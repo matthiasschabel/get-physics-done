@@ -1,7 +1,7 @@
 <purpose>
 Orchestrate conversational verification through a thin session wrapper around `gpd-verifier`.
 
-The verifier owns target construction, proof policy, computational checks, comparison verdicts, and canonical status. This workflow owns preflight, routing, interaction, report sync, diagnosis, and gap repair.
+The verifier owns target construction, proof policy, checks, comparison verdicts, and canonical status. This workflow owns preflight, routing, interaction, sync, diagnosis, and gap repair.
 </purpose>
 
 <philosophy>
@@ -51,7 +51,7 @@ Targeted flags narrow the optional check mix only. `--all` or no flags delegates
 </step>
 
 <step name="initialize" priority="first">
-Load only the session-router stage first. Load later stages where their fields are used.
+Load session-router first; load later stages where used.
 
 ```bash
 SESSION_ROUTER_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage session_router)
@@ -69,7 +69,7 @@ PROJECT_ROOT=$(echo "$SESSION_ROUTER_INIT" | gpd json get .project_root)
 PHASE_DIR_ABS=$(echo "$SESSION_ROUTER_INIT" | gpd json get .phase_dir_abs --default "")
 ```
 
-Do not assume reference ledgers, protocol bundles, or report schemas are loaded here; reload later stages before use.
+Do not assume reference ledgers, protocol bundles, or report schemas are loaded here.
 
 **If no phase was provided:**
 
@@ -92,14 +92,12 @@ If active sessions exist, display:
 ```
 ## Active Verification Sessions
 
-| # | Phase | Session | Verification Status | Current Check | Progress |
-|---|-------|---------|---------------------|---------------|----------|
-| 1 | 04-dispersion | validating | gaps_found | 3. Limiting Cases | 2/6 |
+1. Phase N: validating; verification gaps_found; check 3; progress 2/6
 
 Reply with a number to resume, or provide a phase number.
 ```
 
-Wait for user response; load phase-only stages only after `PHASE_ARG` is set. If none exist, stop with: `No active verification sessions. Provide a phase number to start validation (e.g., gpd:verify-work 4)`.
+Wait for user response; load phase-only stages only after `PHASE_ARG` is set. If none exist, stop with: `No active verification sessions. Provide a phase number (e.g., gpd:verify-work 4)`.
 
 **If non-empty `${PHASE_ARG}` is not found:**
 
@@ -128,13 +126,13 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-If review preflight exits nonzero because the project state is missing or not yet ready for verification, the roadmap is missing, review integrity is degraded, or the selected phase lacks the required artifacts, stop and show the blocking issues before any delegation.
+If review preflight exits nonzero, stop and show its blocking issues before any delegation.
 
 If `project_contract_load_info.status` starts with `blocked`, stop and show the surfaced `project_contract_load_info.errors` / `warnings` before delegation.
 
 If `project_contract_validation.valid` is false, stop and show `project_contract_validation.errors` before delegation.
 
-**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint. Show gate/load/validation errors. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until the gate is authoritative. End with `## > Next Up`: primary `gpd:sync-state` or `gpd:new-project`, then `gpd:verify-work ${PHASE_ARG}` after repair, plus `gpd:suggest-next`.
+**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint. Show gate/load/validation errors. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until repaired. End with `## > Next Up`: primary `gpd:sync-state` or `gpd:new-project`, then `gpd:verify-work ${PHASE_ARG}` after repair, plus `gpd:suggest-next`.
 
 Run the executable lifecycle authority gate before proof repair, inventory building, contract checks, or verifier delegation:
 
@@ -174,7 +172,7 @@ fi
 PHASE_DIR_ABS=$(echo "$PHASE_BOOTSTRAP_INIT" | gpd json get .phase_dir_abs --default "$PHASE_DIR_ABS")
 ```
 
-Use `phase_bootstrap.required_init_fields` as the refreshed bootstrap payload.
+Use `phase_bootstrap.required_init_fields` as the refreshed payload.
 
 Use `phase_proof_review_status` as the proof-review freshness summary. If a required proof-redteam audit is missing, stale, malformed, or not `passed`, spawn `gpd-check-proof` once before finalizing the gap ledger.
 Proof-bearing phases require a canonical `*-PROOF-REDTEAM.md` artifact.
@@ -184,28 +182,20 @@ For proof-bearing work, an additional mandatory floor applies before the wrapper
 CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)
 ```
 
-> Runtime delegation rule: this is a single-turn handoff. If the spawned agent needs user input, it checkpoints and returns; do not keep the original run waiting inside the same task. If the proof critic cannot produce a passed audit, keep the session fail-closed.
+> Runtime delegation rule: this is a single-turn handoff. If the spawned agent needs user input, it checkpoints and returns; do not keep the original run waiting inside the same task. If it cannot produce a passed audit, keep the session fail-closed.
 
 ```
 task(
   subagent_type="gpd-check-proof",
   model="{check_proof_model}",
   readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions.
-Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md before writing any proof audit artifact.
-
-Write to:
-- `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md`
-
-Read the phase proof artifacts, the relevant PLAN contract slice, and any current verification artifact before auditing.
-Return through the typed proof-redteam handoff contract.",
-  description="Repair proof audit for phase {phase_number}"
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions. Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md. Write `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md`; audit phase proof artifacts, PLAN contract slice, and any current verification artifact; return through the typed proof-redteam handoff contract."
 )
 ```
 
 After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` before finalizing the gap ledger. Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation.
 If `gpd-check-proof` still cannot produce a passed audit, keep the verification status fail-closed.
-Do not stop with only the proof-redteam artifact as the user-facing result: the canonical verification report must still record the proof gap ledger. Continue to verifier handoff with reopened proof content/freshness so `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md` is written/updated with a gap report or blocked `gpd_return.status`; otherwise route to `gpd:verify-work ${phase_number}` rather than treating the proof-redteam file alone as a complete verification artifact.
+Do not stop with only the proof-redteam artifact: the canonical verification report must still record the proof gap ledger. Continue to verifier handoff with reopened proof content/freshness so `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md` is written/updated with a gap report or blocked `gpd_return.status`; otherwise route to `gpd:verify-work ${phase_number}`.
 </step>
 
 <step name="load_anchor_context">
@@ -219,7 +209,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Treat `inventory_build.required_init_fields` as the source of truth for contract, reference, and protocol-bundle fields.
+Treat `inventory_build.required_init_fields` as source of truth for contract, reference, and protocol-bundle fields.
 
 Use `active_reference_context` from init JSON as a mandatory input to verification.
 Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_reference_context` is the readable projection, not the source of truth.
@@ -231,12 +221,7 @@ Treat `effective_reference_intake` as the structured source of carry-forward anc
 </step>
 
 <step name="load_protocol_bundle_context">
-Use `protocol_bundle_context` from init JSON as additive specialized guidance.
-
-- If `selected_protocol_bundle_ids` is non-empty, use `protocol_bundle_verifier_extensions` from init JSON as the primary source for bundle checklist extensions and treat them as extra prompts for evidence gathering.
-- Call `get_bundle_checklist(selected_protocol_bundle_ids)` through the verification server only when the init payload lacks those extensions or when you need a fallback consistency check.
-- Bundle guidance may add estimator checks, decisive artifact expectations, or domain-specific audits, but it does NOT replace the plan contract or reduce anchor obligations.
-- Use `protocol_bundle_verifier_extensions` as the machine-readable quick map when deciding which contract-aware checks deserve deeper scrutiny first.
+Use `protocol_bundle_context` from init JSON as additive specialized guidance. If `selected_protocol_bundle_ids` is non-empty, use `protocol_bundle_verifier_extensions` from init JSON as the primary source for bundle checklist extensions; call `get_bundle_checklist(selected_protocol_bundle_ids)` only when extensions are missing or need consistency checking. Bundle guidance may add estimator checks, decisive artifact expectations, or domain-specific audits, but it does NOT replace the plan contract or reduce anchor obligations.
 - If the phase has a PLAN `contract` and project-local anchors or prior-output paths matter, use this contract-check loop before finalizing the inventory:
   1. Call `suggest_contract_checks(contract, project_dir=...)`.
   2. Treat the returned items as the default contract-aware seed unless they are clearly inapplicable.
@@ -247,16 +232,7 @@ Use `protocol_bundle_context` from init JSON as additive specialized guidance.
 <step name="delegate_verification">
 ## Delegate Verification
 
-Spawn `gpd-verifier` once and let it own the physics policy.
-
-The delegation prompt must tell the verifier to own:
-
-- contract-backed target extraction
-- evidence mapping from roadmap, contract, artifacts, anchors, and protocol bundles
-- proof-bearing policy
-- computational checks and decisive comparisons
-- canonical verification report and status semantics
-- suggested contract checks and gap ledger contents
+Spawn `gpd-verifier` once and let it own the physics policy. Use `subagent_type="gpd-verifier"`, model `{verifier_model}`, and scoped write. It owns contract-backed target extraction, evidence mapping, proof policy, computational checks, decisive comparisons, canonical status, suggested contract checks, and the gap ledger.
 
 Pass the project contract, proof freshness summary, active reference context, and protocol bundle context into the handoff so the verifier can build its own authoritative ledger.
 Use `protocol_bundle_verifier_extensions` as primary bundle checklist surface; `protocol_bundle_context` is readable projection. Use `suggest_contract_checks(contract)` for ambiguous decisive anchors or prior-output paths. Required decisive comparisons should stay legible enough that the researcher can recognize in the phase promise which `claim`, acceptance test, or reference is still unresolved. Do not mark the parent claim or acceptance test as passed until that decisive comparison is resolved.
@@ -264,45 +240,14 @@ Human-readable headings in the verifier output are presentation only; route on t
 
 > Runtime delegation rule: this is a one-shot handoff. If the spawned verifier needs user input, it must checkpoint and return. The wrapper must start a fresh continuation after the user responds instead of trying to keep the original verifier alive.
 
-```
-task(
-  subagent_type="gpd-verifier",
-  model="{verifier_model}",
-  readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instructions.
+Prompt: "First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instructions." Then verify Phase {phase_number}; use `Verification flags from the normalized parser: $VERIFY_FLAG_TEXT`; treat `--dimensional`, `--limits`, `--convergence`, and `--regression` as optional-breadth narrowing only.
 
-Verify Phase {phase_number}. Keep verifier ownership of contract-backed target extraction, evidence mapping, proof-bearing policy, computational checks, decisive comparisons, and canonical verification status semantics.
+Read with `file_read`: `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`, all PLAN/SUMMARY/`*-PROOF-REDTEAM.md` files in `${PHASE_DIR_ABS}/`, `${PROJECT_ROOT}/GPD/STATE.md`, and `${PROJECT_ROOT}/GPD/ROADMAP.md`.
 
-Verification flags from the normalized parser: $VERIFY_FLAG_TEXT
-Treat `--dimensional`, `--limits`, `--convergence`, and `--regression` as optional-breadth narrowing only. Otherwise run the full verifier package.
-
-<files_to_read>
-Read these files using the file_read tool:
-- Project-relative artifact label from `phase_dir` and `phase_number` (label only)
-- Verification artifact absolute path: `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`
-- All PLAN.md files in `${PHASE_DIR_ABS}/`
-- All SUMMARY.md files in `${PHASE_DIR_ABS}/`
-- All `*-PROOF-REDTEAM.md` files in `${PHASE_DIR_ABS}/`
-- `${PROJECT_ROOT}/GPD/STATE.md`
-- `${PROJECT_ROOT}/GPD/ROADMAP.md`
-</files_to_read>
-
-<verification_context>
-Project contract: {project_contract}
-Project contract gate: {project_contract_gate}
-Project contract load info: {project_contract_load_info}
-Project contract validation: {project_contract_validation}
-Contract intake: {contract_intake}
-Effective reference intake: {effective_reference_intake}
-Active reference context: {active_reference_context}
-Selected protocol bundle ids: {selected_protocol_bundle_ids}
-Protocol bundle context: {protocol_bundle_context}
-Protocol bundle verifier extensions: {protocol_bundle_verifier_extensions}
-Proof freshness summary: {phase_proof_review_status}
-</verification_context>
+Pass this context: Project contract: {project_contract}; Project contract gate: {project_contract_gate}; Project contract load info: {project_contract_load_info}; Project contract validation: {project_contract_validation}; Contract intake: {contract_intake}; Effective reference intake: {effective_reference_intake}; Active reference context: {active_reference_context}; Selected protocol bundle ids: {selected_protocol_bundle_ids}; Protocol bundle context: {protocol_bundle_context}; Protocol bundle verifier extensions: {protocol_bundle_verifier_extensions}; Proof freshness summary: {phase_proof_review_status}.
 
 Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. Use `protocol_bundle_verifier_extensions` as primary bundle-extension surface. Keep decisive comparison gaps legible at the claim / acceptance-test / reference level. If user input is required, return `gpd_return.status: checkpoint` and stop.
-Schema finalization is bounded: validator pass returns; after the second validator failure total, including the initial failure and one repair rerun, return `gpd_return.status: blocked` with latest errors.
+Schema finalization is bounded: validator pass returns; after the second validator failure total, including the initial failure and one repair rerun, return `gpd_return.status: blocked` with latest errors. Stop after two schema-only repair failures.
 
 <spawn_contract>
 write_scope:
@@ -313,12 +258,8 @@ expected_artifacts:
   - ${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md
 shared_state_policy: return_only
 </spawn_contract>
-",
-  description="Verify Phase {phase_number}"
-)
-```
 
-If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing any contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge` from the loaded `inventory_build` payload; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict); replace `BODY.md` in its `writer_command` with that file; and run the command. The writer serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and schema refs for verifier policy, not for wrapper-side schema recreation. Then immediately apply `sync_verifier_output`; on validation failure, emit the blocked/final response from `sync_verifier_output` and stop. Do not wrapper-repair the canonical report.
+If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict); replace `BODY.md` in its `writer_command` with that file; run it. The writer serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and schema refs for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
 </step>
 
 <step name="sync_verifier_output">
@@ -361,23 +302,16 @@ Changed verification files fail `gpd pre-commit-check` when this header is missi
 
 Read the verifier-supplied current check from the verification file or report state.
 
-Display using checkpoint box format:
+Display compactly:
 
 ```
-+================================================+
-|  CHECKPOINT: Research Validation Required      |
-+================================================+
-
-**Check {number}: {name}**
+### Research Validation Check {number}: {name}
 
 {expected}
 
-**Independent computation:**
-{computation description and result}
+**Independent computation:** {computation description and result}
 
---------------------------------------------------------------
--> Confirm this matches your result, or describe what differs
---------------------------------------------------------------
+Confirm this matches your result, or describe what differs.
 ```
 
 The wrapper should present verifier-produced evidence exactly once per check. It should not derive a new physics criterion here.

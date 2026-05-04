@@ -2087,13 +2087,13 @@ class TestRegistryPromptIncludeInlining:
             "# Compact Gap Report Crib",
             "Do not add `contract_results.status` or `contract_results.summary`",
             "perform exactly one bounded repair pass",
+            "max two targeted repairs",
             "After the second validator failure total",
             "stop all edits and return `gpd_return.status: blocked`",
             "only after the canonical report passes frontmatter and contract validation",
         )
         for fragment in durable_fragments:
             assert fragment in agent.system_prompt
-        assert "max two targeted repairs" not in agent.system_prompt
         assert "<!-- [included:" not in agent.system_prompt
 
     def test_verify_work_skill_surface_keeps_fallback_schema_bridge_visible(self) -> None:

@@ -95,7 +95,7 @@ COMMAND_BASELINES = {
     "undo": (348, 11_419, 1),
     "update": (268, 7_672, 1),
     "validate-conventions": (266, 10_102, 1),
-    "verify-work": (726, 36_091, 1),
+    "verify-work": (669, 36_091, 1),
     "write-paper": (1_417, 86_007, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
@@ -195,7 +195,7 @@ WORKFLOW_BASELINES = {
     "update": (243, 7207, 0),
     "validate-conventions": (225, 8911, 1),
     "verify-phase": (681, 41_946, 0),
-    "verify-work": (653, 34201, 2),
+    "verify-work": (596, 34201, 2),
     "write-paper": (1269, 80049, 2),
 }
 WORST_WORKFLOW_HARD_CAPS = {

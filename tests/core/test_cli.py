@@ -3238,6 +3238,47 @@ def test_verification_report_skeleton_default_prints_markdown_draft_not_rich_tab
     assert "┏" not in result.output
 
 
+def test_verification_report_skeleton_fallback_validation_commands_quote_report_refs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01 with space"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
+        del contract, plan_path, kwargs
+        return {
+            "frontmatter": {
+                "phase": "01 with space",
+                "verified": "1970-01-01T00:00:00Z",
+                "status": status,
+                "score": "gap skeleton",
+                "plan_contract_ref": plan_contract_ref,
+            },
+            "target_report_ref": "GPD/phases/01 with space/01-VERIFICATION.md",
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(plan_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["validation_commands"] == [
+        "gpd frontmatter validate 'GPD/phases/01 with space/01-VERIFICATION.md' --schema verification",
+        "gpd validate verification-contract 'GPD/phases/01 with space/01-VERIFICATION.md'",
+    ]
+
+
 def test_verification_report_skeleton_frontmatter_format_prints_yaml_only(tmp_path: Path) -> None:
     phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
     phase_dir.mkdir(parents=True)
@@ -3393,6 +3434,38 @@ def test_verification_report_skeleton_write_body_file_keeps_colon_text_out_of_ya
     frontmatter_yaml = payload.get("frontmatter_yaml", "")
     assert "The stale pass is not supported: current hash differs" not in str(frontmatter_yaml)
     assert "gpd_return:" not in str(frontmatter_yaml)
+
+
+def test_verification_report_skeleton_write_rejects_body_file_frontmatter(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    body_path = _write_verification_body_file(
+        tmp_path,
+        "---\nstatus: passed\n---\n\n# Verification Body\n",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "skeleton",
+            str(plan_path),
+            "--write",
+            "--output",
+            str(target_path),
+            "--body-file",
+            str(body_path),
+            "--validate",
+            "frontmatter",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "body-only Markdown" in str(payload["error"])
+    assert not target_path.exists()
 
 
 def test_verification_report_skeleton_write_contract_validation_blocks_replace_on_failure(tmp_path: Path) -> None:
@@ -3700,7 +3773,7 @@ def test_validate_verification_contract_rejects_live_row_mistakes_from_product_v
     assert payload["present"] == schema_result.present
     assert payload["schema_name"] == schema_result.schema_name
     assert payload["oracle_evidence_count"] == oracle_result.evidence_count
-    assert payload["errors"] == expected_errors
+    assert sorted(payload["errors"]) == sorted(expected_errors)
     assert oracle_result.valid is True
     assert "status: must be one of passed, gaps_found, expert_needed, human_needed" in expected_errors
     assert any(error.startswith("runtime:") for error in expected_errors)
@@ -3917,9 +3990,29 @@ def test_validate_plan_preflight_passes_when_no_specialized_tools_are_declared(t
     assert payload["guidance"] == "No machine-checkable specialized tool requirements declared."
 
 
-def test_validate_plan_preflight_rejects_invalid_frontmatter_before_tool_checks(tmp_path: Path) -> None:
+def test_validate_plan_preflight_rejects_invalid_frontmatter_before_tool_checks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     plan_path = tmp_path / "01-01-PLAN.md"
-    plan_path.write_text(_plan_with_prose_contract_anchors_only(), encoding="utf-8")
+    plan_content = _plan_with_prose_contract_anchors_only().replace(
+        "---\n\n## Contract Anchors",
+        (
+            "tool_requirements:\n"
+            "  - id: wolfram-cas\n"
+            "    tool: wolfram\n"
+            "    purpose: Should not run when frontmatter is invalid.\n"
+            "    required: true\n"
+            "---\n\n## Contract Anchors"
+        ),
+        1,
+    )
+    plan_path.write_text(plan_content, encoding="utf-8")
+
+    def fail_probe(*args, **kwargs):
+        raise AssertionError("tool probes must not run after invalid frontmatter")
+
+    monkeypatch.setattr("gpd.core.tool_preflight._probe_tool", fail_probe)
 
     result = runner.invoke(
         app,

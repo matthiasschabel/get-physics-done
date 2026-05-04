@@ -185,13 +185,17 @@ def build_verification_report_skeleton(
         )
 
     plan = Path(plan_path) if plan_path is not None else None
+    resolved_plan_contract_ref = plan_contract_ref
+    if plan is not None and plan_contract_ref == _DEFAULT_PLAN_CONTRACT_REF:
+        plan_ref = _project_relative_ref(plan.as_posix()) or plan.as_posix()
+        resolved_plan_contract_ref = f"{plan_ref}#/contract"
     target_report_path = _verification_report_path_from_plan(plan)
     target_report_ref = _project_relative_ref(target_report_path)
     frontmatter = build_verification_gap_report_frontmatter(
         contract,
         phase=_phase_from_plan_path(plan),
         verified=verified,
-        plan_contract_ref=plan_contract_ref,
+        plan_contract_ref=resolved_plan_contract_ref,
         score=score,
         verification_report_path=target_report_ref or target_report_path,
     )
@@ -225,7 +229,7 @@ def build_verification_report_skeleton(
         authoring_rules=authoring_rules,
         warnings=warnings,
         plan_path=None if plan is None else str(plan),
-        plan_contract_ref=plan_contract_ref,
+        plan_contract_ref=resolved_plan_contract_ref,
         target_status=status,
         target_report_path=target_report_path,
         target_report_ref=target_report_ref,

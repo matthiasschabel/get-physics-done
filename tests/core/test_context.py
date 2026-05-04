@@ -4462,14 +4462,17 @@ class TestInitVerifyWork:
         assert "verification_report_skeleton_bridge" in ctx["staged_loading"]["required_init_fields"]
         assert bridge["command_name"] == "gpd verification-report skeleton"
         assert bridge["skeleton_command"] == (
-            f"gpd verification-report skeleton {(phase_dir / '01-PLAN.md').as_posix()} "
-            "--format markdown --status gaps_found"
+            f"gpd verification-report skeleton {(phase_dir / '01-PLAN.md').as_posix()} --format markdown"
         )
         assert bridge["writer_command"] == (
             f"gpd verification-report skeleton {(phase_dir / '01-PLAN.md').as_posix()} "
             f"--write --output {(phase_dir / '01-VERIFICATION.md').as_posix()} --force "
-            "--body-file BODY.md --validate contract --status gaps_found"
+            "--body-file BODY.md --validate contract"
         )
+        assert bridge["supported_statuses"] == ["gaps_found"]
+        assert bridge["gap_report_skeleton_command"] == bridge["skeleton_command"]
+        assert bridge["gap_report_writer_command"] == bridge["writer_command"]
+        assert "gap-report-only" in bridge["status_policy"]
         body_contract = bridge["body_contract"]
         assert "`BODY.md` is body-only Markdown" in body_contract
         assert "one fenced executed `python`/`bash` block" in body_contract

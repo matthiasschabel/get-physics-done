@@ -546,7 +546,9 @@ If STATE.md is missing but other artifacts exist and `planning_exists` is true:
 
 Reconstruct and write STATE.md, then proceed normally.
 
-If `planning_exists` is false, repair recoverable state first; otherwise skip reconstruction and route to `gpd:new-project`.
+If `planning_exists` is false:
+- If recoverable state exists, repair recoverable state first, then run reconstruction.
+- If state is not recoverable, skip reconstruction and route to `gpd:new-project`.
 
 This handles cases where:
 

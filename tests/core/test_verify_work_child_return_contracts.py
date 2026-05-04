@@ -26,14 +26,17 @@ def test_verify_work_inventory_bridge_exposes_writer_command_and_preview_command
     bridge = _build_verification_report_skeleton_bridge(tmp_path, phase_info)
 
     assert bridge["skeleton_command"] == (
-        f"gpd verification-report skeleton {(tmp_path / 'GPD/phases/01-setup/01-PLAN.md').as_posix()} "
-        "--format markdown --status gaps_found"
+        f"gpd verification-report skeleton {(tmp_path / 'GPD/phases/01-setup/01-PLAN.md').as_posix()} --format markdown"
     )
     assert bridge["writer_command"] == (
         f"gpd verification-report skeleton {(tmp_path / 'GPD/phases/01-setup/01-PLAN.md').as_posix()} "
         f"--write --output {(tmp_path / 'GPD/phases/01-setup/01-VERIFICATION.md').as_posix()} --force "
-        "--body-file BODY.md --validate contract --status gaps_found"
+        "--body-file BODY.md --validate contract"
     )
+    assert bridge["supported_statuses"] == ["gaps_found"]
+    assert bridge["gap_report_skeleton_command"] == bridge["skeleton_command"]
+    assert bridge["gap_report_writer_command"] == bridge["writer_command"]
+    assert "gap-report-only" in str(bridge["status_policy"])
     body_contract = bridge["body_contract"]
     assert "`BODY.md` is body-only Markdown" in str(body_contract)
     assert "one fenced executed `python`/`bash` block" in str(body_contract)

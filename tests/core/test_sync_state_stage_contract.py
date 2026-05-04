@@ -105,7 +105,10 @@ def test_sync_state_workflow_has_fail_closed_bad_backup_branch() -> None:
 
     marker = "corrupt_state_bad_backup"
     assert marker in text
-    bad_backup_branch = text[text.index(marker) : text.index(marker) + 800]
+    start = text.index(marker)
+    next_branch = text.find("\n\n**If `state_md_exists` and `state_json_exists` are both false", start)
+    end = next_branch if next_branch != -1 else len(text)
+    bad_backup_branch = text[start:end]
     for required in (
         "corrupt_state_bad_backup",
         "unrecoverable_state_pair",

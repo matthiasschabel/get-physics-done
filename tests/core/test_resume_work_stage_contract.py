@@ -36,7 +36,12 @@ def _workflow_block(text: str, block_name: str) -> str:
 def _command_is_explicitly_excluded(text: str, command: str) -> bool:
     for match in re.finditer(re.escape(command), text):
         window = text[max(0, match.start() - 160) : match.end() + 160].lower()
-        if re.search(r"\b(do not|don't|must not|forbid|forbidden|exclude|excluded|never|not)\b", window):
+        if re.search(
+            r"\b(do not|don't|must not|mustn't|forbid|forbidden|exclude|excluded|never|"
+            r"not\s+(?:to|be|allowed|permitted|use|run|call|invoke|include|route|delegate|spawn|write|read|"
+            r"trust|continue|advance|proceed))\b",
+            window,
+        ):
             return True
     return False
 

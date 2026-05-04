@@ -54,7 +54,9 @@ def test_record_backtrack_creates_file_and_appends_row() -> None:
 
     append_body = _step_body(text, "append_backtrack")
     row_format = "| " + " | ".join(f"{{{field}}}" for field in FINAL_BACKTRACK_FIELDS) + " |"
-    assert row_format in append_body, "append_backtrack must append exactly one row using the 11-column schema order"
+    assert append_body.count(row_format) == 1, (
+        "append_backtrack must append exactly one row using the 11-column schema order"
+    )
 
 
 def test_record_backtrack_dedupes_on_identical_trigger_plus_why() -> None:

@@ -288,6 +288,18 @@ def test_build_verification_report_skeleton_renders_copy_safe_yaml_and_markdown(
     assert raw_validation.valid, raw_validation.errors
 
 
+def test_build_verification_report_skeleton_derives_contract_ref_from_plan_path(tmp_path: Path) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+
+    skeleton = build_verification_report_skeleton(contract=contract, plan_path=plan_path)
+
+    assert skeleton.plan_contract_ref == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert skeleton.frontmatter["plan_contract_ref"] == skeleton.plan_contract_ref
+    yaml_meta = load_strict_yaml(_yaml_block(skeleton.frontmatter_yaml))
+    assert yaml_meta["plan_contract_ref"] == skeleton.plan_contract_ref
+
+
 def test_build_verification_report_skeleton_renders_colon_rich_values_as_parseable_yaml(tmp_path: Path) -> None:
     contract = _compact_stale_refresh_contract()
     plan_path = _write_stale_refresh_plan(tmp_path, contract)

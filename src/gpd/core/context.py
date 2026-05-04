@@ -3682,15 +3682,15 @@ def _build_verification_report_skeleton_bridge(cwd: Path, phase_info: dict | Non
 
     plan_path = _verify_work_expected_plan_path(cwd, phase_info)
     verification_path = _verify_work_expected_verification_path(cwd, phase_info)
+    gap_report_status = "gaps_found"
     skeleton_command = (
-        f"gpd verification-report skeleton {shlex.quote(plan_path)} --format markdown --status gaps_found"
+        f"gpd verification-report skeleton {shlex.quote(plan_path)} --format markdown"
         if plan_path
         else None
     )
     writer_command = (
         f"gpd verification-report skeleton {shlex.quote(plan_path)} --write "
-        f"--output {shlex.quote(verification_path)} --force --body-file BODY.md --validate contract "
-        "--status gaps_found"
+        f"--output {shlex.quote(verification_path)} --force --body-file BODY.md --validate contract"
         if plan_path and verification_path
         else None
     )
@@ -3699,8 +3699,15 @@ def _build_verification_report_skeleton_bridge(cwd: Path, phase_info: dict | Non
     )
     return {
         "command_name": "gpd verification-report skeleton",
+        "supported_statuses": [gap_report_status],
+        "status_policy": (
+            "Bridge-generated skeletons are gap-report-only; stronger statuses require verifier evidence and "
+            "contract validation."
+        ),
         "skeleton_command": skeleton_command,
         "writer_command": writer_command,
+        "gap_report_skeleton_command": skeleton_command,
+        "gap_report_writer_command": writer_command,
         "body_contract": VERIFICATION_REPORT_BODY_CONTRACT,
         "schema_sources": _verify_work_schema_sources(),
         "expected_target_plan_path": plan_path,

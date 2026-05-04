@@ -2249,7 +2249,7 @@ def test_validate_frontmatter_verification_rejects_mismatched_suggested_contract
         _verification_with_contract_results()
         .replace(
             "status: passed\nscore: 3/3 contract targets verified\n",
-            "status: gaps_found\nscore: 3/3 contract targets verified\n",
+            "status: gaps_found\nscore: 1/3 contract targets verified\n",
             1,
         )
         .replace(
@@ -2290,7 +2290,7 @@ def test_validate_frontmatter_verification_rejects_half_bound_suggested_contract
         _verification_with_contract_results()
         .replace(
             "status: passed\nscore: 3/3 contract targets verified\n",
-            "status: gaps_found\nscore: 3/3 contract targets verified\n",
+            "status: gaps_found\nscore: 1/3 contract targets verified\n",
             1,
         )
         .replace(
@@ -2548,6 +2548,25 @@ def test_validate_frontmatter_verification_rejects_stale_refresh_invalid_schema_
     assert "comparison_verdicts: [0] references unknown reference_id current_artifact_hash" in result.errors
     assert "contract_results: present but invalid; contract alignment skipped" in result.errors
     assert "contract_results: required for contract-backed plan" not in result.errors
+
+
+def test_validate_frontmatter_verification_skips_alignment_after_comparison_verdict_parse_failure(
+    tmp_path: Path,
+) -> None:
+    phase_dir = _write_benchmark_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    content = _verification_with_contract_results().replace(
+        "comparison_kind: benchmark\n",
+        "comparison_kind: reproducibility\n",
+        1,
+    )
+    verification_path.write_text(content, encoding="utf-8")
+
+    result = validate_frontmatter(content, "verification", source_path=verification_path)
+
+    assert result.valid is False
+    assert "comparison_verdicts: present but invalid; contract alignment skipped" in result.errors
+    assert not any("Missing decisive comparison_verdict" in error for error in result.errors)
 
 
 def test_verify_summary_requires_must_surface_reference_actions(tmp_path: Path) -> None:

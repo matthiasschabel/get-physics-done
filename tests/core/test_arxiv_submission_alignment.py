@@ -203,6 +203,56 @@ def test_arxiv_package_validator_detects_citations_in_included_tex_files(tmp_pat
     assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
 
 
+def test_arxiv_package_validator_rejects_unreferenced_bib_source_material(tmp_path: Path) -> None:
+    submission_dir = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    (submission_dir / "main.tex").write_text(
+        (
+            "\\documentclass{article}\\begin{document}\n"
+            "Citation \\cite{known-result}.\\bibliographystyle{plain}\\bibliography{refs}\n"
+            "\\end{document}\n"
+        ),
+        encoding="utf-8",
+    )
+    (submission_dir / "stale.bib").write_text(
+        "@article{known-result,title={Known Result}}\n",
+        encoding="utf-8",
+    )
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="paper",
+        manuscript_entrypoint="paper/main.tex",
+    )
+
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert tex_check.passed is False
+    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+
+
+def test_arxiv_package_validator_rejects_bibliography_only_in_unreachable_tex(tmp_path: Path) -> None:
+    submission_dir = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    (submission_dir / "main.tex").write_text(
+        "\\documentclass{article}\\begin{document}Citation \\cite{known-result}.\\end{document}\n",
+        encoding="utf-8",
+    )
+    (submission_dir / "unused.tex").write_text(
+        ("\\begin{thebibliography}{1}\n\\bibitem{known-result} Known Result.\n\\end{thebibliography}\n"),
+        encoding="utf-8",
+    )
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="paper",
+        manuscript_entrypoint="paper/main.tex",
+    )
+
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert tex_check.passed is False
+    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+
+
 def test_arxiv_package_validator_accepts_included_tex_bibliography_material(tmp_path: Path) -> None:
     submission_dir = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / "submission"
     submission_dir.mkdir(parents=True)

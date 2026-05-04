@@ -7787,6 +7787,7 @@ class TestReviewValidationCommands:
         assert checks["submission_tex_ready"]["passed"] is True
         assert checks["tarball_entries_safe"]["passed"] is True
         assert checks["tarball_tex_ready"]["passed"] is True
+        assert "refs.bib" in payload["tarball_entries"]
 
     def test_validate_arxiv_package_reuses_strict_preflight_response_freshness(
         self,

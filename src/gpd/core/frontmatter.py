@@ -2160,16 +2160,19 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
                     else:
                         errors.append("contract_results: required for contract-backed plan")
                 else:
+                    if comparison_verdicts_parse_failed and "comparison_verdicts" in meta:
+                        errors.append("comparison_verdicts: present but invalid; contract alignment skipped")
                     if schema_name == "verification":
-                        verification_errors = _verification_contract_errors(
-                            plan_contract,
-                            contract_results,
-                            comparison_verdicts,
-                            suggested_contract_checks,
-                            project_root=project_root,
-                            artifact_dir=artifact_dir,
-                        )
-                        errors.extend(verification_errors)
+                        if not comparison_verdicts_parse_failed:
+                            verification_errors = _verification_contract_errors(
+                                plan_contract,
+                                contract_results,
+                                comparison_verdicts,
+                                suggested_contract_checks,
+                                project_root=project_root,
+                                artifact_dir=artifact_dir,
+                            )
+                            errors.extend(verification_errors)
                         errors.extend(
                             _verification_status_errors(
                                 meta.get("status"),
@@ -2177,7 +2180,7 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
                                 suggested_contract_checks,
                             )
                         )
-                    else:
+                    elif not comparison_verdicts_parse_failed:
                         errors.extend(
                             _summary_contract_errors(
                                 plan_contract,

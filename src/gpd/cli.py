@@ -11750,6 +11750,11 @@ def _ensure_frontmatter_block(frontmatter_yaml: object) -> str:
     return f"---\n{rendered}\n---\n"
 
 
+def _body_markdown_starts_with_frontmatter(body_markdown: str) -> bool:
+    stripped = body_markdown.lstrip("\ufeff \t\r\n")
+    return stripped == "---" or stripped.startswith("---\n") or stripped.startswith("---\r\n")
+
+
 def _verification_report_artifact_ref(payload: Mapping[str, object]) -> str:
     for key in ("target_report_ref", "target_report_path"):
         rendered = _project_local_gpd_ref(payload.get(key))
@@ -11763,10 +11768,7 @@ def _verification_report_validation_commands(payload: Mapping[str, object]) -> l
     if isinstance(existing, list) and all(isinstance(item, str) for item in existing):
         return list(existing)
     report_ref = _verification_report_artifact_ref(payload)
-    return [
-        f"gpd frontmatter validate {report_ref} --schema verification",
-        f"gpd validate verification-contract {report_ref}",
-    ]
+    return _verification_report_validation_commands_for_ref(report_ref)
 
 
 def _verification_report_authoring_rules() -> list[str]:
@@ -12128,6 +12130,11 @@ def verification_report_skeleton_cmd(
     body_markdown: str | None = None
     if body_file is not None:
         body_path, body_markdown = _load_text_document_or_error(body_file)
+        if _body_markdown_starts_with_frontmatter(body_markdown):
+            _error(
+                "verification-report skeleton --body-file must be body-only Markdown; "
+                f"remove YAML frontmatter from {_format_display_path(body_path)}"
+            )
     try:
         contract = parse_contract_block(content, source_path=file_path)
     except (FrontmatterParseError, FrontmatterValidationError) as exc:

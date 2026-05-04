@@ -641,14 +641,14 @@ Ignore presentation headings; route on structured `gpd_return.status`, `files_wr
 
 On completed returns, consume `gpd_return.roadmap_updates` before checker review or next-step output. The planner returns proposed roadmap edits; the orchestrator applies them to `GPD/ROADMAP.md` and verifies placeholders/count against fresh `*-PLAN.md` artifacts. If missing, malformed, or unapplied, treat the handoff as incomplete: Retry planner / Apply manually / Abort.
 
-Before the checker loop or final status, validate only the fresh plan artifacts named by the planner return or created in an explicit manual/main-context branch:
+Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch:
 
 ```bash
 if [ -z "${FRESH_PLAN_FILES:-}" ]; then
   FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")
 fi
 if [ -z "$FRESH_PLAN_FILES" ]; then
-  echo "ERROR: planner returned completed without naming fresh PLAN.md artifacts"
+  echo "ERROR: no fresh PLAN.md artifacts"
   exit 1
 fi
 
@@ -661,7 +661,7 @@ HANDOFF_ARTIFACT_ARGS=(
 if [ -n "$PLANNER_HANDOFF_STARTED_AT" ]; then
   HANDOFF_ARTIFACT_ARGS+=(--fresh-after "$PLANNER_HANDOFF_STARTED_AT")
 fi
-printf '%s\n' "$PLANNER_RETURN" | gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}" || exit 1
+printf '%s\n' "${PLANNER_RETURN:-$(FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c 'import json,os;print(json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}}))')}" | gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}" || exit 1
 
 for plan_file in $FRESH_PLAN_FILES; do
   case "$plan_file" in

@@ -3193,7 +3193,7 @@ def test_verification_report_skeleton_uses_project_local_ref_when_outer_director
     ]
 
 
-def test_verification_report_output_target_anchors_builder_relative_target_to_plan_dir(
+def test_verification_report_output_target_resolves_payload_relative_paths_by_scope(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3214,9 +3214,17 @@ def test_verification_report_output_target_anchors_builder_relative_target_to_pl
         payload={"target_report_path": "custom-VERIFICATION.md"},
         plan_path=plan_path,
     )
+    project_target = cli_module._verification_report_output_target(
+        None,
+        payload={"target_report_path": "GPD/phases/01-baseline/01-VERIFICATION.md"},
+        plan_path=plan_path,
+    )
 
     assert builder_target == (phase_dir / "custom-VERIFICATION.md").resolve(strict=False)
     assert explicit_target == (launch_dir / "explicit-VERIFICATION.md").resolve(strict=False)
+    assert project_target == (tmp_path / "GPD" / "phases" / "01-baseline" / "01-VERIFICATION.md").resolve(
+        strict=False
+    )
 
 
 def test_verification_report_skeleton_raw_uses_real_builder(tmp_path: Path) -> None:

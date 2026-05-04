@@ -11873,7 +11873,11 @@ def _verification_report_output_target(
         payload_target = payload.get("target_report_path")
         if isinstance(payload_target, str) and payload_target.strip():
             raw_target = payload_target
-            target_base = plan_path.parent
+            payload_path = Path(payload_target).expanduser()
+            if payload_path.parts and payload_path.parts[0] == PLANNING_DIR_NAME:
+                target_base = resolve_project_root(plan_path.parent, require_layout=True) or plan_path.parent
+            else:
+                target_base = plan_path.parent
         else:
             name = plan_path.name
             raw_target = str(

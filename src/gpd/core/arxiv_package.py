@@ -39,11 +39,11 @@ _AUXILIARY_SUFFIXES = {
     ".synctex.gz",
     ".toc",
 }
-_BIB_SOURCE_SUFFIXES = {".bib"}
 _EMPTY_REFERENCE_RE = re.compile(r"\\(?:cite\w*|ref|eqref|autoref|cref|Cref)\s*(?:\[[^\]]*\])*\{\s*\}")
 _CITATION_RE = re.compile(r"\\(?:cite\w*|parencite|textcite)\s*(?:\[[^\]]*\])*\{([^}]*)\}")
-_BIBLIOGRAPHY_COMMAND_RE = re.compile(r"\\(?:bibliography|addbibresource)\s*(?:\[[^\]]*\])?\{")
-_BBL_INPUT_RE = re.compile(r"\\(?:input|include)\s*\{[^}]*\.bbl\}")
+_BIBLIOGRAPHY_COMMAND_RE = re.compile(r"\\(?:bibliography|addbibresource)\s*(?:\[[^\]]*\])?\{([^}]*)\}")
+_BBL_INPUT_RE = re.compile(r"\\(?:input|include)\s*\{([^}]*\.bbl)\}")
+_TEX_INCLUDE_RE = re.compile(r"\\(?:input|include|subfile)\s*\{([^}]+)\}")
 _PLACEHOLDER_RE = re.compile(
     r"(?:RESULT\s+PENDING|PLACEHOLDER|TODO|FIXME|\\todo\s*\{|\\cite\w*\s*(?:\[[^\]]*\])*\{\s*MISSING:)",
     re.IGNORECASE,
@@ -112,10 +112,6 @@ def _is_auxiliary_name(name: str) -> bool:
     return any(lowered.endswith(suffix) for suffix in _AUXILIARY_SUFFIXES)
 
 
-def _is_bib_source_name(name: str) -> bool:
-    return any(PurePosixPath(name).name.lower().endswith(suffix) for suffix in _BIB_SOURCE_SUFFIXES)
-
-
 def _strip_latex_comments(text: str) -> str:
     stripped_lines: list[str] = []
     for line in text.splitlines():
@@ -139,6 +135,73 @@ def _read_text_file(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _safe_relative_resource(current_name: str, raw_resource: str, *, default_suffix: str | None = None) -> str | None:
+    raw = raw_resource.strip().replace("\\", "/")
+    if not raw or raw.startswith(("/", "~")):
+        return None
+    raw_path = PurePosixPath(raw)
+    if raw_path.is_absolute() or ".." in raw_path.parts:
+        return None
+    if default_suffix is not None and not raw_path.suffix:
+        raw_path = PurePosixPath(f"{raw_path.as_posix()}{default_suffix}")
+    candidate = PurePosixPath(current_name).parent / raw_path
+    return candidate.as_posix().removeprefix("./")
+
+
+def _path_with_suffix(path_text: str, suffix: str) -> str:
+    path = PurePosixPath(path_text)
+    if path.suffix:
+        return path.with_suffix(suffix).as_posix()
+    return f"{path.as_posix()}{suffix}"
+
+
+def _included_tex_names(current_name: str, text: str) -> list[str]:
+    names: list[str] = []
+    for match in _TEX_INCLUDE_RE.finditer(text):
+        name = _safe_relative_resource(current_name, match.group(1), default_suffix=".tex")
+        if name is not None:
+            names.append(name)
+    return names
+
+
+def _reachable_tex_payloads(root_entrypoint: str, tex_payloads: dict[str, str]) -> dict[str, str]:
+    if root_entrypoint not in tex_payloads:
+        return {}
+    reachable: dict[str, str] = {}
+    pending = [root_entrypoint]
+    while pending:
+        name = pending.pop(0)
+        if name in reachable:
+            continue
+        text = tex_payloads.get(name)
+        if text is None:
+            continue
+        reachable[name] = text
+        for included_name in _included_tex_names(name, text):
+            if included_name in tex_payloads and included_name not in reachable:
+                pending.append(included_name)
+    return reachable
+
+
+def _bibliography_source_targets(root_entrypoint: str, tex_payloads: dict[str, str]) -> tuple[set[str], set[str]]:
+    bib_targets: set[str] = set()
+    bbl_targets: set[str] = set()
+    root_bbl_target = _path_with_suffix(root_entrypoint, ".bbl")
+    for name, text in tex_payloads.items():
+        for match in _BIBLIOGRAPHY_COMMAND_RE.finditer(text):
+            for raw_resource in match.group(1).split(","):
+                bib_target = _safe_relative_resource(name, raw_resource, default_suffix=".bib")
+                if bib_target is None:
+                    continue
+                bib_targets.add(bib_target)
+                bbl_targets.add(root_bbl_target)
+        for match in _BBL_INPUT_RE.finditer(text):
+            bbl_target = _safe_relative_resource(name, match.group(1))
+            if bbl_target is not None:
+                bbl_targets.add(bbl_target)
+    return bib_targets, bbl_targets
+
+
 def _scan_tex_payload(
     *,
     root_entrypoint: str,
@@ -147,30 +210,33 @@ def _scan_tex_payload(
 ) -> list[str]:
     issues: list[str] = []
     normalized_payloads = {name: _strip_latex_comments(text) for name, text in tex_payloads.items()}
+    if root_entrypoint not in normalized_payloads:
+        return [f"{root_entrypoint} is not a packaged root-level TeX entrypoint"]
     for name, text in normalized_payloads.items():
         if _EMPTY_REFERENCE_RE.search(text):
             issues.append(f"{name} contains an empty citation or reference command")
         placeholder = _PLACEHOLDER_RE.search(text)
         if placeholder is not None:
             issues.append(f"{name} contains unresolved placeholder marker {placeholder.group(0)!r}")
-        if _BIBLIOGRAPHY_COMMAND_RE.search(text):
-            issues.append(f"{name} still contains bibliography commands; inline .bbl content or input a .bbl file")
-
-    combined_text = "\n".join(normalized_payloads.values())
+    reachable_payloads = _reachable_tex_payloads(root_entrypoint, normalized_payloads)
+    combined_text = "\n".join(reachable_payloads.values())
     citation_keys = [
         key.strip()
         for match in _CITATION_RE.finditer(combined_text)
         for key in match.group(1).split(",")
         if key.strip()
     ]
-    has_bibliography_material = (
-        "\\begin{thebibliography}" in combined_text
-        or bool(_BBL_INPUT_RE.search(combined_text))
-        or any(name.lower().endswith(".bbl") for name in packaged_names)
-    )
+    bib_targets, bbl_targets = _bibliography_source_targets(root_entrypoint, reachable_payloads)
+    has_bib_source = any(target in packaged_names for target in bib_targets)
+    has_bbl_source = any(target in packaged_names for target in bbl_targets)
+    has_bibliography_material = "\\begin{thebibliography}" in combined_text or has_bbl_source or has_bib_source
     if citation_keys and not has_bibliography_material:
         issues.append(
-            f"{root_entrypoint} has citation commands but no inlined thebibliography or packaged .bbl material"
+            f"{root_entrypoint} has citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material"
+        )
+    if _BIBLIOGRAPHY_COMMAND_RE.search(combined_text) and not has_bibliography_material:
+        issues.append(
+            f"{root_entrypoint} contains bibliography commands but no packaged .bib, packaged .bbl, or inlined bibliography material"
         )
     return issues
 
@@ -194,8 +260,6 @@ def _submission_tree_payload(
         file_names.append(relative)
         if _is_auxiliary_name(relative):
             issues.append(f"{relative} is a LaTeX auxiliary/editor artifact and must be excluded")
-        if _is_bib_source_name(relative):
-            issues.append(f"{relative} is a .bib source; package .bbl or inlined bibliography material instead")
         if path.suffix.lower() == ".tex":
             tex_payloads[relative] = _read_text_file(path)
     return file_names, issues, tex_payloads
@@ -220,8 +284,6 @@ def _tarball_payload(tarball: Path) -> tuple[list[str], list[str], dict[str, str
                     continue
                 if _is_auxiliary_name(name):
                     issues.append(f"{name} is a LaTeX auxiliary/editor artifact and must be excluded")
-                if _is_bib_source_name(name):
-                    issues.append(f"{name} is a .bib source; package .bbl or inlined bibliography material instead")
                 if PurePosixPath(name).suffix.lower() == ".tex":
                     extracted = archive.extractfile(member)
                     if extracted is None:
@@ -371,7 +433,7 @@ def validate_arxiv_package(
         add_check(
             "submission_tex_ready",
             not tex_issues,
-            "submission TeX files have no unresolved placeholders, empty refs, or bibliography-command residue"
+            "submission TeX files have no unresolved placeholders, empty refs, or missing bibliography material"
             if not tex_issues
             else "; ".join(tex_issues[:5]),
         )
@@ -383,6 +445,7 @@ def validate_arxiv_package(
     if materialize:
         if (
             submission_ready_for_materialize
+            and managed_root_valid
             and submission_under_root
             and tarball_under_root
             and tarball_path.name == ARXIV_TARBALL_NAME
@@ -445,7 +508,7 @@ def validate_arxiv_package(
         add_check(
             "tarball_tex_ready",
             not tarball_tex_issues,
-            "tarball TeX files have no unresolved placeholders, empty refs, or bibliography-command residue"
+            "tarball TeX files have no unresolved placeholders, empty refs, or missing bibliography material"
             if not tarball_tex_issues
             else "; ".join(tarball_tex_issues[:5]),
         )

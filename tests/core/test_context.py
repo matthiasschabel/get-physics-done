@@ -53,6 +53,7 @@ from gpd.core.frontmatter import compute_knowledge_reviewed_content_sha256
 from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
+from gpd.core.state import default_state_dict
 from gpd.core.utils import file_lock
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 
@@ -3139,6 +3140,21 @@ class TestInitNewProject:
                 stage="paper_bootstrap",
             )
 
+    def test_write_paper_stage_bootstrap_rejects_external_intake_with_recoverable_state_only_project(
+        self, tmp_path: Path
+    ) -> None:
+        gpd_dir = tmp_path / "GPD"
+        gpd_dir.mkdir()
+        (gpd_dir / "state.json").write_text(json.dumps(default_state_dict(), indent=2) + "\n", encoding="utf-8")
+        intake_path = _write_write_paper_authoring_input(tmp_path)
+
+        with pytest.raises(ValueError, match="only allowed from a workspace without an initialized GPD project"):
+            init_write_paper(
+                tmp_path,
+                subject=f"--intake {intake_path.name}",
+                stage="paper_bootstrap",
+            )
+
     def test_write_paper_stage_outline_and_scaffold_loads_deferred_context(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
         planning = tmp_path / "GPD"
@@ -4428,6 +4444,85 @@ class TestInitVerifyWork:
         assert ctx["convention_lock"]["metric_signature"] == "(-,+,+,+)"
         assert ctx["derived_convention_lock"]["metric_signature"] == "(-,+,+,+)"
         assert "reference_artifacts_content" not in ctx
+
+    def test_stage_inventory_build_surfaces_schema_bridge_without_loading_schema_authorities(
+        self, tmp_path: Path
+    ) -> None:
+        _setup_project(tmp_path)
+        phase_dir = _create_phase_dir(tmp_path, "01-setup")
+        (phase_dir / "01-PLAN.md").write_text("# Plan\n", encoding="utf-8")
+        _write_stat_mech_project(tmp_path)
+        _write_bundle_ready_contract_state(tmp_path)
+        _write_structured_state_payload(tmp_path)
+
+        ctx = init_verify_work(tmp_path, "1", stage="inventory_build")
+        bridge = ctx["verification_report_skeleton_bridge"]
+
+        assert ctx["staged_loading"]["stage_id"] == "inventory_build"
+        assert "verification_report_skeleton_bridge" in ctx["staged_loading"]["required_init_fields"]
+        assert bridge["command_name"] == "gpd verification-report skeleton"
+        assert bridge["skeleton_command"] == (
+            f"gpd verification-report skeleton {(phase_dir / '01-PLAN.md').as_posix()} --format markdown"
+        )
+        assert bridge["writer_command"] == (
+            f"gpd verification-report skeleton {(phase_dir / '01-PLAN.md').as_posix()} "
+            f"--write --output {(phase_dir / '01-VERIFICATION.md').as_posix()} --force "
+            "--body-file BODY.md --validate contract"
+        )
+        assert bridge["supported_statuses"] == ["gaps_found"]
+        assert bridge["gap_report_skeleton_command"] == bridge["skeleton_command"]
+        assert bridge["gap_report_writer_command"] == bridge["writer_command"]
+        assert "gap-report-only" in bridge["status_policy"]
+        body_contract = bridge["body_contract"]
+        assert "`BODY.md` is body-only Markdown" in body_contract
+        assert "one fenced executed `python`/`bash` block" in body_contract
+        assert "adjacent `**Output:**` plus fenced `output` block" in body_contract
+        assert "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict line" in body_contract
+        assert "prose bullets alone are invalid" in body_contract
+        schema_sources = bridge["schema_sources"]
+        assert [source["name"] for source in schema_sources] == [
+            "verifier_agent",
+            "verification_report_template",
+            "contract_results_schema",
+        ]
+        assert [source["runtime_ref"] for source in schema_sources] == [
+            "{GPD_AGENTS_DIR}/gpd-verifier.md",
+            "{GPD_INSTALL_DIR}/templates/verification-report.md",
+            "{GPD_INSTALL_DIR}/templates/contract-results-schema.md",
+        ]
+        assert all(Path(source["source_path"]).is_file() for source in schema_sources)
+        assert bridge["expected_target_plan_path"] == (phase_dir / "01-PLAN.md").as_posix()
+        assert bridge["expected_verification_path"] == (phase_dir / "01-VERIFICATION.md").as_posix()
+        assert bridge["validation_command"] == (
+            f"gpd validate verification-contract {(phase_dir / '01-VERIFICATION.md').as_posix()}"
+        )
+        assert "run writer_command" in bridge["fallback_rule"]
+        assert "body-only evidence" in bridge["fallback_rule"]
+        assert "satisfies body_contract" in bridge["fallback_rule"]
+        assert "Use skeleton_command as preview context only" in bridge["fallback_rule"]
+        assert "do not hand-author or reflow VERIFICATION.md frontmatter" in bridge["fallback_rule"]
+        assert "use the generated frontmatter as the starting YAML" not in bridge["fallback_rule"]
+
+        manifest = load_workflow_stage_manifest("verify-work")
+        inventory_build = manifest.stage("inventory_build")
+        assert inventory_build.loaded_authorities == (
+            "workflows/verify-work.md",
+            "references/verification/meta/verification-independence.md",
+        )
+        assert "templates/verification-report.md" not in inventory_build.loaded_authorities
+        assert "templates/contract-results-schema.md" not in inventory_build.loaded_authorities
+        assert "templates/verification-report.md" in inventory_build.must_not_eager_load
+        assert "templates/contract-results-schema.md" in inventory_build.must_not_eager_load
+        assert "verification_report_skeleton_bridge" not in init_verify_work(tmp_path, "1")
+
+    def test_stage_inventory_build_fails_when_schema_bridge_phase_is_unresolved(self, tmp_path: Path) -> None:
+        _setup_project(tmp_path)
+        _write_stat_mech_project(tmp_path)
+        _write_bundle_ready_contract_state(tmp_path)
+        _write_structured_state_payload(tmp_path)
+
+        with pytest.raises(ValueError, match="requires a resolved phase"):
+            init_verify_work(tmp_path, "99", stage="inventory_build")
 
     def test_stage_inventory_build_uses_reference_metadata_without_artifact_content(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -6085,38 +6180,52 @@ class TestInitPhaseOp:
         def reference_context(cwd: Path) -> dict[str, object]:
             calls.append("reference")
             return {
+                **{
+                    field: f"reference::{field}"
+                    for field in (
+                        context_module._EXECUTE_PHASE_CONTRACT_GATE_FIELDS
+                        | context_module._EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS
+                    )
+                },
                 "active_reference_context": "reference context",
                 "reference_artifacts_content": "reference artifacts",
             }
 
+        def structured_state_context(cwd: Path) -> dict[str, object]:
+            calls.append("structured_state")
+            return {
+                field: f"structured_state::{field}"
+                for field in context_module._EXECUTE_PHASE_STRUCTURED_STATE_FIELDS
+            }
+
         def state_memory_context(cwd: Path) -> dict[str, object]:
             calls.append("state_memory")
-            return {"derived_convention_lock": {"metric_signature": "mostly-plus"}}
+            return {
+                **{
+                    field: f"state_memory::{field}"
+                    for field in context_module._EXECUTE_PHASE_STATE_MEMORY_FIELDS
+                },
+                "derived_convention_lock": {"metric_signature": "mostly-plus"},
+            }
 
         def execution_context(cwd: Path) -> dict[str, object]:
             calls.append("execution")
-            return {"current_execution": {"phase": "01", "segment_status": "running"}}
+            return {
+                **{
+                    field: f"execution::{field}"
+                    for field in context_module._EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS
+                },
+                "current_execution": {"phase": "01", "segment_status": "running"},
+            }
 
         monkeypatch.setattr("gpd.core.context._build_reference_runtime_context", reference_context)
+        monkeypatch.setattr("gpd.core.context._build_structured_state_runtime_context", structured_state_context)
         monkeypatch.setattr("gpd.core.context._build_state_memory_runtime_context", state_memory_context)
         monkeypatch.setattr("gpd.core.context._build_execution_runtime_context", execution_context)
-        _install_fake_stage_manifest(
-            monkeypatch,
-            workflow_id="research-phase",
-            stages={
-                "research_handoff": [
-                    "phase_found",
-                    "active_reference_context",
-                    "reference_artifacts_content",
-                    "derived_convention_lock",
-                    "current_execution",
-                ]
-            },
-        )
 
         result = init_phase_op(tmp_path, phase="1", stage="research_handoff")
 
-        assert calls == ["reference", "state_memory", "execution"]
+        assert calls == ["reference", "structured_state", "state_memory", "execution"]
         assert result["active_reference_context"] == "reference context"
         assert result["reference_artifacts_content"] == "reference artifacts"
         assert result["derived_convention_lock"] == {"metric_signature": "mostly-plus"}

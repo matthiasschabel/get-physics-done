@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -98,3 +99,30 @@ def test_sync_state_workflow_uses_staged_fields_instead_of_manual_state_probing(
     assert "JSON_EXISTS=$(test -f" not in text
     assert "cat GPD/STATE.md" not in text
     assert "cat GPD/state.json" not in text
+
+
+def test_sync_state_workflow_has_fail_closed_bad_backup_branch() -> None:
+    text = (WORKFLOWS_DIR / "sync-state.md").read_text(encoding="utf-8")
+
+    marker = "corrupt_state_bad_backup"
+    assert marker in text
+    start = text.index(marker)
+    next_branch = text.find("\n\n**If `state_md_exists` and `state_json_exists` are both false", start)
+    assert next_branch != -1, "Expected bad-backup branch boundary was not found"
+    end = next_branch
+    bad_backup_branch = text[start:end]
+    for required in (
+        "corrupt_state_bad_backup",
+        "unrecoverable_state_pair",
+        "gpd:health",
+        "manual repair",
+        "gpd:export-logs",
+    ):
+        assert required in bad_backup_branch
+
+    branch_lower = bad_backup_branch.lower()
+    assert "stop in read-only diagnosis" in branch_lower
+    assert "writes none" in branch_lower or "writes: none" in branch_lower
+    assert "no `state repair-sync`" in branch_lower
+    assert re.search(r"\b(no|not|never|must not|do not)\b[^\n.]*backup promotion", branch_lower)
+    assert re.search(r"\b(no|not|never|must not|do not)\b[^\n.]*state rewrite", branch_lower)

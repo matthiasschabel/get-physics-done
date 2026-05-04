@@ -87,15 +87,15 @@ COMMAND_BASELINES = {
     "settings": (521, 32_153, 1),
     "show-phase": (345, 9_503, 1),
     "slides": (259, 11_462, 1),
-    "start": (321, 16_874, 2),
+    "start": (280, 15_016, 2),
     "suggest-next": (91, 3_059, 0),
-    "sync-state": (251, 9_015, 1),
+    "sync-state": (261, 9_700, 1),
     "tangent": (207, 7_444, 1),
     "tour": (222, 8_946, 2),
     "undo": (348, 11_419, 1),
     "update": (268, 7_672, 1),
     "validate-conventions": (266, 10_102, 1),
-    "verify-work": (726, 36_091, 1),
+    "verify-work": (669, 36_091, 1),
     "write-paper": (1_417, 86_007, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
@@ -111,6 +111,7 @@ PROJECTED_COMMAND_HARD_CAPS = {
     "new-project": (2_200, 107_000),
     "research-phase": (430, 22_000),
     "respond-to-referees": (1_000, 62_000),
+    "verify-work": (850, 47_000),
     "write-paper": (1_700, 100_000),
 }
 RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
@@ -185,8 +186,8 @@ WORKFLOW_BASELINES = {
     "settings": (487, 30977, 1),
     "show-phase": (249, 6801, 0),
     "slides": (173, 8586, 0),
-    "start": (264, 14606, 2),
-    "sync-state": (209, 8078, 0),
+    "start": (223, 12_764, 2),
+    "sync-state": (219, 8763, 0),
     "tangent": (149, 5858, 0),
     "tour": (169, 7018, 1),
     "transition": (1064, 33368, 0),
@@ -194,7 +195,7 @@ WORKFLOW_BASELINES = {
     "update": (243, 7207, 0),
     "validate-conventions": (225, 8911, 1),
     "verify-phase": (681, 41_946, 0),
-    "verify-work": (653, 34201, 2),
+    "verify-work": (596, 34201, 2),
     "write-paper": (1269, 80049, 2),
 }
 WORST_WORKFLOW_HARD_CAPS = {

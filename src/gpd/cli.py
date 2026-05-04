@@ -11600,15 +11600,30 @@ def validate_review_preflight(
         raise typer.Exit(code=1)
 
 
+def _project_local_artifact_ref(path: Path) -> str | None:
+    resolved = path.resolve(strict=False)
+    project_root = resolve_project_root(resolved.parent, require_layout=True)
+    if project_root is not None:
+        try:
+            relative = resolved.relative_to(project_root.resolve(strict=False))
+        except ValueError:
+            pass
+        else:
+            if relative.parts and relative.parts[0] == PLANNING_DIR_NAME:
+                return relative.as_posix()
+
+    gpd_indexes = [index for index, part in enumerate(resolved.parts) if part == PLANNING_DIR_NAME]
+    if gpd_indexes:
+        return Path(*resolved.parts[gpd_indexes[-1] :]).as_posix()
+    return None
+
+
 def _verification_report_plan_contract_ref(plan_path: Path) -> str:
     """Return the canonical project-local contract ref for a PLAN path."""
 
     resolved = plan_path.resolve(strict=False)
-    parts = resolved.parts
-    if "GPD" in parts:
-        gpd_index = parts.index("GPD")
-        return f"{Path(*parts[gpd_index:]).as_posix()}#/contract"
-    return f"{resolved.name}#/contract"
+    artifact_ref = _project_local_artifact_ref(plan_path)
+    return f"{artifact_ref}#/contract" if artifact_ref is not None else f"{resolved.name}#/contract"
 
 
 def _normalize_verification_report_skeleton_status(status: str) -> str:
@@ -11716,10 +11731,7 @@ def _normalize_verification_report_skeleton_format(output_format: str) -> str:
 def _project_local_gpd_ref(path_value: object) -> str | None:
     if not isinstance(path_value, str) or not path_value.strip():
         return None
-    parts = Path(path_value).expanduser().parts
-    if "GPD" not in parts:
-        return path_value
-    return Path(*parts[parts.index("GPD") :]).as_posix()
+    return _project_local_artifact_ref(Path(path_value).expanduser()) or path_value
 
 
 def _render_verification_report_frontmatter_yaml(
@@ -12112,6 +12124,7 @@ def verification_report_skeleton_cmd(
         FrontmatterParseError,
         FrontmatterValidationError,
         parse_contract_block,
+        validate_frontmatter,
     )
 
     try:
@@ -12136,6 +12149,11 @@ def verification_report_skeleton_cmd(
                 f"remove YAML frontmatter from {_format_display_path(body_path)}"
             )
     try:
+        plan_validation = validate_frontmatter(content, "plan", source_path=file_path)
+        if not plan_validation.valid:
+            diagnostics = [*plan_validation.missing, *plan_validation.errors]
+            detail = "; ".join(diagnostics[:3]) if diagnostics else "invalid plan frontmatter"
+            _error(f"verification-report skeleton requires a valid PLAN.md: {detail}")
         contract = parse_contract_block(content, source_path=file_path)
     except (FrontmatterParseError, FrontmatterValidationError) as exc:
         _error(str(exc))

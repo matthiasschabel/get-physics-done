@@ -7,7 +7,7 @@ Use this workflow when:
 </trigger>
 
 <purpose>
-Restore the selected project's full context so "Where were we?" has an immediate answer.
+Restore selected project context so "Where were we?" has an immediate answer.
 
 @{GPD_INSTALL_DIR}/references/orchestration/resume-vocabulary.md
 </purpose>
@@ -24,7 +24,7 @@ Bootstrap loads only immediate resume vocabulary. Later staged payloads name
 Runtime label: Show `gpd:` as native labels; keep local CLI `gpd ...` unchanged.
 
 <step name="initialize">
-Load the shared resume bootstrap stage. `gpd:resume-work` is the guided runtime path, `gpd resume` is the public local read-only summary, `gpd resume --recent` is the cross-project discovery surface, and `gpd --raw resume` is the raw local view:
+Load resume bootstrap. `gpd:resume-work` is the guided runtime path; `gpd resume` is the public local read-only summary; `gpd resume --recent` is the cross-project discovery surface; `gpd --raw resume` is raw local JSON:
 
 ```bash
 INIT=$(gpd --raw init resume --stage resume_bootstrap)
@@ -50,20 +50,12 @@ The recent-project list is advisory and machine-local; once you choose a workspa
 
 **If `project_root_auto_selected` is true or `project_root_source="recent_project"`:** Runtime started outside the selected project. Do not quick-resume or act from the unrelated workspace. On bare "continue" or "go", stop. Show `project_root`; require explicit confirmation or a reopened project folder.
 
-When `active_resume_result` is present, treat it as the hydrated canonical result context for the current resume target. Use its `id` as the continuity anchor, but prefer its structured fields for the user-facing resume summary instead of restating only the raw identifier.
+When present, use `active_resume_result` as hydrated result context. Use its `id` as anchor, but summarize structured fields rather than only the raw identifier.
 
-`workspace_state_exists` means the requested workspace could recover usable state from `GPD/state.json` or `GPD/STATE.md`. `GPD/state.json.bak` is backup support for a real state file, not a backup-only project anchor. A stray unreadable file path by itself does not count as recoverable state.
-`state_exists` means the selected project root could recover usable state from `GPD/state.json` or `GPD/STATE.md`, with `GPD/state.json.bak` used only as crash-recovery support for the JSON state path.
+`workspace_state_exists` / `state_exists` mean usable state from `GPD/state.json` or `GPD/STATE.md`; `GPD/state.json.bak` is only crash-recovery support. A stray unreadable path is not recoverable state.
 Use `workspace_*` to judge the user-requested workspace before auto-selection; use the selected-project fields after re-entry resolution.
 
-The shared resume resolver distinguishes:
-
-- **storage authority:** `GPD/state.json`, with `GPD/state.json.bak` as recovery backup; canonical `continuation` lives here
-- **editable state document:** `GPD/STATE.md`
-- **temporary handoff artifact:** `GPD/phases/.../.continue-here.md`
-- **derived execution head / live execution status:** `GPD/observability/current-execution.json`
-
-The resolver is canonical-first: `state.json.continuation` wins; bounded segment and recorded handoff fields define the primary target; derived execution head supplies live status. Do not treat one `.continue-here.md` or live snapshot as sole authority.
+Resolver authority order: `GPD/state.json` / `continuation`, then `GPD/state.json.bak`, then `GPD/STATE.md`; `.continue-here.md` and live snapshots are context, not sole authority.
 
 **If `planning_exists` is false and no recent-project selection is required:** If recoverable state exists, repair first. Otherwise route to gpd:new-project and do not attempt STATE.md reconstruction.
 **If `state_exists` is false but `roadmap_exists` or `project_exists` is true:** Offer to reconstruct STATE.md from the existing project artifacts.
@@ -72,7 +64,7 @@ If `active_resume_kind="bounded_segment"` and `active_bounded_segment` exists, t
 
 `active_resume_kind` is narrower than the overall recovery status. A recorded handoff, a missing recorded handoff artifact, or advisory live execution can still exist when `active_resume_kind` is `None`; those status cues surface through `continuity_handoff_file` and `missing_continuity_handoff_file`, while `gpd --raw resume` keeps the top-level public fields canonical.
 
-If `active_resume_result` exists, surface it alongside the primary resume target so `gpd:resume-work` can recover the last canonical result context immediately. If a resume candidate carries a hydrated `last_result`, prefer that payload over `last_result_id`-only notes while still preserving the ID as the rerun anchor.
+Surface `active_resume_result` beside the primary target. If a candidate has hydrated `last_result`, prefer it over `last_result_id`-only notes while preserving the ID as rerun anchor.
 
 If `derived_execution_head` exists but `execution_resumable` is false, treat that live snapshot as advisory context only. If `active_resume_pointer` is empty, non-project, or missing on disk, call that out explicitly; in all such cases it is not a ranked bounded-segment resume candidate and does not justify `active_resume_kind="bounded_segment"`.
 
@@ -254,13 +246,9 @@ fi
 
 **Bounded execution segment detection:** If `active_resume_kind` is `bounded_segment`, `execution_resumable` is true, and `active_resume_pointer` is present, treat that bounded continuation as the primary resume target. The runtime ranks three recovery families into `resume_candidates`: a resumable live execution snapshot, a recorded handoff, and an interrupted-agent marker. If the live snapshot lacks a portable usable resume file, keep it visible only as advisory context. Do NOT invent additional candidates from plan files without summaries, auto-checkpoints, or other ad hoc checkpoints.
 
-The shared resume resolver keeps the derived execution head and the temporary handoff artifact subordinate to the storage authority chain. They refine the continuation target; they do not replace `GPD/state.json > GPD/state.json.bak > GPD/STATE.md`.
-
 Reason-scoped clears still matter on resume: a `first_result` clear does not retire `pre_fanout` or skeptical fields, and a `fanout unlock` does not clear the review gate by itself.
 
 When resuming from `first_result` or skeptical state, ask one concrete question first: "What decisive evidence is still owed before downstream work is trustworthy?" Do not resume fanout based only on proxy-looking success or "seems on track" prose.
-
-**Context budget note:** Loading STATE.md, DERIVATION-STATE.md, PROJECT.md, execution snapshot, and roadmap usually consumes 15-20% of a fresh context window, up to 25% for long histories.
 
 **If PLAN without SUMMARY exists:**
 
@@ -380,6 +368,7 @@ Based on project state, determine the most logical next action:
 **If partial/recoverable state or `project_contract_gate.repair_required` needs repair:**
 -> Stop before planning, mutation, execution, reconstruction, or continuation update; writes none; next `gpd:sync-state`
 -> Choices exactly: `gpd:sync-state`, `gpd:health`, `gpd:resume-work` after repair; exclude `gpd:progress` and `gpd:new-project`
+-> This gate overrides quick-resume auto-execution; show only repair choices.
 
 **If `project_contract_gate.authoritative` is false:**
 -> Primary: Repair the blocked contract or state-integrity issue before planning or execution
@@ -561,6 +550,7 @@ This handles cases where:
 If user says "continue" or "go":
 
 - If `project_root_auto_selected` is true or `project_root_source="recent_project"`, quick resume is disabled; show the project path, require explicit confirmation or reopened folder, and do not continue automatically.
+- If partial/recoverable state or `project_contract_gate.repair_required` needs repair, quick resume must not auto-execute; show only repair choices.
 - Load state silently
 - Determine primary action
 - Execute immediately without presenting options

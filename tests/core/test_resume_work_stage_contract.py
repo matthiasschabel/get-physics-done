@@ -161,6 +161,8 @@ def test_resume_work_quick_resume_refuses_auto_selected_recent_projects() -> Non
     assert initialize.index(auto_recent_gate) < initialize.index(new_project_gate)
     assert "quick resume is disabled" in quick_resume
     assert "do not continue automatically" in quick_resume
+    assert "project_contract_gate.repair_required" in quick_resume
+    assert "quick resume must not auto-execute" in quick_resume
 
 
 def test_resume_work_partial_recoverable_repair_menu_blocks_downstream_actions() -> None:
@@ -178,6 +180,7 @@ def test_resume_work_partial_recoverable_repair_menu_blocks_downstream_actions()
     assert "planning" in normalized
     assert "execution" in normalized
     assert re.search(r"\bmutat(e|es|ing|ion|ions)\b", normalized)
+    assert "overrides quick-resume auto-execution" in normalized
 
     assert _command_is_explicitly_excluded(branch, "gpd:progress")
     assert _command_is_explicitly_excluded(branch, "gpd:new-project")

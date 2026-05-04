@@ -3149,6 +3149,50 @@ def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload
     _assert_forbidden_verification_fields_absent(payload)
 
 
+def test_verification_report_skeleton_uses_project_local_ref_when_outer_directory_is_named_gpd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_root = tmp_path / "outer" / "GPD" / "project"
+    phase_dir = project_root / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    plan_path = phase_dir / "01-PLAN.md"
+    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+
+    def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
+        del contract, plan_path, kwargs
+        return {
+            "frontmatter": {
+                "phase": "01-baseline",
+                "verified": "1970-01-01T00:00:00Z",
+                "status": status,
+                "score": "gap skeleton",
+                "plan_contract_ref": plan_contract_ref,
+            },
+            "target_report_path": str(phase_dir / "01-VERIFICATION.md"),
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(plan_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["frontmatter"]["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["validation_commands"] == [
+        "gpd frontmatter validate GPD/phases/01-baseline/01-VERIFICATION.md --schema verification",
+        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
+    ]
+
+
 def test_verification_report_skeleton_raw_uses_real_builder(tmp_path: Path) -> None:
     phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
     phase_dir.mkdir(parents=True)
@@ -3277,6 +3321,42 @@ def test_verification_report_skeleton_fallback_validation_commands_quote_report_
         "gpd frontmatter validate 'GPD/phases/01 with space/01-VERIFICATION.md' --schema verification",
         "gpd validate verification-contract 'GPD/phases/01 with space/01-VERIFICATION.md'",
     ]
+
+
+def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builder(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+    phase_dir.mkdir(parents=True)
+    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir.mkdir(parents=True)
+    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
+    summary_path = phase_dir / "01-SUMMARY.md"
+    summary_path.write_text(
+        _compact_plan_with_missing_must_surface_benchmark().replace(
+            "type: execute\n",
+            "completed: true\ndepth: full\nprovides:\n  claims: []\n",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    def unexpected_builder(**kwargs):
+        raise AssertionError(f"verification skeleton builder should not run for invalid PLAN input: {kwargs}")
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: unexpected_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "verification-report", "skeleton", str(summary_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "requires a valid PLAN.md" in str(payload["error"])
+    assert "type" in str(payload["error"])
 
 
 def test_verification_report_skeleton_frontmatter_format_prints_yaml_only(tmp_path: Path) -> None:

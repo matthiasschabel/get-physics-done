@@ -203,6 +203,29 @@ def test_arxiv_package_validator_detects_citations_in_included_tex_files(tmp_pat
     assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
 
 
+def test_arxiv_package_validator_fails_tex_ready_when_root_entrypoint_is_not_packaged_tex(
+    tmp_path: Path,
+) -> None:
+    submission_dir = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    (submission_dir / "unrelated.tex").write_text(
+        "\\documentclass{article}\\begin{document}Unrelated.\\end{document}\n",
+        encoding="utf-8",
+    )
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="paper",
+        manuscript_entrypoint="paper/main.tex",
+    )
+
+    entrypoint_check = _check_by_name(result, "submission_entrypoint_at_root")
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert entrypoint_check.passed is False
+    assert tex_check.passed is False
+    assert "main.tex is not a packaged root-level TeX entrypoint" in tex_check.detail
+
+
 def test_arxiv_package_validator_rejects_unreferenced_bib_source_material(tmp_path: Path) -> None:
     submission_dir = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / "submission"
     submission_dir.mkdir(parents=True)
@@ -303,6 +326,62 @@ def test_arxiv_package_validator_accepts_packaged_bib_source_material(tmp_path: 
 
     assert _check_by_name(result, "submission_tree_excludes_auxiliary_files").passed is True
     assert _check_by_name(result, "submission_tex_ready").passed is True
+
+
+def test_arxiv_package_validator_accepts_root_jobname_bbl_for_bibtex_bibliography(
+    tmp_path: Path,
+) -> None:
+    submission_dir = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    (submission_dir / "main.tex").write_text(
+        (
+            "\\documentclass{article}\\begin{document}\n"
+            "Citation \\cite{known-result}.\\bibliographystyle{plain}\\bibliography{refs}\n"
+            "\\end{document}\n"
+        ),
+        encoding="utf-8",
+    )
+    (submission_dir / "main.bbl").write_text(
+        "\\begin{thebibliography}{1}\\bibitem{known-result} Known Result.\\end{thebibliography}\n",
+        encoding="utf-8",
+    )
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="paper",
+        manuscript_entrypoint="paper/main.tex",
+    )
+
+    assert _check_by_name(result, "submission_tex_ready").passed is True
+
+
+def test_arxiv_package_validator_rejects_bibliography_target_bbl_without_root_jobname_bbl(
+    tmp_path: Path,
+) -> None:
+    submission_dir = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    (submission_dir / "main.tex").write_text(
+        (
+            "\\documentclass{article}\\begin{document}\n"
+            "Citation \\cite{known-result}.\\bibliographystyle{plain}\\bibliography{refs}\n"
+            "\\end{document}\n"
+        ),
+        encoding="utf-8",
+    )
+    (submission_dir / "refs.bbl").write_text(
+        "\\begin{thebibliography}{1}\\bibitem{known-result} Known Result.\\end{thebibliography}\n",
+        encoding="utf-8",
+    )
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="paper",
+        manuscript_entrypoint="paper/main.tex",
+    )
+
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert tex_check.passed is False
+    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
 
 
 def test_arxiv_package_materialize_refuses_submission_tree_outside_managed_root(tmp_path: Path) -> None:

@@ -3684,9 +3684,7 @@ def _build_verification_report_skeleton_bridge(cwd: Path, phase_info: dict | Non
     verification_path = _verify_work_expected_verification_path(cwd, phase_info)
     gap_report_status = "gaps_found"
     skeleton_command = (
-        f"gpd verification-report skeleton {shlex.quote(plan_path)} --format markdown"
-        if plan_path
-        else None
+        f"gpd verification-report skeleton {shlex.quote(plan_path)} --format markdown" if plan_path else None
     )
     writer_command = (
         f"gpd verification-report skeleton {shlex.quote(plan_path)} --write "
@@ -4961,6 +4959,10 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
         staged_source.update(_build_state_memory_runtime_context(cwd))
 
     if required_fields & _VERIFY_WORK_SCHEMA_BRIDGE_FIELDS:
+        if phase_info is None:
+            raise ValueError(
+                f"verify-work stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
+            )
         staged_source["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
             cwd,
             phase_info,

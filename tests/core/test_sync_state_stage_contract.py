@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -107,7 +108,8 @@ def test_sync_state_workflow_has_fail_closed_bad_backup_branch() -> None:
     assert marker in text
     start = text.index(marker)
     next_branch = text.find("\n\n**If `state_md_exists` and `state_json_exists` are both false", start)
-    end = next_branch if next_branch != -1 else len(text)
+    assert next_branch != -1, "Expected bad-backup branch boundary was not found"
+    end = next_branch
     bad_backup_branch = text[start:end]
     for required in (
         "corrupt_state_bad_backup",
@@ -122,5 +124,5 @@ def test_sync_state_workflow_has_fail_closed_bad_backup_branch() -> None:
     assert "stop in read-only diagnosis" in branch_lower
     assert "writes none" in branch_lower or "writes: none" in branch_lower
     assert "no `state repair-sync`" in branch_lower
-    assert "backup promotion" in branch_lower
-    assert "state rewrite" in branch_lower
+    assert re.search(r"\b(no|not|never|must not|do not)\b[^\n.]*backup promotion", branch_lower)
+    assert re.search(r"\b(no|not|never|must not|do not)\b[^\n.]*state rewrite", branch_lower)

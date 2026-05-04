@@ -4515,6 +4515,15 @@ class TestInitVerifyWork:
         assert "templates/contract-results-schema.md" in inventory_build.must_not_eager_load
         assert "verification_report_skeleton_bridge" not in init_verify_work(tmp_path, "1")
 
+    def test_stage_inventory_build_fails_when_schema_bridge_phase_is_unresolved(self, tmp_path: Path) -> None:
+        _setup_project(tmp_path)
+        _write_stat_mech_project(tmp_path)
+        _write_bundle_ready_contract_state(tmp_path)
+        _write_structured_state_payload(tmp_path)
+
+        with pytest.raises(ValueError, match="requires a resolved phase"):
+            init_verify_work(tmp_path, "99", stage="inventory_build")
+
     def test_stage_inventory_build_uses_reference_metadata_without_artifact_content(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

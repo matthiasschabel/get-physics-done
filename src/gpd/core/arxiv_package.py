@@ -166,7 +166,7 @@ def _included_tex_names(current_name: str, text: str) -> list[str]:
 
 def _reachable_tex_payloads(root_entrypoint: str, tex_payloads: dict[str, str]) -> dict[str, str]:
     if root_entrypoint not in tex_payloads:
-        return dict(tex_payloads)
+        return {}
     reachable: dict[str, str] = {}
     pending = [root_entrypoint]
     while pending:
@@ -183,9 +183,10 @@ def _reachable_tex_payloads(root_entrypoint: str, tex_payloads: dict[str, str]) 
     return reachable
 
 
-def _bibliography_source_targets(tex_payloads: dict[str, str]) -> tuple[set[str], set[str]]:
+def _bibliography_source_targets(root_entrypoint: str, tex_payloads: dict[str, str]) -> tuple[set[str], set[str]]:
     bib_targets: set[str] = set()
     bbl_targets: set[str] = set()
+    root_bbl_target = _path_with_suffix(root_entrypoint, ".bbl")
     for name, text in tex_payloads.items():
         for match in _BIBLIOGRAPHY_COMMAND_RE.finditer(text):
             for raw_resource in match.group(1).split(","):
@@ -193,7 +194,7 @@ def _bibliography_source_targets(tex_payloads: dict[str, str]) -> tuple[set[str]
                 if bib_target is None:
                     continue
                 bib_targets.add(bib_target)
-                bbl_targets.add(_path_with_suffix(bib_target, ".bbl"))
+                bbl_targets.add(root_bbl_target)
         for match in _BBL_INPUT_RE.finditer(text):
             bbl_target = _safe_relative_resource(name, match.group(1))
             if bbl_target is not None:
@@ -209,6 +210,8 @@ def _scan_tex_payload(
 ) -> list[str]:
     issues: list[str] = []
     normalized_payloads = {name: _strip_latex_comments(text) for name, text in tex_payloads.items()}
+    if root_entrypoint not in normalized_payloads:
+        return [f"{root_entrypoint} is not a packaged root-level TeX entrypoint"]
     for name, text in normalized_payloads.items():
         if _EMPTY_REFERENCE_RE.search(text):
             issues.append(f"{name} contains an empty citation or reference command")
@@ -223,7 +226,7 @@ def _scan_tex_payload(
         for key in match.group(1).split(",")
         if key.strip()
     ]
-    bib_targets, bbl_targets = _bibliography_source_targets(reachable_payloads)
+    bib_targets, bbl_targets = _bibliography_source_targets(root_entrypoint, reachable_payloads)
     has_bib_source = any(target in packaged_names for target in bib_targets)
     has_bbl_source = any(target in packaged_names for target in bbl_targets)
     has_bibliography_material = "\\begin{thebibliography}" in combined_text or has_bbl_source or has_bib_source

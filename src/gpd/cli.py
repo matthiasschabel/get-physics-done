@@ -11865,20 +11865,26 @@ def _verification_report_output_target(
     payload: Mapping[str, object],
     plan_path: Path,
 ) -> Path:
-    raw_target = output_path
-    if raw_target is None:
+    target_base = _get_cwd()
+    if output_path is not None:
+        raw_target = output_path
+    else:
+        raw_target = None
         payload_target = payload.get("target_report_path")
         if isinstance(payload_target, str) and payload_target.strip():
             raw_target = payload_target
-    if raw_target is None:
-        name = plan_path.name
-        raw_target = str(
-            plan_path.with_name(name.replace("PLAN.md", "VERIFICATION.md") if "PLAN.md" in name else "VERIFICATION.md")
-        )
+            target_base = plan_path.parent
+        else:
+            name = plan_path.name
+            raw_target = str(
+                plan_path.with_name(
+                    name.replace("PLAN.md", "VERIFICATION.md") if "PLAN.md" in name else "VERIFICATION.md"
+                )
+            )
 
     target = Path(raw_target).expanduser()
     if not target.is_absolute():
-        target = _get_cwd() / target
+        target = target_base / target
     return target.resolve(strict=False)
 
 

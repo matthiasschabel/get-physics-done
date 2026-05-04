@@ -155,7 +155,9 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
     )
 
     assert workflow.index("verification_report_skeleton_bridge") < workflow.index('<step name="sync_verifier_output">')
-    assert workflow.index("writer_command") < workflow.index('<step name="sync_verifier_output">')
+    assert workflow.index("replace `BODY.md` in its `writer_command`") < workflow.index(
+        '<step name="sync_verifier_output">'
+    )
     assert workflow.index(sync_stop) < workflow.index(
         'INTERACTIVE_VALIDATION_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage interactive_validation)'
     )

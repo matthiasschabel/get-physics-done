@@ -6180,38 +6180,52 @@ class TestInitPhaseOp:
         def reference_context(cwd: Path) -> dict[str, object]:
             calls.append("reference")
             return {
+                **{
+                    field: f"reference::{field}"
+                    for field in (
+                        context_module._EXECUTE_PHASE_CONTRACT_GATE_FIELDS
+                        | context_module._EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS
+                    )
+                },
                 "active_reference_context": "reference context",
                 "reference_artifacts_content": "reference artifacts",
             }
 
+        def structured_state_context(cwd: Path) -> dict[str, object]:
+            calls.append("structured_state")
+            return {
+                field: f"structured_state::{field}"
+                for field in context_module._EXECUTE_PHASE_STRUCTURED_STATE_FIELDS
+            }
+
         def state_memory_context(cwd: Path) -> dict[str, object]:
             calls.append("state_memory")
-            return {"derived_convention_lock": {"metric_signature": "mostly-plus"}}
+            return {
+                **{
+                    field: f"state_memory::{field}"
+                    for field in context_module._EXECUTE_PHASE_STATE_MEMORY_FIELDS
+                },
+                "derived_convention_lock": {"metric_signature": "mostly-plus"},
+            }
 
         def execution_context(cwd: Path) -> dict[str, object]:
             calls.append("execution")
-            return {"current_execution": {"phase": "01", "segment_status": "running"}}
+            return {
+                **{
+                    field: f"execution::{field}"
+                    for field in context_module._EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS
+                },
+                "current_execution": {"phase": "01", "segment_status": "running"},
+            }
 
         monkeypatch.setattr("gpd.core.context._build_reference_runtime_context", reference_context)
+        monkeypatch.setattr("gpd.core.context._build_structured_state_runtime_context", structured_state_context)
         monkeypatch.setattr("gpd.core.context._build_state_memory_runtime_context", state_memory_context)
         monkeypatch.setattr("gpd.core.context._build_execution_runtime_context", execution_context)
-        _install_fake_stage_manifest(
-            monkeypatch,
-            workflow_id="research-phase",
-            stages={
-                "research_handoff": [
-                    "phase_found",
-                    "active_reference_context",
-                    "reference_artifacts_content",
-                    "derived_convention_lock",
-                    "current_execution",
-                ]
-            },
-        )
 
         result = init_phase_op(tmp_path, phase="1", stage="research_handoff")
 
-        assert calls == ["reference", "state_memory", "execution"]
+        assert calls == ["reference", "structured_state", "state_memory", "execution"]
         assert result["active_reference_context"] == "reference context"
         assert result["reference_artifacts_content"] == "reference artifacts"
         assert result["derived_convention_lock"] == {"metric_signature": "mostly-plus"}

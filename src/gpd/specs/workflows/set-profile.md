@@ -8,6 +8,8 @@ Read all files referenced by the invoking prompt's execution_context before star
 
 <process>
 
+This is an action workflow. Execute the validation and update steps; do not only explain profile options or summarize the selected mode.
+
 <step name="validate">
 Parse and validate the raw single profile argument:
 
@@ -33,18 +35,13 @@ esac
 </step>
 
 <step name="ensure_and_load_config">
-Ensure config exists and load current state:
+Ensure config exists without initializing or mutating project state:
 
 ```bash
 gpd config ensure-section
-INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
 ```
 
-This creates `GPD/config.json` with defaults if missing and loads current config.
+This creates or repairs the config section only. Do not run `gpd init`, `gpd progress`, state sync, or project reentry from `set-profile`; this command is allowed to change only `GPD/config.json::model_profile`.
 </step>
 
 <step name="update_config">

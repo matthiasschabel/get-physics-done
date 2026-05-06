@@ -7,6 +7,7 @@ logic, background spawn failure, and graceful degradation.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -893,7 +894,7 @@ class TestMainThrottle:
         spawned_argv = mock_popen.call_args.args[0]
         assert str(explicit_target / "cache" / "gpd-update-check.json") == spawned_argv[-1]
 
-    def test_explicit_target_hook_prefers_workspace_cache_over_fresh_self_cache_when_workspace_install_owns_runtime(
+    def test_explicit_target_hook_reads_workspace_cache_but_writes_home_cache_when_workspace_install_owns_runtime(
         self, tmp_path: Path
     ) -> None:
         workspace = tmp_path / "workspace"
@@ -947,4 +948,5 @@ class TestMainThrottle:
 
         mock_popen.assert_called_once()
         spawned_argv = mock_popen.call_args.args[0]
-        assert spawned_argv[-1] == str(workspace_cache)
+        expected_home_cache_root = Path(os.environ.get("GPD_DATA_DIR", str(home / ".gpd")))
+        assert spawned_argv[-1] == str(expected_home_cache_root / "cache" / "gpd-update-check.json")

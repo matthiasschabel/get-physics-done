@@ -404,7 +404,8 @@ def test_gemini_projected_command_surface_matches_install_runtime_rewrites(tmp_p
     assert "<gemini_runtime_notes>" in projected
     assert "Run these as separate shell calls in Gemini auto-edit mode." in projected
     assert f"{bridge} config ensure-section" in projected
-    assert f"{bridge} --raw init progress --include state,config --no-project-reentry" in projected
+    assert f'{bridge} config set model_profile "$PROFILE"' in projected
+    assert f"{bridge} --raw init progress --include state,config" not in projected
     assert "INIT=$(gpd --raw init progress --include state,config)" not in projected
     assert 'echo "$INIT"' not in projected
 
@@ -462,6 +463,30 @@ def test_gemini_projected_shell_allowlist_matches_policy_prefixes(tmp_path: Path
     assert "PROJECT_CONTRACT_JSON" not in "\n".join(shell_bodies)
     assert "printf '%s\\n'" not in "\n".join(shell_bodies)
     assert "```text\nPROJECT_CONTRACT_JSON={...}" in projected
+
+
+def test_gemini_real_command_shell_fences_start_with_policy_prefixes(tmp_path: Path) -> None:
+    target_dir = tmp_path / ".gemini"
+    bridge = _bridge_for_projection("gemini", target_dir)
+    policy_prefixes = gemini_module._gemini_policy_command_prefixes(bridge)
+    offenders: list[str] = []
+
+    for command_name in _command_names():
+        projected = project_markdown_for_runtime(
+            _read(COMMANDS_DIR / f"{command_name}.md"),
+            runtime="gemini",
+            path_prefix="./.gemini/",
+            surface_kind="command",
+            install_scope="--local",
+            workflow_target_dir=target_dir,
+            command_name=command_name,
+        )
+        for body in _shell_fence_bodies(projected):
+            first_command = _first_shell_command(body)
+            if first_command and not first_command.startswith(policy_prefixes):
+                offenders.append(f"{command_name}: {first_command}")
+
+    assert offenders == []
 
 
 @pytest.mark.parametrize("runtime", ("claude-code", "opencode"))

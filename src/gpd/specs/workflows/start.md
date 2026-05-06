@@ -63,7 +63,13 @@ Offer only the choices that fit the detected state.
 
 @{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md
 
+In one-shot or headless runtime prompts, render the chooser as plain text and stop instead of calling a structured input tool that cannot receive a reply.
+
 If choices are rendered as plain text, add: `Reply with the number or the option name.`
+
+If the same user message that invokes `gpd:start` already includes an explicit choice after the command label, treat that as the answer and continue to `route_choice` once. Accept only exact stable choice tokens or displayed labels, such as `tour`, `fast start`, `full guided setup`, `map this folder first`, or their visible choice numbers.
+Do not treat surrounding goals, explanations, or automation instructions as consent to route.
+A same-message explicit choice counts only as the chooser answer for one `option_id`. It is not downstream write approval and not approval for downstream intake, scope approval, file creation, git initialization, state repair, map creation, mapper spawning, progress writes, or permission to execute a recommended next action.
 
 Assign one internal `option_id` per displayed choice. Do not route directly on the mutable English label; map input to: `resume_work`, `sync_state`, `progress`, `map_research`, `new_project_minimal`, `new_project_full`, `tour`, `reopen_recent`.
 
@@ -137,40 +143,46 @@ Route immediately into the real existing workflow for the chosen path.
 
 Normalize the reply to one stable `option_id`; labels are aliases only.
 
+For every start-routed path, the start-menu choice authorizes only the route into that command. If the selected downstream workflow is write-capable, state the route boundary visibly and stop at its first downstream write-capable gate unless that downstream workflow obtains its own separate explicit approval after the handoff.
+
 **If the researcher chooses option_id `resume_work` (`Resume this project (recommended)`, `Continue where I left off`, `Inspect recovery state (recommended)`, or `Inspect recovery state`):**
 
 - Read `{GPD_INSTALL_DIR}/workflows/resume-work.md` with the file-read tool.
 - Use `gpd:resume-work` as the selected runtime command label while following that workflow.
 
 **If the researcher chooses option_id `sync_state` (`Reconcile state files`):**
-
+- Say exactly: "I will route to `gpd:sync-state` now and stop after its recovery diagnosis/instruction gate; no state repair or state rewrite is approved by this start choice."
 - Read `{GPD_INSTALL_DIR}/workflows/sync-state.md` with the file-read tool.
 - Use `gpd:sync-state` as the selected runtime command label while following that workflow.
+- In one-shot or headless runtime prompts, do not continue through the sync-state shell repair workflow from `gpd:start`; stop after the route-boundary/recovery instruction gate is visible.
+- Route boundary for `sync_state`: do not run `gpd state repair-sync`, promote backups, rewrite `GPD/STATE.md`, or rewrite `GPD/state.json` unless the user gives a separate exact sync/repair confirmation inside `gpd:sync-state` or invokes that command directly with explicit repair intent.
 
 **If the researcher chooses option_id `progress` (`Review the project status first`, `Review project status first`, or `Review visible progress`):**
-
+- Say exactly: "I will route to `gpd:progress` now in default/report mode only; no reconcile, state write, compaction, or next-action execution is approved by this start choice."
 - Read `{GPD_INSTALL_DIR}/workflows/progress.md` with the file-read tool.
 - Use `gpd:progress` as the selected runtime command label while following that workflow.
+- Route boundary for `progress`: use default/report mode only. Do not switch to `--reconcile`, execute the recommended next action, update state, compact state, or write progress/state files from this start-routed status check.
 
 **If the researcher chooses option_id `map_research` (`Map this folder first (recommended)` or `Refresh the research map`):**
-
+- Say exactly: "I will route to `gpd:map-research` now and stop at its first map-research decision/write gate; no research-map files, mapper agents, archives, or summaries are approved by this start choice."
 - Read `{GPD_INSTALL_DIR}/workflows/map-research.md` with the file-read tool.
 - Use `gpd:map-research` as the selected runtime command label while following that workflow.
+- Route boundary for `map_research`: stop before creating, archiving, or updating `GPD/research-map/`, before spawning mapper agents, and before writing summaries unless the downstream map workflow obtains an explicit durable-write confirmation after the route handoff.
 
 **If the researcher chooses option_id `new_project_minimal` (`Fast start (recommended)`, `Fast start`, or `Start a brand-new GPD project anyway`):**
-
+- Say exactly: "I will route to `gpd:new-project --minimal` now and stop at its first downstream intake or scope-approval gate; no project, git, state, or progress files are approved by this start choice."
 - Use `gpd:new-project --minimal` as the selected runtime command label and follow its installed command contract directly.
+- Route boundary for `new_project_minimal`: do not create `GPD/`, initialize git, write state, write progress files, or create project artifacts unless `gpd:new-project --minimal` obtains its own explicit downstream intake/scope approval after this start route.
 
 **If the researcher chooses option_id `new_project_full` (`Full guided setup`, `Turn this into a full GPD project (recommended)`, or `Turn this into a full GPD project`):**
-
+- Say exactly: "I will route to `gpd:new-project` now and stop at its first downstream intake or scope-approval gate; no project, git, state, or progress files are approved by this start choice."
 - Use `gpd:new-project` as the selected runtime command label and follow its installed command contract directly.
+- Route boundary for `new_project_full`: do not create `GPD/`, initialize git, write state, write progress files, or create project artifacts unless `gpd:new-project` obtains its own explicit downstream intake/scope approval after this start route.
 
 **If the researcher chooses option_id `tour` (`Take a guided tour first` or `tour`):**
-
 - Use `gpd:tour` as the selected runtime command label and follow its installed command contract directly.
 
 **If the researcher chooses option_id `reopen_recent` (`Reopen a different GPD project`):**
-
 - Do not silently switch projects from inside the runtime.
 - Explain exactly:
   - `Use \`gpd resume --recent\` in your normal terminal to find the project first.`

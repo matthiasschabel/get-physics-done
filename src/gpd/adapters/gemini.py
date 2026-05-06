@@ -50,6 +50,7 @@ from gpd.adapters.install_utils import (
 )
 from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
+from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
 from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
@@ -107,11 +108,14 @@ _GEMINI_APPROVED_CONTRACT_PATH = "GPD/.approved-project-contract.json"
 _GEMINI_STATIC_POLICY_COMMAND_PREFIXES: tuple[str, ...] = (
     "git init",
     "mkdir -p GPD",
+    "cat GPD/",
+    "ls -d GPD",
+    "test -",
 )
 _GEMINI_COMMAND_RUNTIME_NOTE = (
     "<gemini_runtime_notes>\n"
     "Gemini runtime compatibility:\n"
-    "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `/gpd:...` for Gemini commands.\n"
+    "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `{public_prefix}...` for Gemini commands.\n"
     "- When runnable shell steps call the GPD CLI, use {launcher} instead of the ambient `gpd` on PATH.\n"
     "</gemini_runtime_notes>\n\n"
 )
@@ -167,10 +171,50 @@ gpd config ensure-section
 Then run:
 
 ```bash
-gpd --raw init progress --include state,config --no-project-reentry
+gpd config set model_profile "$PROFILE"
 ```
 
-If the init command fails, stop, surface the error, and do not proceed."""
+These commands may only repair `GPD/config.json` and update `GPD/config.json::model_profile`; do not run project init, progress, state sync, or project reentry from `set-profile`."""
+_GEMINI_SET_PROFILE_VALIDATE_BLOCK = """```bash
+PROFILE="$(printf '%s' "$ARGUMENTS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+case "$PROFILE" in
+  deep-theory|numerical|exploratory|review|paper-writing) ;;
+  "")
+    echo "ERROR: Missing profile. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"
+    exit 1
+    ;;
+  *[[:space:]]*)
+    echo "ERROR: set-profile accepts exactly one profile argument."
+    exit 1
+    ;;
+  *)
+    echo "ERROR: Invalid profile \\"$PROFILE\\". Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"
+    exit 1
+    ;;
+esac
+```"""
+_GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT = """Validate the single profile argument without a shell call before running persistence commands. Trim surrounding whitespace. Accept exactly one of: `deep-theory`, `numerical`, `exploratory`, `review`, `paper-writing`. If the argument is missing, contains whitespace, or is not in that list, stop and surface the validation error."""
+_GEMINI_SET_PROFILE_VALIDATE_BLOCK_RE = re.compile(
+    r"```bash\n"
+    r"PROFILE=\"\$\(printf '%s' \"\$ARGUMENTS\" \| sed 's/\^\[\[:space:\]\]\*//;s/\[\[:space:\]\]\*\$//'\)\"\n"
+    r"case \"\$PROFILE\" in\n"
+    r"  deep-theory\|numerical\|exploratory\|review\|paper-writing\) ;;\n"
+    r"  \"\"\)\n"
+    r"    echo \"ERROR: Missing profile\. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing\"\n"
+    r"    exit 1\n"
+    r"    ;;\n"
+    r"  \*\[\[:space:\]\]\*\)\n"
+    r"    echo \"ERROR: set-profile accepts exactly one profile argument\.\"\n"
+    r"    exit 1\n"
+    r"    ;;\n"
+    r"  \*\)\n"
+    r"    echo \"ERROR: Invalid profile \"\\\$PROFILE\"\. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing\"\n"
+    r"    exit 1\n"
+    r"    ;;\n"
+    r"esac\n"
+    r"```",
+    re.MULTILINE,
+)
 _GEMINI_SET_PROFILE_BLOCK_RE = re.compile(
     r"```bash\n"
     r"gpd config ensure-section\n"
@@ -207,6 +251,21 @@ If the pre-check reports issues or exits non-zero, surface the output and contin
 ```bash
 gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
 ```"""
+_GEMINI_HEALTH_BLOCK_REPLACEMENT = """In Gemini auto-edit mode, run health checks as a direct shell call instead of capturing stderr through temp files.
+
+Default read-only check:
+
+```bash
+gpd --raw health
+```
+
+Only after explicit confirmation for `--fix`:
+
+```bash
+gpd --raw health --fix
+```
+
+Do not treat a nonzero health exit status as a wrapper failure when the command output parses as the valid report JSON below."""
 _GEMINI_CONTRACT_PERSIST_SENTENCE = (
     "Write the exact approved contract JSON to "
     f"`{_GEMINI_APPROVED_CONTRACT_PATH}` using file tools, then persist it into `GPD/state.json`:"
@@ -366,8 +425,10 @@ def _inject_gemini_command_runtime_note(
     include_shell_allowlist: bool = False,
 ) -> str:
     """Prepend Gemini-specific shell guidance to installed top-level commands."""
+    public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
     note = _GEMINI_COMMAND_RUNTIME_NOTE.format(
         launcher=bridge_command,
+        public_prefix=public_prefix,
     )
     if include_shell_allowlist:
         note += _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE.format(
@@ -448,8 +509,23 @@ def _rewrite_gemini_shell_workflow_guidance(content: str) -> str:
     denied before GPD ever runs.
     """
     content = _GEMINI_NEW_PROJECT_INIT_BLOCK_RE.sub(_GEMINI_NEW_PROJECT_INIT_REPLACEMENT, content)
+    content = content.replace(_GEMINI_SET_PROFILE_VALIDATE_BLOCK, _GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT)
+    content = _GEMINI_SET_PROFILE_VALIDATE_BLOCK_RE.sub(_GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT, content)
     content = _GEMINI_SET_PROFILE_BLOCK_RE.sub(_GEMINI_SET_PROFILE_REPLACEMENT, content)
     content = content.replace(_GEMINI_MINIMAL_COMMIT_BLOCK, _GEMINI_MINIMAL_COMMIT_REPLACEMENT)
+    content = re.sub(
+        r"```bash\n"
+        r"HEALTH_ERR=\$\(mktemp\)\n"
+        r"if echo \"\$ARGUMENTS\" \| grep -q \"\\-\\-fix\"; then\n"
+        r"[\s\S]+?"
+        r"fi\n"
+        r"HEALTH_STDERR=\$\(cat \"\$HEALTH_ERR\"\)\n"
+        r"rm -f \"\$HEALTH_ERR\"\n"
+        r"```",
+        _GEMINI_HEALTH_BLOCK_REPLACEMENT,
+        content,
+        flags=re.MULTILINE,
+    )
     content = re.sub(
         r'(?m)^([ \t]*)PRE_CHECK=\$\((gpd pre-commit-check --files [^\n]+) 2>&1\) \|\| true\n\1echo "\$PRE_CHECK"$',
         (
@@ -1094,6 +1170,9 @@ def _copy_commands_recursive(
                 explicit_target=explicit_target,
             )
             content = process_attribution(content, attribution)
+            public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
+            content = content.replace("`gpd:`", f"`{public_prefix}`")
+            content = rewrite_runtime_command_surfaces_to_public(content, public_prefix=public_prefix)
             content = _render_gemini_command_prompt(content, bridge_command=bridge_command)
             toml_content = _convert_to_gemini_toml(content)
             toml_path = dest_dir / entry.with_suffix(".toml").name

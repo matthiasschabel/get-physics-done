@@ -302,6 +302,35 @@ class TestConvertToGeminiToml:
 
 
 class TestRewriteGeminiShellWorkflowGuidance:
+    def test_rewrites_set_profile_validation_shell_block_to_non_shell_guidance(self) -> None:
+        content = (
+            "```bash\n"
+            "PROFILE=\"$(printf '%s' \"$ARGUMENTS\" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')\"\n"
+            'case "$PROFILE" in\n'
+            "  deep-theory|numerical|exploratory|review|paper-writing) ;;\n"
+            '  "")\n'
+            '    echo "ERROR: Missing profile. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"\n'
+            "    exit 1\n"
+            "    ;;\n"
+            "  *[[:space:]]*)\n"
+            '    echo "ERROR: set-profile accepts exactly one profile argument."\n'
+            "    exit 1\n"
+            "    ;;\n"
+            "  *)\n"
+            '    echo "ERROR: Invalid profile \\"$PROFILE\\". Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"\n'
+            "    exit 1\n"
+            "    ;;\n"
+            "esac\n"
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert "Validate the single profile argument without a shell call" in result
+        assert "PROFILE=\"$(" not in result
+        assert 'case "$PROFILE"' not in result
+        assert "```bash" not in result
+
     def test_rewrites_updated_set_profile_block_with_reentry_flag(self) -> None:
         content = (
             "```bash\n"
@@ -318,7 +347,8 @@ class TestRewriteGeminiShellWorkflowGuidance:
 
         assert "Run these as separate shell calls in Gemini auto-edit mode." in result
         assert "gpd config ensure-section" in result
-        assert "gpd --raw init progress --include state,config --no-project-reentry" in result
+        assert 'gpd config set model_profile "$PROFILE"' in result
+        assert "gpd --raw init progress --include state,config" not in result
         assert "INIT=$(" not in result
         assert "if [ $? -ne 0 ]" not in result
 
@@ -362,12 +392,7 @@ class TestRewriteGeminiShellWorkflowGuidance:
         assert "if [ $? -ne 0 ]" not in result
 
     def test_rewrites_generic_captured_gpd_echo_block(self) -> None:
-        content = (
-            "```bash\n"
-            "PREVIEW=$(gpd pre-commit-check --files GPD/STATE.md 2>&1) || true\n"
-            'echo "$PREVIEW"\n'
-            "```"
-        )
+        content = '```bash\nPREVIEW=$(gpd pre-commit-check --files GPD/STATE.md 2>&1) || true\necho "$PREVIEW"\n```'
 
         result = _rewrite_gemini_shell_workflow_guidance(content)
 
@@ -380,15 +405,7 @@ class TestRewriteGeminiShellWorkflowGuidance:
 class TestGeminiCommandRuntimeNotes:
     def test_runtime_note_injection_is_idempotent(self) -> None:
         bridge_command = "/runtime/gpd-cli"
-        content = (
-            "---\n"
-            "name: gpd:status\n"
-            "description: Show project status\n"
-            "---\n"
-            "```bash\n"
-            "gpd status\n"
-            "```\n"
-        )
+        content = "---\nname: gpd:status\ndescription: Show project status\n---\n```bash\ngpd status\n```\n"
 
         once = _inject_gemini_command_runtime_note(content, bridge_command, include_shell_allowlist=True)
         twice = _inject_gemini_command_runtime_note(once, bridge_command, include_shell_allowlist=True)
@@ -434,15 +451,7 @@ class TestGeminiCommandRuntimeNotes:
 
     def test_shell_command_prompt_keeps_full_shell_allowlist(self) -> None:
         bridge_command = "/runtime/gpd-cli"
-        content = (
-            "---\n"
-            "name: gpd:status\n"
-            "description: Show project status\n"
-            "---\n"
-            "```bash\n"
-            "gpd status\n"
-            "```\n"
-        )
+        content = "---\nname: gpd:status\ndescription: Show project status\n---\n```bash\ngpd status\n```\n"
 
         result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
 
@@ -1021,8 +1030,7 @@ class TestInstall:
         for relpath in ("commands/help.md", "agents/gpd-verifier.md"):
             source_path = gpd_root / relpath
             source_path.write_text(
-                source_path.read_text(encoding="utf-8")
-                + "\nCo-Authored-By: AI Runtime <ai@example.com>\n",
+                source_path.read_text(encoding="utf-8") + "\nCo-Authored-By: AI Runtime <ai@example.com>\n",
                 encoding="utf-8",
             )
 
@@ -1110,15 +1118,13 @@ class TestInstall:
 
         content = (target / "commands" / "gpd" / "set-profile.toml").read_text(encoding="utf-8")
 
-        assert "Run these as separate shell calls in Gemini auto-edit mode." in content
-        assert "Do not combine them into one multi-line shell block." in content
         assert "INIT=$(" not in content
         assert "if [ $? -ne 0 ]" not in content
+        assert 'PROFILE="$(' not in content
+        assert 'case "$PROFILE"' not in content
         assert expected_gemini_bridge(target) + " config ensure-section" in content
-        assert (
-            expected_gemini_bridge(target) + " --raw init progress --include state,config --no-project-reentry"
-            in content
-        )
+        assert expected_gemini_bridge(target) + " config set model_profile" in content
+        assert expected_gemini_bridge(target) + " --raw init progress --include state,config" not in content
 
     def test_install_agents_replace_runtime_placeholders(
         self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
@@ -1465,6 +1471,20 @@ class TestInstall:
         assert "{GPD_RUNTIME_FLAG}" not in includer
         assert "--gemini" in includer
 
+    def test_install_commands_translate_expanded_includes_to_gemini_command_labels(
+        self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".gemini"
+        target.mkdir()
+        adapter.install(gpd_root, target)
+
+        tour = (target / "commands" / "gpd" / "tour.toml").read_text(encoding="utf-8")
+
+        assert "Runtime label: Show `/gpd:` as native labels;" in tour
+        assert "`/gpd:start`" in tour
+        assert "`gpd:start`" not in tour
+
     def test_install_agents_inline_gpd_agents_dir_includes(
         self, adapter: GeminiAdapter, gpd_root: Path, tmp_path: Path
     ) -> None:
@@ -1536,6 +1556,7 @@ class TestRuntimePermissions:
     ) -> None:
         class _Descriptor:
             launch_command = "/tmp/Gemini CLI/gemini"
+            public_command_surface_prefix = "/gpd:"
 
         monkeypatch.setattr(gemini_module, "get_runtime_descriptor", lambda runtime: _Descriptor())
         target = tmp_path / ".gemini"

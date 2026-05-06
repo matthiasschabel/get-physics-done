@@ -88,6 +88,35 @@ def test_lifecycle_workflows_stop_on_non_authoritative_project_contract_gate(
     assert workflow.index(gate_command) < workflow.index(first_forbidden_marker)
 
 
+def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() -> None:
+    workflow = _workflow_text("plan-phase.md")
+
+    dirty_gate = workflow.index("**Dirty worktree safety gate:**")
+    dirty_stop = workflow.index("ERROR: dirty project worktree detected before planning:")
+    contract_stop = workflow.index("**If `project_contract_load_info.status` starts with `blocked`")
+    first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
+
+    assert "git status --porcelain --untracked-files=all" in workflow
+    assert "Choose: git status --short, gpd commit, or explicitly approve a project-local cleanup path." in workflow
+    assert "HALTING -- plan-phase never stashes, resets, cleans, overwrites, or hides user work." in workflow
+    assert dirty_gate < dirty_stop < contract_stop < first_authoring_reload
+
+
+def test_plan_phase_missing_contract_gate_blocks_scope_substitution_and_authoring() -> None:
+    workflow = _workflow_text("plan-phase.md")
+
+    missing_contract_stop = workflow.index("**If `project_contract` is empty or null:**")
+    authoritative_gate_stop = workflow.index("**If `project_contract_gate.authoritative` is not true:**")
+    lifecycle_gate = workflow.index("LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate plan-phase")
+    first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
+
+    assert "Planning requires an approved scoping contract in `GPD/state.json`" in workflow
+    assert "do not infer phase scope from `ROADMAP.md` or `REQUIREMENTS.md` alone" in workflow
+    assert "a visible-but-blocked contract is not an approved planning contract" in workflow
+    assert "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents" in workflow
+    assert missing_contract_stop < authoritative_gate_stop < lifecycle_gate < first_authoring_reload
+
+
 def test_write_paper_surfaces_manuscript_reference_status_before_using_it() -> None:
     workflow = _workflow_text("write-paper.md")
     surface_line = next(line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using"))

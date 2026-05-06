@@ -29,6 +29,8 @@ def test_tour_command_references_workflow() -> None:
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in raw_command_prompt
     assert "gpd:set-tier-models" in command_prompt
     assert "gpd:settings" in command_prompt
+    assert "This is a read-only tour of the main GPD commands. It will not change your files." in command_prompt
+    assert "Use the runtime-native command labels shown by this command surface" in command_prompt
 
 
 def test_tour_workflow_introduces_a_safe_beginner_walkthrough() -> None:

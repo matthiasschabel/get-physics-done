@@ -78,7 +78,9 @@ def test_set_profile_updates_only_model_profile_through_config_cli() -> None:
 
     assert 'PROFILE="$(printf' in set_profile
     assert 'gpd config set model_profile "$PROFILE"' in set_profile
+    assert "This is an action workflow" in set_profile
     assert "preserving all other `GPD/config.json` keys" in set_profile
+    assert "gpd --raw init progress --include state,config" not in set_profile
     assert "$ARGUMENTS.profile" not in set_profile
     assert '"model_profile": "$ARGUMENTS.profile"' not in set_profile
     assert "Write updated config back to `GPD/config.json`" not in set_profile

@@ -100,7 +100,6 @@ START_ROUTE_RUNTIME_RUN_PROSE_RE = re.compile(
     re.IGNORECASE,
 )
 APPROVED_RUNTIME_LABEL_SHELL_FENCE_LINES = {
-    ("src/gpd/commands/error-patterns.md", 'echo "Error: No GPD project found. Run gpd:new-project first."'),
     ("src/gpd/commands/suggest-next.md", 'echo "Try gpd:progress for manual project status."'),
     ("src/gpd/agents/gpd-planner.md", 'cat "$phase_dir"/*-CONTEXT.md 2>/dev/null   # From gpd:discuss-phase'),
     (
@@ -622,6 +621,25 @@ def test_progress_prompt_runs_preflight_after_init_context() -> None:
     assert 'CONTEXT=$(gpd --raw validate command-context progress "$ARGUMENTS")' in workflow
     init_index = workflow.index("INIT=$(gpd --raw init progress --include state,roadmap,project,config,references)")
     assert init_index < workflow.index('CONTEXT=$(gpd --raw validate command-context progress "$ARGUMENTS")')
+
+
+def test_progress_reconcile_prompt_preserves_no_write_confirmation_branches() -> None:
+    workflow = (REPO_ROOT / "src/gpd/specs/workflows/progress.md").read_text(encoding="utf-8")
+
+    reconcile_start = workflow.index('<step name="reconcile_state">')
+    reconcile_end = workflow.index('<step name="init_context">', reconcile_start)
+    reconcile_step = workflow[reconcile_start:reconcile_end]
+
+    assert '"Sync STATE.md to disk" (Recommended)' in reconcile_step
+    assert '"Keep STATE.md"' in reconcile_step
+    assert '"Show details" — list all mismatches before deciding' in reconcile_step
+    assert "If user chooses sync: update STATE.md position" in reconcile_step
+    assert "before any command that writes reconciled state, ask for an explicit user decision" in reconcile_step
+    assert (
+        "require a typed reply that exactly matches one of `Sync STATE.md to disk`, `Keep STATE.md`, or "
+        "`Show details`; do not infer consent from a vague acknowledgement"
+    ) in reconcile_step
+    assert reconcile_step.index('"Show details"') < reconcile_step.index("If user chooses sync")
 
 
 def test_health_prompt_documents_the_real_raw_health_report_shape() -> None:

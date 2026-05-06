@@ -28,10 +28,7 @@ The same-named workflow owns category validation and uses the live pattern-libra
 
 **Pre-flight check:**
 ```bash
-if [ ! -d "GPD" ]; then
-  echo "Error: No GPD project found. Run gpd:new-project first."
-  exit 1
-fi
+test -d GPD || { echo "Error: No GPD project found. Initialize a GPD project first."; exit 1; }
 ```
 
 <step name="check_file">

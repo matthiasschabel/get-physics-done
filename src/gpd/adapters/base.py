@@ -56,7 +56,7 @@ from gpd.adapters.tool_names import (
     reference_translation_map,
     translate_for_runtime,
 )
-from gpd.command_labels import validated_public_command_prefix
+from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
 
 if TYPE_CHECKING:
     from gpd.registry import AgentDef
@@ -458,7 +458,9 @@ class RuntimeAdapter(abc.ABC):
 
     def translate_shared_command_references(self, content: str) -> str:
         """Rewrite shared command references for this runtime."""
-        return content.replace("`gpd:`", f"`{self.public_command_surface_prefix}`")
+        public_prefix = self.public_command_surface_prefix
+        content = content.replace("`gpd:`", f"`{public_prefix}`")
+        return rewrite_runtime_command_surfaces_to_public(content, public_prefix=public_prefix)
 
     def translate_shared_markdown(
         self,

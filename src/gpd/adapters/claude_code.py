@@ -145,6 +145,7 @@ class ClaudeCodeAdapter(RuntimeAdapter):
             )
         if bridge_command is None:
             raise ValueError("bridge_command is required for projected Claude Code command surfaces")
+        content = self.translate_shared_command_references(content)
         return _render_claude_command_markdown(content, bridge_command=bridge_command)
 
     # --- Template method hooks ---

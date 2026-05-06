@@ -342,7 +342,7 @@ def _relevant_update_cache_candidates(
 def _path_is_under(path: Path, root: Path) -> bool:
     try:
         path.resolve(strict=False).relative_to(root.resolve(strict=False))
-    except ValueError:
+    except (OSError, ValueError):
         return False
     return True
 

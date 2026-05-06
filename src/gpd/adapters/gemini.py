@@ -110,7 +110,8 @@ _GEMINI_STATIC_POLICY_COMMAND_PREFIXES: tuple[str, ...] = (
     "mkdir -p GPD",
     "cat GPD/",
     "ls -d GPD",
-    "test -",
+    "test -d GPD",
+    "test -f GPD/",
 )
 _GEMINI_COMMAND_RUNTIME_NOTE = (
     "<gemini_runtime_notes>\n"

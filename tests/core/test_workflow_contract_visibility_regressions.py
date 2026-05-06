@@ -91,6 +91,11 @@ def test_lifecycle_workflows_stop_on_non_authoritative_project_contract_gate(
 def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() -> None:
     workflow = _workflow_text("plan-phase.md")
 
+    assert "**Dirty worktree safety gate:**" in workflow
+    assert "ERROR: dirty project worktree detected before planning:" in workflow
+    assert "**If `project_contract_load_info.status` starts with `blocked`" in workflow
+    assert 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)' in workflow
+
     dirty_gate = workflow.index("**Dirty worktree safety gate:**")
     dirty_stop = workflow.index("ERROR: dirty project worktree detected before planning:")
     contract_stop = workflow.index("**If `project_contract_load_info.status` starts with `blocked`")
@@ -104,6 +109,11 @@ def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() ->
 
 def test_plan_phase_missing_contract_gate_blocks_scope_substitution_and_authoring() -> None:
     workflow = _workflow_text("plan-phase.md")
+
+    assert "**If `project_contract` is empty or null:**" in workflow
+    assert "**If `project_contract_gate.authoritative` is not true:**" in workflow
+    assert "LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate plan-phase" in workflow
+    assert 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)' in workflow
 
     missing_contract_stop = workflow.index("**If `project_contract` is empty or null:**")
     authoritative_gate_stop = workflow.index("**If `project_contract_gate.authoritative` is not true:**")

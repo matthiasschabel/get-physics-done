@@ -13,7 +13,7 @@ import os
 import re
 import shlex
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
 
 from gpd.adapters.runtime_catalog import (
@@ -26,6 +26,7 @@ from gpd.adapters.runtime_catalog import (
     resolve_global_config_dir,
 )
 from gpd.adapters.tool_names import CONTEXTUAL_TOOL_REFERENCE_NAMES
+from gpd.command_labels import command_slug_from_label
 from gpd.core.constants import HOME_DATA_DIR_NAME
 from gpd.core.model_visible_text import (
     SKEPTICAL_RIGOR_GUARDRAILS_HEADING,
@@ -36,6 +37,8 @@ from gpd.core.public_surface_contract import local_cli_bridge_commands
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
 
 _SHARED_INSTALL_METADATA = get_shared_install_metadata()
 
@@ -718,6 +721,351 @@ def render_markdown_frontmatter(preamble: str, frontmatter: str, separator: str,
     return rendered + body
 
 
+COMPACT_STAGED_COMMAND_SHIM_SENTINEL = "<gpd_staged_bootstrap_shim"
+COMPACT_HELP_BRIDGE_SHIM_SENTINEL = "<gpd_help_bridge_shim"
+COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL = "<gpd_workflow_reference_shim"
+_COMPACT_STAGED_COMMAND_NO_ARGUMENTS = frozenset(
+    {
+        "new-milestone",
+        "new-project",
+        "resume-work",
+        "sync-state",
+    }
+)
+_COMPACT_STAGED_COMMAND_ARGS_AFTER_STAGE = frozenset(
+    {
+        "arxiv-submission",
+        "map-research",
+        "respond-to-referees",
+        "write-paper",
+    }
+)
+_COMPACT_WORKFLOW_COMMAND_ALLOWLIST = frozenset(
+    {
+        "autonomous",
+        "complete-milestone",
+        "derive-equation",
+        "discuss-phase",
+        "settings",
+    }
+)
+
+
+def compact_staged_command_markdown_for_runtime(
+    content: str,
+    *,
+    runtime: str,
+    command_name: str | None,
+    src_root: str | Path | None,
+) -> str:
+    """Replace staged workflow includes with a compact non-native bootstrap shim.
+
+    Native-include runtimes keep the source include. Non-native command
+    surfaces should not inline large staged workflows when the stage manifest
+    can delegate first-turn authority to ``gpd --raw init ... --stage``.
+    """
+    return (
+        compact_staged_command_shim_for_runtime(
+            content,
+            runtime=runtime,
+            command_name=command_name,
+            src_root=src_root,
+            path_prefix="",
+            bridge_command=None,
+        )
+        or content
+    )
+
+
+def compact_staged_command_shim_for_runtime(
+    content: str,
+    *,
+    runtime: str,
+    command_name: str | None,
+    src_root: str | Path | None,
+    path_prefix: str,
+    bridge_command: str | None,
+    surface_kind: str = "command",
+) -> str | None:
+    """Return a compact non-native staged/help command prompt, or ``None``.
+
+    The helper runs before include expansion. It preserves Claude native
+    includes, keeps command frontmatter/body context, and replaces only the
+    heavy workflow include with a compact staged or help bridge contract for
+    runtimes that cannot resolve native ``@`` includes.
+    """
+    del path_prefix
+    descriptor = get_runtime_descriptor(runtime)
+    if descriptor.native_include_support or surface_kind != "command" or not command_name or src_root is None:
+        return None
+
+    workflow_id = _normalize_compact_shim_command_name(command_name)
+    if not workflow_id:
+        return None
+
+    public_label = f"{descriptor.public_command_surface_prefix}{workflow_id}"
+    if workflow_id == "help":
+        return _render_compact_help_command_shim(
+            content,
+            public_label=public_label,
+            bridge_command=bridge_command or "gpd",
+        )
+
+    manifest_path = _stage_manifest_path_for_command(src_root, workflow_id)
+    if not manifest_path.is_file():
+        return _compact_workflow_reference_shim_for_runtime(
+            content,
+            workflow_id=workflow_id,
+            public_label=public_label,
+        )
+
+    try:
+        from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
+
+        manifest = load_workflow_stage_manifest_from_path(manifest_path, expected_workflow_id=workflow_id)
+    except ValueError:
+        logger.exception("Failed to load workflow stage manifest for compact command shim: %s", manifest_path)
+        return None
+
+    if manifest.prompt_usage != "staged_init" or not manifest.stages:
+        return None
+
+    first_stage = manifest.stages[0]
+    shim = _render_compact_staged_command_shim(
+        workflow_id=workflow_id,
+        public_label=public_label,
+        first_stage_id=first_stage.id,
+        bridge_command=bridge_command or "gpd",
+    )
+    replaced = _replace_workflow_include_with_shim(content, workflow_id=workflow_id, shim=shim)
+    if replaced is None:
+        return None
+    return _rewrite_compact_shim_followup_guidance(replaced)
+
+
+def _normalize_compact_shim_command_name(command_name: str) -> str:
+    command_name = command_name.strip()
+    if command_name.endswith(".md"):
+        command_name = command_name[:-3]
+    return command_slug_from_label(command_name)
+
+
+def _stage_manifest_path_for_command(src_root: str | Path, command_name: str) -> Path:
+    """Return the stage-manifest path for a command under either source-root shape."""
+    return _specs_source_root(Path(src_root)) / "workflows" / f"{command_name}-stage-manifest.json"
+
+
+def _render_compact_staged_command_shim(
+    *,
+    workflow_id: str,
+    public_label: str,
+    first_stage_id: str,
+    bridge_command: str,
+) -> str:
+    init_command = _compact_staged_init_command(workflow_id, first_stage_id, bridge_command=bridge_command)
+    return (
+        f'{COMPACT_STAGED_COMMAND_SHIM_SENTINEL} command="{public_label}" first_stage="{first_stage_id}">\n'
+        "This non-native runtime cannot resolve command workflow includes natively, so this command prompt uses "
+        f"a compact staged loader instead of inlining `workflows/{workflow_id}.md`.\n\n"
+        f"{_runtime_label_rule_for_public_label(public_label, workflow_id)}\n\n"
+        "Load the active stage first:\n\n"
+        "```bash\n"
+        f"{init_command}\n"
+        "```\n\n"
+        f"{_compact_staged_argument_note(workflow_id)} If the init command exits non-zero, stop and surface the "
+        "error.\n\n"
+        "Parse JSON and use the returned top-level keys as only the active-stage payload. Treat only "
+        "`payload.staged_loading` as the authority map:\n\n"
+        "- parse the fields named by `staged_loading.required_init_fields`;\n"
+        "- read only active `staged_loading.eager_authorities`;\n"
+        "- do not read `staged_loading.must_not_eager_load` until a later stage makes it eager;\n"
+        "- route only to stage IDs listed in `staged_loading.next_stages`;\n"
+        "- honor `staged_loading.allowed_tools`, `staged_loading.writes_allowed`, "
+        "`staged_loading.produced_state`, and `staged_loading.checkpoints`;\n"
+        "- reload with the same init command and `--stage <next-stage-id>` before acting on any later stage.\n\n"
+        "Do not guess missing payload fields or invent workflow state. If `staged_loading` or required fields "
+        "are missing, stop and report the malformed init payload.\n"
+        "</gpd_staged_bootstrap_shim>"
+    )
+
+
+def _compact_staged_init_command(command_name: str, stage_id: str, *, bridge_command: str) -> str:
+    if command_name in _COMPACT_STAGED_COMMAND_NO_ARGUMENTS:
+        return f"{bridge_command} --raw init {command_name} --stage {stage_id}"
+    if command_name in _COMPACT_STAGED_COMMAND_ARGS_AFTER_STAGE:
+        return f'{bridge_command} --raw init {command_name} --stage {stage_id} -- "$ARGUMENTS"'
+    return f'{bridge_command} --raw init {command_name} "$ARGUMENTS" --stage {stage_id}'
+
+
+def _compact_staged_argument_note(command_name: str) -> str:
+    if command_name in _COMPACT_STAGED_COMMAND_NO_ARGUMENTS:
+        return "Do not pass `$ARGUMENTS` to staged init; handle launch flags after bootstrap."
+    if command_name in _COMPACT_STAGED_COMMAND_ARGS_AFTER_STAGE:
+        return 'Pass non-empty launch arguments after `--`; omit the trailing `-- "$ARGUMENTS"` when empty.'
+    return 'Replace `"$ARGUMENTS"` with the normalized launch argument; omit it only when the init surface allows.'
+
+
+def _render_compact_help_command_shim(
+    content: str,
+    *,
+    public_label: str,
+    bridge_command: str,
+) -> str:
+    preamble, frontmatter, separator, _body = split_markdown_frontmatter(content)
+    body = (
+        "\n<objective>\n"
+        "Display GPD help by delegating to the CLI-owned compact help surface.\n"
+        "Return only the requested help text; do not add project-specific analysis, git status, or next-step commentary.\n"
+        "</objective>\n\n"
+        "<process>\n"
+        f'{COMPACT_HELP_BRIDGE_SHIM_SENTINEL} command="{public_label}">\n'
+        f"For `{public_label}`, do not inline `workflows/help.md`. Run the matching bridge command and return "
+        "its output verbatim.\n\n"
+        f"{_runtime_label_rule_for_public_label(public_label, 'help')}\n\n"
+        "Default help:\n\n"
+        "```bash\n"
+        f"{bridge_command} --raw help\n"
+        "```\n\n"
+        "Compact command index:\n\n"
+        "```bash\n"
+        f"{bridge_command} --raw help --all\n"
+        "```\n\n"
+        "Single command detail:\n\n"
+        "```bash\n"
+        f"{bridge_command} --raw help --command <name>\n"
+        "```\n\n"
+        "If `$ARGUMENTS` is present, pass through `--all` or `--command <name>` exactly once. If no supported "
+        "argument is present, use default help.\n"
+        "</gpd_help_bridge_shim>\n"
+        "</process>\n"
+    )
+    attribution_lines = _compact_shim_attribution_lines(content)
+    if attribution_lines:
+        body = body.rstrip() + "\n\n" + attribution_lines + "\n"
+    return render_markdown_frontmatter(preamble, frontmatter, separator, body)
+
+
+def _compact_workflow_reference_shim_for_runtime(
+    content: str,
+    *,
+    workflow_id: str,
+    public_label: str,
+) -> str | None:
+    """Return a compact non-staged workflow-reference shim for large command wrappers."""
+    if workflow_id not in _COMPACT_WORKFLOW_COMMAND_ALLOWLIST:
+        return None
+
+    include_paths = _gpd_install_include_paths(content)
+    if f"workflows/{workflow_id}.md" not in include_paths:
+        return None
+
+    shim = _render_compact_workflow_reference_shim(
+        workflow_id=workflow_id,
+        public_label=public_label,
+        include_paths=include_paths,
+    )
+    replaced = _replace_execution_context_with_shim(content, workflow_id=workflow_id, shim=shim)
+    if replaced is None:
+        return None
+    return _rewrite_compact_workflow_followup_guidance(replaced)
+
+
+def _gpd_install_include_paths(content: str) -> tuple[str, ...]:
+    paths = re.findall(r"@\{GPD_INSTALL_DIR\}/([A-Za-z0-9_./{}$-]+\.md)", content)
+    return tuple(dict.fromkeys(paths))
+
+
+def _render_compact_workflow_reference_shim(
+    *,
+    workflow_id: str,
+    public_label: str,
+    include_paths: Sequence[str],
+) -> str:
+    authorities = "\n".join(f"- `{{GPD_INSTALL_DIR}}/{path}`" for path in include_paths)
+    return (
+        f'{COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL} command="{public_label}" workflow="{workflow_id}">\n'
+        "This non-native runtime cannot resolve command workflow includes natively, so this command prompt names "
+        "the installed workflow authorities instead of inlining them.\n\n"
+        f"{_runtime_label_rule_for_public_label(public_label, workflow_id)}\n\n"
+        "Read these installed authority files before acting:\n\n"
+        f"{authorities}\n\n"
+        f"Treat `{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md` as the workflow source of truth. "
+        "Use the wrapper sections outside this block only for launch arguments, public command context, and "
+        "command-specific constraints. If an authority file is missing or unreadable, stop and report the broken "
+        "install instead of reconstructing the workflow from memory.\n"
+        "</gpd_workflow_reference_shim>"
+    )
+
+
+def _runtime_label_rule_for_public_label(public_label: str, command_name: str) -> str:
+    public_prefix = public_label.removesuffix(command_name)
+    return f"Runtime label: Show `{public_prefix}` as native labels; keep local CLI `gpd ...` unchanged."
+
+
+def _compact_shim_attribution_lines(content: str) -> str:
+    """Preserve source attribution trailers when a compact shim replaces a body."""
+    return "\n".join(line for line in content.splitlines() if line.lower().startswith("co-authored-by:"))
+
+
+def _replace_execution_context_with_shim(content: str, *, workflow_id: str, shim: str) -> str | None:
+    include_line = f"@{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md"
+    replacement_block = f"<execution_context>\n{shim}\n</execution_context>"
+    block_re = re.compile(
+        rf"<execution_context>.*?{re.escape(include_line)}.*?</execution_context>",
+        re.DOTALL,
+    )
+    replaced, count = block_re.subn(replacement_block, content, count=1)
+    if count:
+        return replaced
+    if include_line not in content:
+        return None
+    return content.replace(include_line, shim, 1)
+
+
+def _replace_workflow_include_with_shim(content: str, *, workflow_id: str, shim: str) -> str | None:
+    include_line = f"@{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md"
+    replacement_block = f"<execution_context>\n{shim}\n</execution_context>"
+    block_re = re.compile(
+        rf"<execution_context>\s*{re.escape(include_line)}\s*</execution_context>",
+        re.DOTALL,
+    )
+    replaced, count = block_re.subn(replacement_block, content, count=1)
+    if count:
+        return replaced
+    if include_line not in content:
+        return None
+    return content.replace(include_line, shim, 1)
+
+
+def _rewrite_compact_shim_followup_guidance(content: str) -> str:
+    replacement = (
+        "Follow the compact staged bootstrap contract above. Load workflow authorities only when the active "
+        "`staged_loading.eager_authorities` payload names them."
+    )
+    for phrase in (
+        "Read the included workflow first and follow it end-to-end.",
+        "Read the included workflow first and follow it exactly.",
+        "Follow the included workflow file exactly.",
+        "Follow the included workflow exactly. Do not duplicate the workflow logic here.",
+    ):
+        content = content.replace(phrase, replacement)
+    return content
+
+
+def _rewrite_compact_workflow_followup_guidance(content: str) -> str:
+    replacement = "Read the installed workflow authority file named in the compact workflow reference above."
+    for phrase in (
+        "Read the included workflow first and follow it end-to-end.",
+        "Read the included workflow first and follow it exactly.",
+        "Read the included settings workflow.",
+        "Follow the included complete-milestone workflow end-to-end after loading the execution-context files above.",
+        "Execute the included derive-equation workflow end-to-end.",
+        "Execute the autonomous workflow end-to-end.",
+    ):
+        content = content.replace(phrase, replacement)
+    return content
+
+
 def _strip_top_level_markdown_section(body: str, *, heading: str) -> str:
     """Remove one top-level markdown section when present."""
 
@@ -1326,6 +1674,44 @@ def compile_markdown_for_runtime(
     return content
 
 
+def compile_command_markdown_for_runtime(
+    content: str,
+    *,
+    runtime: str,
+    command_name: str,
+    path_prefix: str,
+    install_scope: str | None = None,
+    src_root: str | Path | None = None,
+    workflow_target_dir: Path | None = None,
+    explicit_target: bool = False,
+    bridge_command: str | None = None,
+    inject_skeptical_rigor_guardrails: bool = True,
+) -> str:
+    """Compile command markdown, using compact staged shims for non-native runtimes."""
+    staged = compact_staged_command_shim_for_runtime(
+        content,
+        runtime=runtime,
+        command_name=command_name,
+        src_root=src_root,
+        path_prefix=path_prefix,
+        bridge_command=bridge_command,
+        surface_kind="command",
+    )
+    if staged is not None:
+        content = staged
+
+    return compile_markdown_for_runtime(
+        content,
+        runtime=runtime,
+        path_prefix=path_prefix,
+        install_scope=install_scope,
+        src_root=src_root,
+        workflow_target_dir=workflow_target_dir,
+        explicit_target=explicit_target,
+        inject_skeptical_rigor_guardrails=inject_skeptical_rigor_guardrails,
+    )
+
+
 def project_markdown_for_runtime(
     content: str,
     *,
@@ -1347,18 +1733,6 @@ def project_markdown_for_runtime(
     infrastructure stays agnostic about per-runtime surface formats.
     """
 
-    compiled = compile_markdown_for_runtime(
-        content,
-        runtime=runtime,
-        path_prefix=path_prefix,
-        install_scope=install_scope,
-        src_root=src_root,
-        workflow_target_dir=workflow_target_dir,
-        explicit_target=explicit_target,
-        protect_agent_prompt_body=protect_agent_prompt_body,
-        inject_skeptical_rigor_guardrails=inject_skeptical_rigor_guardrails,
-    )
-
     if surface_kind not in {"agent", "command"}:
         raise ValueError("surface_kind must be 'agent' or 'command'")
 
@@ -1379,6 +1753,29 @@ def project_markdown_for_runtime(
             is_global=_normalize_install_scope_flag(install_scope) == "--global",
             explicit_target=explicit_target,
         )
+        staged = compact_staged_command_shim_for_runtime(
+            content,
+            runtime=runtime,
+            command_name=command_name,
+            src_root=src_root,
+            path_prefix=path_prefix,
+            bridge_command=bridge_command,
+            surface_kind=surface_kind,
+        )
+        if staged is not None:
+            content = staged
+
+    compiled = compile_markdown_for_runtime(
+        content,
+        runtime=runtime,
+        path_prefix=path_prefix,
+        install_scope=install_scope,
+        src_root=src_root,
+        workflow_target_dir=workflow_target_dir,
+        explicit_target=explicit_target,
+        protect_agent_prompt_body=protect_agent_prompt_body,
+        inject_skeptical_rigor_guardrails=inject_skeptical_rigor_guardrails,
+    )
 
     return adapter.project_markdown_surface(
         compiled,

@@ -22,6 +22,8 @@ from gpd.adapters.claude_code import ClaudeCodeAdapter
 from gpd.adapters.codex import CodexAdapter
 from gpd.adapters.gemini import GeminiAdapter
 from gpd.adapters.install_utils import (
+    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
     build_runtime_cli_bridge_command,
     convert_tool_references_in_body,
     expand_at_includes,
@@ -49,6 +51,26 @@ VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/verification-report.md",
     "templates/contract-results-schema.md",
     "references/shared/canonical-schema-discipline.md",
+)
+STAGED_SHIM_SENTINELS = ("<gpd_staged_bootstrap_shim", "## Compact Staged Command Shim")
+HELP_BRIDGE_SHIM_SENTINELS = ("<gpd_help_bridge_shim", "CLI-owned compact help surface")
+WORKFLOW_REFERENCE_SHIM_SENTINELS = (COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,)
+UNRESOLVED_INCLUDE_MARKERS = (
+    "@ include not resolved:",
+    "@ include cycle detected:",
+    "@ include read error:",
+    "@ include depth limit reached:",
+)
+STAGED_SHIM_CONTRACT_FRAGMENTS = (
+    "staged_loading",
+    "required_init_fields",
+    "eager_authorities",
+    "must_not_eager_load",
+    "next_stages",
+    "allowed_tools",
+    "writes_allowed",
+    "produced_state",
+    "checkpoints",
 )
 
 
@@ -115,10 +137,83 @@ def _collect_textual_artifacts(root: Path) -> str:
 
 def _raw_include_count(text: str, include_suffix: str) -> int:
     return sum(
-        1
-        for line in text.splitlines()
-        if line.strip().startswith("@") and line.strip().endswith(include_suffix)
+        1 for line in text.splitlines() if line.strip().startswith("@") and line.strip().endswith(include_suffix)
     )
+
+
+def _has_compact_staged_command_shim(text: str) -> bool:
+    return COMPACT_STAGED_COMMAND_SHIM_SENTINEL in text
+
+
+def _assert_compact_staged_command_shim(text: str, *, command_name: str, first_stage: str) -> None:
+    assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in text
+    assert f'command="gpd:{command_name}"' in text
+    assert f'first_stage="{first_stage}"' in text
+    assert f"<!-- [included: {command_name}.md] -->" not in text
+    assert f"@{{GPD_INSTALL_DIR}}/workflows/{command_name}.md" not in text
+    assert f"gpd --raw init {command_name}" in text
+    assert f"--stage {first_stage}" in text
+    assert "staged_loading.required_init_fields" in text
+    assert "staged_loading.eager_authorities" in text
+    assert "staged_loading.must_not_eager_load" in text
+    assert "staged_loading.next_stages" in text
+
+
+def _has_compact_non_native_shim(text: str) -> bool:
+    return (
+        _has_staged_shim_sentinel(text)
+        or _has_help_bridge_shim_sentinel(text)
+        or _has_workflow_reference_shim_sentinel(text)
+    )
+
+
+def _has_staged_shim_sentinel(text: str) -> bool:
+    return any(sentinel in text for sentinel in STAGED_SHIM_SENTINELS)
+
+
+def _has_help_bridge_shim_sentinel(text: str) -> bool:
+    return any(sentinel in text for sentinel in HELP_BRIDGE_SHIM_SENTINELS)
+
+
+def _has_workflow_reference_shim_sentinel(text: str) -> bool:
+    return any(sentinel in text for sentinel in WORKFLOW_REFERENCE_SHIM_SENTINELS)
+
+
+def _assert_no_unresolved_include_markers(text: str, *, label: str) -> None:
+    lowered = text.lower()
+    offenders = [marker for marker in UNRESOLVED_INCLUDE_MARKERS if marker in lowered]
+    assert offenders == [], f"{label} contains unresolved include marker(s): {', '.join(offenders)}"
+
+
+def _first_stage_id(command_name: str) -> str:
+    manifest_path = REPO_GPD_ROOT / "specs" / "workflows" / f"{command_name}-stage-manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stages = payload.get("stages")
+    assert isinstance(stages, list) and stages, f"{manifest_path.name} has no stages"
+    first_stage = stages[0]
+    assert isinstance(first_stage, dict)
+    stage_id = first_stage.get("id")
+    assert isinstance(stage_id, str) and stage_id
+    return stage_id
+
+
+def _assert_runtime_command_label_visible(text: str, *, runtime: str, command_name: str) -> None:
+    expected_label = get_adapter(runtime).format_command(command_name)
+    assert expected_label in text, f"{runtime} {command_name} surface is missing {expected_label!r}"
+
+
+def _installed_workflow_text(target: Path, workflow_name: str) -> str:
+    path = target / "get-physics-done" / "workflows" / f"{workflow_name}.md"
+    assert path.exists(), f"missing installed workflow authority: {path}"
+    return path.read_text(encoding="utf-8")
+
+
+def _command_or_workflow_authority_text(target: Path, command_prompt: str, runtime: str, workflow_name: str) -> str:
+    if _has_compact_non_native_shim(command_prompt):
+        command_text = _canonicalize_runtime_markdown(command_prompt, runtime=runtime)
+        workflow_text = _canonicalize_runtime_markdown(_installed_workflow_text(target, workflow_name), runtime=runtime)
+        return command_text + "\n" + workflow_text
+    return _canonicalize_runtime_markdown(command_prompt, runtime=runtime)
 
 
 def _install_real_repo_for_runtime(tmp_path: Path, runtime: str, source_root: Path = REPO_GPD_ROOT) -> Path:
@@ -335,9 +430,16 @@ def _assert_installed_contract_visibility(
     execute_phase = _canonicalize_runtime_markdown(execute_phase, runtime=runtime)
     verify_work = _canonicalize_runtime_markdown(verify_work, runtime=runtime)
 
-    assert "Execute phase plans through the workflow-owned wave executor" in execute_phase
-    assert "references/orchestration/context-budget.md" in execute_phase
-    assert "<inline_guidance>" not in execute_phase
+    if _has_compact_staged_command_shim(execute_phase):
+        _assert_compact_staged_command_shim(
+            execute_phase,
+            command_name="execute-phase",
+            first_stage="phase_bootstrap",
+        )
+    else:
+        assert "Execute phase plans through the workflow-owned wave executor" in execute_phase
+        assert "references/orchestration/context-budget.md" in execute_phase
+        assert "<inline_guidance>" not in execute_phase
 
     assert "templates/contract-results-schema.md" in verifier
     assert "plan_contract_ref" in verifier
@@ -352,29 +454,54 @@ def _assert_installed_contract_visibility(
     assert "comparison_verdicts" in executor
     assert "These ledgers are user-visible evidence." in executor
 
-    assert "templates/project-contract-schema.md" in new_project
-    assert "project_contract_load_info" in new_project
-    assert "project_contract_validation" in new_project
-    assert "`schema_version` must be the integer `1`" in new_project
-    assert "`references[].must_surface` must stay a boolean `true` or `false`" in new_project
-    assert "`context_intake`" in new_project
-    assert "`approach_policy`" in new_project
-    assert "`uncertainty_markers`" in new_project
-    assert "`context_intake`, `approach_policy`, and `uncertainty_markers` must each stay as objects, not strings or lists." in new_project
-    assert "review_mode: publication" in write_paper
-    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in write_paper
-    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in write_paper
-    assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in write_paper
-    assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in write_paper
-    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in write_paper
-    assert "references/publication/publication-review-round-artifacts.md" in write_paper
+    if _has_compact_staged_command_shim(new_project):
+        _assert_compact_staged_command_shim(
+            new_project,
+            command_name="new-project",
+            first_stage="scope_intake",
+        )
+    else:
+        assert "templates/project-contract-schema.md" in new_project
+        assert "project_contract_load_info" in new_project
+        assert "project_contract_validation" in new_project
+        assert "`schema_version` must be the integer `1`" in new_project
+        assert "`references[].must_surface` must stay a boolean `true` or `false`" in new_project
+        assert "`context_intake`" in new_project
+        assert "`approach_policy`" in new_project
+        assert "`uncertainty_markers`" in new_project
+        assert (
+            "`context_intake`, `approach_policy`, and `uncertainty_markers` must each stay as objects, not strings "
+            "or lists."
+        ) in new_project
 
-    assert "Canonical contract schema and hard validation rules" in plan_phase
-    assert (
-        "every proof-bearing plan must surface the theorem statement, named parameters, hypotheses, "
-        "quantifier/domain obligations, and intended conclusion clauses visibly enough that a later audit can "
-        "detect missing coverage"
-    ) in plan_phase
+    if _has_compact_staged_command_shim(write_paper):
+        _assert_compact_staged_command_shim(
+            write_paper,
+            command_name="write-paper",
+            first_stage="paper_bootstrap",
+        )
+    else:
+        assert "review_mode: publication" in write_paper
+        assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in write_paper
+        assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in write_paper
+        assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in write_paper
+        assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in write_paper
+        assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in write_paper
+        assert "references/publication/publication-review-round-artifacts.md" in write_paper
+
+    if _has_compact_staged_command_shim(plan_phase):
+        _assert_compact_staged_command_shim(
+            plan_phase,
+            command_name="plan-phase",
+            first_stage="phase_bootstrap",
+        )
+    else:
+        assert "Canonical contract schema and hard validation rules" in plan_phase
+        assert (
+            "every proof-bearing plan must surface the theorem statement, named parameters, hypotheses, "
+            "quantifier/domain obligations, and intended conclusion clauses visibly enough that a later audit can "
+            "detect missing coverage"
+        ) in plan_phase
 
     assert "`contract.context_intake` is required and must be a non-empty object" in plan_schema
     assert "`must_surface` is a boolean scalar. Use the YAML literals `true` and `false`" in plan_schema
@@ -383,16 +510,25 @@ def _assert_installed_contract_visibility(
     assert "`carry_forward_to[]` is optional free-text workflow scope" in plan_schema
     assert "`uncertainty_markers` must be a YAML object, not a string or list." in plan_schema
 
-    assert "workflow.verifier=false" in execute_phase
-    assert "skip verification" in execute_phase
-    assert "proof red-teaming" in execute_phase
-    assert "{plan_id}-PROOF-REDTEAM.md" in execute_phase
-    assert "Targeted flags narrow the optional check mix only." in verify_work
-    assert "Every spawned agent is a one-shot delegation" in verify_work
-    assert (
-        "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; "
-        "if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once"
-    ) in verify_work
+    if not _has_compact_staged_command_shim(execute_phase):
+        assert "workflow.verifier=false" in execute_phase
+        assert "skip verification" in execute_phase
+        assert "proof red-teaming" in execute_phase
+        assert "{plan_id}-PROOF-REDTEAM.md" in execute_phase
+
+    if _has_compact_staged_command_shim(verify_work):
+        _assert_compact_staged_command_shim(
+            verify_work,
+            command_name="verify-work",
+            first_stage="session_router",
+        )
+    else:
+        assert "Targeted flags narrow the optional check mix only." in verify_work
+        assert "Every spawned agent is a one-shot delegation" in verify_work
+        assert (
+            "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; "
+            "if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once"
+        ) in verify_work
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
@@ -402,7 +538,15 @@ def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
 ) -> None:
     target = real_installed_repo_factory(runtime)
     peer_review = _read_runtime_command_prompt(target.parent, target, runtime, "peer-review")
-    peer_review = _canonicalize_runtime_markdown(peer_review, runtime=runtime)
+    peer_review = _command_or_workflow_authority_text(target, peer_review, runtime, "peer-review")
+
+    if _has_compact_staged_command_shim(peer_review):
+        _assert_compact_staged_command_shim(
+            peer_review,
+            command_name="peer-review",
+            first_stage=_first_stage_id("peer-review"),
+        )
+        return
 
     assert (
         "Use centralized preflight's selected publication/review roots for GPD-authored review artifacts."
@@ -432,7 +576,10 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
     assert "# Verification Report Template" not in verifier
     assert "# Contract Results Schema" not in verifier
     assert "# Canonical Schema Discipline" not in verifier
-    assert "gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract" in verifier
+    assert (
+        "gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract"
+        in verifier
+    )
     assert len(verifier.splitlines()) <= line_budget
     assert len(verifier) <= char_budget
 
@@ -480,9 +627,7 @@ def test_update_surface_materializes_workflow_paths_in_compiled_artifacts(
         assert f'GPD_GLOBAL_CONFIG_DIR="{canonical_global_dir.as_posix()}"' in content
         update_command = f"{adapter.update_command} --local"
         assert f'UPDATE_COMMAND="{update_command}"' in content
-        assert (
-            f'PATCH_META="{target.as_posix()}/{_SHARED_INSTALL.patches_dir_name}/backup-meta.json"' in content
-        )
+        assert f'PATCH_META="{target.as_posix()}/{_SHARED_INSTALL.patches_dir_name}/backup-meta.json"' in content
         assert "TARGET_DIR_ARG=$(" not in content
 
 
@@ -518,6 +663,67 @@ def test_installed_referee_latex_template_exists_and_matches_source(
     assert source_template.exists()
     assert installed_template.exists()
     assert installed_template.read_bytes() == source_template.read_bytes()
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_execute_phase_surface_uses_native_include_or_compact_stage_shim(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    prompt = _read_runtime_command_prompt(target.parent, target, runtime, "execute-phase")
+    descriptor = get_runtime_descriptor(runtime)
+    first_stage = _first_stage_id("execute-phase")
+
+    assert (_installed_workflow_text(target, "execute-phase")).strip()
+    _assert_no_unresolved_include_markers(prompt, label=f"{runtime} execute-phase")
+    _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name="execute-phase")
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(prompt, "workflows/execute-phase.md") == 1
+        assert "<!-- [included: execute-phase.md] -->" not in prompt
+        assert not _has_staged_shim_sentinel(prompt)
+        return
+
+    assert _raw_include_count(prompt, "workflows/execute-phase.md") == 0
+    assert "<!-- [included: execute-phase.md] -->" not in prompt
+    assert _has_staged_shim_sentinel(prompt)
+    assert not _has_help_bridge_shim_sentinel(prompt)
+    assert "--raw init execute-phase" in prompt
+    assert f"--stage {first_stage}" in prompt
+    for fragment in STAGED_SHIM_CONTRACT_FRAGMENTS:
+        assert fragment in prompt
+    assert len(prompt) < 20_000
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_help_surface_uses_native_include_or_compact_help_bridge_shim(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    prompt = _read_runtime_command_prompt(target.parent, target, runtime, "help")
+    descriptor = get_runtime_descriptor(runtime)
+
+    assert (_installed_workflow_text(target, "help")).strip()
+    _assert_no_unresolved_include_markers(prompt, label=f"{runtime} help")
+    _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name="help")
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(prompt, "workflows/help.md") == 1
+        assert "<!-- [included: help.md] -->" not in prompt
+        assert not _has_help_bridge_shim_sentinel(prompt)
+        return
+
+    assert _raw_include_count(prompt, "workflows/help.md") == 0
+    assert "<!-- [included: help.md] -->" not in prompt
+    assert _has_help_bridge_shim_sentinel(prompt)
+    assert not _has_staged_shim_sentinel(prompt)
+    assert "<current-help-command>" not in prompt
+    assert "--raw help" in prompt
+    assert "--raw help --all" in prompt
+    assert "--raw help --command <name>" in prompt
+    assert len(prompt) < 10_000
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +841,9 @@ class TestCodexRoundtrip:
             line_count = len(content.splitlines())
             char_count = len(content)
 
+            if _has_compact_staged_command_shim(content):
+                assert line_count <= 300, f"{skill_md.parent.name} staged shim has {line_count} lines"
+                assert char_count <= 20_000, f"{skill_md.parent.name} staged shim has {char_count} chars"
             assert line_count <= 2_700, f"{skill_md.parent.name} has {line_count} lines"
             assert char_count <= 145_000, f"{skill_md.parent.name} has {char_count} chars"
             assert content.count("<codex_runtime_notes>") == 1, skill_md.parent.name
@@ -793,17 +1002,35 @@ def test_help_like_skills_keep_canonical_local_cli_language(tmp_path: Path) -> N
     """Codex skills keep canonical local CLI names in prose even when shell steps bridge."""
     _install_real_repo_for_runtime(tmp_path, "codex")
     skills = tmp_path / "skills"
+    target = tmp_path / ".codex"
     help_skill = (skills / "gpd-help" / "SKILL.md").read_text(encoding="utf-8")
     tour_skill = (skills / "gpd-tour" / "SKILL.md").read_text(encoding="utf-8")
     settings_skill = (skills / "gpd-settings" / "SKILL.md").read_text(encoding="utf-8")
+    help_reference = (
+        _installed_workflow_text(target, "help") if _has_help_bridge_shim_sentinel(help_skill) else help_skill
+    )
+    settings_reference = (
+        _installed_workflow_text(target, "settings")
+        if _has_workflow_reference_shim_sentinel(settings_skill)
+        else settings_skill
+    )
 
-    assert "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly." in help_skill
-    assert "For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`." in help_skill
-    assert "For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`." in help_skill
+    assert (
+        "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly."
+        in help_reference
+    )
+    assert (
+        "For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`."
+        in help_reference
+    )
+    assert "For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`." in help_reference
     assert "The normal terminal is where you install GPD, run `gpd --help`, and run" in tour_skill
     assert "`gpd resume` is the normal-terminal recovery step for reopening the right" in tour_skill
-    assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_skill
-    assert "use `gpd cost` after runs for advisory local usage / cost, optional USD budget guardrails, and the current profile tier mix" in settings_skill
+    assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_reference
+    assert (
+        "use `gpd cost` after runs for advisory local usage / cost, optional USD budget guardrails, and the current profile tier mix"
+        in settings_reference
+    )
     assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*(?:--help|resume|cost)[^`\n]*`", help_skill) is None
     assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*(?:--help|resume|cost)[^`\n]*`", tour_skill) is None
     assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*(?:--help|resume|cost)[^`\n]*`", settings_skill) is None
@@ -815,14 +1042,15 @@ def test_real_installed_help_prompt_keeps_relaxed_technical_analysis_contract(
     runtime: str,
 ) -> None:
     target = real_installed_repo_factory(runtime)
-    help_prompt = _canonicalize_runtime_markdown(
-        _read_runtime_command_prompt(target.parent, target, runtime, "help"),
-        runtime=runtime,
-    )
+    raw_help_prompt = _read_runtime_command_prompt(target.parent, target, runtime, "help")
+    help_prompt = _command_or_workflow_authority_text(target, raw_help_prompt, runtime, "help")
 
     assert "Project-aware technical-analysis lane:" in help_prompt
     assert "GPD/analysis/" in help_prompt
-    assert "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed current-workspace lane." in help_prompt
+    assert (
+        "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed current-workspace lane."
+        in help_prompt
+    )
     assert "Usage: `gpd:dimensional-analysis results/01-SUMMARY.md`" in help_prompt
     assert "Usage: `gpd:limiting-cases results/01-SUMMARY.md`" in help_prompt
     assert "Usage: `gpd:numerical-convergence results/mesh-study.csv`" in help_prompt
@@ -834,10 +1062,8 @@ def test_real_installed_help_prompt_surfaces_bounded_write_paper_external_author
     runtime: str,
 ) -> None:
     target = real_installed_repo_factory(runtime)
-    help_prompt = _canonicalize_runtime_markdown(
-        _read_runtime_command_prompt(target.parent, target, runtime, "help"),
-        runtime=runtime,
-    )
+    raw_help_prompt = _read_runtime_command_prompt(target.parent, target, runtime, "help")
+    help_prompt = _command_or_workflow_authority_text(target, raw_help_prompt, runtime, "help")
 
     assert_publication_lane_boundary_contract(help_prompt)
     assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_prompt
@@ -851,12 +1077,17 @@ def test_installed_prompt_contract_visibility_survives_adapter_projection(
     target = real_installed_repo_factory(runtime)
     verifier = _read_runtime_agent_prompt(target, runtime, "gpd-verifier")
     executor = _read_runtime_agent_prompt(target, runtime, "gpd-executor")
-    new_project = _read_runtime_command_prompt(target.parent, target, runtime, "new-project")
-    plan_phase = _read_runtime_command_prompt(target.parent, target, runtime, "plan-phase")
-    write_paper = _read_runtime_command_prompt(target.parent, target, runtime, "write-paper")
+    raw_new_project = _read_runtime_command_prompt(target.parent, target, runtime, "new-project")
+    raw_plan_phase = _read_runtime_command_prompt(target.parent, target, runtime, "plan-phase")
+    raw_write_paper = _read_runtime_command_prompt(target.parent, target, runtime, "write-paper")
     plan_schema = (target / "get-physics-done" / "templates" / "plan-contract-schema.md").read_text(encoding="utf-8")
-    execute_phase = _read_runtime_command_prompt(target.parent, target, runtime, "execute-phase")
-    verify_work = _read_runtime_command_prompt(target.parent, target, runtime, "verify-work")
+    raw_execute_phase = _read_runtime_command_prompt(target.parent, target, runtime, "execute-phase")
+    raw_verify_work = _read_runtime_command_prompt(target.parent, target, runtime, "verify-work")
+    new_project = _command_or_workflow_authority_text(target, raw_new_project, runtime, "new-project")
+    plan_phase = _command_or_workflow_authority_text(target, raw_plan_phase, runtime, "plan-phase")
+    write_paper = _command_or_workflow_authority_text(target, raw_write_paper, runtime, "write-paper")
+    execute_phase = _command_or_workflow_authority_text(target, raw_execute_phase, runtime, "execute-phase")
+    verify_work = _command_or_workflow_authority_text(target, raw_verify_work, runtime, "verify-work")
 
     _assert_installed_contract_visibility(
         verifier,

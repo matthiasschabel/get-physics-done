@@ -72,6 +72,28 @@ def _project_contract_schema_probe(target_dir: Path) -> str:
     )
 
 
+def _project_new_project_workflow_probe(target_dir: Path) -> str:
+    source = (
+        "---\n"
+        "name: gpd:new-project-workflow-probe\n"
+        "description: New project workflow projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "@{GPD_INSTALL_DIR}/workflows/new-project.md\n"
+    )
+    return project_markdown_for_runtime(
+        source,
+        runtime="gemini",
+        path_prefix="./.gemini/",
+        surface_kind="command",
+        install_scope="--local",
+        src_root=GPD_ROOT,
+        workflow_target_dir=target_dir,
+        command_name="new-project-workflow-probe",
+    )
+
+
 def _new_project_contract_section(projected: str) -> str:
     start_marker = "After approval, validate the contract before persisting it:"
     end_marker = "#### M2. Create PROJECT.md"
@@ -140,7 +162,7 @@ def _assert_no_unsafe_gemini_shell_shape(text: str, *, label: str) -> None:
         ),
         pytest.param(
             "new-project contract section",
-            lambda target_dir: _new_project_contract_section(_project_gemini_command("new-project", target_dir)),
+            lambda target_dir: _new_project_contract_section(_project_new_project_workflow_probe(target_dir)),
             id="new-project-contract",
         ),
         pytest.param(

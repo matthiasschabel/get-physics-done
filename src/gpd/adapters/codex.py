@@ -37,6 +37,7 @@ from gpd.adapters.install_utils import (
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
+    compile_command_markdown_for_runtime,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     expand_tilde,
@@ -1698,14 +1699,16 @@ def _render_commands_as_skills(
             skill_dir.mkdir(parents=True, exist_ok=True)
             generated_skill_dirs.add(skill_name)
 
-            content = compile_markdown_for_runtime(
+            content = compile_command_markdown_for_runtime(
                 entry.read_text(encoding="utf-8"),
                 runtime="codex",
+                command_name=base_name,
                 path_prefix=path_prefix,
                 install_scope=install_scope,
                 src_root=gpd_src_root,
                 workflow_target_dir=workflow_target_dir,
                 explicit_target=explicit_target,
+                bridge_command=launcher,
             )
             content = _render_codex_command_skill(content, skill_name=skill_name, launcher=launcher)
 

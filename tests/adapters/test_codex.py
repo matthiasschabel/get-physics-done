@@ -23,6 +23,9 @@ from gpd.adapters.codex import (
     _tracked_codex_generated_skill_dirs,
 )
 from gpd.adapters.install_utils import (
+    COMPACT_HELP_BRIDGE_SHIM_SENTINEL,
+    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
     build_runtime_cli_bridge_command,
     compile_markdown_for_runtime,
     file_hash,
@@ -352,7 +355,9 @@ class TestInstall:
 
         content = (skills / "gpd-help" / "SKILL.md").read_text(encoding="utf-8")
         assert "slash-command" not in content
-        assert "canonical in-runtime command names" in content
+        assert COMPACT_HELP_BRIDGE_SHIM_SENTINEL in content
+        assert 'command="$gpd-help"' in content
+        assert "--raw help" in content
         assert "$gpd-" in content
 
     def test_local_install_uses_repo_scoped_skills_dir_by_default(
@@ -547,7 +552,7 @@ class TestInstall:
         def fail_compile(*args, **kwargs):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr("gpd.adapters.codex.compile_markdown_for_runtime", fail_compile)
+        monkeypatch.setattr("gpd.adapters.codex.compile_command_markdown_for_runtime", fail_compile)
 
         with pytest.raises(RuntimeError, match="boom"):
             adapter.install(gpd_root, target, skills_dir=skills)
@@ -773,7 +778,10 @@ class TestInstall:
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
 
         assert "Codex shell compatibility:" in skill
-        assert f"When shell steps call the GPD CLI, put the runtime bridge directly in command position: {expected_bridge}" in skill
+        assert (
+            f"When shell steps call the GPD CLI, put the runtime bridge directly in command position: {expected_bridge}"
+            in skill
+        )
         assert "Do not store it in a scalar variable" in skill
         assert "GPD_CLI=" not in skill
         assert f'gpd_cli() {{ {expected_bridge} "$@"; }}' in skill
@@ -794,6 +802,36 @@ class TestInstall:
         assert 'if ! gpd verify plan "$plan"; then' not in execute_phase
         assert 'INIT=$(gpd --raw init plan-phase "${PHASE}")' not in agent
 
+    def test_install_uses_compact_staged_command_shim_in_generated_skill(
+        self,
+        adapter: CodexAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".codex"
+        target.mkdir()
+        adapter.install(gpd_root, target, is_global=False)
+        local_skills = tmp_path / ".agents" / "skills"
+
+        expected_bridge = expected_codex_bridge(target, is_global=False)
+        skill = (local_skills / "gpd-execute-phase" / "SKILL.md").read_text(encoding="utf-8")
+
+        assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in skill
+        assert 'command="$gpd-execute-phase"' in skill
+        assert 'first_stage="phase_bootstrap"' in skill
+        assert "<!-- [included: execute-phase.md] -->" not in skill
+        assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in skill
+        assert "references/orchestration/context-budget.md" not in skill
+        assert skill.count("<codex_runtime_notes>") == 1
+        assert skill.count("<!-- Managed by Get Physics Done (GPD). -->") == 1
+        assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in skill
+        assert "staged_loading.required_init_fields" in skill
+        assert "staged_loading.eager_authorities" in skill
+        assert "staged_loading.must_not_eager_load" in skill
+        assert "staged_loading.next_stages" in skill
+        assert "## Command Requirements" in skill
+        assert len(skill) < 20_000
+
     def test_install_keeps_canonical_local_cli_language_in_skill_prose(
         self,
         adapter: CodexAdapter,
@@ -808,22 +846,21 @@ class TestInstall:
         help_skill = (local_skills / "gpd-help" / "SKILL.md").read_text(encoding="utf-8")
         tour_skill = (local_skills / "gpd-tour" / "SKILL.md").read_text(encoding="utf-8")
         settings_skill = (local_skills / "gpd-settings" / "SKILL.md").read_text(encoding="utf-8")
+        settings_reference = (
+            (target / "get-physics-done" / "workflows" / "settings.md").read_text(encoding="utf-8")
+            if COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in settings_skill
+            else settings_skill
+        )
 
-        assert (
-            "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly."
-            in help_skill
-        )
-        assert (
-            "For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`."
-            in help_skill
-        )
-        assert "For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`." in help_skill
+        assert COMPACT_HELP_BRIDGE_SHIM_SENTINEL in help_skill
+        assert "Run the matching bridge command and return its output verbatim." in help_skill
+        assert "--raw help --all" in help_skill
         assert "The normal terminal is where you install GPD, run `gpd --help`, and run" in tour_skill
         assert "`gpd resume` is the normal-terminal recovery step for reopening the right" in tour_skill
-        assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_skill
+        assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_reference
         assert (
             "use `gpd cost` after runs for advisory local usage / cost, optional USD budget guardrails, and the current profile tier mix"
-            in settings_skill
+            in settings_reference
         )
         assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*--help`", help_skill) is None
         assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*resume(?:\s|`)", help_skill) is None
@@ -1763,7 +1800,7 @@ description: Nested command include expansion regression
         assert "@ include not resolved:" not in content.lower()
         assert not (skills / "gpd-main").exists()
 
-    def test_complete_milestone_skill_expands_bullet_list_includes(
+    def test_complete_milestone_skill_uses_compact_workflow_reference_shim(
         self,
         adapter: CodexAdapter,
         tmp_path: Path,
@@ -1776,10 +1813,12 @@ description: Nested command include expansion regression
         adapter.install(gpd_root, target, skills_dir=skills)
 
         content = (skills / "gpd-complete-milestone" / "SKILL.md").read_text(encoding="utf-8")
-        assert "<!-- [included: complete-milestone.md] -->" in content
-        assert "<!-- [included: milestone-archive.md] -->" in content
-        assert "Mark a completed research stage" in content
-        assert "# Milestone Archive Template" in content
+        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in content
+        assert "{GPD_INSTALL_DIR}" not in content
+        assert "get-physics-done/workflows/complete-milestone.md" in content
+        assert "get-physics-done/templates/milestone-archive.md" in content
+        assert "<!-- [included: complete-milestone.md] -->" not in content
+        assert "<!-- [included: milestone-archive.md] -->" not in content
         assert re.search(r"^\s*-\s*@.*?/workflows/complete-milestone\.md.*$", content, flags=re.MULTILINE) is None
         assert re.search(r"^\s*-\s*@.*?/templates/milestone-archive\.md.*$", content, flags=re.MULTILINE) is None
 

@@ -26,6 +26,7 @@ from gpd.adapters.install_utils import (
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
+    compact_staged_command_shim_for_runtime,
     compile_markdown_for_runtime,
     compute_path_prefix,
     convert_tool_references_in_body,
@@ -334,9 +335,22 @@ def copy_flattened_commands(
             base_name = entry.stem
             dest_name = f"{prefix}-{base_name}.md"
             dest_path = dest_dir / dest_name
+            command_name = dest_name.removesuffix(".md").removeprefix("gpd-")
 
+            source_content = entry.read_text(encoding="utf-8")
+            content = (
+                compact_staged_command_shim_for_runtime(
+                    source_content,
+                    runtime="opencode",
+                    command_name=command_name,
+                    src_root=gpd_src_root,
+                    path_prefix=path_prefix,
+                    bridge_command=bridge_command,
+                )
+                or source_content
+            )
             content = compile_markdown_for_runtime(
-                entry.read_text(encoding="utf-8"),
+                content,
                 runtime="opencode",
                 path_prefix=path_prefix,
                 install_scope=install_scope,

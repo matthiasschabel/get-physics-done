@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tomllib
 from pathlib import Path
 
@@ -64,6 +65,25 @@ VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES = (
     "/gpd:verify-work",
     "/gpd-verify-work",
     "gpd-verify-work",
+)
+STAGED_SHIM_SENTINELS = ("<gpd_staged_bootstrap_shim", "## Compact Staged Command Shim")
+HELP_BRIDGE_SHIM_SENTINELS = ("<gpd_help_bridge_shim", "CLI-owned compact help surface")
+UNRESOLVED_INCLUDE_MARKERS = (
+    "@ include not resolved:",
+    "@ include cycle detected:",
+    "@ include read error:",
+    "@ include depth limit reached:",
+)
+STAGED_SHIM_CONTRACT_FRAGMENTS = (
+    "staged_loading",
+    "required_init_fields",
+    "eager_authorities",
+    "must_not_eager_load",
+    "next_stages",
+    "allowed_tools",
+    "writes_allowed",
+    "produced_state",
+    "checkpoints",
 )
 
 
@@ -207,6 +227,42 @@ def _raw_include_count(text: str, include_suffix: str) -> int:
     )
 
 
+def _has_compact_non_native_shim(text: str) -> bool:
+    return _has_staged_shim_sentinel(text) or _has_help_bridge_shim_sentinel(text)
+
+
+def _has_staged_shim_sentinel(text: str) -> bool:
+    return any(sentinel in text for sentinel in STAGED_SHIM_SENTINELS)
+
+
+def _has_help_bridge_shim_sentinel(text: str) -> bool:
+    return any(sentinel in text for sentinel in HELP_BRIDGE_SHIM_SENTINELS)
+
+
+def _assert_no_unresolved_include_markers(text: str, *, label: str) -> None:
+    lowered = text.lower()
+    offenders = [marker for marker in UNRESOLVED_INCLUDE_MARKERS if marker in lowered]
+    assert offenders == [], f"{label} contains unresolved include marker(s): {', '.join(offenders)}"
+
+
+def _first_stage_id(command_name: str) -> str:
+    manifest_path = WORKFLOWS_DIR / f"{command_name}-stage-manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stages = payload.get("stages")
+    assert isinstance(stages, list) and stages, f"{manifest_path.name} has no stages"
+    first_stage = stages[0]
+    assert isinstance(first_stage, dict)
+    stage_id = first_stage.get("id")
+    assert isinstance(stage_id, str) and stage_id
+    return stage_id
+
+
+def _workflow_authority_for_shimmed_projection(command_name: str, projected: str, runtime: str) -> str:
+    if _has_compact_non_native_shim(projected):
+        return projected + "\n" + _project_installed_shared_markdown(WORKFLOWS_DIR / f"{command_name}.md", runtime)
+    return projected
+
+
 def _first_shell_command(body: str) -> str | None:
     for line in body.splitlines():
         stripped = line.strip()
@@ -234,6 +290,57 @@ def _extract_spawn_contracts(text: str) -> list[dict[str, object]]:
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
+def test_runtime_projected_execute_phase_uses_native_include_or_compact_stage_shim(runtime: str) -> None:
+    projected = _project_markdown(COMMANDS_DIR / "execute-phase.md", runtime, is_agent=False)
+    descriptor = get_runtime_descriptor(runtime)
+    first_stage = _first_stage_id("execute-phase")
+
+    _assert_no_unresolved_include_markers(projected, label=f"{runtime} execute-phase")
+    assert get_adapter(runtime).format_command("execute-phase") in projected
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(projected, "workflows/execute-phase.md") == 1
+        assert "<!-- [included: execute-phase.md] -->" not in projected
+        assert not _has_staged_shim_sentinel(projected)
+        return
+
+    assert _raw_include_count(projected, "workflows/execute-phase.md") == 0
+    assert "<!-- [included: execute-phase.md] -->" not in projected
+    assert _has_staged_shim_sentinel(projected)
+    assert not _has_help_bridge_shim_sentinel(projected)
+    assert "--raw init execute-phase" in projected
+    assert f"--stage {first_stage}" in projected
+    for fragment in STAGED_SHIM_CONTRACT_FRAGMENTS:
+        assert fragment in projected
+    assert len(projected) < 20_000
+
+
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_runtime_projected_help_uses_native_include_or_compact_help_bridge_shim(runtime: str) -> None:
+    projected = _project_markdown(COMMANDS_DIR / "help.md", runtime, is_agent=False)
+    descriptor = get_runtime_descriptor(runtime)
+
+    _assert_no_unresolved_include_markers(projected, label=f"{runtime} help")
+    assert get_adapter(runtime).format_command("help") in projected
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(projected, "workflows/help.md") == 1
+        assert "<!-- [included: help.md] -->" not in projected
+        assert not _has_help_bridge_shim_sentinel(projected)
+        return
+
+    assert _raw_include_count(projected, "workflows/help.md") == 0
+    assert "<!-- [included: help.md] -->" not in projected
+    assert _has_help_bridge_shim_sentinel(projected)
+    assert not _has_staged_shim_sentinel(projected)
+    assert "<current-help-command>" not in projected
+    assert "--raw help" in projected
+    assert "--raw help --all" in projected
+    assert "--raw help --command <name>" in projected
+    assert len(projected) < 10_000
+
+
+@pytest.mark.parametrize("runtime", RUNTIMES)
 @pytest.mark.parametrize(("command_name", "expected_fragments"), tuple(COMMAND_SURFACES.items()))
 def test_runtime_projected_commands_keep_model_visible_contract_wrappers(
     command_name: str, expected_fragments: tuple[str, ...], runtime: str
@@ -249,9 +356,10 @@ def test_runtime_projected_commands_keep_model_visible_contract_wrappers(
 @pytest.mark.parametrize("runtime", RUNTIMES)
 def test_runtime_projected_peer_review_keeps_publication_lane_boundary_visible(runtime: str) -> None:
     projected = _project_markdown(COMMANDS_DIR / "peer-review.md", runtime, is_agent=False)
+    visible_text = _workflow_authority_for_shimmed_projection("peer-review", projected, runtime)
 
     _assert_fragments_visible(
-        projected,
+        visible_text,
         PEER_REVIEW_PUBLICATION_LANE_FRAGMENTS,
         label=f"{runtime} peer-review",
     )
@@ -309,7 +417,7 @@ def test_runtime_projected_verify_work_surface_keeps_concise_guidance_visible(ru
     descriptor = get_runtime_descriptor(runtime)
     visible_text = (
         _project_installed_shared_markdown(WORKFLOWS_DIR / "verify-work.md", runtime)
-        if descriptor.native_include_support
+        if descriptor.native_include_support or _has_compact_non_native_shim(projected)
         else projected
     )
 
@@ -360,6 +468,11 @@ def test_runtime_projected_spawn_contract_blocks_match_canonical_command_content
         assert projected_contracts == source_contracts
         if not source_contracts and expanded_contracts:
             assert "@/runtime/get-physics-done/workflows/" in projected
+        return
+
+    if _has_staged_shim_sentinel(projected):
+        assert projected_contracts == source_contracts
+        assert "staged_loading" in projected
         return
 
     assert projected_contracts == expanded_contracts

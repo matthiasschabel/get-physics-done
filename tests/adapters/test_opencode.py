@@ -8,7 +8,14 @@ from pathlib import Path
 
 import pytest
 
-from gpd.adapters.install_utils import MANIFEST_NAME, build_runtime_cli_bridge_command, hook_python_interpreter
+from gpd.adapters.install_utils import (
+    COMPACT_HELP_BRIDGE_SHIM_SENTINEL,
+    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
+    MANIFEST_NAME,
+    build_runtime_cli_bridge_command,
+    hook_python_interpreter,
+)
 from gpd.adapters.opencode import (
     OpenCodeAdapter,
     configure_opencode_permissions,
@@ -479,19 +486,50 @@ class TestInstall:
     def test_local_install_uses_relative_gpd_paths(
         self,
         adapter: OpenCodeAdapter,
-        gpd_root: Path,
         tmp_path: Path,
     ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
         target = tmp_path / ".opencode"
         target.mkdir()
 
         adapter.install(gpd_root, target, is_global=False)
 
-        content = (target / "command" / "gpd-help.md").read_text(encoding="utf-8")
-        assert "./.opencode/get-physics-done/ref" in content
-        assert "~/.claude/agents" in content
-        assert "./.opencode/agents" not in content
+        content = (target / "command" / "gpd-compare-experiment.md").read_text(encoding="utf-8")
+        assert "./.opencode/get-physics-done/templates/paper/experimental-comparison.md" in content
+        assert "./.opencode/get-physics-done/references/results/result-lookup-policy.md" in content
         assert f"{target.as_posix()}/get-physics-done" not in content
+
+    def test_install_projects_staged_and_help_commands_as_compact_shims(
+        self,
+        adapter: OpenCodeAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".opencode"
+        target.mkdir()
+
+        adapter.install(gpd_root, target, is_global=False)
+
+        expected_bridge = expected_opencode_bridge(target, is_global=False)
+        execute_phase = (target / "command" / "gpd-execute-phase.md").read_text(encoding="utf-8")
+        help_command = (target / "command" / "gpd-help.md").read_text(encoding="utf-8")
+
+        assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in execute_phase
+        assert "/gpd-execute-phase" in execute_phase
+        assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in execute_phase
+        assert "payload.staged_loading" in execute_phase
+        assert "<!-- [included: execute-phase.md] -->" not in execute_phase
+        assert "@{GPD_INSTALL_DIR}" not in execute_phase
+        assert len(execute_phase) < 20_000
+
+        assert COMPACT_HELP_BRIDGE_SHIM_SENTINEL in help_command
+        assert "/gpd-help" in help_command
+        assert f"{expected_bridge} --raw help" in help_command
+        assert f"{expected_bridge} --raw help --all" in help_command
+        assert f"{expected_bridge} --raw help --command <name>" in help_command
+        assert "<!-- [included: help.md] -->" not in help_command
+        assert "@{GPD_INSTALL_DIR}" not in help_command
+        assert len(help_command) < 10_000
 
     def test_install_completeness_requires_opencode_json(
         self,
@@ -656,7 +694,7 @@ class TestInstall:
         assert re.search(r"^\s*@.*?/workflows/update\.md\s*$", content, flags=re.MULTILINE) is None
         assert "gpd-reapply-patches" in content
 
-    def test_complete_milestone_command_inlines_bullet_list_includes(
+    def test_complete_milestone_command_uses_compact_workflow_reference_shim(
         self,
         adapter: OpenCodeAdapter,
         tmp_path: Path,
@@ -667,10 +705,12 @@ class TestInstall:
         adapter.install(gpd_root, target)
 
         content = (target / "command" / "gpd-complete-milestone.md").read_text(encoding="utf-8")
-        assert "<!-- [included: complete-milestone.md] -->" in content
-        assert "<!-- [included: milestone-archive.md] -->" in content
-        assert "Mark a completed research stage" in content
-        assert "# Milestone Archive Template" in content
+        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in content
+        assert "{GPD_INSTALL_DIR}" not in content
+        assert "get-physics-done/workflows/complete-milestone.md" in content
+        assert "get-physics-done/templates/milestone-archive.md" in content
+        assert "<!-- [included: complete-milestone.md] -->" not in content
+        assert "<!-- [included: milestone-archive.md] -->" not in content
         assert re.search(r"^\s*-\s*@.*?/workflows/complete-milestone\.md.*$", content, flags=re.MULTILINE) is None
         assert re.search(r"^\s*-\s*@.*?/templates/milestone-archive\.md.*$", content, flags=re.MULTILINE) is None
 
@@ -808,8 +848,9 @@ class TestInstall:
         execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase.md").read_text(encoding="utf-8")
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
 
-        assert expected_bridge + " config ensure-section" in command
-        assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" in command
+        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in command
+        assert expected_bridge + " config ensure-section" not in command
+        assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" not in command
         assert expected_bridge + " config ensure-section" in workflow
         assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" in workflow
         assert 'echo "ERROR: gpd initialization failed: $INIT"' in workflow

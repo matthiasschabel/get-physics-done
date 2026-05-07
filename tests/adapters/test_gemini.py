@@ -27,7 +27,12 @@ from gpd.adapters.gemini import (
     _rewrite_gemini_shell_workflow_guidance,
     _rewrite_gpd_cli_invocations,
 )
-from gpd.adapters.install_utils import build_runtime_cli_bridge_command, hook_python_interpreter
+from gpd.adapters.install_utils import (
+    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
+    build_runtime_cli_bridge_command,
+    hook_python_interpreter,
+)
 from gpd.hooks.install_metadata import assess_install_target
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
@@ -327,7 +332,7 @@ class TestRewriteGeminiShellWorkflowGuidance:
         result = _rewrite_gemini_shell_workflow_guidance(content)
 
         assert "Validate the single profile argument without a shell call" in result
-        assert "PROFILE=\"$(" not in result
+        assert 'PROFILE="$(' not in result
         assert 'case "$PROFILE"' not in result
         assert "```bash" not in result
 
@@ -501,7 +506,7 @@ class TestInstall:
         assert "<!-- [included: update.md] -->" in content
         assert re.search(r"^\s*@.*?/workflows/update\.md\s*$", content, flags=re.MULTILINE) is None
 
-    def test_complete_milestone_command_inlines_bullet_list_includes(
+    def test_complete_milestone_command_uses_compact_workflow_reference_shim(
         self,
         adapter: GeminiAdapter,
         tmp_path: Path,
@@ -512,10 +517,12 @@ class TestInstall:
         adapter.install(gpd_root, target)
 
         content = (target / "commands" / "gpd" / "complete-milestone.toml").read_text(encoding="utf-8")
-        assert "<!-- [included: complete-milestone.md] -->" in content
-        assert "<!-- [included: milestone-archive.md] -->" in content
-        assert "Mark a completed research stage" in content
-        assert "# Milestone Archive Template" in content
+        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in content
+        assert "{GPD_INSTALL_DIR}" not in content
+        assert "get-physics-done/workflows/complete-milestone.md" in content
+        assert "get-physics-done/templates/milestone-archive.md" in content
+        assert "<!-- [included: complete-milestone.md] -->" not in content
+        assert "<!-- [included: milestone-archive.md] -->" not in content
         assert re.search(r"^\s*-\s*@.*?/workflows/complete-milestone\.md.*$", content, flags=re.MULTILINE) is None
         assert re.search(r"^\s*-\s*@.*?/templates/milestone-archive\.md.*$", content, flags=re.MULTILINE) is None
 
@@ -975,6 +982,39 @@ class TestInstall:
         assert "PROJECT_CONTRACT_JSON" not in command
         assert "printf '%s\\n'" not in command
 
+    def test_install_uses_compact_staged_command_shim_in_toml_prompt(
+        self,
+        adapter: GeminiAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".gemini"
+        target.mkdir()
+
+        result = adapter.install(gpd_root, target)
+        adapter.finalize_install(result)
+
+        raw_toml = (target / "commands" / "gpd" / "execute-phase.toml").read_text(encoding="utf-8")
+        parsed = tomllib.loads(raw_toml)
+        prompt = parsed["prompt"]
+        expected_bridge = expected_gemini_bridge(target)
+
+        assert isinstance(prompt, str)
+        assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in prompt
+        assert 'command="/gpd:execute-phase"' in prompt
+        assert "<!-- [included: execute-phase.md] -->" not in prompt
+        assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in prompt
+        assert "references/orchestration/context-budget.md" not in prompt
+        assert prompt.count("<gemini_runtime_notes>") == 1
+        assert prompt.count("<gemini_shell_runtime_notes>") == 1
+        assert "enforced shell-prefix allowlist" in prompt
+        assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in prompt
+        assert "staged_loading.required_init_fields" in prompt
+        assert "staged_loading.eager_authorities" in prompt
+        assert "staged_loading.must_not_eager_load" in prompt
+        assert "staged_loading.next_stages" in prompt
+        assert len(prompt) < 20_000
+
     def test_install_preserves_existing_policy_paths_and_mcp_trust_choice(
         self,
         adapter: GeminiAdapter,
@@ -1093,8 +1133,13 @@ class TestInstall:
         assert f"{expected_bridge} --raw init new-project" in workflow
         assert f"{expected_bridge} commit " in workflow
         assert ' gpd commit "' not in workflow
-        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
-        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
+        if COMPACT_STAGED_COMMAND_SHIM_SENTINEL in command:
+            assert f"{expected_bridge} --raw init new-project --stage scope_intake" in command
+            assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in command
+            assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in command
+        else:
+            assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
+            assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
         assert "PROJECT_CONTRACT_JSON" not in command
         assert "printf '%s\\n'" not in command
         assert "PROJECT_CONTRACT_JSON" not in workflow

@@ -26,6 +26,7 @@ from gpd.adapters.install_utils import (
     MANIFEST_NAME,
     _is_hook_command_for_script,
     build_hook_command,
+    compile_command_markdown_for_runtime,
     compile_markdown_for_runtime,
     convert_tool_references_in_body,
     ensure_update_hook,
@@ -1161,14 +1162,16 @@ def _copy_commands_recursive(
                 explicit_target=explicit_target,
             )
         elif entry.suffix == ".md":
-            content = compile_markdown_for_runtime(
+            content = compile_command_markdown_for_runtime(
                 entry.read_text(encoding="utf-8"),
                 runtime="gemini",
+                command_name=entry.stem,
                 path_prefix=path_prefix,
                 install_scope=install_scope,
                 src_root=gpd_src_root,
                 workflow_target_dir=workflow_target_dir,
                 explicit_target=explicit_target,
+                bridge_command=bridge_command,
             )
             content = process_attribution(content, attribution)
             public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))

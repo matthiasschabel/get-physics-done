@@ -215,6 +215,15 @@ def _first_shell_command(body: str) -> str | None:
     return None
 
 
+def _first_shell_commands(text: str) -> tuple[str, ...]:
+    return tuple(command for body in _shell_fence_bodies(text) if (command := _first_shell_command(body)))
+
+
+def _assert_runtime_note_block_count(text: str, tag: str, expected_count: int) -> None:
+    assert text.count(f"<{tag}>") == expected_count
+    assert text.count(f"</{tag}>") == expected_count
+
+
 def _assert_fragments_visible(text: str, fragments: tuple[str, ...], *, label: str) -> None:
     missing = sorted(fragment for fragment in fragments if fragment not in text)
     assert not missing, f"{label} is missing contract-bearing fragments: {', '.join(missing)}"
@@ -404,11 +413,14 @@ def test_gemini_projected_command_surface_matches_install_runtime_rewrites(tmp_p
 
     projected = _project_fixture_command(source, "gemini", target_dir)
 
-    assert "<gemini_runtime_notes>" in projected
-    assert "Run these as separate shell calls in Gemini auto-edit mode." in projected
-    assert f"{bridge} config ensure-section" in projected
-    assert f'{bridge} config set model_profile "$PROFILE"' in projected
-    assert f"{bridge} --raw init progress --include state,config" not in projected
+    _assert_runtime_note_block_count(projected, "gemini_runtime_notes", 1)
+    _assert_runtime_note_block_count(projected, "gemini_shell_runtime_notes", 1)
+    shell_text = "\n".join(_shell_fence_bodies(projected))
+    assert _first_shell_commands(projected) == (
+        f"{bridge} config ensure-section",
+        f'{bridge} config set model_profile "$PROFILE"',
+    )
+    assert f"{bridge} --raw init progress --include state,config" not in shell_text
     assert "INIT=$(gpd --raw init progress --include state,config)" not in projected
     assert 'echo "$INIT"' not in projected
 
@@ -456,7 +468,7 @@ def test_gemini_projected_shell_allowlist_matches_policy_prefixes(tmp_path: Path
 
     shell_bodies = _shell_fence_bodies(projected)
     assert shell_bodies
-    first_commands = tuple(command for body in shell_bodies if (command := _first_shell_command(body)))
+    first_commands = _first_shell_commands(projected)
     assert first_commands == (
         f"{bridge} --raw validate project-contract GPD/.approved-project-contract.json --mode approved",
         "git init",

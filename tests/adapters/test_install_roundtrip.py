@@ -37,7 +37,7 @@ from gpd.adapters.runtime_catalog import (
 )
 from gpd.adapters.tool_names import build_canonical_alias_map
 from gpd.core.public_surface_contract import local_cli_bridge_commands
-from gpd.registry import load_agents_from_dir
+from gpd.registry import list_commands, load_agents_from_dir
 from tests.doc_surface_contracts import assert_publication_lane_boundary_contract
 
 REPO_GPD_ROOT = Path(__file__).resolve().parents[2] / "src" / "gpd"
@@ -50,6 +50,23 @@ VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/contract-results-schema.md",
     "references/shared/canonical-schema-discipline.md",
 )
+
+
+@cache
+def _opencode_rewritten_command_stems() -> tuple[str, ...]:
+    return tuple(sorted(list_commands(), key=lambda stem: (-len(stem), stem)))
+
+
+@cache
+def _opencode_hyphenated_public_command_re() -> re.Pattern[str]:
+    stems = "|".join(re.escape(stem) for stem in _opencode_rewritten_command_stems())
+    return re.compile(rf"(?<![A-Za-z0-9_./:$-])gpd-(?P<stem>{stems})(?![A-Za-z0-9_-])")
+
+
+@cache
+def _opencode_canonical_public_command_re() -> re.Pattern[str]:
+    stems = "|".join(re.escape(stem) for stem in _opencode_rewritten_command_stems())
+    return re.compile(rf"(?<![A-Za-z0-9_./$-])/?gpd:(?P<stem>{stems})(?![A-Za-z0-9_-])")
 
 
 def expected_opencode_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
@@ -224,37 +241,13 @@ def _canonicalize_runtime_markdown(content: str, *, runtime: str) -> str:
         # markdown body text to `gpd-X` during install (see
         # `_GPD_BARE_COMMAND_RE` in gpd.adapters.opencode). Reverse that here
         # for contract-assertion purposes so tests can use the canonical
-        # `gpd:X` form regardless of runtime. This list enumerates the
-        # command stems we know to rewrite, to avoid accidentally touching
-        # CLI tool or agent names like `gpd-check-proof` that legitimately
-        # use the hyphenated form.
-        _OPENCODE_REWRITTEN_STEMS = (
-            "add-phase", "add-todo", "arxiv-submission", "audit-milestone",
-            "autonomous", "branch-hypothesis", "check-todos", "compact-state",
-            "compare-branches", "compare-experiment", "compare-results",
-            "complete-milestone", "debug", "decisions", "derive-equation",
-            "digest-knowledge", "dimensional-analysis", "discover",
-            "discuss-phase", "error-patterns", "error-propagation",
-            "execute-phase", "explain", "export-logs", "export", "graph",
-            "health", "help", "insert-phase", "limiting-cases",
-            "list-phase-assumptions", "literature-review", "map-research",
-            "merge-phases", "new-milestone", "new-project",
-            "numerical-convergence", "parameter-sweep", "pause-work",
-            "peer-review", "plan-milestone-gaps", "plan-phase", "progress",
-            "quick", "reapply-patches", "record-insight", "regression-check",
-            "remove-phase", "research-phase", "respond-to-referees",
-            "resume-work", "review-knowledge", "revise-phase",
-            "sensitivity-analysis", "set-profile", "set-tier-models",
-            "settings", "show-phase", "slides", "start", "suggest-next",
-            "sync-state", "tangent", "tour", "undo", "update",
-            "validate-conventions", "verify-work", "write-paper",
+        # `gpd:X` form regardless of runtime. Stems come from the live command
+        # registry so new commands are covered automatically while CLI tools
+        # or agent names like `gpd-check-proof` stay hyphenated.
+        content = _opencode_hyphenated_public_command_re().sub(
+            lambda match: f"gpd:{match.group('stem')}",
+            content,
         )
-        for stem in _OPENCODE_REWRITTEN_STEMS:
-            content = re.sub(
-                rf"(?<![A-Za-z0-9_./:$-])gpd-{re.escape(stem)}\b",
-                f"gpd:{stem}",
-                content,
-            )
     return content
 
 
@@ -783,6 +776,17 @@ def test_real_installed_public_local_cli_commands_stay_canonical(
     for public_command in local_cli_bridge_commands():
         assert public_command in installed_text
         assert f"{bridge_command}{public_command[3:]}" not in installed_text
+
+
+def test_opencode_command_projection_rewrites_live_public_command_prefixes(real_installed_repo_factory) -> None:
+    target = real_installed_repo_factory("opencode")
+    command_paths = sorted((target / "command").glob("gpd-*.md"))
+
+    assert {path.stem.removeprefix("gpd-") for path in command_paths} == set(_opencode_rewritten_command_stems())
+    for command_path in command_paths:
+        content = command_path.read_text(encoding="utf-8")
+        match = _opencode_canonical_public_command_re().search(content)
+        assert match is None, f"{command_path.name} still uses OpenCode-incompatible {match.group(0)!r}"
 
 
 def test_help_like_skills_keep_canonical_local_cli_language(tmp_path: Path) -> None:

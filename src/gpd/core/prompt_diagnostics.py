@@ -12,9 +12,11 @@ from typing import Literal, cast
 
 from gpd.adapters.install_utils import (
     DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
+    build_runtime_cli_bridge_command,
     expand_at_includes,
     parse_at_include_path,
     project_markdown_for_runtime,
+    projection_target_dir_from_path_prefix,
     split_markdown_frontmatter,
 )
 from gpd.adapters.runtime_catalog import (
@@ -26,7 +28,7 @@ from gpd.core.return_contract import validate_gpd_return_markdown
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
-PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v2"
+PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v3"
 DEFAULT_PATH_PREFIX = "/runtime/"
 DEFAULT_SURFACES: tuple[PromptSurfaceKind, ...] = ("command", "agent", "workflow")
 
@@ -121,12 +123,15 @@ class MarkdownFence:
 class RuntimeProjectionMetric:
     runtime: str
     native_include_support: bool
+    expanded_line_count: int
+    expanded_char_count: int
     line_count: int
     char_count: int
     include_count: int
     runtime_note_count: int
     runtime_note_chars: int
     shell_fence_count: int
+    shell_rewrite_count: int
     bridge_command_occurrences: int
 
 
@@ -257,7 +262,7 @@ def measure_prompt_file(
     runtime_projection: tuple[RuntimeProjectionMetric, ...] = ()
     if include_runtime_projections and source.kind in {"command", "agent"}:
         runtime_projection = tuple(
-            _measure_runtime_projection(source, raw_text, runtime_name)
+            _measure_runtime_projection(source, raw_text, expanded_text, runtime_name)
             for runtime_name in _normalize_runtime_names(runtime_names)
         )
 
@@ -341,6 +346,7 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         "repo_root": report.repo_root,
         "totals": report.totals,
         "items": [_prompt_item_to_dict(item) for item in _top_items(report.items, top)],
+        "runtime_top_prompts": _runtime_top_prompts_to_dict(report.items, top),
         "invalid_gpd_return_examples": [
             _invalid_gpd_return_example_to_dict(example) for example in report.invalid_gpd_return_examples
         ],
@@ -424,6 +430,28 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 f"{metric.get('bridge_command_occurrences', 0)} |"
             )
 
+    runtime_top_prompts = _runtime_top_prompt_rows(report.items, top)
+    if runtime_top_prompts:
+        lines.extend(
+            [
+                "",
+                "## Runtime Top Prompts",
+                "",
+                "| Runtime | Rank | Native includes | Kind | Name | Projected chars | Expanded chars | Includes | Runtime notes | Shell rewrites |",
+                "|---|---:|---:|---|---|---:|---:|---:|---:|---:|",
+            ]
+        )
+        ranks_by_runtime: dict[str, int] = defaultdict(int)
+        for row in runtime_top_prompts:
+            runtime = str(row["runtime"])
+            ranks_by_runtime[runtime] += 1
+            lines.append(
+                f"| `{runtime}` | {ranks_by_runtime[runtime]} | "
+                f"{str(row['native_include_support']).lower()} | {row['kind']} | `{row['name']}` | "
+                f"{row['projected_char_count']} | {row['expanded_char_count']} | {row['include_count']} | "
+                f"{row['runtime_note_count']} | {row['shell_rewrite_count']} |"
+            )
+
     duplicate_groups = report.duplicate_invariants[: top or len(report.duplicate_invariants)]
     if duplicate_groups:
         lines.extend(
@@ -499,6 +527,50 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
 
     lines = [render_row(headers), render_row(tuple("-" * width for width in widths))]
     lines.extend(render_row(row) for row in rows)
+    runtime_rows = [
+        (
+            str(row["runtime"]),
+            str(row["kind"]),
+            str(row["name"]),
+            str(row["projected_char_count"]),
+            str(row["expanded_char_count"]),
+            str(row["include_count"]),
+            str(row["runtime_note_count"]),
+            str(row["shell_rewrite_count"]),
+        )
+        for row in _runtime_top_prompt_rows(report.items, top)
+    ]
+    if runtime_rows:
+        runtime_headers = (
+            "runtime",
+            "kind",
+            "name",
+            "projected_chars",
+            "expanded_chars",
+            "includes",
+            "runtime_notes",
+            "shell_rewrites",
+        )
+        runtime_widths = [len(header) for header in runtime_headers]
+        for row in runtime_rows:
+            runtime_widths = [
+                max(width, len(cell)) for width, cell in zip(runtime_widths, row, strict=True)
+            ]
+
+        def render_runtime_row(row: Sequence[str]) -> str:
+            return "  ".join(
+                cell.ljust(width) for cell, width in zip(row, runtime_widths, strict=True)
+            ).rstrip()
+
+        lines.extend(
+            (
+                "",
+                "runtime top prompts",
+                render_runtime_row(runtime_headers),
+                render_runtime_row(tuple("-" * width for width in runtime_widths)),
+            )
+        )
+        lines.extend(render_runtime_row(row) for row in runtime_rows)
     return "\n".join(lines) + "\n"
 
 
@@ -732,6 +804,7 @@ def _count_shell_parsing_lines(text: str) -> int:
 def _measure_runtime_projection(
     source: PromptSource,
     raw_text: str,
+    expanded_text: str,
     runtime_name: str,
 ) -> RuntimeProjectionMetric:
     descriptor = get_runtime_descriptor(runtime_name)
@@ -744,18 +817,48 @@ def _measure_runtime_projection(
         protect_agent_prompt_body=source.kind == "agent",
         command_name=source.name,
     )
+    bridge_command = _projection_bridge_command(runtime_name) if source.kind == "command" else None
     runtime_note_lines = [line for line in projected_text.splitlines() if _RUNTIME_NOTE_RE.search(line)]
     return RuntimeProjectionMetric(
         runtime=runtime_name,
         native_include_support=descriptor.native_include_support,
+        expanded_line_count=_line_count(expanded_text),
+        expanded_char_count=len(expanded_text),
         line_count=_line_count(projected_text),
         char_count=len(projected_text),
         include_count=_count_raw_includes(projected_text),
         runtime_note_count=len(runtime_note_lines),
         runtime_note_chars=sum(len(line) for line in runtime_note_lines),
         shell_fence_count=_count_shell_fences(projected_text),
+        shell_rewrite_count=_count_shell_fences_containing(projected_text, bridge_command),
         bridge_command_occurrences=len(_BRIDGE_COMMAND_RE.findall(projected_text)),
     )
+
+
+def _projection_bridge_command(runtime_name: str) -> str:
+    descriptor = get_runtime_descriptor(runtime_name)
+    target_dir = projection_target_dir_from_path_prefix(
+        DEFAULT_PATH_PREFIX,
+        config_dir_name=descriptor.config_dir_name,
+    )
+    return build_runtime_cli_bridge_command(
+        runtime_name,
+        target_dir=target_dir,
+        config_dir_name=descriptor.config_dir_name,
+        is_global=False,
+    )
+
+
+def _count_shell_fences_containing(text: str, needle: str | None) -> int:
+    if not needle:
+        return 0
+
+    count = 0
+    for fence in _iter_markdown_fences(_body_without_frontmatter(text)):
+        language = fence.info.lower().split(None, 1)[0] if fence.info else ""
+        if language in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES and needle in fence.body:
+            count += 1
+    return count
 
 
 def _build_totals(items: Sequence[PromptSurfaceItem]) -> dict[str, object]:
@@ -798,16 +901,25 @@ def _runtime_projection_totals(items: Sequence[PromptSurfaceItem]) -> dict[str, 
                 {
                     "native_include_support": metric.native_include_support,
                     "item_count": 0,
+                    "expanded_line_count": 0,
+                    "expanded_char_count": 0,
                     "line_count": 0,
                     "char_count": 0,
                     "include_count": 0,
                     "runtime_note_count": 0,
                     "runtime_note_chars": 0,
                     "shell_fence_count": 0,
+                    "shell_rewrite_count": 0,
                     "bridge_command_occurrences": 0,
                 },
             )
             runtime_totals["item_count"] = cast(int, runtime_totals["item_count"]) + 1
+            runtime_totals["expanded_line_count"] = (
+                cast(int, runtime_totals["expanded_line_count"]) + metric.expanded_line_count
+            )
+            runtime_totals["expanded_char_count"] = (
+                cast(int, runtime_totals["expanded_char_count"]) + metric.expanded_char_count
+            )
             runtime_totals["line_count"] = cast(int, runtime_totals["line_count"]) + metric.line_count
             runtime_totals["char_count"] = cast(int, runtime_totals["char_count"]) + metric.char_count
             runtime_totals["include_count"] = cast(int, runtime_totals["include_count"]) + metric.include_count
@@ -819,6 +931,9 @@ def _runtime_projection_totals(items: Sequence[PromptSurfaceItem]) -> dict[str, 
             )
             runtime_totals["shell_fence_count"] = (
                 cast(int, runtime_totals["shell_fence_count"]) + metric.shell_fence_count
+            )
+            runtime_totals["shell_rewrite_count"] = (
+                cast(int, runtime_totals["shell_rewrite_count"]) + metric.shell_rewrite_count
             )
             runtime_totals["bridge_command_occurrences"] = (
                 cast(int, runtime_totals["bridge_command_occurrences"]) + metric.bridge_command_occurrences
@@ -1051,6 +1166,58 @@ def _top_items(items: Sequence[PromptSurfaceItem], top: int | None) -> tuple[Pro
     return tuple(sorted_items[:top])
 
 
+def _runtime_top_prompt_rows(
+    items: Sequence[PromptSurfaceItem],
+    top: int | None,
+) -> tuple[dict[str, object], ...]:
+    rows_by_runtime: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for item in items:
+        for metric in item.runtime_projection:
+            rows_by_runtime[metric.runtime].append(
+                {
+                    "runtime": metric.runtime,
+                    "native_include_support": metric.native_include_support,
+                    "kind": item.kind,
+                    "name": item.name,
+                    "path": item.path,
+                    "projected_line_count": metric.line_count,
+                    "projected_char_count": metric.char_count,
+                    "expanded_line_count": metric.expanded_line_count,
+                    "expanded_char_count": metric.expanded_char_count,
+                    "include_count": metric.include_count,
+                    "runtime_note_count": metric.runtime_note_count,
+                    "runtime_note_chars": metric.runtime_note_chars,
+                    "shell_rewrite_count": metric.shell_rewrite_count,
+                }
+            )
+
+    limit = top if top is not None and top > 0 else None
+    rows: list[dict[str, object]] = []
+    for runtime in sorted(rows_by_runtime):
+        runtime_rows = sorted(
+            rows_by_runtime[runtime],
+            key=lambda row: (
+                -cast(int, row["projected_char_count"]),
+                -cast(int, row["expanded_char_count"]),
+                cast(str, row["kind"]),
+                cast(str, row["name"]),
+                cast(str, row["path"]),
+            ),
+        )
+        rows.extend(runtime_rows[:limit])
+    return tuple(rows)
+
+
+def _runtime_top_prompts_to_dict(
+    items: Sequence[PromptSurfaceItem],
+    top: int | None,
+) -> dict[str, list[dict[str, object]]]:
+    rows_by_runtime: dict[str, list[dict[str, object]]] = {}
+    for row in _runtime_top_prompt_rows(items, top):
+        rows_by_runtime.setdefault(cast(str, row["runtime"]), []).append(dict(row))
+    return rows_by_runtime
+
+
 def _prompt_item_to_dict(item: PromptSurfaceItem) -> dict[str, object]:
     return {
         "kind": item.kind,
@@ -1077,12 +1244,15 @@ def _prompt_item_to_dict(item: PromptSurfaceItem) -> dict[str, object]:
             {
                 "runtime": metric.runtime,
                 "native_include_support": metric.native_include_support,
+                "expanded_line_count": metric.expanded_line_count,
+                "expanded_char_count": metric.expanded_char_count,
                 "line_count": metric.line_count,
                 "char_count": metric.char_count,
                 "include_count": metric.include_count,
                 "runtime_note_count": metric.runtime_note_count,
                 "runtime_note_chars": metric.runtime_note_chars,
                 "shell_fence_count": metric.shell_fence_count,
+                "shell_rewrite_count": metric.shell_rewrite_count,
                 "bridge_command_occurrences": metric.bridge_command_occurrences,
             }
             for metric in item.runtime_projection

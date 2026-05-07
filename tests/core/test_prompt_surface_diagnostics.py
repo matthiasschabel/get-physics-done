@@ -17,6 +17,7 @@ EXPECTED_REPORT_KEYS = {
     "repo_root",
     "totals",
     "items",
+    "runtime_top_prompts",
     "invalid_gpd_return_examples",
     "duplicate_invariants",
     "exact_prose_assertion_files",
@@ -46,13 +47,31 @@ EXPECTED_ITEM_KEYS = {
 EXPECTED_RUNTIME_PROJECTION_KEYS = {
     "runtime",
     "native_include_support",
+    "expanded_line_count",
+    "expanded_char_count",
     "line_count",
     "char_count",
     "include_count",
     "runtime_note_count",
     "runtime_note_chars",
     "shell_fence_count",
+    "shell_rewrite_count",
     "bridge_command_occurrences",
+}
+EXPECTED_RUNTIME_TOP_PROMPT_KEYS = {
+    "runtime",
+    "native_include_support",
+    "kind",
+    "name",
+    "path",
+    "projected_line_count",
+    "projected_char_count",
+    "expanded_line_count",
+    "expanded_char_count",
+    "include_count",
+    "runtime_note_count",
+    "runtime_note_chars",
+    "shell_rewrite_count",
 }
 EXPECTED_DUPLICATE_GROUP_KEYS = {
     "phrase",
@@ -72,6 +91,10 @@ EXPECTED_INVALID_RETURN_EXAMPLE_KEYS = {
 
 def _diagnostics():
     return importlib.import_module("gpd.core.prompt_diagnostics")
+
+
+def _non_native_runtime_name() -> str:
+    return next(descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support)
 
 
 def _write(root: Path, relative_path: str, content: str) -> Path:
@@ -175,6 +198,7 @@ def test_report_to_dict_has_stable_schema_version_and_json_shape(tmp_path: Path)
     assert len(payload["items"]) == 1
     assert set(payload["items"][0]) == EXPECTED_ITEM_KEYS
     assert payload["items"][0]["runtime_projection"] == []
+    assert payload["runtime_top_prompts"] == {}
     assert payload["items"][0]["invalid_gpd_return_examples"] == []
     assert payload["invalid_gpd_return_examples"] == []
 
@@ -383,7 +407,7 @@ def test_runtime_projections_cover_every_runtime_descriptor(tmp_path: Path) -> N
         @{GPD_INSTALL_DIR}/templates/runtime-shared.md
         """,
     )
-    _write(tmp_path, "src/gpd/specs/templates/runtime-shared.md", "Shared runtime include.\n")
+    _write(tmp_path, "src/gpd/specs/templates/runtime-shared.md", "Shared runtime include.\n" * 80)
 
     descriptors = tuple(iter_runtime_descriptors())
     runtime_names = tuple(descriptor.runtime_name for descriptor in descriptors)
@@ -401,10 +425,15 @@ def test_runtime_projections_cover_every_runtime_descriptor(tmp_path: Path) -> N
     for descriptor in descriptors:
         metric = projections_by_runtime[descriptor.runtime_name]
         assert metric.native_include_support is descriptor.native_include_support
+        assert metric.expanded_line_count == item.expanded_line_count
+        assert metric.expanded_char_count == item.expanded_char_count
         assert metric.line_count > 0
         assert metric.char_count > 0
+        assert metric.shell_rewrite_count == 0
 
-    native_include_runtimes = tuple(descriptor.runtime_name for descriptor in descriptors if descriptor.native_include_support)
+    native_include_runtimes = tuple(
+        descriptor.runtime_name for descriptor in descriptors if descriptor.native_include_support
+    )
     non_native_include_runtimes = tuple(
         descriptor.runtime_name for descriptor in descriptors if not descriptor.native_include_support
     )
@@ -413,6 +442,64 @@ def test_runtime_projections_cover_every_runtime_descriptor(tmp_path: Path) -> N
     assert non_native_include_runtimes
     assert all(projections_by_runtime[runtime].native_include_support is True for runtime in native_include_runtimes)
     assert all(projections_by_runtime[runtime].native_include_support is False for runtime in non_native_include_runtimes)
+    assert all(projections_by_runtime[runtime].include_count == 1 for runtime in native_include_runtimes)
+    assert all(projections_by_runtime[runtime].include_count == 0 for runtime in non_native_include_runtimes)
+
+
+def test_runtime_projection_shell_rewrite_count_uses_projected_shell_fences_only(tmp_path: Path) -> None:
+    runtime_name = _non_native_runtime_name()
+    _write(
+        tmp_path,
+        "src/gpd/commands/shell-rewrite-probe.md",
+        """
+        ---
+        name: gpd:shell-rewrite-probe
+        description: Shell rewrite probe
+        ---
+        The runtime note may mention the bridge, but prose must not count as a shell rewrite.
+
+        ```bash
+        gpd hidden-probe
+        echo $(gpd hidden-probe --json)
+        ```
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/commands/no-shell-rewrite-probe.md",
+        """
+        ---
+        name: gpd:no-shell-rewrite-probe
+        description: No shell rewrite probe
+        ---
+        This command has no runnable shell fence.
+        """,
+    )
+
+    shell_item = _measure(
+        tmp_path,
+        "command",
+        "shell-rewrite-probe",
+        runtime_names=(runtime_name,),
+        include_runtime_projections=True,
+    )
+    no_shell_item = _measure(
+        tmp_path,
+        "command",
+        "no-shell-rewrite-probe",
+        runtime_names=(runtime_name,),
+        include_runtime_projections=True,
+    )
+
+    shell_metric = shell_item.runtime_projection[0]
+    no_shell_metric = no_shell_item.runtime_projection[0]
+
+    assert shell_metric.shell_fence_count == 1
+    assert shell_metric.shell_rewrite_count == 1
+    assert shell_metric.bridge_command_occurrences > shell_metric.shell_rewrite_count
+    assert no_shell_metric.shell_fence_count == 0
+    assert no_shell_metric.shell_rewrite_count == 0
+    assert no_shell_metric.bridge_command_occurrences > 0
 
 
 def test_report_to_dict_serializes_runtime_and_duplicate_group_shapes(tmp_path: Path) -> None:
@@ -437,6 +524,15 @@ def test_report_to_dict_serializes_runtime_and_duplicate_group_shapes(tmp_path: 
 
     assert set(payload["items"][0]["runtime_projection"][0]) == EXPECTED_RUNTIME_PROJECTION_KEYS
     assert payload["items"][0]["runtime_projection"][0]["runtime"] == runtime_name
+    runtime_top_prompts = payload["runtime_top_prompts"]
+    assert isinstance(runtime_top_prompts, dict)
+    assert set(runtime_top_prompts) == {runtime_name}
+    runtime_rows = runtime_top_prompts[runtime_name]
+    assert isinstance(runtime_rows, list)
+    assert len(runtime_rows) == 3
+    assert set(runtime_rows[0]) == EXPECTED_RUNTIME_TOP_PROMPT_KEYS
+    assert runtime_rows[0]["runtime"] == runtime_name
+    assert runtime_rows[0]["projected_char_count"] >= runtime_rows[-1]["projected_char_count"]
     assert payload["duplicate_invariants"]
     assert set(payload["duplicate_invariants"][0]) == EXPECTED_DUPLICATE_GROUP_KEYS
 
@@ -496,6 +592,37 @@ def test_markdown_render_lists_invalid_gpd_return_examples(tmp_path: Path) -> No
     assert "`src/gpd/agents/return-markdown-probe.md`" in markdown
     assert "5-8" in markdown
     assert "Missing required field: files_written" in markdown
+
+
+def test_runtime_top_prompts_render_in_markdown_and_table(tmp_path: Path) -> None:
+    runtime_name = _non_native_runtime_name()
+    _write(
+        tmp_path,
+        "src/gpd/commands/runtime-render-probe.md",
+        """
+        ---
+        name: gpd:runtime-render-probe
+        description: Runtime render probe
+        ---
+        ```bash
+        gpd hidden-probe
+        ```
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("command",), runtime_names=(runtime_name,))
+    markdown = diagnostics.render_prompt_surface_markdown(report, top=1)
+    table = diagnostics.render_prompt_surface_table(report, top=1)
+
+    assert "## Runtime Top Prompts" in markdown
+    assert "Shell rewrites" in markdown
+    assert f"| `{runtime_name}` | 1 |" in markdown
+    assert "`runtime-render-probe`" in markdown
+    assert "runtime top prompts" in table
+    assert "projected_chars" in table
+    assert "shell_rewrites" in table
+    assert "runtime-render-probe" in table
 
 
 def test_production_prompt_diagnostics_does_not_import_from_tests() -> None:

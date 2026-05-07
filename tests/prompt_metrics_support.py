@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from importlib import import_module
 from math import ceil
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from gpd.adapters.install_utils import expand_at_includes, parse_at_include_path
 from gpd.core.model_visible_text import command_visibility_note
 
 DEFAULT_PROMPT_BUDGET_MARGIN = 0.03
+_PROMPT_DIAGNOSTICS_UNSET = object()
+_PROMPT_DIAGNOSTICS_MODULE: object = _PROMPT_DIAGNOSTICS_UNSET
 
 __all__ = [
     "DEFAULT_PROMPT_BUDGET_MARGIN",
@@ -57,6 +60,33 @@ class MarkdownFence:
     end_line: int
 
 
+def _prompt_diagnostics_module() -> object | None:
+    """Return the production diagnostics module when this checkout has it."""
+
+    global _PROMPT_DIAGNOSTICS_MODULE
+    if _PROMPT_DIAGNOSTICS_MODULE is _PROMPT_DIAGNOSTICS_UNSET:
+        try:
+            _PROMPT_DIAGNOSTICS_MODULE = import_module("gpd.core.prompt_diagnostics")
+        except ModuleNotFoundError as exc:
+            if exc.name != "gpd.core.prompt_diagnostics":
+                raise
+            _PROMPT_DIAGNOSTICS_MODULE = None
+    if _PROMPT_DIAGNOSTICS_MODULE is None:
+        return None
+    return _PROMPT_DIAGNOSTICS_MODULE
+
+
+def _diagnostics_callable(*names: str) -> Callable[..., object] | None:
+    module = _prompt_diagnostics_module()
+    if module is None:
+        return None
+    for name in names:
+        candidate = getattr(module, name, None)
+        if callable(candidate):
+            return candidate
+    return None
+
+
 def budget_from_baseline(
     value: int,
     *,
@@ -83,6 +113,10 @@ def expanded_prompt_text(
 ) -> str:
     """Return one prompt file with runtime includes expanded."""
 
+    diagnostics_expander = _diagnostics_callable("expanded_prompt_text")
+    if diagnostics_expander is not None:
+        return str(diagnostics_expander(path, src_root=src_root, path_prefix=path_prefix, runtime=runtime))
+
     content = path.read_text(encoding="utf-8")
     return expand_at_includes(content, src_root, path_prefix, runtime=runtime)
 
@@ -97,6 +131,19 @@ def projected_prompt_text(
     command_name: str | None = None,
 ) -> str:
     """Return one prompt file as the final runtime-visible projected text."""
+
+    diagnostics_projector = _diagnostics_callable("projected_prompt_text")
+    if diagnostics_projector is not None:
+        return str(
+            diagnostics_projector(
+                path,
+                runtime=runtime,
+                src_root=src_root,
+                path_prefix=path_prefix,
+                surface_kind=surface_kind,
+                command_name=command_name,
+            )
+        )
 
     content = path.read_text(encoding="utf-8")
     return project_markdown_for_runtime(
@@ -118,9 +165,7 @@ def _markdown_fence_marker(stripped_line: str) -> str | None:
     return None
 
 
-def iter_markdown_fences(text: str) -> Sequence[MarkdownFence]:
-    """Return fenced code blocks with 1-based source line metadata."""
-
+def _local_iter_markdown_fences(text: str) -> tuple[MarkdownFence, ...]:
     fences: list[MarkdownFence] = []
     active_fence_marker: str | None = None
     active_info = ""
@@ -159,12 +204,30 @@ def iter_markdown_fences(text: str) -> Sequence[MarkdownFence]:
 
         active_body.append(line)
 
-    return fences
+    return tuple(fences)
 
 
-def count_raw_includes(text: str) -> int:
-    """Count raw ``@`` include lines recognized by the installer."""
+def _coerce_markdown_fence(fence: object) -> MarkdownFence:
+    if isinstance(fence, MarkdownFence):
+        return fence
+    return MarkdownFence(
+        info=str(fence.info),
+        body=str(fence.body),
+        start_line=int(fence.start_line),
+        end_line=int(fence.end_line),
+    )
 
+
+def iter_markdown_fences(text: str) -> Sequence[MarkdownFence]:
+    """Return fenced code blocks with 1-based source line metadata."""
+
+    diagnostics_iter = _diagnostics_callable("iter_markdown_fences")
+    if diagnostics_iter is not None:
+        return tuple(_coerce_markdown_fence(fence) for fence in diagnostics_iter(text))
+    return _local_iter_markdown_fences(text)
+
+
+def _local_count_raw_includes(text: str) -> int:
     include_count = 0
     active_fence_marker: str | None = None
 
@@ -184,15 +247,25 @@ def count_raw_includes(text: str) -> int:
     return include_count
 
 
+def count_raw_includes(text: str) -> int:
+    """Count raw ``@`` include lines recognized by the installer."""
+
+    diagnostics_counter = _diagnostics_callable("count_raw_includes", "_count_raw_includes")
+    if diagnostics_counter is not None:
+        return int(diagnostics_counter(text))
+    return _local_count_raw_includes(text)
+
+
 def expanded_include_markers(text: str) -> tuple[str, ...]:
     """Return include marker filenames from an expanded prompt surface."""
 
+    diagnostics_extractor = _diagnostics_callable("expanded_include_markers")
+    if diagnostics_extractor is not None:
+        return tuple(str(marker) for marker in diagnostics_extractor(text))
     return tuple(re.findall(r"<!-- \[included: ([^\]]+)\] -->", text))
 
 
-def iter_unfenced_lines(text: str) -> Sequence[str]:
-    """Return lines outside fenced code blocks."""
-
+def _local_iter_unfenced_lines(text: str) -> tuple[str, ...]:
     lines: list[str] = []
     active_fence_marker: str | None = None
 
@@ -208,17 +281,34 @@ def iter_unfenced_lines(text: str) -> Sequence[str]:
         if active_fence_marker is not None:
             continue
         lines.append(line)
-    return lines
+    return tuple(lines)
+
+
+def iter_unfenced_lines(text: str) -> Sequence[str]:
+    """Return lines outside fenced code blocks."""
+
+    diagnostics_iter = _diagnostics_callable("iter_unfenced_lines")
+    if diagnostics_iter is not None:
+        return tuple(str(line) for line in diagnostics_iter(text))
+    return _local_iter_unfenced_lines(text)
 
 
 def count_unfenced_heading(text: str, heading: str) -> int:
     """Count exact markdown heading lines outside fenced code blocks."""
 
+    diagnostics_counter = _diagnostics_callable("count_unfenced_heading")
+    if diagnostics_counter is not None:
+        return int(diagnostics_counter(text, heading))
     return sum(1 for line in iter_unfenced_lines(text) if line.strip() == heading)
 
 
 def line_number_for_fragment(text: str, fragment: str, *, start: int = 1) -> int | None:
     """Return the first 1-based line number containing *fragment*."""
+
+    diagnostics_finder = _diagnostics_callable("line_number_for_fragment")
+    if diagnostics_finder is not None:
+        line_number = diagnostics_finder(text, fragment, start=start)
+        return int(line_number) if line_number is not None else None
 
     for line_number, line in enumerate(text.splitlines(), start=1):
         if line_number < start:
@@ -230,6 +320,14 @@ def line_number_for_fragment(text: str, fragment: str, *, start: int = 1) -> int
 
 def first_line_containing_any(text: str, fragments: Sequence[str], *, start: int = 1) -> tuple[int, str] | None:
     """Return the first line number and matched fragment among *fragments*."""
+
+    diagnostics_finder = _diagnostics_callable("first_line_containing_any")
+    if diagnostics_finder is not None:
+        match = diagnostics_finder(text, fragments, start=start)
+        if match is None:
+            return None
+        line_number, marker = match
+        return int(line_number), str(marker)
 
     if not fragments:
         return None

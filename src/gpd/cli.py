@@ -4390,6 +4390,136 @@ def doctor(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# diagnostics — Read-only source diagnostics
+# ═══════════════════════════════════════════════════════════════════════════
+
+diagnostics_app = typer.Typer(help="Read-only source and prompt diagnostics")
+app.add_typer(diagnostics_app, name="diagnostics")
+
+_PROMPT_DIAGNOSTIC_FORMATS = frozenset({"table", "markdown", "json"})
+_PROMPT_DIAGNOSTIC_SURFACES = ("command", "agent", "workflow")
+
+
+def _normalize_prompt_diagnostic_format(output_format: str) -> str:
+    normalized = output_format.strip().casefold()
+    if normalized not in _PROMPT_DIAGNOSTIC_FORMATS:
+        allowed = ", ".join(sorted(_PROMPT_DIAGNOSTIC_FORMATS))
+        _error(f"Unknown diagnostics prompt-surface --format {output_format!r}. Supported: {allowed}")
+    return normalized
+
+
+def _normalize_prompt_diagnostic_surfaces(surface: str) -> tuple[str, ...]:
+    normalized = surface.strip().casefold()
+    if normalized == "all":
+        return _PROMPT_DIAGNOSTIC_SURFACES
+    if normalized not in _PROMPT_DIAGNOSTIC_SURFACES:
+        allowed = ", ".join((*_PROMPT_DIAGNOSTIC_SURFACES, "all"))
+        _error(f"Unknown diagnostics prompt-surface --surface {surface!r}. Supported: {allowed}")
+    return (normalized,)
+
+
+def _normalize_prompt_diagnostic_runtime_names(
+    runtime: str,
+    *,
+    include_runtime_projections: bool,
+) -> tuple[str, ...]:
+    if not include_runtime_projections:
+        return ()
+
+    normalized = runtime.strip().casefold()
+    if normalized == "all":
+        return tuple(list_runtime_names())
+
+    canonical_runtime = normalize_runtime_name(runtime)
+    supported = set(list_runtime_names())
+    if canonical_runtime is None or canonical_runtime not in supported:
+        allowed = ", ".join((*list_runtime_names(), "all"))
+        _error(f"Unknown diagnostics prompt-surface --runtime {runtime!r}. Supported: {allowed}")
+    return (canonical_runtime,)
+
+
+def _print_prompt_diagnostic_rendered(rendered: object) -> None:
+    if rendered is None:
+        return
+    if isinstance(rendered, str):
+        console.print(rendered, highlight=False)
+        return
+    console.print(rendered)
+
+
+def _prompt_diagnostic_repo_root() -> Path:
+    """Return the source checkout root that owns the packaged prompt files."""
+
+    package_dir = Path(__file__).resolve().parent
+    if package_dir.parent.name == "src":
+        return package_dir.parent.parent
+    return package_dir
+
+
+@diagnostics_app.command("prompt-surface")
+def diagnostics_prompt_surface(
+    output_format: str = typer.Option(
+        "table",
+        "--format",
+        help="Output format for non-raw display: table, markdown, or json.",
+    ),
+    surface: str = typer.Option(
+        "all",
+        "--surface",
+        help="Prompt source surface to report: command, agent, workflow, or all.",
+    ),
+    runtime: str = typer.Option(
+        "all",
+        "--runtime",
+        help="Runtime projection to include: all or a runtime id/alias.",
+    ),
+    top: int = typer.Option(20, "--top", help="Number of largest or highest-pressure rows to display."),
+    include_runtime_projections: bool = typer.Option(
+        True,
+        "--runtime-projections/--no-runtime-projections",
+        help="Include final runtime-projected prompt-size metrics.",
+    ),
+    include_tests: bool = typer.Option(
+        False,
+        "--include-tests",
+        help="Include advisory prompt-facing test exactness diagnostics.",
+    ),
+) -> None:
+    """Report read-only diagnostics for GPD prompt and runtime surfaces."""
+    normalized_format = _normalize_prompt_diagnostic_format(output_format)
+    surfaces = _normalize_prompt_diagnostic_surfaces(surface)
+    runtime_names = _normalize_prompt_diagnostic_runtime_names(
+        runtime,
+        include_runtime_projections=include_runtime_projections,
+    )
+    if top < 1:
+        _error("diagnostics prompt-surface --top must be >= 1")
+
+    from gpd.core import prompt_diagnostics
+
+    report = prompt_diagnostics.build_prompt_surface_report(
+        _prompt_diagnostic_repo_root(),
+        surfaces=surfaces,
+        runtime_names=runtime_names,
+        include_tests=include_tests,
+        top=top,
+        include_runtime_projections=include_runtime_projections,
+    )
+
+    payload = prompt_diagnostics.report_to_dict(report, top=top)
+    if _raw:
+        _output(payload)
+        return
+    if normalized_format == "json":
+        _emit_raw_json(payload)
+        return
+    if normalized_format == "markdown":
+        _print_prompt_diagnostic_rendered(prompt_diagnostics.render_prompt_surface_markdown(report, top))
+        return
+    _print_prompt_diagnostic_rendered(prompt_diagnostics.render_prompt_surface_table(report, top))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # query — Cross-phase dependency and search
 # ═══════════════════════════════════════════════════════════════════════════
 

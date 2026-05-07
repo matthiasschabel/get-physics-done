@@ -128,3 +128,48 @@ def test_validate_proof_redteam_artifact_accepts_existing_passed_artifact(tmp_pa
     assert result.status == "passed"
     assert result.errors == []
     assert package.manuscript_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("old_line", "new_line", "expected_fragment"),
+    [
+        ("missing_parameter_symbols: []", "missing_parameter_symbols: [r_0]", "missing_parameter_symbols=r_0"),
+        ("missing_hypothesis_ids: []", "missing_hypothesis_ids: [H1]", "missing_hypothesis_ids=H1"),
+        (
+            "coverage_gaps: []",
+            "coverage_gaps: ['Proof only establishes the centered case.']",
+            "coverage_gaps=Proof only establishes the centered case.",
+        ),
+        ("scope_status: matched", "scope_status: narrower_than_claim", "scope_status=narrower_than_claim"),
+        ("quantifier_status: matched", "quantifier_status: narrowed", "quantifier_status=narrowed"),
+    ],
+)
+def test_validate_proof_redteam_artifact_rejects_passed_status_with_structured_gap(
+    tmp_path: Path,
+    old_line: str,
+    new_line: str,
+    expected_fragment: str,
+) -> None:
+    write_proof_review_package(
+        tmp_path,
+        theorem_bearing=True,
+        review_report=True,
+        proof_redteam_status="passed",
+    )
+    artifact_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM.md"
+    artifact_path.write_text(
+        artifact_path.read_text(encoding="utf-8").replace(old_line, new_line, 1),
+        encoding="utf-8",
+    )
+
+    result = validate_proof_redteam_artifact(
+        artifact_path,
+        project_root=tmp_path,
+        expected_claim_ids=("CLM-001",),
+        expected_proof_artifact_paths=("paper/curvature_flow_bounds.tex",),
+    )
+
+    assert result.valid is False
+    assert result.status is None
+    assert result.errors
+    assert expected_fragment in result.errors[0]

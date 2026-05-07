@@ -19,6 +19,7 @@ from gpd.core.verification_report import (
     build_verification_report_skeleton,
     compose_verification_report_markdown,
     render_verification_report_markdown,
+    validate_rendered_verification_report,
 )
 
 
@@ -369,6 +370,44 @@ def test_verification_report_markdown_draft_surfaces_authoring_rules_and_warning
         assert warning in skeleton.markdown_draft
     assert "gpd_return" in skeleton.markdown_draft
     assert "Markdown body" in skeleton.markdown_draft or "body" in skeleton.markdown_draft
+
+
+def test_generated_verification_skeleton_fails_contract_validation_until_placeholders_replaced(
+    tmp_path: Path,
+) -> None:
+    contract = _compact_stale_refresh_contract()
+    plan_path = _write_stale_refresh_plan(tmp_path, contract)
+    report_path = plan_path.with_name("01-VERIFICATION.md")
+    target_report_ref = "GPD/phases/01-baseline/01-VERIFICATION.md"
+    skeleton = build_verification_report_skeleton(
+        contract=contract,
+        plan_path=plan_path,
+        plan_contract_ref="GPD/phases/01-baseline/01-PLAN.md#/contract",
+    )
+
+    skeleton_validation = validate_rendered_verification_report(
+        skeleton.markdown_draft,
+        source_path=report_path,
+        mode="contract",
+    )
+
+    assert not skeleton_validation.valid
+    assert skeleton_validation.missing == []
+    assert skeleton_validation.oracle_evidence_count == 0
+    assert any("computational_oracle" in error for error in skeleton_validation.errors)
+
+    filled_composition = compose_verification_report_markdown(
+        skeleton.frontmatter,
+        _stale_refresh_oracle_body(),
+        target_report_ref=target_report_ref,
+        source_path=report_path,
+        validation_mode="contract",
+    )
+
+    assert filled_composition.validation.valid, filled_composition.validation.errors
+    assert filled_composition.validation.oracle_evidence_count == 1
+    meta, _body = extract_frontmatter(filled_composition.markdown)
+    assert meta["status"] == "gaps_found"
 
 
 def test_gap_report_composition_accepts_oracle_evidence_body(tmp_path: Path) -> None:

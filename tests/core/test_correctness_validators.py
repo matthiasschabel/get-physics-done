@@ -121,6 +121,35 @@ def test_verification_oracle_validator_requires_explicit_verdict_after_output() 
     assert "PASS/FAIL/INCONCLUSIVE verdict" in result.errors[0]
 
 
+def test_verification_oracle_validator_rejects_template_code_with_real_output_and_verdict() -> None:
+    result = validate_verification_oracle_evidence(
+        _verification_report(
+            dedent(
+                """\
+                # Verification
+
+                ```python
+                # Replace this block with the exact Python or bash check you executed.
+                raise SystemExit("template only - replace before validation")
+                ```
+
+                **Output:**
+
+                ```output
+                4
+                ```
+
+                Verdict: PASS. The output matches the expected value.
+                """
+            )
+        )
+    )
+
+    assert result.valid is False
+    assert result.evidence_count == 0
+    assert "computational_oracle" in result.errors[0]
+
+
 def test_validate_verification_contract_cli_rejects_missing_oracle(tmp_path: Path) -> None:
     report = tmp_path / "01-VERIFICATION.md"
     report.write_text(_verification_report("# Verification\n\nNo executable check.\n"), encoding="utf-8")

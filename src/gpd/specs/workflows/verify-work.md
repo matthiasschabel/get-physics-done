@@ -403,7 +403,9 @@ Present the diagnosis results to the user and ask how to proceed:
 
 - Auto-plan fixes
 - Investigate manually
-- Accept as-is
+- Acknowledge limitation; verification status remains non-passed
+
+Acknowledgement is routing only, not verification evidence. It cannot upgrade non-passed verifier/frontmatter/proof/check status to `passed`; preserve verifier-owned status and route to gap planning or follow-up.
 </step>
 
 <step name="load_gap_repair_stage">
@@ -521,7 +523,7 @@ gpd --raw state record-verification --phase "${phase_number}"
 ```
 
 `record-verification` reads frontmatter `status:` (`passed` -> `Verified`; non-passed -> `Blocked`).
-Use `--status passed|failed` only when bypassing frontmatter. Barrier: wait before state get/validate/repair; never parallelize state mutation with validation.
+Do not pass `--status` here or for acknowledgement; legacy/admin overrides require no verifier frontmatter and cannot turn limitations into passes. Barrier: wait before state get/validate/repair; never parallelize state mutation with validation.
 
 Present the summary of passed, issue, and skipped checks. Do not relax verifier fail-closed results.
 

@@ -175,7 +175,9 @@ def test_record_verification_maps_gap_report_to_blocked_and_keeps_state_surfaces
     initial_status: str,
 ) -> None:
     phase_dir = _write_phase_project(tmp_path, status=initial_status)
-    _write_gap_verification(phase_dir / "02-VERIFICATION.md")
+    verification_report = phase_dir / "02-VERIFICATION.md"
+    _write_gap_verification(verification_report)
+    before_report = verification_report.read_text(encoding="utf-8")
 
     result = RUNNER.invoke(
         app,
@@ -195,10 +197,12 @@ def test_record_verification_maps_gap_report_to_blocked_and_keeps_state_surfaces
     assert payload["recorded"] is True
     assert payload["status"] == "Blocked"
     assert payload["previous_status"] == initial_status
+    assert verification_report.read_text(encoding="utf-8") == before_report
 
     state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
     markdown = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
     assert state["position"]["status"] == "Blocked"
+    assert state["position"]["status"] != "Verified"
     assert "**Status:** Blocked" in markdown
 
     validation = RUNNER.invoke(app, ["--raw", "--cwd", str(tmp_path), "state", "validate"])

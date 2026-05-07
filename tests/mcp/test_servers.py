@@ -2921,6 +2921,16 @@ class TestVerificationServer:
 
     # --- run_check ---
 
+    def _assert_run_check_static_triage_invariants(self, result, *, triage_status):
+        assert result["result_kind"] == "static_triage"
+        assert result["triage_status"] == triage_status
+        assert result["passes_physics"] is False
+        assert result["requires_caller_verification"] is True
+        assert result["grants_final_verification_pass"] is False
+        assert result["empty_automated_issues_means"] == (
+            "No static pattern issue was detected; this is not a pass verdict."
+        )
+
     def test_run_check_dimensional(self):
         from gpd.mcp.servers.verification_server import run_check
 
@@ -2930,24 +2940,30 @@ class TestVerificationServer:
         assert result["schema_version"] == 1
         assert result["evidence_kind"] == "computational"
         assert result["machine_supported"] is True
+        self._assert_run_check_static_triage_invariants(result, triage_status="schema_only")
+        assert "Caller-owned verification is still required" in result["guidance"]
 
     def test_run_check_dimensional_missing_hbar(self):
         from gpd.mcp.servers.verification_server import run_check
 
         result = run_check("5.1", "qft", "quantum commutator calculation")
         assert any("hbar" in issue for issue in result["automated_issues"])
+        self._assert_run_check_static_triage_invariants(result, triage_status="failed_or_tension")
 
     def test_run_check_limiting_cases_no_limits(self):
         from gpd.mcp.servers.verification_server import run_check
 
         result = run_check("5.3", "qft", "just some plain calculation here")
         assert any("limiting" in issue.lower() for issue in result["automated_issues"])
+        self._assert_run_check_static_triage_invariants(result, triage_status="failed_or_tension")
 
     def test_run_check_limiting_cases_with_limits(self):
         from gpd.mcp.servers.verification_server import run_check
 
         result = run_check("5.3", "qft", "In the limit \\to 0 this reduces to known result")
         assert len(result["automated_issues"]) == 0
+        self._assert_run_check_static_triage_invariants(result, triage_status="schema_only")
+        assert "not a pass verdict" in result["empty_automated_issues_means"]
 
     def test_run_check_unknown_id(self):
         from gpd.mcp.servers.verification_server import run_check

@@ -273,10 +273,25 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
     assert "never send more input to closed child" in workflow
 
 
+def test_verify_work_acknowledgement_is_routing_only_not_status_upgrade() -> None:
+    workflow = _read(WORKFLOWS_DIR / "verify-work.md")
+
+    assert "Accept as-is" not in workflow
+    assert "- Acknowledge limitation; verification status remains non-passed" in workflow
+    assert "Acknowledgement is routing only, not verification evidence." in workflow
+    assert "cannot upgrade non-passed verifier/frontmatter/proof/check status to `passed`" in workflow
+    assert "preserve verifier-owned status" in workflow
+    assert "route to gap planning or follow-up" in workflow
+
+
 def test_verify_work_record_verification_state_closeout_is_sequential() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     assert 'gpd --raw state record-verification --phase "${phase_number}"' in workflow
-    assert "Use `--status passed|failed` only when bypassing frontmatter." in workflow
+    assert "`record-verification` reads frontmatter `status:` (`passed` -> `Verified`; non-passed -> `Blocked`)." in workflow
+    assert "Do not pass `--status` here or for acknowledgement" in workflow
+    assert "legacy/admin overrides require no verifier frontmatter" in workflow
+    assert "cannot turn limitations into passes" in workflow
+    assert "--status passed|failed" not in workflow
     assert "Barrier: wait before state get/validate/repair" in workflow
     assert "never parallelize state mutation with validation." in workflow

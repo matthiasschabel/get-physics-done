@@ -939,7 +939,8 @@ def test_public_descriptors_surface_contract_and_optional_dependency_visibility(
     descriptors = build_public_descriptors()
 
     verification = descriptors["gpd-verification"]
-    assert verification["description"].startswith("GPD physics verification checks.")
+    assert verification["description"].startswith("GPD physics verification support tools.")
+    assert "MCP results do not by themselves grant final scientific verification status" in verification["description"]
     assert verification_contract_surface_summary_text() in verification["description"]
     assert "Proof checks require authoritative contract payloads." in verification["description"]
     assert "Only contract-payload enum case drift is recoverable" in verification["description"]
@@ -1396,6 +1397,9 @@ def test_run_check_tool_description_surfaces_alias_and_contract_hint_support() -
 
     description = _tool_description(mcp, "run_check")
 
+    assert "Run static triage" in description
+    assert "does not pass or certify the artifact" in description
+    assert "Empty ``automated_issues`` means only" in description
     assert "canonical check keys" in description
     assert "contract.limit_recovery" in description
     assert "required_request_fields" in description
@@ -1413,5 +1417,6 @@ def test_public_verification_infra_descriptor_surfaces_semantic_contract_rules()
     )
 
     description = descriptor["description"]
-    assert description.startswith("GPD physics verification checks.")
+    assert description.startswith("GPD physics verification support tools.")
+    assert "MCP results do not by themselves grant final scientific verification status" in description
     assert verification_contract_surface_summary_text() in description

@@ -54,6 +54,9 @@ def test_verification_contract_policy_text_stays_aligned_across_public_surfaces(
     )
     assert verification_descriptor["description"] == verification_server_description()
     assert infra_descriptor["description"] == verification_server_description()
+    assert verification_descriptor["description"].startswith("GPD physics verification support tools.")
+    assert "static triage" in verification_descriptor["description"]
+    assert "do not by themselves grant final scientific verification status" in verification_descriptor["description"]
     assert tools["run_contract_check"].description is not None
     assert tools["suggest_contract_checks"].description is not None
     assert verification_contract_surface_summary_text() in verification_descriptor["description"]

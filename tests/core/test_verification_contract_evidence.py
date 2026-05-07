@@ -522,6 +522,32 @@ def test_validate_frontmatter_verification_accepts_contract_results() -> None:
     assert result.errors == []
 
 
+@pytest.mark.parametrize(
+    "triage_status",
+    [
+        "VERIFIED",
+        "PARTIAL",
+        "FAILED",
+        "UNCERTAIN",
+        "schema_only",
+        "failed_or_tension",
+        "static_triage",
+    ],
+)
+def test_validate_frontmatter_verification_rejects_triage_labels_as_top_level_status(
+    triage_status: str,
+) -> None:
+    content = _verification_with_contract_results().replace("status: passed", f"status: {triage_status}", 1)
+
+    result = validate_frontmatter(content, "verification")
+
+    assert result.valid is False
+    assert any(
+        "status: must be one of passed, gaps_found, expert_needed, human_needed" in error
+        for error in result.errors
+    )
+
+
 def test_validate_frontmatter_verification_rejects_passed_proof_claim_without_complete_proof_audit(
     tmp_path: Path,
 ) -> None:

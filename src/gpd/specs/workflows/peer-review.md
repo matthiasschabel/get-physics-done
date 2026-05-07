@@ -341,7 +341,9 @@ Use one short sentence that names each stage's job, for example:
 <step name="child_return_contract">
 **Peer-review child return contract:**
 
-Every spawned review child must return a typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, `files_written` naming only artifacts that genuinely landed on disk in that child run, `issues`, `next_actions`, and `peer_review_stage`. Human-readable completion labels are presentation only and do not satisfy the handoff without the typed envelope.
+Every spawned review child must return a typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, `files_written` naming only artifacts that genuinely landed on disk in that child run, `issues`, and `next_actions`. Human-readable completion labels are presentation only and do not satisfy the handoff without the typed envelope.
+
+Stage identity is callsite-owned, not return-envelope data. Derive it from the stage task callsite, expected artifact paths, write allowlist, canonical artifact filenames, and validator-checked artifact bodies. Never require or trust a stage label inside `gpd_return`; route on `gpd_return.status` plus the stage-recovery artifact gate.
 
 Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` after every child return. The stage callsites below keep the exact expected artifacts, validator commands, retry prompt, and write allowlist local.
 
@@ -404,7 +406,7 @@ Focus on:
 3. Flag where abstract/introduction/conclusion overclaim the physics.
 4. Do NOT use `STATE.md`, `ROADMAP.md`, or phase summaries as a source of truth for the manuscript's validity.
 
-Use the child return contract with `peer_review_stage: reader`; `files_written` exactly `${REVIEW_ROOT}/CLAIMS{round_suffix}.json` and `${REVIEW_ROOT}/STAGE-reader{round_suffix}.json` when completed. Optional prose may say STAGE 1 COMPLETE with assessment, blocker count, and major concern count.",
+Use the child return contract for the Stage 1 reader callsite; completion requires fresh `files_written` entries for `${REVIEW_ROOT}/CLAIMS{round_suffix}.json` and `${REVIEW_ROOT}/STAGE-reader{round_suffix}.json`, and `gpd validate review-claim-index` plus `gpd validate review-stage-report` must confirm the claim index and `stage_id: reader` / `stage_kind: reader`. Optional prose may say STAGE 1 COMPLETE with assessment, blocker count, and major concern count.",
   description="Peer review stage 1: manuscript read"
 )
 ```
@@ -478,7 +480,7 @@ Files to read:
 - All `*.bib` files under `${MANUSCRIPT_ROOT}`, plus `references/references.bib` if present
 
 Use targeted web search when novelty, significance, or prior-work positioning is uncertain. Treat novelty-heavy claims as requiring external comparison, not trust. Use bundle reference prompts only as additive hints about prior-work or benchmark framing; do not infer novelty or correctness from bundle presence alone.
-Use the child return contract with `peer_review_stage: literature`; `files_written` exactly `${REVIEW_ROOT}/STAGE-literature{round_suffix}.json` when completed. Optional prose may say STAGE 2 COMPLETE with assessment, blocker count, and major concern count.",
+Use the child return contract for the Stage 2 literature callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-literature{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: literature` / `stage_kind: literature`. Optional prose may say STAGE 2 COMPLETE with assessment, blocker count, and major concern count.",
   description="Peer review stage 2: literature context"
 )
 ```
@@ -521,7 +523,7 @@ Files to read:
 
 Focus on key equations, limits, internal consistency, and approximation validity.
 If theorem-bearing claims are present, `gpd-check-proof` may be running in parallel and will produce `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`; do not wait on that artifact to begin the math review, and do not duplicate the proof audit yourself.
-Use the child return contract with `peer_review_stage: math`; `files_written` exactly `${REVIEW_ROOT}/STAGE-math{round_suffix}.json` when completed. Optional prose may say STAGE 3 COMPLETE with assessment, blocker count, and major concern count.",
+Use the child return contract for the Stage 3 math callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-math{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: math` / `stage_kind: math`. Optional prose may say STAGE 3 COMPLETE with assessment, blocker count, and major concern count.",
   description="Peer review stage 3: mathematical soundness"
 )
 ```
@@ -571,7 +573,7 @@ Files to read:
 - `${REPRODUCIBILITY_MANIFEST_PATH}` if present
 
 Reconstruct the theorem / proof inventory explicitly before judging the proof. If any named parameter, hypothesis, quantifier, or conclusion clause disappears from the proof, set `status: gaps_found`. Do not silently accept a proof of a narrower special case. Run at least one adversarial probe against scope, quantifier coverage, or hidden assumptions before you pass the proof.
-Use the child return contract with `peer_review_stage: proof_redteam`; `files_written` exactly `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` when completed.",
+Use the child return contract for the proof-redteam callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` within the proof-redteam write allowlist.",
   description="Peer review auxiliary proof critique"
 )
 ```
@@ -666,7 +668,7 @@ Focus on:
 
 Treat bundle guidance as additive skepticism only: it may highlight missing decisive comparisons or estimator caveats, but it must not replace authoritative evidence required by the resolved review target or project contract or create new manuscript obligations out of thin air.
 
-Use the child return contract with `peer_review_stage: physics`; `files_written` exactly `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` when completed. Optional prose may say STAGE 4 COMPLETE with assessment, blocker count, and major concern count.",
+Use the child return contract for the Stage 4 physics callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: physics` / `stage_kind: physics`. Optional prose may say STAGE 4 COMPLETE with assessment, blocker count, and major concern count.",
   description="Peer review stage 4: physical soundness"
 )
 ```
@@ -738,7 +740,7 @@ You must explicitly decide whether the paper is:
 2. Merely technically competent
 3. Overclaimed relative to its actual contribution
 
-Use the child return contract with `peer_review_stage: interestingness`; `files_written` exactly `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json` when completed. Optional prose may say STAGE 5 COMPLETE with assessment, blocker count, and major concern count.",
+Use the child return contract for the Stage 5 interestingness callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: interestingness` / `stage_kind: interestingness`. Optional prose may say STAGE 5 COMPLETE with assessment, blocker count, and major concern count.",
   description="Peer review stage 5: significance and venue fit"
 )
 ```
@@ -861,7 +863,7 @@ Write `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` and the matching `${
 Treat the referee report files as required final-stage artifacts. If either report file is missing after adjudication, the stage is incomplete even if the JSON validators passed.
 Also write `${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md` when applicable.
 
-Use the child return contract with `peer_review_stage: referee`; `files_written` naming only Stage 6-owned artifacts written in this run. Optional prose may summarize the recommendation, confidence, issue counts, and whether prior major concerns are resolved.",
+Use the child return contract for the Stage 6 final-adjudication callsite; completion requires fresh `files_written` naming only Stage 6-owned artifacts written in this run, and the review-ledger, referee-decision, and referee-report artifact gates must pass. Optional prose may summarize the recommendation, confidence, issue counts, and whether prior major concerns are resolved.",
   description="Peer review stage 6: final adjudication"
 )
 ```

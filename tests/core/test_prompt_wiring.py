@@ -4112,25 +4112,38 @@ def test_peer_review_workflow_and_generated_skill_surface_keep_lifecycle_cleanup
     _assert_contains_fragments(peer_review_skill_content, *expected_fragments)
 
 
-def test_peer_review_spawned_stage_prompts_require_typed_child_returns() -> None:
+def test_peer_review_spawned_stage_prompts_keep_stage_identity_callsite_owned() -> None:
     peer_review = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
     assert '<step name="child_return_contract">' in peer_review
     assert "Human-readable completion labels are presentation only" in peer_review
     assert "status: completed | checkpoint | blocked | failed" in peer_review
-    for stage_name in (
-        "reader",
-        "literature",
-        "math",
-        "proof_redteam",
-        "physics",
-        "interestingness",
-        "referee",
-    ):
-        assert f"`peer_review_stage: {stage_name}`" in peer_review
-    assert "files_written` exactly `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`" in peer_review
-    assert "files_written` exactly `${REVIEW_ROOT}/STAGE-literature{round_suffix}.json`" in peer_review
-    assert "files_written` naming only Stage 6-owned artifacts written in this run" in peer_review
+    assert "Stage identity is callsite-owned, not return-envelope data." in peer_review
+    assert (
+        "Derive it from the stage task callsite, expected artifact paths, write allowlist, "
+        "canonical artifact filenames, and validator-checked artifact bodies."
+    ) in peer_review
+    assert "route on `gpd_return.status` plus the stage-recovery artifact gate" in peer_review
+    assert "peer" + "_review_stage" not in peer_review
+
+    expected_stage_contracts = (
+        "child return contract for the Stage 1 reader callsite",
+        "fresh `files_written` entries for `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`",
+        "`stage_id: reader` / `stage_kind: reader`",
+        "child return contract for the Stage 2 literature callsite",
+        "`stage_id: literature` / `stage_kind: literature`",
+        "child return contract for the Stage 3 math callsite",
+        "`stage_id: math` / `stage_kind: math`",
+        "child return contract for the proof-redteam callsite",
+        "fresh `files_written` entry for `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`",
+        "child return contract for the Stage 4 physics callsite",
+        "`stage_id: physics` / `stage_kind: physics`",
+        "child return contract for the Stage 5 interestingness callsite",
+        "`stage_id: interestingness` / `stage_kind: interestingness`",
+        "child return contract for the Stage 6 final-adjudication callsite",
+        "fresh `files_written` naming only Stage 6-owned artifacts written in this run",
+    )
+    _assert_contains_fragments(peer_review, *expected_stage_contracts)
 
 
 def test_bibliographer_skill_surface_stays_direct_only() -> None:

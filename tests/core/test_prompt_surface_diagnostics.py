@@ -18,8 +18,12 @@ EXPECTED_REPORT_KEYS = {
     "totals",
     "items",
     "runtime_top_prompts",
+    "stage_diagnostics",
     "invalid_gpd_return_examples",
+    "disallowed_return_field_mentions",
     "duplicate_invariants",
+    "semantic_duplicate_invariants",
+    "exact_assertion_diagnostics",
     "exact_prose_assertion_files",
     "warnings",
 }
@@ -37,6 +41,9 @@ EXPECTED_ITEM_KEYS = {
     "visible_schema_example_count",
     "invalid_gpd_return_example_count",
     "invalid_gpd_return_examples",
+    "return_field_mention_count",
+    "disallowed_return_field_mention_count",
+    "disallowed_return_field_mentions",
     "hard_gate_line_count",
     "hard_gate_density",
     "shell_fence_count",
@@ -51,6 +58,9 @@ EXPECTED_RUNTIME_PROJECTION_KEYS = {
     "expanded_char_count",
     "line_count",
     "char_count",
+    "line_delta",
+    "char_delta",
+    "char_delta_percent",
     "include_count",
     "runtime_note_count",
     "runtime_note_chars",
@@ -68,6 +78,9 @@ EXPECTED_RUNTIME_TOP_PROMPT_KEYS = {
     "projected_char_count",
     "expanded_line_count",
     "expanded_char_count",
+    "line_delta",
+    "char_delta",
+    "char_delta_percent",
     "include_count",
     "runtime_note_count",
     "runtime_note_chars",
@@ -80,12 +93,116 @@ EXPECTED_DUPLICATE_GROUP_KEYS = {
     "severity",
     "locations",
 }
+EXPECTED_SEMANTIC_DUPLICATE_GROUP_KEYS = {
+    "category",
+    "label",
+    "occurrence_count",
+    "file_count",
+    "non_reference_file_count",
+    "severity",
+    "canonical_references",
+    "suggested_action",
+    "examples",
+}
+EXPECTED_SEMANTIC_DUPLICATE_EXAMPLE_KEYS = {
+    "path",
+    "line",
+    "category",
+    "snippet",
+    "matched_terms",
+    "is_reference_or_template",
+}
 EXPECTED_INVALID_RETURN_EXAMPLE_KEYS = {
     "path",
     "start_line",
     "end_line",
     "errors",
     "preview",
+}
+EXPECTED_RETURN_FIELD_MENTION_KEYS = {
+    "path",
+    "line",
+    "field",
+    "mention_kind",
+    "polarity",
+    "allowed",
+    "allowed_source",
+    "severity",
+    "snippet",
+    "suggestion",
+}
+EXPECTED_STAGE_DIAGNOSTIC_KEYS = {
+    "workflow_id",
+    "command_name",
+    "command_path",
+    "manifest_path",
+    "stage_count",
+    "first_turn_line_count",
+    "first_turn_char_count",
+    "first_turn_raw_include_count",
+    "runtime_projection",
+    "stages",
+    "violation_count",
+    "warnings",
+}
+EXPECTED_STAGE_KEYS = {
+    "workflow_id",
+    "stage_id",
+    "order",
+    "eager_authorities",
+    "eager_authority_metrics",
+    "eager_line_count",
+    "eager_char_count",
+    "lazy_authorities",
+    "lazy_authority_metrics",
+    "lazy_line_count",
+    "lazy_char_count",
+    "must_not_eager_load_violations",
+}
+EXPECTED_AUTHORITY_KEYS = {
+    "authority",
+    "path",
+    "raw_line_count",
+    "raw_char_count",
+    "raw_include_count",
+    "expanded_line_count",
+    "expanded_char_count",
+    "transitive_include_authorities",
+}
+EXPECTED_VIOLATION_KEYS = {
+    "workflow_id",
+    "stage_id",
+    "authority",
+    "violation_source",
+    "eager_via",
+}
+EXPECTED_EXACT_ASSERTION_TOTAL_KEYS = {
+    "files_scanned",
+    "exact_assertion_file_count",
+    "exact_assertion_count",
+    "machine_contract_exact_assertions",
+    "public_ux_exact_assertions",
+    "brittle_prose_assertions",
+    "brittle_prose_file_count",
+}
+EXPECTED_EXACT_ASSERTION_FILE_KEYS = {
+    "path",
+    "exact_assertion_count",
+    "machine_contract_exact_assertions",
+    "public_ux_exact_assertions",
+    "brittle_prose_assertions",
+    "brittle_prose_density",
+    "severity",
+    "examples",
+}
+EXPECTED_EXACT_ASSERTION_EXAMPLE_KEYS = {
+    "path",
+    "line",
+    "literal",
+    "assertion_shape",
+    "polarity",
+    "category",
+    "reason",
 }
 
 
@@ -199,8 +316,119 @@ def test_report_to_dict_has_stable_schema_version_and_json_shape(tmp_path: Path)
     assert set(payload["items"][0]) == EXPECTED_ITEM_KEYS
     assert payload["items"][0]["runtime_projection"] == []
     assert payload["runtime_top_prompts"] == {}
+    assert payload["stage_diagnostics"] == []
     assert payload["items"][0]["invalid_gpd_return_examples"] == []
     assert payload["invalid_gpd_return_examples"] == []
+    assert payload["items"][0]["disallowed_return_field_mentions"] == []
+    assert payload["disallowed_return_field_mentions"] == []
+    assert payload["semantic_duplicate_invariants"] == []
+    exact_diagnostics = payload["exact_assertion_diagnostics"]
+    assert isinstance(exact_diagnostics, dict)
+    assert exact_diagnostics["schema_version"] == "exact_assertions.v1"
+    assert set(exact_diagnostics["totals"]) == EXPECTED_EXACT_ASSERTION_TOTAL_KEYS
+    assert exact_diagnostics["totals"]["exact_assertion_count"] == 0
+    assert exact_diagnostics["files"] == []
+
+
+def test_stage_diagnostics_measure_staged_commands_and_transitive_lazy_violations(tmp_path: Path) -> None:
+    runtime_name = _non_native_runtime_name()
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe command
+        ---
+        @{GPD_INSTALL_DIR}/workflows/probe.md
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/probe.md",
+        """
+        ---
+        name: probe
+        ---
+        Stage bootstrap body.
+        @{GPD_INSTALL_DIR}/templates/deferred.md
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/specs/templates/deferred.md",
+        """
+        Deferred authority body.
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/probe-stage-manifest.json",
+        """
+        {
+          "schema_version": 1,
+          "workflow_id": "probe",
+          "stages": [
+            {
+              "id": "bootstrap",
+              "order": 1,
+              "purpose": "Load the probe bootstrap.",
+              "mode_paths": ["workflows/probe.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe.md"],
+              "conditional_authorities": [
+                {
+                  "when": "need_deferred",
+                  "authorities": ["templates/deferred.md"]
+                }
+              ],
+              "must_not_eager_load": ["templates/deferred.md"],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": [],
+              "checkpoints": []
+            }
+          ]
+        }
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("command",), runtime_names=(runtime_name,))
+    payload = diagnostics.report_to_dict(report)
+
+    command_item = payload["items"][0]
+    stage_diagnostic = payload["stage_diagnostics"][0]
+    assert set(stage_diagnostic) == EXPECTED_STAGE_DIAGNOSTIC_KEYS
+    assert stage_diagnostic["workflow_id"] == "probe"
+    assert stage_diagnostic["command_name"] == "probe"
+    assert stage_diagnostic["first_turn_char_count"] == command_item["expanded_char_count"]
+    assert stage_diagnostic["first_turn_line_count"] == command_item["expanded_line_count"]
+    assert len(stage_diagnostic["runtime_projection"]) == 1
+    assert set(stage_diagnostic["runtime_projection"][0]) == EXPECTED_RUNTIME_PROJECTION_KEYS
+
+    stage = stage_diagnostic["stages"][0]
+    assert set(stage) == EXPECTED_STAGE_KEYS
+    assert stage["stage_id"] == "bootstrap"
+    assert stage["eager_authorities"] == ["workflows/probe.md"]
+    assert stage["lazy_authorities"] == ["templates/deferred.md"]
+    assert len(stage["eager_authority_metrics"]) == 1
+    assert set(stage["eager_authority_metrics"][0]) == EXPECTED_AUTHORITY_KEYS
+    assert set(stage["lazy_authority_metrics"][0]) == EXPECTED_AUTHORITY_KEYS
+    assert "templates/deferred.md" in stage["eager_authority_metrics"][0]["transitive_include_authorities"]
+
+    violations = stage["must_not_eager_load_violations"]
+    assert all(set(violation) == EXPECTED_VIOLATION_KEYS for violation in violations)
+    violation_sources = {violation["violation_source"] for violation in violations}
+    assert "first_turn_transitive_include" in violation_sources
+    assert "stage_eager_transitive_include" in violation_sources
+    assert "conditional_eager_overlap" not in violation_sources
+    first_turn_violation = next(
+        violation for violation in violations if violation["violation_source"] == "first_turn_transitive_include"
+    )
+    assert "workflows/probe.md" in first_turn_violation["eager_via"]
+    assert stage_diagnostic["violation_count"] == len(violations)
 
 
 def test_include_counting_ignores_fenced_code_and_uses_installer_expansion(tmp_path: Path) -> None:
@@ -310,6 +538,243 @@ def test_duplicate_invariant_grouping_normalizes_whitespace_and_case(tmp_path: P
     assert len(group.locations) == 3
 
 
+def test_semantic_duplicate_invariants_group_paraphrased_categories(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/alpha.md",
+        """
+        ---
+        name: gpd:alpha
+        description: Alpha
+        ---
+        When routing, read gpd_return.status; the valid runtime choices remain completed, checkpoint, blocked, and failed.
+        A checkpoint handoff stops after asking the user and the orchestrator starts a fresh continuation instead of letting that same spawned run continue.
+        Reject a phase artifact that already existed before this run; runtime completion text cannot prove success by itself.
+        Treat the report as fresh only when the expected path appears in gpd_return.files_written and is readable on disk.
+        Human-readable headings and success prose are presentation only; route on the structured status, not labels.
+        Do not fabricate a child gpd_return when the checker omits its return envelope; retry the child instead.
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/beta.md",
+        """
+        ---
+        name: beta
+        ---
+        Consume the typed status from gpd_return.status and use only completed | checkpoint | blocked | failed.
+        For checkpoint user input, present the checkpoint and spawn a fresh continuation rather than resuming in place.
+        Preexisting files are stale evidence for this handoff; do not infer completion from files alone.
+        The artifact gate passes only when gpd_return.files_written names the same path that now exists.
+        Route on gpd_return.status, not headings or marker strings that merely look successful.
+        Never paste a synthetic gpd_return for a verifier child; a malformed return envelope is incomplete.
+        """,
+    )
+
+    report = _report(tmp_path, runtime_names=())
+    groups_by_category = {group.category: group for group in report.semantic_duplicate_invariants}
+
+    assert set(groups_by_category) == {
+        "status_handling",
+        "fresh_continuation",
+        "stale_artifact_rejection",
+        "files_written_freshness",
+        "heading_prose_non_authority",
+        "no_synthesized_child_gpd_return",
+    }
+    assert groups_by_category["no_synthesized_child_gpd_return"].severity == "high"
+    assert all(group.occurrence_count >= 2 for group in groups_by_category.values())
+    assert all(group.non_reference_file_count == 2 for group in groups_by_category.values())
+    assert all(group.examples for group in groups_by_category.values())
+
+    matching_exact_groups = [
+        group
+        for group in report.duplicate_invariants
+        if "fresh continuation" in group.phrase or "files_written" in group.phrase
+    ]
+    assert matching_exact_groups == []
+
+
+def test_semantic_duplicate_invariants_ignore_frontmatter_and_fenced_code(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/fenced-only.md",
+        """
+        ---
+        name: gpd:fenced-only
+        description: gpd_return.status completed checkpoint blocked failed in metadata
+        ---
+        ```text
+        Route on gpd_return.status and use completed | checkpoint | blocked | failed.
+        Do not fabricate a child gpd_return from this fenced example.
+        ```
+        """,
+    )
+
+    report = _report(tmp_path, runtime_names=())
+
+    assert report.semantic_duplicate_invariants == ()
+
+
+def test_semantic_duplicate_invariants_avoid_common_false_positives(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/false-positive-probe.md",
+        """
+        ---
+        name: false-positive-probe
+        ---
+        Record verification_status: passed | gaps_found | expert_needed | human_needed for scientific review.
+        The research synthesizer can synthesize literature summaries without touching any return envelope.
+        A main-context fallback owns its own gpd_return and does not patch a child envelope.
+        Numerical artifacts may appear in plots, but that does not describe handoff freshness.
+        """,
+    )
+
+    report = _report(tmp_path, runtime_names=())
+
+    assert report.semantic_duplicate_invariants == ()
+
+
+def test_semantic_duplicate_invariants_reference_only_occurrences_are_info(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/references/orchestration/child-artifact-gate.md",
+        """
+        The artifact gate passes only when gpd_return.files_written names the expected path and it exists on disk.
+        """,
+    )
+
+    report = _report(tmp_path, runtime_names=())
+
+    assert len(report.semantic_duplicate_invariants) == 1
+    group = report.semantic_duplicate_invariants[0]
+    assert group.category == "files_written_freshness"
+    assert group.severity == "info"
+    assert group.non_reference_file_count == 0
+    assert group.examples[0].is_reference_or_template is True
+
+
+def test_exact_assertion_diagnostics_split_machine_public_ux_and_brittle_prose(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe
+        ---
+        Probe body.
+        """,
+    )
+    _write(
+        tmp_path,
+        "tests/core/test_prompt_contracts.py",
+        '''
+        def test_machine_contracts(prompt):
+            assert "gpd --raw init new-project --stage post_scope" in prompt
+            assert "templates/project-contract-schema.md" in prompt
+            assert "project_contract.claims[]" in prompt
+            assert "must_haves" not in prompt
+            assert '<step name="load_gap_repair_stage">' in prompt
+            assert "schema_version: 1" in prompt
+            assert "--mode approved" in prompt
+        ''',
+    )
+    _write(
+        tmp_path,
+        "tests/core/test_cli.py",
+        '''
+        def test_public_ux(output):
+            assert "## Command Index" in output
+            assert "Quick Start" in output
+            assert "## Choose this runtime if" in output
+            assert "[Y/n/e]" in output
+            assert "Start a fresh context window, then run `{next command}`." in output
+        ''',
+    )
+    _write(
+        tmp_path,
+        "tests/core/test_prompt_prose.py",
+        '''
+        def test_brittle_prompt_prose(prompt):
+            assert "The planner returns proposed roadmap edits for the next execution segment." in prompt
+            prompt.count("Do not approve a scoping contract that strips decisive outputs from the project brief.")
+            prompt.index("The worker should preserve the surrounding prose when updating this workflow section.")
+        ''',
+    )
+
+    diagnostics = _diagnostics()
+    report = diagnostics.build_prompt_surface_report(
+        tmp_path,
+        surfaces=("command",),
+        runtime_names=(),
+        include_tests=True,
+        include_runtime_projections=False,
+    )
+    payload = diagnostics.report_to_dict(report)
+    exact = payload["exact_assertion_diagnostics"]
+    totals = exact["totals"]
+
+    assert set(totals) == EXPECTED_EXACT_ASSERTION_TOTAL_KEYS
+    assert totals["files_scanned"] == 3
+    assert totals["exact_assertion_count"] == 15
+    assert totals["machine_contract_exact_assertions"] == 7
+    assert totals["public_ux_exact_assertions"] == 5
+    assert totals["brittle_prose_assertions"] == 3
+    assert totals["brittle_prose_file_count"] == 1
+
+    files_by_path = {entry["path"]: entry for entry in exact["files"]}
+    assert set(files_by_path) == {
+        "tests/core/test_cli.py",
+        "tests/core/test_prompt_contracts.py",
+        "tests/core/test_prompt_prose.py",
+    }
+    for entry in files_by_path.values():
+        assert set(entry) == EXPECTED_EXACT_ASSERTION_FILE_KEYS
+
+    prose_entry = files_by_path["tests/core/test_prompt_prose.py"]
+    assert prose_entry["brittle_prose_assertions"] == 3
+    assert prose_entry["machine_contract_exact_assertions"] == 0
+    assert prose_entry["public_ux_exact_assertions"] == 0
+    assert prose_entry["brittle_prose_density"] == 1.0
+    assert prose_entry["severity"] == "info"
+    brittle_examples = prose_entry["examples"]["brittle_prose"]
+    assert {example["assertion_shape"] for example in brittle_examples} == {
+        "assert_contains",
+        "count",
+        "index",
+    }
+    assert all(set(example) == EXPECTED_EXACT_ASSERTION_EXAMPLE_KEYS for example in brittle_examples)
+    assert all(example["category"] == "brittle_prose" for example in brittle_examples)
+
+    machine_examples = files_by_path["tests/core/test_prompt_contracts.py"]["examples"]["machine_contract"]
+    assert {example["reason"] for example in machine_examples} >= {
+        "gpd_command_or_flag",
+        "path_or_artifact",
+        "schema_or_field_path",
+    }
+    assert any(example["polarity"] == "forbidden" for example in machine_examples)
+
+    public_entry = files_by_path["tests/core/test_cli.py"]
+    assert public_entry["public_ux_exact_assertions"] == 5
+    assert public_entry["examples"]["public_ux"][0]["reason"] == "public_ux_copy"
+
+    compatibility = {entry["path"]: entry for entry in payload["exact_prose_assertion_files"]}
+    assert compatibility["tests/core/test_prompt_contracts.py"]["machine_contract_assertions"] == 7
+    assert compatibility["tests/core/test_cli.py"]["prose_contract_assertions"] == 5
+    assert compatibility["tests/core/test_prompt_prose.py"]["brittle_prose_assertions"] == 3
+
+    markdown = diagnostics.render_prompt_surface_markdown(report, top=3)
+    table = diagnostics.render_prompt_surface_table(report, top=3)
+    assert "## Prompt-Test Exactness" in markdown
+    assert "Thresholds: brittle prose warn" in markdown
+    assert "| File | Exact | Machine | Public UX | Brittle prose | Brittle % | Severity |" in markdown
+    assert "prompt-test exactness" in table
+    assert "public_ux" in table
+    assert "brittle_pct" in table
+
+
 def test_invalid_partial_gpd_return_examples_are_reported(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -393,6 +858,131 @@ def test_shell_blocks_that_construct_returns_are_not_schema_examples(tmp_path: P
     assert item.visible_schema_example_count == 0
     assert item.invalid_gpd_return_example_count == 0
     assert item.invalid_gpd_return_examples == ()
+
+
+def test_disallowed_direct_gpd_return_field_mentions_are_reported(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/direct-return-field-probe.md",
+        """
+        ---
+        name: gpd:direct-return-field-probe
+        description: Direct return field probe
+        ---
+        Route on gpd_return.file_written after the handoff.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("command",), runtime_names=())
+    item = report.items[0]
+    mention = report.disallowed_return_field_mentions[0]
+
+    assert item.return_field_mention_count == 1
+    assert item.disallowed_return_field_mention_count == 1
+    assert item.disallowed_return_field_mentions == report.disallowed_return_field_mentions
+    assert mention.path == "src/gpd/commands/direct-return-field-probe.md"
+    assert mention.field == "file_written"
+    assert mention.mention_kind == "direct_reference"
+    assert mention.polarity == "positive"
+    assert mention.allowed is False
+    assert mention.allowed_source == "unknown"
+    assert mention.severity == "error"
+    assert mention.suggestion == "files_written"
+
+
+def test_disallowed_extended_field_list_mentions_are_reported(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/agents/extended-return-field-probe.md",
+        """
+        ---
+        name: extended-return-field-probe
+        description: Extended return field probe
+        ---
+        Return extended fields: `verification_status`, `mystery_metric`.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("agent",), runtime_names=())
+
+    assert report.totals["return_field_mention_count"] == 2
+    assert report.totals["allowed_return_field_mention_count"] == 1
+    assert len(report.disallowed_return_field_mentions) == 1
+    mention = report.disallowed_return_field_mentions[0]
+    assert mention.field == "mystery_metric"
+    assert mention.mention_kind == "extended_field_list"
+
+
+def test_disallowed_yaml_example_key_reports_field_specific_diagnostic(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/yaml-return-field-probe.md",
+        """
+        ---
+        name: yaml-return-field-probe
+        ---
+        ```yaml
+        gpd_return:
+          status: completed
+          file_written:
+            - GPD/output.md
+          issues: []
+          next_actions: []
+        ```
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+    item = report.items[0]
+    mention = report.disallowed_return_field_mentions[0]
+
+    assert item.invalid_gpd_return_example_count == 1
+    assert report.invalid_gpd_return_examples
+    assert item.disallowed_return_field_mention_count == 1
+    assert mention.field == "file_written"
+    assert mention.mention_kind == "yaml_example_key"
+    assert mention.suggestion == "files_written"
+
+
+def test_negative_disallowed_return_field_guardrail_does_not_fail_diagnostic(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/negative-return-field-probe.md",
+        """
+        ---
+        name: negative-return-field-probe
+        ---
+        Do not use gpd_return.execution_segment; use continuation_update.bounded_segment instead.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+
+    assert report.disallowed_return_field_mentions == ()
+    assert report.totals["disallowed_return_field_mention_count"] == 0
+    assert report.totals["negative_return_field_mention_count"] == 1
+    mention = report.return_field_mentions[0]
+    assert mention.field == "execution_segment"
+    assert mention.polarity == "negative"
+    assert mention.severity == "info"
+
+
+def test_nested_continuation_fields_are_not_treated_as_top_level_return_fields(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/nested-continuation-probe.md",
+        """
+        ---
+        name: nested-continuation-probe
+        ---
+        Persist continuation_update.bounded_segment.resume_file when the checkpoint is durable.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+
+    assert report.return_field_mentions == ()
+    assert report.disallowed_return_field_mentions == ()
 
 
 def test_runtime_projections_cover_every_runtime_descriptor(tmp_path: Path) -> None:
@@ -535,6 +1125,10 @@ def test_report_to_dict_serializes_runtime_and_duplicate_group_shapes(tmp_path: 
     assert runtime_rows[0]["projected_char_count"] >= runtime_rows[-1]["projected_char_count"]
     assert payload["duplicate_invariants"]
     assert set(payload["duplicate_invariants"][0]) == EXPECTED_DUPLICATE_GROUP_KEYS
+    assert payload["semantic_duplicate_invariants"]
+    semantic_group = payload["semantic_duplicate_invariants"][0]
+    assert set(semantic_group) == EXPECTED_SEMANTIC_DUPLICATE_GROUP_KEYS
+    assert set(semantic_group["examples"][0]) == EXPECTED_SEMANTIC_DUPLICATE_EXAMPLE_KEYS
 
 
 def test_report_to_dict_serializes_invalid_gpd_return_example_shape(tmp_path: Path) -> None:
@@ -568,6 +1162,34 @@ def test_report_to_dict_serializes_invalid_gpd_return_example_shape(tmp_path: Pa
     assert report_example["preview"].startswith("gpd_return:")
 
 
+def test_report_to_dict_serializes_disallowed_return_field_mention_shape(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/return-field-shape-probe.md",
+        """
+        ---
+        name: gpd:return-field-shape-probe
+        description: Return field shape probe
+        ---
+        Route on gpd_return.file_written after the handoff.
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("command",), runtime_names=())
+    payload = diagnostics.report_to_dict(report)
+    item_mention = payload["items"][0]["disallowed_return_field_mentions"][0]
+    report_mention = payload["disallowed_return_field_mentions"][0]
+
+    assert item_mention == report_mention
+    assert set(report_mention) == EXPECTED_RETURN_FIELD_MENTION_KEYS
+    assert report_mention["path"] == "src/gpd/commands/return-field-shape-probe.md"
+    assert report_mention["field"] == "file_written"
+    assert report_mention["mention_kind"] == "direct_reference"
+    assert report_mention["severity"] == "error"
+    assert report_mention["suggestion"] == "files_written"
+
+
 def test_markdown_render_lists_invalid_gpd_return_examples(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -592,6 +1214,65 @@ def test_markdown_render_lists_invalid_gpd_return_examples(tmp_path: Path) -> No
     assert "`src/gpd/agents/return-markdown-probe.md`" in markdown
     assert "5-8" in markdown
     assert "Missing required field: files_written" in markdown
+
+
+def test_markdown_render_lists_disallowed_return_field_mentions(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/return-field-markdown-probe.md",
+        """
+        ---
+        name: gpd:return-field-markdown-probe
+        description: Return field markdown probe
+        ---
+        Route on gpd_return.file_written after the handoff.
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("command",), runtime_names=())
+    markdown = diagnostics.render_prompt_surface_markdown(report)
+    table = diagnostics.render_prompt_surface_table(report)
+
+    assert "Disallowed `gpd_return` field mentions: 1" in markdown
+    assert "## Disallowed `gpd_return` Field Mentions" in markdown
+    assert "`file_written`" in markdown
+    assert "files_written" in markdown
+    assert "bad_fields" in table
+    assert "return-field-markdown-probe" in table
+
+
+def test_markdown_render_lists_semantic_duplicate_invariants(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/semantic-render-a.md",
+        """
+        ---
+        name: gpd:semantic-render-a
+        description: Semantic render A
+        ---
+        Treat output as fresh only when gpd_return.files_written lists the expected artifact and it is readable.
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/semantic-render-b.md",
+        """
+        ---
+        name: semantic-render-b
+        ---
+        The artifact gate passes when gpd_return.files_written names the same path that exists now.
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, runtime_names=())
+    markdown = diagnostics.render_prompt_surface_markdown(report, top=1)
+
+    assert "## Semantic Duplicate Invariants" in markdown
+    assert "`files_written_freshness`" in markdown
+    assert "### `files_written_freshness` Examples" in markdown
+    assert "`src/gpd/commands/semantic-render-a.md:" in markdown
 
 
 def test_runtime_top_prompts_render_in_markdown_and_table(tmp_path: Path) -> None:

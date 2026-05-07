@@ -153,6 +153,24 @@ def test_rejects_unknown_top_level_typo_fields() -> None:
     assert any("Unknown gpd_return top-level field" in error and "file_written" in error for error in result.errors)
 
 
+def test_rejects_peer_review_stage_as_callsite_metadata_not_return_field() -> None:
+    content = _wrap_return_block(
+        "  status: completed\n"
+        "  files_written: [GPD/publication/review/STAGE-reader.json]\n"
+        "  issues: []\n"
+        "  next_actions: []\n"
+        "  peer_review_stage: reader\n"
+    )
+
+    result = validate_gpd_return_markdown(content)
+
+    assert result.passed is False
+    assert any(
+        "Unknown gpd_return top-level field" in error and "peer_review_stage" in error
+        for error in result.errors
+    )
+
+
 def test_rejects_status_disallowed_structured_fields() -> None:
     content = _wrap_return_block(
         "  status: blocked\n"

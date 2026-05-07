@@ -9,7 +9,7 @@ The verifier owns target construction, proof policy, checks, comparison verdicts
 
 - Fail closed before delegation if the project, roadmap, contract, or proof readiness are not usable.
 - Present verifier-produced evidence one check at a time and record only the session overlay in this workflow.
-- Every spawned agent is a one-shot delegation: if it needs user input, it must checkpoint and return, and the wrapper must start a fresh continuation after the user responds.
+- Every spawned agent is a one-shot delegation: if it needs user input or new evidence arrives after return, start a fresh continuation; never send more input to closed child.
 - File-producing handoffs must prove the expected artifact exists before success is accepted.
 </philosophy>
 
@@ -174,9 +174,11 @@ PHASE_DIR_ABS=$(echo "$PHASE_BOOTSTRAP_INIT" | gpd json get .phase_dir_abs --def
 
 Use `phase_bootstrap.required_init_fields` as the refreshed payload.
 
-Use `phase_proof_review_status` as the proof-review freshness summary. If a required proof-redteam audit is missing, stale, malformed, or not `passed`, spawn `gpd-check-proof` once before finalizing the gap ledger.
-Proof-bearing phases require a canonical `*-PROOF-REDTEAM.md` artifact.
-For proof-bearing work, an additional mandatory floor applies before the wrapper can accept a passed verification result.
+`staged_loading.checkpoints` is not a proof classifier; ignore `phase_proof_review_status.state=not_reviewed|fresh` alone.
+Classify proof-bearing only from research artifacts; exclude installed runtime/config/skills trees and generated manifests.
+
+Use `phase_proof_review_status` as the proof-review freshness summary. For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once before finalizing gaps.
+This additional mandatory floor applies.
 
 ```bash
 CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)
@@ -516,9 +518,8 @@ gpd commit "verify(${phase_number}): complete research validation - {passed} pas
 gpd --raw state record-verification --phase "${phase_number}"
 ```
 
-The command reads the canonical verification frontmatter `status:` field and
-transitions STATE.md / state.json to `Verified` on pass or `Blocked` on fail.
-Pass `--status passed|failed` explicitly only when bypassing the frontmatter.
+`record-verification` reads frontmatter `status:` (`passed` -> `Verified`; non-passed -> `Blocked`).
+Use `--status passed|failed` only when bypassing frontmatter. Barrier: wait before state get/validate/repair; never parallelize state mutation with validation.
 
 Present the summary of passed, issue, and skipped checks. Do not relax verifier fail-closed results.
 

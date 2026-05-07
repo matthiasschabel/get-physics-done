@@ -207,6 +207,11 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "project_contract_validation" in manifest.stages[0].required_init_fields
     assert "references/verification/core/verification-core.md" in manifest.stages[1].must_not_eager_load
     assert "phase_proof_review_status" in manifest.stages[1].required_init_fields
+    assert "proof-bearing work detected" not in manifest.stages[1].checkpoints
+    assert (
+        "proof-readiness context loaded; classify proof-bearing status from inspected proof metadata"
+        in manifest.stages[1].checkpoints
+    )
     assert manifest.stages[2].loaded_authorities == (
         "workflows/verify-work.md",
         "references/verification/meta/verification-independence.md",

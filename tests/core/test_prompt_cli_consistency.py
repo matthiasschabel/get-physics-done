@@ -272,6 +272,18 @@ def test_prompt_shell_fences_do_not_add_runtime_command_labels() -> None:
     assert offenders == []
 
 
+def test_agent_infrastructure_distinguishes_structural_phase_verify_from_verify_work() -> None:
+    text = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "These terminal `gpd verify ...` commands are structural checks." in text
+    assert "They do not" in text
+    assert "replace the runtime `gpd:verify-work <phase>` workflow" in text
+    assert "# Structural completeness only: all plans have `*-SUMMARY.md`" in text
+    assert "gpd verify phase <phase-number>" in text
+
+
 def test_command_looking_fences_are_explicitly_labeled() -> None:
     offenders: list[str] = []
 

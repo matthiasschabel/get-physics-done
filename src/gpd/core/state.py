@@ -1460,7 +1460,15 @@ VALID_TRANSITIONS: dict[str, list[str] | None] = {
     "ready to plan": ["planning", "researching", "paused", "blocked", "not started", "milestone complete"],
     "planning": ["ready to execute", "researching", "paused", "blocked", "ready to plan", "not started"],
     "researching": ["planning", "ready to execute", "paused", "blocked", "ready to plan", "not started"],
-    "ready to execute": ["executing", "planning", "researching", "paused", "blocked", "not started"],
+    "ready to execute": [
+        "executing",
+        "phase complete \u2014 ready for verification",
+        "planning",
+        "researching",
+        "paused",
+        "blocked",
+        "not started",
+    ],
     "executing": [
         "phase complete \u2014 ready for verification",
         "planning",
@@ -1474,6 +1482,7 @@ VALID_TRANSITIONS: dict[str, list[str] | None] = {
     "phase complete \u2014 ready for verification": [
         "verifying",
         "verified",
+        "blocked",
         "not started",
         "planning",
         "executing",
@@ -4992,12 +5001,15 @@ def state_record_verification(
         normalized = status.strip().lower()
         if normalized in {"passed", "pass", "ok", "success"}:
             normalized_status = "passed"
-        elif normalized in {"failed", "fail", "blocked"}:
+        elif normalized in {"failed", "fail", "blocked", "gaps_found", "expert_needed", "human_needed"}:
             normalized_status = "failed"
         elif normalized:
             return RecordVerificationResult(
                 recorded=False,
-                error=f"unrecognized status '{status}' (expected passed|failed)",
+                error=(
+                    f"unrecognized status '{status}' "
+                    "(expected passed|failed or canonical non-passed verification status)"
+                ),
             )
 
     if normalized_status is None:
@@ -5038,7 +5050,7 @@ def state_record_verification(
                     val = m.group(1).strip().strip("'\"").lower()
                     if val in {"passed", "pass", "ok"}:
                         normalized_status = "passed"
-                    elif val in {"failed", "fail"}:
+                    elif val in {"failed", "fail", "blocked", "gaps_found", "expert_needed", "human_needed"}:
                         normalized_status = "failed"
                     break
         if normalized_status is None:

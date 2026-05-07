@@ -122,7 +122,7 @@
         "inventory_build"
       ],
       "checkpoints": [
-        "proof-bearing work detected",
+        "proof-readiness context loaded; classify proof-bearing status from inspected proof metadata",
         "bootstrap gate remains fail-closed"
       ]
     },

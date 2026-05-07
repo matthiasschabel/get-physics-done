@@ -253,11 +253,15 @@ gpd convention check
 
 Used by verifiers and orchestrators to validate research artifacts:
 
+These terminal `gpd verify ...` commands are structural checks. They do not
+replace the runtime `gpd:verify-work <phase>` workflow, which owns full
+phase-level physics verification and report generation.
+
 ```bash
 # Verify plan structure (wave assignments, dependencies, frontmatter)
 gpd verify plan <plan-file-path>
 
-# Verify phase completeness (all plans have `*-SUMMARY.md`)
+# Structural completeness only: all plans have `*-SUMMARY.md`
 gpd verify phase <phase-number>
 
 # Verify cross-file references in a document

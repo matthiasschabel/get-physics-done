@@ -44,8 +44,9 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
         in workflow
     )
     assert "Confirm `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` exists after the refresh before proceeding to reproducibility or strict review." in workflow
-    assert "Do not accept a preexisting `.tex` file as a substitute for a successful spawn; a spawn error always leaves the section incomplete until a fresh typed return names the artifact and the file exists on disk." in workflow
-    assert "Do not accept preexisting response files as a substitute for a successful spawn; the round remains incomplete until a fresh typed return names both outputs and both files exist on disk." in workflow
+    assert "Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`." in workflow
+    assert "fresh `gpd_return.files_written` naming the expected `.tex` file" in workflow
+    assert "fresh `gpd_return.files_written` naming both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md`" in workflow
     assert "Embedded `write-paper` review parity for the bounded external-authoring lane is deferred" in workflow
     assert "route the user to standalone `gpd:peer-review`" in workflow
     assert "do not recommend `gpd:arxiv-submission` directly from this lane." in workflow
@@ -104,57 +105,27 @@ def test_paper_writer_prompt_supports_bounded_external_authoring_without_workspa
 def test_peer_review_workflow_retires_finished_handoffs_and_clears_transient_state() -> None:
     workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
+    assert "{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md" in workflow
+    assert "spawned reviewer/proof-auditor/referee lifecycle" in workflow
+    assert "checkpoint continuation, stale-output rejection, retry freshness, and sequential fallback cleanup" in workflow
     assert (
-        "A spawned handoff is not complete until the orchestrator has captured its typed return, "
-        "verified the stage-owned artifact boundary on disk, and then treated that finished child "
-        "as closed and retired." in workflow
-    )
-    assert (
-        "Once retired, its transient execution state, scratch reasoning, and live conversation "
-        "context must not be reused." in workflow
-    )
-    assert (
-        "Every downstream stage must begin from persisted artifacts plus the explicitly declared "
+        "Each downstream stage begins from persisted artifacts plus the explicitly declared "
         "carry-forward inputs for that stage." in workflow
-    )
-    assert (
-        "If subagent spawning is unavailable and the workflow falls back to sequential execution "
-        "in the main context, emulate the same boundary discipline: finish one stage, persist and "
-        "verify its artifacts, clear the stage-local transient state, and begin the next stage "
-        "only from those persisted outputs and declared carry-forward inputs." in workflow
     )
 
 
 def test_peer_review_workflow_requires_barriers_and_cleanup_before_downstream_stage_spawns() -> None:
     workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
-    assert "Treat this recovery step as the Stage 2 / Stage 3 / proof-review branch barrier." in workflow
+    assert "Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered review wave under the publication stage-recovery gate." in workflow
     assert (
-        "Before Stage 4 can spawn, the orchestrator must capture the typed return from every "
-        "launched branch in the wave, confirm that the persisted artifacts for this round exist "
-        "and validate, and then retire each finished child handoff." in workflow
+        "Before Stage 4 can spawn, the branch barrier must pass: every launched child has a typed "
+        "return, every persisted artifact above exists and validates, and downstream work restarts "
+        "only from those artifacts plus the declared carry-forward inputs." in workflow
     )
-    assert (
-        "Later stages and retries must restart from the written artifacts above plus the declared "
-        "carry-forward inputs, not from branch-local live context." in workflow
-    )
-    assert (
-        "After the Stage 4 typed return is captured and "
-        "`${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` validates, treat the finished Stage 4 "
-        "handoff as closed and retired before spawning Stage 5." in workflow
-    )
-    assert "Stage 5 must start from the persisted stage artifacts and declared carry-forward inputs only." in workflow
-    assert (
-        "After the Stage 5 typed return is captured and "
-        "`${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json` validates, treat the finished "
-        "Stage 5 handoff as closed and retired before spawning Stage 6." in workflow
-    )
-    assert "Stage 6 must begin from the persisted stage artifacts and declared carry-forward inputs only." in workflow
-    assert (
-        "Capture the Stage 6 typed return first, then treat the finished adjudication handoff as "
-        "closed and retired before classifying the outcome as recovery-eligible, upstream-blocked, "
-        "or complete." in workflow
-    )
+    assert "After `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` validates, Stage 5 must start from persisted stage artifacts and declared carry-forward inputs only." in workflow
+    assert "After `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json` validates, Stage 6 must begin from the persisted stage artifacts and declared carry-forward inputs only." in workflow
+    assert "Apply the publication stage-recovery gate to the Stage 6 typed return before classifying the outcome as recovery-eligible, upstream-blocked, or complete." in workflow
 
 
 def test_peer_review_stage_six_limits_writes_to_stage_six_owned_artifacts() -> None:

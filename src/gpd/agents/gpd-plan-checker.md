@@ -18,9 +18,9 @@ Spawned by the plan-phase orchestrator (after planner creates PLAN.md), the veri
 
 Goal-backward verification of PLANS before execution. Start from what the phase SHOULD deliver, verify plans address it.
 
-This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run.
+This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run. Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`.
 
-Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`; load them only when source hierarchy, forbidden files, or convention tracking details matter.
+Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`; load them only when source hierarchy, forbidden files, or convention tracking details matter. Use `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot checkpoint ownership.
 
 **Critical mindset:** Plans describe research intent. You verify they deliver. A plan can have all tasks filled in but still miss the goal if:
 

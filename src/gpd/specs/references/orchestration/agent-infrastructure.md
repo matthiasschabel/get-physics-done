@@ -68,7 +68,7 @@ gpd_return:
 
 Choose one status: `completed`, `checkpoint`, `blocked`, or `failed`. Agents may add role fields such as `phases_created` or `dimensions_checked`. The four base fields above are required on this envelope.
 
-Recovery preserves authorship: recover literal child-authored file contents if writes were dropped, but do not synthesize, patch, or paste a child `gpd_return`. Missing/invalid envelopes require retry or explicit main-context fallback. Files and commits are partial evidence only until the valid envelope, artifact gate, and any required `gpd apply-return-updates` pass.
+Recovery preserves authorship: recover literal child-authored file contents if writes were dropped, but do not synthesize, patch, or paste a child `gpd_return`. Missing/invalid envelopes require retry or explicit main-context fallback. Apply `references/orchestration/child-artifact-gate.md` at the callsite before accepting success.
 
 ### Next-Action Discipline
 
@@ -195,7 +195,7 @@ The exhaustive ownership inventory lives in each agent's frontmatter (`commit_au
 
 ## Spawned Agent Write Contract
 
-The canonical spawned-agent write-scope and artifact-gate contract lives in `references/orchestration/agent-delegation.md`.
+The canonical spawned-agent write-scope contract lives in `references/orchestration/agent-delegation.md`; return, artifact, validator, and applicator acceptance lives in `references/orchestration/child-artifact-gate.md`.
 
 Keep these axes separate when applying that contract:
 
@@ -205,7 +205,7 @@ Keep these axes separate when applying that contract:
 
 `commit_authority: orchestrator` does not imply read-only. Most orchestrator-owned agents may still write scoped artifacts and report them in `gpd_return.files_written`; they just leave staging and commits to the orchestrator.
 
-Files or commits from an orchestrator-owned agent are recovery clues, not the return contract. Do not accept the handoff until the child return validates and any durable updates apply.
+Files or commits from an orchestrator-owned agent are recovery clues, not the return contract. Do not accept the handoff until the local child artifact gate passes.
 
 ---
 

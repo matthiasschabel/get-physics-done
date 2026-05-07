@@ -76,6 +76,7 @@
       "must_not_eager_load": [
         "references/publication/publication-response-writer-handoff.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
@@ -115,7 +116,8 @@
       "loaded_authorities": [
         "workflows/respond-to-referees.md",
         "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md"
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
@@ -171,7 +173,8 @@
       "loaded_authorities": [
         "workflows/respond-to-referees.md",
         "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md"
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
@@ -214,6 +217,7 @@
       "loaded_authorities": [
         "workflows/respond-to-referees.md",
         "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
@@ -265,7 +269,8 @@
       "loaded_authorities": [
         "workflows/respond-to-referees.md",
         "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md"
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [],

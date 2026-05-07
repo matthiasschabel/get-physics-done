@@ -43,7 +43,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Treat `project_contract` as the authoritative machine-readable project contract only when `project_contract_gate.authoritative` is true. Keep `project_contract_load_info` and `project_contract_validation` visible as gate inputs, and treat `project_contract` as visible-but-non-authoritative when the gate is blocked.
+`{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
+
+Apply the shared contract authority gate: `project_contract` is authoritative milestone scope only when `project_contract_gate.authoritative` is true, with `project_contract_load_info` and `project_contract_validation` kept visible as gate inputs.
 
 Treat init as staged:
 - Use this bootstrap init for milestone identity and contract gate state only.
@@ -58,7 +60,7 @@ Load project files:
 - Read MILESTONES.md (if exists — may not exist for first milestone)
 - Read STATE.md (if `state_exists` — pending items, blockers)
 - Check for MILESTONE-CONTEXT.md (from milestone discussion)
-- Keep `project_contract_load_info` and `project_contract_validation` visible while gathering goals, determining milestone version, and reviewing roadmap coverage; do not assume `project_contract` is authoritative unless `project_contract_gate.authoritative` is true.
+- Continue applying the contract authority gate while gathering goals, determining milestone version, and reviewing roadmap coverage.
 - If `project_contract_gate.authoritative` is false, checkpoint with the user and repair the stored contract before using it for milestone scope.
 
 Refresh the survey/objectives stage before gathering milestone goals:

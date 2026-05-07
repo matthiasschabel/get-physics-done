@@ -31,9 +31,9 @@ def test_literature_reviewer_shows_base_return_fields_and_one_shot_checkpointing
     agent = _read(AGENTS_DIR / "gpd-literature-reviewer.md")
 
     assert "The markdown `## REVIEW COMPLETE` heading is presentation only." in agent
-    assert "The `## CHECKPOINT REACHED` heading below is presentation only;" in agent
+    assert "The `## CHECKPOINT REACHED` heading below is presentation only." in agent
     assert "When reaching a checkpoint, return a typed `gpd_return` checkpoint and stop." in agent
-    assert "orchestrator presents it to the user and spawns a fresh continuation run after the response" in agent
+    assert "stop at the continuation boundary" in agent
     assert "Use `gpd_return.status: completed` for a finished review." in agent
 
     completed_block = agent.split("Use `gpd_return.status: completed` for a finished review.", 1)[1]

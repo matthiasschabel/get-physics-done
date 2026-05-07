@@ -11,9 +11,8 @@ WORKFLOW = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "write-paper.md"
 def test_write_paper_writer_completion_requires_typed_status_files_written_and_disk_artifact() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "Check the writer's typed `gpd_return.status` first." in source
-    assert "If the writer returned `status: completed`, verify that `gpd_return.files_written` names the expected `.tex` file" in source
-    assert "If the writer returned `status: checkpoint`, treat it as an incomplete handoff" in source
+    assert "stage-recovery-gate.md" in source
+    assert "completion requires `status: completed`, fresh `gpd_return.files_written` naming the expected `.tex` file" in source
     assert "Treat the emitted `.tex` file as the success artifact gate for each section" in source
 
 
@@ -31,9 +30,8 @@ def test_write_paper_bibliography_completion_requires_typed_status_files_written
 def test_write_paper_response_artifact_completion_requires_typed_status_files_written_and_disk_artifacts() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "Check the agent's typed `gpd_return.status` first." in source
-    assert "If it returned `status: completed`, verify that `gpd_return.files_written` names both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`" in source
-    assert "If it returned `status: checkpoint`, treat that as a fresh continuation handoff rather than completion." in source
+    assert "stage-recovery-gate.md" in source
+    assert "completion requires `status: completed`, fresh `gpd_return.files_written` naming both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`" in source
     assert "Treat `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md`, `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and the writer's typed `gpd_return` envelope as the response success gate." in source
 
 

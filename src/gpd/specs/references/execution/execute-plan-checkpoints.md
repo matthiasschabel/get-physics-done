@@ -1,6 +1,6 @@
 # Execute-Plan: Checkpoint Protocol
 
-Referenced by `{GPD_INSTALL_DIR}/workflows/execute-plan.md`. Governs checkpoint creation, previous attempt detection, checkpoint handling during execution, and cleanup.
+Referenced by `{GPD_INSTALL_DIR}/workflows/execute-plan.md`. Governs checkpoint creation, previous attempt detection, checkpoint handling during execution, and cleanup. Use `references/orchestration/continuation-boundary.md` for the shared one-shot child/fresh-continuation boundary.
 
 ## Create Rollback Tag
 
@@ -100,7 +100,7 @@ When spawned via task and hitting checkpoint: return structured state (cannot in
 
 If the stop is tied to first-result, skeptical, or pre-fanout review, the `execution_segment` must say which gate is still pending. A gate clear must name the specific reason being retired, and `fanout unlock` never substitutes for that clear. For `pre_fanout`, return `pre_fanout_review_cleared: true` when the review outcome is known but downstream unlock is still outstanding.
 
-Orchestrator parses -> presents to user -> spawns fresh continuation with your completed tasks state plus the `execution_segment` payload. The fresh continuation uses that payload as transport state; the persisted `continuation.bounded_segment` copy is what survives if the pause is recorded durably. The child never waits for user approval inside the same run and will NOT be resumed in place. In main context: use checkpoint protocol above.
+Orchestrator parses -> presents to user -> spawns fresh continuation with your completed tasks state plus the `execution_segment` payload. Apply `references/orchestration/continuation-boundary.md`: the child never waits for user approval inside the same run and will NOT be resumed in place. In main context: use checkpoint protocol above.
 
 ## Cleanup Checkpoint
 

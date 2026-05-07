@@ -48,10 +48,10 @@ def test_peer_review_and_referee_skill_surfaces_keep_lifecycle_cleanup_boundary(
 
     assert "error" not in peer_review
     assert "error" not in referee
-    assert "treated that finished child as closed and retired" in peer_review_content
-    assert "transient execution state, scratch reasoning, and live conversation context must not be reused" in peer_review_content
-    assert "retire each finished child handoff" in peer_review_content
-    assert "do not keep the adjudication run live while deciding what to do next" in peer_review_content
+    assert "stage-recovery-gate.md" in peer_review_content
+    assert "spawned reviewer/proof-auditor/referee lifecycle" in peer_review_content
+    assert "stale-output rejection" in peer_review_content
+    assert "Apply the publication stage-recovery gate to the Stage 6 typed return" in peer_review_content
     assert "Checkpoint ownership is orchestrator-side" in referee_content
     assert "owns the fresh continuation handoff" in referee_content
     assert "Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run." in referee_content

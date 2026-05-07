@@ -1,13 +1,14 @@
 <purpose>
 Orchestrate conversational verification through a thin session wrapper around `gpd-verifier`.
 
-The verifier owns target construction, proof policy, checks, comparison verdicts, and canonical status. This workflow owns preflight, routing, interaction, sync, diagnosis, and gap repair.
+The verifier owns target construction, proof policy, checks, comparison verdicts, and canonical status. Scientific status ownership and routing vocabulary live in `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md`. This workflow owns preflight, routing, interaction, sync, diagnosis, and gap repair.
 </purpose>
 
 <philosophy>
 **Do not duplicate verifier policy here.**
 
 - Fail closed before delegation if the project, roadmap, contract, or proof readiness are not usable.
+- Use `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` for status ownership and vocabulary; this wrapper gates artifacts and routes, but does not decide the scientific verdict.
 - Present verifier-produced evidence one check at a time and record only the session overlay in this workflow.
 - Every spawned agent is a one-shot delegation: if it needs user input or new evidence arrives after return, start a fresh continuation; never send more input to closed child.
 - File-producing handoffs must prove the expected artifact exists before success is accepted.
@@ -57,7 +58,7 @@ Load session-router first; load later stages where used.
 SESSION_ROUTER_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage session_router)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $SESSION_ROUTER_INIT"
-  # STOP - display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -167,7 +168,7 @@ Load proof/bootstrap before using proof freshness or proof-repair routing:
 PHASE_BOOTSTRAP_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage phase_bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd phase-bootstrap initialization failed: $PHASE_BOOTSTRAP_INIT"
-  # STOP - display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 PHASE_DIR_ABS=$(echo "$PHASE_BOOTSTRAP_INIT" | gpd json get .phase_dir_abs --default "$PHASE_DIR_ABS")
 ```
@@ -207,7 +208,7 @@ Load inventory-building before using anchor, protocol-bundle, state, or verifier
 INVENTORY_BUILD_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage inventory_build)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd inventory-build initialization failed: $INVENTORY_BUILD_INIT"
-  # STOP - display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -237,6 +238,7 @@ Use `protocol_bundle_context` from init JSON as additive specialized guidance. I
 Spawn `gpd-verifier` once and let it own the physics policy. Use `subagent_type="gpd-verifier"`, model `{verifier_model}`, and scoped write. It owns contract-backed target extraction, evidence mapping, proof policy, computational checks, decisive comparisons, canonical status, suggested contract checks, and the gap ledger.
 
 Pass the project contract, proof freshness summary, active reference context, and protocol bundle context into the handoff so the verifier can build its own authoritative ledger.
+Point the verifier at `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` for scientific status ownership, target status vocabulary, top-level verification status, and runtime return-status distinction.
 Use `protocol_bundle_verifier_extensions` as primary bundle checklist surface; `protocol_bundle_context` is readable projection. Use `suggest_contract_checks(contract)` for ambiguous decisive anchors or prior-output paths. Required decisive comparisons should stay legible enough that the researcher can recognize in the phase promise which `claim`, acceptance test, or reference is still unresolved. Do not mark the parent claim or acceptance test as passed until that decisive comparison is resolved.
 Human-readable headings in the verifier output are presentation only; route on the canonical verification frontmatter and `gpd_return.status`, not on headings or marker strings.
 
@@ -289,7 +291,7 @@ Load the staged researcher-session scaffold and canonical schema pack at this st
 INTERACTIVE_VALIDATION_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage interactive_validation)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd interactive-validation initialization failed: $INTERACTIVE_VALIDATION_INIT"
-  # STOP - display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -413,7 +415,7 @@ When the user chooses auto-plan fixes, reload `verify-work` through the explicit
 GAP_REPAIR_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage gap_repair)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd gap-repair initialization failed: $GAP_REPAIR_INIT"
-  # STOP - display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

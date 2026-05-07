@@ -764,7 +764,9 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
    This ensures the user sees progress even when waves have multiple parallel plans. Do not wait for the entire wave to finish before showing any output.
 
-   **If any executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without SUMMARY, valid child `gpd_return`, artifact gate, and `gpd apply-return-updates`. If the envelope is missing or invalid, keep that child handoff incomplete and mark the plan failed for this wave unless the user chooses explicit main-context fallback. Then offer: 1) Retry in a new wave, 2) Execute in main context, 3) Skip and continue.
+   Wave child artifact gate: `gpd-executor`; expect `SUMMARY_FILE`, required/final deliverables, and required proof-redteam artifact, all fresh under the phase/plan stem; validate spot checks, deliverables, self-check/validation markers, proof-redteam `status: passed`, and `gpd --raw apply-return-updates "${SUMMARY_FILE}"` with `passed: true`; otherwise route to `wave_failure_handling`, retry, main-context execution, or user-approved skip/continue.
+
+   **If any executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without the wave child artifact gate above. If the envelope is missing or invalid, keep that child handoff incomplete and mark the plan failed for this wave unless the user chooses explicit main-context fallback. Then offer: 1) Retry in a new wave, 2) Execute in main context, 3) Skip and continue.
 
 6. **Report completion -- spot-check claims first:**
 
@@ -1169,7 +1171,7 @@ for DEP in $(echo "$PLAN_DEPS" | tr ',' ' '); do
 done
 ```
 
-> **Handoff verification:** Verify expected output files, the valid structured return envelope, and any required `gpd apply-return-updates` before success; git commits are partial evidence only.
+> **Handoff verification:** Apply the local child artifact gate before success; git commits are partial evidence only.
 </step>
 
 <step name="checkpoint_handling">
@@ -1936,7 +1938,7 @@ Orchestrator stays lean per `references/orchestration/context-budget.md`; subage
 
 <failure_handling>
 
-- **False failure report despite delivered work:** Commits/files are partial evidence. Accept success only if SUMMARY, expected artifacts, valid `gpd_return`, and any `gpd apply-return-updates` gate pass; otherwise route to wave_failure_handling, retry, or explicit main-context fallback.
+- **False failure report despite delivered work:** Commits/files are partial evidence. Accept success only if the local child artifact gate passes; otherwise route to wave_failure_handling, retry, or explicit main-context fallback.
 - **Agent fails mid-plan:** Missing SUMMARY.md -> report, route to wave_failure_handling for user decision
 - **Dependency chain breaks:** Wave N plan fails -> identify Wave N+1 dependents via `depends_on` frontmatter -> auto-skip with clear message -> user chooses at wave level
 - **All agents in wave fail:** Systemic issue -> stop, report for investigation, offer wave-level rollback

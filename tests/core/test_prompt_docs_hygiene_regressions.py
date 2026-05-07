@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +61,22 @@ def test_runtime_delegation_fallback_boilerplate_stays_single_sourced() -> None:
         if include not in text:
             continue
         hits = [fragment for fragment in disallowed if fragment in text]
+        if hits:
+            offenders[path.relative_to(REPO_ROOT).as_posix()] = hits
+
+    assert offenders == {}
+
+
+def test_workflow_shell_stop_comments_use_short_form() -> None:
+    verbose_stop_comment = re.compile(
+        r"# STOP\s+(?:-|--|—)\s+display the error to the user and do not proceed"
+        r"(?: with the workflow)?\."
+    )
+
+    offenders: dict[str, list[str]] = {}
+    for path in sorted(WORKFLOWS_DIR.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        hits = verbose_stop_comment.findall(text)
         if hits:
             offenders[path.relative_to(REPO_ROOT).as_posix()] = hits
 

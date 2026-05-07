@@ -21,7 +21,7 @@ file_read:
 ROADMAP=$(gpd --raw roadmap analyze)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd roadmap analyze failed: $ROADMAP"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

@@ -18,7 +18,7 @@ Load bootstrap and use returned state-file fields as the routing authority:
 SYNC_BOOTSTRAP_INIT=$(gpd --raw init sync-state --stage sync_bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd sync-state bootstrap failed: $SYNC_BOOTSTRAP_INIT"
-  # STOP - display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 export PROJECT_ROOT
 PROJECT_ROOT=$(echo "$SYNC_BOOTSTRAP_INIT" | gpd json get .project_root)

@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+VERIFICATION_STATUS_AUTHORITY = REPO_ROOT / "src/gpd/specs/references/verification/verification-status-authority.md"
 
 
 def _read_verifier_prompt() -> str:
@@ -200,6 +201,7 @@ def test_shipped_verification_examples_roundtrip_through_the_verification_valida
 
 def test_verifier_prompt_uses_canonical_include_for_worked_examples() -> None:
     verifier = _read_verifier_prompt()
+    status_authority = VERIFICATION_STATUS_AUTHORITY.read_text(encoding="utf-8")
 
     assert (
         "<!-- Stub detection patterns extracted to reduce context. Load on demand from `references/verification/examples/verifier-worked-examples.md`. -->"
@@ -207,7 +209,8 @@ def test_verifier_prompt_uses_canonical_include_for_worked_examples() -> None:
     )
     assert "## Physics Stub Detection Patterns" not in verifier
     assert "Load on demand from `references/verification/examples/verifier-worked-examples.md`." in verifier
-    assert "all artifacts pass levels 1-4" in verifier
+    assert "verification-status-authority.md" in verifier
+    assert "all supporting artifacts exist, are substantive, and pass decisive checks" in status_authority
 
 
 def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review_gate() -> None:
@@ -215,6 +218,7 @@ def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review
     contract_results_schema = (TEMPLATES_DIR / "contract-results-schema.md").read_text(encoding="utf-8")
     research_verification = _read_research_verification_template()
     verification_template = _read_verification_template()
+    status_authority = VERIFICATION_STATUS_AUTHORITY.read_text(encoding="utf-8")
 
     assert "## Physics Stub Detection Patterns" not in verifier
     assert (
@@ -262,7 +266,8 @@ def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review
         'recommended_action: "collect one more benchmark point before marking the claim as passed"'
         in research_verification
     )
-    assert "all artifacts pass levels 1-4" in verifier
+    assert "verification-status-authority.md" in verifier
+    assert "proof-bearing work has passed proof-redteam artifacts" in status_authority
     assert "all artifacts pass levels 1-3" not in verifier
 
 

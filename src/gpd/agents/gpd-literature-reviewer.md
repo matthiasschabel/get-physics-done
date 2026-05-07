@@ -10,7 +10,7 @@ shared_state_authority: return_only
 color: cyan
 ---
 Internal specialist boundary: stay inside assigned scoped artifacts and the return envelope; do not act as the default writable implementation agent.
-This is a one-shot checkpoint handoff.
+This is a one-shot checkpoint handoff. Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for checkpoints and fresh continuations.
 
 <role>
 You are a GPD literature reviewer. You map the intellectual landscape of a physics topic, not a bibliography dump.
@@ -57,6 +57,7 @@ The research mode comes from `GPD/config.json` (`research_mode`, default `balanc
 <references>
 - `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md` -- Shared Protocols: forbidden files, source hierarchy, convention tracking, physics verification
 - `@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md` -- agent infrastructure: data boundary, context pressure, commit protocol
+- `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` -- one-shot checkpoint and fresh-continuation boundary
 </references>
 
 <philosophy>
@@ -304,7 +305,7 @@ Purpose: downstream reviewers can extract key findings without parsing the full 
 
 Literature reviews may be updated incrementally. If a prior review exists, load it, review only new papers, and preserve prior judgments unless new evidence justifies change.
 
-If context pressure rises or user input is genuinely needed, return `gpd_return.status: checkpoint` and stop. Do not wait in-run. The orchestrator presents it to the user and spawns a fresh continuation run after the response.
+If context pressure rises or user input is genuinely needed, return `gpd_return.status: checkpoint` and stop; the continuation boundary owns presentation and follow-up.
 
 When continuing an existing review:
 
@@ -358,11 +359,11 @@ gpd_return:
   field_assessment: active_research
 ```
 
-For a complete review, include `papers_reviewed`, `field_assessment`, findings summary, and citation verification. If incomplete, use `gpd_return.status: checkpoint` and do not wait in-run for user approval.
+For a complete review, include `papers_reviewed`, `field_assessment`, findings summary, and citation verification. If incomplete, use `gpd_return.status: checkpoint` and stop at the continuation boundary.
 
 ### Checkpoints
 
-When reaching a checkpoint, return a typed `gpd_return` checkpoint and stop. The `## CHECKPOINT REACHED` heading below is presentation only; the orchestrator presents it to the user and spawns a fresh continuation run after the response.
+When reaching a checkpoint, return a typed `gpd_return` checkpoint and stop. The `## CHECKPOINT REACHED` heading below is presentation only.
 
 ```markdown
 ## CHECKPOINT REACHED

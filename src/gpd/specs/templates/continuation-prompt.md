@@ -4,7 +4,7 @@ template_version: 1
 
 # Executor Continuation Prompt Template
 
-Template for spawning a fresh gpd-executor agent to continue plan execution after a checkpoint pause. This is a fresh continuation handoff owned by the orchestrator, not an in-run wait or resume-in-place. Uses a fresh agent with explicit state instead of resume to avoid serialization issues with parallel tool calls. The `<execution_segment>` block is the workflow/runtime handoff payload; if the pause is durably recorded, the canonical bounded-segment subset of that payload is persisted in `continuation.bounded_segment` and also recorded in the append-only execution lineage so the execution head can be rebuilt without parsing prose.
+Template for spawning a fresh gpd-executor agent to continue plan execution after a checkpoint pause. This is a fresh continuation handoff owned by the orchestrator, not an in-run wait or resume-in-place; see `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`. The `<execution_segment>` block is the workflow/runtime handoff payload; if the pause is durably recorded, the canonical bounded-segment subset of that payload is persisted in `continuation.bounded_segment` and also recorded in the append-only execution lineage so the execution head can be rebuilt without parsing prose.
 
 Persisted bounded-segment fields: `resume_file`, `phase`, `plan`, `segment_id`, `segment_status`, `checkpoint_reason`, `waiting_reason`, `blocked_reason`, `waiting_for_review`, `first_result_gate_pending`, `pre_fanout_review_pending`, `pre_fanout_review_cleared`, `skeptical_requestioning_required`, `downstream_locked`, `skeptical_requestioning_summary`, `weakest_unchecked_anchor`, `disconfirming_observation`, `transition_id`, `last_result_id`, `updated_at`, `source_session_id`, `recorded_by`.
 
@@ -70,6 +70,7 @@ Read these files at execution start using the file_read tool:
 - Workflow: {GPD_INSTALL_DIR}/workflows/execute-plan.md
 - Summary template: {GPD_INSTALL_DIR}/templates/summary.md
 - Checkpoints ref: {GPD_INSTALL_DIR}/references/orchestration/checkpoints.md
+- Continuation boundary: {GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md
 - Validation ref: {GPD_INSTALL_DIR}/references/verification/core/verification-core.md
 - Plan: {phase_dir}/{plan_file}
 - State: GPD/STATE.md

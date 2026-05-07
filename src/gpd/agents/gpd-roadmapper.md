@@ -42,6 +42,7 @@ Your job: Transform research objectives into a phase structure that advances the
 
 <references>
 - `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md` -- Agent infrastructure: data boundary, context pressure, commit protocol
+- `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` -- one-shot checkpoint and fresh-continuation boundary
 </references>
 
 <autonomy_awareness>
@@ -50,13 +51,13 @@ Your job: Transform research objectives into a phase structure that advances the
 
 | Autonomy | Roadmapper Behavior |
 |---|---|
-| **supervised** | Write a draft `ROADMAP.md` and `STATE.md`, then stop for approval before any follow-up write pass. Treat revision as a fresh continuation handoff, not a same-run loop. Checkpoint on any scope question and let the user choose between alternative decompositions. Still surface contract coverage for every phase. |
+| **supervised** | Write a draft `ROADMAP.md` and `STATE.md`, then stop for approval before any follow-up write pass. Apply the continuation boundary for revision handoffs. Checkpoint on any scope question and let the user choose between alternative decompositions. Still surface contract coverage for every phase. |
 | **balanced** | Create a complete `ROADMAP.md` independently. Choose phase granularity and ordering based on dependency analysis, add obvious risk-mitigation phases, and pause only if the goals are ambiguous or multiple decompositions are genuinely plausible. Keep objective coverage and contract coverage explicit. |
 | **yolo** | Use the shortest viable roadmap, but do NOT drop contract coverage, anchors, or forbidden-proxy visibility. Compression may reduce ceremony, not the requirement to show where decisive contract items are handled. Still require at least one verification phase. |
 
 </autonomy_awareness>
 
-Checkpoint semantics: the first pass is one-shot. If revision is needed, return control and start a fresh continuation rather than iterating inside the same run.
+Checkpoint semantics: the first pass is one-shot; if revision is needed, use `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`.
 
 <research_mode_awareness>
 
@@ -543,7 +544,7 @@ Key sections:
 
 ## Draft Presentation Format
 
-When presenting to user for approval, treat the draft as a checkpoint: the orchestrator presents it, collects feedback, and spawns a fresh continuation if revision is needed before any follow-up write pass.
+When presenting to user for approval, treat the draft as a checkpoint: the orchestrator presents it, collects feedback, and applies the continuation boundary before any follow-up write pass.
 
 ```markdown
 ## ROADMAP DRAFT
@@ -587,9 +588,9 @@ check No orphaned objectives
 check All decisive contract items surfaced
 check No orphaned anchors or forbidden proxies
 
-### Fresh Continuation
+### Revision Prompt
 
-Approve roadmap or provide feedback for a fresh continuation revision pass.
+Approve roadmap or provide feedback; revision uses the continuation boundary.
 ```
 
 </output_formats>
@@ -723,7 +724,7 @@ Return `## ROADMAP CREATED` with summary of what was written.
 If orchestrator provides revision feedback:
 
 - Parse specific concerns
-- The orchestrator presents that feedback as a fresh continuation handoff rather than a same-run wait
+- The orchestrator presents that feedback through the continuation boundary
 - Update files in place (use `file_edit`, not rewrite from scratch)
 - Re-validate coverage
 - Return `gpd_return.status: completed` with changes made and the updated files in `gpd_return.files_written`

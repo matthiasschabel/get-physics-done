@@ -135,6 +135,7 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
 
     assert consistency.loaded_authorities == (
         "workflows/write-paper.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
     )
@@ -144,6 +145,7 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
     )
@@ -254,6 +256,7 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
 
     assert "references/publication/publication-bootstrap-preflight.md" in bootstrap.loaded_authorities
     assert "references/publication/publication-response-writer-handoff.md" in bootstrap.must_not_eager_load
+    assert "references/publication/stage-recovery-gate.md" in bootstrap.must_not_eager_load
     assert "project_root" in bootstrap.required_init_fields
     assert "response_intake_input" in bootstrap.required_init_fields
     assert "publication_subject_slug" in bootstrap.required_init_fields
@@ -266,12 +269,14 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
         "workflows/respond-to-referees.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
     )
     assert "reference_artifacts_content" in revision_planning.required_init_fields
     for stage_id in manifest.stage_ids()[1:]:
         assert "response_intake_input" in manifest.stage(stage_id).required_init_fields
     assert "templates/paper/referee-response.md" in response_authoring.loaded_authorities
     assert "templates/paper/author-response.md" in response_authoring.loaded_authorities
+    assert "references/publication/stage-recovery-gate.md" in response_authoring.loaded_authorities
     assert "GPD/AUTHOR-RESPONSE{round_suffix}.md" in response_authoring.writes_allowed
     assert "GPD/review/REFEREE_RESPONSE{round_suffix}.md" in response_authoring.writes_allowed
     assert "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md" in response_authoring.writes_allowed
@@ -303,6 +308,7 @@ def test_publication_response_writer_handoff_uses_canonical_completion_gate() ->
 
     assert "Canonical workflow-facing handoff and completion reference for spawned response-writing work." in source
     assert "publication-response-artifacts.md" in source
+    assert "stage-recovery-gate.md" in source
     assert "status: checkpoint" in source
     assert "gpd_return.files_written" in source
     assert "publication-artifact-gates.md" not in source

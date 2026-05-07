@@ -11,10 +11,34 @@ from tests.doc_surface_contracts import resume_authority_public_vocabulary_intro
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
+ORCHESTRATION_REFS_DIR = REPO_ROOT / "src/gpd/specs/references/orchestration"
 
 
 def _workflow_text(name: str) -> str:
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+
+
+def test_contract_authority_gate_reference_defines_shared_boundary() -> None:
+    reference = (ORCHESTRATION_REFS_DIR / "contract-authority-gate.md").read_text(encoding="utf-8")
+
+    assert "project_contract_gate.authoritative" in reference
+    assert "diagnostic context, not planning, execution, verification" in reference
+    assert "obey the lifecycle preflight and stop fail-closed" in reference
+    assert "do not infer approved scope from roadmap, state, manuscript, reference context, or user prose" in reference
+    assert "The local workflow still owns its subject, artifacts, validators, and failure route." in reference
+
+
+def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -> None:
+    include = "`{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`"
+    for workflow_name in (
+        "audit-milestone.md",
+        "new-milestone.md",
+        "literature-review.md",
+        "map-research.md",
+        "compare-results.md",
+        "compare-experiment.md",
+    ):
+        assert _workflow_text(workflow_name).count(include) == 1
 
 
 @pytest.mark.parametrize(

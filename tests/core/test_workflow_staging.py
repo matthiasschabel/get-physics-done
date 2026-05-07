@@ -613,6 +613,7 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
     assert "references/publication/publication-response-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/publication-pipeline-modes.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-panel.md" in bootstrap.must_not_eager_load
+    assert "references/publication/stage-recovery-gate.md" in bootstrap.must_not_eager_load
     assert "templates/paper/paper-config-schema.md" in bootstrap.must_not_eager_load
     assert bootstrap.writes_allowed == ()
     assert "contract_intake" in bootstrap.required_init_fields
@@ -642,6 +643,7 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
     )
     assert authoring.loaded_authorities == (
         "workflows/write-paper.md",
+        "references/publication/stage-recovery-gate.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/figure-tracker.md",
     )
@@ -666,6 +668,7 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
     )
@@ -997,6 +1000,7 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert "references/publication/publication-review-round-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-panel.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-reliability.md" in bootstrap.must_not_eager_load
+    assert "references/publication/stage-recovery-gate.md" in bootstrap.must_not_eager_load
     assert "templates/paper/paper-config-schema.md" in bootstrap.must_not_eager_load
     assert "review_target_input" in bootstrap.required_init_fields
     assert "review_target_mode" in bootstrap.required_init_fields
@@ -1034,6 +1038,7 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert panel_stages.loaded_authorities == (
         "workflows/peer-review.md",
         "references/publication/peer-review-panel.md",
+        "references/publication/stage-recovery-gate.md",
     )
     assert "GPD/review/CLAIMS{round_suffix}.json" in panel_stages.writes_allowed
     assert "GPD/publication/{subject_slug}/review/CLAIMS{round_suffix}.json" in panel_stages.writes_allowed
@@ -1041,6 +1046,7 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert final_adjudication.loaded_authorities == (
         "workflows/peer-review.md",
         "references/publication/peer-review-panel.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
     )

@@ -15,38 +15,47 @@ def _read(path: Path) -> str:
 
 def test_agent_delegation_reference_makes_one_shot_checkpoint_and_artifact_gate_explicit() -> None:
     text = _read(ORCHESTRATION_REFERENCES / "agent-delegation.md")
+    gate = _read(ORCHESTRATION_REFERENCES / "child-artifact-gate.md")
 
     assert "canonical delegation contract" in text
     assert "Delegation Invariants" in text
     assert "One-shot handoff" in text
     assert "returns `status: checkpoint` and stops" in text
-    assert "Artifact gate" in text
-    assert "verified on disk" in text
+    assert "Child artifact gate" in text
+    assert "child-artifact-gate.md" in text
     assert "Return gate" in text
-    assert "Files and commits are partial evidence only" in text
-    assert "must not synthesize, patch, or paste a child `gpd_return`" in text
+    assert "Files and commits are recovery evidence only" in text
+    assert "Do not synthesize, patch, or paste a child `gpd_return`" in text
     assert "Fresh continuation ownership" in text
     assert "spawn a fresh continuation handoff" in text
     assert "must not wait for the user inside the same handoff" in text
     assert "literal child-authored file contents" in text
-    assert "the structured return must validate" in text
-    assert "gpd apply-return-updates" in text
+    assert "Re-run the child artifact gate before accepting success" in text
     assert (
         "File-producing or state-sensitive spawned prompts must include this block directly in the prompt text" in text
     )
     assert "adjacent documented exemption" in text
+
+    assert "Use this gate after every spawned child return" in gate
+    assert "Route on a valid fenced `gpd_return.status`" in gate
+    assert "`gpd_return.files_written`" in gate
+    assert "callsite applicator" in gate
+    assert "Files, commits, runtime success, and preexisting artifacts are recovery" in gate
+    assert "synthesize, patch, or paste a child `gpd_return`" in gate
 
 
 def test_runtime_delegation_note_reuses_the_same_one_shot_and_artifact_language() -> None:
     text = _read(ORCHESTRATION_REFERENCES / "runtime-delegation-note.md")
 
     assert "agent-delegation.md" in text
+    assert "child-artifact-gate.md" in text
     assert "one-shot" in text
     assert "`status: checkpoint`" in text
-    assert "Artifact gate" in text
+    assert "Child artifact gate" in text
+    assert "local callsite names expected artifacts, validators, applicator, and failure route" in text
     assert "A missing or invalid `gpd_return` is incomplete" in text
     assert "must not synthesize, patch, or paste a child `gpd_return`" in text
-    assert "Files and commits are partial evidence only" in text
+    assert "Files, commits, and preexisting artifacts are recovery evidence only" in text
     assert "Fresh-continuation ownership" in text
     assert "Empty-model omission" in text
     assert "`readonly=false`" in text
@@ -60,11 +69,12 @@ def test_agent_infrastructure_points_spawned_write_contract_to_canonical_delegat
     )[0]
 
     assert "references/orchestration/agent-delegation.md" in write_contract
+    assert "references/orchestration/child-artifact-gate.md" in write_contract
     assert "commit_authority" in write_contract
     assert "write_scope" in write_contract
     assert "shared_state_policy" in write_contract
     assert "Files or commits from an orchestrator-owned agent are recovery clues" in write_contract
-    assert "the child return validates" in write_contract
+    assert "local child artifact gate passes" in write_contract
     assert "<spawn_contract>" not in write_contract
 
 

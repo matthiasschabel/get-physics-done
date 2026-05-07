@@ -99,6 +99,7 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
     assert panel_execution.loaded_authorities == (
         "workflows/peer-review.md",
         "references/publication/peer-review-panel.md",
+        "references/publication/stage-recovery-gate.md",
     )
     assert "workflows/peer-review.md" in final_adjudication.loaded_authorities
     assert "references/publication/peer-review-panel.md" in final_adjudication.loaded_authorities

@@ -50,7 +50,7 @@ load_map_research_stage() {
 BOOTSTRAP_INIT=$(load_map_research_stage map_bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $BOOTSTRAP_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 
 PROJECT_ROOT=$(echo "$BOOTSTRAP_INIT" | gpd json get .project_root --default "")
@@ -59,11 +59,12 @@ RESEARCH_MAP_DIR=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_map_dir --def
 RESEARCH_MAP_DIR_ABS=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_map_dir_absolute --default "")
 if [ -z "$PROJECT_ROOT" ] || [ -z "$RESEARCH_MAP_DIR_ABS" ]; then
   echo "ERROR: map-research init did not return project_root and research_map_dir_absolute"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
 Extract from init JSON: `mapper_model`, `workspace_root`, `project_root`, `commit_docs`, `research_mode`, `map_focus`, `map_focus_provided`, `research_map_dir`, `research_map_dir_absolute`, `existing_maps`, `has_maps`, `research_map_dir_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+`{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
 
 All filesystem actions in this workflow must use `PROJECT_ROOT` / `RESEARCH_MAP_DIR_ABS` from the staged payload. Do not create, delete, archive, verify, or commit `GPD/research-map` relative to the shell launch directory; a nested launch cwd inside a project is valid and must still target the resolved project root.
 
@@ -82,7 +83,7 @@ RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default b
 - `RESEARCH_MODE` is sourced from the init payload. Do not re-query config later in this workflow.
 - Preserve stable anchor identity: every durable `REFERENCES.md` anchor needs reusable `Anchor ID` and concrete `Source / Locator`.
 - Keep carry-forward scope separate from contract subject linkage: `Carry Forward To` names workflow stages; exact claim/deliverable IDs go in `Contract Subject IDs`.
-- Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. If the gate is blocked, keep the contract visible as context but do not treat it as approved mapping truth.
+- Contract gate: `project_contract` is authoritative only when `project_contract_gate.authoritative` is true; otherwise keep gate/load/validation visible.
 - If `map_focus_provided` is true, keep `map_focus` visible and bias each slice without losing contract-critical coverage. Map focus: {map_focus}
 Each mapper agent is a one-shot file-producing handoff. Route on `gpd_return.status`, then verify `gpd_return.files_written` against the expected artifacts before accepting the run.
 </step>
@@ -182,7 +183,7 @@ Use task tool with `subagent_type="gpd-research-mapper"`, `model="{mapper_model}
 
 **CRITICAL:** Use the dedicated `gpd-research-mapper` agent, NOT `Explore`. The mapper agent writes documents directly.
 
-Each mapper prompt must carry the staged intake, active reference context, excerpts, contract load/validation status, and project contract. Prefer contract IDs only when `project_contract_gate.authoritative` is true.
+Each mapper prompt must carry the staged intake, active reference context, excerpts, contract load/validation status, and project contract. Keep compact inline authority instructions in the task prompt; prefer contract IDs only when `project_contract_gate.authoritative` is true.
 
 Mapper write paths are project-rooted. Resolve every relative `GPD/research-map/...` path against `{project_root}` and write to the corresponding absolute target under `{research_map_dir_absolute}`. Never write under the runtime shell cwd unless it is the same directory as `{project_root}`.
 

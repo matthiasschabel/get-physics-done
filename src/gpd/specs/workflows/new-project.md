@@ -127,7 +127,7 @@ Load the approval-stage payload before schema-governed contract authoring:
 SCOPE_APPROVAL_INIT=$(gpd --raw init new-project --stage scope_approval)
 if [ $? -ne 0 ]; then
   echo "ERROR: scope-approval init failed: $SCOPE_APPROVAL_INIT"
-  # STOP -- display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -439,7 +439,7 @@ Runtime label: Show `gpd:` as native labels; keep local CLI `gpd ...` unchanged.
 INIT=$(gpd --raw init new-project --stage scope_intake)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed with the workflow.
+  # STOP; surface the error.
 fi
 ```
 

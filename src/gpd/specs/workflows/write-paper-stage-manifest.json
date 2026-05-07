@@ -133,6 +133,7 @@
         "references/publication/publication-pipeline-modes.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
@@ -212,6 +213,7 @@
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/review-ledger-schema.md",
@@ -280,6 +282,7 @@
       ],
       "loaded_authorities": [
         "workflows/write-paper.md",
+        "references/publication/stage-recovery-gate.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/figure-tracker.md"
       ],
@@ -355,6 +358,7 @@
       ],
       "loaded_authorities": [
         "workflows/write-paper.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md"
       ],
@@ -436,6 +440,7 @@
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md"
       ],

@@ -20,10 +20,13 @@ def test_publication_bootstrap_preflight_defines_the_shared_publication_gate() -
 
 def test_publication_response_writer_handoff_defines_one_shot_child_returns() -> None:
     source = (REFERENCES_DIR / "publication-response-writer-handoff.md").read_text(encoding="utf-8")
+    recovery = (REFERENCES_DIR / "stage-recovery-gate.md").read_text(encoding="utf-8")
 
     assert "Canonical workflow-facing handoff and completion reference for spawned response-writing work." in source
-    assert "A spawned response writer is one-shot. If user input is needed, it returns `status: checkpoint` and stops." in source
-    assert "The orchestrator resumes with a fresh continuation handoff. It does not wait inside the same run." in source
+    assert "stage-recovery-gate.md" in source
+    assert "Apply the publication stage-recovery gate for one-shot writer lifecycle" in source
+    assert "Treat every spawned publication child as one-shot." in recovery
+    assert "For `checkpoint`, stop that child and resume only by spawning a fresh continuation" in recovery
     assert (
         "`status: completed` is provisional until the expected response files exist on disk and are named in fresh typed `gpd_return.files_written`."
         in source
@@ -33,8 +36,9 @@ def test_publication_response_writer_handoff_defines_one_shot_child_returns() ->
     assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in source
     assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in source
     assert "default project subjects resolve those to `GPD/AUTHOR-RESPONSE{round_suffix}.md`" in source
-    assert "Do not treat prose-only status messages or stale preexisting files as proof of completion." in source
+    assert "Do not treat prose-only status messages as proof of completion." in source
     assert "stale same-round files without a binding do not complete the handoff" in source
+    assert "Do not accept stale preexisting files as proof of current-run completion." in recovery
     assert "publication-artifact-gates.md" not in source
 
 
@@ -69,11 +73,8 @@ def test_publication_response_artifacts_define_paired_completion_gate() -> None:
     source = (REFERENCES_DIR / "publication-response-artifacts.md").read_text(encoding="utf-8")
 
     assert "Canonical paired response-artifact and one-shot child-return contract for referee-response work." in source
-    assert (
-        "If a spawned writer needs user input, it returns `status: checkpoint` and stops. "
-        "The orchestrator resumes with a fresh continuation; it does not wait inside the same run."
-        in source
-    )
+    assert "stage-recovery-gate.md" in source
+    assert "spawned writer lifecycle, checkpoint continuation, and stale-output rejection" in source
     assert (
         "A reported `status: completed` is provisional until the response pair exists on disk and those same fresh paths appear in typed `gpd_return.files_written`."
         in source
@@ -85,7 +86,7 @@ def test_publication_response_artifacts_define_paired_completion_gate() -> None:
     assert "Successful response-round completion requires both" in source
     assert "status: checkpoint" in source
     assert "gpd_return.files_written" in source
-    assert "Do not accept stale preexisting files" in source
+    assert "stale-output handling comes from the stage-recovery gate" in source
     assert "Project-backed response rounds resolve `selected_publication_root=GPD`" in source
     assert "same paired response artifacts bind under the subject-owned" in source
     assert "response_to: REFEREE-REPORT{round_suffix}.md" in source
@@ -140,7 +141,7 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
     assert "fixed" in paper_writer and "on disk" in paper_writer
     assert "fixed" in referee and "on disk" in referee
     assert "gpd_return.files_written" in write_paper
-    assert "both outputs and both files exist on disk" in write_paper
+    assert "both files present on disk" in write_paper
     assert "publication-bootstrap-preflight.md" in write_paper
     assert "publication-response-writer-handoff.md" in write_paper
     assert "publication-bootstrap-preflight.md" in respond
@@ -155,9 +156,9 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
 def test_peer_review_stage_six_requires_fresh_referee_return_and_artifacts() -> None:
     workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
-    assert "status: checkpoint" in workflow
-    assert "Do not keep the same spawned run alive waiting for confirmation." in workflow
-    assert "fresh continuation handoff" in workflow
+    assert "status: completed | checkpoint | blocked | failed" in workflow
+    assert "stage-recovery-gate.md" in workflow
+    assert "checkpoint continuation" in workflow
 
 
 def test_peer_review_parallel_wave_stops_terminal_children_before_stage_4() -> None:
@@ -170,7 +171,7 @@ def test_peer_review_parallel_wave_stops_terminal_children_before_stage_4() -> N
     assert "If literature, math, or the conditional proof-critique stage fails, STOP and report the failure." in workflow
     assert "Stages 2-3 recovery -- Validate literature and math outputs before proceeding." in workflow
     assert (
-        "Re-run only the failed stage subagent with the same inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`"
+        "Retry only the failed stage once with the same persisted inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`"
         in workflow
     )
     assert "Do not proceed to Stage 4." in workflow

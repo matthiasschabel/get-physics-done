@@ -20,7 +20,7 @@ Run centralized command-context preflight first.
 CONTEXT=$(gpd --raw validate command-context limiting-cases "$ARGUMENTS")
 if [ $? -ne 0 ]; then
   echo "$CONTEXT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -39,7 +39,7 @@ After classifying the target, load workspace-bound state and conventions without
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -53,7 +53,7 @@ fi
 PHASE_INIT=$(gpd --raw init phase-op --include state,config "${PHASE_ARG}")
 if [ $? -ne 0 ]; then
   echo "ERROR: limiting-cases phase resolution failed: $PHASE_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

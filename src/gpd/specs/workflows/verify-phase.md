@@ -3,7 +3,7 @@ Verify research phase goal achievement through decisive verification. Check that
 
 Executed by a verification subagent spawned from execute-phase.md.
 
-`verify-phase` is the canonical owner of the verifier/proof child-return contract and artifact-gate seam for phase verification. Shared handoff mechanics live in `references/verification/core/verification-child-return-contract.md`, while report-schema and proof-audit authority stay local to this workflow.
+`verify-phase` is the canonical owner of the verifier/proof child-return contract and artifact-gate seam for phase verification. Shared handoff mechanics live in `references/verification/core/verification-child-return-contract.md`; scientific status vocabulary lives in `references/verification/verification-status-authority.md`; report-schema and proof-audit authority stay local to this workflow.
 
 The standalone `gpd:verify-work` workflow reuses the same verification criteria through `verify-work.md`; this file itself is executed by the execute-phase orchestrator.
 </purpose>
@@ -43,6 +43,7 @@ Do not raw-include the verification reference library at workflow load. Load onl
 - `{GPD_INSTALL_DIR}/references/verification/core/verification-core.md` -> universal decisive-check rules in `verify_contract_targets`
 - `{GPD_INSTALL_DIR}/references/verification/core/verification-numerical.md` -> numerical/statistical checks in `physics_specific_verification`
 - `{GPD_INSTALL_DIR}/references/verification/core/verification-child-return-contract.md` -> verifier return envelope routing
+- `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` -> target status, top-level verification status, and runtime return-status boundary
 - `{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md` -> context include/exclude choices
 - `{GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md` -> uncertainty or propagation targets
 - `{GPD_INSTALL_DIR}/templates/verification-report.md` and `{GPD_INSTALL_DIR}/templates/contract-results-schema.md` -> immediately before writing `VERIFICATION.md`
@@ -57,7 +58,7 @@ Load phase operation context:
 INIT=$(gpd --raw init phase-op "${PHASE_ARG}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -244,7 +245,7 @@ Count total checks across all contract-backed targets (claims + deliverables + a
 <step name="verify_contract_targets">
 For each contract-backed target, determine if the research artifacts support it.
 
-**Status:** VERIFIED (all supporting artifacts and decisive checks pass) | PARTIAL (some evidence exists but decisive checks, anchor actions, or decisive comparisons remain open) | FAILED (artifact missing/incomplete/unvalidated or decisive comparison fails) | UNCERTAIN (needs human expert)
+Load `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` and apply its target-status vocabulary and fail-closed promotion rules.
 
 For each claim or acceptance test: identify supporting artifacts -> check artifact status -> run computational physics checks -> determine target status. State the verdict in terms of the user-visible outcome, not internal task completion.
 
@@ -586,13 +587,7 @@ Format each as: Check Name -> What to verify -> Expected result -> Why cannot ve
 </step>
 
 <step name="determine_status">
-**passed:** All decisive contract targets VERIFIED with computation evidence, all artifacts pass levels 1-4, all required comparison verdicts are acceptable, all must-surface references are handled, all forbidden proxies are rejected, no unresolved `suggested_contract_checks` remain on decisive targets, no blocker anti-patterns, no cross-phase blockers.
-
-**gaps_found:** Any decisive contract target FAILED, artifact MISSING/INCOMPLETE/INCORRECT, required comparison verdict missing/FAIL/TENSION without resolution, required reference action missing, forbidden proxy VIOLATED/UNRESOLVED, physics check NOT_PERFORMED/FAILED, blocker anti-pattern found, cross-phase blocker found, or an omitted decisive check is recorded in `suggested_contract_checks` without an equivalent closing check elsewhere.
-
-**expert_needed:** All automated and computational checks pass but domain-expert verification items remain.
-
-**human_needed:** All automated and computational checks pass but non-expert human review or user decision remains.
+Apply the top-level rules from `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md`. Local phase-specific blockers still matter: cross-phase blockers prevent `passed`, and any omitted decisive check recorded in `suggested_contract_checks` keeps the relevant target below `VERIFIED` unless an equivalent closing check exists elsewhere.
 
 **Score:** `verified_contract_targets / total_contract_targets`
 If you need an aggregate independently confirmed tally for the narrative, keep it in body prose or tables. Do not add a non-canonical verification frontmatter key for that count.
@@ -684,7 +679,7 @@ When this workflow returns directly to the user or a blocking status stops orche
 - [ ] Anti-patterns scanned and categorized
 - [ ] Cross-phase consistency checked (notation, conventions, approximations, units) if 2+ phases exist
 - [ ] Expert verification items identified with explanation of computational limitations
-- [ ] Overall status determined with independently-confirmed count
+- [ ] Overall status determined through the verification-status authority, with independently-confirmed count kept out of frontmatter
 - [ ] Fix plans generated with computation evidence (if gaps_found)
 - [ ] VERIFICATION.md created with complete computational verification details
 - [ ] Results returned to orchestrator

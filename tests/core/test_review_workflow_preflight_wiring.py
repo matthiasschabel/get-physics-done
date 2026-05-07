@@ -90,8 +90,8 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
     assert "the end-of-options marker is mandatory in both validator calls" in workflow
     assert "missing referee report source when provided as a path" in workflow
     assert "In explicit external-manuscript mode, `project_state` and `conventions` are advisory only." in workflow
-    assert "Any spawned agent that needs user input must return `status: checkpoint` and stop" in workflow
-    assert "Do not ask the child agent to wait inside the same run" in workflow
+    assert "Any spawned agent that needs user input follows the publication stage-recovery gate checkpoint semantics." in workflow
+    assert "If a spawned paper-writer returns `status: checkpoint`, apply the publication stage-recovery gate" in workflow
     assert "Apply the shared publication bootstrap preflight exactly:" in workflow
     assert PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
@@ -164,8 +164,8 @@ def test_peer_review_workflow_runs_centralized_review_preflight_with_explicit_ar
 
     assert 'gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict' in workflow
     assert "gpd validate review-preflight peer-review --strict" not in workflow
-    assert "If any spawned reviewer or proof auditor needs user input, it must return `status: checkpoint` and stop." in workflow
-    assert "Do not keep the same spawned run alive waiting for confirmation." in workflow
+    assert "stage-recovery-gate.md" in workflow
+    assert "checkpoint continuation" in workflow
     assert "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree." in workflow
 
 

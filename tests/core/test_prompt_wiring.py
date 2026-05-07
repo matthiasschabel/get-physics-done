@@ -2060,7 +2060,8 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
     assert "project_contract_validation" in compare_workflow
     assert "active_reference_context" in compare_workflow
     assert (
-        "Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true."
+        "Apply the shared contract authority gate: treat `project_contract` as authoritative comparison scope only when "
+        "`project_contract_gate.authoritative` is true."
         in compare_workflow
     )
     assert "active_reference_context" in map_workflow
@@ -2133,12 +2134,16 @@ def test_research_phase_command_delegates_file_path_and_return_routing_to_the_wo
 def test_revision_and_audit_workflows_verify_artifacts_before_trusting_success_text() -> None:
     respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
     audit = (WORKFLOWS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
+    stage_gate = (REPO_ROOT / "src/gpd/specs/references/publication/stage-recovery-gate.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "templates/paper/author-response.md" in respond
     assert "needs-calculation" in respond
     assert "Use `**Evidence:**` blocks for rebuttals" in respond
     assert "verify the promised artifacts before trusting the handoff text" in respond
-    assert "If the agent claimed success but the files did not change, treat that section as failed" in respond
+    assert "stage-recovery-gate.md" in respond
+    assert "Do not accept stale preexisting files as proof of current-run completion." in stage_gate
     assert "Re-open `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`" in respond
 
     assert "Verify the promised referee artifacts before trusting the handoff text" in audit
@@ -2152,7 +2157,8 @@ def test_audit_milestone_surfaces_contract_gate_and_milestone_review_namespace()
     assert "project_contract_load_info" in audit
     assert "project_contract_validation" in audit
     assert "active_reference_context" in audit
-    assert "Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true." in audit
+    assert "Apply the shared contract authority gate" in audit
+    assert "project_contract` is approved milestone scope only when `project_contract_gate.authoritative` is true" in audit
     assert (
         "skip mock peer review and note that the contract gate must be repaired before milestone publishability review"
         in audit
@@ -2652,7 +2658,7 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
     assert "comparison_verdicts" in compare_workflow
     assert "project_contract_load_info" in compare_workflow
     assert "project_contract_validation" in compare_workflow
-    assert "authoritative only when `project_contract_gate.authoritative` is true" in compare_workflow
+    assert "approved contract only when `project_contract_gate.authoritative` is true" in compare_workflow
     assert "selected_protocol_bundle_ids" in compare_workflow
     assert "protocol_bundle_context" in compare_workflow
     assert "active_reference_context" in compare_workflow
@@ -3843,11 +3849,11 @@ def test_peer_review_workflow_and_generated_skill_surface_keep_lifecycle_cleanup
     peer_review_skill_content = get_skill("gpd-peer-review")["content"]
 
     expected_fragments = (
-        "stage-owned artifact boundary on disk",
-        "closed and retired",
-        "transient execution state",
+        "stage-recovery-gate.md",
+        "spawned reviewer/proof-auditor/referee lifecycle",
+        "stale-output rejection",
         "declared carry-forward inputs",
-        "keep the adjudication run live while deciding what to do next",
+        "Apply the publication stage-recovery gate to the Stage 6 typed return",
     )
 
     _assert_contains_fragments(peer_review_workflow, *expected_fragments)

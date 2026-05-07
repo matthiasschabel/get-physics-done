@@ -81,6 +81,7 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
     assert "references/publication/publication-response-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-panel.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-reliability.md" in bootstrap.must_not_eager_load
+    assert "references/publication/stage-recovery-gate.md" in bootstrap.must_not_eager_load
     assert "references/publication/publication-pipeline-modes.md" in bootstrap.must_not_eager_load
     assert "templates/paper/paper-config-schema.md" in bootstrap.must_not_eager_load
     assert "templates/paper/artifact-manifest-schema.md" in bootstrap.must_not_eager_load
@@ -95,11 +96,13 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
     )
     assert figure_authoring.loaded_authorities == (
         "workflows/write-paper.md",
+        "references/publication/stage-recovery-gate.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/figure-tracker.md",
     )
     assert consistency.loaded_authorities == (
         "workflows/write-paper.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
     )
@@ -109,6 +112,7 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
     )

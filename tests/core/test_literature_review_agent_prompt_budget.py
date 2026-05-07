@@ -33,8 +33,8 @@ def test_gpd_literature_reviewer_prompt_stays_within_expected_budget_and_keeps_t
     assert "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" not in source
     assert "anchor_id" in source
     assert "locator" in source
-    assert "fresh continuation run" in source
-    assert "do not wait in-run for user approval" in source
+    assert "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in source
+    assert "continuation boundary owns presentation and follow-up" in source
 
     for heading in (
         "Paper Assessment Rubric",

@@ -30,7 +30,7 @@ Load project state and conventions before beginning validation. Keep this workfl
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -45,7 +45,7 @@ Resolve authoritative phase context only after the target is known. If the targe
 PHASE_INIT=$(gpd --raw init phase-op --include state,config "{phase_number}")
 if [ $? -ne 0 ]; then
   echo "ERROR: phase initialization failed: $PHASE_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

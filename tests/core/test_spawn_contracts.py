@@ -192,6 +192,7 @@ def test_agent_delegation_reference_defines_canonical_task_contract() -> None:
     assert "Blocking completion semantics:" in content
     assert "Success-path artifact gate:" in content
     assert "Return-envelope parity:" in content
+    assert "child-artifact-gate.md" in content
     assert "write_scope:" in content
     assert "expected_artifacts:" in content
     assert "shared_state_policy:" in content
@@ -202,9 +203,9 @@ def test_agent_delegation_reference_defines_canonical_task_contract() -> None:
     assert "Artifact Recovery Protocol" in content
     assert "literal child-authored file contents" in content
     assert "Write those file contents directly in the main orchestrator context" in content
-    assert "must not synthesize, patch, or paste a child `gpd_return`" in content
+    assert "Do not synthesize, patch, or paste a child `gpd_return`" in content
     assert "A missing or invalid `gpd_return` envelope is an incomplete handoff" in content
-    assert "Files and commits remain partial evidence until those gates pass." in content
+    assert "Re-run the child artifact gate before accepting success" in content
     assert "Never silently proceed" in content
 
 
@@ -343,7 +344,8 @@ def test_quick_and_write_paper_gate_handoffs_on_expected_artifacts() -> None:
 
     assert "Verify plan exists at `${QUICK_DIR}/${next_num}-PLAN.md`" in quick
     assert "Verify summary exists at `${QUICK_DIR}/${next_num}-SUMMARY.md`" in quick
-    assert "Do not trust the runtime handoff status by itself." in quick
+    assert "A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only" in quick
+    assert "Apply the executor child artifact gate before success" in quick
     assert "check for the expected .tex output files before spawning writer agents" in write_paper
     assert "Check if the expected .tex file was written to `${PAPER_DIR}/`" in write_paper
     assert "If the file exists, proceed to the next section." in write_paper
@@ -369,7 +371,7 @@ def test_execute_phase_requires_state_return_envelope_and_handoff_spot_checks() 
     )
     assert "State updates returned (NOT written to STATE.md directly)" in executor.text
     assert "Executor subagents MUST NOT write STATE.md directly." in content
-    assert "Verify expected output files, the valid structured return envelope" in content
+    assert "Apply the local child artifact gate before success" in content
     assert "git commits are partial evidence only" in content
     assert "pre_execution_specialists" in content
     assert '# task(subagent_type="gpd-notation-coordinator"' not in content

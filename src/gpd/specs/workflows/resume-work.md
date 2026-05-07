@@ -30,7 +30,7 @@ Load resume bootstrap. `gpd:resume-work` is the guided runtime path; `gpd resume
 INIT=$(gpd --raw init resume --stage resume_bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -80,7 +80,7 @@ Load state-restore before using contract, reference, or readable state fields:
 STATE_RESTORE_INIT=$(gpd --raw init resume --stage state_restore)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd state-restore initialization failed: $STATE_RESTORE_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -134,7 +134,7 @@ Load derivation-restore before reconstructing derivation history:
 DERIVATION_RESTORE_INIT=$(gpd --raw init resume --stage derivation_restore)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd derivation-restore initialization failed: $DERIVATION_RESTORE_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -223,7 +223,7 @@ Load resume-routing before deciding what work is incomplete or resumable:
 RESUME_ROUTING_INIT=$(gpd --raw init resume --stage resume_routing)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd resume-routing initialization failed: $RESUME_ROUTING_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

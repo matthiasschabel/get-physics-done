@@ -22,7 +22,7 @@ def test_debugger_vertical_spawn_contract_is_one_shot_and_file_producing() -> No
     expanded_workflow = expand_at_includes(workflow, REPO_ROOT / "src/gpd", "/runtime/")
 
     assert "One-shot handoff" in delegation
-    assert "Artifact gate" in delegation
+    assert "Child artifact gate" in delegation
     assert "Always set `readonly=false` for file-producing agents." in delegation
     assert "Spawn a fresh subagent for the task below." in runtime_note
     assert "one-shot handoff" in runtime_note

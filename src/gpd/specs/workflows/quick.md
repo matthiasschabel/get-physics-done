@@ -34,7 +34,7 @@ If empty, re-prompt: "Please provide a task description."
 TASK_BOOTSTRAP_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $TASK_BOOTSTRAP_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$TASK_BOOTSTRAP_INIT"
 ```
@@ -89,7 +89,7 @@ Load the staged task-authoring payload before assembling the quick planner promp
 TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_authoring)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd quick task-authoring init failed: $TASK_AUTHORING_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$TASK_AUTHORING_INIT"
 ```
@@ -148,7 +148,9 @@ Return a structured `gpd_return` envelope. Use `gpd_return.status: completed` on
 )
 ```
 
-**If the planner agent fails to spawn or returns an error:** Check if a plan file was written to `${QUICK_DIR}/${next_num}-PLAN.md` (agents write files first). If the plan exists, proceed to step 5. If no plan, offer: 1) Retry planner, 2) Create the plan in the main context, 3) Abort. Do not silently continue without a plan.
+Child artifact gate: `gpd-planner`; expect fresh `${QUICK_DIR}/${next_num}-PLAN.md` named in `gpd_return.files_written`, readable under `${QUICK_DIR}`, and plan-preflighted when it declares `tool_requirements`; no applicator before execution; otherwise retry, explicit main-context fallback with its own return, or abort.
+
+**If the planner agent fails to spawn or returns an error:** A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only. Do not proceed to step 5 from files alone; require a valid planner `gpd_return` naming that plan, or run the explicit main-context fallback that owns its own return envelope. If the gate cannot pass, offer: 1) Retry planner, 2) Create the plan in the main context, 3) Abort. Do not silently continue without a gated plan.
 
 After planner returns:
 
@@ -170,7 +172,7 @@ if [ -n "$PLAN_TOOL_REQUIREMENTS" ]; then
   PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "${QUICK_DIR}/${next_num}-PLAN.md")
   if [ $? -ne 0 ]; then
     echo "ERROR: plan-preflight failed: $PLAN_PREFLIGHT"
-    # STOP — display the error to the user and do not proceed.
+    # STOP; surface the error.
   fi
 fi
 ```
@@ -215,7 +217,9 @@ Reference artifacts: {reference_artifacts_content}
 )
 ```
 
-**If the executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without `${QUICK_DIR}/${next_num}-SUMMARY.md`, valid child `gpd_return`, artifact gate, and `gpd apply-return-updates`. If the return is missing/invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Execute in explicit main-context fallback with its own return, 3) Abort.
+Child artifact gate: `gpd-executor`; expect fresh readable `${QUICK_DIR}/${next_num}-SUMMARY.md` named in `gpd_return.files_written`; apply `gpd apply-return-updates "${QUICK_DIR}/${next_num}-SUMMARY.md"`; otherwise retry, explicit main-context fallback with its own return, or abort.
+
+**If the executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without the local child artifact gate above. If the return is missing/invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Execute in explicit main-context fallback with its own return, 3) Abort.
 
 After executor returns:
 
@@ -223,7 +227,7 @@ After executor returns:
 2. Extract commit hash from executor output
 3. Report completion status
 
-> **Handoff verification:** Do not trust the runtime handoff status by itself. Verify output files, valid return, and `gpd apply-return-updates` before success; git commits are partial evidence only.
+> **Handoff verification:** Apply the executor child artifact gate before success; git commits are partial evidence only.
 
 If summary not found, error: "Executor failed to create ${next_num}-SUMMARY.md"
 

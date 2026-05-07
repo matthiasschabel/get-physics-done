@@ -24,3 +24,5 @@ def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -
     assert "The `## CHECKPOINT REACHED` heading is presentation only." in workflow
     assert "The `## PLANNING COMPLETE` heading is presentation only." in workflow
     assert "Route on `gpd_return.status` and the artifact gate, not on the human-readable headings" in workflow
+    assert "A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only" in workflow
+    assert "Do not proceed to step 5 from files alone" in workflow

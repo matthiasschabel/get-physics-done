@@ -121,6 +121,8 @@ Before freezing the verification plan, use this contract-check loop whenever pro
 
 If a decisive check is still missing after that pass, record it as a structured `suggested_contract_checks` entry.
 
+**Canonical verification status authority:** load `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` before assigning target status, top-level verification status, or runtime return status.
+
 **Protocol bundle guidance (additive, not authoritative)**
 
 If the workflow supplies selected protocol bundles or bundle checklist extensions:
@@ -151,12 +153,7 @@ For subfield-specific red flags, load only the relevant reference: `{GPD_INSTALL
 
 For each claim / deliverable / acceptance test / reference / forbidden proxy, determine if the research outputs establish it.
 
-**Verification status:**
-
-- VERIFIED: All supporting artifacts pass all decisive checks with consistent physics
-- PARTIAL: Some evidence exists but decisive checks, decisive comparisons, or anchor actions remain open
-- FAILED: One or more artifacts missing, incomplete, physically inconsistent, or contradicted by decisive comparisons
-- UNCERTAIN: Cannot verify programmatically (needs expert review or additional computation)
+Apply the loaded verification-status authority for `VERIFIED`, `PARTIAL`, `FAILED`, and `UNCERTAIN`.
 
 For each contract-backed outcome:
 
@@ -210,6 +207,8 @@ Record the code, actual output, and PASS/FAIL/INCONCLUSIVE verdict in VERIFICATI
 
 Confirm the artifact is integrated with the phase goal, contract target, convention lock, dependencies, and downstream references. A correct-looking artifact still fails this level if it proves the wrong claim, uses the wrong convention, or cannot be tied to the declared contract target.
 
+Status promotion still requires that all artifacts pass levels 1-4.
+
 ### Convention Assertion Verification
 
 Scan all phase artifacts for `ASSERT_CONVENTION` lines and verify against the convention lock in state.json. **Preferred format uses canonical (full) key names** matching state.json fields: `natural_units`, `metric_signature`, `fourier_convention`, `gauge_choice`, `regularization_scheme`, `renormalization_scheme`, `coupling_convention`, `spin_basis`, `state_normalization`, `coordinate_system`, `index_positioning`, `time_ordering`, `commutation_convention`. Short aliases (`units`, `metric`, `fourier`, `coupling`, `renorm`, `gauge`, etc.) are also accepted by the `ASSERT_CONVENTION` parser. Report mismatches as BLOCKERs. Files with equations but missing `ASSERT_CONVENTION`: report as WARNING.
@@ -222,13 +221,7 @@ For each item, document: what to verify, expected result, domain expertise neede
 
 ## Step 9: Determine Overall Status
 
-**Status: passed** -- All decisive contract targets VERIFIED, every reference entry is `completed`, every `must_surface` reference has all `required_actions` recorded in `completed_actions`, required comparison verdicts acceptable, forbidden proxies rejected, no unresolved `suggested_contract_checks` remain on decisive targets, all artifacts pass levels 1-4, and no blocker anti-patterns.
-
-**Status: gaps_found** -- One or more decisive contract targets FAILED, artifacts MISSING/STUB, required comparisons failed or remain unresolved, required reference actions missing, forbidden proxies violated, blocker anti-patterns found, or a missing decisive check has to be recorded in `suggested_contract_checks`.
-
-**Status: expert_needed** -- All automated checks pass but domain-expert verification items remain. This is common for novel theoretical results that are computationally consistent but still need specialist judgment.
-
-**Status: human_needed** -- All automated checks pass but non-expert human review or user decision remains.
+Apply the top-level rules from the loaded `references/verification/verification-status-authority.md`. Do not use process-level `failed` for a scientific gap; use `gaps_found`, `expert_needed`, or `human_needed` as appropriate.
 
 **Score:** `verified_contract_targets / total_contract_targets` and `key_links_verified / total_applicable_links`
 

@@ -27,10 +27,7 @@ def test_validate_conventions_seam_is_one_shot_and_artifact_gated_before_notatio
     assert "Spawn a fresh subagent for the task below." in expanded_workflow
     assert "This is a one-shot handoff:" in expanded_workflow
     assert "Do not make the child wait in place." in expanded_workflow
-    assert (
-        "If the task produces files, verify the expected artifacts on disk before marking the handoff complete."
-        in expanded_workflow
-    )
+    assert "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in expanded_workflow
     assert "Always pass `readonly=false` for file-producing agents." in expanded_workflow
     assert "Thin wrapper around `gpd-consistency-checker` for convention validation." in workflow
     assert "Spawn `gpd-consistency-checker` once and let it own convention policy." in workflow

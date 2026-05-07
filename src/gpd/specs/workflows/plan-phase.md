@@ -459,9 +459,11 @@ task(
 
 ### Handle Researcher Return
 
-Human-readable headings such as `## RESEARCH COMPLETE` and `## RESEARCH BLOCKED` are presentation only. Route on `gpd_return.status` and the artifact gate below.
+Researcher gate: fresh RESEARCH.md in return; else continue/skip/abort.
 
-- **`gpd_return.status: completed`:** Verify the returned files and the on-disk artifact before accepting completion, then display confirmation and continue to step 6.
+Human-readable headings such as `## RESEARCH COMPLETE` and `## RESEARCH BLOCKED` are presentation only. Route on typed status and gate.
+
+- **`gpd_return.status: completed`:** Run the gate, then display confirmation and continue to step 6.
 - **`gpd_return.status: checkpoint`:** Present the checkpoint, collect the response, and spawn a fresh continuation handoff. Do not wait inside the child run.
 - **`gpd_return.status: blocked` or `failed`:** Display blocker, offer: 1) Provide context, 2) Skip research, 3) Abort
 
@@ -633,9 +635,11 @@ task(
 
 Planner return validation and main-context fallback are separate paths. Do not synthesize or patch a child planner `gpd_return` from files on disk. If the child return is missing, malformed, or fails artifact validation, the child handoff is incomplete; either retry the planner or start an explicit main-context authoring path that owns its own artifacts and return envelope.
 
-If the user chooses Main-context plan or any manual bounded authoring branch, it is not an override. Set `PLANNER_HANDOFF_STARTED_AT` before writing, write only `${PHASE_DIR}/*-PLAN.md`, set `FRESH_PLAN_FILES` to the newly created path(s), and run the artifact plus validator gate below once using a complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`. No full planner/checker loop is required for this fallback unless requested, but a failing gate means `status: blocked`, not `planned_ready`/`green`, and no `gpd:execute-phase` route.
+If the user chooses Main-context plan or any manual bounded authoring branch, it is not an override: set `PLANNER_HANDOFF_STARTED_AT`, write only `${PHASE_DIR}/*-PLAN.md`, set `FRESH_PLAN_FILES` to the newly created path(s), and run one gate with a complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`. No full planner/checker loop is required for this fallback unless requested, but a failing gate means `status: blocked`, not `planned_ready`/`green`, and no `gpd:execute-phase` route.
 
-Ignore presentation headings; route on structured `gpd_return.status`, `files_written`, and the on-disk artifact check.
+Planner gate: fresh plans; validate handoff/readability/contract/preflight; no pre-checker applicator; else retry, main-context, or abort.
+
+Ignore presentation headings; route on structured `gpd_return.status`, `files_written`, and gate.
 
 - **`gpd_return.status: completed`:** Accept only after `gpd_return.files_written` names at least one fresh, readable `${PHASE_DIR}/*-PLAN.md`; do not trust return text or preexisting files alone. Display plan count. In `AUTONOMY=supervised`, show draft plans and get user confirmation before checker or next-step output. If `--skip-verify` or `plan_checker_enabled` is false, skip to step 13 only when no proof-bearing plans were written; proof-bearing plans still need checker review or an equivalent main-context audit. Otherwise: step 10.
 - **`gpd_return.status: checkpoint`:** Present to user, get response, spawn a fresh planner continuation handoff. Do not route planner checkpoints into the checker revision loop.

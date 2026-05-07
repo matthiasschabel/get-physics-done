@@ -54,7 +54,7 @@ else
 fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $PAPER_BOOTSTRAP_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$PAPER_BOOTSTRAP_INIT"
 PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
@@ -542,7 +542,7 @@ Load the staged outline/scaffold payload before using outline-time publication s
 OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold -- "${WRITE_PAPER_ARGUMENTS:-}")
 if [ $? -ne 0 ]; then
   echo "ERROR: write-paper outline/scaffold init failed: $OUTLINE_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$OUTLINE_INIT"
 ```
@@ -647,7 +647,7 @@ Load the staged figure/section authoring payload before generating figures or sp
 AUTHORING_INIT=$(gpd --raw init write-paper --stage figure_and_section_authoring -- "${WRITE_PAPER_ARGUMENTS:-}")
 if [ $? -ne 0 ]; then
   echo "ERROR: write-paper authoring init failed: $AUTHORING_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$AUTHORING_INIT"
 ```
@@ -750,7 +750,7 @@ task(
 )
 ```
 
-**If a writer agent fails to spawn or returns an error:** Check the writer's typed `gpd_return.status` first. If the writer returned `status: completed`, verify that `gpd_return.files_written` names the expected `.tex` file and that the file exists on disk. If the writer returned `status: checkpoint`, treat it as an incomplete handoff and continue only by spawning a fresh continuation run after the orchestrator/user review. If the writer returned `status: blocked` or `status: failed`, treat the section as incomplete. Do not accept a preexisting `.tex` file as a substitute for a successful spawn; a spawn error always leaves the section incomplete until a fresh typed return names the artifact and the file exists on disk.
+**If a writer agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`. For this section callsite, completion requires `status: completed`, fresh `gpd_return.files_written` naming the expected `.tex` file, and that file present on disk; otherwise the section stays incomplete.
 
 Treat the emitted `.tex` file as the success artifact gate for each section.
 Route on the writer's typed return envelope. A writer response that does not report `status: completed`, does not list the emitted path in `files_written`, or does not leave the expected file on disk is not a completed section, even if the agent returned success text.
@@ -833,7 +833,7 @@ Load the staged consistency/reference payload before notation checks, bibliograp
 CONSISTENCY_INIT=$(gpd --raw init write-paper --stage consistency_and_references -- "${WRITE_PAPER_ARGUMENTS:-}")
 if [ $? -ne 0 ]; then
   echo "ERROR: write-paper consistency/reference init failed: $CONSISTENCY_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$CONSISTENCY_INIT"
 ```
@@ -979,7 +979,7 @@ Return a typed `gpd_return` envelope. Use `status: completed` when the bibliogra
 )
 ```
 
-**If the bibliographer agent fails to spawn or returns an error:** Do not mark bibliography verification complete. Offer: 1) Retry the bibliographer, 2) Run the audit in the main context, 3) Stop and leave citation status unverified. Do not proceed to strict review, reproducibility-manifest generation, or final review until `${PAPER_DIR}/CITATION-AUDIT.md` and the refreshed `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` exist.
+**If the bibliographer agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`. Do not mark bibliography verification complete or proceed to strict review, reproducibility-manifest generation, or final review until `${PAPER_DIR}/CITATION-AUDIT.md` and the refreshed `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` exist. Offer: 1) Retry the bibliographer, 2) Run the audit in the main context, 3) Stop and leave citation status unverified.
 
 Treat `${PAPER_DIR}/CITATION-AUDIT.md`, the refreshed `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`, the existing `{ACTIVE_BIBLIOGRAPHY_PATH}`, and the bibliographer's typed `gpd_return` envelope as the bibliography success gate. The typed return must name `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json`, and must name `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography changed; otherwise keep the pass incomplete even if older audit files are still on disk.
 
@@ -1042,7 +1042,7 @@ Load the staged publication-review payload before running the embedded peer-revi
 PUBLICATION_REVIEW_INIT=$(gpd --raw init write-paper --stage publication_review -- "${WRITE_PAPER_ARGUMENTS:-}")
 if [ $? -ne 0 ]; then
   echo "ERROR: write-paper publication-review init failed: $PUBLICATION_REVIEW_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$PUBLICATION_REVIEW_INIT"
 ```
@@ -1153,7 +1153,7 @@ When revising a paper in response to referee reports:
    )
    ```
 
-   **If the response-handoff agent fails to spawn or returns an error:** Check the agent's typed `gpd_return.status` first. If it returned `status: completed`, verify that `gpd_return.files_written` names both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and verify both files exist on disk. If it returned `status: checkpoint`, treat that as a fresh continuation handoff rather than completion. If it returned `status: blocked` or `status: failed`, treat the response as incomplete. Do not accept preexisting response files as a substitute for a successful spawn; the round remains incomplete until a fresh typed return names both outputs and both files exist on disk.
+   **If the response-handoff agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`. For this response callsite, completion requires `status: completed`, fresh `gpd_return.files_written` naming both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and both files present on disk.
    Treat `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md`, `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and the writer's typed `gpd_return` envelope as the response success gate. If the shared gate is not satisfied, offer: 1) Retry the agent, 2) Draft the response artifacts in the main context using the referee report and revised manuscript, 3) Skip structured response and proceed directly to calculation tracking.
 
    See the canonical `templates/paper/author-response.md` and `templates/paper/referee-response.md` contracts plus the shared publication response-writer handoff for the full response-tracker format.

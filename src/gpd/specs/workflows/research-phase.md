@@ -29,7 +29,7 @@ load_research_phase_stage() {
 BOOTSTRAP_INIT=$(load_research_phase_stage phase_bootstrap "${PHASE}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $BOOTSTRAP_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

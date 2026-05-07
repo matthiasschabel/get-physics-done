@@ -29,7 +29,7 @@ else
 fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP -- display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
 if [ -n "$PROJECT_ROOT" ]; then
@@ -50,7 +50,7 @@ RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Pause after each referee point for user review of the proposed response.
-- `autonomy=balanced`: Draft the full response and apply routine manuscript changes. Do not force a parse-confirmation pause; pause only if the referee report is ambiguous, the response needs claim-level changes, new calculations, or unresolved referee disagreements. Any spawned agent that needs user input must return `status: checkpoint` and stop; the orchestrator presents the checkpoint and spawns a fresh continuation handoff after the user responds.
+- `autonomy=balanced`: Draft the full response and apply routine manuscript changes. Do not force a parse-confirmation pause; pause only if the referee report is ambiguous, the response needs claim-level changes, new calculations, or unresolved referee disagreements. Any spawned agent that needs user input follows the publication stage-recovery gate checkpoint semantics.
 - `autonomy=yolo`: Draft response and apply manuscript changes without pausing.
 
 **Normalize command intake into one manuscript subject plus one or more report sources before preflight:**
@@ -193,7 +193,7 @@ else
 fi
 if [ $? -ne 0 ]; then
   echo "ERROR: respond-to-referees report-triage init failed: $REPORT_TRIAGE_INIT"
-  # STOP -- display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -272,7 +272,7 @@ else
 fi
 if [ $? -ne 0 ]; then
   echo "ERROR: respond-to-referees revision-planning init failed: $REVISION_PLANNING_INIT"
-  # STOP -- display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -288,7 +288,7 @@ else
 fi
 if [ $? -ne 0 ]; then
   echo "ERROR: respond-to-referees response-authoring init failed: $RESPONSE_AUTHORING_INIT"
-  # STOP -- display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -451,11 +451,11 @@ Group revision items by affected section to minimize agent spawns. For each affe
 
 > Apply the canonical runtime delegation convention already loaded above.
 
-Apply the shared publication round and response contracts exactly for the response-artifact pair. The workflow-specific addition for each section handoff is that the same fresh child return must also name the revised section file.
+Apply the shared publication round, response-artifact, and stage-recovery contracts exactly for the response-artifact pair. The workflow-specific addition for each section handoff is that the same fresh child return must also name the revised section file.
 
 ```
 task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-paper-writer.md for your role and instructions.\n\nRead the canonical <author_response> protocol at {GPD_INSTALL_DIR}/templates/paper/author-response.md, the canonical referee response template at {GPD_INSTALL_DIR}/templates/paper/referee-response.md, and the shared publication response-writer handoff at {GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md. You own both the manuscript edits and the response-tracker updates for this section. Make the manuscript changes first, then update the response trackers for the same comments. If you need user input, return `status: checkpoint` and stop; do not wait inside this run. Return only after the fresh `gpd_return.files_written` set names the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`; stale pre-existing edits do not count.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n" + revision_prompt,
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-paper-writer.md for your role and instructions.\n\nRead the canonical <author_response> protocol at {GPD_INSTALL_DIR}/templates/paper/author-response.md, the canonical referee response template at {GPD_INSTALL_DIR}/templates/paper/referee-response.md, and the shared publication response-writer handoff at {GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md. You own both the manuscript edits and the response-tracker updates for this section. Make the manuscript changes first, then update the response trackers for the same comments. Return only after the fresh `gpd_return.files_written` set names the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n" + revision_prompt,
   subagent_type="gpd-paper-writer",
   model="{writer_model}",
   readonly=false,
@@ -474,15 +474,13 @@ Each revision agent receives:
 - Instruction to make minimal, targeted changes (do NOT rewrite the section)
 - Instruction to mark changed text with `% REVISED: Referee X, Comment Y` LaTeX comments for tracking
 
-**If a revision agent fails to spawn or returns an error:** Note the failure for that section. Continue with other sections. After all agents complete, report which sections failed and offer: 1) Retry failed sections, 2) Apply revisions manually in the main context, 3) Skip failed sections and proceed. Do not block the entire referee response on a single section failure.
+**If a revision agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for that section. Continue with other sections, then report failed sections and offer: 1) Retry failed sections, 2) Apply revisions manually in the main context, 3) Skip failed sections and proceed.
 
 After each agent returns, verify the promised artifacts before trusting the handoff text:
-- Re-apply the shared publication response-artifact contract first; for this workflow, the same fresh child return must also name the revised section file for the affected section.
-- Check the fresh child `gpd_return.files_written` first; the section is complete only when it names the revised section file plus both response artifacts.
+- Re-apply the shared publication response-artifact and stage-recovery contracts first; for this workflow, the section is complete only when fresh `gpd_return.files_written` names the revised section file plus both response artifacts.
 - Re-read the targeted resolved section file under `${PAPER_DIR}` and confirm the expected revision markers or substantive edits landed.
 - Re-open `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` and confirm the affected comment block now contains the updated assessment / changes-made text.
 - If the section file changed but the response trackers did not, or vice versa, treat that section as failed and route it through the retry/manual options above instead of silently proceeding.
-- If the agent claimed success but the files did not change, treat that section as failed and route it through the retry/manual options above instead of silently proceeding.
 
 Only after those checks pass, update both `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`:
 - Fill in "Changes made" with specific locations (section, page, equation)
@@ -513,7 +511,7 @@ pdflatex -interaction=nonstopmode "${MANUSCRIPT_BASENAME}" 2>&1 | tail -5
 5. Resolve any `MISSING:` citation markers left by the paper-writer (see write-paper workflow for the resolution protocol)
 6. Re-check any decisive `comparison_verdicts` or benchmark anchors touched by the revision. If protocol bundles are selected, use them only as an additive reminder of which decisive comparisons or estimator caveats must remain visible after revision.
 7. If the revision touched bibliography files or citation commands, refresh `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` before generating the response letter or proceeding to final review. Use `gpd paper-build` as the refresh path, and use `derived_manuscript_reference_status` as the quick read on what likely changed; the manuscript-root bibliography audit remains authoritative for the round. Stale bibliography audits are not acceptable in a referee-response round. Confirm the refreshed JSON artifact exists before treating the round as complete.
-8. If a spawned paper-writer returns `status: checkpoint`, stop after recording the checkpoint. Present it to the user and spawn a fresh continuation handoff after the user responds. Do not ask the child agent to wait inside the same run.
+8. If a spawned paper-writer returns `status: checkpoint`, apply the publication stage-recovery gate: stop after recording the checkpoint, present it to the user, and continue only from persisted artifacts after the user responds.
 
 **If inconsistencies found and iteration < 3:**
 
@@ -539,7 +537,7 @@ Options:
 
 Apply the already-loaded shared publication response-writer handoff before treating the response-artifact pair as complete.
 
-Read the completed `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` (all comments should have status "Response drafted" or "Final"). Treat those files as complete only if the expected mirrored artifacts exist on disk, their response frontmatter binds to the active manuscript path and review round when the subject is explicit, and the orchestrator has aggregated every section handoff: the revised section file exists, both response artifacts exist, and the fresh child `gpd_return.files_written` for that section names all required outputs. Do not rely on stale pre-existing edits or prose completion alone.
+Read the completed `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` (all comments should have status "Response drafted" or "Final"). Treat those files as complete only if the expected mirrored artifacts exist on disk, their response frontmatter binds to the active manuscript path and review round when the subject is explicit, and the orchestrator has aggregated every section handoff under the publication stage-recovery gate: the revised section file exists, both response artifacts exist, and fresh child `gpd_return.files_written` names all required outputs.
 Those two Markdown artifacts under the selected GPD publication/review roots are the canonical required outputs for this workflow. `${PAPER_DIR}/response-letter.tex` or `${PAPER_DIR}/response-letter.md` is optional and should be generated only when the journal or user asked for a manuscript-local submission companion. If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots and do not write sidecars beside that external manuscript unless the main integration later exposes a subject-local export hook.
 If centralized preflight resolved a subject-owned publication root at `GPD/publication/{subject_slug}` for that explicit external subject, apply the same rule there: keep the canonical response pair under `selected_publication_root` / `selected_review_root`, not beside the manuscript, and do not infer a full publication-tree relocation from this bounded continuation path.
 
@@ -567,7 +565,7 @@ else
 fi
 if [ $? -ne 0 ]; then
   echo "ERROR: respond-to-referees finalize init failed: $FINALIZE_INIT"
-  # STOP -- display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

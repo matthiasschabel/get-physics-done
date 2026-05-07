@@ -11,15 +11,15 @@ WORKFLOW = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "respond-to-refer
 def test_respond_to_referees_group_b_completion_requires_fresh_child_files_written_and_rejects_stale_edits() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "If you need user input, return `status: checkpoint` and stop; do not wait inside this run." in source
     assert (
-        "Return only after the fresh `gpd_return.files_written` set names the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`; stale pre-existing edits do not count."
+        "Return only after the fresh `gpd_return.files_written` set names the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`."
         in source
     )
     assert (
-        "Check the fresh child `gpd_return.files_written` first; the section is complete only when it names the revised section file plus both response artifacts."
+        "Re-apply the shared publication response-artifact and stage-recovery contracts first; for this workflow, the section is complete only when fresh `gpd_return.files_written` names the revised section file plus both response artifacts."
         in source
     )
+    assert "stage-recovery-gate.md" in source
     assert "If the section file changed but the response trackers did not, or vice versa, treat that section as failed" in source
 
 
@@ -27,9 +27,9 @@ def test_respond_to_referees_response_letter_generation_stays_file_backed_and_fr
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert (
-        "Treat those files as complete only if the expected mirrored artifacts exist on disk, their response frontmatter binds to the active manuscript path and review round when the subject is explicit, and the orchestrator has aggregated every section handoff"
+        "Treat those files as complete only if the expected mirrored artifacts exist on disk, their response frontmatter binds to the active manuscript path and review round when the subject is explicit, and the orchestrator has aggregated every section handoff under the publication stage-recovery gate"
         in source
     )
     assert "Those two GPD-owned response artifacts stay canonical even when the manuscript subject is explicit or external." in source
     assert "If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots" in source
-    assert "Do not rely on stale pre-existing edits or prose completion alone." in source
+    assert "fresh child `gpd_return.files_written` names all required outputs" in source

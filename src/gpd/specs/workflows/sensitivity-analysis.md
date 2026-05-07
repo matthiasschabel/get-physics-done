@@ -26,7 +26,7 @@ Load workspace-bound supporting context first. Sensitivity analysis may use proj
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -41,7 +41,7 @@ Resolve authoritative phase-backed persistence only after the target quantity is
 PHASE_INIT=$(gpd --raw init phase-op --include state,config "{phase_number}")
 if [ $? -ne 0 ]; then
   echo "ERROR: phase initialization failed: $PHASE_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 

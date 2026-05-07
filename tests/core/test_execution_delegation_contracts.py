@@ -16,7 +16,7 @@ def test_execute_plan_routes_checkpoints_through_orchestrator_owned_returns() ->
     assert "Emit the checkpoint return with the task result and all intermediate values" in execute_plan
     assert "return structured checkpoint state to the orchestrator" in execute_plan
     assert "Awaiting (what the orchestrator must resolve before continuation)" in checkpoints
-    assert "The child never waits for user approval inside the same run" in checkpoints
+    assert "the child never waits for user approval inside the same run" in checkpoints
 
 
 def test_execute_plan_clean_wave_batching_uses_typed_verification_outcome() -> None:

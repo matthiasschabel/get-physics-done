@@ -50,11 +50,12 @@ load_literature_review_stage() {
 BOOTSTRAP_INIT=$(load_literature_review_stage review_bootstrap "$ARGUMENTS")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $BOOTSTRAP_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
 Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `topic`, `slug`.
+`{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
 
 - If `topic` is empty, do not invent or auto-derive it from project state, active references, or deferred artifacts.
 - In project-backed mode, ask one focused question to lock the topic before broadening the search or loading scoped reference artifacts.
@@ -81,7 +82,7 @@ RESEARCH_MODE=$(gpd --raw config get research_mode 2>/dev/null | gpd json get .v
 - **If `state_exists` is true:** Extract `convention_lock` for notation context (helps identify which conventions are used in papers being reviewed). Extract active research topic, phase context, and any contract-critical references from `active_reference_context`.
 - **If `state_exists` is false** (standalone usage): Proceed — the user will specify the topic directly.
 - Treat `effective_reference_intake` as the machine-readable carry-forward ledger for anchors, prior outputs, baselines, user-mandated context, and unresolved gaps. Re-surface those items in the review even if the broader search expands beyond them.
-- Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. If the gate is blocked, keep the contract visible as context but do not promote it to approved review truth.
+- Apply the shared contract authority gate: treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true; in review context, otherwise keep it visible as diagnostics and do not promote it to approved review truth.
 
 Project context helps focus the review on conventions and methods relevant to the current research.
 </step>

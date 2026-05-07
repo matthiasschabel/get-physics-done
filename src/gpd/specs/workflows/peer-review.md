@@ -14,10 +14,7 @@ Peer review should be staged, evidence-aware, and fail-closed on unsupported sci
 6. Whether the paper should be accepted, revised, or rejected
 
 Each stage runs in a fresh subagent context and writes a compact artifact. The final referee decides only after reading those artifacts.
-If any spawned reviewer or proof auditor needs user input, it must return `status: checkpoint` and stop. The orchestrator presents the checkpoint and spawns a fresh continuation handoff after the user responds. Do not keep the same spawned run alive waiting for confirmation.
-A spawned handoff is not complete until the orchestrator has captured its typed return, verified the stage-owned artifact boundary on disk, and then treated that finished child as closed and retired. Once retired, its transient execution state, scratch reasoning, and live conversation context must not be reused.
-Every downstream stage must begin from persisted artifacts plus the explicitly declared carry-forward inputs for that stage. Do not treat a prior child's live context, unstaged notes, or in-memory state as valid carry-forward evidence.
-If subagent spawning is unavailable and the workflow falls back to sequential execution in the main context, emulate the same boundary discipline: finish one stage, persist and verify its artifacts, clear the stage-local transient state, and begin the next stage only from those persisted outputs and declared carry-forward inputs.
+Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for spawned reviewer/proof-auditor/referee lifecycle, checkpoint continuation, stale-output rejection, retry freshness, and sequential fallback cleanup. Each downstream stage begins from persisted artifacts plus the explicitly declared carry-forward inputs for that stage.
 </core_principle>
 
 <process>
@@ -33,7 +30,7 @@ Bootstrap peer-review context from the dedicated peer-review init surface, not `
 BOOTSTRAP=$(gpd --raw init peer-review --stage bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review bootstrap failed: $BOOTSTRAP"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -74,7 +71,7 @@ After the user has chosen a mode or supplied an explicit path, rerun the subject
 INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review target init failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 ```
 
@@ -169,7 +166,7 @@ Load the staged preflight payload before using manuscript-root gates, reference-
 PREFLIGHT_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage preflight)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review preflight init failed: $PREFLIGHT_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$PREFLIGHT_INIT"
 ```
@@ -198,7 +195,7 @@ Load the staged artifact-discovery payload before resolving review-round state o
 ARTIFACT_DISCOVERY_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage artifact_discovery)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review artifact-discovery init failed: $ARTIFACT_DISCOVERY_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$ARTIFACT_DISCOVERY_INIT"
 ```
@@ -331,7 +328,7 @@ Load the staged panel payload before launching Stage 1 through Stage 5 and the c
 PANEL_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage panel_stages)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review panel init failed: $PANEL_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$PANEL_INIT"
 ```
@@ -345,6 +342,8 @@ Use one short sentence that names each stage's job, for example:
 **Peer-review child return contract:**
 
 Every spawned review child must return a typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, `files_written` naming only artifacts that genuinely landed on disk in that child run, `issues`, `next_actions`, and `peer_review_stage`. Human-readable completion labels are presentation only and do not satisfy the handoff without the typed envelope.
+
+Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` after every child return. The stage callsites below keep the exact expected artifacts, validator commands, retry prompt, and write allowlist local.
 
 Panel-stage artifacts use {GPD_INSTALL_DIR}/references/publication/peer-review-panel.md. Final adjudication uses {GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md and {GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md. Load these only in panel or final-adjudication stages.
 </step>
@@ -427,10 +426,7 @@ gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-reader{round_suffix}.json
 
 If validation fails:
 
-1. **Retry once.** Re-run the Stage 1 subagent with the same inputs and an explicit reminder to match the `StageReviewReport` and `ClaimIndex` JSON schemas from `peer-review-panel.md`, then rerun `gpd validate review-claim-index` and `gpd validate review-stage-report`.
-2. **If the retry also fails,** STOP the pipeline and report the failure: stage name, missing or malformed fields, and any partial output. Do not proceed to Stages 2-6.
-
-Max retries per stage: **1**.
+Apply the publication stage-recovery gate. Retry Stage 1 once with the same persisted inputs and an explicit reminder to match the `StageReviewReport` and `ClaimIndex` JSON schemas from `peer-review-panel.md`, then rerun the validators above. If the retry also fails, STOP and report the stage name, missing or malformed fields, and any partial output. Do not proceed to Stages 2-6.
 </step>
 
 <step name="stage_2_and_3">
@@ -581,7 +577,7 @@ Use the child return contract with `peer_review_stage: proof_redteam`; `files_wr
 ```
 
 If the runtime supports parallel subagent execution, run Stage 2, Stage 3, and the conditional proof-critique pass in parallel when theorem-bearing claims are present. Otherwise run Stage 2 first, then Stage 3, then the conditional proof-critique pass.
-Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered review wave. In sequential fallback, emulate the same barrier after each stage: finish the stage, persist and validate its artifact, retire that stage-local working state, and launch the next handoff only from the written artifacts for this round plus the declared carry-forward inputs.
+Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered review wave under the publication stage-recovery gate.
 
 If literature, math, or the conditional proof-critique stage fails, STOP and report the failure.
 </step>
@@ -608,13 +604,10 @@ Missing file, missing frontmatter, or missing required sections is a hard failur
 
 If validation fails for either stage:
 
-1. **Retry once.** Re-run only the failed stage subagent with the same inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`, then rerun `gpd validate review-stage-report`.
-2. **If the retry also fails,** STOP the pipeline and report the failure: stage name, missing or malformed fields, and any partial output. Do not proceed to Stage 4.
-
-Max retries per stage: **1**.
+Apply the publication stage-recovery gate. Retry only the failed stage once with the same persisted inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`, then rerun `gpd validate review-stage-report`. If the retry also fails, STOP and report the stage name, missing or malformed fields, and any partial output. Do not proceed to Stage 4.
 
 If the proof-redteam artifact is missing, malformed, lacks the canonical frontmatter, or omits required sections, retry `gpd-check-proof` once with the same inputs and an explicit reminder to emit the full canonical proof-audit artifact. If the retry also fails, STOP the pipeline and report that proof review could not be completed.
-Treat this recovery step as the Stage 2 / Stage 3 / proof-review branch barrier. Before Stage 4 can spawn, the orchestrator must capture the typed return from every launched branch in the wave, confirm that the persisted artifacts for this round exist and validate, and then retire each finished child handoff. Later stages and retries must restart from the written artifacts above plus the declared carry-forward inputs, not from branch-local live context.
+Before Stage 4 can spawn, the branch barrier must pass: every launched child has a typed return, every persisted artifact above exists and validates, and downstream work restarts only from those artifacts plus the declared carry-forward inputs.
 </step>
 
 <step name="stage_4_physics">
@@ -692,11 +685,9 @@ gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-physics{round_suffix}.json
 
 If validation fails:
 
-1. **Retry once.** Re-run the Stage 4 subagent with the same inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`, then rerun `gpd validate review-stage-report`.
-2. **If the retry also fails,** STOP the pipeline and report the failure: stage name, missing or malformed fields, and any partial output. Do not proceed to Stage 5.
+Apply the publication stage-recovery gate. Retry Stage 4 once with the same persisted inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`, then rerun `gpd validate review-stage-report`. If the retry also fails, STOP and report the stage name, missing or malformed fields, and any partial output. Do not proceed to Stage 5.
 
-Max retries per stage: **1**.
-After the Stage 4 typed return is captured and `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` validates, treat the finished Stage 4 handoff as closed and retired before spawning Stage 5. Stage 5 must start from the persisted stage artifacts and declared carry-forward inputs only.
+After `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` validates, Stage 5 must start from persisted stage artifacts and declared carry-forward inputs only.
 </step>
 
 <step name="stage_5_significance">
@@ -766,11 +757,9 @@ gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-interestingness{round_suff
 
 If validation fails:
 
-1. **Retry once.** Re-run the Stage 5 subagent with the same inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`, then rerun `gpd validate review-stage-report`.
-2. **If the retry also fails,** STOP the pipeline and report the failure: stage name, missing or malformed fields, and any partial output. Do not proceed to Stage 6 adjudication.
+Apply the publication stage-recovery gate. Retry Stage 5 once with the same persisted inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`, then rerun `gpd validate review-stage-report`. If the retry also fails, STOP and report the stage name, missing or malformed fields, and any partial output. Do not proceed to Stage 6 adjudication.
 
-Max retries per stage: **1**.
-After the Stage 5 typed return is captured and `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json` validates, treat the finished Stage 5 handoff as closed and retired before spawning Stage 6. Stage 6 must begin from the persisted stage artifacts and declared carry-forward inputs only.
+After `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json` validates, Stage 6 must begin from the persisted stage artifacts and declared carry-forward inputs only.
 </step>
 
 <step name="final_adjudication">
@@ -782,7 +771,7 @@ Load the staged final-adjudication payload before spawning `gpd-referee`:
 FINAL_ADJUDICATION_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage final_adjudication)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review final-adjudication init failed: $FINAL_ADJUDICATION_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$FINAL_ADJUDICATION_INIT"
 ```
@@ -885,7 +874,7 @@ Treat the Stage 6 return as incomplete if the fresh `gpd_return.files_written` s
 <step name="stage_recovery_6">
 **Stage 6 recovery -- Validate the adjudication outputs before proceeding.**
 
-Capture the Stage 6 typed return first, then treat the finished adjudication handoff as closed and retired before classifying the outcome as recovery-eligible, upstream-blocked, or complete. Recovery routing, validation, and final summaries use persisted Stage 6 artifacts plus the typed return only; do not keep the adjudication run live while deciding what to do next.
+Apply the publication stage-recovery gate to the Stage 6 typed return before classifying the outcome as recovery-eligible, upstream-blocked, or complete. Recovery routing, validation, and final summaries use persisted Stage 6 artifacts plus the typed return only.
 
 Check that both `${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json` and `${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json` exist and parse as valid JSON.
 Also confirm `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` and `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex` exist before treating the final recommendation as complete.
@@ -903,7 +892,7 @@ For proof-bearing reviews, this strict final-decision validator is the favorable
 If validation fails:
 
 1. **Classify the failure first.** Distinguish Stage 6-owned artifact failures from upstream staged-review artifact failures.
-2. **Only retry Stage 6 for Stage 6-owned artifacts.** If failure is limited to report `.md`/`.tex`, ledger, decision, or consistency report, re-run Stage 6 once with `review-ledger-schema.md` / `referee-decision-schema.md` validator reminders.
+2. **Only retry Stage 6 for Stage 6-owned artifacts.** If failure is limited to report `.md`/`.tex`, ledger, decision, or consistency report, apply the publication stage-recovery gate and re-run Stage 6 once with `review-ledger-schema.md` / `referee-decision-schema.md` validator reminders.
 3. **Do not retry Stage 6 as an upstream repair step.** If errors point at `CLAIMS{round_suffix}.json`, `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`, STOP fail-closed and rerun the earliest failing upstream stage.
 4. **If the eligible Stage 6 retry also fails,** STOP the pipeline and report the failure: stage name, validation errors, and any partial output. Do not proceed to report summarization.
 
@@ -936,7 +925,7 @@ Load the staged finalize payload before summarizing the report and routing the n
 FINALIZE_INIT=$(gpd --raw init peer-review "$REVIEW_TARGET" --stage finalize)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd peer-review finalize init failed: $FINALIZE_INIT"
-  # STOP — display the error to the user and do not proceed.
+  # STOP; surface the error.
 fi
 INIT="$FINALIZE_INIT"
 ```

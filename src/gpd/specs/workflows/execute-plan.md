@@ -239,11 +239,11 @@ grep -n "type=\"checkpoint" "${phase_dir}/${phase}-${plan}-PLAN.md"
 
 **Pattern A:** init_agent_tracking -> spawn task(subagent_type="gpd-executor", model=executor_model, readonly=false) with prompt: execute plan at [path], all tasks + SUMMARY + structured return envelope, follow deviation/validation rules, **load conventions from `gpd convention list` before starting work and rerun `gpd validate plan-preflight <PLAN.md path>` before substantive execution**, `<autonomy_mode>{AUTONOMY}</autonomy_mode>`, `<review_cadence>{REVIEW_CADENCE}</review_cadence>`, `<bounded_execution>false</bounded_execution>` (only for genuinely low-risk short plans), return: plan name, tasks, SUMMARY path, commit hash, and state updates -> track agent_id -> wait -> update tracking -> report.
 
-**If the executor agent fails to spawn or returns an error (Pattern A):** Check `git log --oneline -3` only for partial evidence. Commits or output files do not prove success unless SUMMARY, valid child `gpd_return`, artifact gate, and needed `gpd apply-return-updates` pass. If the return envelope is missing or invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Pattern C main-context execution with its own return, 3) Abort. Mark tracking failed with details.
+**If the executor agent fails to spawn or returns an error (Pattern A):** Pattern A child artifact gate requires a fresh summary, declared deliverables, valid child `gpd_return`, non-failing self-check/validation markers, and `gpd apply-return-updates` for durable updates. Check `git log --oneline -3` only for partial evidence. Commits or output files do not prove success without the gate. If the return envelope is missing or invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Pattern C main-context execution with its own return, 3) Abort. Mark tracking failed with details.
 
 **Pattern B:** Execute segment-by-segment. Non-interactive segments: spawn subagent for assigned tasks only (no SUMMARY/commit). Checkpoints: main context. After all segments: aggregate, create SUMMARY, commit. See segment_execution.
 
-**If a segment executor fails to spawn or returns an error (Pattern B):** Treat output files as partial evidence. Do not proceed unless expected artifacts and typed return data pass the aggregator gate. If the envelope is missing or invalid, retry or use explicit main-context fallback; otherwise offer skip/continue as an incomplete segment. Record the failure in agent tracking.
+**If a segment executor fails to spawn or returns an error (Pattern B):** Pattern B/D child artifact gate requires fresh segment outputs, aggregator summary, valid typed return data, aggregator gate, non-failing self-check/validation markers, and final-summary return updates. Treat output files as partial evidence. If the envelope is missing or invalid, retry or use explicit main-context fallback; otherwise offer skip/continue as an incomplete segment. Record the failure in agent tracking.
 
 **Pattern C:** Execute in main using standard flow (step name="execute").
 
@@ -285,7 +285,7 @@ Pattern B/D only (authored or virtual checkpoints). Skip for A/C.
    - Append `## Self-Check: PASSED` or `## Self-Check: FAILED` to SUMMARY
    - Run physics validation checks (dimensional consistency, limiting cases) -> Append `## Validation: PASSED` or `## Validation: FAILED`
 
-   > **Handoff verification:** Verify output files, valid return, and any required `gpd apply-return-updates` before success; git commits are partial evidence only.
+   > **Handoff verification:** Apply the Pattern B/D child artifact gate before success; git commits are partial evidence only.
 
 </step>
 

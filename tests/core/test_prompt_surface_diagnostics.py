@@ -21,6 +21,7 @@ EXPECTED_REPORT_KEYS = {
     "stage_diagnostics",
     "invalid_gpd_return_examples",
     "disallowed_return_field_mentions",
+    "forbidden_child_return_synthesis_mentions",
     "duplicate_invariants",
     "semantic_duplicate_invariants",
     "exact_assertion_diagnostics",
@@ -130,6 +131,14 @@ EXPECTED_RETURN_FIELD_MENTION_KEYS = {
     "severity",
     "snippet",
     "suggestion",
+}
+EXPECTED_FORBIDDEN_CHILD_RETURN_SYNTHESIS_MENTION_KEYS = {
+    "path",
+    "line",
+    "action",
+    "polarity",
+    "severity",
+    "snippet",
 }
 EXPECTED_STAGE_DIAGNOSTIC_KEYS = {
     "workflow_id",
@@ -321,6 +330,7 @@ def test_report_to_dict_has_stable_schema_version_and_json_shape(tmp_path: Path)
     assert payload["invalid_gpd_return_examples"] == []
     assert payload["items"][0]["disallowed_return_field_mentions"] == []
     assert payload["disallowed_return_field_mentions"] == []
+    assert payload["forbidden_child_return_synthesis_mentions"] == []
     assert payload["semantic_duplicate_invariants"] == []
     exact_diagnostics = payload["exact_assertion_diagnostics"]
     assert isinstance(exact_diagnostics, dict)
@@ -636,6 +646,65 @@ def test_semantic_duplicate_invariants_avoid_common_false_positives(tmp_path: Pa
     assert report.semantic_duplicate_invariants == ()
 
 
+def test_forbidden_parent_child_return_synthesis_instruction_is_reported(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/bad-child-return-synthesis.md",
+        """
+        ---
+        name: bad-child-return-synthesis
+        ---
+        Patch the checker child gpd_return from files on disk before continuing.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+
+    assert len(report.forbidden_child_return_synthesis_mentions) == 1
+    mention = report.forbidden_child_return_synthesis_mentions[0]
+    assert mention.path == "src/gpd/specs/workflows/bad-child-return-synthesis.md"
+    assert mention.action == "patch"
+    assert mention.polarity == "positive"
+    assert mention.severity == "error"
+    assert "Patch the checker child gpd_return" in mention.snippet
+    assert report.totals["forbidden_child_return_synthesis_mention_count"] == 1
+
+
+def test_negative_child_return_authorship_guardrail_is_not_forbidden(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/good-child-return-guardrail.md",
+        """
+        ---
+        name: good-child-return-guardrail
+        ---
+        Do not synthesize, patch, or paste a child `gpd_return`; retry or fail closed.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+
+    assert report.forbidden_child_return_synthesis_mentions == ()
+    assert report.totals["forbidden_child_return_synthesis_mention_count"] == 0
+
+
+def test_main_context_fallback_own_return_is_not_child_return_synthesis(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/main-context-fallback.md",
+        """
+        ---
+        name: main-context-fallback
+        ---
+        A main-context fallback owns its own gpd_return and does not patch a child envelope.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+
+    assert report.forbidden_child_return_synthesis_mentions == ()
+
+
 def test_semantic_duplicate_invariants_reference_only_occurrences_are_info(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -911,6 +980,116 @@ def test_disallowed_extended_field_list_mentions_are_reported(tmp_path: Path) ->
     mention = report.disallowed_return_field_mentions[0]
     assert mention.field == "mystery_metric"
     assert mention.mention_kind == "extended_field_list"
+
+
+def test_return_field_declaration_parser_ignores_status_vocab_before_role_fields(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/role-field-probe.md",
+        """
+        ---
+        name: role-field-probe
+        ---
+        Choose one status: `completed`, `checkpoint`, `blocked`, or `failed`. Agents may add role fields such as `phases_created` or `dimensions_checked`.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+    fields_by_kind = {
+        (mention.field, mention.mention_kind, mention.allowed_source) for mention in report.return_field_mentions
+    }
+
+    assert fields_by_kind == {
+        ("phases_created", "role_field_statement", "extension"),
+        ("dimensions_checked", "role_field_statement", "extension"),
+    }
+    assert report.disallowed_return_field_mentions == ()
+
+
+def test_generic_extended_fields_sentence_does_not_mine_ordinary_words(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/agents/generic-extended-fields-probe.md",
+        """
+        ---
+        name: generic-extended-fields-probe
+        description: Generic extended fields probe
+        ---
+        A checkpoint can carry proposals in the body or extended fields when actual boundary continuation file lock writes govern the follow-up.
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("agent",), runtime_names=())
+
+    assert report.return_field_mentions == ()
+    assert report.disallowed_return_field_mentions == ()
+
+
+def test_peer_review_stage_prompt_mentions_are_disallowed_return_fields(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/peer-review-stage-direct.md",
+        """
+        ---
+        name: gpd:peer-review-stage-direct
+        description: Direct peer review stage probe
+        ---
+        Route on gpd_return.peer_review_stage after the handoff.
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/agents/peer-review-stage-list.md",
+        """
+        ---
+        name: peer-review-stage-list
+        description: Listed peer review stage probe
+        ---
+        Return extended fields: `peer_review_stage`.
+        """,
+    )
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/peer-review-stage-yaml.md",
+        """
+        ---
+        name: peer-review-stage-yaml
+        ---
+        ```yaml
+        gpd_return:
+          status: completed
+          files_written: []
+          issues: []
+          next_actions: []
+          peer_review_stage: planning
+        ```
+        """,
+    )
+
+    report = _report(tmp_path, runtime_names=())
+    mentions = {
+        (mention.path, mention.field, mention.mention_kind)
+        for mention in report.disallowed_return_field_mentions
+    }
+
+    assert mentions == {
+        (
+            "src/gpd/commands/peer-review-stage-direct.md",
+            "peer_review_stage",
+            "direct_reference",
+        ),
+        (
+            "src/gpd/agents/peer-review-stage-list.md",
+            "peer_review_stage",
+            "extended_field_list",
+        ),
+        (
+            "src/gpd/specs/workflows/peer-review-stage-yaml.md",
+            "peer_review_stage",
+            "yaml_example_key",
+        ),
+    }
+    assert report.totals["disallowed_return_field_mention_count"] == 3
 
 
 def test_disallowed_yaml_example_key_reports_field_specific_diagnostic(tmp_path: Path) -> None:
@@ -1190,6 +1369,31 @@ def test_report_to_dict_serializes_disallowed_return_field_mention_shape(tmp_pat
     assert report_mention["suggestion"] == "files_written"
 
 
+def test_report_to_dict_serializes_forbidden_child_return_synthesis_shape(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/child-return-synthesis-shape-probe.md",
+        """
+        ---
+        name: child-return-synthesis-shape-probe
+        ---
+        Fabricate the verifier child return envelope from its artifact before continuing.
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+    payload = diagnostics.report_to_dict(report)
+    mention = payload["forbidden_child_return_synthesis_mentions"][0]
+
+    assert set(mention) == EXPECTED_FORBIDDEN_CHILD_RETURN_SYNTHESIS_MENTION_KEYS
+    assert mention["path"] == "src/gpd/specs/workflows/child-return-synthesis-shape-probe.md"
+    assert mention["action"] == "fabricate"
+    assert mention["polarity"] == "positive"
+    assert mention["severity"] == "error"
+    assert "Fabricate the verifier child return envelope" in mention["snippet"]
+
+
 def test_markdown_render_lists_invalid_gpd_return_examples(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -1240,6 +1444,30 @@ def test_markdown_render_lists_disallowed_return_field_mentions(tmp_path: Path) 
     assert "files_written" in markdown
     assert "bad_fields" in table
     assert "return-field-markdown-probe" in table
+
+
+def test_markdown_render_lists_forbidden_child_return_synthesis(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/child-return-synthesis-markdown-probe.md",
+        """
+        ---
+        name: child-return-synthesis-markdown-probe
+        ---
+        Paste the planner child gpd_return from notes when the run omits it.
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("workflow",), runtime_names=())
+    markdown = diagnostics.render_prompt_surface_markdown(report)
+    table = diagnostics.render_prompt_surface_table(report)
+
+    assert "Forbidden child `gpd_return` synthesis instructions: 1" in markdown
+    assert "## Forbidden Child `gpd_return` Synthesis Instructions" in markdown
+    assert "`paste`" in markdown
+    assert "child-return-synthesis-markdown-probe" in markdown
+    assert "forbidden child return synthesis instructions: 1" in table
 
 
 def test_markdown_render_lists_semantic_duplicate_invariants(tmp_path: Path) -> None:

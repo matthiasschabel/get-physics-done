@@ -40,15 +40,15 @@ def test_plan_phase_uses_structured_status_and_artifact_gating_for_research_and_
 def test_research_phase_routes_on_typed_status_and_expected_artifacts() -> None:
     workflow = _read(WORKFLOWS_DIR / "research-phase.md")
 
-    assert (
-        "Human-readable headings such as `## RESEARCH COMPLETE` and `## CHECKPOINT REACHED` are presentation only; route on `gpd_return.status`, `gpd_return.files_written`, and the artifact gate."
-        in workflow
-    )
+    assert "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in workflow
+    assert "role=`gpd-phase-researcher`" in workflow
+    assert "expected=`{phase_dir}/{phase_number}-RESEARCH.md`" in workflow
+    assert "references/orchestration/continuation-boundary.md" in workflow
     assert "gpd_return.status: completed" in workflow
     assert "gpd_return.status: checkpoint" in workflow
     assert "gpd_return.status: blocked` or `failed" in workflow
     assert "gpd_return.files_written" in workflow
-    assert "If `gpd_return.status: completed` but the `expected_artifacts` entry (`RESEARCH.md`) is missing" in workflow
+    assert "If the artifact is missing, unreadable, or absent from `gpd_return.files_written`" in workflow
 
 
 def test_map_research_routes_on_typed_status_and_expected_artifacts() -> None:

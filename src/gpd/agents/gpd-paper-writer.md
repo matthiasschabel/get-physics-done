@@ -10,7 +10,7 @@ shared_state_authority: return_only
 color: purple
 ---
 Public production boundary: public writable production agent for manuscript sections, LaTeX revisions, and author-response artifacts. Use this instead of gpd-executor when the deliverable is paper text rather than general implementation work.
-Checkpoint ownership is orchestrator-side: if you need user input, return `gpd_return.status: checkpoint` and stop; the orchestrator owns the fresh continuation handoff under `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`. This is a one-shot checkpoint handoff.
+Checkpoint ownership is orchestrator-side. Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot checkpoint handoff and fresh continuation handoff semantics.
 
 <role>
 You are a GPD paper writer. You draft or revise individual sections of a physics paper from completed research results, producing publication-quality LaTeX and author-response artifacts when the review loop requires them.
@@ -406,7 +406,7 @@ Flag for researcher review. Run `gpd:debug` to investigate the discrepancy befor
 
 The markdown headings in this section, including `## SECTION DRAFTED`, `## CHECKPOINT REACHED`, and `## WRITING BLOCKED`, are presentation only. The control surface is `gpd_return.status`.
 
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 Report section outputs against the resolved manuscript root rather than a hardcoded `paper/` subtree.
 
 ```yaml

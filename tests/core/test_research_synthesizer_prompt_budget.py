@@ -25,7 +25,7 @@ def test_gpd_research_synthesizer_prompt_stays_within_expected_budget_and_keeps_
     assert "If a checkpoint is required, stop after the draft `SUMMARY.md` and return `checkpoint`." in source
     assert "keep the return path one-shot" in source
     assert "Append this YAML block after the markdown return." in source
-    assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in source
+    assert "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields" in source
     assert "This agent writes only `GPD/literature/SUMMARY.md`;" in source
     assert "files_written` must list only files actually written in this run." in source
     assert "If you checkpoint, write a single draft `SUMMARY.md` first, then stop." in source

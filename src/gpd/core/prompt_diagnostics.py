@@ -43,7 +43,7 @@ from gpd.core.workflow_staging import (
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
-PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v4"
+PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v5"
 DEFAULT_PATH_PREFIX = "/runtime/"
 DEFAULT_SURFACES: tuple[PromptSurfaceKind, ...] = ("command", "agent", "workflow")
 
@@ -277,6 +277,28 @@ _SEMANTIC_MISSING_CHILD_RETURN_RE = re.compile(
     re.IGNORECASE,
 )
 _SEMANTIC_CLAUSE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_CHILD_RETURN_SYNTHESIS_CLAUSE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|;\s*")
+_CHILD_RETURN_SYNTHESIS_ACTION_RE = re.compile(
+    r"\b(?P<action>"
+    r"synthesi[sz]e|synthesi[sz]ed|synthesi[sz]ing|"
+    r"fabricate|fabricated|fabricating|"
+    r"patch|patched|patching|"
+    r"paste|pasted|pasting|"
+    r"hand-author|hand-authored|hand-authoring|hand author|hand authored|hand authoring"
+    r")\b",
+    re.IGNORECASE,
+)
+_CHILD_RETURN_SYNTHESIS_CONTEXT_RE = re.compile(
+    r"\b(?:child|planner|checker|verifier|agent|subagent)\b.{0,140}"
+    r"\b(?:gpd_return|return envelope)\b|"
+    r"\b(?:gpd_return|return envelope)\b.{0,140}"
+    r"\b(?:child|planner|checker|verifier|agent|subagent)\b",
+    re.IGNORECASE,
+)
+_CHILD_RETURN_SYNTHESIS_NEGATION_RE = re.compile(
+    r"\b(?:do not|don't|never|must not|should not|cannot|can't|forbidden|not allowed|without|instead of)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,6 +462,16 @@ class PromptReturnFieldMention:
 
 
 @dataclass(frozen=True, slots=True)
+class ForbiddenChildReturnSynthesisMention:
+    path: str
+    line: int
+    action: str
+    polarity: Literal["positive"]
+    severity: Literal["error"]
+    snippet: str
+
+
+@dataclass(frozen=True, slots=True)
 class PromptSurfaceItem:
     kind: PromptSurfaceKind
     name: str
@@ -572,6 +604,7 @@ class PromptSurfaceReport:
     invalid_gpd_return_examples: tuple[InvalidGpdReturnExample, ...]
     return_field_mentions: tuple[PromptReturnFieldMention, ...]
     disallowed_return_field_mentions: tuple[PromptReturnFieldMention, ...]
+    forbidden_child_return_synthesis_mentions: tuple[ForbiddenChildReturnSynthesisMention, ...]
     duplicate_invariants: tuple[DuplicateInvariantGroup, ...]
     semantic_duplicate_invariants: tuple[SemanticDuplicateGroup, ...]
     exact_assertion_diagnostics: Mapping[str, object]
@@ -584,6 +617,7 @@ __all__ = [
     "PROMPT_SURFACE_REPORT_SCHEMA_VERSION",
     "AuthorityPromptMetric",
     "DuplicateInvariantGroup",
+    "ForbiddenChildReturnSynthesisMention",
     "InvalidGpdReturnExample",
     "MustNotEagerLoadViolation",
     "PromptSource",
@@ -734,6 +768,7 @@ def build_prompt_surface_report(
     invalid_return_examples = tuple(example for item in items for example in item.invalid_gpd_return_examples)
     return_field_mentions = _scan_return_field_mentions_for_repo(root, include_tests=include_tests)
     disallowed_return_field_mentions = _disallowed_return_field_mentions(return_field_mentions)
+    forbidden_child_return_synthesis_mentions = _scan_forbidden_child_return_synthesis_mentions(sources)
     stage_diagnostics = _build_stage_diagnostics(sources, items, report_warnings=warnings)
 
     return PromptSurfaceReport(
@@ -743,12 +778,14 @@ def build_prompt_surface_report(
             items,
             stage_diagnostics=stage_diagnostics,
             return_field_mentions=return_field_mentions,
+            forbidden_child_return_synthesis_mentions=forbidden_child_return_synthesis_mentions,
         ),
         items=items,
         stage_diagnostics=stage_diagnostics,
         invalid_gpd_return_examples=invalid_return_examples,
         return_field_mentions=return_field_mentions,
         disallowed_return_field_mentions=disallowed_return_field_mentions,
+        forbidden_child_return_synthesis_mentions=forbidden_child_return_synthesis_mentions,
         duplicate_invariants=duplicate_invariants,
         semantic_duplicate_invariants=semantic_duplicate_invariants,
         exact_assertion_diagnostics=exact_assertion_diagnostics,
@@ -772,6 +809,10 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         ],
         "disallowed_return_field_mentions": [
             _return_field_mention_to_dict(mention) for mention in report.disallowed_return_field_mentions
+        ],
+        "forbidden_child_return_synthesis_mentions": [
+            _forbidden_child_return_synthesis_mention_to_dict(mention)
+            for mention in report.forbidden_child_return_synthesis_mentions
         ],
         "duplicate_invariants": [
             {
@@ -827,6 +868,8 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
         f"- Expanded chars: {totals.get('expanded_char_count', 0)}",
         f"- Invalid `gpd_return` examples: {len(report.invalid_gpd_return_examples)}",
         f"- Disallowed `gpd_return` field mentions: {len(report.disallowed_return_field_mentions)}",
+        f"- Forbidden child `gpd_return` synthesis instructions: "
+        f"{len(report.forbidden_child_return_synthesis_mentions)}",
         f"- Hard-gate lines: {totals.get('hard_gate_line_count', 0)}",
         f"- Shell parsing lines: {totals.get('shell_parsing_line_count', 0)}",
         "",
@@ -876,6 +919,22 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
             lines.append(
                 f"| `{mention.path}` | {mention.line} | `{mention.field}` | {mention.mention_kind} | "
                 f"{_markdown_table_cell(suggestion)} | `{_markdown_table_cell(mention.snippet)}` |"
+            )
+
+    if report.forbidden_child_return_synthesis_mentions:
+        lines.extend(
+            [
+                "",
+                "## Forbidden Child `gpd_return` Synthesis Instructions",
+                "",
+                "| Path | Line | Action | Snippet |",
+                "|---|---:|---|---|",
+            ]
+        )
+        for mention in report.forbidden_child_return_synthesis_mentions:
+            lines.append(
+                f"| `{mention.path}` | {mention.line} | `{mention.action}` | "
+                f"`{_markdown_table_cell(mention.snippet)}` |"
             )
 
     runtime_totals = cast(Mapping[str, Mapping[str, object]], totals.get("runtime_projection", {}))
@@ -1173,6 +1232,14 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
     outside_top_disallowed = _disallowed_return_field_mentions_outside_top_rows(report, top)
     if outside_top_disallowed:
         lines.extend(("", f"disallowed return field mentions outside top prompt rows: {outside_top_disallowed}"))
+    if report.forbidden_child_return_synthesis_mentions:
+        lines.extend(
+            (
+                "",
+                "forbidden child return synthesis instructions: "
+                f"{len(report.forbidden_child_return_synthesis_mentions)}",
+            )
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -1402,6 +1469,84 @@ def _scan_return_field_mentions(text: str, path: str) -> tuple[PromptReturnField
     return tuple(_dedupe_return_field_mentions(mentions))
 
 
+def _scan_forbidden_child_return_synthesis_mentions(
+    sources: Sequence[PromptSource],
+) -> tuple[ForbiddenChildReturnSynthesisMention, ...]:
+    mentions: list[ForbiddenChildReturnSynthesisMention] = []
+    for source in sources:
+        if source.kind != "workflow":
+            continue
+        try:
+            text = source.absolute_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        body, line_offset = _body_without_frontmatter_with_line_offset(text)
+        for line_number, line in _iter_unfenced_lines(body):
+            for clause in _child_return_synthesis_clauses(line):
+                action = _forbidden_child_return_synthesis_action(clause)
+                if action is None:
+                    continue
+                mentions.append(
+                    ForbiddenChildReturnSynthesisMention(
+                        path=source.path,
+                        line=line_number + line_offset,
+                        action=action,
+                        polarity="positive",
+                        severity="error",
+                        snippet=_prompt_line_snippet(clause),
+                    )
+                )
+    return tuple(
+        sorted(
+            mentions,
+            key=lambda mention: (
+                mention.path,
+                mention.line,
+                mention.action,
+                mention.snippet,
+            ),
+        )
+    )
+
+
+def _child_return_synthesis_clauses(line: str) -> tuple[str, ...]:
+    normalized = re.sub(r"^\s*(?:[-*+]|\d+[.)]|#+|>)\s*", "", line).strip()
+    normalized = normalized.strip("`*_ ")
+    normalized = re.sub(r"\s+", " ", normalized)
+    if not normalized:
+        return ()
+    return tuple(
+        part.strip(" -")
+        for part in _CHILD_RETURN_SYNTHESIS_CLAUSE_SPLIT_RE.split(normalized)
+        if part.strip(" -")
+    ) or (normalized,)
+
+
+def _forbidden_child_return_synthesis_action(clause: str) -> str | None:
+    action_match = _CHILD_RETURN_SYNTHESIS_ACTION_RE.search(clause)
+    if action_match is None:
+        return None
+    if not _CHILD_RETURN_SYNTHESIS_CONTEXT_RE.search(clause):
+        return None
+    if _CHILD_RETURN_SYNTHESIS_NEGATION_RE.search(clause):
+        return None
+    if _is_main_context_fallback_return_clause(clause):
+        return None
+    return action_match.group("action").casefold().replace(" ", "-")
+
+
+def _is_main_context_fallback_return_clause(clause: str) -> bool:
+    folded = clause.casefold()
+    if "fallback" not in folded:
+        return False
+    has_main_context = "main-context" in folded or "main context" in folded
+    has_own_return = (
+        ("own" in folded or "owns" in folded)
+        and ("gpd_return" in folded or "return envelope" in folded or "own return" in folded)
+    )
+    return has_main_context and has_own_return
+
+
 def _scan_direct_return_field_references(
     body: str,
     path: str,
@@ -1451,11 +1596,21 @@ def _scan_return_field_declarations(
 
 
 def _declared_return_fields(line: str, declaration_match: re.Match[str]) -> tuple[str, ...]:
-    backticked = tuple(_BACKTICK_IDENTIFIER_RE.findall(line))
+    field_span = line[declaration_match.end() :]
+    backticked = tuple(_BACKTICK_IDENTIFIER_RE.findall(field_span))
     if backticked:
         return tuple(field for field in backticked if field != "gpd_return")
 
-    field_span = line[declaration_match.end() :]
+    declaration_text = declaration_match.group(0).casefold()
+    has_explicit_list_intro = (
+        ":" in field_span or "such as" in declaration_text or re.search(r"\bsuch as\b", field_span, re.IGNORECASE)
+    )
+    if not has_explicit_list_intro:
+        return ()
+
+    such_as_match = re.search(r"\bsuch as\b", field_span, re.IGNORECASE)
+    if such_as_match is not None:
+        field_span = field_span[such_as_match.end() :]
     colon_index = field_span.find(":")
     if colon_index >= 0:
         field_span = field_span[colon_index + 1 :]
@@ -2224,6 +2379,7 @@ def _build_totals(
     *,
     stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric] = (),
     return_field_mentions: Sequence[PromptReturnFieldMention] = (),
+    forbidden_child_return_synthesis_mentions: Sequence[ForbiddenChildReturnSynthesisMention] = (),
 ) -> dict[str, object]:
     numeric_fields = (
         "raw_line_count",
@@ -2263,6 +2419,9 @@ def _build_totals(
     else:
         totals["negative_return_field_mention_count"] = 0
         totals["allowed_return_field_mention_count"] = 0
+    totals["forbidden_child_return_synthesis_mention_count"] = len(
+        forbidden_child_return_synthesis_mentions
+    )
     totals["by_kind"] = by_kind
     totals["runtime_projection"] = _runtime_projection_totals(items)
     totals["stage_diagnostics"] = _stage_diagnostics_totals(stage_diagnostics)
@@ -3306,6 +3465,19 @@ def _return_field_mention_to_dict(mention: PromptReturnFieldMention) -> dict[str
         "severity": mention.severity,
         "snippet": mention.snippet,
         "suggestion": mention.suggestion,
+    }
+
+
+def _forbidden_child_return_synthesis_mention_to_dict(
+    mention: ForbiddenChildReturnSynthesisMention,
+) -> dict[str, object]:
+    return {
+        "path": mention.path,
+        "line": mention.line,
+        "action": mention.action,
+        "polarity": mention.polarity,
+        "severity": mention.severity,
+        "snippet": mention.snippet,
     }
 
 

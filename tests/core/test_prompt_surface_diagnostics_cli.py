@@ -66,6 +66,14 @@ EXPECTED_RETURN_FIELD_MENTION_KEYS = {
     "snippet",
     "suggestion",
 }
+EXPECTED_FORBIDDEN_CHILD_RETURN_SYNTHESIS_MENTION_KEYS = {
+    "path",
+    "line",
+    "action",
+    "polarity",
+    "severity",
+    "snippet",
+}
 EXPECTED_STAGE_DIAGNOSTIC_KEYS = {
     "workflow_id",
     "command_name",
@@ -157,6 +165,7 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert set(payload["stage_diagnostics"][0]["stages"][0]) == EXPECTED_STAGE_KEYS
     assert isinstance(payload["invalid_gpd_return_examples"], list)
     assert isinstance(payload["disallowed_return_field_mentions"], list)
+    assert isinstance(payload["forbidden_child_return_synthesis_mentions"], list)
     assert isinstance(payload["duplicate_invariants"], list)
     assert isinstance(payload["semantic_duplicate_invariants"], list)
     assert isinstance(payload["exact_assertion_diagnostics"], dict)
@@ -215,6 +224,16 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
         assert mention["severity"] == "error"
         assert isinstance(mention["snippet"], str)
         assert mention["suggestion"] is None or isinstance(mention["suggestion"], str)
+
+    for mention in payload["forbidden_child_return_synthesis_mentions"]:
+        assert set(mention) == EXPECTED_FORBIDDEN_CHILD_RETURN_SYNTHESIS_MENTION_KEYS
+        assert isinstance(mention["path"], str)
+        assert mention["path"].endswith(".md")
+        assert isinstance(mention["line"], int)
+        assert isinstance(mention["action"], str)
+        assert mention["polarity"] == "positive"
+        assert mention["severity"] == "error"
+        assert isinstance(mention["snippet"], str)
 
 
 def test_prompt_surface_diagnostics_include_tests_exact_assertion_shape() -> None:

@@ -10141,6 +10141,82 @@ def test_sync_phase_checkpoints_uses_ancestor_project_root_from_nested_cwd(mock_
     mock_sync.assert_called_once_with(project_root.resolve())
 
 
+def _return_skeleton_error_payload(result) -> dict[str, object]:
+    text = result.output.strip() or getattr(result, "stderr", "").strip()
+    return json.loads(text)
+
+
+def test_return_skeleton_default_prints_markdown_not_rich_table() -> None:
+    result = runner.invoke(app, ["return", "skeleton", "--role", "executor", "--status", "completed"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("```yaml\n")
+    assert "gpd_return:" in result.output
+    assert "status: completed" in result.output
+    assert "recorded_at" not in result.output
+    assert "┏" not in result.output
+
+
+def test_return_skeleton_yaml_format_outputs_raw_yaml() -> None:
+    result = runner.invoke(
+        app,
+        ["return", "skeleton", "--role", "checker", "--status", "checkpoint", "--format", "yaml"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("gpd_return:\n")
+    assert "```" not in result.output
+    assert "status: checkpoint" in result.output
+
+
+def test_return_skeleton_json_format_outputs_payload() -> None:
+    result = runner.invoke(
+        app,
+        ["return", "skeleton", "--role", "verifier", "--status", "blocked", "--format", "json"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["profile_id"] == "verifier"
+    assert payload["status"] == "blocked"
+    assert payload["envelope"]["status"] == "blocked"
+    assert payload["markdown"].startswith("```yaml\n")
+    assert "validation_commands" in payload
+
+
+def test_return_skeleton_raw_outputs_payload() -> None:
+    result = runner.invoke(app, ["--raw", "return", "skeleton", "--role", "researcher", "--status", "failed"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["profile_id"] == "researcher"
+    assert payload["status"] == "failed"
+    assert payload["envelope"]["status"] == "failed"
+    assert payload["envelope"]["files_written"] == []
+
+
+def test_return_skeleton_rejects_unknown_role_before_rendering() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "skeleton", "--role", "bogus", "--status", "completed"],
+    )
+
+    assert result.exit_code == 1
+    payload = _return_skeleton_error_payload(result)
+    assert "unknown gpd_return role profile" in payload["error"]
+
+
+def test_return_skeleton_rejects_unknown_status_before_rendering() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "skeleton", "--role", "executor", "--status", "done"],
+    )
+
+    assert result.exit_code == 1
+    payload = _return_skeleton_error_payload(result)
+    assert "unknown gpd_return status" in payload["error"]
+
+
 @patch("gpd.core.commands.cmd_validate_return")
 def test_validate_return_prefers_launch_cwd_relative_file_from_nested_cwd(mock_validate, tmp_path: Path) -> None:
     project_root, nested_cwd = _nested_project_root(tmp_path)

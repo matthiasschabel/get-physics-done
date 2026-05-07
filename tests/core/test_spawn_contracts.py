@@ -342,9 +342,12 @@ def test_quick_and_write_paper_gate_handoffs_on_expected_artifacts() -> None:
     quick = _read(WORKFLOWS_DIR / "quick.md")
     write_paper = _read(WORKFLOWS_DIR / "write-paper.md")
 
-    assert "Verify plan exists at `${QUICK_DIR}/${next_num}-PLAN.md`" in quick
+    assert "role=`gpd-planner`" in quick
+    assert "expected=`${QUICK_DIR}/${next_num}-PLAN.md`" in quick
     assert "Verify summary exists at `${QUICK_DIR}/${next_num}-SUMMARY.md`" in quick
-    assert "A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only" in quick
+    assert "role=`gpd-executor`" in quick
+    assert "expected=`${QUICK_DIR}/${next_num}-SUMMARY.md`" in quick
+    assert "recovery evidence only" in quick
     assert "Apply the executor child artifact gate before success" in quick
     assert "check for the expected .tex output files before spawning writer agents" in write_paper
     assert "Check if the expected .tex file was written to `${PAPER_DIR}/`" in write_paper
@@ -418,13 +421,12 @@ def test_parameter_sweep_executor_uses_spawn_contract_and_return_only_state_upda
 def test_research_phase_verifies_research_artifact_before_accepting_handoff() -> None:
     content = _read(WORKFLOWS_DIR / "research-phase.md")
 
-    assert (
-        "Accept the researcher handoff automatically only once `expected_artifacts` exist and pass the artifact check."
-        in content
-    )
-    assert "Do not trust the runtime handoff status by itself." in content
+    assert "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in content
+    assert "role=`gpd-phase-researcher`" in content
+    assert "expected=`{phase_dir}/{phase_number}-RESEARCH.md`" in content
+    assert "allowed_root=`{phase_dir}`" in content
     assert "Artifact gate:" in content
-    assert "If `gpd_return.status: completed` but the `expected_artifacts` entry (`RESEARCH.md`) is missing" in content
+    assert "If the artifact is missing, unreadable, or absent from `gpd_return.files_written`" in content
     assert "<spawn_contract>" in content
     assert "expected_artifacts:" in content
     assert "shared_state_policy: return_only" in content

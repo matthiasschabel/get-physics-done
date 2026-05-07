@@ -6851,6 +6851,9 @@ app.add_typer(verification_report_app, name="verification-report")
 proof_redteam_app = typer.Typer(help="Proof-redteam artifact helpers")
 app.add_typer(proof_redteam_app, name="proof-redteam")
 
+return_app = typer.Typer(help="gpd_return envelope helpers")
+app.add_typer(return_app, name="return")
+
 
 def _resolve_subject_path(subject: str | None, *, base: Path) -> Path | None:
     """Resolve one raw subject string relative to *base* when possible."""
@@ -12387,6 +12390,142 @@ def _emit_proof_redteam_skeleton(payload: Mapping[str, object]) -> None:
     typer.echo(markdown_draft.rstrip() + "\n", nl=False)
 
 
+def _load_return_skeleton_builder() -> Callable[..., object]:
+    """Load the source-of-truth gpd_return skeleton builder."""
+
+    try:
+        from gpd.core.return_skeleton import build_gpd_return_skeleton
+    except ImportError as exc:
+        raise GPDError(
+            "return skeleton builder is not available; expected "
+            "gpd.core.return_skeleton.build_gpd_return_skeleton"
+        ) from exc
+    return build_gpd_return_skeleton
+
+
+def _normalize_return_skeleton_format(output_format: str) -> str:
+    normalized = output_format.strip().lower()
+    if normalized not in {"markdown", "yaml", "json"}:
+        raise GPDError("return skeleton --format must be one of: markdown, yaml, json")
+    return normalized
+
+
+def _normalize_return_skeleton_output(raw_payload: object) -> dict[str, object]:
+    if hasattr(raw_payload, "model_dump"):
+        payload = raw_payload.model_dump(mode="json", by_alias=True)
+    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
+        payload = dataclasses.asdict(raw_payload)
+    else:
+        payload = raw_payload
+    if not isinstance(payload, Mapping):
+        raise GPDError("return skeleton builder must return a mapping")
+
+    normalized = dict(payload)
+    envelope = normalized.get("envelope")
+    if not isinstance(envelope, Mapping):
+        raise GPDError("return skeleton payload is missing envelope")
+    if "yaml_payload" not in normalized:
+        from gpd.core.return_skeleton import render_gpd_return_yaml
+
+        normalized["yaml_payload"] = render_gpd_return_yaml(envelope)
+    if "markdown" not in normalized:
+        from gpd.core.return_skeleton import render_gpd_return_markdown
+
+        normalized["markdown"] = render_gpd_return_markdown(envelope)
+    return normalized
+
+
+def _emit_return_skeleton(payload: Mapping[str, object], *, output_format: str) -> None:
+    if _raw or output_format == "json":
+        _emit_raw_json(dict(payload))
+        return
+    if output_format == "yaml":
+        yaml_payload = payload.get("yaml_payload")
+        if not isinstance(yaml_payload, str) or not yaml_payload.strip():
+            raise GPDError("return skeleton payload is missing yaml_payload")
+        typer.echo(yaml_payload.rstrip() + "\n", nl=False)
+        return
+    markdown = payload.get("markdown")
+    if not isinstance(markdown, str) or not markdown.strip():
+        raise GPDError("return skeleton payload is missing markdown")
+    typer.echo(markdown.rstrip() + "\n", nl=False)
+
+
+@return_app.command("skeleton")
+def return_skeleton_cmd(
+    role: str = typer.Option(..., "--role", help="Return role profile to render."),
+    status: str = typer.Option(
+        "completed",
+        "--status",
+        help="Canonical gpd_return status to render: completed, checkpoint, blocked, or failed.",
+    ),
+    output_format: str = typer.Option(
+        "markdown",
+        "--format",
+        help="Output mode for non-raw use: markdown, yaml, or json.",
+    ),
+    files_written: list[str] | None = typer.Option(
+        None,
+        "--file",
+        help="Seed one gpd_return.files_written entry. Repeatable.",
+    ),
+    issues: list[str] | None = typer.Option(
+        None,
+        "--issue",
+        help="Seed one gpd_return.issues entry. Repeatable.",
+    ),
+    next_actions: list[str] | None = typer.Option(
+        None,
+        "--next-action",
+        help="Seed one gpd_return.next_actions entry. Repeatable.",
+    ),
+    phase: str | None = typer.Option(None, "--phase", help="Optional role-local phase value."),
+    plan: str | None = typer.Option(None, "--plan", help="Optional role-local plan value."),
+    include_applicator_fields: bool = typer.Option(
+        False,
+        "--include-applicator-fields",
+        help="Include durable continuation fields when the skeleton can be applicator-ready.",
+    ),
+    resume_file: str | None = typer.Option(
+        None,
+        "--resume-file",
+        help="Project-relative existing resume file for checkpoint applicator skeletons.",
+    ),
+) -> None:
+    """Render a read-only canonical gpd_return skeleton."""
+
+    try:
+        normalized_format = _normalize_return_skeleton_format(output_format)
+    except GPDError as exc:
+        _error(str(exc))
+
+    try:
+        builder = _load_return_skeleton_builder()
+    except GPDError as exc:
+        _error(str(exc))
+
+    project_root = _read_only_project_scoped_cwd(_get_cwd())
+    try:
+        raw_payload = builder(
+            role=role,
+            status=status,
+            files_written=files_written or [],
+            issues=issues or [],
+            next_actions=next_actions or [],
+            phase=phase,
+            plan=plan,
+            include_applicator_fields=include_applicator_fields,
+            resume_file=resume_file,
+            project_root=project_root,
+        )
+        payload = _normalize_return_skeleton_output(raw_payload)
+        _emit_return_skeleton(payload, output_format=normalized_format)
+    except ValueError as exc:
+        _error(str(exc))
+    except GPDError as exc:
+        _error(str(exc))
+
+
 def _proof_redteam_output_target(output_path: str | None) -> Path:
     if output_path is None or not output_path.strip():
         raise GPDError("proof-redteam skeleton --write requires --output PATH")
@@ -13174,6 +13313,11 @@ def validate_handoff_artifacts_cmd(
         "--require-files-written",
         help="Fail when gpd_return.files_written is empty.",
     ),
+    require_status: str | None = typer.Option(
+        None,
+        "--require-status",
+        help="Require a canonical gpd_return.status value, for example completed for success gates.",
+    ),
     fresh_after: str | None = typer.Option(
         None,
         "--fresh-after",
@@ -13203,6 +13347,7 @@ def validate_handoff_artifacts_cmd(
         allowed_roots=allowed_root or [],
         required_suffixes=required_suffix or [],
         require_files_written=require_files_written,
+        require_status=require_status,
         fresh_after=freshness_cutoff,
     )
     _output(result)

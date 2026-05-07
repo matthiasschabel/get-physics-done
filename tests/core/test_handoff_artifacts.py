@@ -13,7 +13,7 @@ from gpd.cli import app
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
 
 
-def _return_block(files_written: list[str]) -> str:
+def _return_block(files_written: list[str], *, status: str = "completed") -> str:
     files_written_yaml = (
         "  files_written: []\n"
         if not files_written
@@ -22,7 +22,7 @@ def _return_block(files_written: list[str]) -> str:
     return (
         "```yaml\n"
         "gpd_return:\n"
-        "  status: completed\n"
+        f"  status: {status}\n"
         f"{files_written_yaml}"
         "  issues: []\n"
         "  next_actions: []\n"
@@ -85,6 +85,27 @@ def test_handoff_artifact_validator_accepts_fresh_in_scope_expected_plan(tmp_pat
 
     assert result.passed is True
     assert result.checked_files == ["GPD/phases/01-test/01-01-PLAN.md"]
+
+
+def test_handoff_artifact_validator_require_completed_rejects_non_completed_status(tmp_path: Path) -> None:
+    plan_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-PLAN.md"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("---\nplan_id: 01-01\n---\n", encoding="utf-8")
+
+    for status in ("checkpoint", "blocked", "failed"):
+        result = validate_handoff_artifacts_markdown(
+            tmp_path,
+            _return_block(["GPD/phases/01-test/01-01-PLAN.md"], status=status),
+            expected_artifacts=["GPD/phases/01-test/01-01-PLAN.md"],
+            allowed_roots=["GPD/phases/01-test"],
+            required_suffixes=["-PLAN.md"],
+            require_files_written=True,
+            require_status="completed",
+        )
+
+        assert result.passed is False
+        assert result.status == status
+        assert f"gpd_return.status must be 'completed' for this artifact gate, got '{status}'" in result.errors
 
 
 def test_handoff_artifact_validator_rejects_missing_claimed_artifact(tmp_path: Path) -> None:
@@ -184,3 +205,37 @@ def test_validate_handoff_artifacts_cli_accepts_stdin_return(tmp_path: Path) -> 
 
     assert result.exit_code == 0, result.output
     assert json.loads(result.output)["passed"] is True
+
+
+def test_validate_handoff_artifacts_cli_require_status_completed_rejects_checkpoint(tmp_path: Path) -> None:
+    plan_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-PLAN.md"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("plan\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "validate",
+            "handoff-artifacts",
+            "-",
+            "--allowed-root",
+            "GPD/phases/01-test",
+            "--expected-glob",
+            "GPD/phases/01-test/*-PLAN.md",
+            "--required-suffix=-PLAN.md",
+            "--require-files-written",
+            "--require-status",
+            "completed",
+        ],
+        input=_return_block(["GPD/phases/01-test/01-01-PLAN.md"], status="checkpoint"),
+        catch_exceptions=False,
+    )
+
+    payload = json.loads(result.output)
+    assert result.exit_code == 1
+    assert payload["passed"] is False
+    assert payload["status"] == "checkpoint"
+    assert "gpd_return.status must be 'completed' for this artifact gate, got 'checkpoint'" in payload["errors"]

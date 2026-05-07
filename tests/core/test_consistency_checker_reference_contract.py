@@ -19,4 +19,4 @@ def test_consistency_checker_reference_contract_uses_state_json_authority_and_ty
         in infra
     )
     assert "structured YAML block at the end of their output" not in infra
-    assert "The four base fields above are required on this envelope." in infra
+    assert "The four base fields above are required on every envelope." in infra

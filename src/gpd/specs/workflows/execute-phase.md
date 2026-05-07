@@ -1776,6 +1776,8 @@ Spawn the consistency checker in rapid mode:
 
 > Apply the canonical runtime delegation convention above.
 
+CONSISTENCY_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+CONSISTENCY_RETURN=$(
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-consistency-checker.md for your role and instructions.
 
 <mode>rapid</mode>
@@ -1796,23 +1798,31 @@ Use the structured init-state payload (`convention_lock` / `derived_convention_l
 Use `gpd convention list` and `file_read: GPD/STATE.md, GPD/state.json` only if the payload is missing or inconsistent.
 file_read: All SUMMARY.md files from phase {PHASE_NUMBER}
 
-Return exactly one typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, include `files_written`, and write `{phase_dir}/CONSISTENCY-CHECK.md`. Append the same typed YAML `gpd_return` block to `{phase_dir}/CONSISTENCY-CHECK.md` before returning so the canonical applicator can validate the durable handoff from the artifact itself.
+Return exactly one typed `gpd_return` envelope, include `files_written`, and write `{phase_dir}/CONSISTENCY-CHECK.md`. Append the same typed YAML `gpd_return` block to `{phase_dir}/CONSISTENCY-CHECK.md` before returning so the canonical artifact gate can validate the durable handoff from the artifact itself.
 ", subagent_type="gpd-consistency-checker", model="{consistency_model}", readonly=false, description="Rapid consistency check")
+)
 
-**Artifact gate:** Do not accept `gpd_return.status: completed` until `{phase_dir}/CONSISTENCY-CHECK.md` exists on disk. If the artifact is missing, treat the handoff as blocked even when the runtime reported success.
+**Consistency checker child artifact gate:** apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-consistency-checker`; expected=`{phase_dir}/CONSISTENCY-CHECK.md`; allowed_root=`{phase_dir}`; freshness=`after $CONSISTENCY_HANDOFF_STARTED_AT`; validators=`gpd validate handoff-artifacts --require-status completed` plus readability; applicator=none here; failure=`blocked -> gpd:validate-conventions | retry/fresh execute continuation`.
 
 ```bash
 CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"
-if [ ! -f "$CONSISTENCY_REPORT" ]; then
+if [ ! -r "$CONSISTENCY_REPORT" ]; then
   echo "ERROR: consistency-check artifact missing: $CONSISTENCY_REPORT"
   exit 1
 fi
+printf '%s\n' "$CONSISTENCY_RETURN" | gpd validate handoff-artifacts - \
+  --expected "$CONSISTENCY_REPORT" \
+  --allowed-root "${phase_dir}" \
+  --required-suffix=CONSISTENCY-CHECK.md \
+  --require-files-written \
+  --require-status completed \
+  --fresh-after "$CONSISTENCY_HANDOFF_STARTED_AT" || exit 1
 ```
 
 **If the consistency checker agent fails to spawn or returns an error:** Treat the consistency check as blocked. Do not proceed as if the phase was checked. End with `## > Next Up`: primary `gpd:validate-conventions`, plus `gpd:resume-work`, `gpd:execute-phase {PHASE_NUMBER}`, and `gpd:suggest-next`.
 
 **Handle the checker response through `gpd_return.status`:**
-- `gpd_return.status: completed`: accept only if the artifact gate passes. Surface any `issues` as warnings, then continue.
+- `gpd_return.status: completed`: accept only if the consistency checker gate passes. Surface any `issues` as warnings, then continue.
 - `gpd_return.status: checkpoint`: stop, surface the checkpoint payload from the checker, and end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:validate-conventions` and `gpd:suggest-next`. Do not wait in place for user input inside this run.
 - `gpd_return.status: blocked` / `gpd_return.status: failed`: stop execution, surface the returned issues, and end with `## > Next Up`: primary `gpd:validate-conventions`, plus `gpd:resume-work` and `gpd:suggest-next`. If the user wants convention repair, route through `gpd:validate-conventions`; the fresh continuation handoff owns any notation-coordinator work.
 

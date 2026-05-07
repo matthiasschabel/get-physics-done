@@ -15,14 +15,14 @@ def test_verifier_prompt_keeps_the_canonical_return_contract_visible() -> None:
     verifier = _read_verifier_prompt()
 
     assert "Return with status `completed | checkpoint | blocked | failed`:" in verifier
-    assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in verifier
+    assert "Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields." in verifier
     assert "status: completed" in verifier
     assert "files_written:\n    - GPD/phases/03-spectral-form-factor/03-VERIFICATION.md" in verifier
     assert "issues: []" in verifier
     assert "next_actions:\n    - \"gpd:execute-phase 04\"" in verifier
     assert "`gpd_return.files_written` is fail-closed:" in verifier
     assert "list only files that genuinely landed on disk in this run" in verifier
-    assert "`checkpoint`, `blocked`, and `failed` may use `[]`" in verifier
+    assert "Non-completed returns may use `[]`" in verifier
 
 
 def test_verifier_prompt_surfaces_schema_sources_before_the_machine_readable_return_envelope() -> None:

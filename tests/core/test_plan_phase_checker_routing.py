@@ -85,7 +85,7 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
 def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None:
     source = PLAN_PHASE.read_text(encoding="utf-8")
 
-    assert "Do not synthesize or patch a child planner `gpd_return` from files on disk." in source
+    assert "The child artifact gate owns the no-synthetic-child-return rule" in source
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in source
     assert 'printf \'```yaml\\ngpd_return:\\n\'' in source
     assert '{"gpd_return":{"files_written"' not in source

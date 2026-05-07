@@ -905,7 +905,7 @@ gpd_return:
   phases_created: 4
 ```
 
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 </structured_returns>
 

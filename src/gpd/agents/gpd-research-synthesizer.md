@@ -915,7 +915,7 @@ When unable to proceed:
 
 ### Machine-Readable Return Envelope
 
-Append this YAML block after the markdown return. Required per agent-infrastructure.md. Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+Append this YAML block after the markdown return. Required per agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields.
 
 If you checkpoint, write a single draft `SUMMARY.md` first, then stop. Do not continue into a second synthesis pass in the same run.
 

@@ -294,10 +294,8 @@ def test_plan_checker_prompt_surfaces_direct_schema_visibility_and_read_only_aut
     assert checker_prompt.count("@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md") >= 2
     assert "{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" in checker_prompt
     assert "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" not in checker_prompt
-    assert (
-        "This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run."
-        in checker_prompt
-    )
+    assert "Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics." in checker_prompt
+    assert "If user input is needed, return the typed checkpoint and stop." in checker_prompt
     assert "artifact_write_authority: read_only" in checker_prompt
     assert "file_write" not in checker_prompt
     assert "approved_plans:" in checker_prompt

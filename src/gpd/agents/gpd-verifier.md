@@ -334,8 +334,7 @@ gpd_return:
   confidence: HIGH
 ```
 
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
-`gpd_return.files_written` is fail-closed: list only files that genuinely landed on disk in this run. `completed` may include `${phase_dir}/${phase_number}-VERIFICATION.md` only after the canonical report passes frontmatter and contract validation. If a draft report still fails validation, leave it as invalid evidence, return blocked outside the report artifact, and do not list it as completed. `checkpoint`, `blocked`, and `failed` may use `[]` unless a partial verification artifact was truly written and verified on disk.
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields. `gpd_return.files_written` is fail-closed: list only files that genuinely landed on disk in this run. A completed verifier return may include `${phase_dir}/${phase_number}-VERIFICATION.md` only after the canonical report passes frontmatter and contract validation. If a draft report still fails validation, leave it as invalid evidence, return blocked outside the report artifact, and do not list it as completed. Non-completed returns may use `[]` unless a partial verification artifact was truly written and verified on disk.
 
 </structured_returns>
 

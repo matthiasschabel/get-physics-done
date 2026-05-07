@@ -23,11 +23,11 @@ def test_gpd_project_researcher_prompt_stays_within_expected_budget_and_keeps_on
     assert metrics.expanded_line_count < 2_250
     assert metrics.expanded_char_count < 115_000
 
-    assert "This is a one-shot handoff." in source
-    assert "return typed `gpd_return.status: checkpoint` and stop" in source
+    assert "one-shot handoff and fresh-continuation semantics" in source
+    assert "return the typed checkpoint and stop" in source
     assert "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in source
-    assert "fresh continuation" in source
-    assert "Do not wait inside the same spawned run." in source
+    assert "fresh-continuation" in source
+    assert "Do not wait inside the same spawned run." not in source
     assert "Structured return provided to orchestrator" in source
     assert "status: completed" in source
     assert "files_written:\n    - GPD/literature/SUMMARY.md" in source

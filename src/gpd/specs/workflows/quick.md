@@ -131,14 +131,14 @@ Read the file at GPD/STATE.md
 - Quick tasks should be atomic and self-contained
 - No literature review phase, no checker phase
 - Use the `staged_loading` fields from `TASK_AUTHORING_INIT` as the source of truth for the handoff instead of inventing a separate quick-only contract
-- If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` instead of drafting a plan from guessed scope. The `## CHECKPOINT REACHED` heading is presentation only.
+- If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` instead of drafting a plan from guessed scope.
 - If the task is theorem-style or proof-bearing, return `gpd_return.status: checkpoint` and tell the user quick mode is blocked pending the full proof-redteam workflow.
 - Target ~30% context usage (simple, focused)
 </constraints>
 
 <output>
 Write plan to: ${QUICK_DIR}/${next_num}-PLAN.md
-Return a structured `gpd_return` envelope. Use `gpd_return.status: completed` only when the plan file was written and named in `gpd_return.files_written`. Use `gpd_return.status: checkpoint` when user input is needed, `blocked` when the task cannot proceed without external repair, and `failed` when the handoff did not complete. The `## PLANNING COMPLETE` heading is presentation only.
+Return a structured `gpd_return` envelope. Local completed output is `${QUICK_DIR}/${next_num}-PLAN.md` named in `gpd_return.files_written`; use checkpoint when user input or a contract block prevents drafting.
 </output>
 ",
   subagent_type="gpd-planner",
@@ -148,19 +148,17 @@ Return a structured `gpd_return` envelope. Use `gpd_return.status: completed` on
 )
 ```
 
-Child artifact gate: `gpd-planner`; expect fresh `${QUICK_DIR}/${next_num}-PLAN.md` named in `gpd_return.files_written`, readable under `${QUICK_DIR}`, and plan-preflighted when it declares `tool_requirements`; no applicator before execution; otherwise retry, explicit main-context fallback with its own return, or abort.
+Child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-planner`; expected=`${QUICK_DIR}/${next_num}-PLAN.md`; allowed_root=`${QUICK_DIR}`; validators=`gpd validate plan-preflight` when the plan declares `tool_requirements`; applicator=none before execution; failure=`retry planner | explicit main-context fallback with its own return | abort`.
 
-**If the planner agent fails to spawn or returns an error:** A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only. Do not proceed to step 5 from files alone; require a valid planner `gpd_return` naming that plan, or run the explicit main-context fallback that owns its own return envelope. If the gate cannot pass, offer: 1) Retry planner, 2) Create the plan in the main context, 3) Abort. Do not silently continue without a gated plan.
+**If the planner agent fails to spawn or returns an error:** Keep the handoff incomplete under the gate above. A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only; require a valid planner `gpd_return` naming that plan, or run explicit main-context fallback with its own return. Offer: 1) Retry planner, 2) Create the plan in the main context, 3) Abort.
 
 After planner returns:
 
-1. Route on `gpd_return.status`, not on headings.
-2. Verify plan exists at `${QUICK_DIR}/${next_num}-PLAN.md` and that the same path appears in `gpd_return.files_written`.
-3. Treat any preexisting plan file as stale unless the child reported that exact path in `gpd_return.files_written` for this run.
-4. If the planner returned `checkpoint`, present the checkpoint to the user and wait for the updated continuation handoff before proceeding.
-5. If the planner returned `blocked` or `failed`, treat the handoff as incomplete unless a fresh plan file was created and named in `gpd_return.files_written`; then offer retry, main-context planning, or abort.
-6. Extract plan count (typically 1 for quick tasks).
-7. Report: "Plan created: ${QUICK_DIR}/${next_num}-PLAN.md"
+1. Apply the planner gate tuple above: completed requires a fresh readable `${QUICK_DIR}/${next_num}-PLAN.md` named in `gpd_return.files_written`.
+2. For checkpoint, present the checkpoint and continue only through a fresh continuation handoff under `references/orchestration/continuation-boundary.md`.
+3. For blocked or failed, offer retry, main-context planning, or abort.
+4. Extract plan count (typically 1 for quick tasks).
+5. Report: "Plan created: ${QUICK_DIR}/${next_num}-PLAN.md"
 
 If the plan file is missing, unreadable, stale, or absent from `gpd_return.files_written`, error: "Planner failed to create ${next_num}-PLAN.md"
 
@@ -207,7 +205,7 @@ Reference artifacts: {reference_artifacts_content}
 - Create summary at: ${QUICK_DIR}/${next_num}-SUMMARY.md
 - Do NOT update ROADMAP.md (quick tasks are separate from planned phases)
 - If proof-bearing work slipped through planning, STOP and return the reroute instead of executing. Quick mode must not produce a proof result without the mandatory proof-redteam gate.
-- Return a structured `gpd_return` envelope with `gpd_return.status` and `gpd_return.files_written`; the `## PLANNING COMPLETE` / `## CHECKPOINT REACHED` headings are presentation only.
+- Return a structured `gpd_return` envelope with `gpd_return.status` and `gpd_return.files_written`; local completed output is `${QUICK_DIR}/${next_num}-SUMMARY.md`.
 </constraints>
 ",
   subagent_type="gpd-executor",
@@ -217,9 +215,9 @@ Reference artifacts: {reference_artifacts_content}
 )
 ```
 
-Child artifact gate: `gpd-executor`; expect fresh readable `${QUICK_DIR}/${next_num}-SUMMARY.md` named in `gpd_return.files_written`; apply `gpd apply-return-updates "${QUICK_DIR}/${next_num}-SUMMARY.md"`; otherwise retry, explicit main-context fallback with its own return, or abort.
+Child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-executor`; expected=`${QUICK_DIR}/${next_num}-SUMMARY.md`; allowed_root=`${QUICK_DIR}`; validators=readable summary; applicator=`gpd apply-return-updates "${QUICK_DIR}/${next_num}-SUMMARY.md"`; failure=`retry executor | explicit main-context fallback with its own return | abort`.
 
-**If the executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without the local child artifact gate above. If the return is missing/invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Execute in explicit main-context fallback with its own return, 3) Abort.
+**If the executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without the local child artifact gate above. Offer: 1) Retry executor, 2) Execute in explicit main-context fallback with its own return, 3) Abort.
 
 After executor returns:
 
@@ -247,12 +245,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Route on `gpd_return.status` and the artifact gate, not on the human-readable headings:
-
-- `gpd_return.status: completed` means the summary file passed the artifact gate and its durable child-return effects were applied.
-- `gpd_return.status: checkpoint` means the quick task needs user input; present the checkpoint and spawn a fresh continuation handoff.
-- `gpd_return.status: blocked` means the task cannot be completed without external repair.
-- `gpd_return.status: failed` means the task did not complete and must be retried or handled manually.
+Apply `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`: completed means the summary gate and applicator passed; checkpoint means present the checkpoint and spawn a fresh continuation; blocked or failed means surface issues and retry or handle manually.
 
 Only proceed to the quick-task completion record after `apply-return-updates` succeeds and the summary file still exists on disk.
 

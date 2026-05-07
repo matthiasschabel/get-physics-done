@@ -81,6 +81,20 @@ def test_phase0_prompt_diagnostics_and_visible_return_examples_agree(
     assert not failures, "Invalid visible gpd_return examples:\n" + "\n".join(failures)
 
 
+def test_phase0_prompt_return_field_mentions_match_contract_allowlist(
+    phase0_prompt_report: PromptSurfaceReport,
+) -> None:
+    assert phase0_prompt_report.disallowed_return_field_mentions == ()
+    assert int(phase0_prompt_report.totals["disallowed_return_field_mention_count"]) == 0
+
+
+def test_phase0_parent_workflows_do_not_instruct_child_return_synthesis(
+    phase0_prompt_report: PromptSurfaceReport,
+) -> None:
+    assert phase0_prompt_report.forbidden_child_return_synthesis_mentions == ()
+    assert int(phase0_prompt_report.totals["forbidden_child_return_synthesis_mention_count"]) == 0
+
+
 def test_phase0_stage_manifests_preserve_eager_loading_boundaries() -> None:
     manifest_paths = sorted(WORKFLOW_STAGE_MANIFEST_DIR.glob(f"*{WORKFLOW_STAGE_MANIFEST_SUFFIX}"))
 

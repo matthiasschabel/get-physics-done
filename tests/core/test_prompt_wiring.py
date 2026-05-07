@@ -1999,10 +1999,8 @@ def test_plan_checker_requires_contract_gate_and_reference_artifacts() -> None:
 
     assert "## Dimension 0: Contract Gate" in checker_agent
     assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in checker_agent
-    assert (
-        "This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run."
-        in checker_agent
-    )
+    assert "Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics." in checker_agent
+    assert "If user input is needed, return the typed checkpoint and stop." in checker_agent
     assert "contract_decisive_output" in checker_agent
     assert "contract_anchor_coverage" in checker_agent
     assert "proxy_only_success_path" in checker_agent
@@ -2546,10 +2544,10 @@ def test_phase_researcher_prompt_keeps_the_one_shot_handoff_and_return_contract_
     assert "gpd_return:" in phase_researcher
     assert "status: completed" in phase_researcher
     assert "files_written:\n    - GPD/phases/03-spectral-form-factor/03-RESEARCH.md" in phase_researcher
-    assert "This is a one-shot handoff" in research_workflow
-    assert "return a checkpoint rather than wait in place" in research_workflow
+    assert "references/orchestration/continuation-boundary.md" in research_workflow
+    assert "fresh continuation handoff" in research_workflow
     assert "expected_artifacts" in research_workflow
-    assert "Do not trust the runtime handoff status by itself." in research_workflow
+    assert "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in research_workflow
     assert "gpd_return.files_written" in research_workflow
     assert "Follow the included research-phase workflow." in research_command
     assert 'gpd --raw init research-phase "${phase_arg}" --stage "${stage_name}"' in research_workflow
@@ -4893,7 +4891,7 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
     assert "Contract intake: {contract_intake}" in quick
     assert "Project contract gate: {project_contract_gate}" in quick
     assert "gpd validate plan-preflight" in quick
-    assert "## CHECKPOINT REACHED" in quick
+    assert "references/orchestration/continuation-boundary.md" in quick
     assert "classifyHandoffIfNeeded" not in execute_phase
     assert "classifyHandoffIfNeeded" not in execute_plan
     assert "classifyHandoffIfNeeded" not in quick

@@ -605,9 +605,7 @@ For blocked or failed designs, set the base `status` accordingly, put missing in
 
 <structured_returns>
 
-All returns to the orchestrator MUST use this YAML envelope for reliable parsing:
-
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+All returns to the orchestrator MUST use this YAML envelope for reliable parsing. Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 ```yaml
 gpd_return:

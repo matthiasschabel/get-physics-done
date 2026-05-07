@@ -20,10 +20,10 @@ def _read_agent(name: str) -> str:
 def test_project_researcher_uses_staged_mode_and_one_shot_checkpoint_language() -> None:
     source = _read_agent("gpd-project-researcher.md")
 
-    assert "This is a one-shot handoff." in source
-    assert "typed `gpd_return.status: checkpoint`" in source
-    assert "fresh continuation" in source
-    assert "Do not wait inside the same spawned run." in source
+    assert "one-shot handoff and fresh-continuation semantics" in source
+    assert "return the typed checkpoint and stop" in source
+    assert "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in source
+    assert "Do not wait inside the same spawned run." not in source
     assert "Do not query config or reread init JSON inside this agent." in source
     assert "Write only the assigned `write_scope.allowed_paths`" in source
     assert "Execute all 4 parallel research threads independently" not in source

@@ -15,12 +15,13 @@ def _read(name: str) -> str:
 def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
     plan_phase = _read("plan-phase.md")
 
-    assert "Runtime delegation rule: this is a one-shot handoff." in plan_phase
-    assert "Accept only after `gpd_return.files_written` names at least one fresh, readable `${PHASE_DIR}/*-PLAN.md`" in plan_phase
-    assert "do not trust return text or preexisting files alone" in plan_phase
+    assert "Planner checkpoint: apply `references/orchestration/continuation-boundary.md`" in plan_phase
+    assert "Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in plan_phase
+    assert "expected=`${PHASE_DIR}/*-PLAN.md`" in plan_phase
+    assert "freshness=`after $PLANNER_HANDOFF_STARTED_AT`" in plan_phase
     assert 'gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}"' in plan_phase
     assert 'gpd validate plan-contract "$plan_file"' in plan_phase
-    assert "Do not synthesize or patch a child planner `gpd_return` from files on disk." in plan_phase
+    assert "The child artifact gate owns the no-synthetic-child-return rule" in plan_phase
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in plan_phase
 
 

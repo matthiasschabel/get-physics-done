@@ -577,7 +577,7 @@ All returns use the `gpd_return` YAML envelope in `<structured_returns>` below. 
 
 **For convention conflicts:** `gpd_return` with `status: failed`, extended fields: `conflicts` (array of {category, phase_a, phase_b, value_a, value_b, test_value_result, suggested_resolution}), `severity`
 
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 </return_format>
 

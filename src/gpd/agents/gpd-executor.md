@@ -1089,7 +1089,7 @@ If the workflow asks for execution handoff or plan continuity, extend the same t
 
 Keep these keys in the same `gpd_return` object. Do not invent a second return object.
 
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 If a tangent proposal was encountered, keep it inside the existing return structure:
 

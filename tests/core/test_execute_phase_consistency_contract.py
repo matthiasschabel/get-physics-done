@@ -19,20 +19,24 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
     assert "<spawn_contract>" in workflow
     assert "expected_artifacts:" in workflow
     assert "{phase_dir}/CONSISTENCY-CHECK.md" in workflow
-    assert "Return exactly one typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`" in workflow
+    assert "Return exactly one typed `gpd_return` envelope, include `files_written`" in workflow
     assert (
         "Append the same typed YAML `gpd_return` block to `{phase_dir}/CONSISTENCY-CHECK.md` before returning"
         in workflow
     )
-    assert "Artifact gate:" in workflow
+    assert "Consistency checker child artifact gate:" in workflow
     assert "gpd_return.status: completed" in workflow
     assert "gpd_return.status: checkpoint" in workflow
     assert "gpd_return.status: blocked" in workflow
     assert "gpd_return.status: failed" in workflow
+    assert "CONSISTENCY_HANDOFF_STARTED_AT=" in workflow
     assert 'CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"' in workflow
-    assert 'if [ ! -f "$CONSISTENCY_REPORT" ]; then' in workflow
+    assert 'if [ ! -r "$CONSISTENCY_REPORT" ]; then' in workflow
     assert "consistency-check artifact missing" in workflow
-    assert "Do not accept `gpd_return.status: completed` until" in workflow
+    assert "gpd validate handoff-artifacts -" in workflow
+    assert "--require-files-written" in workflow
+    assert "--require-status completed" in workflow
+    assert '--fresh-after "$CONSISTENCY_HANDOFF_STARTED_AT"' in workflow
 
 
 def test_execute_phase_consistency_check_no_longer_routes_on_legacy_status() -> None:

@@ -21,8 +21,7 @@ def _gpd_return_block(path: Path) -> str:
 def test_paper_writer_prompt_uses_typed_status_and_one_shot_checkpoint_language() -> None:
     source = _read(PAPER_WRITER)
 
-    assert "return `gpd_return.status: checkpoint` and stop" in source
-    assert "This is a one-shot checkpoint handoff." in source
+    assert "one-shot checkpoint handoff and fresh continuation handoff semantics" in source
     assert "do not wait for user input inside the current run" not in source
     assert "Use `gpd_return.status: checkpoint` as the control surface." in source
     assert "The `## CHECKPOINT REACHED` heading below is presentation only." in source

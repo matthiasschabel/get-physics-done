@@ -618,7 +618,7 @@ Do not restate template-owned contract gates, tangent control, tool-requirement 
 PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 PLANNER_RETURN=$(
 task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.\n\n" + filled_prompt + "\n\n<spawn_contract>\nwrite_scope:\n  mode: scoped_write\n  allowed_paths:\n    - \"{phase_dir}/*-PLAN.md\"\nexpected_artifacts:\n  - \"readable {phase_dir}/*-PLAN.md named in gpd_return.files_written\"\nshared_state_policy: return_only\nartifact_gate: orchestrator validates files_written, scope, freshness, readability, suffix, plan-contract, and plan-preflight\n</spawn_contract>",
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.\n\n" + filled_prompt + "\n\n<spawn_contract>\nwrite_scope:\n  mode: scoped_write\n  allowed_paths:\n    - \"{phase_dir}/*-PLAN.md\"\nexpected_artifacts:\n  - \"readable {phase_dir}/*-PLAN.md named in gpd_return.files_written\"\nshared_state_policy: return_only\n</spawn_contract>",
   subagent_type="gpd-planner",
   model="{planner_model}",
   readonly=false,
@@ -627,21 +627,19 @@ task(
 )
 ```
 
-> Runtime delegation rule: this is a one-shot handoff. If the planner needs user input, it checkpoints and returns; the wrapper must start a fresh continuation after the user responds.
+Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-planner`; expected=`${PHASE_DIR}/*-PLAN.md`; root=`${PHASE_DIR}`; freshness=`after $PLANNER_HANDOFF_STARTED_AT`; validators=`gpd validate handoff-artifacts`, `gpd validate plan-contract`, `gpd validate plan-preflight`; failure=`retry | main | abort`.
+
+Planner checkpoint: apply `references/orchestration/continuation-boundary.md`; trigger=user input; resume fresh.
 
 ## 9. Handle Planner Return
 
-**If the planner agent fails to spawn or returns an error:** Do not infer completion from existing `PLAN.md` files. Without a fresh typed `gpd_return` naming `files_written`, keep the child handoff incomplete. Offer: Retry planner / Main-context plan / Abort.
+**If the planner agent fails to spawn or returns an error:** Keep the child handoff incomplete under the planner gate. Existing `PLAN.md` files are recovery evidence only. Offer: Retry planner / Main-context plan / Abort.
 
-Planner return validation and main-context fallback are separate paths. Do not synthesize or patch a child planner `gpd_return` from files on disk. If the child return is missing, malformed, or fails artifact validation, the child handoff is incomplete; either retry the planner or start an explicit main-context authoring path that owns its own artifacts and return envelope.
+Planner return validation and main-context fallback are separate paths. The child artifact gate owns the no-synthetic-child-return rule; an explicit main-context authoring path must own its own artifacts and return envelope.
 
 If the user chooses Main-context plan or any manual bounded authoring branch, it is not an override: set `PLANNER_HANDOFF_STARTED_AT`, write only `${PHASE_DIR}/*-PLAN.md`, set `FRESH_PLAN_FILES` to the newly created path(s), and run one gate with a complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`. No full planner/checker loop is required for this fallback unless requested, but a failing gate means `status: blocked`, not `planned_ready`/`green`, and no `gpd:execute-phase` route.
 
-Planner gate: fresh plans; validate handoff/readability/contract/preflight; no pre-checker applicator; else retry, main-context, or abort.
-
-Ignore presentation headings; route on structured `gpd_return.status`, `files_written`, and gate.
-
-- **`gpd_return.status: completed`:** Accept only after `gpd_return.files_written` names at least one fresh, readable `${PHASE_DIR}/*-PLAN.md`; do not trust return text or preexisting files alone. Display plan count. In `AUTONOMY=supervised`, show draft plans and get user confirmation before checker or next-step output. If `--skip-verify` or `plan_checker_enabled` is false, skip to step 13 only when no proof-bearing plans were written; proof-bearing plans still need checker review or an equivalent main-context audit. Otherwise: step 10.
+- **`gpd_return.status: completed`:** Accept only after the planner gate tuple passes, then display plan count. In `AUTONOMY=supervised`, show draft plans and get user confirmation before checker or next-step output. If `--skip-verify` or `plan_checker_enabled` is false, skip to step 13 only when no proof-bearing plans were written; proof-bearing plans still need checker review or an equivalent main-context audit. Otherwise: step 10.
 - **`gpd_return.status: checkpoint`:** Present to user, get response, spawn a fresh planner continuation handoff. Do not route planner checkpoints into the checker revision loop.
 - **`gpd_return.status: blocked` or `failed`:** Show attempts, offer: Add context / Retry / Manual
 
@@ -798,7 +796,7 @@ In addition to structural checks, verify:
 ```
 CHECKER_RETURN=$(
 task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-plan-checker.md for your role and instructions.\n\n" + checker_prompt + "\n\n<spawn_contract>\nwrite_scope:\n  mode: read_only\n  allowed_paths: []\nexpected_artifacts: []\nshared_state_policy: return_only\nartifact_gate: checker returns approved_plans, blocked_plans, and files_written: []; orchestrator reconciles IDs against FRESH_PLAN_FILES\n</spawn_contract>",
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-plan-checker.md for your role and instructions.\n\n" + checker_prompt + "\n\n<spawn_contract>\nwrite_scope:\n  mode: read_only\n  allowed_paths: []\nexpected_artifacts: []\nshared_state_policy: return_only\n</spawn_contract>",
   subagent_type="gpd-plan-checker",
   model="{checker_model}",
   readonly=false,
@@ -806,6 +804,8 @@ task(
 )
 )
 ```
+
+Checker child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-plan-checker`; expected=none; validators=approved/blocked plan-ID reconciliation against `FRESH_PLAN_FILES` and `files_written: []`; failure=`revision | fail-closed | manual`.
 
 ## 11. Handle Checker Return
 
@@ -916,7 +916,7 @@ Keep the revision prompt scoped to targeted checker fixes. Do not restate templa
 PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 PLANNER_RETURN=$(
 task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.\n\n" + revision_prompt + "\n\n<spawn_contract>\nwrite_scope:\n  mode: scoped_write\n  allowed_paths:\n    - \"{phase_dir}/*-PLAN.md\"\nexpected_artifacts:\n  - \"revised readable {phase_dir}/*-PLAN.md named in gpd_return.files_written\"\nshared_state_policy: return_only\nartifact_gate: orchestrator validates files_written, scope, freshness, readability, suffix, plan-contract, and plan-preflight before re-checking\n</spawn_contract>",
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.\n\n" + revision_prompt + "\n\n<spawn_contract>\nwrite_scope:\n  mode: scoped_write\n  allowed_paths:\n    - \"{phase_dir}/*-PLAN.md\"\nexpected_artifacts:\n  - \"revised readable {phase_dir}/*-PLAN.md named in gpd_return.files_written\"\nshared_state_policy: return_only\n</spawn_contract>",
   subagent_type="gpd-planner",
   model="{planner_model}",
   readonly=false,
@@ -924,6 +924,8 @@ task(
 )
 )
 ```
+
+Revision planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-planner`; expected=`${PHASE_DIR}/*-PLAN.md`; root=`${PHASE_DIR}`; freshness=`after $PLANNER_HANDOFF_STARTED_AT`; validators=`gpd validate handoff-artifacts`, `gpd validate plan-contract`, `gpd validate plan-preflight`; failure=`retry | manual | force`.
 
 **If the revision planner agent fails to spawn or returns an error:** Do not proceed to re-check just because revised `PLAN.md` files exist on disk. Treat any such files as incomplete until a fresh typed planner return explicitly names them in `gpd_return.files_written`. If no fresh revision return is available, keep the loop fail-closed and offer: 1) Retry revision planner, 2) Apply revisions manually in the main context using checker feedback, 3) Force proceed with current plans despite checker issues.
 

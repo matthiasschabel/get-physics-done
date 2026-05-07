@@ -17,6 +17,7 @@ REFERENCE_EXAMPLE_PATHS = (
     REPO_ROOT / "src" / "gpd" / "specs" / "references" / "execution" / "executor-completion.md",
     REPO_ROOT / "src" / "gpd" / "specs" / "references" / "orchestration" / "agent-infrastructure.md",
 )
+AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 YAML_FENCE_RE = re.compile(r"^```ya?ml[^\n]*\n(?P<body>.*?)(?:\n^```[ \t]*$)", re.MULTILINE | re.DOTALL)
 
 
@@ -48,3 +49,17 @@ def test_visible_gpd_return_yaml_examples_match_return_contract() -> None:
 
     assert checked_examples > 0
     assert not failures, "Invalid gpd_return YAML examples:\n" + "\n".join(failures)
+
+
+def test_agent_return_examples_use_canonical_status_profile_reference() -> None:
+    infra = (REFERENCE_EXAMPLE_PATHS[1]).read_text(encoding="utf-8")
+    assert "Status vocabulary and base fields are canonical here." in infra
+    assert "return skeleton/profile source" in infra
+
+    offenders = []
+    for path in sorted(AGENTS_DIR.glob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if "Use only status names:" in text:
+            offenders.append(path.relative_to(REPO_ROOT).as_posix())
+
+    assert offenders == []

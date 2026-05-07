@@ -2169,9 +2169,10 @@ class TestRegistryPromptIncludeInlining:
         assert skill.path.endswith("gpd-plan-checker.md")
         assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in skill.content
         assert (
-            "This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run."
+            "Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics."
             in skill.content
         )
+        assert "If user input is needed, return the typed checkpoint and stop." in skill.content
         assert "approved_plans:" in skill.content
         assert '    - "04-01"' in skill.content
         assert "blocked_plans: []" in skill.content
@@ -2972,7 +2973,7 @@ class TestPublicAPI:
         assert synthesizer.path.endswith("gpd-research-synthesizer.md")
         assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer.content
         assert "files_written` must list only files actually written in this run." in synthesizer.content
-        assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in synthesizer.content
+        assert "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields" in synthesizer.content
         assert "gpd_return:" in synthesizer.content
 
         assert new_project.spawn_contracts == new_project_command.spawn_contracts

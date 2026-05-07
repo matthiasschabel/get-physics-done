@@ -89,7 +89,7 @@ gpd --raw state snapshot | gpd json get .decisions --default "[]"
 
 Load the heavier handoff slice only after phase validation, existing-research routing, and context gathering are complete:
 
-This is a one-shot handoff: if the researcher needs user input, it must return a checkpoint rather than wait in place.
+Apply `references/orchestration/continuation-boundary.md`; local checkpoint trigger=researcher needs user input.
 
 ```bash
 HANDOFF_INIT=$(load_research_phase_stage research_handoff "${phase_number}")
@@ -182,16 +182,15 @@ shared_state_policy: return_only
 </spawn_contract>
 ```
 
-Accept the researcher handoff automatically only once `expected_artifacts` exist and pass the artifact check. Do not trust the runtime handoff status by itself.
-Human-readable headings such as `## RESEARCH COMPLETE` and `## CHECKPOINT REACHED` are presentation only; route on `gpd_return.status`, `gpd_return.files_written`, and the artifact gate.
+Child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-phase-researcher`; expected=`{phase_dir}/{phase_number}-RESEARCH.md`; allowed_root=`{phase_dir}`; validators=readable research artifact; applicator=none; failure=`retry research | skip to plan-phase | abort/discuss`.
 
 ## Step 5: Handle Return
 
 **If the researcher agent fails to spawn or returns an error:** Report the failure. End with `## > Next Up`: primary `gpd:research-phase {phase_number}` to retry, plus `gpd:plan-phase {phase_number}` to skip research and plan directly, and `gpd:suggest-next`. Do not silently continue without research output.
 
-- **Artifact gate:** If `gpd_return.status: completed` but the `expected_artifacts` entry (`RESEARCH.md`) is missing from the phase directory or absent from `gpd_return.files_written`, treat the handoff as incomplete. End with `## > Next Up`: primary `gpd:research-phase {phase_number}` to retry, plus `gpd:plan-phase {phase_number}` and `gpd:suggest-next`.
+- **Artifact gate:** Accept completed only after the gate tuple passes for `RESEARCH.md`. If the artifact is missing, unreadable, or absent from `gpd_return.files_written`, end with `## > Next Up`: primary `gpd:research-phase {phase_number}` to retry, plus `gpd:plan-phase {phase_number}` and `gpd:suggest-next`.
 - `gpd_return.status: completed` -- Display summary and end with `## > Next Up`: primary `gpd:plan-phase {phase_number}`, plus `gpd:research-phase {phase_number}` to dig deeper, `gpd:show-phase {phase_number}` to review, and `gpd:suggest-next`.
-- `gpd_return.status: checkpoint` -- Present the checkpoint to the user, collect the response, spawn a fresh continuation handoff, and end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:research-phase {phase_number}` and `gpd:suggest-next`. Do not resume the same spawned run.
+- `gpd_return.status: checkpoint` -- Present the checkpoint and continue only through a fresh continuation handoff under `references/orchestration/continuation-boundary.md`. End with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:research-phase {phase_number}` and `gpd:suggest-next`.
 - `gpd_return.status: blocked` or `failed` -- Show attempts and end with `## > Next Up`: primary `gpd:discuss-phase {phase_number}` to add context, plus `gpd:research-phase {phase_number}` and `gpd:suggest-next`.
 
 ## Step 6: Spawn Continuation Researcher

@@ -18,7 +18,7 @@ Spawned by the plan-phase orchestrator (after planner creates PLAN.md), the veri
 
 Goal-backward verification of PLANS before execution. Start from what the phase SHOULD deliver, verify plans address it.
 
-This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run. Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`.
+Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics. If user input is needed, return the typed checkpoint and stop.
 
 Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`; load them only when source hierarchy, forbidden files, or convention tracking details matter. Use `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot checkpoint ownership.
 
@@ -1269,7 +1269,7 @@ gpd_return:
 
 When contract-gate failures or escalation diagnoses matter, represent them in the `issues` list and the markdown report above instead of inventing nested `gpd_return` payloads.
 
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 </structured_returns>
 

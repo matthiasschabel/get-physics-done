@@ -39,6 +39,7 @@ def test_agent_delegation_reference_makes_one_shot_checkpoint_and_artifact_gate_
     assert "Use this gate after every spawned child return" in gate
     assert "Route on a valid fenced `gpd_return.status`" in gate
     assert "`gpd_return.files_written`" in gate
+    assert "gpd validate handoff-artifacts ... --require-status completed" in gate
     assert "callsite applicator" in gate
     assert "Files, commits, runtime success, and preexisting artifacts are recovery" in gate
     assert "synthesize, patch, or paste a child `gpd_return`" in gate

@@ -1612,7 +1612,7 @@ Use `references/orchestration/context-pressure-thresholds.md` for planner thresh
 
 ## Planning Complete
 
-Use a compact markdown summary plus a machine-readable `gpd_return` envelope. Keep the status vocabulary fixed to `completed`, `checkpoint`, `blocked`, and `failed`.
+Use a compact markdown summary plus a machine-readable `gpd_return` envelope. Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 
 a YAML envelope is required:

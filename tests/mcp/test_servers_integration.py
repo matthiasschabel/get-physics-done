@@ -728,7 +728,10 @@ class TestSkillsServerIntegration:
         }
         assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer["content"]
         assert "files_written` must list only files actually written in this run." in synthesizer["content"]
-        assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in synthesizer["content"]
+        assert (
+            "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields"
+            in synthesizer["content"]
+        )
         assert "gpd_return:" in synthesizer["content"]
 
         expected_project_spawn_contracts = [dict(contract) for contract in registry.get_command("gpd:new-project").spawn_contracts]

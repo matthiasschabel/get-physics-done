@@ -1035,7 +1035,7 @@ For all statuses, `files_written` must list only files actually written in this 
 
 For `blocked` returns caused by upstream staged-review artifact failures, keep `files_written` empty unless you wrote only `${selected_publication_root}/CONSISTENCY-REPORT.md`. Never list `CLAIMS{round_suffix}.json`, any `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md` in `files_written`.
 
-Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 </structured_returns>
 

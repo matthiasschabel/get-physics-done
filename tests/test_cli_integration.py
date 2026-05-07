@@ -2493,6 +2493,33 @@ class TestRegressionCheck:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+class TestReturnSkeleton:
+    def test_return_skeleton_markdown_round_trips_through_validate_return(self, gpd_project: Path) -> None:
+        """The read-only skeleton output should be valid validate-return input."""
+        skeleton_result = _invoke(
+            "return",
+            "skeleton",
+            "--role",
+            "executor",
+            "--status",
+            "completed",
+            "--file",
+            "GPD/phases/01-test-phase/01-SUMMARY.md",
+            "--next-action",
+            "gpd validate-return RETURN-SKELETON.md",
+        )
+        return_file = gpd_project / "RETURN-SKELETON.md"
+        return_file.write_text(skeleton_result.output, encoding="utf-8")
+
+        validate_result = _invoke("--raw", "validate-return", str(return_file))
+        parsed = json.loads(validate_result.output)
+
+        assert parsed["passed"] is True
+        assert parsed["fields"]["status"] == "completed"
+        assert parsed["fields"]["files_written"] == ["GPD/phases/01-test-phase/01-SUMMARY.md"]
+        assert parsed["fields"]["next_actions"] == ["gpd validate-return RETURN-SKELETON.md"]
+
+
 class TestValidateReturn:
     def test_validate_return_valid(self, gpd_project: Path) -> None:
         """A file with a valid gpd_return block should pass."""

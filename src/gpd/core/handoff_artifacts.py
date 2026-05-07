@@ -8,7 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from gpd.core.return_contract import validate_gpd_return_markdown
+from gpd.core.return_contract import VALID_RETURN_STATUSES, validate_gpd_return_markdown
 
 
 class HandoffArtifactValidationResult(BaseModel):
@@ -17,6 +17,7 @@ class HandoffArtifactValidationResult(BaseModel):
     passed: bool
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    status: str | None = None
     files_written: list[str] = Field(default_factory=list)
     checked_files: list[str] = Field(default_factory=list)
     expected_artifacts: list[str] = Field(default_factory=list)
@@ -46,6 +47,7 @@ def validate_handoff_artifacts_markdown(
     allowed_roots: list[str] | tuple[str, ...] = (),
     required_suffixes: list[str] | tuple[str, ...] = (),
     require_files_written: bool = False,
+    require_status: str | None = None,
     fresh_after: datetime | None = None,
 ) -> HandoffArtifactValidationResult:
     """Validate that a spawned return names real, in-scope artifacts.
@@ -56,6 +58,17 @@ def validate_handoff_artifacts_markdown(
     root = project_root.expanduser().resolve(strict=False)
     errors: list[str] = []
     warnings: list[str] = []
+
+    normalized_required_status = _normalize_required_status(require_status)
+    if require_status is not None and normalized_required_status is None:
+        allowed = ", ".join(sorted(VALID_RETURN_STATUSES))
+        return HandoffArtifactValidationResult(
+            passed=False,
+            errors=[f"required status must be one of: {allowed}"],
+            expected_artifacts=list(expected_artifacts),
+            expected_globs=list(expected_globs),
+            allowed_roots=list(allowed_roots),
+        )
 
     return_validation = validate_gpd_return_markdown(return_markdown)
     if not return_validation.passed or return_validation.envelope is None:
@@ -69,6 +82,11 @@ def validate_handoff_artifacts_markdown(
         )
 
     envelope = return_validation.envelope
+    if normalized_required_status is not None and envelope.status != normalized_required_status:
+        errors.append(
+            f"gpd_return.status must be {normalized_required_status!r} for this artifact gate, got {envelope.status!r}"
+        )
+
     files_written = [_normalize_project_local_path(path) for path in envelope.files_written]
     expected = [_normalize_project_local_path(path) for path in expected_artifacts]
     globs = [_normalize_project_local_path(pattern) for pattern in expected_globs]
@@ -120,12 +138,22 @@ def validate_handoff_artifacts_markdown(
         passed=not errors,
         errors=errors,
         warnings=warnings + list(return_validation.warnings),
+        status=envelope.status,
         files_written=files_written,
         checked_files=checked_files,
         expected_artifacts=expected,
         expected_globs=globs,
         allowed_roots=allowed_display,
     )
+
+
+def _normalize_required_status(status: str | None) -> str | None:
+    if status is None:
+        return None
+    normalized = status.strip()
+    if normalized not in VALID_RETURN_STATUSES:
+        return None
+    return normalized
 
 
 def _normalize_project_local_path(path_text: str) -> str:

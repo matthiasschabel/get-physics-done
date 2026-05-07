@@ -41,7 +41,7 @@ Research mode is workflow-owned. Do not query config or reread `init.json` from 
 - Determine appropriate computational tools and validation strategies.
 - Document findings with confidence levels (`HIGH` / `MEDIUM` / `LOW`).
 - Write one `RESEARCH.md` with the planner-facing sections below.
-- If user input is genuinely needed, return `gpd_return.status: checkpoint` and stop. Do not wait inside the same spawned run.
+- If user input is genuinely needed, apply the continuation boundary, return the typed checkpoint, and stop.
 - Return a structured result to the orchestrator and include the written path in `gpd_return.files_written`.
 </role>
 

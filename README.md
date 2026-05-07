@@ -578,7 +578,7 @@ This research made use of Get Physics Done (GPD), developed by Physical Superint
 
 ## Papers Using GPD
 
-Papers that cite or acknowledge use of GPD. If your paper should be listed here, open a pull request.
+Papers that cite or acknowledge use of GPD. If your paper should be listed here, please open a pull request.
 
 - L. Eberhardt, *The Super Virasoro Minimal String from 3d Supergravity* (2026), [arXiv:2604.26038](https://arxiv.org/abs/2604.26038).
 - C. Ferko, J. Halverson, V. Jejjala and B. Robinson, *Topological Effects in Neural Network Field Theory* (2026), [arXiv:2604.02313](https://arxiv.org/abs/2604.02313).

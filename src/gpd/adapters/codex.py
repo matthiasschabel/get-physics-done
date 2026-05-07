@@ -146,7 +146,7 @@ _CODEX_COMMAND_RUNTIME_NOTE = (
     "Codex shell compatibility:\n"
     "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `{public_prefix}...` for Codex commands.\n"
     "- When shell steps call the GPD CLI, put the runtime bridge directly in command position: {launcher}.\n"
-    '- The bridge is a command with arguments, not one executable path. Do not assign it to a scalar like `GPD_CLI="{launcher}"` and then run `$GPD_CLI ...`.\n'
+    "- The bridge is a command with arguments, not one executable path. Do not store it in a scalar variable and then expand that variable as the command.\n"
     '- If you need reuse inside one shell block, define a function: `gpd_cli() {{ {launcher} "$@"; }}` and call `gpd_cli --raw ...`.\n'
     "- In zsh examples, use `cmd_status=$?`; `status` is a reserved read-only parameter.\n"
     "</codex_runtime_notes>\n\n"

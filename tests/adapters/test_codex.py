@@ -83,7 +83,8 @@ def test_codex_command_runtime_note_injection_is_idempotent() -> None:
     assert twice.count("Codex shell compatibility:") == 1
     assert twice.count("When shell steps call the GPD CLI") == 1
     assert f"put the runtime bridge directly in command position: {launcher}" in twice
-    assert f'GPD_CLI="{launcher}"' in twice
+    assert "Do not store it in a scalar variable" in twice
+    assert "GPD_CLI=" not in twice
     assert f'gpd_cli() {{ {launcher} "$@"; }}' in twice
     assert "use `cmd_status=$?`; `status` is a reserved read-only parameter" in twice
     assert "The bridge already pins Codex" not in twice
@@ -773,7 +774,8 @@ class TestInstall:
 
         assert "Codex shell compatibility:" in skill
         assert f"When shell steps call the GPD CLI, put the runtime bridge directly in command position: {expected_bridge}" in skill
-        assert f'GPD_CLI="{expected_bridge}"' in skill
+        assert "Do not store it in a scalar variable" in skill
+        assert "GPD_CLI=" not in skill
         assert f'gpd_cli() {{ {expected_bridge} "$@"; }}' in skill
         assert "use `cmd_status=$?`; `status` is a reserved read-only parameter" in skill
         assert "The bridge already pins Codex" not in skill

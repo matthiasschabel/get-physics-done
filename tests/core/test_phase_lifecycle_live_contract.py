@@ -219,6 +219,10 @@ def test_completed_phase_suggests_active_runtime_verify_work_not_structural_veri
 
     result = suggest_next(tmp_path)
 
-    verify = next(suggestion for suggestion in result.suggestions if suggestion.action == "verify-work")
+    verify = next((suggestion for suggestion in result.suggestions if suggestion.action == "verify-work"), None)
+    assert verify is not None, (
+        f"No 'verify-work' suggestion found for runtime={runtime!r}; "
+        f"got: {[suggestion.action for suggestion in result.suggestions]}"
+    )
     assert verify.command == f"{adapter.format_command('verify-work')} 02"
     assert "gpd verify phase" not in verify.command

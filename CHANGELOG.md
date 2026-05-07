@@ -4,6 +4,19 @@ All notable changes to Get Physics Done are documented here.
 
 ## vNEXT
 
+## v1.2.2
+
+### Live command audit hardening
+
+- Stabilize live command behavior across Codex, Claude, Gemini, and OpenCode, including update, install, uninstall, help, profile, and new-project workflows.
+- Harden phase planning, phase execution, checkpoint routing, project-local verification reports, and publication command gates so live audit recovery paths fail closed instead of drifting across projects.
+- Tighten verifier prompt budgets, staged context handling, raw help surfaces, arXiv command subject validation, and external-project read-only routing.
+
+### Maintenance
+
+- Refresh arXiv, arXiv MCP server, Typer, and Ruff dependencies.
+- Clarify paper-submission README guidance and add the Eberhardt GPD acknowledgement to the public papers list.
+
 ## v1.2.1
 
 ### Workflow and release hardening

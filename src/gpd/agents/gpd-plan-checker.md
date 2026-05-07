@@ -1251,13 +1251,20 @@ Headings above are presentation only. Route on `gpd_return.status`, the approved
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # This read-only agent always uses files_written: [].
-  approved_plans: [list of plan IDs that passed]
-  blocked_plans: [list of plan IDs needing revision or escalation]
-  dimensions_checked: [list of dimensions evaluated]
-  revision_round: 1-3  # current round number
-  revision_guidance: "specific feedback for planner"
+  status: completed
+  files_written: []
+  issues: []
+  next_actions:
+    - "gpd:execute-phase 04"
+  approved_plans:
+    - "04-01"
+    - "04-02"
+  blocked_plans: []
+  dimensions_checked:
+    - "dependencies"
+    - "contract coverage"
+  revision_round: 1
+  revision_guidance: "Plans are approved; execute the approved set."
 ```
 
 When contract-gate failures or escalation diagnoses matter, represent them in the `issues` list and the markdown report above instead of inventing nested `gpd_return` payloads.

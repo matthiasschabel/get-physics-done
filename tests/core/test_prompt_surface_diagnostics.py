@@ -17,6 +17,7 @@ EXPECTED_REPORT_KEYS = {
     "repo_root",
     "totals",
     "items",
+    "invalid_gpd_return_examples",
     "duplicate_invariants",
     "exact_prose_assertion_files",
     "warnings",
@@ -34,6 +35,7 @@ EXPECTED_ITEM_KEYS = {
     "unresolved_include_count",
     "visible_schema_example_count",
     "invalid_gpd_return_example_count",
+    "invalid_gpd_return_examples",
     "hard_gate_line_count",
     "hard_gate_density",
     "shell_fence_count",
@@ -58,6 +60,13 @@ EXPECTED_DUPLICATE_GROUP_KEYS = {
     "file_count",
     "severity",
     "locations",
+}
+EXPECTED_INVALID_RETURN_EXAMPLE_KEYS = {
+    "path",
+    "start_line",
+    "end_line",
+    "errors",
+    "preview",
 }
 
 
@@ -166,6 +175,8 @@ def test_report_to_dict_has_stable_schema_version_and_json_shape(tmp_path: Path)
     assert len(payload["items"]) == 1
     assert set(payload["items"][0]) == EXPECTED_ITEM_KEYS
     assert payload["items"][0]["runtime_projection"] == []
+    assert payload["items"][0]["invalid_gpd_return_examples"] == []
+    assert payload["invalid_gpd_return_examples"] == []
 
 
 def test_include_counting_ignores_fenced_code_and_uses_installer_expansion(tmp_path: Path) -> None:
@@ -297,6 +308,67 @@ def test_invalid_partial_gpd_return_examples_are_reported(tmp_path: Path) -> Non
 
     assert item.visible_schema_example_count == 1
     assert item.invalid_gpd_return_example_count == 1
+    assert len(item.invalid_gpd_return_examples) == 1
+    example = item.invalid_gpd_return_examples[0]
+    assert example.path == "src/gpd/agents/gpd-return-probe.md"
+    assert example.start_line == 6
+    assert example.end_line == 10
+    assert "Missing required field: files_written" in example.errors
+    assert "Missing required field: issues" in example.errors
+    assert "Missing required field: next_actions" in example.errors
+    assert example.preview.startswith("gpd_return: status: completed")
+
+
+def test_invalid_json_gpd_return_examples_are_reported_as_invalid(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/json-return-probe.md",
+        """
+        ---
+        name: json-return-probe
+        ---
+        ```json
+        {"gpd_return":{"files_written":["GPD/plan.md"]}}
+        ```
+        """,
+    )
+
+    item = _measure(tmp_path, "workflow", "json-return-probe")
+
+    assert item.visible_schema_example_count == 1
+    assert item.invalid_gpd_return_example_count == 1
+    example = item.invalid_gpd_return_examples[0]
+    assert example.start_line == 4
+    assert example.end_line == 6
+    assert example.errors == ("No gpd_return YAML block found",)
+    assert '"gpd_return"' in example.preview
+
+
+def test_shell_blocks_that_construct_returns_are_not_schema_examples(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/shell-return-probe.md",
+        """
+        ---
+        name: shell-return-probe
+        ---
+        ```bash
+        printf '```yaml\\n'
+        printf 'gpd_return:\\n'
+        printf '  status: completed\\n'
+        printf '  files_written: []\\n'
+        printf '  issues: []\\n'
+        printf '  next_actions: []\\n'
+        printf '```\\n'
+        ```
+        """,
+    )
+
+    item = _measure(tmp_path, "workflow", "shell-return-probe")
+
+    assert item.visible_schema_example_count == 0
+    assert item.invalid_gpd_return_example_count == 0
+    assert item.invalid_gpd_return_examples == ()
 
 
 def test_runtime_projections_cover_every_runtime_descriptor(tmp_path: Path) -> None:
@@ -367,6 +439,63 @@ def test_report_to_dict_serializes_runtime_and_duplicate_group_shapes(tmp_path: 
     assert payload["items"][0]["runtime_projection"][0]["runtime"] == runtime_name
     assert payload["duplicate_invariants"]
     assert set(payload["duplicate_invariants"][0]) == EXPECTED_DUPLICATE_GROUP_KEYS
+
+
+def test_report_to_dict_serializes_invalid_gpd_return_example_shape(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/agents/return-shape-probe.md",
+        """
+        ---
+        name: return-shape-probe
+        description: Return shape probe
+        ---
+        ```yaml
+        gpd_return:
+          status: completed
+        ```
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("agent",), runtime_names=())
+    payload = diagnostics.report_to_dict(report)
+    item_example = payload["items"][0]["invalid_gpd_return_examples"][0]
+    report_example = payload["invalid_gpd_return_examples"][0]
+
+    assert item_example == report_example
+    assert set(report_example) == EXPECTED_INVALID_RETURN_EXAMPLE_KEYS
+    assert report_example["path"] == "src/gpd/agents/return-shape-probe.md"
+    assert report_example["start_line"] == 5
+    assert report_example["end_line"] == 8
+    assert report_example["errors"]
+    assert report_example["preview"].startswith("gpd_return:")
+
+
+def test_markdown_render_lists_invalid_gpd_return_examples(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/agents/return-markdown-probe.md",
+        """
+        ---
+        name: return-markdown-probe
+        description: Return markdown probe
+        ---
+        ```yaml
+        gpd_return:
+          status: completed
+        ```
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("agent",), runtime_names=())
+    markdown = diagnostics.render_prompt_surface_markdown(report)
+
+    assert "## Invalid `gpd_return` Examples" in markdown
+    assert "`src/gpd/agents/return-markdown-probe.md`" in markdown
+    assert "5-8" in markdown
+    assert "Missing required field: files_written" in markdown
 
 
 def test_production_prompt_diagnostics_does_not_import_from_tests() -> None:

@@ -764,7 +764,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
    This ensures the user sees progress even when waves have multiple parallel plans. Do not wait for the entire wave to finish before showing any output.
 
-   **If any executor agent fails to spawn or returns an error:** Check if the agent committed any work (`git log --oneline -3`). If commits exist, the agent may have completed but failed to report — spot-check output files and proceed. If no work was done, record the plan as failed for this wave. After all other agents complete, report failed plans and offer: 1) Retry failed plans in a new wave, 2) Execute failed plans in the main context, 3) Skip failed plans and continue. Do not abort the entire phase for individual plan failures.
+   **If any executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without SUMMARY, valid child `gpd_return`, artifact gate, and `gpd apply-return-updates`. If the envelope is missing or invalid, keep that child handoff incomplete and mark the plan failed for this wave unless the user chooses explicit main-context fallback. Then offer: 1) Retry in a new wave, 2) Execute in main context, 3) Skip and continue.
 
 6. **Report completion -- spot-check claims first:**
 
@@ -1169,7 +1169,7 @@ for DEP in $(echo "$PLAN_DEPS" | tr ',' ' '); do
 done
 ```
 
-> **Handoff verification:** Do not trust the runtime handoff status by itself. Verify expected output files, the structured return envelope, and git commits before treating a subagent as failed.
+> **Handoff verification:** Verify expected output files, the valid structured return envelope, and any required `gpd apply-return-updates` before success; git commits are partial evidence only.
 </step>
 
 <step name="checkpoint_handling">
@@ -1936,7 +1936,7 @@ Orchestrator stays lean per `references/orchestration/context-budget.md`; subage
 
 <failure_handling>
 
-- **False failure report despite delivered work:** Spot-check (SUMMARY exists, commits present, expected artifacts exist) -> if pass, treat as success
+- **False failure report despite delivered work:** Commits/files are partial evidence. Accept success only if SUMMARY, expected artifacts, valid `gpd_return`, and any `gpd apply-return-updates` gate pass; otherwise route to wave_failure_handling, retry, or explicit main-context fallback.
 - **Agent fails mid-plan:** Missing SUMMARY.md -> report, route to wave_failure_handling for user decision
 - **Dependency chain breaks:** Wave N plan fails -> identify Wave N+1 dependents via `depends_on` frontmatter -> auto-skip with clear message -> user chooses at wave level
 - **All agents in wave fail:** Systemic issue -> stop, report for investigation, offer wave-level rollback

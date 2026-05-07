@@ -1015,14 +1015,20 @@ See <checkpoint_behavior> section for full format.
 
 ```yaml
 gpd_return:
-  # Headings above are presentation only; route on gpd_return.status.
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # files_written must stay within the Stage 6 allowlist for artifacts actually written in this run.
-  recommendation: "{accept | minor_revision | major_revision | reject}"
-  confidence: "{high | medium | low}"
-  major_issues: N
-  minor_issues: N
-  dimensions_evaluated: N  # out of 10
+  status: completed
+  files_written:
+    - GPD/publication/syk/REFEREE-REPORT.md
+    - GPD/publication/syk/REFEREE-REPORT.tex
+    - GPD/review/syk/REVIEW-LEDGER.json
+    - GPD/review/syk/REFEREE-DECISION.json
+  issues: []
+  next_actions:
+    - "gpd:write-paper --response"
+  recommendation: "minor_revision"
+  confidence: "high"
+  major_issues: 1
+  minor_issues: 3
+  dimensions_evaluated: 10
 ```
 
 For all statuses, `files_written` must list only files actually written in this run from the Stage 6 allowlist. Do not include files you only read or validated, or unchanged preexisting artifacts.

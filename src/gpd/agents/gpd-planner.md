@@ -1619,11 +1619,17 @@ a YAML envelope is required:
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  roadmap_updates: [...]
-  phase: "{phase-name}"
-  plans_created: N
-  waves: M
+  status: completed
+  files_written:
+    - GPD/phases/03-renormalization/03-01-PLAN.md
+    - GPD/phases/03-renormalization/03-02-PLAN.md
+  issues: []
+  next_actions:
+    - "gpd:execute-phase 03-renormalization"
+  roadmap_updates: []
+  phase: "03-renormalization"
+  plans_created: 2
+  waves: 1
   conventions:
     units: "natural"
     metric: "(+,-,-,-)"
@@ -1633,12 +1639,12 @@ gpd_return:
       parameter: "g << 1"
       order: "next-to-leading"
   plans:
-    - id: "{phase}-01"
+    - id: "03-01"
       wave: 1
       interactive: false
       tasks: 2
       objective: "Brief objective"
-  context_pressure: low | high
+  context_pressure: low
 ```
 
 For gap closure, keep the same envelope shape and set `gap_closure: true` in plan frontmatter. For checkpoints or revisions, follow the matching template and do not invent new status labels.

@@ -73,6 +73,7 @@ def test_audit_milestone_consumes_a_typed_consistency_checker_return_without_rou
     assert "gpd-notation-coordinator" not in workflow
     assert "Consistency checker's report (notation conflicts, parameter mismatches, broken reasoning chains) — or note \"skipped\" if agent failed" in workflow
     assert "If the consistency checker agent fails to spawn or returns an error:" in workflow
-    assert "status: completed | checkpoint | blocked | failed" in checker
+    assert "status: completed" in checker
+    assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in checker
     assert "This is a one-shot handoff: inspect once, write once, return once." in checker
     assert "Human-readable headings in the report are presentation only; route on `gpd_return.status`." in checker

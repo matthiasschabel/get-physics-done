@@ -58,13 +58,17 @@ Spawned agents that need to hand machine-readable results back to the orchestrat
 
 ```yaml
 gpd_return:
-  status: completed | checkpoint | blocked | failed
-  files_written: [list of file paths created or modified]
-  issues: [list of issues encountered, if any]
-  next_actions: [concrete commands or exact artifact review actions]
+  status: completed
+  files_written:
+    - "GPD/phases/XX-name/XX-plan-SUMMARY.md"
+  issues: []
+  next_actions:
+    - "gpd:show-phase XX"
 ```
 
-Agents may extend this with additional fields specific to their role (e.g., `phases_created`, `dimensions_checked`). The four base fields above are required on this envelope.
+Choose one status: `completed`, `checkpoint`, `blocked`, or `failed`. Agents may add role fields such as `phases_created` or `dimensions_checked`. The four base fields above are required on this envelope.
+
+Recovery preserves authorship: recover literal child-authored file contents if writes were dropped, but do not synthesize, patch, or paste a child `gpd_return`. Missing/invalid envelopes require retry or explicit main-context fallback. Files and commits are partial evidence only until the valid envelope, artifact gate, and any required `gpd apply-return-updates` pass.
 
 ### Next-Action Discipline
 
@@ -200,6 +204,8 @@ Keep these axes separate when applying that contract:
 - `shared_state_policy`: whether canonical shared state is written directly or returned for orchestrator application
 
 `commit_authority: orchestrator` does not imply read-only. Most orchestrator-owned agents may still write scoped artifacts and report them in `gpd_return.files_written`; they just leave staging and commits to the orchestrator.
+
+Files or commits from an orchestrator-owned agent are recovery clues, not the return contract. Do not accept the handoff until the child return validates and any durable updates apply.
 
 ---
 

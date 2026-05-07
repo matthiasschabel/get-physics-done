@@ -59,7 +59,8 @@ def test_consistency_checker_and_notation_coordinator_keep_ownership_boundaries_
         "Scope boundary: `gpd-verifier` owns within-phase correctness. You own between-phase consistency only."
         in checker
     )
-    assert "status: completed | checkpoint | blocked | failed" in checker
+    assert "status: completed" in checker
+    assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in checker
     assert (
         "Use `status: checkpoint` only when missing inputs or context pressure prevent a trustworthy check." in checker
     )
@@ -91,5 +92,5 @@ def test_audit_milestone_consumes_checker_reports_without_spawning_notation_reso
         in workflow
     )
     assert "If the consistency checker agent fails to spawn or returns an error:" in workflow
-    assert "status: completed | checkpoint | blocked | failed" in checker
+    assert "status: completed" in checker
     assert "Human-readable headings in the report are presentation only; route on `gpd_return.status`." in checker

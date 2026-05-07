@@ -723,8 +723,14 @@ All returns to the orchestrator MUST use this YAML envelope for reliable parsing
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  focus: "theory | computation | methodology | status"
+  status: completed
+  files_written:
+    - GPD/research-map/FORMALISM.md
+    - GPD/research-map/REFERENCES.md
+  issues: []
+  next_actions:
+    - "gpd:map-research computation"
+  focus: "theory"
 ```
 
 `focus` is the agent-specific extended field; `files_written` must name the `GPD/research-map/` documents actually written.

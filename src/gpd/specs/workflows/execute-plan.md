@@ -239,11 +239,11 @@ grep -n "type=\"checkpoint" "${phase_dir}/${phase}-${plan}-PLAN.md"
 
 **Pattern A:** init_agent_tracking -> spawn task(subagent_type="gpd-executor", model=executor_model, readonly=false) with prompt: execute plan at [path], all tasks + SUMMARY + structured return envelope, follow deviation/validation rules, **load conventions from `gpd convention list` before starting work and rerun `gpd validate plan-preflight <PLAN.md path>` before substantive execution**, `<autonomy_mode>{AUTONOMY}</autonomy_mode>`, `<review_cadence>{REVIEW_CADENCE}</review_cadence>`, `<bounded_execution>false</bounded_execution>` (only for genuinely low-risk short plans), return: plan name, tasks, SUMMARY path, commit hash, and state updates -> track agent_id -> wait -> update tracking -> report.
 
-**If the executor agent fails to spawn or returns an error (Pattern A):** Check if any work was committed (`git log --oneline -3`). If commits with the plan's work exist, the executor may have completed but failed to report — verify output files and proceed to post-execution checks. If no work was done, offer: 1) Retry executor spawn, 2) Fall back to Pattern C (execute in main context), 3) Abort. Update agent tracking status to "failed" with error details.
+**If the executor agent fails to spawn or returns an error (Pattern A):** Check `git log --oneline -3` only for partial evidence. Commits or output files do not prove success unless SUMMARY, valid child `gpd_return`, artifact gate, and needed `gpd apply-return-updates` pass. If the return envelope is missing or invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Pattern C main-context execution with its own return, 3) Abort. Mark tracking failed with details.
 
 **Pattern B:** Execute segment-by-segment. Non-interactive segments: spawn subagent for assigned tasks only (no SUMMARY/commit). Checkpoints: main context. After all segments: aggregate, create SUMMARY, commit. See segment_execution.
 
-**If a segment executor fails to spawn or returns an error (Pattern B):** Check if the segment's tasks produced any output files. If work exists, proceed to the next segment. If no work, offer: 1) Retry this segment, 2) Execute the segment's tasks in the main context, 3) Skip this segment and continue. Do not abort the entire plan for a single segment failure. Record the failure in agent tracking.
+**If a segment executor fails to spawn or returns an error (Pattern B):** Treat output files as partial evidence. Do not proceed unless expected artifacts and typed return data pass the aggregator gate. If the envelope is missing or invalid, retry or use explicit main-context fallback; otherwise offer skip/continue as an incomplete segment. Record the failure in agent tracking.
 
 **Pattern C:** Execute in main using standard flow (step name="execute").
 
@@ -285,7 +285,7 @@ Pattern B/D only (authored or virtual checkpoints). Skip for A/C.
    - Append `## Self-Check: PASSED` or `## Self-Check: FAILED` to SUMMARY
    - Run physics validation checks (dimensional consistency, limiting cases) -> Append `## Validation: PASSED` or `## Validation: FAILED`
 
-   > **Handoff verification:** Do not trust the runtime handoff status by itself. Verify expected output files, the return envelope, and git commits before treating a subagent as failed.
+   > **Handoff verification:** Verify output files, valid return, and any required `gpd apply-return-updates` before success; git commits are partial evidence only.
 
 </step>
 
@@ -644,6 +644,11 @@ Include these fields in your return envelope:
 
 ```yaml
 gpd_return:
+  status: completed
+  files_written:
+    - "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md"
+  issues: []
+  next_actions: []
   state_updates:
     advance_plan: true
     update_progress: true
@@ -655,9 +660,15 @@ gpd_return:
       files: "${FILE_COUNT}"
   contract_updates:
     plan_contract_ref: "GPD/phases/${phase_dir_name}/${phase}-${plan}-PLAN.md#/contract"
-    contract_results: { ... keyed by claim/deliverable/test/reference/proxy ids ... }
-    comparison_verdicts: [ ... ]  # Include inconclusive/tension entries when a decisive comparison is still open
-    contract_completion_status: complete | partial | blocked
+    contract_results:
+      claim:mass-gap-estimate:
+        status: satisfied
+        evidence: "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md#key-results"
+    comparison_verdicts:
+      - subject_id: "acceptance-test:mass-gap-benchmark"
+        verdict: inconclusive
+        evidence: "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md#validation-events"
+    contract_completion_status: partial
 ```
 
 **Exception:** If executing in Pattern C (main context, no subagent), you ARE the orchestrator — apply state updates directly by invoking the same canonical applicator on the summary file:
@@ -673,6 +684,13 @@ From SUMMARY: Extract decisions and blockers. Include them in the `gpd_return` e
 
 ```yaml
 gpd_return:
+  status: checkpoint
+  files_written:
+    - "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md"
+  issues:
+    - "Blocker description"
+  next_actions:
+    - "Resolve blocker before continuing downstream execution."
   decisions:
     - phase: "${phase}"
       summary: "${DECISION_TEXT}"
@@ -694,6 +712,11 @@ Include continuation update in the `gpd_return` envelope so `gpd apply-return-up
 
 ```yaml
 gpd_return:
+  status: completed
+  files_written:
+    - "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md"
+  issues: []
+  next_actions: []
   continuation_update:
     handoff:
       stopped_at: "Completed ${phase}-${plan}-PLAN.md"

@@ -22,9 +22,15 @@ def test_agent_delegation_reference_makes_one_shot_checkpoint_and_artifact_gate_
     assert "returns `status: checkpoint` and stops" in text
     assert "Artifact gate" in text
     assert "verified on disk" in text
+    assert "Return gate" in text
+    assert "Files and commits are partial evidence only" in text
+    assert "must not synthesize, patch, or paste a child `gpd_return`" in text
     assert "Fresh continuation ownership" in text
     assert "spawn a fresh continuation handoff" in text
     assert "must not wait for the user inside the same handoff" in text
+    assert "literal child-authored file contents" in text
+    assert "the structured return must validate" in text
+    assert "gpd apply-return-updates" in text
     assert (
         "File-producing or state-sensitive spawned prompts must include this block directly in the prompt text" in text
     )
@@ -38,6 +44,9 @@ def test_runtime_delegation_note_reuses_the_same_one_shot_and_artifact_language(
     assert "one-shot" in text
     assert "`status: checkpoint`" in text
     assert "Artifact gate" in text
+    assert "A missing or invalid `gpd_return` is incomplete" in text
+    assert "must not synthesize, patch, or paste a child `gpd_return`" in text
+    assert "Files and commits are partial evidence only" in text
     assert "Fresh-continuation ownership" in text
     assert "Empty-model omission" in text
     assert "`readonly=false`" in text
@@ -54,6 +63,8 @@ def test_agent_infrastructure_points_spawned_write_contract_to_canonical_delegat
     assert "commit_authority" in write_contract
     assert "write_scope" in write_contract
     assert "shared_state_policy" in write_contract
+    assert "Files or commits from an orchestrator-owned agent are recovery clues" in write_contract
+    assert "the child return validates" in write_contract
     assert "<spawn_contract>" not in write_contract
 
 

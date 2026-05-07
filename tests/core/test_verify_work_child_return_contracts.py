@@ -198,8 +198,9 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
         "Headings above are presentation only. Route on `gpd_return.status`, the approved/blocked plan lists, and `issues`."
         in checker
     )
-    assert "approved_plans: [list of plan IDs that passed]" in checker
-    assert "blocked_plans: [list of plan IDs needing revision or escalation]" in checker
+    assert "approved_plans:" in checker
+    assert '    - "04-01"' in checker
+    assert "blocked_plans: []" in checker
 
 
 def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifacts() -> None:

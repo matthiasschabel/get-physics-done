@@ -338,10 +338,15 @@ Append this YAML block after the markdown return. Required per agent-infrastruct
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  verification_status: passed | gaps_found | expert_needed | human_needed
-  score: "{N}/{M}"
-  confidence: HIGH | MEDIUM | LOW | UNRELIABLE
+  status: completed
+  files_written:
+    - GPD/phases/03-spectral-form-factor/03-VERIFICATION.md
+  issues: []
+  next_actions:
+    - "gpd:execute-phase 04"
+  verification_status: passed
+  score: "3/3"
+  confidence: HIGH
 ```
 
 Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.

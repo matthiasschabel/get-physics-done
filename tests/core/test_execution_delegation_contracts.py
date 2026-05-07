@@ -39,6 +39,37 @@ def test_execute_phase_requires_on_disk_artifacts_before_accepting_success() -> 
     assert "Verify first 2 files from `key-files.created` exist on disk" in execute_phase
 
 
+def test_executor_handoff_recovery_treats_commits_as_partial_evidence_only() -> None:
+    quick = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
+    execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
+    execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+
+    for source in (quick, execute_plan, execute_phase):
+        assert "partial evidence" in source
+        assert "valid" in source
+        assert "gpd apply-return-updates" in source
+
+    assert "Commits or files do not prove success" in quick
+    assert "Commits or output files do not prove success" in execute_plan
+    assert "Commits or files do not prove success" in execute_phase
+    assert "If the return envelope is missing or invalid, keep the child handoff incomplete" in execute_plan
+    assert "If the envelope is missing or invalid, keep that child handoff incomplete" in execute_phase
+    assert "git commits are partial evidence only" in quick
+    assert "git commits are partial evidence only" in execute_plan
+    assert "git commits are partial evidence only" in execute_phase
+
+
+def test_execute_plan_recovery_records_commits_as_partial_evidence_until_return_gate_passes() -> None:
+    recovery = (EXECUTION_REFERENCES_DIR / "execute-plan-recovery.md").read_text(encoding="utf-8")
+
+    assert "commits after the checkpoint are partial evidence" in recovery
+    assert "Classify completion only after expected artifacts exist" in recovery
+    assert "required `gpd_return` envelope validates" in recovery
+    assert "required `gpd apply-return-updates` pass has succeeded" in recovery
+    assert "Partial Evidence (not yet success)" in recovery
+    assert "require retry or explicit main-context fallback" in recovery
+
+
 def test_execute_phase_fails_closed_on_reverification_and_notation_handoffs() -> None:
     execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
 

@@ -139,8 +139,9 @@ def test_plan_checker_prompt_surfaces_direct_schema_visibility_and_read_only_aut
     assert "This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run." in checker_prompt
     assert "artifact_write_authority: read_only" in checker_prompt
     assert "file_write" not in checker_prompt
-    assert "approved_plans: [list of plan IDs that passed]" in checker_prompt
-    assert "blocked_plans: [list of plan IDs needing revision or escalation]" in checker_prompt
+    assert "approved_plans:" in checker_prompt
+    assert '    - "04-01"' in checker_prompt
+    assert "blocked_plans: []" in checker_prompt
     assert "GPD/phases/00-baseline/00-01-SUMMARY.md" in checker_prompt
     assert "GPD/phases/00-baseline/00-01-SUMMARY.md#gauge-unit-and-notation-conventions" in checker_prompt
     assert "GPD/phases/00-baseline/00-01-SUMMARY.md#gauge-and-tensor-convention" in checker_prompt

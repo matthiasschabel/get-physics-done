@@ -695,7 +695,10 @@ class TestSkillsServerIntegration:
         assert result["structured_metadata_authority"]["agent_policy"] == "mirrored"
         assert "Checkpoint after the initial survey with scope confirmation." in result["content"]
         assert "gpd_return:" in result["content"]
-        assert "status: completed | checkpoint | blocked | failed" in result["content"]
+        assert "status: completed" in result["content"]
+        assert "files_written:" in result["content"]
+        assert "issues: []" in result["content"]
+        assert "next_actions:" in result["content"]
         assert "wait for confirmation" not in result["content"]
         assert "pause here for approval" not in result["content"]
         assert "ask the user then continue" not in result["content"]

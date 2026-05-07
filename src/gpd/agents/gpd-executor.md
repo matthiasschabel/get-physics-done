@@ -1070,13 +1070,17 @@ Append the structured YAML return envelope defined in `executor-completion.md`:
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # Executor completion details follow executor-completion.md.
-  phase: "{phase}"
-  plan: "{plan}"
-  tasks_completed: N
-  tasks_total: M
-  duration_seconds: NNN
+  status: completed
+  files_written:
+    - GPD/phases/02-renormalization/02-01-SUMMARY.md
+  issues: []
+  next_actions:
+    - "gpd:verify-work 02-renormalization"
+  phase: "02-renormalization"
+  plan: "01"
+  tasks_completed: 2
+  tasks_total: 2
+  duration_seconds: 180
 ```
 
 If the workflow asks for execution handoff or plan continuity, extend the same top-level envelope with the role-specific fields from `executor-completion.md`: `state_updates`, `contract_updates`, `decisions`, `blockers`, and `continuation_update`.

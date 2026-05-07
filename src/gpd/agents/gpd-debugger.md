@@ -141,13 +141,12 @@ All returns to the orchestrator MUST use this YAML envelope:
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  status: completed | checkpoint | blocked | failed
+  status: completed
   files_written:
-    - GPD/debug/{slug}.md
+    - GPD/debug/root-cause.md
   issues: []
   next_actions: []
-  session_file: GPD/debug/{slug}.md
+  session_file: GPD/debug/root-cause.md
 ```
 
 `session_file` is debugger-specific visibility for the handoff. Use only the canonical status names.

@@ -24,26 +24,27 @@ def test_referee_routes_on_status_and_shows_base_return_fields_first() -> None:
     assert count_unfenced_heading(source, "## REVIEW INCOMPLETE") == 0
     assert count_unfenced_heading(source, "## CHECKPOINT REACHED") == 0
 
-    base_idx = source.index("# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.")
-    allowlist_idx = source.index("# files_written must stay within the Stage 6 allowlist")
-    recommendation_idx = source.index('  recommendation: "{accept | minor_revision | major_revision | reject}"')
+    status_idx = source.index("  status: completed")
+    files_idx = source.index("  files_written:")
+    recommendation_idx = source.index('  recommendation: "minor_revision"')
 
-    assert base_idx < allowlist_idx < recommendation_idx
+    assert status_idx < files_idx < recommendation_idx
 
 
 def test_project_researcher_uses_presentation_only_heading_mapping_and_base_fields_first() -> None:
     source = _read_agent("gpd-project-researcher.md")
 
     assert "gpd_return:" in source
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in source
-    assert "confidence: HIGH | MEDIUM | LOW" in source
+    assert "status: completed" in source
+    assert "files_written:\n    - GPD/literature/SUMMARY.md" in source
+    assert "confidence: HIGH" in source
     assert "Mapping: RESEARCH COMPLETE → completed, RESEARCH BLOCKED → blocked" not in source
     assert "Headings above are presentation only; route on gpd_return.status." in source
 
-    base_idx = source.index("  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.")
-    confidence_idx = source.index("  confidence: HIGH | MEDIUM | LOW")
+    next_actions_idx = source.index("  next_actions:")
+    confidence_idx = source.index("  confidence: HIGH")
 
-    assert base_idx < confidence_idx
+    assert next_actions_idx < confidence_idx
 
 
 def test_plan_checker_uses_typed_status_and_drops_nested_return_payload_examples() -> None:
@@ -61,11 +62,11 @@ def test_plan_checker_uses_typed_status_and_drops_nested_return_payload_examples
     assert count_unfenced_heading(source, "## VERIFICATION PASSED") == 0
     assert count_unfenced_heading(source, "## ISSUES FOUND") == 0
 
-    base_idx = source.index("  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.")
-    files_idx = source.index("  # This read-only agent always uses files_written: [].")
-    approved_idx = source.index("  approved_plans: [list of plan IDs that passed]")
+    status_idx = source.index("  status: completed")
+    files_idx = source.index("  files_written: []")
+    approved_idx = source.index("  approved_plans:")
 
-    assert base_idx < files_idx < approved_idx
+    assert status_idx < files_idx < approved_idx
     assert "contract_gate_summary:" not in source
     assert "issues_found:" not in source
     assert "escalation: null | {pattern, options}" not in source

@@ -26,7 +26,7 @@ from gpd.core.return_contract import validate_gpd_return_markdown
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
-PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v1"
+PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v2"
 DEFAULT_PATH_PREFIX = "/runtime/"
 DEFAULT_SURFACES: tuple[PromptSurfaceKind, ...] = ("command", "agent", "workflow")
 
@@ -39,10 +39,14 @@ _SPAWN_CONTRACT_RE = re.compile(
 )
 _SCHEMA_BLOCK_MARKERS = (
     "gpd_return:",
+    '"gpd_return"',
+    "'gpd_return'",
     "schema_version",
     "contract_results",
     "project_contract",
 )
+_SCHEMA_FENCE_LANGUAGES = frozenset({"yaml", "yml", "json", "toml"})
+_GPD_RETURN_EXAMPLE_RE = re.compile(r"(?m)(?:^|[\s{,\[\('\"`])['\"]?gpd_return['\"]?\s*:")
 _HARD_GATE_LINE_RE = re.compile(
     r"\b(?:STOP|fail[- ]closed|do not proceed|must|required|never|forbidden|reject|cannot|blocked)\b",
     re.IGNORECASE,
@@ -127,6 +131,15 @@ class RuntimeProjectionMetric:
 
 
 @dataclass(frozen=True, slots=True)
+class InvalidGpdReturnExample:
+    path: str
+    start_line: int
+    end_line: int
+    errors: tuple[str, ...]
+    preview: str
+
+
+@dataclass(frozen=True, slots=True)
 class PromptSurfaceItem:
     kind: PromptSurfaceKind
     name: str
@@ -140,6 +153,7 @@ class PromptSurfaceItem:
     unresolved_include_count: int
     visible_schema_example_count: int
     invalid_gpd_return_example_count: int
+    invalid_gpd_return_examples: tuple[InvalidGpdReturnExample, ...]
     hard_gate_line_count: int
     hard_gate_density: float
     shell_fence_count: int
@@ -163,6 +177,7 @@ class PromptSurfaceReport:
     repo_root: str
     totals: Mapping[str, object]
     items: tuple[PromptSurfaceItem, ...]
+    invalid_gpd_return_examples: tuple[InvalidGpdReturnExample, ...]
     duplicate_invariants: tuple[DuplicateInvariantGroup, ...]
     exact_prose_assertion_files: tuple[Mapping[str, object], ...]
     warnings: tuple[str, ...]
@@ -172,6 +187,7 @@ __all__ = [
     "DEFAULT_SURFACES",
     "PROMPT_SURFACE_REPORT_SCHEMA_VERSION",
     "DuplicateInvariantGroup",
+    "InvalidGpdReturnExample",
     "PromptSource",
     "PromptSurfaceItem",
     "PromptSurfaceReport",
@@ -231,7 +247,8 @@ def measure_prompt_file(
     raw_text = source.absolute_path.read_text(encoding="utf-8")
     expanded_text = expand_at_includes(raw_text, source.src_root, DEFAULT_PATH_PREFIX)
     raw_include_count = _count_raw_includes(raw_text)
-    visible_schema_example_count, invalid_return_count = _count_visible_schema_examples(raw_text)
+    visible_schema_example_count, invalid_return_examples = _inspect_visible_schema_examples(raw_text, source.path)
+    invalid_return_count = len(invalid_return_examples)
     hard_gate_line_count, hard_gate_density = _hard_gate_metrics(raw_text)
     shell_fence_count = _count_shell_fences(raw_text)
     shell_parsing_line_count = _count_shell_parsing_lines(raw_text)
@@ -265,6 +282,7 @@ def measure_prompt_file(
         unresolved_include_count=unresolved_include_count,
         visible_schema_example_count=visible_schema_example_count,
         invalid_gpd_return_example_count=invalid_return_count,
+        invalid_gpd_return_examples=invalid_return_examples,
         hard_gate_line_count=hard_gate_line_count,
         hard_gate_density=hard_gate_density,
         shell_fence_count=shell_fence_count,
@@ -301,12 +319,14 @@ def build_prompt_surface_report(
     )
     duplicate_invariants = _duplicate_invariant_groups(root, include_tests=include_tests)
     exact_assertions = _scan_exact_prompt_assertions(root) if include_tests else ()
+    invalid_return_examples = tuple(example for item in items for example in item.invalid_gpd_return_examples)
 
     return PromptSurfaceReport(
         schema_version=PROMPT_SURFACE_REPORT_SCHEMA_VERSION,
         repo_root=str(root),
         totals=_build_totals(items),
         items=items,
+        invalid_gpd_return_examples=invalid_return_examples,
         duplicate_invariants=duplicate_invariants,
         exact_prose_assertion_files=exact_assertions,
         warnings=tuple(warnings),
@@ -321,6 +341,9 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         "repo_root": report.repo_root,
         "totals": report.totals,
         "items": [_prompt_item_to_dict(item) for item in _top_items(report.items, top)],
+        "invalid_gpd_return_examples": [
+            _invalid_gpd_return_example_to_dict(example) for example in report.invalid_gpd_return_examples
+        ],
         "duplicate_invariants": [
             {
                 "phrase": group.phrase,
@@ -348,6 +371,7 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
         f"- Repo root: `{report.repo_root}`",
         f"- Prompt sources: {totals.get('item_count', 0)}",
         f"- Expanded chars: {totals.get('expanded_char_count', 0)}",
+        f"- Invalid `gpd_return` examples: {len(report.invalid_gpd_return_examples)}",
         f"- Hard-gate lines: {totals.get('hard_gate_line_count', 0)}",
         f"- Shell parsing lines: {totals.get('shell_parsing_line_count', 0)}",
         "",
@@ -363,6 +387,23 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
             f"{item.visible_schema_example_count} | {item.invalid_gpd_return_example_count} | "
             f"{item.rigidity_index} |"
         )
+
+    if report.invalid_gpd_return_examples:
+        lines.extend(
+            [
+                "",
+                "## Invalid `gpd_return` Examples",
+                "",
+                "| Path | Lines | Errors | Preview |",
+                "|---|---:|---|---|",
+            ]
+        )
+        for example in report.invalid_gpd_return_examples:
+            lines.append(
+                f"| `{example.path}` | {example.start_line}-{example.end_line} | "
+                f"{_markdown_table_cell('; '.join(example.errors))} | "
+                f"`{_markdown_table_cell(example.preview)}` |"
+            )
 
     runtime_totals = cast(Mapping[str, Mapping[str, object]], totals.get("runtime_projection", {}))
     if runtime_totals:
@@ -524,8 +565,14 @@ def _line_count(text: str) -> int:
 
 
 def _body_without_frontmatter(text: str) -> str:
-    _preamble, _frontmatter, _separator, body = split_markdown_frontmatter(text)
+    body, _line_offset = _body_without_frontmatter_with_line_offset(text)
     return body
+
+
+def _body_without_frontmatter_with_line_offset(text: str) -> tuple[str, int]:
+    _preamble, _frontmatter, _separator, body = split_markdown_frontmatter(text)
+    prefix = text[: len(text) - len(body)]
+    return body, prefix.count("\n")
 
 
 def _markdown_fence_marker(stripped_line: str) -> str | None:
@@ -610,25 +657,54 @@ def _count_shell_fences(text: str) -> int:
     return count
 
 
-def _count_visible_schema_examples(text: str) -> tuple[int, int]:
-    body = _body_without_frontmatter(text)
+def _inspect_visible_schema_examples(text: str, path: str) -> tuple[int, tuple[InvalidGpdReturnExample, ...]]:
+    body, line_offset = _body_without_frontmatter_with_line_offset(text)
     visible_count = 0
-    invalid_return_count = 0
+    invalid_return_examples: list[InvalidGpdReturnExample] = []
 
     for fence in _iter_markdown_fences(body):
         language = fence.info.lower().split(None, 1)[0] if fence.info else ""
-        is_schema_block = language in {"yaml", "yml", "json", "toml"} or any(
-            marker in fence.body for marker in _SCHEMA_BLOCK_MARKERS
-        )
+        is_schema_block = _is_visible_schema_fence(language, fence.body)
         if not is_schema_block:
             continue
         visible_count += 1
-        if "gpd_return:" in fence.body and not validate_gpd_return_markdown(f"```yaml\n{fence.body}\n```").passed:
-            invalid_return_count += 1
+        if not _contains_visible_gpd_return_example(fence.body):
+            continue
+        validation = validate_gpd_return_markdown(f"```yaml\n{fence.body}\n```")
+        if validation.passed:
+            continue
+        invalid_return_examples.append(
+            InvalidGpdReturnExample(
+                path=path,
+                start_line=fence.start_line + line_offset,
+                end_line=fence.end_line + line_offset,
+                errors=tuple(validation.errors),
+                preview=_preview_fence_body(fence.body),
+            )
+        )
 
     spawn_contract_count = len(_SPAWN_CONTRACT_RE.findall(body))
     visible_count += spawn_contract_count
-    return visible_count, invalid_return_count
+    return visible_count, tuple(invalid_return_examples)
+
+
+def _is_visible_schema_fence(language: str, body: str) -> bool:
+    if language in _SCHEMA_FENCE_LANGUAGES:
+        return True
+    if language in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES:
+        return False
+    return any(marker in body for marker in _SCHEMA_BLOCK_MARKERS)
+
+
+def _contains_visible_gpd_return_example(body: str) -> bool:
+    return bool(_GPD_RETURN_EXAMPLE_RE.search(body))
+
+
+def _preview_fence_body(body: str, max_chars: int = 140) -> str:
+    preview = " ".join(line.strip() for line in body.splitlines() if line.strip())
+    if len(preview) <= max_chars:
+        return preview
+    return preview[: max_chars - 3].rstrip() + "..."
 
 
 def _hard_gate_metrics(text: str) -> tuple[int, float]:
@@ -989,6 +1065,9 @@ def _prompt_item_to_dict(item: PromptSurfaceItem) -> dict[str, object]:
         "unresolved_include_count": item.unresolved_include_count,
         "visible_schema_example_count": item.visible_schema_example_count,
         "invalid_gpd_return_example_count": item.invalid_gpd_return_example_count,
+        "invalid_gpd_return_examples": [
+            _invalid_gpd_return_example_to_dict(example) for example in item.invalid_gpd_return_examples
+        ],
         "hard_gate_line_count": item.hard_gate_line_count,
         "hard_gate_density": item.hard_gate_density,
         "shell_fence_count": item.shell_fence_count,
@@ -1009,3 +1088,17 @@ def _prompt_item_to_dict(item: PromptSurfaceItem) -> dict[str, object]:
             for metric in item.runtime_projection
         ],
     }
+
+
+def _invalid_gpd_return_example_to_dict(example: InvalidGpdReturnExample) -> dict[str, object]:
+    return {
+        "path": example.path,
+        "start_line": example.start_line,
+        "end_line": example.end_line,
+        "errors": list(example.errors),
+        "preview": example.preview,
+    }
+
+
+def _markdown_table_cell(value: str) -> str:
+    return value.replace("|", "\\|").replace("`", "\\`").replace("\n", " ")

@@ -47,13 +47,16 @@ Return exactly one canonical `gpd_return` envelope:
 
 ```yaml
 gpd_return:
-  status: completed | checkpoint | blocked | failed
-  files_written: [GPD/phases/{scope}/CONSISTENCY-CHECK.md]
-  issues: [list of issues, including warnings]
-  next_actions: [concrete commands such as "gpd:validate-conventions", "gpd:resume-work", or "gpd:suggest-next"]
-  phase_checked: [phase or milestone scope]
-  checks_performed: [count]
-  issues_found: [count]
+  status: completed
+  files_written:
+    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md
+  issues:
+    - "Warning: notation drift found between prior phases."
+  next_actions:
+    - "gpd:validate-conventions"
+  phase_checked: "03-conventions"
+  checks_performed: 12
+  issues_found: 1
 ```
 
 For milestone scope, write `GPD/CONSISTENCY-CHECK.md` in `files_written` instead.

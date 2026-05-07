@@ -48,6 +48,7 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert isinstance(payload["totals"], dict)
     assert isinstance(payload["items"], list)
     assert 1 <= len(payload["items"]) <= 3
+    assert isinstance(payload["invalid_gpd_return_examples"], list)
     assert isinstance(payload["duplicate_invariants"], list)
     assert isinstance(payload["exact_prose_assertion_files"], list)
     assert isinstance(payload["warnings"], list)
@@ -65,12 +66,23 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
         assert isinstance(item["unresolved_include_count"], int)
         assert isinstance(item["visible_schema_example_count"], int)
         assert isinstance(item["invalid_gpd_return_example_count"], int)
+        assert isinstance(item["invalid_gpd_return_examples"], list)
         assert isinstance(item["hard_gate_line_count"], int)
         assert isinstance(item["hard_gate_density"], int | float)
         assert isinstance(item["shell_fence_count"], int)
         assert isinstance(item["shell_parsing_line_count"], int)
         assert isinstance(item["rigidity_index"], int)
         assert item["runtime_projection"] == []
+
+    for example in payload["invalid_gpd_return_examples"]:
+        assert isinstance(example["path"], str)
+        assert example["path"].endswith(".md")
+        assert isinstance(example["start_line"], int)
+        assert isinstance(example["end_line"], int)
+        assert example["start_line"] <= example["end_line"]
+        assert isinstance(example["errors"], list)
+        assert all(isinstance(error, str) for error in example["errors"])
+        assert isinstance(example["preview"], str)
 
 
 def test_prompt_surface_diagnostics_markdown_smoke() -> None:
@@ -84,6 +96,7 @@ def test_prompt_surface_diagnostics_markdown_smoke() -> None:
     normalized_output = result.output.lower()
     assert "prompt" in normalized_output
     assert "surface" in normalized_output
+    assert "invalid `gpd_return` examples" in normalized_output
     assert ".md" in result.output
 
 

@@ -923,9 +923,12 @@ This agent writes only `GPD/literature/SUMMARY.md`; `files_written` must list on
 
 ```yaml
 gpd_return:
-  # Map complete synthesis to completed, blocked synthesis to blocked.
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # files_written must include GPD/literature/SUMMARY.md when a draft or final summary was written.
+  status: completed
+  files_written:
+    - GPD/literature/SUMMARY.md
+  issues: []
+  next_actions:
+    - "gpd:roadmap"
 ```
 
 </structured_returns>

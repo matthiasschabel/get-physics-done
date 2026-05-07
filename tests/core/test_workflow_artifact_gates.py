@@ -20,6 +20,8 @@ def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
     assert "do not trust return text or preexisting files alone" in plan_phase
     assert 'gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}"' in plan_phase
     assert 'gpd validate plan-contract "$plan_file"' in plan_phase
+    assert "Do not synthesize or patch a child planner `gpd_return` from files on disk." in plan_phase
+    assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in plan_phase
 
 
 def test_verify_work_rechecks_proof_redteam_artifact_after_repair() -> None:

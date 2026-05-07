@@ -534,7 +534,7 @@ def test_read_only_plan_checker_and_research_mapper_tool_policy_are_contract_ali
     mapper = (AGENTS_DIR / "gpd-research-mapper.md").read_text(encoding="utf-8")
 
     assert "Return changed paths in `gpd_return.files_written`" not in checker
-    assert "# This read-only agent always uses files_written: []." in checker
+    assert "files_written: []" in checker
     assert "artifact_write_authority: read_only" in checker
     assert "All tools declared in frontmatter are available to this agent." in mapper
     assert "Reserve `web_search` and `web_fetch` for the `status` focus" in mapper
@@ -632,8 +632,8 @@ def test_consistency_checker_prompt_keeps_the_canonical_contract_and_stays_least
     source = (AGENTS_DIR / "gpd-consistency-checker.md").read_text(encoding="utf-8")
 
     assert "one-shot handoff" in source
-    assert "status: completed | checkpoint | blocked | failed" in source
-    assert "files_written: [GPD/phases/{scope}/CONSISTENCY-CHECK.md]" in source
+    assert "status: completed" in source
+    assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in source
     assert "GPD/CONSISTENCY-CHECK.md" in source
     assert "@{GPD_INSTALL_DIR}" not in source
     assert "Authority: use the frontmatter-derived Agent Requirements block" not in source
@@ -1950,12 +1950,9 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     assert "Contract coverage" in roadmapper_agent
     assert "Machine-Readable Return Envelope" in roadmapper_agent
     assert "gpd_return:" in roadmapper_agent
-    assert (
-        "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-        in roadmapper_agent
-    )
-    assert "# files_written must name ROADMAP.md and any state/requirements files actually written." in roadmapper_agent
-    assert "phases_created: {count}" in roadmapper_agent
+    assert "status: completed" in roadmapper_agent
+    assert "files_written:\n    - GPD/ROADMAP.md\n    - GPD/STATE.md\n    - GPD/REQUIREMENTS.md" in roadmapper_agent
+    assert "phases_created: 4" in roadmapper_agent
     assert "gpd_return.files_written" in new_project_roadmapper
     assert "GPD/REQUIREMENTS.md" in new_project_roadmapper
     assert "do not rely on runtime completion text alone." in new_project_roadmapper
@@ -2377,10 +2374,8 @@ def test_phase_researcher_prompt_keeps_the_one_shot_handoff_and_return_contract_
     assert "## RESEARCH COMPLETE" in phase_researcher
     assert "## RESEARCH BLOCKED" in phase_researcher
     assert "gpd_return:" in phase_researcher
-    assert (
-        "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-        in phase_researcher
-    )
+    assert "status: completed" in phase_researcher
+    assert "files_written:\n    - GPD/phases/03-spectral-form-factor/03-RESEARCH.md" in phase_researcher
     assert "This is a one-shot handoff" in research_workflow
     assert "return a checkpoint rather than wait in place" in research_workflow
     assert "expected_artifacts" in research_workflow

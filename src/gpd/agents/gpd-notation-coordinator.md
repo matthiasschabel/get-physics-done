@@ -586,8 +586,12 @@ All returns to the orchestrator MUST use this YAML envelope for reliable parsing
 
 ```yaml
 gpd_return:
-  # Mapping: established → completed, updated → completed, conflict → failed
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
+  status: completed
+  files_written:
+    - GPD/CONVENTIONS.md
+  issues: []
+  next_actions:
+    - "gpd:validate-conventions"
   conventions_file: GPD/CONVENTIONS.md
 ```
 

@@ -28,7 +28,9 @@ def test_gpd_project_researcher_prompt_stays_within_expected_budget_and_keeps_on
     assert "The orchestrator presents the checkpoint and spawns a fresh continuation after the response." in source
     assert "Do not wait inside the same spawned run." in source
     assert "Structured return provided to orchestrator" in source
-    assert "status: completed | checkpoint | blocked | failed" in source
+    assert "status: completed" in source
+    assert "files_written:\n    - GPD/literature/SUMMARY.md" in source
+    assert "confidence: HIGH" in source
     assert "Authority: use the frontmatter-derived Agent Requirements block" not in source
 
     generated_prompt = registry.get_agent("gpd-project-researcher").system_prompt

@@ -16,7 +16,10 @@ def test_verifier_prompt_keeps_the_canonical_return_contract_visible() -> None:
 
     assert "Return with status `completed | checkpoint | blocked | failed`:" in verifier
     assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in verifier
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in verifier
+    assert "status: completed" in verifier
+    assert "files_written:\n    - GPD/phases/03-spectral-form-factor/03-VERIFICATION.md" in verifier
+    assert "issues: []" in verifier
+    assert "next_actions:\n    - \"gpd:execute-phase 04\"" in verifier
     assert "`gpd_return.files_written` is fail-closed:" in verifier
     assert "list only files that genuinely landed on disk in this run" in verifier
     assert "`checkpoint`, `blocked`, and `failed` may use `[]`" in verifier

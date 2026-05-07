@@ -104,7 +104,8 @@ def test_consistency_checker_stays_one_shot_and_does_not_claim_resolution_work()
 
     assert "This is a one-shot handoff: inspect once, write once, return once." in source
     assert "gpd_return.status: checkpoint" in source
-    assert "status: completed | checkpoint | blocked | failed" in source
+    assert "status: completed" in source
+    assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in source
     assert INTERNAL_AGENT_BOUNDARY_POINTER in source
     assert "Do not claim ownership of code fixes, commits, convention-authoring, or pattern-library updates." in source
     assert "Create it from the template" not in source
@@ -156,10 +157,7 @@ def test_planner_backtracks_guidance_is_capped_before_injection() -> None:
     assert "tail -n 30 GPD/BACKTRACKS.md" not in source
 
 
-def test_owned_agent_structured_returns_defer_base_gpd_return_fields_to_infrastructure() -> None:
-    base_field_pointer = (
-        "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-    )
+def test_owned_agent_structured_return_examples_include_complete_base_fields() -> None:
     required_fields = ("status:", "files_written:", "issues:", "next_actions:")
 
     for agent_name in ("gpd-planner", "gpd-executor", "gpd-experiment-designer"):
@@ -171,5 +169,4 @@ def test_owned_agent_structured_returns_defer_base_gpd_return_fields_to_infrastr
                 if "gpd_return:" not in yaml_block:
                     continue
                 has_explicit_base_fields = all(field in yaml_block for field in required_fields)
-                has_base_pointer = base_field_pointer in yaml_block
-                assert has_explicit_base_fields or has_base_pointer, (agent_name, yaml_block)
+                assert has_explicit_base_fields, (agent_name, yaml_block)

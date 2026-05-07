@@ -227,9 +227,17 @@ Append this YAML block after the markdown return. Required per agent-infrastruct
 
 ```yaml
 gpd_return:
-  status: completed | checkpoint | blocked | failed
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  confidence: HIGH | MEDIUM | LOW
+  status: completed
+  files_written:
+    - GPD/literature/SUMMARY.md
+    - GPD/literature/PRIOR-WORK.md
+    - GPD/literature/METHODS.md
+    - GPD/literature/COMPUTATIONAL.md
+    - GPD/literature/PITFALLS.md
+  issues: []
+  next_actions:
+    - "gpd:new-project --continue-roadmap"
+  confidence: HIGH
 ```
 
 Headings above are presentation only; route on gpd_return.status.

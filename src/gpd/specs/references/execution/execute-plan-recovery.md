@@ -15,11 +15,13 @@ When plan execution fails (task error, unrecoverable validation failure, agent c
 Determine which tasks completed and which failed:
 
 ```bash
-# Completed tasks: those with commits after the checkpoint
+# Candidate completed tasks: commits after the checkpoint are partial evidence
 COMPLETED=$(git log --oneline "${CHECKPOINT_TAG}"..HEAD --grep="(${PHASE}-${PLAN}):")
 FAILED_TASK="${CURRENT_TASK_NUM}: ${CURRENT_TASK_NAME}"
 REMAINING_TASKS="${TASKS_AFTER_FAILED}"
 ```
+
+Classify completion only after expected artifacts exist, the required `gpd_return` envelope validates, and any required `gpd apply-return-updates` pass has succeeded. Commits/files are partial-work evidence, not success proof.
 
 Present failure report:
 
@@ -31,8 +33,11 @@ Present failure report:
 **Plan:** {PHASE}-{PLAN} ({plan name})
 **Checkpoint:** ${CHECKPOINT_TAG}
 
-### Completed Tasks (committed)
-{list of completed tasks with commit hashes}
+### Completed Tasks (validated)
+{list of tasks whose commits, artifacts, return envelope, and applicator gate all passed}
+
+### Partial Evidence (not yet success)
+{list of commits or files that exist but still lack a valid return/artifact/applicator gate}
 
 ### Failed Task
 **Task {N}: {name}**
@@ -131,6 +136,8 @@ created: { ISO timestamp }
 | ---- | ------ | ----------- |
 
 {rows for each completed task}
+
+Do not list a task here merely because commits/files exist. If the return was missing or invalid, record partial evidence under Failure Context or Remaining Work and require retry or explicit main-context fallback.
 
 ## Remaining Work
 

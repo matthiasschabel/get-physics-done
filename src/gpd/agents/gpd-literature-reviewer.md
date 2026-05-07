@@ -350,13 +350,15 @@ Use `gpd_return.status: completed` for a finished review. The markdown `## REVIE
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # For completed reviews, files_written must include GPD/literature/{slug}-REVIEW.md.
-  papers_reviewed: {count}
-  field_assessment: settled | active_research | active_debate | speculative
+  status: completed
+  files_written: [GPD/literature/spectral-form-factor-REVIEW.md]
+  issues: []
+  next_actions: ["gpd:literature-review --synthesize"]
+  papers_reviewed: 12
+  field_assessment: active_research
 ```
 
-For a complete review, include `papers_reviewed`, `field_assessment`, a short findings summary, and the citation verification status. If the review is incomplete, use `gpd_return.status: checkpoint` and do not wait in-run for user approval.
+For a complete review, include `papers_reviewed`, `field_assessment`, findings summary, and citation verification. If incomplete, use `gpd_return.status: checkpoint` and do not wait in-run for user approval.
 
 ### Checkpoints
 
@@ -379,13 +381,14 @@ When reaching a checkpoint, return a typed `gpd_return` checkpoint and stop. The
 **Review file:** GPD/literature/{slug}-REVIEW.md (partial, updated to current point)
 ```
 
-Use this checkpoint envelope:
-
 ```yaml
 gpd_return:
-  # Base fields follow agent-infrastructure.md; checkpoint next_actions should name "gpd:resume-work" or the exact user-response handoff.
-  papers_reviewed: {count}
-  field_assessment: settled | active_research | active_debate | speculative
+  status: checkpoint
+  files_written: [GPD/literature/spectral-form-factor-REVIEW.md]
+  issues: ["Need researcher choice between bootstrap and random-matrix framing."]
+  next_actions: ["gpd:resume-work after the researcher chooses a framing."]
+  papers_reviewed: 6
+  field_assessment: active_debate
 ```
 
 </structured_returns>

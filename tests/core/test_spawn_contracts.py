@@ -200,7 +200,11 @@ def test_agent_delegation_reference_defines_canonical_task_contract() -> None:
     assert "discoverable action/tool surface" in content
     assert "installed agent prompt instructions" in content
     assert "Artifact Recovery Protocol" in content
-    assert "Write the files directly in the main orchestrator context" in content
+    assert "literal child-authored file contents" in content
+    assert "Write those file contents directly in the main orchestrator context" in content
+    assert "must not synthesize, patch, or paste a child `gpd_return`" in content
+    assert "A missing or invalid `gpd_return` envelope is an incomplete handoff" in content
+    assert "Files and commits remain partial evidence until those gates pass." in content
     assert "Never silently proceed" in content
 
 
@@ -365,7 +369,8 @@ def test_execute_phase_requires_state_return_envelope_and_handoff_spot_checks() 
     )
     assert "State updates returned (NOT written to STATE.md directly)" in executor.text
     assert "Executor subagents MUST NOT write STATE.md directly." in content
-    assert "Verify expected output files, the structured return envelope, and git commits" in content
+    assert "Verify expected output files, the valid structured return envelope" in content
+    assert "git commits are partial evidence only" in content
     assert "pre_execution_specialists" in content
     assert '# task(subagent_type="gpd-notation-coordinator"' not in content
     assert '# task(subagent_type="gpd-experiment-designer"' not in content

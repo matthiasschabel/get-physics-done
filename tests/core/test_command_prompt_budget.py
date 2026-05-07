@@ -57,7 +57,7 @@ COMMAND_BASELINES = {
     "insert-phase": (198, 5_945, 1),
     "limiting-cases": (543, 23_645, 1),
     "list-phase-assumptions": (385, 13_881, 1),
-    "literature-review": (578, 27_305, 1),
+    "literature-review": (583, 28_622, 1),
     "map-research": (539, 22_619, 1),
     "merge-phases": (387, 12_144, 1),
     "new-milestone": (802, 38_778, 1),
@@ -67,7 +67,7 @@ COMMAND_BASELINES = {
     "pause-work": (303, 13_141, 1),
     "peer-review": (1_238, 71_171, 1),
     "plan-milestone-gaps": (357, 11_407, 1),
-    "plan-phase": (1_030, 53_272, 1),
+    "plan-phase": (1_060, 55_862, 1),
     "progress": (612, 20_396, 1),
     "quick": (434, 18_919, 1),
     "reapply-patches": (151, 4_511, 1),
@@ -95,8 +95,8 @@ COMMAND_BASELINES = {
     "undo": (348, 11_419, 1),
     "update": (268, 7_672, 1),
     "validate-conventions": (266, 10_102, 1),
-    "verify-work": (669, 36_091, 1),
-    "write-paper": (1_417, 86_007, 1),
+    "verify-work": (673, 37_469, 1),
+    "write-paper": (1_420, 88_501, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
     "write-paper": (1_600, 91_000),
@@ -166,7 +166,7 @@ WORKFLOW_BASELINES = {
     "pause-work": (276, 12601, 0),
     "peer-review": (1050, 61424, 2),
     "plan-milestone-gaps": (290, 7888, 0),
-    "plan-phase": (982, 51676, 1),
+    "plan-phase": (1012, 54266, 1),
     "progress": (576, 19413, 0),
     "quick": (348, 15685, 1),
     "reapply-patches": (114, 3750, 0),
@@ -195,8 +195,8 @@ WORKFLOW_BASELINES = {
     "update": (243, 7207, 0),
     "validate-conventions": (225, 8911, 1),
     "verify-phase": (681, 41_946, 0),
-    "verify-work": (596, 34201, 2),
-    "write-paper": (1269, 80049, 2),
+    "verify-work": (600, 35580, 2),
+    "write-paper": (1272, 82543, 2),
 }
 WORST_WORKFLOW_HARD_CAPS = {
     "verify-phase": (720, 44_000),

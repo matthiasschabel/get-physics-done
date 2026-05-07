@@ -22,14 +22,16 @@ def _yaml_envelope(text: str) -> str:
     return text.split("```yaml\n", 1)[1].split("```", 1)[0]
 
 
-def test_roadmapper_prompt_example_defers_base_return_fields() -> None:
+def test_roadmapper_prompt_example_includes_complete_base_return_fields() -> None:
     roadmapper = _read(ROADMAPPER)
     envelope = _yaml_envelope(roadmapper)
 
     assert envelope.startswith("gpd_return:\n")
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in envelope
-    assert "# files_written must name ROADMAP.md and any state/requirements files actually written." in envelope
-    assert "phases_created: {count}" in envelope
+    assert "status: completed" in envelope
+    assert "files_written:\n    - GPD/ROADMAP.md\n    - GPD/STATE.md\n    - GPD/REQUIREMENTS.md" in envelope
+    assert "issues: []" in envelope
+    assert "next_actions:\n    - \"gpd:plan-phase 01\"" in envelope
+    assert "phases_created: 4" in envelope
 
 
 def test_new_project_roadmapper_task_block_requires_requirements_freshness_and_named_files_written() -> None:
@@ -57,9 +59,11 @@ def test_phase_researcher_machine_readable_return_is_typed_first() -> None:
     researcher = _read(PHASE_RESEARCHER)
 
     assert "gpd_return:" in researcher
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in researcher
-    assert "# files_written must include $PHASE_DIR/$PADDED_PHASE-RESEARCH.md when a research artifact was written." in researcher
-    assert "confidence: HIGH | MEDIUM | LOW" in researcher
+    assert "status: completed" in researcher
+    assert "files_written:\n    - GPD/phases/03-spectral-form-factor/03-RESEARCH.md" in researcher
+    assert "issues: []" in researcher
+    assert "next_actions:\n    - \"gpd:plan-phase 03-spectral-form-factor\"" in researcher
+    assert "confidence: HIGH" in researcher
     assert "Mapping: RESEARCH COMPLETE → completed, RESEARCH BLOCKED → blocked" not in researcher
     assert "Headings above are presentation only; route on gpd_return.status." in researcher
 
@@ -67,10 +71,10 @@ def test_phase_researcher_machine_readable_return_is_typed_first() -> None:
 def test_executor_completion_spawned_handoff_example_keeps_base_fields_and_extensions() -> None:
     completion = _read(EXECUTOR_COMPLETION)
 
-    assert "status: completed | checkpoint | blocked | failed" in completion
-    assert 'files_written: ["GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md"]' in completion
-    assert "issues: [list of issues encountered, if any]" in completion
-    assert "next_actions: [concrete commands or exact artifact review actions]" in completion
+    assert "status: completed" in completion
+    assert '    - "GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md"' in completion
+    assert "issues:" in completion
+    assert "next_actions:" in completion
     assert "state_updates:" in completion
     assert "advance_plan: true" in completion
     assert "update_progress: true" in completion

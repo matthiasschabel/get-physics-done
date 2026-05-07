@@ -105,9 +105,13 @@ Route on `gpd_return.status`, not presentation headings. Use `completed` when th
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # files_written names the active bibliography path and GPD/references-status.json when written.
-  entries_added: N
+  status: completed
+  files_written:
+    - paper/references.bib
+    - GPD/references-status.json
+  issues: []
+  next_actions: []
+  entries_added: 3
 ```
 
 ## Downstream Consumers

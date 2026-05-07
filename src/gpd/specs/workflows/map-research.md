@@ -336,11 +336,14 @@ Read each agent's output file for confirmation, then reconcile the typed return 
 
 ```yaml
 gpd_return:
-  status: completed | checkpoint | blocked | failed
-  files_written: [GPD/research-map/{DOC1}.md, ...]
-  issues: [list of issues encountered, if any]
-  next_actions: [concrete commands or exact artifact review actions]
-  focus: "theory | computation | methodology | status"
+  status: completed
+  files_written:
+    - "GPD/research-map/FORMALISM.md"
+    - "GPD/research-map/REFERENCES.md"
+  issues: []
+  next_actions:
+    - "Verify GPD/research-map/FORMALISM.md and GPD/research-map/REFERENCES.md exist on disk before accepting the handoff."
+  focus: "theory"
 ```
 
 **What you receive:** Typed return + file paths and line counts. NOT document contents.

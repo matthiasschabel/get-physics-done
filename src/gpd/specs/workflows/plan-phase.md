@@ -629,9 +629,11 @@ task(
 
 ## 9. Handle Planner Return
 
-**If the planner agent fails to spawn or returns an error:** Do not infer completion from existing `PLAN.md` files. Without a fresh typed `gpd_return` naming `files_written`, keep the handoff incomplete. Offer: Retry planner / Main-context plan / Abort.
+**If the planner agent fails to spawn or returns an error:** Do not infer completion from existing `PLAN.md` files. Without a fresh typed `gpd_return` naming `files_written`, keep the child handoff incomplete. Offer: Retry planner / Main-context plan / Abort.
 
-If the user chooses Main-context plan or any manual bounded authoring branch, it is not an override. Set `PLANNER_HANDOFF_STARTED_AT` before writing, write only `${PHASE_DIR}/*-PLAN.md`, set `FRESH_PLAN_FILES` to the newly created path(s), and run the artifact plus validator gate below once. No full planner/checker loop is required for this fallback unless requested, but a failing gate means `status: blocked`, not `planned_ready`/`green`, and no `gpd:execute-phase` route.
+Planner return validation and main-context fallback are separate paths. Do not synthesize or patch a child planner `gpd_return` from files on disk. If the child return is missing, malformed, or fails artifact validation, the child handoff is incomplete; either retry the planner or start an explicit main-context authoring path that owns its own artifacts and return envelope.
+
+If the user chooses Main-context plan or any manual bounded authoring branch, it is not an override. Set `PLANNER_HANDOFF_STARTED_AT` before writing, write only `${PHASE_DIR}/*-PLAN.md`, set `FRESH_PLAN_FILES` to the newly created path(s), and run the artifact plus validator gate below once using a complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`. No full planner/checker loop is required for this fallback unless requested, but a failing gate means `status: blocked`, not `planned_ready`/`green`, and no `gpd:execute-phase` route.
 
 Ignore presentation headings; route on structured `gpd_return.status`, `files_written`, and the on-disk artifact check.
 
@@ -661,7 +663,18 @@ HANDOFF_ARTIFACT_ARGS=(
 if [ -n "$PLANNER_HANDOFF_STARTED_AT" ]; then
   HANDOFF_ARTIFACT_ARGS+=(--fresh-after "$PLANNER_HANDOFF_STARTED_AT")
 fi
-printf '%s\n' "${PLANNER_RETURN:-$(FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c 'import json,os;print(json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}}))')}" | gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}" || exit 1
+
+PLAN_RETURN_MARKDOWN="${PLANNER_RETURN:-}"
+if [ -z "$PLAN_RETURN_MARKDOWN" ]; then
+  MAIN_CONTEXT_PLAN_RETURN=$(
+    printf '```yaml\ngpd_return:\n'
+    printf '  status: completed\n  files_written:\n'
+    for plan_file in $FRESH_PLAN_FILES; do printf '    - %s\n' "$plan_file"; done
+    printf '  issues: []\n  next_actions: []\n```\n'
+  )
+  PLAN_RETURN_MARKDOWN="$MAIN_CONTEXT_PLAN_RETURN"
+fi
+printf '%s\n' "$PLAN_RETURN_MARKDOWN" | gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}" || exit 1
 
 for plan_file in $FRESH_PLAN_FILES; do
   case "$plan_file" in

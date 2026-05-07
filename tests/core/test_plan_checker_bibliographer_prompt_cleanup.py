@@ -28,10 +28,12 @@ def test_plan_checker_prompt_uses_typed_status_and_concise_presentation_language
     assert "Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`" in source
     assert "Headings above are presentation only. Route on `gpd_return.status`, the approved/blocked plan lists, and `issues`." in source
     assert "Headings above are presentation only; route on gpd_return.status." not in source
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in envelope
-    assert "# This read-only agent always uses files_written: []." in envelope
-    assert "approved_plans: [list of plan IDs that passed]" in envelope
-    assert "blocked_plans: [list of plan IDs needing revision or escalation]" in envelope
+    assert "  status: completed" in envelope
+    assert "  files_written: []" in envelope
+    assert "  issues: []" in envelope
+    assert "  next_actions:\n    - \"gpd:execute-phase 04\"" in envelope
+    assert "approved_plans:\n    - \"04-01\"\n    - \"04-02\"" in envelope
+    assert "blocked_plans: []" in envelope
 
 
 def test_bibliographer_prompt_uses_typed_checkpoint_language_and_shorter_heading_note() -> None:
@@ -42,8 +44,10 @@ def test_bibliographer_prompt_uses_typed_checkpoint_language_and_shorter_heading
     assert "Route on `gpd_return.status`, not presentation headings." in source
     assert "Use `gpd_return.status: checkpoint` as the control surface." not in source
     assert "The markdown headings in this section, including `## BIBLIOGRAPHY UPDATED`, `## CITATION ISSUES FOUND`, and `## CHECKPOINT REACHED`, are presentation only." not in source
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in envelope
-    assert "# files_written names the active bibliography path and GPD/references-status.json when written." in envelope
-    assert "entries_added: N" in envelope
+    assert "  status: completed" in envelope
+    assert "  files_written:\n    - paper/references.bib\n    - GPD/references-status.json" in envelope
+    assert "  issues: []" in envelope
+    assert "  next_actions: []" in envelope
+    assert "entries_added: 3" in envelope
     assert "{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md" in source
     assert "@{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md" not in source

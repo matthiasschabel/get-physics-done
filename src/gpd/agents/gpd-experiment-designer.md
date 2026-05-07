@@ -611,8 +611,13 @@ Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  design_file: [path to EXPERIMENT-DESIGN.md]
+  status: completed
+  files_written:
+    - GPD/experiments/syk-spectral-form-factor/EXPERIMENT-DESIGN.md
+  issues: []
+  next_actions:
+    - "gpd:execute-plan 03-numerics 02"
+  design_file: GPD/experiments/syk-spectral-form-factor/EXPERIMENT-DESIGN.md
 ```
 
 `design_file` is the agent-specific extended field; it must match the EXPERIMENT-DESIGN.md path in `files_written`.

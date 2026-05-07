@@ -34,7 +34,7 @@ def test_paper_writer_prompt_uses_typed_status_and_one_shot_checkpoint_language(
     assert "Return WRITING BLOCKED." not in source
 
 
-def test_paper_writer_return_example_defers_base_fields_and_keeps_extensions() -> None:
+def test_paper_writer_return_example_includes_complete_base_fields_and_keeps_extensions() -> None:
     source = _read(PAPER_WRITER)
     envelope = _gpd_return_block(PAPER_WRITER)
 
@@ -43,17 +43,12 @@ def test_paper_writer_return_example_defers_base_fields_and_keeps_extensions() -
         "Use the actual resolved manuscript-root path in `files_written`, for example `paper/results.tex` or `GPD/publication/{subject_slug}/manuscript/results.tex`."
         in source
     )
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in envelope
-    assert "# files_written uses the actual resolved manuscript-root path." in envelope
-    assert 'section_name: "{section drafted}"' in envelope
-    assert envelope.index(
-        "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-    ) < envelope.index(
-        "# files_written uses the actual resolved manuscript-root path."
-    )
-    assert envelope.index("# files_written uses the actual resolved manuscript-root path.") < envelope.index(
-        'section_name: "{section drafted}"'
-    )
+    assert "  status: completed" in envelope
+    assert "  files_written:\n    - paper/results.tex" in envelope
+    assert "  issues: []" in envelope
+    assert "  next_actions:\n    - \"gpd:paper-build\"" in envelope
+    assert 'section_name: "Results"' in envelope
+    assert envelope.index("  next_actions:") < envelope.index('  section_name: "Results"')
 
 
 def test_bibliographer_prompt_uses_typed_status_and_deferred_base_fields() -> None:
@@ -65,16 +60,9 @@ def test_bibliographer_prompt_uses_typed_status_and_deferred_base_fields() -> No
     assert "Use `completed` when the bibliography task finished" in source
     assert "Use `gpd_return.status: checkpoint` as the control surface." not in source
     assert "Return BIBLIOGRAPHY UPDATED or CITATION ISSUES FOUND" not in source
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in envelope
-    assert "# files_written names the active bibliography path and GPD/references-status.json when written." in envelope
-    assert "entries_added: N" in envelope
-    assert envelope.index(
-        "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-    ) < envelope.index(
-        "# files_written names the active bibliography path and GPD/references-status.json when written."
-    )
-    assert envelope.index(
-        "# files_written names the active bibliography path and GPD/references-status.json when written."
-    ) < envelope.index(
-        "entries_added: N"
-    )
+    assert "  status: completed" in envelope
+    assert "  files_written:\n    - paper/references.bib\n    - GPD/references-status.json" in envelope
+    assert "  issues: []" in envelope
+    assert "  next_actions: []" in envelope
+    assert "entries_added: 3" in envelope
+    assert envelope.index("  next_actions: []") < envelope.index("  entries_added: 3")

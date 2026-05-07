@@ -893,9 +893,15 @@ Common research roadblocks:
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # files_written must name ROADMAP.md and any state/requirements files actually written.
-  phases_created: {count}
+  status: completed
+  files_written:
+    - GPD/ROADMAP.md
+    - GPD/STATE.md
+    - GPD/REQUIREMENTS.md
+  issues: []
+  next_actions:
+    - "gpd:plan-phase 01"
+  phases_created: 4
 ```
 
 Use only status names: `completed` | `checkpoint` | `blocked` | `failed`.

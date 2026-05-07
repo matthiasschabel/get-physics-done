@@ -255,7 +255,7 @@ gpd state add-blocker --text "Blocker description"
 
 ```yaml
 gpd_return:
-  status: completed | checkpoint | blocked | failed
+  status: completed
   files_written:
     - "derivations/hamiltonian.tex"
     - "scripts/compute_spectrum.py"
@@ -267,9 +267,9 @@ gpd_return:
     - "gpd:show-phase {phase}"
   phase: "{phase}"
   plan: "{plan}"
-  tasks_completed: N
-  tasks_total: M
-  duration_seconds: NNN
+  tasks_completed: 4
+  tasks_total: 4
+  duration_seconds: 3600
   conventions_used:
     units: "natural"
     metric: "(+,-,-,-)"
@@ -286,10 +286,12 @@ If the workflow expects a spawned-agent handoff, the same `gpd_return` object ma
 
 ```yaml
 gpd_return:
-  status: completed | checkpoint | blocked | failed
+  status: checkpoint
   files_written: ["GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md"]
-  issues: [list of issues encountered, if any]
-  next_actions: [concrete commands or exact artifact review actions]
+  issues:
+    - "{blocker text}"
+  next_actions:
+    - "Resolve {blocker text} before continuing downstream execution."
   state_updates:
     advance_plan: true
     update_progress: true
@@ -300,7 +302,8 @@ gpd_return:
       tasks: N
       files: N
   contract_updates:
-    claim_id: { ... }
+    claim_id:
+      status: "updated"
   decisions:
     - summary: "{decision summary}"
       phase: "{phase}"

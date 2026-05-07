@@ -410,15 +410,19 @@ Report section outputs against the resolved manuscript root rather than a hardco
 
 ```yaml
 gpd_return:
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # files_written uses the actual resolved manuscript-root path.
-  section_name: "{section drafted}"
-  equations_added: N
-  figures_added: N
-  citations_added: N
-  journal_calibration: "{prl | apj | mnras | nature | jhep | jfm | style-only-other}"
-  framing_strategy: "{extension | alternative | resolution | first-application | systematic-study}"
-  context_pressure: null | "high"  # present when ORANGE threshold reached
+  status: completed
+  files_written:
+    - paper/results.tex
+  issues: []
+  next_actions:
+    - "gpd:paper-build"
+  section_name: "Results"
+  equations_added: 2
+  figures_added: 1
+  citations_added: 4
+  journal_calibration: "jhep"
+  framing_strategy: "systematic-study"
+  context_pressure: null
 ```
 
 Use the actual resolved manuscript-root path in `files_written`, for example `paper/results.tex` or `GPD/publication/{subject_slug}/manuscript/results.tex`.

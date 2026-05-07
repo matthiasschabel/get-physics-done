@@ -30,6 +30,43 @@ def _return_block(files_written: list[str]) -> str:
     )
 
 
+def _files_only_return_block(files_written: list[str]) -> str:
+    files_written_yaml = (
+        "  files_written: []\n"
+        if not files_written
+        else "  files_written:\n" + "\n".join(f"    - {json.dumps(path)}" for path in files_written) + "\n"
+    )
+    return "```yaml\n" "gpd_return:\n" f"{files_written_yaml}" "```\n"
+
+
+def test_handoff_artifact_validator_rejects_raw_files_only_json_envelope(tmp_path: Path) -> None:
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        json.dumps({"gpd_return": {"files_written": ["GPD/phases/01-test/01-01-PLAN.md"]}}),
+        allowed_roots=["GPD/phases/01-test"],
+        required_suffixes=["-PLAN.md"],
+        require_files_written=True,
+    )
+
+    assert result.passed is False
+    assert "No gpd_return YAML block found" in result.errors
+
+
+def test_handoff_artifact_validator_rejects_fenced_files_only_envelope(tmp_path: Path) -> None:
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        _files_only_return_block(["GPD/phases/01-test/01-01-PLAN.md"]),
+        allowed_roots=["GPD/phases/01-test"],
+        required_suffixes=["-PLAN.md"],
+        require_files_written=True,
+    )
+
+    assert result.passed is False
+    assert "Missing required field: status" in result.errors
+    assert "Missing required field: issues" in result.errors
+    assert "Missing required field: next_actions" in result.errors
+
+
 def test_handoff_artifact_validator_accepts_fresh_in_scope_expected_plan(tmp_path: Path) -> None:
     plan_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-PLAN.md"
     plan_path.parent.mkdir(parents=True)

@@ -2128,10 +2128,10 @@ class TestRegistryPromptIncludeInlining:
         assert agent.path.endswith("gpd-project-researcher.md")
         assert "Checkpoint after the initial survey with scope confirmation." in agent.content
         assert "gpd_return:" in agent.content
-        assert (
-            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-            in agent.content
-        )
+        assert "status: completed" in agent.content
+        assert "files_written:" in agent.content
+        assert "issues: []" in agent.content
+        assert "next_actions:" in agent.content
         assert "commit_authority: orchestrator" in agent.content
         assert "Authority: use the frontmatter-derived Agent Requirements block" not in agent.content
         assert "## Agent Requirements" in agent.content
@@ -2173,8 +2173,9 @@ class TestRegistryPromptIncludeInlining:
             "This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run."
             in skill.content
         )
-        assert "approved_plans: [list of plan IDs that passed]" in skill.content
-        assert "blocked_plans: [list of plan IDs needing revision or escalation]" in skill.content
+        assert "approved_plans:" in skill.content
+        assert '    - "04-01"' in skill.content
+        assert "blocked_plans: []" in skill.content
 
     def test_write_paper_command_surface_uses_staged_loading_for_contract_schemas(self) -> None:
         command = registry.get_command("gpd:write-paper")
@@ -3238,10 +3239,10 @@ class TestPublicAPI:
         assert "## RESEARCH COMPLETE" in agent.system_prompt
         assert "## RESEARCH BLOCKED" in agent.system_prompt
         assert "gpd_return:" in agent.system_prompt
-        assert (
-            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-            in agent.system_prompt
-        )
+        assert "status: completed" in agent.system_prompt
+        assert "files_written:" in agent.system_prompt
+        assert "issues: []" in agent.system_prompt
+        assert "next_actions:" in agent.system_prompt
         assert "RESEARCH.md" in agent.system_prompt
 
     def test_registry_cache_invalidation_clears_new_project_stage_manifest(self) -> None:

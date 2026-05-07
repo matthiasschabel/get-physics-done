@@ -308,13 +308,17 @@ Block the research with `gpd_return.status: blocked` immediately if:
 ### Machine-Readable Return Envelope
 
 Append this YAML block after the markdown return. Required per agent-infrastructure.md:
+Headings above are presentation only; route on gpd_return.status.
 
 ```yaml
 gpd_return:
-  # Headings above are presentation only; route on gpd_return.status.
-  # Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md.
-  # files_written must include $PHASE_DIR/$PADDED_PHASE-RESEARCH.md when a research artifact was written.
-  confidence: HIGH | MEDIUM | LOW
+  status: completed
+  files_written:
+    - GPD/phases/03-spectral-form-factor/03-RESEARCH.md
+  issues: []
+  next_actions:
+    - "gpd:plan-phase 03-spectral-form-factor"
+  confidence: HIGH
 ```
 
 </structured_returns>

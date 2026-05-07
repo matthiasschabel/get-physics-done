@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,10 @@ def _between(text: str, start: str, end: str) -> str:
     body, end_marker, _ = tail.partition(end)
     assert end_marker, f"missing marker: {end}"
     return body
+
+
+def _fenced_yaml_blocks(text: str) -> list[str]:
+    return re.findall(r"```(?:yaml|yml)\n(.*?)```", text, flags=re.DOTALL)
 
 
 def test_installed_prompt_paths_do_not_reference_source_specs_segment() -> None:
@@ -402,8 +407,8 @@ def test_executor_uses_plain_paths_for_inline_references_and_at_includes_only_fo
     assert "`{GPD_INSTALL_DIR}/templates/summary.md`" in executor
 
 
-def test_agent_specific_return_examples_defer_base_envelope_fields_to_infrastructure() -> None:
-    trimmed_agents = (
+def test_agent_specific_return_examples_include_complete_valid_base_envelope_fields() -> None:
+    agent_examples = (
         "gpd-experiment-designer.md",
         "gpd-notation-coordinator.md",
         "gpd-project-researcher.md",
@@ -422,12 +427,16 @@ def test_agent_specific_return_examples_defer_base_envelope_fields_to_infrastruc
         "gpd-planner.md",
     )
 
-    for agent_name in trimmed_agents:
+    required_fields = ("status:", "files_written:", "issues:", "next_actions:")
+
+    for agent_name in agent_examples:
         text = (AGENTS_DIR / agent_name).read_text(encoding="utf-8")
-        assert (
-            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
-            in text
-        ), agent_name
+        gpd_blocks = [block for block in _fenced_yaml_blocks(text) if "gpd_return:" in block]
+        assert gpd_blocks, agent_name
+        for yaml_block in gpd_blocks:
+            assert all(field in yaml_block for field in required_fields), (agent_name, yaml_block)
+            result = validate_gpd_return_markdown(f"```yaml\n{yaml_block}```")
+            assert result.passed, (agent_name, result.errors, yaml_block)
         assert "The four base fields (`status`, `files_written`, `issues`, `next_actions`)" not in text, agent_name
 
 
@@ -435,7 +444,8 @@ def test_bibliographer_delegates_return_boilerplate_to_agent_infrastructure() ->
     text = (AGENTS_DIR / "gpd-bibliographer.md").read_text(encoding="utf-8")
 
     assert "Use agent-infrastructure.md for checkpoint ownership, return-envelope base fields" in text
-    assert "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md." in text
+    assert "status: completed" in text
+    assert "files_written:\n    - paper/references.bib\n    - GPD/references-status.json" in text
 
     for removed_phrase in (
         "Checkpoint ownership is orchestrator-side",

@@ -30,7 +30,7 @@ AGENT_BASELINES = {
     "gpd-executor": (3_017, 202_551),
     "gpd-experiment-designer": (807, 45_334),
     "gpd-explainer": (241, 9_508),
-    "gpd-literature-reviewer": (372, 14_339),
+    "gpd-literature-reviewer": (394, 14_734),
     "gpd-notation-coordinator": (629, 36_452),
     "gpd-paper-writer": (672, 36_231),
     "gpd-phase-researcher": (366, 15_409),

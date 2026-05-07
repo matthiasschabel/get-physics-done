@@ -59,9 +59,14 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
     )
     assert 'if [ -z "${FRESH_PLAN_FILES:-}" ]; then' in source
     assert 'FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")' in source
-    assert 'printf \'%s\\n\' "${PLANNER_RETURN:-$(' in source
-    assert 'FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c' in source
-    assert 'json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}})' in source
+    assert 'PLAN_RETURN_MARKDOWN="${PLANNER_RETURN:-}"' in source
+    assert "MAIN_CONTEXT_PLAN_RETURN=$(" in source
+    assert "PLAN_RETURN_MARKDOWN=\"$MAIN_CONTEXT_PLAN_RETURN\"" in source
+    assert 'printf \'  status: completed\\n  files_written:\\n\'' in source
+    assert 'printf \'  issues: []\\n  next_actions: []\\n```\\n\'' in source
+    assert 'printf \'%s\\n\' "$PLAN_RETURN_MARKDOWN" | gpd validate handoff-artifacts -' in source
+    assert 'FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c' not in source
+    assert 'json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}})' not in source
     assert "gpd validate handoff-artifacts -" in source
     assert '--allowed-root "$PHASE_DIR"' in source
     assert '--expected-glob "${PHASE_DIR}/*-PLAN.md"' in source
@@ -75,6 +80,16 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
     assert (
         "Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch:"
     ) in source
+
+
+def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None:
+    source = PLAN_PHASE.read_text(encoding="utf-8")
+
+    assert "Do not synthesize or patch a child planner `gpd_return` from files on disk." in source
+    assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in source
+    assert 'printf \'```yaml\\ngpd_return:\\n\'' in source
+    assert '{"gpd_return":{"files_written"' not in source
+    assert "${PLANNER_RETURN:-$(" not in source
 
 
 def test_plan_phase_manual_plan_fallback_cannot_skip_fresh_plan_validators() -> None:

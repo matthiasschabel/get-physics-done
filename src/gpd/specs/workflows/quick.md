@@ -215,7 +215,7 @@ Reference artifacts: {reference_artifacts_content}
 )
 ```
 
-**If the executor agent fails to spawn or returns an error:** Check if any work was committed (run `git log --oneline -3`). If commits exist with the task's work, proceed to step 6 — the executor may have completed but failed to report back. If no commits, offer: 1) Retry executor, 2) Execute the plan in the main context, 3) Abort. The plan file is still available for re-execution.
+**If the executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without `${QUICK_DIR}/${next_num}-SUMMARY.md`, valid child `gpd_return`, artifact gate, and `gpd apply-return-updates`. If the return is missing/invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Execute in explicit main-context fallback with its own return, 3) Abort.
 
 After executor returns:
 
@@ -223,7 +223,7 @@ After executor returns:
 2. Extract commit hash from executor output
 3. Report completion status
 
-> **Handoff verification:** Do not trust the runtime handoff status by itself. Verify expected output files and git commits before treating a subagent as failed.
+> **Handoff verification:** Do not trust the runtime handoff status by itself. Verify output files, valid return, and `gpd apply-return-updates` before success; git commits are partial evidence only.
 
 If summary not found, error: "Executor failed to create ${next_num}-SUMMARY.md"
 

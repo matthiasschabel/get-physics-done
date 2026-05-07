@@ -329,8 +329,8 @@ def test_debugger_session_paths_keep_the_active_and_resolved_lifecycles_separate
 
     assert "Debug session artifact: `GPD/debug/{slug}.md`" in debug_command
     assert "the child reads `GPD/debug/{slug}.md` before continuing" in debug_command
-    assert "files_written:\n    - GPD/debug/{slug}.md" in debug_agent
-    assert "session_file: GPD/debug/{slug}.md" in debug_agent
+    assert "files_written:\n    - GPD/debug/root-cause.md" in debug_agent
+    assert "session_file: GPD/debug/root-cause.md" in debug_agent
     assert "**Troubleshooting Session:** GPD/debug/resolved/{slug}.md" in debug_agent
     assert "session_status: diagnosed" in debug_workflow
     assert "Do not route on heading markers in the returned text" in debug_workflow

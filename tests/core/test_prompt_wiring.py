@@ -342,6 +342,34 @@ def _extract_between(content: str, start_marker: str, end_marker: str) -> str:
     return content[start:end]
 
 
+def _normalized_prompt_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().lower()
+
+
+def _assert_prompt_concepts(
+    text: str,
+    concepts: dict[str, tuple[str, ...]],
+    *,
+    context: str,
+) -> None:
+    normalized = _normalized_prompt_text(text)
+    missing: list[str] = []
+    for concept, fragments in concepts.items():
+        absent = [fragment for fragment in fragments if _normalized_prompt_text(fragment) not in normalized]
+        if absent:
+            missing.append(f"{concept}: {absent}")
+    assert not missing, f"{context} missing prompt concepts:\n" + "\n".join(missing)
+
+
+def _assert_ordered_prompt_fragments(text: str, fragments: tuple[str, ...], *, context: str) -> None:
+    normalized = _normalized_prompt_text(text)
+    position = -1
+    for fragment in fragments:
+        next_position = normalized.find(_normalized_prompt_text(fragment), position + 1)
+        assert next_position != -1, f"{context} missing ordered fragment after {position}: {fragment}"
+        position = next_position
+
+
 def _plan_with_contract_text() -> str:
     return (CONTRACT_BASELINE_FIXTURES / "plan_with_contract.md").read_text(encoding="utf-8")
 
@@ -1648,49 +1676,115 @@ def test_new_project_command_avoids_stale_workflow_line_counts() -> None:
 
 def test_questioning_guide_requires_anchors_and_disconfirming_questions() -> None:
     guide_text = (REFERENCES_DIR / "research" / "questioning.md").read_text(encoding="utf-8")
+    how_to_question = _extract_between(guide_text, "<how_to_question>", "</how_to_question>")
+    question_types = _extract_between(guide_text, "<question_types>", "</question_types>")
+    context_checklist = _extract_between(guide_text, "<context_checklist>", "</context_checklist>")
+    decision_gate = _extract_between(guide_text, "<decision_gate>", "</decision_gate>")
 
-    assert "Surface anchors early." in guide_text
-    assert "Preserve the user's guidance." in guide_text
-    assert "Pressure-test the first story." in guide_text
-    assert "Once you have a plausible framing on the table" in guide_text
-    assert "Do not force decomposition too early." in guide_text
-    assert "Ground-truth anchors -- what reality should constrain this:" in guide_text
-    assert "Disconfirmation and failure -- how the current framing could be wrong:" in guide_text
-    assert "Lack of a full phase list is not itself a blocker." in guide_text
-    assert "Do not count turns mechanically." in guide_text
-    assert "What would be a misleading proxy for success" in guide_text
+    _assert_prompt_concepts(
+        how_to_question,
+        {
+            "early anchors": ("references", "prior outputs", "benchmarks", "smoking-gun signal"),
+            "preserve user guidance": ("figure", "dataset", "paper", "stop condition", "recognizable"),
+            "pressure-test framing": ("working hypothesis", "narrow", "overturn", "falsify"),
+            "avoid fake decomposition": ("roadmap is still fuzzy", "open decomposition question", "fake phases"),
+        },
+        context="questioning guide how_to_question",
+    )
+    _assert_prompt_concepts(
+        question_types,
+        {
+            "ground-truth anchors": ("Ground-truth anchors", "known result", "prior output", "trusted anchor"),
+            "disconfirmation": ("Disconfirmation and failure", "wrong or incomplete", "should not count as success"),
+        },
+        context="questioning guide question_types",
+    )
+    _assert_prompt_concepts(
+        context_checklist,
+        {
+            "background anchor checks": ("background checklist", "known result", "prior output", "misleading proxy"),
+        },
+        context="questioning guide context_checklist",
+    )
+    _assert_prompt_concepts(
+        decision_gate,
+        {
+            "coarse scope can proceed": ("Lack of a full phase list", "first grounded investigation chunk"),
+            "no mechanical turn count": ("Do not count turns mechanically", "materially sharpening"),
+        },
+        context="questioning guide decision_gate",
+    )
 
 
 def test_new_project_questioning_requires_smoking_gun_and_rejects_proxy_only_readiness() -> None:
     workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
     guide_text = (REFERENCES_DIR / "research" / "questioning.md").read_text(encoding="utf-8")
+    deep_questioning = _extract_between(workflow_text, "## 3. Deep Questioning", "## 4. ")
+    step_m1_contract = _extract_between(workflow_text, "#### M1.5. Synthesize", "#### M2. ")
+    guide_decision_gate = _extract_between(guide_text, "<decision_gate>", "</decision_gate>")
+    guide_question_types = _extract_between(guide_text, "<question_types>", "</question_types>")
 
-    assert (
-        "What exact smoking-gun observable, curve, benchmark reproduction, or scaling law they would trust before softer sanity checks"
-        in workflow_text
+    _assert_prompt_concepts(
+        deep_questioning,
+        {
+            "smoking-gun intake": (
+                "smoking-gun",
+                "observable",
+                "curve",
+                "benchmark reproduction",
+                "scaling law",
+                "softer sanity checks",
+            ),
+            "proxy rejection": ("limiting cases", "sanity checks", "generic benchmark language", "keep exploring"),
+            "disconfirming follow-up": ("wrong or incomplete", "progress", "should not count as success"),
+        },
+        context="new-project deep questioning",
     )
-    assert (
-        'Demand the smoking gun ("What exact check would make you trust this over softer sanity checks?")'
-        in workflow_text
+    _assert_prompt_concepts(
+        step_m1_contract,
+        {
+            "user smoking-gun preservation": ("first smoking-gun check", "softer proxies", "limiting cases"),
+            "proxy-only underspecified": (
+                "limiting cases",
+                "sanity checks",
+                "qualitative expectations",
+                "underspecified",
+            ),
+        },
+        context="new-project Step M1.5 contract",
     )
-    assert (
-        "If you only have limiting cases, sanity checks, or generic benchmark language with no decisive smoking-gun observable, curve, or benchmark reproduction, keep exploring unless the user explicitly says that is the decisive standard."
-        in workflow_text
+    _assert_prompt_concepts(
+        guide_text,
+        {
+            "hard correctness anchor": ("hard correctness check", "smoking-gun signal", "generic limiting cases"),
+        },
+        context="questioning guide smoking-gun policy",
     )
-    assert (
-        "especially the first smoking-gun check they would trust over softer proxies or limiting cases" in workflow_text
+    _assert_prompt_concepts(
+        guide_question_types,
+        {
+            "smoking-gun question": ("smoking-gun observable", "scaling law", "curve", "benchmark"),
+            "sanity check is not enough": ("limiting cases", "sanity checks", "missed the smoking-gun check"),
+        },
+        context="questioning guide success and anchors",
     )
-    assert (
-        "If the only checks captured so far are limiting cases, sanity checks, or qualitative expectations, treat the contract as still underspecified"
-        in workflow_text
-    )
-    assert "Push until you know the first hard correctness check or smoking-gun signal they would trust" in guide_text
-    assert "What is the first smoking-gun observable, scaling law, curve, or benchmark" in guide_text
-    assert "If the result passed a few limiting cases or sanity checks but missed the smoking-gun check" in guide_text
-    assert (
-        "Do not offer the gate if you only have proxy checks, sanity checks, or limiting cases and still lack "
-        "concrete reference/prior-output/baseline grounding, even when the missing anchor is noted explicitly."
-        in guide_text
+    _assert_prompt_concepts(
+        guide_decision_gate,
+        {
+            "proxy-only gate rejection": (
+                "proxy checks",
+                "sanity checks",
+                "limiting cases",
+                "no decisive smoking-gun observable",
+            ),
+            "missing-anchor note is insufficient": (
+                "missing-anchor note",
+                "concrete reference",
+                "prior-output",
+                "baseline grounding",
+            ),
+        },
+        context="questioning guide decision gate",
     )
 
 
@@ -1993,25 +2087,44 @@ def test_research_prompt_surfaces_use_canonical_literature_outputs() -> None:
 def test_new_project_minimal_mode_and_planning_wiring_allow_coarse_scoped_decomposition() -> None:
     workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
+    approval_contract = _extract_between(workflow_text, "#### M1.5. Synthesize", "#### M2. ")
+    roadmap_instructions = _extract_between(workflow_text, "<instructions>", "</instructions>")
 
     assert "whether the anchor is still unknown" in workflow_text
-    assert "Do not force a phase list just to make the scoping contract look complete." in workflow_text
-    assert (
-        "If the user does not know the anchor yet, preserve that explicitly in `scope.unresolved_questions`, "
-        "`context_intake.context_gaps`, or `uncertainty_markers.weakest_anchors` rather than inventing a paper, "
-        "benchmark, or baseline." in workflow_text
+    _assert_prompt_concepts(
+        approval_contract,
+        {
+            "unknown anchor fields": (
+                "anchor",
+                "scope.unresolved_questions",
+                "context_intake.context_gaps",
+                "uncertainty_markers.weakest_anchors",
+            ),
+            "no invented grounding": ("rather than inventing", "paper", "benchmark", "baseline"),
+            "coarse decomposition": ("Do not force a phase list", "uncertainty", "single coarse phase"),
+        },
+        context="new-project approval contract",
     )
     assert "put it in `context_intake.must_include_prior_outputs`" in workflow_text
     assert (
         "`context_intake.crucial_inputs` for user-stated observables, stop conditions, review requests, or constraints"
         in workflow_text
     )
-    assert "Missing-anchor notes preserve uncertainty, but they do not satisfy approval on their own." in workflow_text
-    assert "A full phase breakdown is not required at this stage;" in workflow_text
-    assert "Use the coarsest decomposition the approved contract actually supports." in workflow_text
-    assert (
-        "Do NOT invent literature, numerics, or paper phases unless the requirements or contract demand them."
-        in workflow_text
+    _assert_prompt_concepts(
+        workflow_text,
+        {
+            "missing anchor is not approval": ("Missing-anchor notes", "do not satisfy approval", "concrete anchor"),
+            "coarse stage gate": ("full phase breakdown", "not required", "first grounded investigation chunk"),
+        },
+        context="new-project missing-anchor approval gate",
+    )
+    _assert_prompt_concepts(
+        roadmap_instructions,
+        {
+            "smallest supported roadmap": ("smallest decomposition", "single phase", "coarse early roadmap"),
+            "no invented phase families": ("Do NOT invent", "literature", "numerics", "paper phases"),
+        },
+        context="new-project roadmap instructions",
     )
     assert "## CHECKPOINT REACHED" in planner_prompt
     assert "missing or no longer sufficient to identify the right phase slice" in planner_prompt
@@ -2027,12 +2140,25 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
     map_command = (COMMANDS_DIR / "map-research.md").read_text(encoding="utf-8")
     mapper_agent = (AGENTS_DIR / "gpd-research-mapper.md").read_text(encoding="utf-8")
 
-    assert "contract-critical anchors" in literature_workflow
     assert "project_contract_load_info" in literature_workflow
     assert "project_contract_validation" in literature_workflow
-    assert "authoritative only when `project_contract_gate.authoritative` is true" in literature_workflow
-    assert "Do not frontload reference artifacts before the scope is fixed." in literature_workflow
-    assert "Do not use `reference_artifact_files` or `reference_artifacts_content` yet." in literature_workflow
+    _assert_prompt_concepts(
+        literature_workflow,
+        {
+            "contract-gated anchor scope": (
+                "contract-critical anchors",
+                "project_contract_gate.authoritative",
+                "authoritative",
+            ),
+            "defer heavy artifacts until scoped": (
+                "frontload reference artifacts",
+                "scope is fixed",
+                "reference_artifact_files",
+                "reference_artifacts_content",
+            ),
+        },
+        context="literature-review workflow anchor propagation",
+    )
     assert "load_scoped_reference_artifacts" in literature_workflow
     assert "include `bibtex_key` only when it is already known and verified" in literature_workflow
     load_context_line = next(line for line in literature_workflow.splitlines() if "Parse JSON for:" in line)
@@ -2051,25 +2177,41 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
     assert "reference_id" in literature_agent
     assert "include `bibtex_key` as an optional preferred key" in literature_agent
     assert "Keep `bibtex_key` stable across reruns when present" in literature_agent
-    assert "preferred `bibtex_key`, treat it as the manuscript bridge candidate" in bibliographer_agent
-    assert (
-        "For the full mode specification matrix, see `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`."
-        in bibliographer_agent
+    _assert_prompt_concepts(
+        bibliographer_agent,
+        {
+            "bibtex manuscript bridge": ("preferred `bibtex_key`", "manuscript bridge candidate"),
+            "mode matrix reference": ("mode specification matrix", "publication-pipeline-modes.md"),
+        },
+        context="bibliographer anchor propagation",
     )
     assert "project_contract_load_info" in compare_workflow
     assert "project_contract_validation" in compare_workflow
     assert "active_reference_context" in compare_workflow
-    assert (
-        "Apply the shared contract authority gate: treat `project_contract` as authoritative comparison scope only when "
-        "`project_contract_gate.authoritative` is true."
-        in compare_workflow
+    _assert_prompt_concepts(
+        compare_workflow,
+        {
+            "comparison scope authority gate": (
+                "contract authority gate",
+                "project_contract",
+                "comparison scope",
+                "project_contract_gate.authoritative",
+            ),
+        },
+        context="compare-results workflow anchor propagation",
     )
     assert "active_reference_context" in map_workflow
     assert "effective_reference_intake" in map_workflow
     assert "project_contract_load_info" in map_workflow
     assert "project_contract_validation" in map_workflow
     assert "reference_artifacts_content" in map_workflow
-    assert "authoritative only when `project_contract_gate.authoritative` is true" in map_workflow
+    _assert_prompt_concepts(
+        map_workflow,
+        {
+            "map-research authority gate": ("authoritative", "project_contract_gate.authoritative"),
+        },
+        context="map-research workflow anchor propagation",
+    )
     assert "Follow the included map-research workflow." in map_command
     assert "project_contract_load_info" not in map_command
     assert "reference_artifacts_content" not in map_command
@@ -2134,9 +2276,7 @@ def test_research_phase_command_delegates_file_path_and_return_routing_to_the_wo
 def test_revision_and_audit_workflows_verify_artifacts_before_trusting_success_text() -> None:
     respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
     audit = (WORKFLOWS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
-    stage_gate = (REPO_ROOT / "src/gpd/specs/references/publication/stage-recovery-gate.md").read_text(
-        encoding="utf-8"
-    )
+    stage_gate = (REPO_ROOT / "src/gpd/specs/references/publication/stage-recovery-gate.md").read_text(encoding="utf-8")
 
     assert "templates/paper/author-response.md" in respond
     assert "needs-calculation" in respond
@@ -2158,7 +2298,9 @@ def test_audit_milestone_surfaces_contract_gate_and_milestone_review_namespace()
     assert "project_contract_validation" in audit
     assert "active_reference_context" in audit
     assert "Apply the shared contract authority gate" in audit
-    assert "project_contract` is approved milestone scope only when `project_contract_gate.authoritative` is true" in audit
+    assert (
+        "project_contract` is approved milestone scope only when `project_contract_gate.authoritative` is true" in audit
+    )
     assert (
         "skip mock peer review and note that the contract gate must be repaired before milestone publishability review"
         in audit
@@ -2346,29 +2488,51 @@ def test_phase_research_and_verification_surfaces_keep_anchor_checks_mandatory()
     verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
     verify_workflow_expanded = expand_at_includes(verify_workflow, REPO_ROOT / "src/gpd", "/runtime/")
 
-    assert "## Active Anchor References" in phase_researcher
-    assert "contract-critical anchors as mandatory inputs" in phase_researcher
+    _assert_prompt_concepts(
+        phase_researcher,
+        {
+            "active anchor section": ("## Active Anchor References",),
+            "mandatory anchor inputs": ("contract-critical anchors", "mandatory inputs"),
+        },
+        context="phase researcher anchor checks",
+    )
     assert "FORMALISM.md" in planner_agent
-    assert "| derivation, analytical, symbolic   | CONVENTIONS.md, FORMALISM.md    |" in planner_agent
-    assert "| validation, testing, benchmarks    | VALIDATION.md, REFERENCES.md    |" in planner_agent
-    assert "Do NOT skip contract-critical anchors" in verify_workflow
+    _assert_prompt_concepts(
+        planner_agent,
+        {
+            "derivation reference table row": ("derivation, analytical, symbolic", "CONVENTIONS.md", "FORMALISM.md"),
+            "validation reference table row": ("validation, testing, benchmarks", "VALIDATION.md", "REFERENCES.md"),
+        },
+        context="planner anchor reference table",
+    )
+    _assert_prompt_concepts(
+        verify_workflow,
+        {
+            "mandatory contract anchors": ("Do NOT skip", "contract-critical anchors"),
+            "blocked contract repair": ("visible-but-blocked contract", "repaired", "authoritative verification scope"),
+        },
+        context="verify-work anchor checks",
+    )
     assert "active_reference_context" in verify_workflow
     assert "project_contract_gate" in verify_workflow
     assert "project_contract_validation" in verify_workflow
     assert "project_contract_load_info" in verify_workflow
-    assert (
-        "visible-but-blocked contract must be repaired before it is used as authoritative verification scope"
-        in verify_workflow
-    )
     assert "suggest_contract_checks(contract)" in verify_workflow
     assert verify_workflow.count("**Project Contract Gate:** {project_contract_gate}") == 1
     assert verify_workflow_expanded.count("**Project Contract Gate:** {project_contract_gate}") >= 1
-    assert (
-        verify_workflow.count(
-            "Treat `effective_reference_intake` as the structured source of carry-forward anchors; "
-            "`active_reference_context` is the readable projection, not the source of truth."
-        )
-        == 2
+    _assert_prompt_concepts(
+        verify_workflow,
+        {
+            "structured anchor source": (
+                "effective_reference_intake",
+                "structured source",
+                "carry-forward anchors",
+                "active_reference_context",
+                "readable projection",
+                "source of truth",
+            ),
+        },
+        context="verify-work effective reference intake",
     )
 
 
@@ -2621,7 +2785,10 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
     assert "independently_confirmed" not in verify_workflow
     assert "Return status (`passed` | `gaps_found` | `expert_needed` | `human_needed`)" in verify_phase
     assert "gpd verification-report skeleton PLAN.md --write --output" in verify_phase
-    assert "The helper owns frontmatter shape, `plan_contract_ref`, `contract_results`, `comparison_verdicts`, `suggested_contract_checks`, and validation." in verify_phase
+    assert (
+        "The helper owns frontmatter shape, `plan_contract_ref`, `contract_results`, `comparison_verdicts`, `suggested_contract_checks`, and validation."
+        in verify_phase
+    )
     assert "frontmatter (phase/timestamp/status/score" not in verify_phase
     assert "independently_confirmed" not in verify_phase
     assert "`suggested_contract_check`" not in verify_phase
@@ -2748,23 +2915,45 @@ def test_execute_and_autonomous_gate_execution_before_plan_work() -> None:
         '<step name="validate_selected_plans_before_execution" priority="first">',
         "</step>",
     )
-    assert "workspace scripts, numerical computations, task dispatches, subagents, artifact writes" in execute_gate
+    _assert_prompt_concepts(
+        execute_gate,
+        {
+            "blocks execution-side work before validation": (
+                "workspace scripts",
+                "numerical computations",
+                "task dispatches",
+                "subagents",
+                "artifact writes",
+            ),
+            "plan repair route": ("gpd:plan-phase {N}", "supported public plan repair route"),
+        },
+        context="execute-phase selected-plan gate",
+    )
     assert 'gpd validate plan-contract "$plan"' in execute_gate
     assert 'if ! gpd verify plan "$plan"; then' in execute_gate
     assert 'PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "$plan")' in execute_gate
     assert 'gpd verify references "$plan"' in execute_gate
     assert 'gpd phase validate-waves "$phase_number"' in execute_gate
-    assert "gpd:plan-phase {N}` is the supported public plan repair route" in execute_gate
 
-    assert "Before invoking execute-phase, run gate" in autonomous
+    _assert_prompt_concepts(
+        autonomous,
+        {
+            "lifecycle gate before execute-phase": ("Before invoking execute-phase", "run gate"),
+            "stop before execution-side work": (
+                "stop before",
+                "workspace scripts",
+                "numerical computations",
+                "task dispatches",
+                "subagents",
+                "artifact writes",
+            ),
+            "repair goes through discuss then plan": ("gpd:discuss-phase ${PHASE_NUM}", "gpd:plan-phase ${PHASE_NUM}"),
+        },
+        context="autonomous execution-before-plan gate",
+    )
     assert 'gpd --raw validate lifecycle-contract-gate execute-phase "${PHASE_NUM}"' in autonomous
     assert "gpd validate plan-contract" in autonomous
     assert "gpd --raw validate plan-preflight" in autonomous
-    assert (
-        "stop before workspace scripts, numerical computations, task dispatches, subagents, artifact writes"
-        in autonomous
-    )
-    assert "gpd:discuss-phase ${PHASE_NUM}` then `gpd:plan-phase ${PHASE_NUM}" in autonomous
     assert "--revise" not in execute_phase
     assert "--revise" not in autonomous
 
@@ -3408,19 +3597,39 @@ def test_peer_review_prompt_includes_concise_stage_map_for_users() -> None:
     peer_review_command = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
     peer_review_workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
-    assert (
-        "When announcing the panel to the user, say what each stage does in one concise sentence" in peer_review_command
+    _assert_prompt_concepts(
+        peer_review_command,
+        {
+            "user-facing stage map": ("announcing the panel", "each stage", "concise sentence"),
+        },
+        context="peer-review command stage map",
     )
-    assert "Before spawning any reviewer, give the user a concise stage map" in peer_review_workflow
-    for token in (
-        "Stage 1 maps the paper's claims",
-        "Stages 2-3 check prior work and mathematical soundness in parallel",
-        "Stage 4 checks whether the physical interpretation is supported",
-        "Stage 5 judges significance and venue fit",
-        "Stage 6 synthesizes everything into the final recommendation",
-    ):
-        assert token in peer_review_command
-        assert token in peer_review_workflow
+    _assert_prompt_concepts(
+        peer_review_workflow,
+        {
+            "pre-spawn stage map": ("Before spawning", "reviewer", "concise stage map"),
+        },
+        context="peer-review workflow stage map",
+    )
+    stage_map = {
+        "Stage 1": ("Stage 1", "claims"),
+        "Stages 2-3": ("Stages 2-3", "prior work", "mathematical soundness", "parallel"),
+        "Stage 4": ("Stage 4", "physical interpretation", "supported"),
+        "Stage 5": ("Stage 5", "significance", "venue fit"),
+        "Stage 6": ("Stage 6", "synthesizes", "final recommendation"),
+    }
+    _assert_prompt_concepts(peer_review_command, stage_map, context="peer-review command stage roles")
+    _assert_prompt_concepts(peer_review_workflow, stage_map, context="peer-review workflow stage roles")
+    _assert_ordered_prompt_fragments(
+        peer_review_command,
+        ("Stage 1", "Stages 2-3", "Stage 4", "Stage 5", "Stage 6"),
+        context="peer-review command stage order",
+    )
+    _assert_ordered_prompt_fragments(
+        peer_review_workflow,
+        ("Stage 1", "Stages 2-3", "Stage 4", "Stage 5", "Stage 6"),
+        context="peer-review workflow stage order",
+    )
 
 
 def test_peer_review_command_limits_default_manuscript_targets_to_canonical_roots() -> None:
@@ -3452,31 +3661,70 @@ def test_peer_review_referee_surface_fail_closed_final_adjudication_contract() -
     panel = (REFERENCES_DIR / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
     reliability = (REFERENCES_DIR / "publication" / "peer-review-reliability.md").read_text(encoding="utf-8")
 
-    assert (
-        "If any required staged-review artifact is missing, malformed, or uses the wrong round suffix, STOP"
-        in peer_review
-    )
-    assert "before trusting any final recommendation" in peer_review
-    assert (
-        "Treat blank `manuscript_path` values in either `${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json`"
-        in peer_review
+    _assert_prompt_concepts(
+        peer_review,
+        {
+            "fail closed before recommendation": (
+                "required staged-review artifact",
+                "missing",
+                "malformed",
+                "wrong round suffix",
+                "STOP",
+                "final recommendation",
+            ),
+            "blank manuscript path fails validation": (
+                "blank `manuscript_path`",
+                "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
+                "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json",
+                "validation failures",
+            ),
+        },
+        context="peer-review workflow fail-closed final adjudication",
     )
     assert "Do not fall back to standalone review" in referee
     assert "fall back to direct standalone review" not in referee
-    assert "passes `gpd validate referee-decision ... --strict --ledger ...`" in reliability
-    assert "passes `gpd validate review-ledger ...`, including a non-empty `manuscript_path`" in reliability
-    assert "A blank `manuscript_path` in the review ledger or referee decision is a contract failure" in reliability
+    _assert_prompt_concepts(
+        reliability,
+        {
+            "strict referee decision validation": (
+                "gpd validate referee-decision",
+                "--strict",
+                "--ledger",
+                "manuscript_path",
+            ),
+            "strict ledger validation": ("gpd validate review-ledger", "non-empty `manuscript_path`"),
+            "blank manuscript path contract failure": ("blank `manuscript_path`", "contract failure"),
+        },
+        context="peer-review reliability final adjudication",
+    )
     assert "bibliography_audit_clean" in reliability
     assert "reproducibility_ready" in reliability
-    _assert_contains_fragments(
+    _assert_prompt_concepts(
         panel,
-        "Stage 6 may write only the adjudication artifacts listed under Output.",
-        "Treat `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, every `${REVIEW_ROOT}/STAGE-*.json`, and "
-        "`${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` as read-only upstream evidence.",
-        "If any upstream artifact is missing, malformed, stale, or mutually inconsistent, Stage 6 must fail "
-        "closed and route the inconsistency back to the earliest failing upstream stage",
-        "`${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md` when applicable, but only as a diagnostic sidecar.",
-        "Do not repair upstream stage artifacts during final adjudication.",
+        {
+            "Stage 6 owns only adjudication output": ("Stage 6", "write only", "adjudication artifacts", "Output"),
+            "upstream evidence is read-only": (
+                "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+                "${REVIEW_ROOT}/STAGE-*.json",
+                "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+                "read-only upstream evidence",
+            ),
+            "fail closed routes upstream": (
+                "missing",
+                "malformed",
+                "stale",
+                "mutually inconsistent",
+                "Stage 6",
+                "fail closed",
+                "earliest failing upstream stage",
+            ),
+            "consistency report is sidecar": (
+                "${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md",
+                "diagnostic sidecar",
+            ),
+            "no upstream repair": ("Do not repair", "upstream stage artifacts", "final adjudication"),
+        },
+        context="peer-review panel Stage 6 boundary",
     )
 
 
@@ -4947,30 +5195,68 @@ def test_help_and_execution_surfaces_wire_tangent_control_path() -> None:
     assert re.search(r"gpd:tangent.*?(?:branch|follow-up|alternative)", execute_phase, re.I | re.S)
     assert "tangent_summary" in execute_phase
     assert "tangent_decision" in execute_phase
-    assert "optional `tangent_summary` and `tangent_decision`" in execute_phase
-    assert (
-        "keep it inside the same live execution payload instead of inventing a new tangent state machine"
-        in execute_phase
+    _assert_prompt_concepts(
+        execute_phase,
+        {
+            "live execution tangent bridge": (
+                "tangent proposal",
+                "same live execution payload",
+                "new tangent state machine",
+                "tangent_summary",
+                "tangent_decision",
+            ),
+            "no executor-initiated side work": ("new branch", "child plan", "side subagent", "executor initiative"),
+        },
+        context="execute-phase tangent control",
     )
-    assert "Do not create a new branch, child plan, or side subagent from executor initiative alone." in execute_phase
     assert "tangent_summary" in execute_plan
     assert "tangent_decision" in execute_plan
-    assert (
-        "keep it in the same execution payload rather than inventing a new event family. Optional fields:"
-        in execute_plan
+    _assert_prompt_concepts(
+        execute_plan,
+        {
+            "bounded stop tangent payload": (
+                "bounded stop",
+                "same execution payload",
+                "new event family",
+                "tangent_summary",
+                "tangent_decision",
+            ),
+            "telemetry cannot auto-branch": ("existing `execution` payload", "Do not auto-branch", "side work"),
+        },
+        context="execute-plan tangent control",
     )
-    assert (
-        "keep the optional `tangent_summary` / `tangent_decision` fields on the existing `execution` payload until "
-        "that review stop is explicitly resolved. Do not auto-branch or create side work from telemetry alone."
-    ) in execute_plan
     assert "{GPD_INSTALL_DIR}/workflows/quick.md" in tangent_workflow
     assert "{GPD_INSTALL_DIR}/workflows/add-todo.md" in tangent_workflow
     assert "{GPD_INSTALL_DIR}/workflows/branch-hypothesis.md" in tangent_workflow
-    assert "Until a concrete `$TANGENT_DECISION` is captured" in tangent_workflow
-    assert "do not name `gpd:quick`, `gpd:add-todo`, `gpd:branch-hypothesis`, `gpd:execute-phase`" in tangent_workflow
-    assert "do not present `gpd:quick`, `gpd:add-todo`, `gpd:branch-hypothesis`, `gpd:execute-phase`" in (
-        COMMANDS_DIR / "tangent.md"
-    ).read_text(encoding="utf-8")
+    _assert_prompt_concepts(
+        tangent_workflow,
+        {
+            "decision before selected command": (
+                "$TANGENT_DECISION",
+                "do not name",
+                "gpd:quick",
+                "gpd:add-todo",
+                "gpd:branch-hypothesis",
+                "gpd:execute-phase",
+            ),
+        },
+        context="tangent workflow chooser",
+    )
+    _assert_prompt_concepts(
+        (COMMANDS_DIR / "tangent.md").read_text(encoding="utf-8"),
+        {
+            "command stays at chooser until explicit outcome": (
+                "exactly one tangent outcome",
+                "do not present",
+                "gpd:quick",
+                "gpd:add-todo",
+                "gpd:branch-hypothesis",
+                "gpd:execute-phase",
+                "gpd:tangent",
+            ),
+        },
+        context="tangent command chooser",
+    )
 
 
 def test_planner_and_plan_phase_keep_no_silent_branching_and_exploit_tangent_suppression() -> None:

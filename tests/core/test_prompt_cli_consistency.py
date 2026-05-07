@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.cli import app as cli_app
 from gpd.core import public_surface_contract as public_surface_contract_module
 from gpd.core.cli_args import _ROOT_GLOBAL_FLAG_TOKENS
 from gpd.core.model_visible_text import command_visibility_note
@@ -22,7 +23,8 @@ from gpd.core.public_surface_contract import (
     resume_authority_fields,
 )
 from gpd.core.state import VALID_STATUSES
-from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter, get_command
+from gpd.core.workflow_presets import list_workflow_presets
+from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter, get_command, list_commands
 from tests.doc_surface_contracts import (
     DOCTOR_RUNTIME_SCOPE_RE,
     assert_beginner_startup_routing_contract,
@@ -49,7 +51,6 @@ from tests.doc_surface_contracts import (
 from tests.prompt_metrics_support import iter_markdown_fences
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI_PATH = REPO_ROOT / "src/gpd/cli.py"
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 PROMPT_ROOTS = (
@@ -59,12 +60,10 @@ PROMPT_ROOTS = (
     REPO_ROOT / "src/gpd/specs/references",
     REPO_ROOT / "src/gpd/specs/templates",
 )
-ROOT_COMMAND_RE = re.compile(r"@app\.command\(\s*\"([a-z0-9-]+)\"(?:,|\))", re.MULTILINE)
-TYPER_GROUP_RE = re.compile(r"app\.add_typer\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*name=\"([a-z0-9-]+)\"", re.MULTILINE)
-GROUP_COMMAND_RE = re.compile(r"@{group}\.command\(\s*\"([a-z0-9-]+)\"(?:,|\))", re.MULTILINE)
 NON_CANONICAL_GPD_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_./}])(?:\$gpd-[A-Za-z0-9{}-]+|/gpd-[A-Za-z0-9{}-]+)(?!\.md)")
 RAW_AFTER_SUBCOMMAND_RE = re.compile(r"\bgpd\s+(?!--raw\b)[^`\n]*\s+--raw\b")
 SUMMARY_EXTRACT_FIELDS_RE = re.compile(r"\bgpd\s+summary-extract\b[^\n`]*\s--fields\b")
+COMMAND_INDEX_ENTRY_RE = re.compile(r"^- `(?P<signature>gpd:[^`]+)` - (?P<description>.+)$", re.MULTILINE)
 SHELL_FENCE_LANGUAGES = frozenset({"bash", "sh", "shell", "zsh"})
 RUNTIME_LABEL_IN_SHELL_RE = re.compile(
     r"(?<![A-Za-z0-9_./}])"
@@ -133,6 +132,82 @@ def _extract_between(content: str, start_marker: str, end_marker: str) -> str:
     return content[start:end]
 
 
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _assert_normalized_fragments(content: str, fragments: tuple[str, ...]) -> None:
+    normalized = _normalize_text(content)
+    missing = [fragment for fragment in fragments if _normalize_text(fragment) not in normalized]
+    assert missing == []
+
+
+def _assert_normalized_absent(content: str, fragments: tuple[str, ...]) -> None:
+    normalized = _normalize_text(content)
+    present = [fragment for fragment in fragments if _normalize_text(fragment) in normalized]
+    assert present == []
+
+
+def _assert_ordered_fragments(content: str, fragments: tuple[str, ...]) -> None:
+    normalized = _normalize_text(content)
+    cursor = 0
+    missing: list[str] = []
+    for fragment in fragments:
+        normalized_fragment = _normalize_text(fragment)
+        position = normalized.find(normalized_fragment, cursor)
+        if position < 0:
+            missing.append(fragment)
+            continue
+        cursor = position + len(normalized_fragment)
+    assert missing == []
+
+
+def _typer_command_name(command_info: object) -> str:
+    name = getattr(command_info, "name", None)
+    if name:
+        return str(name)
+    callback = getattr(command_info, "callback", None)
+    if callback is not None:
+        return str(callback.__name__).replace("_", "-")
+    raise AssertionError(f"Typer command metadata has no name or callback: {command_info!r}")
+
+
+def _declared_command_surfaces() -> set[str]:
+    root_commands = _declared_root_commands()
+    group_commands = _declared_groups()
+    surfaces = set(root_commands)
+    surfaces.update(group_commands)
+    for group_name, subcommands in group_commands.items():
+        surfaces.update(f"{group_name} {subcommand}" for subcommand in subcommands)
+    return surfaces
+
+
+def _declared_root_commands() -> set[str]:
+    return {_typer_command_name(command) for command in cli_app.registered_commands}
+
+
+def _declared_groups() -> dict[str, set[str]]:
+    groups: dict[str, set[str]] = {}
+    for group in cli_app.registered_groups:
+        group_name = getattr(group, "name", None)
+        assert group_name, f"Typer group metadata has no name: {group!r}"
+        typer_instance = group.typer_instance
+        groups[str(group_name)] = {_typer_command_name(command) for command in typer_instance.registered_commands}
+    return groups
+
+
+def _command_index_runtime_labels(command_index_markdown: str) -> set[str]:
+    labels: set[str] = set()
+    for match in COMMAND_INDEX_ENTRY_RE.finditer(command_index_markdown):
+        signature = match.group("signature")
+        labels.add(signature.split()[0])
+    return labels
+
+
+def _workflow_preset_labels() -> set[str]:
+    return {preset.label for preset in list_workflow_presets()}
+
+
 def _iter_prompt_sources() -> list[Path]:
     files: list[Path] = []
     for root in PROMPT_ROOTS:
@@ -146,36 +221,6 @@ def _shell_fence_language(info: str) -> str:
 
 def _has_bracketed_shell_placeholder_arg(line: str) -> bool:
     return bool(BRACKETED_SHELL_PLACEHOLDER_ARG_RE.search(line) or OPTIONAL_BRACKETED_SHELL_ARG_RE.search(line))
-
-
-def _declared_command_surfaces() -> set[str]:
-    content = CLI_PATH.read_text(encoding="utf-8")
-    surfaces = set(ROOT_COMMAND_RE.findall(content))
-    surfaces.update(_declared_group_surfaces(content))
-    return surfaces
-
-
-def _declared_group_surfaces(content: str) -> set[str]:
-    groups = dict(TYPER_GROUP_RE.findall(content))
-    surfaces: set[str] = set(groups.values())
-    for group_var, group_name in groups.items():
-        command_re = re.compile(GROUP_COMMAND_RE.pattern.format(group=re.escape(group_var)), re.MULTILINE)
-        for subcommand in command_re.findall(content):
-            surfaces.add(f"{group_name} {subcommand}")
-    return surfaces
-
-
-def _declared_root_commands(content: str) -> set[str]:
-    return set(ROOT_COMMAND_RE.findall(content))
-
-
-def _declared_groups(content: str) -> dict[str, set[str]]:
-    groups = dict(TYPER_GROUP_RE.findall(content))
-    result: dict[str, set[str]] = {}
-    for group_var, group_name in groups.items():
-        command_re = re.compile(GROUP_COMMAND_RE.pattern.format(group=re.escape(group_var)), re.MULTILINE)
-        result[group_name] = set(command_re.findall(content))
-    return result
 
 
 def _iter_markdown_code_samples(content: str) -> list[str]:
@@ -217,9 +262,8 @@ def _extract_gpd_command_surfaces(
 
 def test_prompt_sources_keep_command_surface_rules_canonical_and_consistent() -> None:
     allowed = _declared_command_surfaces()
-    cli_content = CLI_PATH.read_text(encoding="utf-8")
-    root_commands = _declared_root_commands(cli_content)
-    group_commands = _declared_groups(cli_content)
+    root_commands = _declared_root_commands()
+    group_commands = _declared_groups()
 
     invalid_surfaces: list[str] = []
     noncanonical_surfaces: list[str] = []
@@ -273,9 +317,7 @@ def test_prompt_shell_fences_do_not_add_runtime_command_labels() -> None:
 
 
 def test_agent_infrastructure_distinguishes_structural_phase_verify_from_verify_work() -> None:
-    text = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(
-        encoding="utf-8"
-    )
+    text = (REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md").read_text(encoding="utf-8")
 
     assert "These terminal `gpd verify ...` commands are structural checks." in text
     assert "They do not" in text
@@ -351,9 +393,8 @@ def test_start_workflow_routes_runtime_labels_without_shell_run_prose() -> None:
 
 
 def test_prompt_surface_extractor_matches_shared_root_global_flags() -> None:
-    cli_content = CLI_PATH.read_text(encoding="utf-8")
-    root_commands = _declared_root_commands(cli_content)
-    group_commands = _declared_groups(cli_content)
+    root_commands = _declared_root_commands()
+    group_commands = _declared_groups()
 
     sample = """
     ```text
@@ -394,11 +435,19 @@ def test_help_prompt_default_quick_start_extracts_workflow_owned_sections() -> N
     assert_help_workflow_quick_start_taxonomy_contract(quick_start_reference)
     assert_help_workflow_command_index_contract(command_index)
     assert_beginner_startup_routing_contract(quick_start_reference)
+    assert _command_index_runtime_labels(command_index) == set(list_commands(name_format="label"))
     assert "Usage: `/gpd:start`" not in quick_start_reference
     assert "## Detailed Command Reference" in help_workflow
-    assert (
-        "gpd:new-project -> gpd:discuss-phase -> gpd:plan-phase -> gpd:execute-phase -> gpd:verify-work -> repeat"
-        in help_workflow
+    _assert_ordered_fragments(
+        help_workflow,
+        (
+            "gpd:new-project",
+            "gpd:discuss-phase",
+            "gpd:plan-phase",
+            "gpd:execute-phase",
+            "gpd:verify-work",
+            "repeat",
+        ),
     )
     assert "gpd init new-project" not in help_workflow
     for token in ("gpd:discuss-phase", "gpd:write-paper", "gpd:tangent", "gpd:set-tier-models", "gpd:settings"):
@@ -418,15 +467,30 @@ def test_help_prompt_keeps_workflow_preset_readiness_on_local_cli_surface() -> N
     assert "Exclude the marker comment lines themselves." in quick_start
     assert "Append this one wrapper-owned line" in quick_start
     assert_help_workflow_runtime_reference_contract(help_workflow)
-    assert "executable probes" in help_workflow
-    assert "pdflatex" in help_workflow
-    assert "wolframscript" in help_workflow
+    optional_addons = _extract_between(help_workflow, "### Optional Local CLI Add-Ons", "Workflow presets are bundles")
+    _assert_normalized_fragments(
+        optional_addons,
+        (
+            "Workflow presets",
+            "gpd presets list",
+            "gpd presets show <preset>",
+            "gpd presets apply <preset>",
+            "pdflatex --version",
+            "tectonic --version",
+            "wolframscript -version",
+        ),
+    )
     assert DOCTOR_RUNTIME_SCOPE_RE.search(help_workflow) is not None
     assert_wolfram_plan_boundary_contract(help_workflow)
     assert_workflow_preset_surface_contract(help_workflow)
-    assert (
-        "Workflow preset tooling is layered on top of the base install; it does not change runtime permission alignment."
-        in help_workflow
+    _assert_normalized_fragments(
+        help_workflow,
+        (
+            "Workflow presets are bundles over the existing config keys only",
+            "they do not add a separate persisted preset block",
+            "Workflow preset tooling is layered on top of the base install",
+            "does not change runtime permission alignment",
+        ),
     )
 
 
@@ -434,26 +498,51 @@ def test_start_prompt_delegates_routing_to_workflow_only() -> None:
     start_command = (COMMANDS_DIR / "start.md").read_text(encoding="utf-8")
     start_command_expanded = expand_at_includes(start_command, REPO_ROOT / "src/gpd", "/runtime/")
     start_workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
+    start_registry = get_command("start")
+    reopen_recent_branch = _extract_between(
+        start_workflow,
+        "**If the researcher chooses option_id `reopen_recent`",
+        "- STOP after giving those instructions.",
+    )
 
     assert "@{GPD_INSTALL_DIR}/workflows/start.md" in start_command
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in start_command
-    assert "actual first-run chooser when the user wants the right next action" in start_command_expanded
-    assert "read-only walkthrough when the user wants orientation before choosing a path" in start_command_expanded
-    assert "explain official terms the first time they appear" in start_command
-    assert "gpd:tour" in start_command_expanded
-    assert_start_workflow_router_contract(start_workflow)
-    assert local_cli_resume_recent_command() in start_workflow
-    assert "in your normal terminal to find the project first" in start_workflow
-    assert "The recent-project picker is advisory; choose the workspace there" in start_workflow
-    assert "reloads canonical state for that project." in start_workflow
-    assert "GPD may auto-select it" in start_workflow
-    assert "recent-project picker" in start_workflow
-    assert "Then open that project folder in the runtime and choose" in start_workflow
-    assert "\\`gpd:resume-work\\` command." in start_workflow
-    assert (
-        "the in-runtime continuation step once the recovery ladder has identified the right project" in start_workflow
+    assert start_registry.argument_hint == "[optional short goal]"
+    assert start_registry.context_mode == "projectless"
+    _assert_normalized_fragments(
+        start_command_expanded,
+        (
+            "actual first-run chooser",
+            "read-only walkthrough",
+            "gpd:tour",
+            "same-message explicit choice counts only as the chooser answer",
+        ),
     )
-    assert "reopened its workspace" in start_workflow
+    _assert_normalized_fragments(
+        start_command,
+        (
+            "explain official terms",
+            "first time they appear",
+            "do not invent a parallel onboarding state machine",
+        ),
+    )
+    assert_start_workflow_router_contract(start_workflow)
+    assert local_cli_resume_recent_command() in reopen_recent_branch
+    _assert_normalized_fragments(
+        reopen_recent_branch,
+        (
+            "normal terminal",
+            "recent-project picker",
+            "advisory",
+            "gpd:resume-work",
+            "reloads canonical state",
+            "auto-select",
+            "choose the project explicitly",
+            "open that project folder in the runtime",
+            "in-runtime continuation step",
+            "reopened its workspace",
+        ),
+    )
     assert "Read `{GPD_INSTALL_DIR}/workflows/new-project.md` with the file-read tool." not in start_workflow
     assert "Read `{GPD_INSTALL_DIR}/workflows/help.md` with the file-read tool." not in start_workflow
     assert "Read `{GPD_INSTALL_DIR}/workflows/tour.md` with the file-read tool." not in start_workflow
@@ -484,10 +573,18 @@ def test_help_workflow_surfaces_start_as_first_run_router() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
     quick_start_reference = _extract_between(help_workflow, "## Quick Start", "## Command Index")
 
-    assert "gpd:start" in help_workflow
-    assert "Guided first-run router" in help_workflow
-    assert "gpd:tour" in help_workflow
-    assert "guided tour" in help_workflow.lower()
+    assert get_command("start").name in help_workflow
+    assert get_command("tour").name in help_workflow
+    _assert_normalized_fragments(
+        quick_start_reference,
+        (
+            "gpd:start",
+            "first-run router",
+            "safest first step",
+            "gpd:tour",
+            "read-only",
+        ),
+    )
     assert_beginner_startup_routing_contract(quick_start_reference)
 
 
@@ -642,15 +739,21 @@ def test_progress_reconcile_prompt_preserves_no_write_confirmation_branches() ->
     reconcile_end = workflow.index('<step name="init_context">', reconcile_start)
     reconcile_step = workflow[reconcile_start:reconcile_end]
 
-    assert '"Sync STATE.md to disk" (Recommended)' in reconcile_step
-    assert '"Keep STATE.md"' in reconcile_step
-    assert '"Show details" — list all mismatches before deciding' in reconcile_step
-    assert "If user chooses sync: update STATE.md position" in reconcile_step
-    assert "before any command that writes reconciled state, ask for an explicit user decision" in reconcile_step
-    assert (
-        "require a typed reply that exactly matches one of `Sync STATE.md to disk`, `Keep STATE.md`, or "
-        "`Show details`; do not infer consent from a vague acknowledgement"
-    ) in reconcile_step
+    _assert_normalized_fragments(
+        reconcile_step,
+        (
+            '"Sync STATE.md to disk" (Recommended)',
+            '"Keep STATE.md"',
+            '"Show details"',
+            "update STATE.md position",
+            "before any command that writes reconciled state",
+            "explicit user decision",
+            "`Sync STATE.md to disk`",
+            "`Keep STATE.md`",
+            "`Show details`",
+            "do not infer consent",
+        ),
+    )
     assert reconcile_step.index('"Show details"') < reconcile_step.index("If user chooses sync")
 
 
@@ -673,13 +776,33 @@ def test_progress_prompt_and_help_clarify_runtime_vs_local_cli_boundary() -> Non
     command = (REPO_ROOT / "src/gpd/commands/progress.md").read_text(encoding="utf-8")
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
     progress_section = _extract_between(help_workflow, "### Progress Tracking", "### Session Management")
-    normalized_command = " ".join(command.split())
-    normalized_progress_section = " ".join(progress_section.split())
+    progress_registry = get_command("progress")
 
-    assert "The local CLI `gpd progress` is a separate read-only renderer" in normalized_command
-    assert "takes `json|bar|table` and does not accept these flags" in normalized_command
-    assert "The local CLI `gpd progress` is a separate read-only renderer" in normalized_progress_section
-    assert "Local CLI: `gpd progress json|bar|table`" in normalized_progress_section
+    assert progress_registry.argument_hint == "[--brief | --full | --reconcile]"
+    assert "progress" in _declared_root_commands()
+    _assert_normalized_fragments(
+        command,
+        (
+            "`--brief`, `--full`, and `--reconcile`",
+            "runtime-surface options for `gpd:progress`",
+            "local CLI `gpd progress`",
+            "read-only renderer",
+            "json|bar|table",
+            "does not accept these flags",
+        ),
+    )
+    _assert_normalized_fragments(
+        progress_section,
+        (
+            "Usage: `gpd:progress --full`",
+            "Usage: `gpd:progress --brief`",
+            "Usage: `gpd:progress --reconcile`",
+            "local CLI `gpd progress`",
+            "read-only renderer",
+            "json|bar|table",
+            "Local CLI: `gpd progress json|bar|table`",
+        ),
+    )
 
 
 def test_progress_health_advice_uses_runtime_command_wording() -> None:
@@ -825,6 +948,7 @@ def test_settings_and_research_mode_docs_keep_tangent_branch_taxonomy_strict() -
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
     new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
     research_modes = (REPO_ROOT / "src/gpd/specs/references/research/research-modes.md").read_text(encoding="utf-8")
+    preset_labels = _workflow_preset_labels()
 
     assert "Which starting workflow preset should GPD use for `GPD/config.json`?" in new_project
     assert "offer a preset choice before individual questions" in new_project
@@ -832,11 +956,10 @@ def test_settings_and_research_mode_docs_keep_tangent_branch_taxonomy_strict() -
     assert "preview" in new_project
     assert "writing `GPD/config.json`" in new_project
     assert "Do not persist a separate preset key." in new_project
+    assert "Core research" in preset_labels
     assert '"Core research (Recommended)"' in new_project
-    assert '"Theory"' in new_project
-    assert '"Numerics"' in new_project
-    assert '"Publication / manuscript"' in new_project
-    assert '"Full research"' in new_project
+    for label in sorted(preset_labels - {"Core research"}):
+        assert f'"{label}"' in new_project
     assert "multiple hypothesis branches" not in settings
     assert "Minimal branching, fast convergence." not in settings
     assert "auto-switch to exploit once approach is validated" not in settings
@@ -911,17 +1034,27 @@ def test_help_prompt_workflow_modes_match_current_settings_vocabulary() -> None:
 
 def test_help_prompt_surfaces_workflow_presets_on_the_local_cli_surface() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
+    optional_addons = _extract_between(help_workflow, "### Optional Local CLI Add-Ons", "Workflow presets are bundles")
+    preset_ids = {preset.id for preset in list_workflow_presets()}
 
     assert "### Optional Local CLI Add-Ons" in help_workflow
     assert "**Workflow presets**" in help_workflow
-    assert "Paper/manuscript workflows" in help_workflow
+    assert "publication-manuscript" in preset_ids
+    assert "Paper/manuscript workflows" in optional_addons
     assert DOCTOR_RUNTIME_SCOPE_RE.search(help_workflow) is not None
-    assert "executable probes" in help_workflow
     assert_workflow_preset_surface_contract(help_workflow)
-    assert "paper-toolchain readiness" in help_workflow
-    assert "degrade `write-paper`" in help_workflow
-    assert "`paper-build` remains the build contract" in help_workflow
-    assert "`arxiv-submission` requires the built manuscript" in help_workflow
+    _assert_normalized_fragments(
+        optional_addons,
+        (
+            "paper-toolchain readiness",
+            "degrade `write-paper`",
+            "`paper-build` remains the build contract",
+            "`arxiv-submission` requires the built manuscript",
+            "pdflatex --version",
+            "tectonic --version",
+            "wolframscript -version",
+        ),
+    )
     assert "gpd:set-tier-models" in help_workflow
     assert "gpd:settings" in help_workflow
     assert "gpd:set-profile" in help_workflow
@@ -1054,18 +1187,30 @@ def test_execute_phase_failure_recovery_counts_only_top_level_verification_statu
 
 def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None:
     workflow = (REPO_ROOT / "src/gpd/specs/workflows/execute-phase.md").read_text(encoding="utf-8")
+    offer_next = _extract_between(workflow, '<step name="offer_next">', "</step>")
 
-    assert 'Never end with only "ready to plan/continue" prose.' in workflow
-    assert "choose exactly one matching variant" in workflow
-    assert "make `gpd:discuss-phase {X+1}` the primary command" in workflow
-    assert "make `gpd:plan-phase {X+1}` the primary command" in workflow
-    assert "Always include `gpd:suggest-next`" in workflow
-    assert "Primary: `{chosen primary command}`" in workflow
-    assert "`gpd:complete-milestone`" in workflow
-    assert "**Also available:** `gpd:suggest-next`" in workflow
-    assert "Primary: `gpd:discuss-phase {X+1}` if context is missing" not in workflow
-    assert "If context is missing:" not in workflow
-    assert "If context exists:" not in workflow
+    assert "## > Next Up" in offer_next
+    _assert_normalized_fragments(
+        offer_next,
+        (
+            "concrete commands",
+            "one matching variant",
+            "gpd:discuss-phase {X+1}",
+            "gpd:plan-phase {X+1}",
+            "gpd:suggest-next",
+            "Primary: `{chosen primary command}`",
+            "gpd:complete-milestone",
+            "**Also available:** `gpd:suggest-next`",
+        ),
+    )
+    _assert_normalized_absent(
+        offer_next,
+        (
+            "Primary: `gpd:discuss-phase {X+1}` if context is missing",
+            "If context is missing:",
+            "If context exists:",
+        ),
+    )
 
 
 def test_command_requirements_force_concrete_next_up_for_stops() -> None:

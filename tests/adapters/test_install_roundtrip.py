@@ -396,7 +396,10 @@ def _assert_installed_contract_visibility(
     assert "{plan_id}-PROOF-REDTEAM.md" in execute_phase
     assert "Targeted flags narrow the optional check mix only." in verify_work
     assert "Every spawned agent is a one-shot delegation" in verify_work
-    assert "If a required proof-redteam audit is missing, stale, malformed, or not `passed`, spawn `gpd-check-proof` once" in verify_work
+    assert (
+        "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; "
+        "if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once"
+    ) in verify_work
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)

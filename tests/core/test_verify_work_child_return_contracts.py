@@ -245,6 +245,10 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     assert "Use `phase_proof_review_status` as the proof-review freshness summary." in workflow
+    assert "`staged_loading.checkpoints` is not a proof classifier" in workflow
+    assert "ignore `phase_proof_review_status.state=not_reviewed|fresh` alone" in workflow
+    assert "Classify proof-bearing only from research artifacts" in workflow
+    assert "exclude installed runtime/config/skills trees" in workflow
     assert (
         "> Runtime delegation rule: this is a single-turn handoff. If the spawned agent needs user input, it checkpoints and returns; do not keep the original run waiting inside the same task."
         in workflow
@@ -263,3 +267,13 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
         in workflow
     )
     assert "File-producing handoffs must prove the expected artifact exists before success is accepted." in workflow
+    assert "never send more input to closed child" in workflow
+
+
+def test_verify_work_record_verification_state_closeout_is_sequential() -> None:
+    workflow = _read(WORKFLOWS_DIR / "verify-work.md")
+
+    assert 'gpd --raw state record-verification --phase "${phase_number}"' in workflow
+    assert "Use `--status passed|failed` only when bypassing frontmatter." in workflow
+    assert "Barrier: wait before state get/validate/repair" in workflow
+    assert "never parallelize state mutation with validation." in workflow

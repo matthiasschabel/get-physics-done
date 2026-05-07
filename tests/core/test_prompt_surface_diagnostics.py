@@ -1050,7 +1050,7 @@ def test_runtime_projection_shell_rewrite_count_uses_projected_shell_fences_only
 
         ```bash
         gpd hidden-probe
-        echo $(gpd hidden-probe --json)
+        gpd hidden-probe --json
         ```
         """,
     )

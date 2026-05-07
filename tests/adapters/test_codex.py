@@ -40,6 +40,8 @@ from tests.adapters.review_contract_test_utils import (
 WOLFRAM_MANAGED_SERVER_KEY = "gpd-wolfram"
 WOLFRAM_MCP_API_KEY_ENV_VAR = "GPD_WOLFRAM_MCP_API_KEY"
 WOLFRAM_MCP_ENDPOINT_ENV_VAR = "GPD_WOLFRAM_MCP_ENDPOINT"
+CODEX_RUNTIME_SNIPPET_REL = "get-physics-done/references/tooling/runtime-command-snippets.md"
+CODEX_RUNTIME_NOTE_RE = re.compile(r"<codex_runtime_notes>\n.*?</codex_runtime_notes>", re.DOTALL)
 
 
 @pytest.fixture()
@@ -74,6 +76,89 @@ def _assert_no_new_codex_install_artifacts(target: Path, skills_dir: Path) -> No
     assert not any(skills_dir.glob("gpd-*"))
 
 
+def _single_tag_block(text: str, tag: str) -> str:
+    assert text.count(f"<{tag}>") == 1
+    assert text.count(f"</{tag}>") == 1
+    match = re.search(rf"<{tag}>\n(?P<body>.*?)</{tag}>", text, flags=re.DOTALL)
+    assert match is not None
+    return match.group("body")
+
+
+def _has_line_with_terms(text: str, *terms: str) -> bool:
+    folded_terms = tuple(term.casefold() for term in terms)
+    return any(all(term in line.casefold() for term in folded_terms) for line in text.splitlines())
+
+
+def _assert_codex_runtime_note_guidance(text: str, launcher: str) -> None:
+    block = _single_tag_block(text, "codex_runtime_notes")
+    assert "runtime-command-snippets.md#runtime-shell-bridge" in block
+    assert launcher in block
+    assert _has_line_with_terms(block, "bridge")
+    assert "GPD_CLI=" not in block
+    assert "The bridge already pins Codex" not in block
+    assert "`GPD_ACTIVE_RUNTIME=codex uv run gpd ...`" not in block
+    assert "Codex shell compatibility:" not in block
+    assert "When shell steps call the GPD CLI" not in block
+    assert "Do not store it in a scalar variable" not in block
+
+
+def _assert_codex_shell_bridge_snippet(text: str) -> None:
+    assert "## Runtime Shell Bridge" in text
+    assert _has_line_with_terms(text, "gpd ...", "runtime-native")
+    assert _has_line_with_terms(text, "bridge", "command")
+    assert _has_line_with_terms(text, "scalar", "variable")
+    assert _has_line_with_terms(text, "shell function", '"$@"')
+    assert _has_line_with_terms(text, "status", "reserved")
+    assert re.search(r"\bcmd_status\s*=\s*\$\?", text)
+    assert "GPD_CLI=" not in text
+
+
+def _assert_codex_questioning_snippet(text: str) -> None:
+    assert "## Runtime Questioning" in text
+    assert _has_line_with_terms(text, "question", "once") or _has_line_with_terms(text, "question", "exactly")
+    assert _has_line_with_terms(text, "options", "once")
+    assert _has_line_with_terms(text, "restate") or _has_line_with_terms(text, "meta")
+
+
+def _assert_codex_questioning_block(text: str) -> None:
+    block = _single_tag_block(text, "codex_questioning")
+    assert "runtime-command-snippets.md#runtime-questioning" in block
+    assert _has_line_with_terms(block, "ask", "once")
+    assert _has_line_with_terms(block, "prompt") or _has_line_with_terms(block, "options")
+
+
+def _assert_no_legacy_codex_questioning(text: str) -> None:
+    lowered = text.casefold()
+    assert "ask_user(" not in lowered
+    assert "use ask_user" not in lowered
+    assert "> **platform note:** if `ask_user` is not available" not in lowered
+
+
+def _assert_inline_freeform_question_guidance(text: str) -> None:
+    _assert_codex_questioning_block(text)
+    assert _has_line_with_terms(text, "ask", "inline", "freeform")
+    assert (
+        _has_line_with_terms(text, "one", "inline", "freeform")
+        or _has_line_with_terms(text, "single", "inline", "freeform")
+        or _has_line_with_terms(text, "exactly", "inline", "freeform")
+    )
+
+
+def _assert_plain_text_question_guidance(text: str) -> None:
+    _assert_codex_questioning_block(text)
+    assert (
+        _has_line_with_terms(text, "plain text", "options")
+        or _has_line_with_terms(text, "plain text", "choices")
+        or _has_line_with_terms(text, "plain text", "prompt")
+    )
+
+
+def _assert_compact_question_prompt_guidance(text: str) -> None:
+    _assert_codex_questioning_block(text)
+    assert _has_line_with_terms(text, "ask", "once")
+    assert _has_line_with_terms(text, "compact", "prompt") or _has_line_with_terms(text, "compact", "options")
+
+
 def test_codex_command_runtime_note_injection_is_idempotent() -> None:
     content = "---\nname: gpd-probe\ndescription: Probe\n---\n```bash\ngpd status\n```\n"
     launcher = "/runtime/gpd-cli"
@@ -82,15 +167,7 @@ def test_codex_command_runtime_note_injection_is_idempotent() -> None:
     twice = _inject_codex_command_runtime_note(once, launcher)
 
     assert once == twice
-    assert twice.count("<codex_runtime_notes>") == 1
-    assert twice.count("Codex shell compatibility:") == 1
-    assert twice.count("When shell steps call the GPD CLI") == 1
-    assert f"put the runtime bridge directly in command position: {launcher}" in twice
-    assert "Do not store it in a scalar variable" in twice
-    assert "GPD_CLI=" not in twice
-    assert f'gpd_cli() {{ {launcher} "$@"; }}' in twice
-    assert "use `cmd_status=$?`; `status` is a reserved read-only parameter" in twice
-    assert "The bridge already pins Codex" not in twice
+    _assert_codex_runtime_note_guidance(twice, launcher)
 
 
 def _make_checkout(tmp_path: Path, version: str) -> Path:
@@ -776,18 +853,10 @@ class TestInstall:
         workflow = (target / "get-physics-done" / "workflows" / "set-profile.md").read_text(encoding="utf-8")
         execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase.md").read_text(encoding="utf-8")
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
+        snippet = (target / CODEX_RUNTIME_SNIPPET_REL).read_text(encoding="utf-8")
 
-        assert "Codex shell compatibility:" in skill
-        assert (
-            f"When shell steps call the GPD CLI, put the runtime bridge directly in command position: {expected_bridge}"
-            in skill
-        )
-        assert "Do not store it in a scalar variable" in skill
-        assert "GPD_CLI=" not in skill
-        assert f'gpd_cli() {{ {expected_bridge} "$@"; }}' in skill
-        assert "use `cmd_status=$?`; `status` is a reserved read-only parameter" in skill
-        assert "The bridge already pins Codex" not in skill
-        assert "`GPD_ACTIVE_RUNTIME=codex uv run gpd ...`" not in skill
+        _assert_codex_runtime_note_guidance(skill, expected_bridge)
+        _assert_codex_shell_bridge_snippet(snippet)
         assert expected_bridge + " config ensure-section" in skill
         assert expected_bridge + ' config set model_profile "$PROFILE"' in skill
         assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" not in skill
@@ -831,6 +900,37 @@ class TestInstall:
         assert "staged_loading.next_stages" in skill
         assert "## Command Requirements" in skill
         assert len(skill) < 20_000
+
+    def test_install_uses_reference_backed_compact_codex_runtime_notes(
+        self,
+        adapter: CodexAdapter,
+        tmp_path: Path,
+    ) -> None:
+        gpd_root = Path(__file__).resolve().parents[2] / "src" / "gpd"
+        target = tmp_path / ".codex"
+        target.mkdir()
+        adapter.install(gpd_root, target, is_global=False)
+        local_skills = tmp_path / ".agents" / "skills"
+
+        expected_bridge = expected_codex_bridge(target, is_global=False)
+        snippet = (target / CODEX_RUNTIME_SNIPPET_REL).read_text(encoding="utf-8")
+        _assert_codex_shell_bridge_snippet(snippet)
+        _assert_codex_questioning_snippet(snippet)
+
+        total_note_chars = 0
+        for skill_md in sorted(local_skills.glob("gpd-*/SKILL.md")):
+            content = skill_md.read_text(encoding="utf-8")
+            _assert_codex_runtime_note_guidance(content, expected_bridge)
+            blocks = CODEX_RUNTIME_NOTE_RE.findall(content)
+            assert len(blocks) == 1, skill_md.parent.name
+            block = blocks[0]
+            total_note_chars += len(block)
+            assert CODEX_RUNTIME_SNIPPET_REL in block, skill_md.parent.name
+            assert "#runtime-shell-bridge" in block, skill_md.parent.name
+            assert "bridge `" in block, skill_md.parent.name
+            assert len(block.splitlines()) <= 3, skill_md.parent.name
+
+        assert total_note_chars <= 25_000
 
     def test_install_keeps_canonical_local_cli_language_in_skill_prose(
         self,
@@ -1689,7 +1789,7 @@ description: Nested command include expansion regression
 
         content = (skills / "gpd-nested-include" / "SKILL.md").read_text(encoding="utf-8")
         assert "<!-- [included: update.md] -->" in content
-        assert "Check for a newer GPD release" in content
+        assert "$gpd-reapply-patches" in content
         assert re.search(r"^\s*@.*?/workflows/update\.md\s*$", content, flags=re.MULTILINE) is None
 
     def test_update_skill_expands_workflow_include(
@@ -1706,16 +1806,13 @@ description: Nested command include expansion regression
 
         content = (skills / "gpd-update" / "SKILL.md").read_text(encoding="utf-8")
         assert "<!-- [included: update.md] -->" in content
-        assert "Check for a newer GPD release" in content
         assert re.search(r"^\s*@.*?/workflows/update\.md\s*$", content, flags=re.MULTILINE) is None
         assert "$gpd-reapply-patches" in content
-        assert "<codex_questioning>" in content
-        assert "> **Platform note:** If `ask_user` is not available" not in content
-        assert "Use ask_user:" not in content
-        assert "Ask the user once using a single compact prompt block:" in content
+        _assert_no_legacy_codex_questioning(content)
+        _assert_compact_question_prompt_guidance(content)
 
     @pytest.mark.parametrize(
-        ("content", "expected"),
+        ("content", "expected_mode"),
         [
             (
                 "> **Platform note:** if `ask_user` is not available, present these options in plain text and wait for the user's freeform response.\n\n"
@@ -1725,30 +1822,39 @@ description: Nested command include expansion regression
                 '  {"question": "How much autonomy should the AI have?"}\n'
                 "])\n"
                 "```\n",
-                "plain_text_prompt([",
+                "plain_text_options",
             ),
             (
                 "> **Platform note:** if `ask_user` is not available, present these options in plain text and wait for the user's freeform response.\n\n"
                 "if overlapping, use ask_user:\n",
-                "If overlapping, present the duplicate choices in plain text:",
+                "plain_text_options",
             ),
             (
                 "ask inline (freeform, not ask_user):\n\n"
                 "based on what they said, ask follow-up questions that dig into their response. use ask_user with options that probe what they mentioned — interpretations, clarifications, concrete examples.\n\n"
                 "when you could write a clear scoping contract, use ask_user:\n",
-                "When you could write a clear scoping contract, ask the user inline:",
+                "inline_freeform",
             ),
         ],
     )
     def test_normalize_codex_questioning_rewrites_lowercase_fallback_variants(
         self,
         content: str,
-        expected: str,
+        expected_mode: str,
     ) -> None:
         normalized = _normalize_codex_questioning(content)
 
-        assert "ask_user" not in normalized.lower()
-        assert expected.lower() in normalized.lower()
+        _assert_no_legacy_codex_questioning(normalized)
+        _assert_codex_questioning_block(normalized)
+        if expected_mode == "plain_text_options":
+            _assert_plain_text_question_guidance(normalized)
+        elif expected_mode == "inline_freeform":
+            _assert_inline_freeform_question_guidance(normalized)
+            assert _has_line_with_terms(normalized, "scoping contract", "inline")
+            assert _has_line_with_terms(normalized, "follow-up", "plain text")
+        else:
+            raise AssertionError(f"Unhandled Codex questioning mode: {expected_mode}")
+        assert "Ask each user-facing question exactly once" not in _single_tag_block(normalized, "codex_questioning")
 
     def test_new_project_workflow_normalizes_codex_questioning(
         self,
@@ -1764,11 +1870,9 @@ description: Nested command include expansion regression
         adapter.install(gpd_root, target, skills_dir=skills)
 
         workflow = (target / "get-physics-done" / "workflows" / "new-project.md").read_text(encoding="utf-8")
-        assert "<codex_questioning>" in workflow
-        assert "> **Platform note:** If `ask_user` is not available" not in workflow
-        assert "Use ask_user:" not in workflow
-        assert "Ask exactly one inline freeform question with no preamble or restatement:" in workflow
-        assert "Ask one inline freeform question with no preamble or restatement:" in workflow
+        _assert_no_legacy_codex_questioning(workflow)
+        _assert_inline_freeform_question_guidance(workflow)
+        assert "Ask each user-facing question exactly once" not in _single_tag_block(workflow, "codex_questioning")
 
     def test_install_agents_inline_gpd_agents_dir_in_agent_surfaces_only(
         self,

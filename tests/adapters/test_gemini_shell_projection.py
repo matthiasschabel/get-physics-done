@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -26,6 +28,39 @@ FORBIDDEN_GEMINI_SHELL_FRAGMENTS = (
     "<<",
 )
 LEADING_ASSIGNMENT_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
+SHELL_CONTROL_PREFIXES = ("case ", "elif ", "else", "fi", "for ", "if ", "then", "while ")
+TERMINAL_EXAMPLE_PREFIXES = (
+    "./",
+    "cat ",
+    "cd ",
+    "cp ",
+    "curl ",
+    "echo ",
+    "find ",
+    "git ",
+    "gpd ",
+    "grep ",
+    "ls ",
+    "mkdir ",
+    "python ",
+    "python3 ",
+    "rm ",
+    "sed ",
+    "uv ",
+)
+
+GeminiShellClassification = Literal["runnable-bridge", "policy-static", "terminal-example", "pseudocode", "non-runnable"]
+
+
+@dataclass(frozen=True, slots=True)
+class GeminiShellPolicyOffender:
+    label: str
+    line_span: str
+    classification: GeminiShellClassification
+    detail: str
+
+    def render(self) -> str:
+        return f"{self.label}:{self.line_span} {self.classification}: {self.detail}"
 
 
 def _bridge_for_projection(target_dir: Path) -> str:
@@ -123,6 +158,91 @@ def _first_runnable_shell_command(fence: MarkdownFence) -> str | None:
     return lines[0] if lines else None
 
 
+def _classify_rendered_gemini_shell_fence(
+    fence: MarkdownFence,
+    *,
+    bridge: str,
+    allowed_prefixes: tuple[str, ...],
+) -> GeminiShellClassification:
+    command = _first_runnable_shell_command(fence)
+    if command is None:
+        return "non-runnable"
+    if command.startswith(bridge):
+        return "runnable-bridge"
+    static_prefixes = tuple(prefix for prefix in allowed_prefixes if prefix != bridge)
+    if command.startswith(static_prefixes):
+        return "policy-static"
+    if _looks_like_shell_pseudocode(fence.body, command):
+        return "pseudocode"
+    return "terminal-example"
+
+
+def _looks_like_shell_pseudocode(body: str, command: str) -> bool:
+    stripped = command.strip()
+    if LEADING_ASSIGNMENT_RE.match(stripped):
+        return True
+    if stripped.startswith(SHELL_CONTROL_PREFIXES):
+        return True
+    if "$(" in body or "<<" in body:
+        return True
+    if "$ARGUMENTS" in body or "${" in body:
+        return True
+    if "<" in body and ">" in body and "```" not in body:
+        return True
+    return False
+
+
+def _gemini_shell_policy_offenders(
+    text: str,
+    *,
+    bridge: str,
+    label: str,
+) -> tuple[GeminiShellPolicyOffender, ...]:
+    allowed_prefixes = _gemini_policy_command_prefixes(bridge)
+    offenders: list[GeminiShellPolicyOffender] = []
+
+    for fence in _shell_fences(text):
+        line_span = f"{fence.start_line}-{fence.end_line}"
+        command = _first_runnable_shell_command(fence)
+        classification = _classify_rendered_gemini_shell_fence(
+            fence,
+            bridge=bridge,
+            allowed_prefixes=allowed_prefixes,
+        )
+
+        if classification not in {"runnable-bridge", "policy-static"}:
+            detail = command or "no runnable command"
+            if command and command.startswith(TERMINAL_EXAMPLE_PREFIXES):
+                detail = f"terminal command rendered as executable shell: {command}"
+            offenders.append(GeminiShellPolicyOffender(label, line_span, classification, detail))
+        elif command is None or not command.startswith(allowed_prefixes):
+            offenders.append(
+                GeminiShellPolicyOffender(
+                    label,
+                    line_span,
+                    classification,
+                    command or "no runnable command",
+                )
+            )
+
+        for fragment in FORBIDDEN_GEMINI_SHELL_FRAGMENTS:
+            if fragment in fence.body:
+                offenders.append(
+                    GeminiShellPolicyOffender(label, line_span, "pseudocode", f"unsafe fragment {fragment!r}")
+                )
+        for line in _runnable_shell_lines(fence):
+            if LEADING_ASSIGNMENT_RE.match(line):
+                offenders.append(GeminiShellPolicyOffender(label, line_span, "pseudocode", f"leading assignment {line!r}"))
+
+    return tuple(offenders)
+
+
+def _format_gemini_shell_policy_offenders(offenders: tuple[GeminiShellPolicyOffender, ...]) -> str:
+    if not offenders:
+        return ""
+    return "Rendered Gemini shell-policy offenders:\n" + "\n".join(offender.render() for offender in offenders)
+
+
 def _assert_gemini_shell_fences_are_policy_runnable(text: str, *, bridge: str, label: str) -> None:
     fences = _shell_fences(text)
     assert fences, f"{label} should expose at least one Gemini shell fence"
@@ -183,3 +303,39 @@ def test_gemini_projected_shell_fences_use_policy_prefixes_and_safe_shapes(
 
     _assert_gemini_shell_fences_are_policy_runnable(projected, bridge=bridge, label=label)
     _assert_no_unsafe_gemini_shell_shape(projected, label=label)
+
+
+def test_gemini_expanded_command_corpus_has_zero_rendered_shell_policy_offenders(tmp_path: Path) -> None:
+    target_dir = tmp_path / ".gemini"
+    bridge = _bridge_for_projection(target_dir)
+    offenders: list[GeminiShellPolicyOffender] = []
+    shell_fence_count = 0
+
+    command_paths = sorted(COMMANDS_DIR.glob("*.md"))
+    assert command_paths, "Gemini command corpus should contain real command markdown files"
+
+    for command_path in command_paths:
+        projected = project_markdown_for_runtime(
+            command_path.read_text(encoding="utf-8"),
+            runtime="gemini",
+            path_prefix="./.gemini/",
+            surface_kind="command",
+            install_scope="--local",
+            src_root=GPD_ROOT,
+            workflow_target_dir=target_dir,
+            command_name=command_path.stem,
+        )
+        assert "{GPD_INSTALL_DIR}" not in projected
+        assert "{GPD_AGENTS_DIR}" not in projected
+        shell_fence_count += len(_shell_fences(projected))
+        offenders.extend(
+            _gemini_shell_policy_offenders(
+                projected,
+                bridge=bridge,
+                label=f"commands/{command_path.name}",
+            )
+        )
+
+    assert len(command_paths) >= 50
+    assert shell_fence_count > 0
+    assert tuple(offenders) == (), _format_gemini_shell_policy_offenders(tuple(offenders))

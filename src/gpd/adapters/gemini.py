@@ -17,7 +17,9 @@ import shlex
 import shutil
 import tomllib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from gpd.adapters.base import RuntimeAdapter
 from gpd.adapters.install_utils import (
@@ -25,6 +27,8 @@ from gpd.adapters.install_utils import (
     HOOK_SCRIPTS,
     MANIFEST_NAME,
     _is_hook_command_for_script,
+    _markdown_fence_language,
+    _markdown_fence_marker,
     build_hook_command,
     compile_command_markdown_for_runtime,
     compile_markdown_for_runtime,
@@ -114,11 +118,24 @@ _GEMINI_STATIC_POLICY_COMMAND_PREFIXES: tuple[str, ...] = (
     "test -d GPD",
     "test -f GPD/",
 )
+GeminiShellFenceKind = Literal["runnable-bridge", "terminal-example", "pseudocode", "policy-static", "non-runnable"]
+
+
+@dataclass(frozen=True, slots=True)
+class GeminiShellFenceClassification:
+    """Gemini rendering decision for one source shell fence."""
+
+    kind: GeminiShellFenceKind
+    first_runnable_command: str | None
+    reasons: tuple[str, ...]
+
+
 _GEMINI_COMMAND_RUNTIME_NOTE = (
     "<gemini_runtime_notes>\n"
     "Gemini runtime compatibility:\n"
-    "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `{public_prefix}...` for Gemini commands.\n"
-    "- When runnable shell steps call the GPD CLI, use {launcher} instead of the ambient `gpd` on PATH.\n"
+    "- Runtime bridge for runnable shell GPD CLI calls: {launcher}.\n"
+    "- Stable runtime rules: installed `get-physics-done/references/tooling/runtime-command-snippets.md`.\n"
+    "- Public labels: `gpd ...` for terminals and `{public_prefix}...` for Gemini commands.\n"
     "</gemini_runtime_notes>\n\n"
 )
 _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE = re.compile(
@@ -127,13 +144,10 @@ _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE = re.compile(
 )
 _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE = (
     "<gemini_shell_runtime_notes>\n"
-    "Gemini shell compatibility:\n"
-    "- When shell steps call the GPD CLI, use {launcher} instead of the ambient `gpd` on PATH.\n"
-    "- Gemini's enforced shell-prefix allowlist for GPD auto-edit mode is:\n{allowlist}\n"
-    "- Gemini policy checks are syntactic in headless auto-edit mode. Prefer direct commands and reason over stdout instead of wrapping approved commands in shell variables, `$(...)`, heredocs, or extra chained blocks.\n"
-    "- Any remaining `VAR=$(...)` examples in rendered workflow guidance are non-runnable shorthand; do not copy them into Gemini auto-edit mode.\n"
+    "Gemini shell compatibility: enforced shell-prefix allowlist for auto-edit mode:\n{allowlist}\n"
+    "- Use direct commands; runnable GPD CLI shell calls must start with {launcher}.\n"
+    "- Stable shell rules: installed `get-physics-done/references/tooling/runtime-command-snippets.md`.\n"
     "- If `run_shell_command` is denied by policy, stop and report the policy block. Do not replace validation or persistence commands with unvalidated file writes.\n"
-    "- Keep contract JSON in-memory or under `GPD/`. Do not write approved contracts to `/tmp`.\n"
     "</gemini_shell_runtime_notes>\n\n"
 )
 _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE = re.compile(
@@ -451,12 +465,187 @@ def _strip_gemini_command_runtime_note_blocks(content: str) -> str:
     return _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE.sub("", content)
 
 
+_GEMINI_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+_GEMINI_SHELL_TEMPLATE_PLACEHOLDER_RE = re.compile(
+    r"(?<![$\\])\{[^{}\n]+\}|\[[A-Za-z][^\]\n]*(?:dir|file|hash|name|path|phase|slug)[^\]\n]*\]"
+)
+_GEMINI_SHELL_CONTROL_PREFIXES = (
+    "if ",
+    "for ",
+    "while ",
+    "until ",
+    "case ",
+    "then",
+    "do",
+    "done",
+    "else",
+    "elif ",
+)
+_GEMINI_SHELL_UNSAFE_FRAGMENTS = (
+    "<<",
+    "mktemp",
+    "PROJECT_CONTRACT_JSON",
+    "printf '%s\\n'",
+)
+_GEMINI_TERMINAL_EXAMPLE_PREFIXES = (
+    "./",
+    "git ",
+    "grep ",
+    "rg ",
+    "ls ",
+    "cat ",
+    "cd ",
+    "cp ",
+    "curl ",
+    "echo ",
+    "find ",
+    "wc ",
+    "jq ",
+    "mkdir ",
+    "rm ",
+    "sed ",
+    "awk ",
+    "tar ",
+    "uv ",
+    "zip ",
+    "python ",
+    "python3 ",
+)
+
+
+def _gemini_runnable_shell_lines(body: str) -> tuple[str, ...]:
+    """Return non-empty, non-comment shell lines from a fenced block body."""
+    return tuple(stripped for line in body.splitlines() if (stripped := line.strip()) and not stripped.startswith("#"))
+
+
+def _classify_gemini_shell_fence_body(
+    body: str,
+    *,
+    bridge_command: str | None = None,
+) -> GeminiShellFenceClassification:
+    """Classify one shell fence before Gemini command rendering.
+
+    Gemini headless auto-edit policy checks the first runnable shell command
+    syntactically. Source prompts often use shell fences for terminal examples
+    and pseudocode, so Gemini projection must decide which fences remain
+    runnable instead of trying to patch every prose variant with exact rewrites.
+    """
+    lines = _gemini_runnable_shell_lines(body)
+    if not lines:
+        return GeminiShellFenceClassification("non-runnable", None, ("empty-shell-fence",))
+
+    first = lines[0]
+    reasons: list[str] = []
+    first_lower = first.lower()
+
+    if any(fragment in body for fragment in _GEMINI_SHELL_UNSAFE_FRAGMENTS):
+        reasons.append("unsafe-shell-fragment")
+    if any(_GEMINI_SHELL_ASSIGNMENT_RE.match(line) for line in lines):
+        reasons.append("leading-assignment")
+    if any(line.lower().startswith(_GEMINI_SHELL_CONTROL_PREFIXES) for line in lines):
+        reasons.append("shell-control-flow")
+    if "$(" in body:
+        reasons.append("command-substitution")
+    if any("<" in line and ">" in line for line in lines):
+        reasons.append("angle-placeholder")
+    if _GEMINI_SHELL_TEMPLATE_PLACEHOLDER_RE.search(body):
+        reasons.append("template-placeholder")
+
+    if reasons:
+        return GeminiShellFenceClassification("pseudocode", first, tuple(dict.fromkeys(reasons)))
+
+    if bridge_command and first.startswith(bridge_command):
+        return GeminiShellFenceClassification("runnable-bridge", first, ("bridge-command",))
+    if first.startswith("gpd "):
+        return GeminiShellFenceClassification("runnable-bridge", first, ("canonical-gpd-command",))
+    if first.startswith(_GEMINI_STATIC_POLICY_COMMAND_PREFIXES):
+        return GeminiShellFenceClassification("policy-static", first, ("static-policy-prefix",))
+    if first_lower.startswith(_GEMINI_TERMINAL_EXAMPLE_PREFIXES):
+        return GeminiShellFenceClassification("terminal-example", first, ("terminal-example-prefix",))
+    return GeminiShellFenceClassification("pseudocode", first, ("unclassified-shell-shape",))
+
+
+def classify_gemini_shell_fence_body(
+    body: str,
+    *,
+    bridge_command: str | None = None,
+) -> GeminiShellFenceClassification:
+    """Classify a Gemini shell fence body using the renderer's decision logic."""
+    return _classify_gemini_shell_fence_body(body, bridge_command=bridge_command)
+
+
+def _replace_markdown_fence_language(line: str, marker: str, language: str) -> str:
+    """Return *line* with its opening fence language replaced."""
+    stripped = line.lstrip()
+    indent = line[: len(line) - len(stripped)]
+    eol = "\n" if line.endswith("\n") else ""
+    return f"{indent}{marker}{language}{eol}"
+
+
+def _render_gemini_classified_shell_fences(content: str, *, bridge_command: str) -> tuple[str, bool]:
+    """Downgrade Gemini-non-runnable shell fences and report if shell policy is needed."""
+    rendered: list[str] = []
+    active_marker: str | None = None
+    opening_line = ""
+    opening_is_shell = False
+    body_lines: list[str] = []
+    shell_policy_required = False
+
+    for line in content.splitlines(keepends=True):
+        stripped = line.lstrip()
+        fence_marker = _markdown_fence_marker(stripped)
+        if active_marker is None:
+            if fence_marker is None:
+                rendered.append(line)
+                continue
+
+            active_marker = fence_marker
+            opening_line = line
+            opening_is_shell = (
+                _markdown_fence_language(stripped, fence_marker) in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES
+            )
+            body_lines = []
+            continue
+
+        if fence_marker == active_marker:
+            body = "".join(body_lines)
+            if not opening_is_shell:
+                rendered.append(opening_line)
+                rendered.append(body)
+                rendered.append(line)
+            else:
+                classification = _classify_gemini_shell_fence_body(body, bridge_command=bridge_command)
+                if classification.kind in {"runnable-bridge", "policy-static"}:
+                    shell_policy_required = True
+                    rendered.append(opening_line)
+                else:
+                    rendered.append(_replace_markdown_fence_language(opening_line, active_marker, "text"))
+                rendered.append(body)
+                rendered.append(line)
+            active_marker = None
+            opening_line = ""
+            opening_is_shell = False
+            body_lines = []
+            continue
+
+        body_lines.append(line)
+
+    if active_marker is not None:
+        rendered.append(opening_line)
+        rendered.extend(body_lines)
+
+    return "".join(rendered), shell_policy_required
+
+
 def _render_gemini_command_prompt(content: str, *, bridge_command: str) -> str:
     """Render one canonical command markdown source into Gemini prompt text."""
     content = strip_sub_tags(content)
     content = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
     content = _rewrite_gemini_shell_workflow_guidance(content)
-    shell_allowlist_required = _contains_gemini_shell_fence(content)
+    content, shell_allowlist_required = _render_gemini_classified_shell_fences(
+        content,
+        bridge_command=bridge_command,
+    )
     rewritten = _rewrite_gpd_cli_invocations(content, bridge_command)
     shell_allowlist_required = shell_allowlist_required or rewritten != content
     return _inject_gemini_command_runtime_note(

@@ -280,6 +280,42 @@ def _assert_runtime_note_block_count(text: str, tag: str, expected_count: int) -
     assert text.count(f"</{tag}>") == expected_count
 
 
+def _single_runtime_note_block(text: str, tag: str) -> str:
+    _assert_runtime_note_block_count(text, tag, 1)
+    start_marker = f"<{tag}>"
+    end_marker = f"</{tag}>"
+    start = text.index(start_marker) + len(start_marker)
+    end = text.index(end_marker, start)
+    return text[start:end].strip()
+
+
+def _has_line_with_terms(text: str, *terms: str) -> bool:
+    folded_terms = tuple(term.casefold() for term in terms)
+    return any(all(term in line.casefold() for term in folded_terms) for line in text.splitlines())
+
+
+def _assert_codex_compact_runtime_note(text: str, bridge: str) -> None:
+    block = _single_runtime_note_block(text, "codex_runtime_notes")
+    assert "runtime-command-snippets.md#runtime-shell-bridge" in block
+    assert bridge in block
+    assert _has_line_with_terms(block, "bridge")
+    assert "Codex shell compatibility:" not in block
+    assert "When shell steps call the GPD CLI" not in block
+
+
+def _assert_codex_inline_freeform_questioning(text: str) -> None:
+    block = _single_runtime_note_block(text, "codex_questioning")
+    assert "runtime-command-snippets.md#runtime-questioning" in block
+    assert _has_line_with_terms(block, "ask", "once")
+    assert "ask_user" not in text.casefold()
+    assert _has_line_with_terms(text, "ask", "inline", "freeform")
+    assert (
+        _has_line_with_terms(text, "one", "inline", "freeform")
+        or _has_line_with_terms(text, "single", "inline", "freeform")
+        or _has_line_with_terms(text, "exactly", "inline", "freeform")
+    )
+
+
 def _assert_fragments_visible(text: str, fragments: tuple[str, ...], *, label: str) -> None:
     missing = sorted(fragment for fragment in fragments if fragment not in text)
     assert not missing, f"{label} is missing contract-bearing fragments: {', '.join(missing)}"
@@ -497,9 +533,8 @@ def test_codex_projected_command_surface_matches_install_runtime_rewrites(tmp_pa
 
     projected = _project_fixture_command(source, "codex", target_dir)
 
-    assert "<codex_runtime_notes>" in projected
-    assert "<codex_questioning>" in projected
-    assert "Ask exactly one inline freeform question with no preamble or restatement:" in projected
+    _assert_codex_compact_runtime_note(projected, bridge)
+    _assert_codex_inline_freeform_questioning(projected)
     assert f"{bridge} --raw init progress --include state,config" in projected
 
 

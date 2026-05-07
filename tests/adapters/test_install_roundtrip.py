@@ -24,9 +24,11 @@ from gpd.adapters.gemini import GeminiAdapter
 from gpd.adapters.install_utils import (
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
+    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     build_runtime_cli_bridge_command,
     convert_tool_references_in_body,
     expand_at_includes,
+    rewrite_gpd_shell_line_to_runtime_bridge,
     translate_frontmatter_tool_names,
 )
 from gpd.adapters.opencode import OpenCodeAdapter
@@ -41,6 +43,7 @@ from gpd.adapters.tool_names import build_canonical_alias_map
 from gpd.core.public_surface_contract import local_cli_bridge_commands
 from gpd.registry import list_commands, load_agents_from_dir
 from tests.doc_surface_contracts import assert_publication_lane_boundary_contract
+from tests.prompt_metrics_support import MarkdownFence, iter_markdown_fences
 
 REPO_GPD_ROOT = Path(__file__).resolve().parents[2] / "src" / "gpd"
 RUNTIME_ALIAS_MAP = build_canonical_alias_map(adapter.tool_name_map for adapter in iter_adapters())
@@ -72,6 +75,24 @@ STAGED_SHIM_CONTRACT_FRAGMENTS = (
     "produced_state",
     "checkpoints",
 )
+RUNTIME_NOTE_TAGS = (
+    "codex_runtime_notes",
+    "gemini_runtime_notes",
+    "gemini_shell_runtime_notes",
+)
+UNRESOLVED_INSTALL_SHAPE_MARKERS = (
+    "{GPD_INSTALL_DIR}",
+    "{GPD_CONFIG_DIR}",
+    "{GPD_RUNTIME_FLAG}",
+)
+GEMINI_FORBIDDEN_INSTALLED_SHELL_FRAGMENTS = (
+    "PROJECT_CONTRACT_JSON",
+    "printf '%s\\n'",
+    "mktemp",
+    "<<",
+)
+LEADING_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
+RAW_GPD_COMMAND_SUBSTITUTION_RE = re.compile(r"\$\([^)]*\bgpd(?:\s|$)")
 
 
 @cache
@@ -382,6 +403,87 @@ def _read_runtime_command_prompt(tmp_path: Path, target: Path, runtime: str, com
         return (target / "command" / f"gpd-{command_name}.md").read_text(encoding="utf-8")
 
     raise AssertionError(f"Unsupported runtime {runtime}")
+
+
+@cache
+def _installed_command_names() -> tuple[str, ...]:
+    return tuple(sorted(path.stem for path in (REPO_GPD_ROOT / "commands").glob("*.md")))
+
+
+def _installed_command_kind(runtime: str) -> str:
+    if runtime == "claude-code":
+        return "native_md"
+    if runtime == "codex":
+        return "codex_skill"
+    if runtime == "gemini":
+        return "gemini_toml_prompt"
+    if runtime == "opencode":
+        return "opencode_flat_md"
+    raise AssertionError(f"Unsupported runtime {runtime}")
+
+
+def _iter_installed_command_prompts(
+    target: Path,
+    runtime: str,
+) -> tuple[tuple[str, str, str], ...]:
+    kind = _installed_command_kind(runtime)
+    return tuple(
+        (
+            command_name,
+            _read_runtime_command_prompt(target.parent, target, runtime, command_name),
+            kind,
+        )
+        for command_name in _installed_command_names()
+    )
+
+
+def _tag_count(text: str, tag: str) -> tuple[int, int]:
+    return text.count(f"<{tag}>"), text.count(f"</{tag}>")
+
+
+def _single_tag_block(text: str, tag: str, *, label: str) -> str:
+    blocks = re.findall(rf"<{re.escape(tag)}>\n(.*?)</{re.escape(tag)}>", text, flags=re.DOTALL)
+    assert len(blocks) == 1, f"{label} should have one <{tag}> block"
+    return blocks[0]
+
+
+def _shell_fences(text: str) -> tuple[MarkdownFence, ...]:
+    shell_fences: list[MarkdownFence] = []
+    for fence in iter_markdown_fences(text):
+        info = fence.info.strip()
+        language = info.split(None, 1)[0].lower() if info else ""
+        if language in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES:
+            shell_fences.append(fence)
+    return tuple(shell_fences)
+
+
+def _runnable_shell_lines(fence: MarkdownFence) -> tuple[str, ...]:
+    return tuple(
+        stripped
+        for line in fence.body.splitlines()
+        if (stripped := line.strip()) and not stripped.startswith("#")
+    )
+
+
+def _first_runnable_shell_command(fence: MarkdownFence) -> str | None:
+    lines = _runnable_shell_lines(fence)
+    return lines[0] if lines else None
+
+
+def _classify_installed_gemini_shell_fence(
+    fence: MarkdownFence,
+    *,
+    bridge_command: str,
+    policy_prefixes: tuple[str, ...],
+) -> str:
+    command = _first_runnable_shell_command(fence)
+    if command is None:
+        return "non-runnable"
+    if command.startswith(bridge_command):
+        return "runnable-bridge"
+    if command.startswith(tuple(prefix for prefix in policy_prefixes if prefix != bridge_command)):
+        return "policy-static"
+    return "unsupported"
 
 
 def _read_runtime_update_surface(tmp_path: Path, target: Path, runtime: str) -> str:
@@ -724,6 +826,141 @@ def test_installed_help_surface_uses_native_include_or_compact_help_bridge_shim(
     assert "--raw help --all" in prompt
     assert "--raw help --command <name>" in prompt
     assert len(prompt) < 10_000
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_command_runtime_note_tags_match_runtime_container(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+
+    for command_name, prompt, kind in _iter_installed_command_prompts(target, runtime):
+        label = f"{runtime}:{command_name}:{kind}"
+
+        if runtime == "codex":
+            assert _tag_count(prompt, "codex_runtime_notes") == (1, 1), label
+            assert _tag_count(prompt, "gemini_runtime_notes") == (0, 0), label
+            assert _tag_count(prompt, "gemini_shell_runtime_notes") == (0, 0), label
+            continue
+
+        if runtime == "gemini":
+            assert _tag_count(prompt, "codex_runtime_notes") == (0, 0), label
+            assert _tag_count(prompt, "gemini_runtime_notes") == (1, 1), label
+            expected_shell_note_count = (1, 1) if _shell_fences(prompt) else (0, 0)
+            assert _tag_count(prompt, "gemini_shell_runtime_notes") == expected_shell_note_count, label
+            continue
+
+        for tag in RUNTIME_NOTE_TAGS:
+            assert _tag_count(prompt, tag) == (0, 0), label
+        if runtime == "opencode":
+            assert prompt.count("<!-- Managed by Get Physics Done (GPD). -->") == 1, label
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_command_surfaces_have_no_unresolved_install_shape(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+
+    for command_name, prompt, kind in _iter_installed_command_prompts(target, runtime):
+        label = f"{runtime}:{command_name}:{kind}"
+        _assert_no_unresolved_include_markers(prompt, label=label)
+        offenders = [marker for marker in UNRESOLVED_INSTALL_SHAPE_MARKERS if marker in prompt]
+        assert offenders == [], f"{label} contains unresolved install shape markers: {offenders}"
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_command_shell_fences_use_runtime_bridge_or_public_cli(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    bridge_command = _expected_local_bridge_for_runtime(runtime, target)
+    offenders: list[str] = []
+
+    for command_name, prompt, kind in _iter_installed_command_prompts(target, runtime):
+        for fence in _shell_fences(prompt):
+            for line in _runnable_shell_lines(fence):
+                rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
+                if rewritten != line:
+                    offenders.append(
+                        f"{runtime}:{command_name}:{kind}: lines {fence.start_line}-{fence.end_line}: {line!r}"
+                    )
+                if RAW_GPD_COMMAND_SUBSTITUTION_RE.search(line):
+                    offenders.append(
+                        f"{runtime}:{command_name}:{kind}: lines {fence.start_line}-{fence.end_line}: "
+                        f"raw gpd command substitution {line!r}"
+                    )
+
+    assert offenders == []
+
+
+def test_installed_gemini_toml_policy_and_shell_fence_classification(real_installed_repo_factory) -> None:
+    target = real_installed_repo_factory("gemini")
+    bridge_command = _expected_local_bridge_for_runtime("gemini", target)
+    policy = tomllib.loads((target / "policies" / "gpd-auto-edit.toml").read_text(encoding="utf-8"))
+    rules = policy.get("rule")
+
+    assert isinstance(rules, list) and len(rules) == 1
+    rule = rules[0]
+    assert rule["toolName"] == "run_shell_command"
+    assert rule["decision"] == "allow"
+    assert rule["modes"] == ["autoEdit"]
+    assert rule["allow_redirection"] is True
+
+    raw_policy_prefixes = rule["commandPrefix"]
+    assert isinstance(raw_policy_prefixes, list)
+    policy_prefixes = tuple(prefix for prefix in raw_policy_prefixes if isinstance(prefix, str))
+    assert len(policy_prefixes) == len(raw_policy_prefixes)
+    assert policy_prefixes[0] == bridge_command
+
+    offenders: list[str] = []
+    shell_note_commands = 0
+    for command_name, prompt, kind in _iter_installed_command_prompts(target, "gemini"):
+        label = f"gemini:{command_name}:{kind}"
+        fences = _shell_fences(prompt)
+        if not fences:
+            continue
+
+        shell_note_commands += 1
+        shell_note = _single_tag_block(prompt, "gemini_shell_runtime_notes", label=label)
+        for prefix in policy_prefixes:
+            assert f"`{prefix}`" in shell_note, f"{label} shell notes omit policy prefix {prefix!r}"
+
+        for fence in fences:
+            classification = _classify_installed_gemini_shell_fence(
+                fence,
+                bridge_command=bridge_command,
+                policy_prefixes=policy_prefixes,
+            )
+            first_command = _first_runnable_shell_command(fence)
+            if classification not in {"runnable-bridge", "policy-static"}:
+                offenders.append(
+                    f"{label}: lines {fence.start_line}-{fence.end_line}: "
+                    f"{classification} first command {first_command!r}"
+                )
+                continue
+            assert first_command is not None
+            if not first_command.startswith(policy_prefixes):
+                offenders.append(
+                    f"{label}: lines {fence.start_line}-{fence.end_line}: "
+                    f"first command is outside installed policy prefixes: {first_command!r}"
+                )
+            for fragment in GEMINI_FORBIDDEN_INSTALLED_SHELL_FRAGMENTS:
+                if fragment in fence.body:
+                    offenders.append(
+                        f"{label}: lines {fence.start_line}-{fence.end_line}: contains {fragment!r}"
+                    )
+            for line in _runnable_shell_lines(fence):
+                if LEADING_SHELL_ASSIGNMENT_RE.match(line):
+                    offenders.append(
+                        f"{label}: lines {fence.start_line}-{fence.end_line}: leading assignment {line!r}"
+                    )
+
+    assert shell_note_commands > 0
+    assert offenders == []
 
 
 # ---------------------------------------------------------------------------

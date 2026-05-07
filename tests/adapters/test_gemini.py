@@ -26,6 +26,7 @@ from gpd.adapters.gemini import (
     _render_gemini_shell_allowlist,
     _rewrite_gemini_shell_workflow_guidance,
     _rewrite_gpd_cli_invocations,
+    classify_gemini_shell_fence_body,
 )
 from gpd.adapters.install_utils import (
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
@@ -405,6 +406,70 @@ class TestRewriteGeminiShellWorkflowGuidance:
         assert "gpd pre-commit-check --files GPD/STATE.md 2>&1 || true" in result
         assert "PREVIEW=$(" not in result
         assert "$PREVIEW" not in result
+
+
+class TestGeminiShellFenceClassification:
+    @pytest.mark.parametrize(
+        ("body", "expected_kind"),
+        (
+            ("gpd status\n", "runnable-bridge"),
+            ("/runtime/gpd-cli status\n", "runnable-bridge"),
+            ("git init\n", "policy-static"),
+            ("git status --porcelain\n", "terminal-example"),
+            ("mkdir -p exports\n", "terminal-example"),
+            ("VALUE=$(gpd status)\n", "pseudocode"),
+            ("git show {branch}:GPD/STATE.md\n", "pseudocode"),
+            ("\n# comment only\n", "non-runnable"),
+        ),
+    )
+    def test_classifies_phase2_shell_fence_categories(self, body: str, expected_kind: str) -> None:
+        classification = classify_gemini_shell_fence_body(body, bridge_command="/runtime/gpd-cli")
+
+        assert classification.kind == expected_kind
+
+    def test_renderer_downgrades_non_runnable_shell_fences_before_bridge_rewrite(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "---\n"
+            "name: gpd:projection-probe\n"
+            "description: Projection probe\n"
+            "---\n"
+            "```bash\n"
+            "gpd status\n"
+            "```\n"
+            "\n"
+            "```bash\n"
+            "git status --porcelain\n"
+            "```\n"
+            "\n"
+            "```bash\n"
+            "VALUE=$(git status --porcelain)\n"
+            "```\n"
+        )
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert f"```bash\n{bridge_command} status\n```" in result
+        assert "```text\ngit status --porcelain\n```" in result
+        assert "```text\nVALUE=$(git status --porcelain)\n```" in result
+        assert f"VALUE=$({bridge_command} status)" not in result
+        assert "<gemini_shell_runtime_notes>" in result
+
+    def test_renderer_omits_shell_allowlist_when_only_examples_remain(self) -> None:
+        content = (
+            "---\n"
+            "name: gpd:projection-probe\n"
+            "description: Projection probe\n"
+            "---\n"
+            "```bash\n"
+            "git status --porcelain\n"
+            "```\n"
+        )
+
+        result = _render_gemini_command_prompt(content, bridge_command="/runtime/gpd-cli")
+
+        assert "```text\ngit status --porcelain\n```" in result
+        assert "<gemini_shell_runtime_notes>" not in result
 
 
 class TestGeminiCommandRuntimeNotes:
@@ -1126,7 +1191,7 @@ class TestInstall:
         workflow = (target / "get-physics-done" / "workflows" / "new-project.md").read_text(encoding="utf-8")
         state_schema = (target / "get-physics-done" / "templates" / "state-json-schema.md").read_text(encoding="utf-8")
 
-        assert f"When shell steps call the GPD CLI, use {expected_bridge}" in command
+        assert f"Runtime bridge for runnable shell GPD CLI calls: {expected_bridge}" in command
         assert "Run the init command as its own shell call in Gemini auto-edit mode." in workflow
         assert "INIT=$(gpd --raw init new-project)" not in workflow
         assert f"INIT=$({expected_bridge} --raw init new-project)" not in workflow

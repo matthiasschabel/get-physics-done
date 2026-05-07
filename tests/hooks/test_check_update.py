@@ -923,7 +923,12 @@ class TestMainThrottle:
         )
 
         active_install_target = SimpleNamespace(config_dir=workspace_runtime_dir, install_scope="local")
-        self_install = SimpleNamespace(config_dir=explicit_target, runtime="codex", install_scope="local")
+        self_install = SimpleNamespace(
+            config_dir=explicit_target,
+            runtime="codex",
+            install_scope="local",
+            cache_file=self_cache,
+        )
 
         monkeypatch.delenv("GPD_DATA_DIR", raising=False)
 

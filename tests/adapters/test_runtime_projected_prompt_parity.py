@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 VERIFIER_BUDGET_BY_NATIVE_INCLUDE_SUPPORT = {
@@ -37,6 +38,11 @@ VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/verification-report.md",
     "templates/contract-results-schema.md",
     "references/shared/canonical-schema-discipline.md",
+)
+VERIFIER_SCHEMA_AUTHORITY_MARKERS = (
+    ("templates/verification-report.md", "# Verification Report Template"),
+    ("templates/contract-results-schema.md", "# Contract Results Schema"),
+    ("references/shared/canonical-schema-discipline.md", "# Canonical Schema Discipline"),
 )
 VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS = (
     "Every spawned agent is a one-shot delegation",
@@ -126,23 +132,17 @@ PLAN_AGENT_SURFACES = {
 RESULT_AGENT_SURFACES = {
     "gpd-verifier": (
         agent_visibility_note(),
-        "Fallback report-writer rule",
+        "templates/contract-results-schema.md",
         "writer_command",
-        "body-only evidence",
-        "Follow `body_contract` when present",
-        "one fenced executed `python`/`bash` block",
-        "adjacent `**Output:**` plus fenced `output`",
-        "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-        "Do not hand-author or reflow `VERIFICATION.md` YAML",
-        "contract_results",
-        "comparison_verdicts",
-        "suggested_contract_checks",
-        "completed_actions",
-        "missing_actions",
-        "inconclusive` / `tension`",
+        "skeleton_command",
+        "verification_report_skeleton_bridge",
+        "gpd frontmatter validate",
+        "gpd validate verification-contract",
     ),
     "gpd-executor": (
         agent_visibility_note(),
+        "templates/contract-results-schema.md",
+        "templates/summary.md",
         "plan_contract_ref",
         "contract_results",
         "comparison_verdicts",
@@ -268,8 +268,16 @@ def test_runtime_projected_agents_keep_contract_results_guidance_visible(
     runtime: str,
 ) -> None:
     projected = _project_markdown(AGENTS_DIR / f"{agent_name}.md", runtime, is_agent=True)
+    descriptor = get_runtime_descriptor(runtime)
 
     _assert_fragments_visible(projected, expected_fragments, label=f"{runtime} {agent_name}")
+    if agent_name == "gpd-executor":
+        validator_text = (
+            _project_installed_shared_markdown(TEMPLATES_DIR / "contract-results-schema.md", runtime)
+            if descriptor.native_include_support
+            else projected
+        )
+        assert "gpd validate summary-contract" in validator_text
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
@@ -280,13 +288,8 @@ def test_runtime_projected_verifier_surface_keeps_one_wrapper_and_stays_within_b
 
     assert projected.count("## Agent Requirements") == 1
     assert projected.index("## Agent Requirements") < projected.index("## Bootstrap Discipline")
-    if descriptor.native_include_support:
-        for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
-            assert _raw_include_count(projected, include_suffix) == 1
-    else:
-        assert projected.count("# Verification Report Template") == 1
-        assert projected.count("# Contract Results Schema") == 1
-        assert projected.count("# Canonical Schema Discipline") == 1
+    for include_suffix, expanded_heading in VERIFIER_SCHEMA_AUTHORITY_MARKERS:
+        assert include_suffix in projected or expanded_heading in projected
     assert len(projected.splitlines()) <= line_budget
     assert len(projected) <= char_budget
 

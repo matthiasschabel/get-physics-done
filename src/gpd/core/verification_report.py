@@ -12,14 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gpd.contracts import (
     ComparisonVerdict,
-    ContractForbiddenProxyResult,
     ContractReference,
-    ContractReferenceUsage,
-    ContractResultEntry,
-    ContractResults,
     ResearchContract,
     SuggestedContractCheck,
 )
+from gpd.core.contract_skeletons import build_contract_results_skeleton
 
 __all__ = [
     "VERIFICATION_REPORT_BODY_CONTRACT",
@@ -109,42 +106,6 @@ def build_verification_gap_report_frontmatter(
     It does not judge physics and does not include runtime return envelopes.
     """
 
-    contract_results = ContractResults(
-        claims={
-            claim.id: ContractResultEntry(
-                status="blocked",
-                summary="Verification gap skeleton: this claim needs independent evidence before it can pass.",
-                linked_ids=_dedupe((*claim.deliverables, *claim.acceptance_tests, *claim.references)),
-            )
-            for claim in contract.claims
-        },
-        deliverables={
-            deliverable.id: ContractResultEntry(
-                status="not_attempted",
-                summary="Verification gap skeleton: this deliverable has not been judged by the builder.",
-                path=deliverable.path,
-            )
-            for deliverable in contract.deliverables
-        },
-        acceptance_tests={
-            test.id: ContractResultEntry(
-                status="blocked",
-                summary="Verification gap skeleton: this acceptance test needs decisive verification evidence.",
-                linked_ids=_dedupe((test.subject, *test.evidence_required)),
-            )
-            for test in contract.acceptance_tests
-        },
-        references={reference.id: _reference_usage_for_gap_skeleton(reference) for reference in contract.references},
-        forbidden_proxies={
-            proxy.id: ContractForbiddenProxyResult(
-                status="unresolved",
-                notes="Verification gap skeleton: this forbidden proxy has not yet been independently rejected.",
-            )
-            for proxy in contract.forbidden_proxies
-        },
-        uncertainty_markers=contract.uncertainty_markers,
-    )
-
     comparison_verdicts = _comparison_verdicts_for_gap_skeleton(contract)
     suggested_checks = _suggested_contract_checks_for_gap_skeleton(
         contract,
@@ -157,7 +118,7 @@ def build_verification_gap_report_frontmatter(
         "status": "gaps_found",
         "score": score if score is not None else _gap_score(contract),
         "plan_contract_ref": plan_contract_ref,
-        "contract_results": contract_results.model_dump(mode="json", exclude_none=True),
+        "contract_results": build_contract_results_skeleton(contract, target="verification"),
         "comparison_verdicts": [verdict.model_dump(mode="json", exclude_none=True) for verdict in comparison_verdicts],
         "suggested_contract_checks": [check.model_dump(mode="json", exclude_none=True) for check in suggested_checks],
     }
@@ -484,44 +445,11 @@ def _prune_empty_authoring_bait(value: object) -> object:
     return value
 
 
-def _dedupe(values: Iterable[str]) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        result.append(value)
-    return result
-
-
 def _gap_score(contract: ResearchContract) -> str:
     target_count = len(contract.claims) + len(contract.deliverables) + len(contract.acceptance_tests)
     if target_count == 0:
         return "verification gaps found; no contract targets passed by this skeleton"
     return f"0/{target_count} contract targets passed by this skeleton; verification gaps require follow-up"
-
-
-def _reference_usage_for_gap_skeleton(reference: ContractReference) -> ContractReferenceUsage:
-    if _is_decisive_reference(reference) or reference.must_surface:
-        return ContractReferenceUsage(
-            status="missing",
-            completed_actions=[],
-            missing_actions=_missing_reference_actions(reference),
-            summary=(
-                f"Verification gap skeleton: required reference actions remain unresolved for {reference.locator}."
-            ),
-        )
-    return ContractReferenceUsage(
-        status="not_applicable",
-        completed_actions=[],
-        missing_actions=[],
-        summary="Verification gap skeleton: no required verification action is recorded for this reference.",
-    )
-
-
-def _missing_reference_actions(reference: ContractReference) -> list[str]:
-    return list(reference.required_actions) or ["read"]
 
 
 def _is_decisive_reference(reference: ContractReference) -> bool:

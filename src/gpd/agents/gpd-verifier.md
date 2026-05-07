@@ -98,19 +98,13 @@ Treat the contract as a typed checklist, not a prose hint:
 - `references` tell you which anchor actions must be completed
 - `forbidden_proxies` tell you what must not be mistaken for success
 
-**Canonical verification frontmatter/schema authority (required):**
+**Canonical verification report authoring (required):**
 
-Immediately before writing or validating `VERIFICATION.md`, load the canonical schema references on demand:
+Use the report helper as the primary frontmatter writer. When the handoff payload provides `verification_report_skeleton_bridge`, write body-only evidence to a Markdown body file, then run its `writer_command`. Follow `body_contract` when present: body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict. The writer serializes frontmatter and validates before the report is canonical. Use `skeleton_command` only as read-only preview context. Do not hand-author or reflow `VERIFICATION.md` YAML.
 
-@{GPD_INSTALL_DIR}/templates/verification-report.md
-@{GPD_INSTALL_DIR}/templates/contract-results-schema.md
-@{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md
+If the bridge is unavailable, run the equivalent helper directly: `gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract`. Use `{GPD_INSTALL_DIR}/templates/verification-report.md`, `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`, and `{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md` as authority references only when the helper or validator errors require them; do not inline or recreate their full YAML in the prompt or report body.
 
-Do not restate the schema from memory. Treat those files as the source of truth for `plan_contract_ref`, `contract_results`, `comparison_verdicts`, `suggested_contract_checks`, proof-audit fields, status vocabularies, ID linkage, and stale-audit handling. Keep validator-owned ledger labels visible: `contract_results.uncertainty_markers`, reference `completed_actions` / `missing_actions`, decisive `comparison_verdicts` with `subject_role: decisive`, incomplete `inconclusive` / `tension` verdicts, and required reference actions missing. Unresolved decisive comparisons get canonical incomplete verdicts, not omitted entries or upgraded parent targets.
-
-Fallback report-writer rule: when a handoff payload provides `verification_report_skeleton_bridge`, write body-only evidence to a Markdown body file, then run its `writer_command`. Follow `body_contract` when present: body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict. The writer serializes frontmatter and validates before the report is canonical. Do not hand-author or reflow `VERIFICATION.md` YAML. Use `skeleton_command` only as a read-only preview or if the writer helper is unavailable; in that fallback, copy generated YAML verbatim and edit body only.
-
-Schema guard: frontmatter `status` uses the verification schema enum; use `gaps_found` for physics/evidence gaps, not `failed`. Keep `contract_results` keyed by PLAN IDs and use only fields from loaded schema references. Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter; they belong in body or return envelope. No `gpd_return`, `computational_oracle`, or runtime fields in frontmatter. Oracle in body; return after report. Contract IDs stay in frontmatter; project-only IDs go in body/unbound suggestions. Omit ambiguous `evidence[]`; do not invent comparison-verdict keys. Unclear `evidence[]`: use parent `summary` / `notes`. No aliases or empty evidence to pass. For missing decisive anchors, follow `contract-results-schema.md#compact-gap-report-crib`.
+Schema guard: frontmatter `status` uses the verification schema enum; use `gaps_found` for physics/evidence gaps, not `failed`. Keep `plan_contract_ref`, `contract_results`, `contract_results.uncertainty_markers`, `comparison_verdicts`, `suggested_contract_checks`, proof-audit linkage, status vocabularies, ID linkage, and stale-audit handling helper/validator-owned. Keep decisive comparisons marked as `subject_role: decisive`. Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter; they belong in body or return envelope. No `gpd_return`, `computational_oracle`, or runtime fields in frontmatter. Oracle in body; return after report. Contract IDs stay in frontmatter; project-only IDs go in body/unbound suggestions. Do not invent comparison-verdict keys, aliases, or empty evidence to pass. For missing decisive anchors, prefer the helper-generated compact gap ledger and explain the computation evidence in the body.
 
 Before freezing the verification plan, use this contract-check loop whenever project-local anchors or prior-output paths matter:
 
@@ -236,7 +230,7 @@ Apply the top-level rules from the loaded `references/verification/verification-
 
 ## Step 10: Structure Gap Output (If Gaps Found)
 
-Structure gaps in YAML frontmatter for `gpd:plan-phase --gaps`. A gap report's top-level `status` is `gaps_found`, `expert_needed`, or `human_needed` as applicable, never `failed` for a physics or evidence gap. Each gap has: `gap_subject_kind`, `subject_id`, `expectation` (what failed), `expected_check`, `status` (failed|partial), `category` (which check: dimensional_analysis, limiting_case, symmetry, conservation, math_consistency, convergence, literature_agreement, plausibility, statistical_rigor, thermodynamic_consistency, spectral_analytic, anomalies_topological, spot_check, cross_check, intermediate_spot_check, forbidden_proxy, comparison_verdict), `reason`, `computation_evidence` (what you computed that revealed the error), `artifacts` (path + issue), `missing` (specific fixes), `severity` (blocker|significant|minor), and `suggested_contract_checks` when the contract is missing a decisive target.
+Use the verification-report helper to serialize the gap ledger for `gpd:plan-phase --gaps`; do not hand-author gap YAML. A gap report's top-level `status` is `gaps_found`, `expert_needed`, or `human_needed` as applicable, never `failed` for a physics or evidence gap. The body must still make every gap actionable: identify the contract target, expectation, failed/partial check, category, computation evidence, affected artifacts, missing fix, severity, and any decisive check the contract omitted.
 
 **Group related gaps by root cause** — if multiple contract targets fail from the same physics error, note this for focused remediation.
 
@@ -268,9 +262,7 @@ See `{GPD_INSTALL_DIR}/references/verification/core/computational-verification-t
 
 ## Create VERIFICATION.md
 
-Create `${phase_dir}/${phase_number}-VERIFICATION.md` with this structure:
-
-Immediately before writing frontmatter, reload those canonical schema files and obey those ledger rules literally.
+Create `${phase_dir}/${phase_number}-VERIFICATION.md` through the verification-report writer helper, not by hand-authoring YAML.
 
 If the project has an active convention lock, include a machine-readable `ASSERT_CONVENTION` comment immediately after the YAML frontmatter in `VERIFICATION.md`. Use canonical lock keys and exact lock values. Changed phase verification artifacts now fail `gpd pre-commit-check` if the required header is missing or mismatched.
 
@@ -278,9 +270,9 @@ After the closing frontmatter `---`, add the machine-readable header before the 
 
 <!-- ASSERT_CONVENTION: natural_units=natural, metric_signature=mostly-minus, fourier_convention=physics -->
 
-### Frontmatter Schema
+### Body-Only Evidence
 
-Use the loaded canonical report template and result-ledger schema as the example and validator-aligned ledger source. Do not inline a second YAML schema here.
+Write the report body as body-only Markdown and let `gpd verification-report skeleton --write --body-file ... --validate contract` serialize the frontmatter. The body must contain the decisive evidence: contract coverage narrative, required artifacts, computational verification details (spot-checks, limiting cases, cross-checks, intermediate checks, dimensional trace), physics consistency, forbidden proxy audit, comparison verdict discussion, discrepancies, suggested contract checks, requirements coverage, expert review needs, confidence assessment, and gap summary.
 
 ### Validation Stop Rule
 
@@ -288,7 +280,7 @@ Run the validator after writing: `gpd frontmatter validate ${phase_dir}/${phase_
 
 ### Report Body Sections
 
-Keep the body lean and schema-driven: Header; Contract Coverage; Required Artifacts; Computational Verification Details (spot-checks, limiting cases, cross-checks, intermediate checks, dimensional trace); Physics Consistency; Forbidden Proxy Audit; Comparison Verdict Ledger; Discrepancies Found; Suggested Contract Checks; Requirements Coverage; Anti-Patterns Found; Expert Verification Required; Confidence Assessment; Gaps Summary.
+Keep the body lean and schema-driven. Do not paste schema prose, copied frontmatter examples, runtime transcripts, or helper output into the body unless it is actual executed evidence needed for the scientific verdict.
 
 </output>
 

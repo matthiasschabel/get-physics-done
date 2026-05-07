@@ -2841,6 +2841,7 @@ def test_validate_help_surfaces_command_context_preflight_entrypoint() -> None:
     assert "plan-preflight" in result.output
     assert "review-preflight" in result.output
     assert "project-contract" in result.output
+    assert "proof-redteam" in result.output
 
 
 def test_validate_project_contract_help_surfaces_proof_obligation_visibility() -> None:
@@ -2979,6 +2980,343 @@ def _raw_payload_from_result(result) -> dict[str, object]:
         assert isinstance(payload, dict)
         return payload
     raise AssertionError(f"result did not contain a JSON object:\n{result.output}")
+
+
+def _proof_redteam_markdown(*, claim_id: str, claim_text: str, status: str) -> str:
+    return (
+        "---\n"
+        f"status: {status}\n"
+        "reviewer: proof-redteam\n"
+        "claim_ids:\n"
+        f"  - {claim_id}\n"
+        "proof_artifact_paths:\n"
+        "  - paper/main.tex\n"
+        "missing_parameter_symbols: []\n"
+        "missing_hypothesis_ids: []\n"
+        "coverage_gaps:\n"
+        "  - unresolved coverage pending human review\n"
+        "scope_status: unclear\n"
+        "quantifier_status: unclear\n"
+        "counterexample_status: not_attempted\n"
+        "---\n\n"
+        "# Proof Redteam\n\n"
+        "## Proof Inventory\n\n"
+        f"- Exact claim / theorem text: {claim_text}\n\n"
+        "## Coverage Ledger\n\n"
+        "### Named-Parameter Coverage\n\n"
+        "| Parameter | Role / Domain | Proof Location | Status | Notes |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        "| `r_0` | target radius | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
+        "### Hypothesis Coverage\n\n"
+        "| Hypothesis | Proof Location | Status | Notes |\n"
+        "| --- | --- | --- | --- |\n"
+        "| `H1` | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
+        "### Quantifier / Domain Coverage\n\n"
+        "| Obligation | Proof Location | Status | Notes |\n"
+        "| --- | --- | --- | --- |\n"
+        "| for every r_0 > 0 | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
+        "### Conclusion-Clause Coverage\n\n"
+        "| Clause | Proof Location | Status | Notes |\n"
+        "| --- | --- | --- | --- |\n"
+        "| target annulus is reached | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
+        "## Adversarial Probe\n\n"
+        "- Probe type: dropped-parameter test\n"
+        "- Result: Human audit still required.\n\n"
+        "## Verdict\n\n"
+        "- Scope status: `unclear`\n"
+        "- Quantifier status: `unclear`\n"
+        "- Counterexample status: `not_attempted`\n\n"
+        "## Required Follow-Up\n\n"
+        "- Complete the proof-redteam audit.\n"
+    )
+
+
+def test_validate_proof_redteam_calls_public_validator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD").mkdir()
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    artifact_path = tmp_path / "PROOF-REDTEAM.md"
+    artifact_path.write_text("# Proof Redteam\n", encoding="utf-8")
+    calls: dict[str, object] = {}
+
+    def fake_validator(path: Path, *, project_root: Path) -> dict[str, object]:
+        calls["path"] = path
+        calls["project_root"] = project_root
+        return {
+            "valid": True,
+            "status": "gaps_found",
+            "errors": [],
+            "artifact_path": str(path),
+        }
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_validator", lambda: fake_validator)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "validate", "proof-redteam", str(artifact_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["valid"] is True
+    assert payload["status"] == "gaps_found"
+    assert payload["artifact_path"] == str(artifact_path)
+    assert calls["path"] == artifact_path
+    assert calls["project_root"] == tmp_path
+
+
+def test_validate_proof_redteam_exits_nonzero_when_validator_reports_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD").mkdir()
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    artifact_path = tmp_path / "PROOF-REDTEAM.md"
+    artifact_path.write_text("# Proof Redteam\n", encoding="utf-8")
+
+    def fake_validator(path: Path, *, project_root: Path) -> dict[str, object]:
+        del project_root
+        return {
+            "valid": False,
+            "status": "invalid",
+            "errors": [f"{path.name} is missing required proof inventory"],
+        }
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_validator", lambda: fake_validator)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "validate", "proof-redteam", str(artifact_path)],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["valid"] is False
+    assert payload["errors"] == ["PROOF-REDTEAM.md is missing required proof inventory"]
+
+
+def test_proof_redteam_skeleton_raw_uses_builder_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_builder(*, claim_id: str, claim_text: str | None, status: str) -> dict[str, object]:
+        calls["claim_id"] = claim_id
+        calls["claim_text"] = claim_text
+        calls["status"] = status
+        rendered_claim_text = claim_text or "<fill exact claim>"
+        return {
+            "frontmatter": {
+                "status": status,
+                "claim_ids": [claim_id],
+            },
+            "markdown_draft": _proof_redteam_markdown(
+                claim_id=claim_id,
+                claim_text=rendered_claim_text,
+                status=status,
+            ),
+            "target_artifact_ref": "GPD/publication/demo/review/PROOF-REDTEAM.md",
+            "warnings": ["Skeleton is non-passing until the audit is completed."],
+        }
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "For every r_0 > 0, the target annulus is reached.",
+            "--status",
+            "human_needed",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["claim_id"] == "CLM-001"
+    assert payload["claim_text"] == "For every r_0 > 0, the target annulus is reached."
+    assert payload["target_status"] == "human_needed"
+    assert payload["frontmatter"]["status"] == "human_needed"
+    assert "Exact claim / theorem text: For every r_0 > 0" in payload["markdown_draft"]
+    assert payload["validation_commands"] == [
+        "gpd validate proof-redteam GPD/publication/demo/review/PROOF-REDTEAM.md"
+    ]
+    assert payload["warnings"] == ["Skeleton is non-passing until the audit is completed."]
+    assert calls == {
+        "claim_id": "CLM-001",
+        "claim_text": "For every r_0 > 0, the target annulus is reached.",
+        "status": "human_needed",
+    }
+
+
+def test_proof_redteam_skeleton_rejects_passed_status_before_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unexpected_builder(**kwargs):
+        raise AssertionError(f"proof-redteam skeleton builder should not run for invalid status: {kwargs}")
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: unexpected_builder)
+
+    result = runner.invoke(
+        app,
+        ["--raw", "proof-redteam", "skeleton", "--claim-id", "CLM-001", "--status", "passed"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "gaps_found, human_needed" in str(payload["error"])
+
+
+def test_proof_redteam_skeleton_write_refuses_existing_without_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_path = tmp_path / "PROOF-REDTEAM.md"
+    target_path.write_text("existing audit\n", encoding="utf-8")
+
+    def fake_builder(*, claim_id: str, claim_text: str | None, status: str) -> dict[str, object]:
+        del claim_text
+        return {
+            "markdown_draft": _proof_redteam_markdown(
+                claim_id=claim_id,
+                claim_text="For every r_0 > 0, the target annulus is reached.",
+                status=status,
+            )
+        }
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        [
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--write",
+            "--output",
+            str(target_path),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is False
+    assert payload["target_path"] == str(target_path)
+    assert "--force" in payload["error"]
+    assert target_path.read_text(encoding="utf-8") == "existing audit\n"
+
+
+def test_proof_redteam_skeleton_write_force_overwrites_target(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target_path = tmp_path / "PROOF-REDTEAM.md"
+    target_path.write_text("existing audit\n", encoding="utf-8")
+
+    def fake_builder(*, claim_id: str, claim_text: str | None, status: str) -> dict[str, object]:
+        return {
+            "markdown_draft": _proof_redteam_markdown(
+                claim_id=claim_id,
+                claim_text=claim_text or "For every r_0 > 0, the target annulus is reached.",
+                status=status,
+            )
+        }
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: fake_builder)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "For every r_0 > 0, the target annulus is reached.",
+            "--write",
+            "--output",
+            str(target_path),
+            "--force",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["replaced"] is True
+    assert payload["target_path"] == str(target_path)
+    assert payload["validation_commands"] == [f"gpd validate proof-redteam {target_path}"]
+    content = target_path.read_text(encoding="utf-8")
+    assert content.startswith("---\nstatus: gaps_found")
+    assert "Exact claim / theorem text: For every r_0 > 0" in content
+
+
+def test_proof_redteam_skeleton_write_can_validate_with_bound_proof_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "GPD" / "review").mkdir(parents=True)
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    proof_path = tmp_path / "paper" / "main.tex"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("\\begin{theorem}Demo.\\end{theorem}\n", encoding="utf-8")
+    target_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM.md"
+
+    write_result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "skeleton",
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "For every r_0 > 0, the target annulus is reached.",
+            "--proof-artifact-path",
+            "paper/main.tex",
+            "--write",
+            "--output",
+            str(target_path),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert write_result.exit_code == 0, write_result.output
+    write_payload = _raw_payload_from_result(write_result)
+    assert write_payload["written"] is True
+    content = target_path.read_text(encoding="utf-8")
+    assert "proof_artifact_paths:\n- paper/main.tex" in content
+    assert "reviewer: gpd-check-proof" in content
+
+    validate_result = runner.invoke(
+        app,
+        ["--raw", "validate", "proof-redteam", str(target_path)],
+        catch_exceptions=False,
+    )
+
+    assert validate_result.exit_code == 0, validate_result.output
+    validate_payload = _raw_payload_from_result(validate_result)
+    assert validate_payload["valid"] is True
+    assert validate_payload["status"] == "gaps_found"
 
 
 def _colon_rich_verification_body() -> str:

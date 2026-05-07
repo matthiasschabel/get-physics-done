@@ -433,13 +433,13 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
 
     assert verifier.count("## Agent Requirements") == 1
     assert verifier.index("## Agent Requirements") < verifier.index("## Bootstrap Discipline")
-    if descriptor.native_include_support:
-        for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
-            assert _raw_include_count(verifier, include_suffix) == 1
-    else:
-        assert verifier.count("# Verification Report Template") == 1
-        assert verifier.count("# Contract Results Schema") == 1
-        assert verifier.count("# Canonical Schema Discipline") == 1
+    for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
+        assert include_suffix in verifier
+        assert _raw_include_count(verifier, include_suffix) == 0
+    assert "# Verification Report Template" not in verifier
+    assert "# Contract Results Schema" not in verifier
+    assert "# Canonical Schema Discipline" not in verifier
+    assert "gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract" in verifier
     assert len(verifier.splitlines()) <= line_budget
     assert len(verifier) <= char_budget
 

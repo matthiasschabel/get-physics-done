@@ -192,7 +192,7 @@ task(
   subagent_type="gpd-check-proof",
   model="{check_proof_model}",
   readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions. Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md. Write `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md`; audit phase proof artifacts, PLAN contract slice, and any current verification artifact; return through the typed proof-redteam handoff contract."
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions. Use `gpd proof-redteam skeleton` for helper-owned proof-redteam frontmatter and `gpd validate proof-redteam` before reporting completion; use {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md as authority references when helper/validator errors require them. Write `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md`; audit phase proof artifacts, PLAN contract slice, and any current verification artifact; return through the typed proof-redteam handoff contract."
 )
 ```
 
@@ -263,7 +263,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict); replace `BODY.md` in its `writer_command` with that file; run it. The writer serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and schema refs for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
+If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict); replace `BODY.md` in its `writer_command` with that file; run it. The writer serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
 </step>
 
 <step name="sync_verifier_output">

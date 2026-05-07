@@ -48,10 +48,14 @@ def test_verifier_prompt_points_to_canonical_verification_schema_sources() -> No
     assert "templates/verification-report.md" in verifier
     assert "templates/contract-results-schema.md" in verifier
     assert "references/shared/canonical-schema-discipline.md" in verifier
-    assert (
-        "Immediately before writing or validating `VERIFICATION.md`, load the canonical schema references on demand:"
-        in verifier
-    )
+    assert "**Canonical verification report authoring (required):**" in verifier
+    assert "Use the report helper as the primary frontmatter writer." in verifier
+    assert "`gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract`" in verifier
+    assert "do not inline or recreate their full YAML in the prompt or report body" in verifier
+    assert "@{GPD_INSTALL_DIR}/templates/verification-report.md" not in verifier
+    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in verifier
+    assert "# Verification Report Template" not in expanded_verifier
+    assert "# Contract Results Schema" not in expanded_verifier
     assert "## Canonical LLM Error References" in verifier
     assert (
         "include a machine-readable `ASSERT_CONVENTION` comment immediately after the YAML frontmatter in `VERIFICATION.md`."
@@ -75,11 +79,16 @@ def test_verifier_prompt_surfaces_validator_enforced_contract_ledger_rules() -> 
     verifier = _read_verifier_prompt()
     contract_results_schema = (TEMPLATES_DIR / "contract-results-schema.md").read_text(encoding="utf-8")
 
-    assert "Do not restate the schema from memory." in verifier
-    assert (
-        "Treat those files as the source of truth for `plan_contract_ref`, `contract_results`, "
-        "`comparison_verdicts`, `suggested_contract_checks`, proof-audit fields"
-    ) in verifier
+    for contract_anchor in (
+        "`plan_contract_ref`",
+        "`contract_results`",
+        "`contract_results.uncertainty_markers`",
+        "`comparison_verdicts`",
+        "`suggested_contract_checks`",
+        "proof-audit linkage",
+    ):
+        assert contract_anchor in verifier
+    assert "helper/validator-owned" in verifier
     assert (
         "If `contract_results` or `comparison_verdicts` are present, `plan_contract_ref` is required." not in verifier
     )
@@ -87,7 +96,8 @@ def test_verifier_prompt_surfaces_validator_enforced_contract_ledger_rules() -> 
     assert "project-only IDs go in body/unbound suggestions" in verifier
     assert "No `gpd_return`, `computational_oracle`, or runtime fields in frontmatter" in verifier
     assert "Oracle in body; return after report." in verifier
-    assert "Unclear `evidence[]`: use parent `summary` / `notes`." in verifier
+    assert "Do not invent comparison-verdict keys, aliases, or empty evidence to pass." in verifier
+    assert "prefer the helper-generated compact gap ledger" in verifier
     assert "plan_contract_ref: GPD/phases/XX-name/XX-YY-PLAN.md#/contract" in contract_results_schema
     assert (
         "`contract_results` is keyed to `plan_contract_ref`; project-only IDs belong in body" in contract_results_schema
@@ -125,7 +135,7 @@ def test_verifier_prompt_surfaces_validator_enforced_contract_ledger_rules() -> 
     assert "keep `project_dir` as the top-level absolute project root argument" in verifier
     assert "bind only `supported_binding_fields`" in verifier
     assert "Execute `run_contract_check(request=..., project_dir=...)`." in verifier
-    assert "required reference actions missing" in verifier
+    assert "identify the contract target, expectation, failed/partial check, category, computation evidence" in verifier
     assert "`suggested_contract_check`" not in verifier
 
 
@@ -154,7 +164,8 @@ def test_verifier_prompt_reloads_the_canonical_schema_files_once() -> None:
     assert verifier.count("templates/verification-report.md") == 1
     assert verifier.count("templates/contract-results-schema.md") == 1
     assert verifier.count("references/shared/canonical-schema-discipline.md") == 1
-    assert "load the canonical schema references on demand" in verifier
+    assert "Use the report helper as the primary frontmatter writer." in verifier
+    assert "as authority references only when the helper or validator errors require them" in verifier
     assert "from Step 2" not in verifier
 
 
@@ -181,11 +192,12 @@ def test_verifier_prompt_frontmatter_example_includes_contract_ledgers() -> None
         in verifier
     )
     assert "filler placeholders" not in verifier
-    assert "Use the loaded canonical report template and result-ledger schema" in verifier
+    assert "Write the report body as body-only Markdown" in verifier
+    assert "let `gpd verification-report skeleton --write --body-file ... --validate contract` serialize the frontmatter" in verifier
     assert "### Validation Stop Rule" in verifier
     assert "max two targeted repairs" in verifier
     assert "`gpd_return.status: blocked` with latest errors" in verifier
-    assert "No aliases or empty evidence to pass." in verifier
+    assert "aliases, or empty evidence to pass" in verifier
     assert "### Frontmatter Schema (YAML)" not in verifier
     assert "Verification reports are the decisive readout of the same contract-backed ledger" in verification_template
     assert "Frontmatter is not the return channel: no `gpd_return`, `computational_oracle`" in verification_template
@@ -225,7 +237,7 @@ def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review
         "<!-- Stub detection patterns extracted to reduce context. Load on demand from `references/verification/examples/verifier-worked-examples.md`. -->"
         in verifier
     )
-    assert "proof-audit fields, status vocabularies, ID linkage, and stale-audit handling" in verifier
+    assert "proof-audit linkage, status vocabularies, ID linkage, and stale-audit handling" in verifier
     assert (
         "Every named theorem parameter or hypothesis is used or explicitly discharged; no theorem symbol may disappear without explanation"
         not in verifier

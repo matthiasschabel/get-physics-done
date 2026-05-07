@@ -46,7 +46,8 @@ Do not raw-include the verification reference library at workflow load. Load onl
 - `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` -> target status, top-level verification status, and runtime return-status boundary
 - `{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md` -> context include/exclude choices
 - `{GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md` -> uncertainty or propagation targets
-- `{GPD_INSTALL_DIR}/templates/verification-report.md` and `{GPD_INSTALL_DIR}/templates/contract-results-schema.md` -> immediately before writing `VERIFICATION.md`
+- `gpd verification-report skeleton --write --body-file ... --validate contract` -> report frontmatter/writer helper
+- `{GPD_INSTALL_DIR}/templates/verification-report.md` and `{GPD_INSTALL_DIR}/templates/contract-results-schema.md` -> authority references only when helper/validator errors require them
 </required_reading>
 
 <process>
@@ -184,7 +185,7 @@ task(
   model="{check_proof_model}",
   readonly=false,
   prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions.
-Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md before writing any proof audit artifact.
+Use `gpd proof-redteam skeleton` for helper-owned proof-redteam frontmatter and `gpd validate proof-redteam` before reporting completion. Use {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md as authority references when helper/validator errors require them.
 
 Operate in proof-redteam repair mode with a fresh context and follow the shared verification child-return contract.
 
@@ -610,11 +611,11 @@ If gaps_found:
 REPORT_PATH="$phase_dir/${phase_number}-VERIFICATION.md"
 ```
 
-Fill template sections: frontmatter (phase/verified/status/score/plan_contract_ref/contract_results including `uncertainty_markers`/comparison_verdicts/suggested_contract_checks), goal achievement, contract targets table, artifact table, computational verification details (spot-checks, limits re-derived, cross-checks, dimensional analysis traces), physics checks table, requirements coverage, anti-patterns, cross-phase consistency, expert verification, gaps summary with computation evidence, fix plans (if gaps_found), metadata. The contract targets table should read like a user-visible outcome ledger, not a workflow checklist.
+Write body-only evidence first, then create/update the report with `gpd verification-report skeleton PLAN.md --write --output "$REPORT_PATH" --force --body-file BODY.md --validate contract`. The helper owns frontmatter shape, `plan_contract_ref`, `contract_results`, `comparison_verdicts`, `suggested_contract_checks`, and validation. The body owns goal achievement, contract target narrative, artifact table, computational verification details (spot-checks, limits re-derived, cross-checks, dimensional analysis traces), physics checks, requirements coverage, anti-patterns, cross-phase consistency, expert verification, gaps summary with computation evidence, and fix plans.
 
-If the verifier identifies a decisive check that the contract omitted but downstream work clearly depends on, record it under `suggested_contract_checks` with a reason and recommended evidence path. Do not hide this by marking the parent target VERIFIED; keep the target PARTIAL or FAILED until the missing decisive check is resolved or explicitly re-scoped.
+If the verifier identifies a decisive check that the contract omitted but downstream work clearly depends on, keep the body evidence explicit and let the helper/validator-owned ledger carry `suggested_contract_checks`. Do not hide this by marking the parent target VERIFIED; keep the target PARTIAL or FAILED until the missing decisive check is resolved or explicitly re-scoped.
 
-See {GPD_INSTALL_DIR}/templates/verification-report.md for complete template.
+Use {GPD_INSTALL_DIR}/templates/verification-report.md as the canonical template reference when the helper or validator reports a schema issue; do not hand-author or reflow full YAML/frontmatter.
 </step>
 
 <step name="oracle_gate_check">
@@ -681,6 +682,6 @@ When this workflow returns directly to the user or a blocking status stops orche
 - [ ] Expert verification items identified with explanation of computational limitations
 - [ ] Overall status determined through the verification-status authority, with independently-confirmed count kept out of frontmatter
 - [ ] Fix plans generated with computation evidence (if gaps_found)
-- [ ] VERIFICATION.md created with complete computational verification details
+- [ ] VERIFICATION.md created via the verification-report helper with complete computational verification details in the body
 - [ ] Results returned to orchestrator
 </success_criteria>

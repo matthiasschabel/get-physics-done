@@ -173,6 +173,11 @@ def _assert_phrases_visible(text: str, phrases: set[str], *, label: str) -> None
     assert not missing, f"{label} is missing canonical choice phrases: {', '.join(missing)}"
 
 
+def _assert_fragments_visible(text: str, fragments: tuple[str, ...], *, label: str) -> None:
+    missing = sorted(fragment for fragment in fragments if fragment not in text)
+    assert not missing, f"{label} is missing schema-authority fragments: {', '.join(missing)}"
+
+
 def _choice_line(field_name: str, values: tuple[str, ...]) -> str:
     return f"{field_name}: {' | '.join(values)}"
 
@@ -201,16 +206,12 @@ def test_plan_contract_schema_surfaces_canonical_research_contract_fields() -> N
         assert phrase in plan_schema
 
 
-def test_expanded_phase_prompt_surfaces_the_same_research_contract_fields_before_generation() -> None:
-    phase_prompt = _expanded(TEMPLATES_DIR / "phase-prompt.md")
+def test_phase_prompt_points_to_plan_contract_schema_authority_and_validator_before_generation() -> None:
+    raw_phase_prompt = _read(TEMPLATES_DIR / "phase-prompt.md")
+    expanded_phase_prompt = _expanded(TEMPLATES_DIR / "phase-prompt.md")
 
-    _assert_tokens_visible(phase_prompt, _field_tokens(*PLAN_MODELS), label="expanded phase-prompt.md")
-    assert "scalar|curve|map|classification|proof_obligation|other" in phase_prompt
-    assert "do not count as grounding" in phase_prompt
-    assert "proof-specific acceptance test" in phase_prompt
-    assert "proof_deliverables`, `parameters`, `hypotheses`, and `conclusion_clauses" in phase_prompt
-    for phrase in PLAN_QUANTIFIER_VISIBILITY_PHRASES:
-        assert phrase in phase_prompt
+    assert "templates/plan-contract-schema.md" in raw_phase_prompt
+    assert "gpd validate plan-contract" in expanded_phase_prompt
 
 
 def test_contract_results_schema_and_verification_template_surface_canonical_result_ledger_fields() -> None:
@@ -235,17 +236,50 @@ def test_contract_results_schema_and_verification_template_surface_canonical_res
         assert phrase in contract_results_schema
 
 
-def test_expanded_verifier_and_executor_prompts_keep_canonical_result_ledger_fields_visible() -> None:
-    verifier_prompt = _expanded(AGENTS_DIR / "gpd-verifier.md")
-    executor_prompt = _expanded(AGENTS_DIR / "gpd-executor.md")
+def test_expanded_verifier_and_executor_prompts_keep_schema_authority_helpers_and_validators_visible() -> None:
+    raw_verifier_prompt = _read(AGENTS_DIR / "gpd-verifier.md")
+    raw_executor_prompt = _read(AGENTS_DIR / "gpd-executor.md")
+    expanded_verifier_prompt = _expanded(AGENTS_DIR / "gpd-verifier.md")
+    expanded_executor_prompt = _expanded(AGENTS_DIR / "gpd-executor.md")
 
-    tokens = _field_tokens(*RESULT_MODELS)
-    phrases = _choice_phrases(*RESULT_MODELS)
-
-    _assert_tokens_visible(verifier_prompt, tokens, label="expanded gpd-verifier.md")
-    _assert_tokens_visible(executor_prompt, tokens, label="expanded gpd-executor.md")
-    _assert_phrases_visible(verifier_prompt, phrases, label="expanded gpd-verifier.md")
-    _assert_phrases_visible(executor_prompt, phrases, label="expanded gpd-executor.md")
+    _assert_fragments_visible(
+        raw_verifier_prompt,
+        (
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md",
+        ),
+        label="gpd-verifier.md",
+    )
+    _assert_fragments_visible(
+        expanded_verifier_prompt,
+        (
+            "verification_report_skeleton_bridge",
+            "writer_command",
+            "skeleton_command",
+            "gpd frontmatter validate",
+            "gpd validate verification-contract",
+        ),
+        label="expanded gpd-verifier.md",
+    )
+    _assert_fragments_visible(
+        raw_executor_prompt,
+        (
+            "templates/contract-results-schema.md",
+            "templates/summary.md",
+        ),
+        label="gpd-executor.md",
+    )
+    _assert_fragments_visible(
+        expanded_executor_prompt,
+        (
+            "plan_contract_ref",
+            "contract_results",
+            "comparison_verdicts",
+            "gpd validate summary-contract",
+        ),
+        label="expanded gpd-executor.md",
+    )
 
 
 def test_project_contract_schema_examples_surface_validator_accepted_proof_objects() -> None:
@@ -362,9 +396,12 @@ def test_project_contract_model_literals_use_exported_enum_constants() -> None:
     assert _ordered_literal_tokens(ContractLink.model_fields["relation"].annotation) == CONTRACT_LINK_RELATION_VALUES
 
 
-def test_contract_results_schema_and_expanded_prompts_surface_full_proof_audit_status_vocabularies() -> None:
+def test_contract_results_schema_surfaces_full_proof_audit_status_vocabularies() -> None:
     expected_lines = (
-        _choice_line("proof_audit.completeness", _ordered_literal_tokens(ContractProofAudit.model_fields["completeness"].annotation)),
+        _choice_line(
+            "proof_audit.completeness",
+            _ordered_literal_tokens(ContractProofAudit.model_fields["completeness"].annotation),
+        ),
         _choice_line("proof_audit.quantifier_status", PROOF_AUDIT_QUANTIFIER_STATUS_VALUES),
         _choice_line("proof_audit.scope_status", PROOF_AUDIT_SCOPE_STATUS_VALUES),
         _choice_line("proof_audit.counterexample_status", PROOF_AUDIT_COUNTEREXAMPLE_STATUS_VALUES),
@@ -372,10 +409,6 @@ def test_contract_results_schema_and_expanded_prompts_surface_full_proof_audit_s
     )
 
     contract_results_schema = _read(TEMPLATES_DIR / "contract-results-schema.md")
-    verifier_prompt = _expanded(AGENTS_DIR / "gpd-verifier.md")
-    executor_prompt = _expanded(AGENTS_DIR / "gpd-executor.md")
 
     for line in expected_lines:
         assert line in contract_results_schema
-        assert line in verifier_prompt
-        assert line in executor_prompt

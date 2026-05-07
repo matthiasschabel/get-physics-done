@@ -2620,13 +2620,13 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
     assert "`suggested_contract_check`" not in verify_workflow
     assert "independently_confirmed" not in verify_workflow
     assert "Return status (`passed` | `gaps_found` | `expert_needed` | `human_needed`)" in verify_phase
-    assert "contract_results including `uncertainty_markers`" in verify_phase
-    assert "frontmatter (phase/verified/status/score/plan_contract_ref/contract_results" in verify_phase
+    assert "gpd verification-report skeleton PLAN.md --write --output" in verify_phase
+    assert "The helper owns frontmatter shape, `plan_contract_ref`, `contract_results`, `comparison_verdicts`, `suggested_contract_checks`, and validation." in verify_phase
     assert "frontmatter (phase/timestamp/status/score" not in verify_phase
     assert "independently_confirmed" not in verify_phase
     assert "`suggested_contract_check`" not in verify_phase
-    assert "gap_subject_kind" in verifier_agent
-    assert "Each gap has: `gap_subject_kind`" in verifier_agent
+    assert "Use the verification-report helper to serialize the gap ledger" in verifier_agent
+    assert "The body must still make every gap actionable" in verifier_agent
     assert "Each gap has: `subject_kind`" not in verifier_agent
     assert "Verification Status:** {passed | gaps_found | expert_needed | human_needed}" in verifier_agent
     assert "`suggested_contract_check`" not in verifier_agent
@@ -2828,12 +2828,14 @@ def test_verification_prompts_keep_suggested_contract_check_bindings_schema_tigh
         in verification_template
     )
     assert "proof-audit rules in the canonical schema" in verification_template
-    assert "@{GPD_INSTALL_DIR}/templates/verification-report.md" in verifier_agent
-    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in verifier_agent
-    assert "Do not inline a second YAML schema here." in verifier_agent
-    assert "proof-audit fields" in verifier_agent
-    assert "gap_subject_kind" in verifier_agent
-    assert "Each gap has: `gap_subject_kind`" in verifier_agent
+    assert "{GPD_INSTALL_DIR}/templates/verification-report.md" in verifier_agent
+    assert "{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in verifier_agent
+    assert "@{GPD_INSTALL_DIR}/templates/verification-report.md" not in verifier_agent
+    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in verifier_agent
+    assert "do not inline or recreate their full YAML" in verifier_agent
+    assert "proof-audit linkage" in verifier_agent
+    assert "helper-generated compact gap ledger" in verifier_agent
+    assert "The body must still make every gap actionable" in verifier_agent
     assert "Each gap has: `subject_kind`" not in verifier_agent
     assert "Verification Status:** {passed | gaps_found | expert_needed | human_needed}" in verifier_agent
 
@@ -2868,8 +2870,10 @@ def test_lane5_prompt_examples_keep_schema_valid_contract_fields_visible() -> No
     assert "reference-main" not in verify_work
     assert "acceptance-test-main" not in verify_work
     assert "test-benchmark" not in verify_work
-    assert "@{GPD_INSTALL_DIR}/templates/verification-report.md" in verifier
-    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in verifier
+    assert "{GPD_INSTALL_DIR}/templates/verification-report.md" in verifier
+    assert "{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in verifier
+    assert "@{GPD_INSTALL_DIR}/templates/verification-report.md" not in verifier
+    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in verifier
     assert "reference-main" not in verifier
     assert "acceptance-test-main" not in verifier
     assert "test-benchmark" not in verifier

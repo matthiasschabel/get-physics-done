@@ -21,6 +21,9 @@ def test_gpd_check_proof_prompt_stays_within_expected_budget_and_drops_panel_inl
     assert metrics.raw_include_count == 0
     assert metrics.expanded_line_count < 2_400
     assert metrics.expanded_char_count < 125_000
+    assert "gpd proof-redteam skeleton" in source
+    assert "gpd validate proof-redteam" in source
+    assert "helper-owned frontmatter" in source
     assert "{GPD_INSTALL_DIR}/templates/proof-redteam-schema.md" in source
     assert "{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md" in source
     assert "@{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" not in source

@@ -136,7 +136,7 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
         "Use `skeleton_command` only as read-only preview context",
         "do not hand-author or reflow frontmatter",
         "keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML",
-        "Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and schema refs for verifier policy",
+        "Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy",
         "not for wrapper-side schema recreation",
         "Do not wrapper-repair the canonical report.",
     )
@@ -246,6 +246,8 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     assert "Use `phase_proof_review_status` as the proof-review freshness summary." in workflow
+    assert "Use `gpd proof-redteam skeleton` for helper-owned proof-redteam frontmatter" in workflow
+    assert "`gpd validate proof-redteam` before reporting completion" in workflow
     assert "`staged_loading.checkpoints` is not a proof classifier" in workflow
     assert "ignore `phase_proof_review_status.state=not_reviewed|fresh` alone" in workflow
     assert "Classify proof-bearing only from research artifacts" in workflow

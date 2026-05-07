@@ -11,6 +11,7 @@ from gpd.contracts import (
     parse_comparison_verdicts_data_strict,
     parse_contract_results_data_artifact,
 )
+from gpd.core.contract_skeletons import build_contract_results_skeleton
 from gpd.core.frontmatter import extract_frontmatter, reconstruct_frontmatter, validate_frontmatter
 from gpd.core.strict_yaml import load_strict_yaml
 from gpd.core.verification_report import (
@@ -227,6 +228,14 @@ def test_build_verification_gap_report_frontmatter_returns_typed_schema_valid_sk
         ("acceptance_test", "test-stale-verification-decisive"),
         ("reference", "ref-stale-verification-benchmark"),
     }
+
+
+def test_build_verification_gap_report_frontmatter_uses_shared_contract_results_skeleton() -> None:
+    contract = _compact_stale_refresh_contract()
+
+    frontmatter = build_verification_gap_report_frontmatter(contract)
+
+    assert frontmatter["contract_results"] == build_contract_results_skeleton(contract, target="verification")
 
 
 def test_build_verification_report_skeleton_renders_copy_safe_yaml_and_markdown(tmp_path: Path) -> None:

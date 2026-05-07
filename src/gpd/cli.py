@@ -6848,6 +6848,9 @@ app.add_typer(validate_app, name="validate")
 verification_report_app = typer.Typer(help="Verification report skeleton helpers")
 app.add_typer(verification_report_app, name="verification-report")
 
+proof_redteam_app = typer.Typer(help="Proof-redteam artifact helpers")
+app.add_typer(proof_redteam_app, name="proof-redteam")
+
 
 def _resolve_subject_path(subject: str | None, *, base: Path) -> Path | None:
     """Resolve one raw subject string relative to *base* when possible."""
@@ -12227,6 +12230,309 @@ def _write_text_atomically(target_path: Path, content: str) -> None:
                 pass
 
 
+def _load_proof_redteam_validator() -> Callable[..., object]:
+    """Load the public proof-redteam artifact validator."""
+
+    try:
+        from gpd.core.proof_redteam import validate_proof_redteam_artifact
+    except ImportError as exc:
+        raise GPDError(
+            "proof-redteam validator is not available; expected "
+            "gpd.core.proof_redteam.validate_proof_redteam_artifact"
+        ) from exc
+    return validate_proof_redteam_artifact
+
+
+def _load_proof_redteam_skeleton_builder() -> Callable[..., object]:
+    """Load the source-of-truth proof-redteam skeleton builder."""
+
+    try:
+        from gpd.core.proof_redteam import build_proof_redteam_skeleton
+    except ImportError as exc:
+        raise GPDError(
+            "proof-redteam skeleton builder is not available; expected "
+            "gpd.core.proof_redteam.build_proof_redteam_skeleton"
+        ) from exc
+    return build_proof_redteam_skeleton
+
+
+def _validation_result_is_valid(result: object) -> bool:
+    """Return the conventional validation boolean from a result object."""
+
+    for field_name in ("valid", "passed"):
+        if isinstance(result, Mapping) and isinstance(result.get(field_name), bool):
+            return bool(result[field_name])
+        value = getattr(result, field_name, None)
+        if isinstance(value, bool):
+            return value
+    if isinstance(result, Mapping) and isinstance(result.get("errors"), list):
+        return len(result["errors"]) == 0
+    errors = getattr(result, "errors", None)
+    if isinstance(errors, list | tuple):
+        return len(errors) == 0
+    return True
+
+
+def _normalize_proof_redteam_skeleton_status(status: str) -> str:
+    normalized = status.strip().lower()
+    if normalized not in {"gaps_found", "human_needed"}:
+        raise GPDError("proof-redteam skeleton --status must be one of: gaps_found, human_needed")
+    return normalized
+
+
+def _normalize_proof_redteam_claim_id(claim_id: str) -> str:
+    normalized = claim_id.strip()
+    if not normalized:
+        raise GPDError("proof-redteam skeleton --claim-id cannot be empty")
+    return normalized
+
+
+def _normalize_optional_proof_redteam_claim_text(claim_text: str | None) -> str | None:
+    if claim_text is None:
+        return None
+    normalized = claim_text.strip()
+    if not normalized:
+        raise GPDError("proof-redteam skeleton --claim-text cannot be empty when provided")
+    return normalized
+
+
+def _normalize_proof_redteam_proof_artifact_paths(proof_artifact_paths: list[str] | None) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_path in proof_artifact_paths or []:
+        path = raw_path.strip()
+        if not path:
+            raise GPDError("proof-redteam skeleton --proof-artifact-path cannot be empty")
+        if path in seen:
+            continue
+        seen.add(path)
+        normalized.append(path)
+    return normalized
+
+
+def _call_proof_redteam_skeleton_builder(
+    builder: Callable[..., object],
+    *,
+    claim_id: str,
+    claim_text: str | None,
+    status: str,
+    proof_artifact_paths: list[str],
+) -> object:
+    kwargs: dict[str, object] = {
+        "claim_id": claim_id,
+        "status": status,
+    }
+    if claim_text is not None or _callable_accepts_kwarg(builder, "claim_text"):
+        kwargs["claim_text"] = claim_text
+    if proof_artifact_paths or _callable_accepts_kwarg(builder, "proof_artifact_paths"):
+        kwargs["proof_artifact_paths"] = proof_artifact_paths
+    return builder(**kwargs)
+
+
+def _proof_redteam_validation_commands_for_ref(artifact_ref: str) -> list[str]:
+    return [f"gpd validate proof-redteam {shlex.quote(artifact_ref)}"]
+
+
+def _proof_redteam_artifact_ref_from_payload(payload: Mapping[str, object]) -> str:
+    for key in ("target_artifact_ref", "target_report_ref", "target_artifact_path", "target_path"):
+        rendered = _project_local_gpd_ref(payload.get(key))
+        if rendered:
+            return rendered
+    return "PROOF-REDTEAM.md"
+
+
+def _normalize_proof_redteam_skeleton_output(
+    raw_payload: object,
+    *,
+    claim_id: str,
+    claim_text: str | None,
+    target_status: str,
+) -> dict[str, object]:
+    if isinstance(raw_payload, str):
+        payload: object = {"markdown_draft": raw_payload}
+    elif hasattr(raw_payload, "model_dump"):
+        payload = raw_payload.model_dump(mode="json", by_alias=True)
+    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
+        payload = dataclasses.asdict(raw_payload)
+    else:
+        payload = raw_payload
+    if not isinstance(payload, Mapping):
+        raise GPDError("proof-redteam skeleton builder must return a mapping or Markdown string")
+
+    normalized = dict(payload)
+    normalized.setdefault("claim_id", claim_id)
+    if claim_text is not None:
+        normalized.setdefault("claim_text", claim_text)
+    normalized.setdefault("status", target_status)
+    normalized.setdefault("target_status", target_status)
+    if "validation_commands" not in normalized:
+        normalized["validation_commands"] = _proof_redteam_validation_commands_for_ref(
+            _proof_redteam_artifact_ref_from_payload(normalized)
+        )
+    if "warnings" not in normalized:
+        normalized["warnings"] = []
+    markdown_draft = normalized.get("markdown_draft")
+    if not isinstance(markdown_draft, str) or not markdown_draft.strip():
+        raise GPDError("proof-redteam skeleton payload is missing markdown_draft")
+    return normalized
+
+
+def _emit_proof_redteam_skeleton(payload: Mapping[str, object]) -> None:
+    if _raw:
+        _emit_raw_json(dict(payload))
+        return
+    markdown_draft = payload.get("markdown_draft")
+    if not isinstance(markdown_draft, str) or not markdown_draft.strip():
+        raise GPDError("proof-redteam skeleton payload is missing markdown_draft")
+    typer.echo(markdown_draft.rstrip() + "\n", nl=False)
+
+
+def _proof_redteam_output_target(output_path: str | None) -> Path:
+    if output_path is None or not output_path.strip():
+        raise GPDError("proof-redteam skeleton --write requires --output PATH")
+    target = Path(output_path).expanduser()
+    if not target.is_absolute():
+        target = _get_cwd() / target
+    return target.resolve(strict=False)
+
+
+def _proof_redteam_write_not_run(error: str, *, target_path: Path, force: bool) -> dict[str, object]:
+    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    return {
+        "written": False,
+        "target_path": str(target_path),
+        "target_ref": target_ref,
+        "replaced": False,
+        "force": force,
+        "error": error,
+        "validation_commands": _proof_redteam_validation_commands_for_ref(target_ref),
+    }
+
+
+@proof_redteam_app.command("skeleton")
+def proof_redteam_skeleton_cmd(
+    claim_id: str = typer.Option(..., "--claim-id", help="Claim or theorem id under proof-redteam review."),
+    claim_text: str | None = typer.Option(None, "--claim-text", help="Exact claim text to seed the skeleton."),
+    status: str = typer.Option(
+        "gaps_found",
+        "--status",
+        help="Target proof-redteam status for the skeleton: gaps_found or human_needed.",
+    ),
+    proof_artifact_paths: list[str] | None = typer.Option(
+        None,
+        "--proof-artifact-path",
+        "--proof-artifact",
+        help="Proof artifact path to bind in frontmatter. Repeatable.",
+    ),
+    write: bool = typer.Option(
+        False, "--write", help="Write the rendered PROOF-REDTEAM artifact instead of only printing it."
+    ),
+    output_path: str | None = typer.Option(None, "--output", help="Target PROOF-REDTEAM.md path for --write."),
+    force: bool = typer.Option(False, "--force", help="Allow --write to replace an existing target."),
+) -> None:
+    """Build a conservative proof-redteam artifact skeleton."""
+
+    try:
+        normalized_claim_id = _normalize_proof_redteam_claim_id(claim_id)
+        normalized_claim_text = _normalize_optional_proof_redteam_claim_text(claim_text)
+        normalized_status = _normalize_proof_redteam_skeleton_status(status)
+        normalized_proof_artifact_paths = _normalize_proof_redteam_proof_artifact_paths(proof_artifact_paths)
+    except GPDError as exc:
+        _error(str(exc))
+
+    if output_path is not None and not write:
+        _error("proof-redteam skeleton --output requires --write")
+
+    try:
+        builder = _load_proof_redteam_skeleton_builder()
+    except GPDError as exc:
+        _error(str(exc))
+    try:
+        raw_payload = _call_proof_redteam_skeleton_builder(
+            builder,
+            claim_id=normalized_claim_id,
+            claim_text=normalized_claim_text,
+            status=normalized_status,
+            proof_artifact_paths=normalized_proof_artifact_paths,
+        )
+        payload = _normalize_proof_redteam_skeleton_output(
+            raw_payload,
+            claim_id=normalized_claim_id,
+            claim_text=normalized_claim_text,
+            target_status=normalized_status,
+        )
+    except ValueError as exc:
+        _error(str(exc))
+    except GPDError as exc:
+        _error(str(exc))
+
+    if not write:
+        try:
+            _emit_proof_redteam_skeleton(payload)
+        except GPDError as exc:
+            _error(str(exc))
+        return
+
+    try:
+        target_path = _proof_redteam_output_target(output_path)
+    except GPDError as exc:
+        _error(str(exc))
+    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    validation_commands = _proof_redteam_validation_commands_for_ref(target_ref)
+    markdown_draft = payload["markdown_draft"]
+    assert isinstance(markdown_draft, str)
+    target_exists = target_path.exists()
+    if target_exists and not force:
+        _emit_raw_json(
+            _proof_redteam_write_not_run(
+                f"target exists; pass --force to overwrite: {_format_display_path(target_path)}",
+                target_path=target_path,
+                force=force,
+            )
+        )
+        raise typer.Exit(code=1)
+    if not target_path.parent.exists():
+        _emit_raw_json(
+            _proof_redteam_write_not_run(
+                f"target parent directory does not exist: {_format_display_path(target_path.parent)}",
+                target_path=target_path,
+                force=force,
+            )
+        )
+        raise typer.Exit(code=1)
+    if not target_path.parent.is_dir():
+        _emit_raw_json(
+            _proof_redteam_write_not_run(
+                f"target parent is not a directory: {_format_display_path(target_path.parent)}",
+                target_path=target_path,
+                force=force,
+            )
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        _write_text_atomically(target_path, markdown_draft.rstrip() + "\n")
+    except OSError as exc:
+        _emit_raw_json(
+            _proof_redteam_write_not_run(
+                f"failed to write target atomically: {exc}",
+                target_path=target_path,
+                force=force,
+            )
+        )
+        raise typer.Exit(code=1) from exc
+    _emit_raw_json(
+        {
+            "written": True,
+            "target_path": str(target_path),
+            "target_ref": target_ref,
+            "replaced": target_exists,
+            "force": force,
+            "validation_commands": validation_commands,
+        }
+    )
+
+
 @verification_report_app.command("skeleton")
 def verification_report_skeleton_cmd(
     input_path: str = typer.Argument(..., help="Path to a contract-backed PLAN.md file"),
@@ -12801,6 +13107,27 @@ def validate_verification_contract_cmd(
     }
     _output(result)
     if not result["valid"]:
+        raise typer.Exit(code=1)
+
+
+@validate_app.command("proof-redteam")
+def validate_proof_redteam_cmd(
+    input_path: str = typer.Argument(..., help="Path to a PROOF-REDTEAM.md artifact"),
+) -> None:
+    """Validate a proof-redteam artifact with the public proof audit validator."""
+
+    file_path, _ = _load_text_document_or_error(input_path)
+    project_root = resolve_project_root(file_path.parent, require_layout=True) or _require_project_root(
+        _get_cwd(),
+        command_label="gpd validate proof-redteam",
+    )
+    try:
+        validator = _load_proof_redteam_validator()
+    except GPDError as exc:
+        _error(str(exc))
+    result = validator(file_path, project_root=project_root)
+    _output(result)
+    if not _validation_result_is_valid(result):
         raise typer.Exit(code=1)
 
 

@@ -46,7 +46,7 @@ AGENT_BASELINES = {
     "gpd-review-reader": (52, 3_166),
     "gpd-review-significance": (54, 2_790),
     "gpd-roadmapper": (1_920, 89_849),
-    "gpd-verifier": (717, 49_656),
+    "gpd-verifier": (417, 28_705),
 }
 
 PEER_REVIEW_SPECIALIST_AGENTS = (

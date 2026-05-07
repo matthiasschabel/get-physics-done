@@ -242,14 +242,7 @@ def test_runtime_shell_rewriters_handle_metacharacter_terminated_gpd_commands(
 def test_shared_runtime_shell_rewriter_handles_fenced_command_positions() -> None:
     from gpd.adapters.install_utils import rewrite_gpd_cli_invocations_to_runtime_bridge
 
-    content = (
-        "Prose keeps `gpd status` unchanged.\n"
-        "```bash\n"
-        "gpd status\n"
-        "echo 'gpd status'\n"
-        "echo $(gpd status)\n"
-        "```\n"
-    )
+    content = "Prose keeps `gpd status` unchanged.\n```bash\ngpd status\necho 'gpd status'\necho $(gpd status)\n```\n"
 
     result = rewrite_gpd_cli_invocations_to_runtime_bridge(content, "/runtime/gpd")
 
@@ -257,6 +250,23 @@ def test_shared_runtime_shell_rewriter_handles_fenced_command_positions() -> Non
     assert "/runtime/gpd status" in result
     assert "echo 'gpd status'" in result
     assert "echo $(/runtime/gpd status)" in result
+
+
+def test_shared_runtime_shell_rewriter_handles_double_quoted_command_substitutions() -> None:
+    from gpd.adapters.install_utils import rewrite_gpd_cli_invocations_to_runtime_bridge
+
+    content = (
+        "```bash\n"
+        'if [ "$(echo "$ROADMAP_INFO" | gpd json get .found --default false)" != "true" ]; then\n'
+        "  echo \"$(printf 'gpd status')\"\n"
+        "fi\n"
+        "```\n"
+    )
+
+    result = rewrite_gpd_cli_invocations_to_runtime_bridge(content, "/runtime/gpd")
+
+    assert 'if [ "$(echo "$ROADMAP_INFO" | /runtime/gpd json get .found --default false)" != "true" ]; then' in result
+    assert "echo \"$(printf 'gpd status')\"" in result
 
 
 def test_shared_runtime_shell_rewriter_handles_reserved_word_command_positions() -> None:
@@ -298,9 +308,7 @@ def test_runtime_rewriters_preserve_public_local_cli_contract(module_name: str, 
     content = (
         "Use `gpd --help` before anything else.\n"
         "Keep `gpd config ensure-section` bridged because it is an executable shell step.\n"
-        "```bash\n"
-        + "\n".join([*public_commands, "gpd config ensure-section"])
-        + "\n```\n"
+        "```bash\n" + "\n".join([*public_commands, "gpd config ensure-section"]) + "\n```\n"
     )
 
     result = rewrite(content, "/runtime/gpd")

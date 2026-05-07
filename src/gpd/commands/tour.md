@@ -36,4 +36,11 @@ Follow the included tour workflow end-to-end.
 Keep the response instructional and self-contained. Show the main command paths
 and the situations they fit, but do not hand off to another workflow or create
 any artifacts.
+
+Start with the exact read-only opener from the workflow:
+`This is a read-only tour of the main GPD commands. It will not change your files.`
+Use the runtime-native command labels shown by this command surface in examples
+and include visible examples for `gpd:start`, `gpd:tour`, and `gpd:help` after
+runtime projection. Do not answer a chooser, infer a setup path, or route into a
+follow-up command.
 </process>

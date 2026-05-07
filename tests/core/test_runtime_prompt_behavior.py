@@ -89,8 +89,9 @@ def test_projected_owned_commands_use_descriptor_public_runtime_label_prefix(com
 
 def test_claude_new_project_wrapper_keeps_post_init_next_step_runtime_native() -> None:
     projected = _project_command("new-project", _RUNTIME_WITH_NATIVE_INCLUDE_SUPPORT.runtime_name)
+    public_prefix = validated_public_command_prefix(_RUNTIME_WITH_NATIVE_INCLUDE_SUPPORT)
 
-    assert "`gpd:discuss-phase 1`" in projected
+    assert f"`{public_prefix}discuss-phase 1`" in projected
     assert "show native runtime label" in projected
 
 

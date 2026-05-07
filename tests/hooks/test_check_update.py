@@ -12,6 +12,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from gpd.adapters.runtime_catalog import get_shared_install_metadata, iter_runtime_descriptors
 from gpd.hooks.check_update import (
     UNKNOWN_LATEST_UPDATE_CHECK_TTL_SECONDS,
@@ -893,8 +895,8 @@ class TestMainThrottle:
         spawned_argv = mock_popen.call_args.args[0]
         assert str(explicit_target / "cache" / "gpd-update-check.json") == spawned_argv[-1]
 
-    def test_explicit_target_hook_prefers_workspace_cache_over_fresh_self_cache_when_workspace_install_owns_runtime(
-        self, tmp_path: Path
+    def test_explicit_target_hook_reads_workspace_cache_but_writes_home_cache_when_workspace_install_owns_runtime(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
@@ -921,7 +923,14 @@ class TestMainThrottle:
         )
 
         active_install_target = SimpleNamespace(config_dir=workspace_runtime_dir, install_scope="local")
-        self_install = SimpleNamespace(config_dir=explicit_target, runtime="codex", install_scope="local")
+        self_install = SimpleNamespace(
+            config_dir=explicit_target,
+            runtime="codex",
+            install_scope="local",
+            cache_file=self_cache,
+        )
+
+        monkeypatch.delenv("GPD_DATA_DIR", raising=False)
 
         with (
             patch("gpd.hooks.check_update.__file__", str(hook_path)),
@@ -947,4 +956,5 @@ class TestMainThrottle:
 
         mock_popen.assert_called_once()
         spawned_argv = mock_popen.call_args.args[0]
-        assert spawned_argv[-1] == str(workspace_cache)
+        expected_home_cache_root = home / ".gpd"
+        assert spawned_argv[-1] == str(expected_home_cache_root / "cache" / "gpd-update-check.json")

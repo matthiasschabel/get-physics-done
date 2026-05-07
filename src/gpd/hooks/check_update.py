@@ -330,7 +330,21 @@ def _relevant_update_cache_candidates(
     else:
         relevant_candidates = shared_candidates
 
-    return relevant_candidates, primary_update_cache_file(relevant_candidates, home=resolved_home)
+    cache_file = primary_update_cache_file(relevant_candidates, home=resolved_home)
+    if self_config_dir is not None and workspace_path is not None and _path_is_under(cache_file, workspace_path):
+        from gpd.hooks.runtime_detect import home_update_cache_file
+
+        cache_file = home_update_cache_file(home=resolved_home)
+
+    return relevant_candidates, cache_file
+
+
+def _path_is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def main(argv: list[str] | None = None) -> None:

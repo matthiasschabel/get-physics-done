@@ -192,6 +192,21 @@ def rewrite_runtime_command_surfaces(content: str, *, canonical: str = "skill") 
     return runtime_command_surface_pattern().sub(_replace, content)
 
 
+def rewrite_runtime_command_surfaces_to_public(content: str, *, public_prefix: str) -> str:
+    """Rewrite registered runtime command references to a runtime-public prefix."""
+
+    command_slugs = _registered_command_slugs()
+
+    def _replace(match: re.Match[str]) -> str:
+        if runtime_command_surface_is_path_like_context(content, match):
+            return match.group(0)
+        if match.group("slug") not in command_slugs:
+            return match.group(0)
+        return f"{public_prefix}{match.group('slug')}"
+
+    return runtime_command_surface_pattern().sub(_replace, content)
+
+
 __all__ = [
     "CANONICAL_COMMAND_PREFIX",
     "CANONICAL_SKILL_PREFIX",
@@ -201,6 +216,7 @@ __all__ = [
     "command_slug_from_label",
     "parse_command_label",
     "rewrite_runtime_command_surfaces",
+    "rewrite_runtime_command_surfaces_to_public",
     "runtime_command_prefixes",
     "runtime_command_surface_is_path_like_context",
     "runtime_command_surface_pattern",

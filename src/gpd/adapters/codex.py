@@ -144,7 +144,7 @@ _CODEX_MCP_STARTUP_TIMEOUT_SEC = 30
 _CODEX_COMMAND_RUNTIME_NOTE = (
     "<codex_runtime_notes>\n"
     "Codex shell compatibility:\n"
-    "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `$gpd-...` for Codex commands.\n"
+    "- Keep user-facing command names canonical in prose: `gpd ...` for your normal terminal and `{public_prefix}...` for Codex commands.\n"
     "- When shell steps call the GPD CLI, use {launcher} instead of the ambient `gpd` on PATH.\n"
     "</codex_runtime_notes>\n\n"
 )
@@ -620,7 +620,7 @@ def _rewrite_codex_command_references(content: str) -> str:
         slug = match.group(1)
         if slug not in command_slugs:
             return match.group(0)
-        return f"$gpd-{slug}"
+        return f"{public_prefix}{slug}"
 
     converted = content.replace("`gpd:`", f"`{public_prefix}`")
     converted = _CODEX_SLASH_COMMAND_REFERENCE_RE.sub(_replace, converted)
@@ -759,7 +759,8 @@ def _toml_value(value: object) -> str:
 
 def _inject_codex_command_runtime_note(content: str, launcher: str) -> str:
     """Prepend Codex-specific shell guidance to installed command skills."""
-    note = _CODEX_COMMAND_RUNTIME_NOTE.format(launcher=launcher)
+    public_prefix = validated_public_command_prefix(get_runtime_descriptor("codex"))
+    note = _CODEX_COMMAND_RUNTIME_NOTE.format(launcher=launcher, public_prefix=public_prefix)
     preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
     if not frontmatter:
         return note + _CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE.sub("", content)

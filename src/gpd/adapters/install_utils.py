@@ -350,6 +350,16 @@ def rewrite_gpd_shell_line_to_runtime_bridge(line: str, bridge_command: str) -> 
             index += 1
             continue
 
+        if not in_single and line.startswith("$(", index):
+            command_substitution_end = _find_command_substitution_end(line, index)
+            if command_substitution_end is not None:
+                inner = line[index + 2 : command_substitution_end]
+                pieces.append("$(")
+                pieces.append(rewrite_gpd_shell_line_to_runtime_bridge(inner, bridge_command))
+                pieces.append(")")
+                index = command_substitution_end + 1
+                continue
+
         if (
             not in_single
             and not in_double
@@ -369,6 +379,43 @@ def rewrite_gpd_shell_line_to_runtime_bridge(line: str, bridge_command: str) -> 
         index += 1
 
     return "".join(pieces)
+
+
+def _find_command_substitution_end(line: str, start_index: int) -> int | None:
+    """Return the matching ``)`` for a shell ``$(...)`` starting at *start_index*."""
+    if not line.startswith("$(", start_index):
+        return None
+
+    depth = 1
+    index = start_index + 2
+    in_single = False
+    in_double = False
+    while index < len(line):
+        char = line[index]
+        previous = line[index - 1] if index > 0 else ""
+
+        if char == "'" and not in_double:
+            in_single = not in_single
+            index += 1
+            continue
+
+        if char == '"' and not in_single and previous != "\\":
+            in_double = not in_double
+            index += 1
+            continue
+
+        if not in_single and line.startswith("$(", index):
+            depth += 1
+            index += 2
+            continue
+
+        if char == ")" and not in_single and not in_double:
+            depth -= 1
+            if depth == 0:
+                return index
+
+        index += 1
+    return None
 
 
 def is_gpd_shell_command_start(line: str, index: int) -> bool:

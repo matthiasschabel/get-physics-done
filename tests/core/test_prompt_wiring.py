@@ -1645,10 +1645,7 @@ def test_new_project_wiring_mentions_contract_persistence_and_contract_first_dow
         "## 1. Setup",
         context="new-project scope intake",
     )
-    assert (
-        "gpd --raw stage field-access new-project --stage scope_intake --style instruction"
-        in workflow_text
-    )
+    assert "gpd --raw stage field-access new-project --stage scope_intake --style instruction" in workflow_text
     assert "SCOPE_INIT.staged_loading.required_init_fields" in workflow_text
     for field in (
         "commit_docs",
@@ -2093,8 +2090,6 @@ def test_plan_checker_requires_contract_gate_and_reference_artifacts() -> None:
         machine_exact(
             "plan checker continuation boundary reference",
             "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md",
-            owner="plan-checker",
-            rationale="runtime prompt includes the canonical continuation-boundary reference path",
         ),
         semantic_anchor(
             "plan checker checkpoint handoff stop",
@@ -2478,14 +2473,9 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
         'gpd --raw summary-extract <path> --field one_liner | gpd json get .one_liner --default ""' in progress_workflow
     )
     assert "PHASES=$(gpd --raw phase list)" in gaps_workflow
-    assert (
-        "Load plan inventory with wave grouping from `gpd phase index {phase_number}`."
-        in execute_workflow
-    )
+    assert "Load plan inventory with wave grouping from `gpd phase index {phase_number}`." in execute_workflow
     assert "`objective`" in execute_workflow
-    assert (
-        "summary-extract for one-liners" in execute_workflow
-    )
+    assert "summary-extract for one-liners" in execute_workflow
     assert "ROADMAP=$(gpd --raw roadmap analyze)" in milestone_workflow
     assert (
         'gpd --raw summary-extract "$summary" --field one_liner | gpd json get .one_liner --default ""'
@@ -2907,8 +2897,6 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         machine_exact(
             "research verification report template path",
             "{GPD_INSTALL_DIR}/templates/verification-report.md",
-            owner="verification-schema",
-            rationale="the helper must point at the canonical verification report template",
         ),
         semantic_anchor(
             "research verification uses canonical frontmatter contract",
@@ -3024,8 +3012,6 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         machine_exact(
             "execute-plan contract results schema path",
             "{GPD_INSTALL_DIR}/templates/contract-results-schema.md",
-            owner="execution-contract-results",
-            rationale="executor prompt must reopen the canonical contract results schema path",
         ),
         semantic_anchor(
             "execute-plan reapplies contract-results schema before frontmatter",
@@ -3509,8 +3495,6 @@ def test_contract_schema_references_stay_wired_into_templates_and_review_docs() 
         machine_exact(
             "contract results closed action vocabulary",
             "`read`, `use`, `compare`, `cite`, `avoid`",
-            owner="contract-results-schema",
-            rationale="validators and downstream ledgers share this closed action vocabulary",
         ),
     )
     assert "forbidden_proxy_id" in summary_template
@@ -3573,8 +3557,6 @@ def test_contract_schema_references_stay_wired_into_templates_and_review_docs() 
         machine_exact(
             "plan-phase planner template heading names",
             ("`## Standard Planning Template`", "`## Revision Template`", "`filled_prompt`", "`revision_prompt`"),
-            owner="plan-phase-staged-loading",
-            rationale="stage rendering wires these exact template headings into named prompt payloads",
         ),
         semantic_anchor(
             "plan-phase does not duplicate template-owned gates",
@@ -4873,8 +4855,6 @@ def test_plan_contract_schema_surfaces_downstream_contract_fields_and_normalizat
         machine_exact(
             "plan contract required actions vocabulary",
             "`read`, `use`, `compare`, `cite`, `avoid`",
-            owner="plan-contract-schema",
-            rationale="the plan validator enforces this closed action vocabulary",
         ),
         semantic_anchor(
             "non-scoping plans require decisive contract sections",

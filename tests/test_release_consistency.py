@@ -53,6 +53,7 @@ _SHARED_INSTALL = get_shared_install_metadata()
 _BOOTSTRAP_JSON_ASSETS = (
     "src/gpd/adapters/runtime_catalog.json",
     "src/gpd/adapters/runtime_catalog_schema.json",
+    "src/gpd/bootstrap/installer_metadata.json",
     "src/gpd/core/public_surface_contract.json",
     "src/gpd/core/public_surface_contract_schema.json",
 )
@@ -472,7 +473,10 @@ def test_contributor_docs_describe_gemini_completion_at_cli_boundary() -> None:
     normalized = re.sub(r"\s+", " ", contributing)
 
     assert "Gemini installs are expected to be complete on disk after `GeminiAdapter.install()`" not in contributing
-    assert "Gemini public installs are expected to be complete on disk after the CLI-level install path succeeds" in normalized
+    assert (
+        "Gemini public installs are expected to be complete on disk after the CLI-level install path succeeds"
+        in normalized
+    )
     assert "`gpd install gemini" in normalized
     assert "`npx -y get-physics-done --gemini" in normalized
     assert "Raw `GeminiAdapter.install()` prepares deferred settings" in normalized
@@ -598,7 +602,12 @@ def test_public_bootstrap_installer_pins_the_matching_python_release() -> None:
     content = (repo_root / "bin" / "install.js").read_text(encoding="utf-8")
 
     assert 'require("../package.json")' in content
-    assert 'require("../src/gpd/core/public_surface_contract.json")' in content
+    assert 'require("../src/gpd/core/public_surface_contract.json")' not in content
+    assert "BOOTSTRAP_INSTALLER_METADATA_RELATIVE_PATH" in content
+    assert '"installer_metadata.json"' in content
+    assert "loadBootstrapInstallerMetadata()" in content
+    assert "validateBootstrapInstallerMetadata" in content
+    assert 'crypto.createHash("sha256")' in content
     assert "gpdPythonVersion" in content
     assert '["-m", "venv", "--help"]' in content
     assert "managed environment" in content

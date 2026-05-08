@@ -196,14 +196,10 @@ _EXACT_ASSERTION_THRESHOLDS: dict[str, dict[str, int]] = {
 _TAXONOMY_HELPER_USAGE_SCHEMA_VERSION = "taxonomy_helper_usage.v1"
 _TAXONOMY_HELPER_NAMES: tuple[str, ...] = (
     "assert_fragments",
-    "assert_prompt_baseline_budget",
-    "assert_prompt_budget",
     "assert_prompt_contracts",
-    "assert_prompt_metric_budget",
     "forbidden_duplicate",
     "fragment_count",
     "machine_exact",
-    "prompt_budget",
     "public_exact",
     "semantic_anchor",
 )
@@ -2832,9 +2828,7 @@ def _semantic_duplicate_invariant_groups(
     for category_id, occurrences in occurrences_by_category.items():
         category = _SEMANTIC_DUPLICATE_CATEGORY_BY_ID[category_id]
         file_count = len(files_by_category[category_id])
-        non_reference_occurrence_count = sum(
-            1 for occurrence in occurrences if not occurrence.is_reference_or_template
-        )
+        non_reference_occurrence_count = sum(1 for occurrence in occurrences if not occurrence.is_reference_or_template)
         non_reference_file_count = len(non_reference_files_by_category[category_id])
         sorted_examples = tuple(
             sorted(

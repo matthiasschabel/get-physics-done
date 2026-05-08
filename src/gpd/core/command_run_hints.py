@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from gpd.command_labels import parse_command_label
+from gpd.core.public_surface_contract import local_cli_bridge_commands
 
 COMMAND_RUN_HINT_SCHEMA_VERSION = 1
 COMMAND_RUN_HINT_EXECUTION = "not_executed"
@@ -15,12 +16,6 @@ KIND_LOCAL_CLI_VALIDATION_COMMAND = "local_cli_validation_command"
 KIND_LOCAL_CLI_FINALIZER_COMMAND = "local_cli_finalizer_command"
 KIND_UNKNOWN_DISPLAY_ONLY = "unknown_display_only"
 
-_LOCAL_VALIDATION_COMMAND_PREFIXES = ("gpd validate",)
-_LOCAL_FINALIZER_COMMAND_PREFIXES = (
-    "gpd verification-report",
-    "gpd proof-redteam",
-    "gpd apply-return-updates",
-)
 _SHELL_CONTROL_TOKENS = ("\n", "\r", ";", "|", "&", "<", ">", "`", "$(")
 
 
@@ -56,6 +51,13 @@ class CommandRunHint:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _LocalCliRunHintRule:
+    kind: str
+    command_roots: tuple[str, ...]
+    notes: tuple[str, ...] = ("display_copy_safe", "not_executed")
+
+
 @lru_cache(maxsize=1)
 def _registered_command_slugs() -> frozenset[str]:
     try:
@@ -65,6 +67,45 @@ def _registered_command_slugs() -> frozenset[str]:
             raise
         return frozenset()
     return frozenset(str(slug) for slug in list_commands(name_format="slug"))
+
+
+def _unique_ordered(values: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
+
+
+def _local_validation_command_root(command: str) -> str | None:
+    parts = command.split()
+    if len(parts) >= 2 and parts[0] == "gpd" and parts[1] == "validate":
+        return " ".join(parts[:2])
+    return None
+
+
+@lru_cache(maxsize=1)
+def _contract_local_validation_command_roots() -> tuple[str, ...]:
+    roots = tuple(
+        root
+        for command in local_cli_bridge_commands()
+        if (root := _local_validation_command_root(command)) is not None
+    )
+    return _unique_ordered(roots)
+
+
+@lru_cache(maxsize=1)
+def _local_cli_run_hint_rules() -> tuple[_LocalCliRunHintRule, ...]:
+    return (
+        _LocalCliRunHintRule(
+            kind=KIND_LOCAL_CLI_VALIDATION_COMMAND,
+            command_roots=_contract_local_validation_command_roots(),
+        ),
+        _LocalCliRunHintRule(
+            kind=KIND_LOCAL_CLI_FINALIZER_COMMAND,
+            command_roots=(
+                "gpd verification-report",
+                "gpd proof-redteam",
+                "gpd apply-return-updates",
+            ),
+        ),
+    )
 
 
 def _contains_shell_control_tokens(command: str) -> bool:
@@ -144,25 +185,16 @@ def build_command_run_hint(
             notes=("user_initiated_runtime_command_required",),
         ).as_dict()
 
-    if _starts_with_command_prefix(normalized_command, _LOCAL_VALIDATION_COMMAND_PREFIXES):
-        return CommandRunHint(
-            source=source,
-            kind=KIND_LOCAL_CLI_VALIDATION_COMMAND,
-            command=normalized_command,
-            action=action,
-            phase=phase,
-            notes=("display_copy_safe", "not_executed"),
-        ).as_dict()
-
-    if _starts_with_command_prefix(normalized_command, _LOCAL_FINALIZER_COMMAND_PREFIXES):
-        return CommandRunHint(
-            source=source,
-            kind=KIND_LOCAL_CLI_FINALIZER_COMMAND,
-            command=normalized_command,
-            action=action,
-            phase=phase,
-            notes=("display_copy_safe", "not_executed"),
-        ).as_dict()
+    for rule in _local_cli_run_hint_rules():
+        if _starts_with_command_prefix(normalized_command, rule.command_roots):
+            return CommandRunHint(
+                source=source,
+                kind=rule.kind,
+                command=normalized_command,
+                action=action,
+                phase=phase,
+                notes=rule.notes,
+            ).as_dict()
 
     return _unknown_hint(
         command=normalized_command,

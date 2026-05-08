@@ -22,7 +22,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `researcher_model`, `synthesizer_model`, `roadmapper_model`, `commit_docs`, `autonomy`, `research_mode`, `research_enabled`, `current_milestone`, `current_milestone_name`, `project_exists`, `roadmap_exists`, `state_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `platform`.
+Use `gpd --raw stage field-access new-milestone --stage milestone_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `INIT`; `INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Pause for user confirmation after requirements gathering and before roadmap generation.
@@ -73,7 +73,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `researcher_model`, `synthesizer_model`, `roadmapper_model`, `commit_docs`, `autonomy`, `research_mode`, `research_enabled`, `current_milestone`, `current_milestone_name`, `project_exists`, `roadmap_exists`, `state_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `literature_review_files`, `literature_review_count`, `research_map_reference_files`, `research_map_reference_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`, `project_content`, `state_content`, `milestones_content`, `platform`.
+Use `gpd --raw stage field-access new-milestone --stage survey_objectives --style instruction` to confirm the manifest-selected survey/objectives fields. Read only those keys from `SURVEY_INIT`; `SURVEY_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
 Treat `active_reference_context` and `effective_reference_intake` from this survey/objectives init as binding carry-forward context even when `project_contract` is empty or blocked.
 
@@ -496,7 +496,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `roadmapper_model`, `commit_docs`, `autonomy`, `current_milestone`, `current_milestone_name`, `roadmap_exists`, `state_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `literature_review_files`, `literature_review_count`, `requirements_content`, `roadmap_content`, `state_content`, `project_content`, `milestones_content`, `platform`.
+Use `gpd --raw stage field-access new-milestone --stage roadmap_authoring --style instruction` to confirm the manifest-selected roadmapping fields. Read only those keys from `ROADMAPPER_INIT`; `ROADMAPPER_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
 Use the bootstrap init for milestone identity and contract gating. Use this late-stage init for the final handoff and do not reuse stale roadmapping inputs from the survey/objective loop.
 

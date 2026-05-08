@@ -121,7 +121,11 @@ Use the exact command for your runtime:
 | Continue in the reopened runtime | `/gpd:resume-work` | `$gpd-resume-work` | `/gpd-resume-work` |
 <!-- gpd-public-surface:os-next-steps-table:end -->
 
-Use `gpd resume` in your normal terminal first. Use `gpd resume --recent` when you need to jump to a different recent workspace before reopening the runtime. After the terminal points you to the right workspace, open your runtime there and use its `resume-work` command to continue inside the project.
+Use the generated recovery ladder when you are returning later:
+
+<!-- gpd-public-surface:recovery-note:start -->
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+<!-- gpd-public-surface:recovery-note:end -->
 
 ## Official docs
 

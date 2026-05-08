@@ -106,6 +106,10 @@ def _code(value: str) -> str:
     return f"`{value}`"
 
 
+def _unique_ordered(values: Iterable[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(values))
+
+
 def _slugify(value: str) -> str:
     slug = _SLUG_RE.sub("-", value.casefold()).strip("-")
     if not slug:
@@ -131,8 +135,12 @@ def render_beginner_caveat_list(context: PublicSurfaceRenderContext | None = Non
 
 def render_terminal_runtime_bridge_text(context: PublicSurfaceRenderContext | None = None) -> str:
     ctx = _context(context)
-    launchers = ", ".join(_code(surface.launch_command) for surface in ctx.runtime_surfaces)
-    command_styles = ", ".join(_code(surface.help_command) for surface in ctx.runtime_surfaces)
+    launchers = ", ".join(
+        _code(command) for command in _unique_ordered(surface.launch_command for surface in ctx.runtime_surfaces)
+    )
+    command_styles = ", ".join(
+        _code(command) for command in _unique_ordered(surface.help_command for surface in ctx.runtime_surfaces)
+    )
     return "\n".join(
         (
             "Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers "

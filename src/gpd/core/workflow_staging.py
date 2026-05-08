@@ -1301,14 +1301,29 @@ def resolve_workflow_stage_manifest_path(workflow_id: str) -> Path:
     return WORKFLOW_STAGE_MANIFEST_DIR / f"{workflow_slug}{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 
 
-def _normalize_manifest_doc_path(raw: object, *, label: str) -> str:
+def _normalize_specs_root(specs_root: Path | None = None) -> Path:
+    root = SPECS_DIR if specs_root is None else specs_root
+    return root.expanduser().resolve(strict=False)
+
+
+def _specs_root_cache_key(specs_root: Path | None = None) -> str:
+    return _normalize_specs_root(specs_root).as_posix()
+
+
+def _workflow_stage_manifest_path(workflow_id: str, *, specs_root: Path | None = None) -> Path:
+    workflow_slug = _normalize_workflow_id(workflow_id)
+    root = _normalize_specs_root(specs_root)
+    return root / "workflows" / f"{workflow_slug}{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+
+
+def _normalize_manifest_doc_path(raw: object, *, label: str, specs_root: Path) -> str:
     normalized = _normalize_relative_posix_path(raw, label=label)
     path = PurePosixPath(normalized)
     if path.suffix != ".md":
         raise ValueError(f"{label} must reference an existing markdown file: {normalized}")
     if not normalized.startswith(_AUTHORITY_ROOTS):
         raise ValueError(f"{label} must reference an authority path under workflows/, references/, or templates/")
-    if not (SPECS_DIR / normalized).is_file():
+    if not (specs_root / normalized).is_file():
         raise ValueError(f"{label} must reference an existing markdown file: {normalized}")
     return normalized
 
@@ -1369,7 +1384,7 @@ def known_init_fields_for_workflow(workflow_id: str | None) -> frozenset[str] | 
 
 
 def _validate_conditional_authorities(
-    raw: object, *, stage_index: int
+    raw: object, *, stage_index: int, specs_root: Path
 ) -> tuple[WorkflowStageConditionalAuthority, ...]:
     if not isinstance(raw, list):
         raise ValueError(f"stages[{stage_index}].conditional_authorities must be a list")
@@ -1390,7 +1405,11 @@ def _validate_conditional_authorities(
             raise ValueError(f"stages[{stage_index}].conditional_authorities must not contain duplicate when values")
         seen_conditions.add(when)
         authorities = tuple(
-            _normalize_manifest_doc_path(authority, label=f"{entry_label}.authorities[{authority_index}]")
+            _normalize_manifest_doc_path(
+                authority,
+                label=f"{entry_label}.authorities[{authority_index}]",
+                specs_root=specs_root,
+            )
             for authority_index, authority in enumerate(
                 _require_string_tuple(entry["authorities"], label=f"{entry_label}.authorities")
             )
@@ -1470,6 +1489,7 @@ def _validate_stage(
     allowed_tools: frozenset[str],
     known_init_fields: frozenset[str] | None,
     required_init_field_groups: dict[str, tuple[str, ...]],
+    specs_root: Path,
 ) -> WorkflowStage:
     if not isinstance(raw, dict):
         raise ValueError(f"stages[{index}] must be a JSON object")
@@ -1491,7 +1511,11 @@ def _validate_stage(
     if "init_spec_id" in raw:
         init_spec_id = _require_string(raw["init_spec_id"], label=f"stages[{index}].init_spec_id")
     mode_paths = tuple(
-        _normalize_manifest_doc_path(mode_path, label=f"stages[{index}].mode_paths[{mode_index}]")
+        _normalize_manifest_doc_path(
+            mode_path,
+            label=f"stages[{index}].mode_paths[{mode_index}]",
+            specs_root=specs_root,
+        )
         for mode_index, mode_path in enumerate(
             _require_string_tuple(raw["mode_paths"], label=f"stages[{index}].mode_paths")
         )
@@ -1502,7 +1526,11 @@ def _validate_stage(
         groups=required_init_field_groups,
     )
     loaded_authorities = tuple(
-        _normalize_manifest_doc_path(authority, label=f"stages[{index}].loaded_authorities[{authority_index}]")
+        _normalize_manifest_doc_path(
+            authority,
+            label=f"stages[{index}].loaded_authorities[{authority_index}]",
+            specs_root=specs_root,
+        )
         for authority_index, authority in enumerate(
             _require_string_tuple(
                 raw["loaded_authorities"], label=f"stages[{index}].loaded_authorities", allow_empty=True
@@ -1512,9 +1540,14 @@ def _validate_stage(
     conditional_authorities = _validate_conditional_authorities(
         raw.get("conditional_authorities", []),
         stage_index=index,
+        specs_root=specs_root,
     )
     must_not_eager_load = tuple(
-        _normalize_manifest_doc_path(authority, label=f"stages[{index}].must_not_eager_load[{authority_index}]")
+        _normalize_manifest_doc_path(
+            authority,
+            label=f"stages[{index}].must_not_eager_load[{authority_index}]",
+            specs_root=specs_root,
+        )
         for authority_index, authority in enumerate(
             _require_string_tuple(
                 raw["must_not_eager_load"], label=f"stages[{index}].must_not_eager_load", allow_empty=True
@@ -1590,6 +1623,7 @@ def validate_workflow_stage_manifest_payload(
     expected_workflow_id: str | None = None,
     allowed_tools: Iterable[str] | None = None,
     known_init_fields: Iterable[str] | None = None,
+    specs_root: Path | None = None,
 ) -> WorkflowStageManifest:
     if not isinstance(raw, dict):
         raise ValueError("workflow stage manifest must be a JSON object")
@@ -1622,6 +1656,7 @@ def validate_workflow_stage_manifest_payload(
 
     normalized_allowed_tools = _normalize_tool_set(allowed_tools, workflow_id=workflow_id)
     normalized_known_init_fields = _normalize_init_field_set(known_init_fields, workflow_id=workflow_id)
+    normalized_specs_root = _normalize_specs_root(specs_root)
     required_init_field_groups = _validate_required_init_field_groups(raw.get("required_init_field_groups"))
     stages = tuple(
         _validate_stage(
@@ -1631,6 +1666,7 @@ def validate_workflow_stage_manifest_payload(
             allowed_tools=normalized_allowed_tools,
             known_init_fields=normalized_known_init_fields,
             required_init_field_groups=required_init_field_groups,
+            specs_root=normalized_specs_root,
         )
         for index, stage in enumerate(stages_raw)
     )
@@ -1693,6 +1729,7 @@ def _infer_known_init_fields_cache_key_from_payload(raw: object) -> tuple[str, .
 @cache
 def _load_workflow_stage_manifest_cached(
     manifest_path: str,
+    specs_root_key: str,
     expected_workflow_id: str | None,
     allowed_tools_key: tuple[str, ...] | None,
     known_init_fields_key: tuple[str, ...] | None,
@@ -1710,6 +1747,7 @@ def _load_workflow_stage_manifest_cached(
         expected_workflow_id=expected_workflow_id,
         allowed_tools=allowed_tools_key,
         known_init_fields=known_init_fields_for_validation,
+        specs_root=Path(specs_root_key),
     )
 
 
@@ -1718,11 +1756,14 @@ def load_workflow_stage_manifest(
     *,
     allowed_tools: Iterable[str] | None = None,
     known_init_fields: Iterable[str] | None = None,
+    specs_root: Path | None = None,
 ) -> WorkflowStageManifest:
     workflow_id = _normalize_workflow_id(workflow_id)
-    manifest_path = resolve_workflow_stage_manifest_path(workflow_id)
+    manifest_path = _workflow_stage_manifest_path(workflow_id, specs_root=specs_root)
+    specs_root_key = _specs_root_cache_key(specs_root)
     return _load_workflow_stage_manifest_cached(
         manifest_path.as_posix(),
+        specs_root_key,
         workflow_id,
         _cache_key_tools(allowed_tools, workflow_id=workflow_id),
         _cache_key_init_fields(known_init_fields, workflow_id=workflow_id),
@@ -1735,6 +1776,7 @@ def load_workflow_stage_manifest_from_path(
     expected_workflow_id: str | None = None,
     allowed_tools: Iterable[str] | None = None,
     known_init_fields: Iterable[str] | None = None,
+    specs_root: Path | None = None,
 ) -> WorkflowStageManifest:
     workflow_id = _normalize_workflow_id(expected_workflow_id) if expected_workflow_id is not None else None
     if known_init_fields is not None:
@@ -1744,8 +1786,10 @@ def load_workflow_stage_manifest_from_path(
         normalized_init_fields = _cache_key_init_fields(None, workflow_id=workflow_id)
     else:
         normalized_init_fields = None
+    specs_root_key = _specs_root_cache_key(specs_root)
     return _load_workflow_stage_manifest_cached(
         manifest_path.as_posix(),
+        specs_root_key,
         workflow_id,
         _cache_key_tools(allowed_tools, workflow_id=workflow_id or ""),
         normalized_init_fields,

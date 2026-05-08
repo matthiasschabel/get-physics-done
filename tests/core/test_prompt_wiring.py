@@ -14,7 +14,7 @@ from gpd.adapters.install_utils import expand_at_includes
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.contracts import ResearchContract, VerificationEvidence
 from gpd.core.frontmatter import validate_frontmatter
-from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
+from gpd.core.workflow_staging import load_workflow_stage_manifest, validate_workflow_stage_manifest_payload
 from gpd.registry import _parse_frontmatter, _parse_tools
 from tests.assertion_taxonomy_support import (
     FragmentAssertion,
@@ -2681,8 +2681,11 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
     map_command = (COMMANDS_DIR / "map-research.md").read_text(encoding="utf-8")
     mapper_agent = (AGENTS_DIR / "gpd-research-mapper.md").read_text(encoding="utf-8")
 
-    assert "project_contract_load_info" in literature_workflow
-    assert "project_contract_validation" in literature_workflow
+    literature_bootstrap_fields = load_workflow_stage_manifest("literature-review").stage(
+        "review_bootstrap"
+    ).required_init_fields
+    assert "project_contract_load_info" in literature_bootstrap_fields
+    assert "project_contract_validation" in literature_bootstrap_fields
     _assert_prompt_concepts(
         literature_workflow,
         {
@@ -2702,9 +2705,8 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
     )
     assert "load_scoped_reference_artifacts" in literature_workflow
     assert "include `bibtex_key` only when it is already known and verified" in literature_workflow
-    load_context_line = next(line for line in literature_workflow.splitlines() if "Parse JSON for:" in line)
-    assert "reference_artifact_files" not in load_context_line
-    assert "reference_artifacts_content" not in load_context_line
+    assert "reference_artifact_files" not in literature_bootstrap_fields
+    assert "reference_artifacts_content" not in literature_bootstrap_fields
     assert "Follow the included literature-review workflow exactly." in literature_command
     assert (
         "The workflow owns staged loading, scope fixing, artifact gating, and citation verification."

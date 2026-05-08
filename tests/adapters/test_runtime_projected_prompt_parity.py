@@ -18,7 +18,7 @@ from gpd.adapters.install_utils import (
     expand_at_includes,
     project_markdown_for_runtime,
 )
-from gpd.adapters.runtime_catalog import get_runtime_descriptor, iter_runtime_descriptors
+from gpd.adapters.runtime_catalog import get_runtime_descriptor
 from gpd.core.context import init_execute_phase, init_plan_phase, init_quick, init_verify_work
 from gpd.core.model_visible_text import (
     agent_visibility_note,
@@ -27,7 +27,10 @@ from gpd.core.model_visible_text import (
 from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
 from tests.adapters.projection_budget_support import (
+    NATIVE_AGENT_PROJECTION_BUDGETS,
     NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
+    NORMALIZED_RUNTIME_BRIDGE_MARKER,
+    RUNTIME_PROJECTION_TARGETS,
     SELECTED_AGENT_PROJECTION_BUDGETS,
     SELECTED_AGENT_PROJECTION_TARGETS,
     STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
@@ -46,7 +49,7 @@ AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 
-RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+RUNTIMES = RUNTIME_PROJECTION_TARGETS
 COMPACT_WORKFLOW_COMMANDS = (
     "parameter-sweep",
     "sensitivity-analysis",
@@ -69,10 +72,6 @@ RUNTIME_BRIDGE_COMMAND_RE = re.compile(
     r"(?:[^ \n`]+)\s+-m gpd\.runtime_cli\s+--runtime\s+[a-z-]+"
     r"\s+--config-dir\s+[^ \n`]+(?:\s+--install-scope\s+local)?"
 )
-VERIFIER_BUDGET_BY_NATIVE_INCLUDE_SUPPORT = {
-    True: (500, 35_000),
-    False: (500, 35_000),
-}
 VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/verification-report.md",
     "templates/contract-results-schema.md",
@@ -537,7 +536,7 @@ def _shell_fence_bodies(text: str) -> tuple[str, ...]:
 
 
 def _normalized_runtime_bridge_text(text: str) -> str:
-    return RUNTIME_BRIDGE_COMMAND_RE.sub("<runtime-bridge>", text)
+    return RUNTIME_BRIDGE_COMMAND_RE.sub(NORMALIZED_RUNTIME_BRIDGE_MARKER, text)
 
 
 def _raw_include_count(text: str, include_suffix: str) -> int:
@@ -720,12 +719,7 @@ def test_staged_init_target_command_projection_stays_under_baseline_budget(
 
 
 @pytest.mark.parametrize("command_name", STAGED_INIT_TARGET_COMMANDS)
-@pytest.mark.parametrize(
-    "runtime",
-    tuple(
-        descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support
-    ),
-)
+@pytest.mark.parametrize("runtime", NON_NATIVE_RUNTIME_PROJECTION_TARGETS)
 def test_staged_init_target_non_native_command_shims_use_exact_runtime_bridge(
     command_name: str,
     runtime: str,
@@ -989,14 +983,18 @@ def test_runtime_projected_agents_keep_contract_results_guidance_visible(
 def test_runtime_projected_verifier_surface_keeps_one_wrapper_and_stays_within_budget(runtime: str) -> None:
     projected = _project_markdown(AGENTS_DIR / "gpd-verifier.md", runtime, is_agent=True)
     descriptor = get_runtime_descriptor(runtime)
-    line_budget, char_budget = VERIFIER_BUDGET_BY_NATIVE_INCLUDE_SUPPORT[descriptor.native_include_support]
+    budget = (
+        NATIVE_AGENT_PROJECTION_BUDGETS["gpd-verifier"]
+        if descriptor.native_include_support
+        else SELECTED_AGENT_PROJECTION_BUDGETS["gpd-verifier"]
+    )
 
     assert projected.count("## Agent Requirements") == 1
     assert projected.index("## Agent Requirements") < projected.index("## Bootstrap Discipline")
     for include_suffix, expanded_heading in VERIFIER_SCHEMA_AUTHORITY_MARKERS:
         assert include_suffix in projected or expanded_heading in projected
-    assert len(projected.splitlines()) <= line_budget
-    assert len(projected) <= char_budget
+    assert len(projected.splitlines()) <= budget["lines"]
+    assert len(projected) <= budget["chars"]
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)

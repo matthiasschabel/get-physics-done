@@ -8,6 +8,14 @@ from functools import lru_cache
 from typing import TypeAlias
 
 from gpd.command_labels import canonical_command_label, parse_command_label
+from gpd.core.public_surface_contract import (
+    beginner_startup_ladder,
+    beginner_startup_ladder_text,
+    local_cli_cost_command,
+    local_cli_observe_execution_command,
+    local_cli_resume_command,
+    local_cli_resume_recent_command,
+)
 from gpd.registry import get_command, list_commands
 
 CommandGroupPayload: TypeAlias = dict[str, object]
@@ -234,13 +242,7 @@ _COMMAND_GROUP_SPECS: tuple[_CommandGroupSpec, ...] = (
     ),
 )
 
-_QUICK_START_RUNTIME_COMMANDS = (
-    "gpd:help",
-    "gpd:start",
-    "gpd:tour",
-    "gpd:new-project",
-    "gpd:map-research",
-    "gpd:resume-work",
+_ADDITIONAL_QUICK_START_RUNTIME_COMMANDS = (
     "gpd:progress",
     "gpd:suggest-next",
     "gpd:settings",
@@ -248,6 +250,50 @@ _QUICK_START_RUNTIME_COMMANDS = (
     "gpd:tangent",
     "gpd:branch-hypothesis",
 )
+
+
+def _runtime_command_for_ladder_step(step: str) -> tuple[str, ...]:
+    return tuple(f"gpd:{part.strip()}" for part in step.split("/") if part.strip())
+
+
+def _startup_ladder_runtime_command_map(ladder: tuple[str, ...]) -> dict[str, str]:
+    commands: dict[str, str] = {}
+    for step in ladder:
+        for command in _runtime_command_for_ladder_step(step):
+            commands[parse_command_label(command).slug] = command
+    return commands
+
+
+def _required_ladder_command(commands: dict[str, str], slug: str) -> str:
+    try:
+        return commands[slug]
+    except KeyError as exc:
+        raise ValueError(f"beginner startup ladder must include {slug!r}") from exc
+
+
+def _format_ladder_step_as_runtime_commands(step: str) -> str:
+    commands = _runtime_command_for_ladder_step(step)
+    if not commands:
+        raise ValueError("beginner startup ladder steps must contain at least one command")
+    return " or ".join(f"`{command}`" for command in commands)
+
+
+def _runtime_ladder_sentence(ladder: tuple[str, ...]) -> str:
+    command_fragments = tuple(_format_ladder_step_as_runtime_commands(step) for step in ladder)
+    if len(command_fragments) < 2:
+        raise ValueError("beginner startup ladder must contain at least two steps")
+    return (
+        "In runtime terms, that means "
+        + ", then ".join(command_fragments[:-1])
+        + f", and later {command_fragments[-1]} when you return."
+    )
+
+
+def _quick_start_runtime_commands() -> tuple[str, ...]:
+    ladder_commands = tuple(
+        command for step in beginner_startup_ladder() for command in _runtime_command_for_ladder_step(step)
+    )
+    return (*ladder_commands, *_ADDITIONAL_QUICK_START_RUNTIME_COMMANDS)
 
 
 def _entry_registry_command(spec: _CommandEntrySpec) -> str:
@@ -353,35 +399,46 @@ def command_detail_payload(command_name: str, *, minimal: bool = False) -> dict[
 def render_quick_start_markdown() -> str:
     """Render the default public quick-start help section."""
 
-    for command in _QUICK_START_RUNTIME_COMMANDS:
+    for command in _quick_start_runtime_commands():
         get_command(command)
+    startup_ladder = beginner_startup_ladder()
+    local_resume = local_cli_resume_command()
+    local_resume_recent = local_cli_resume_recent_command()
+    local_observe_execution = local_cli_observe_execution_command()
+    local_cost = local_cli_cost_command()
+    ladder_commands = _startup_ladder_runtime_command_map(startup_ladder)
+    start_command = _required_ladder_command(ladder_commands, "start")
+    tour_command = _required_ladder_command(ladder_commands, "tour")
+    new_project_command = _required_ladder_command(ladder_commands, "new-project")
+    map_research_command = _required_ladder_command(ladder_commands, "map-research")
+    resume_work_command = _required_ladder_command(ladder_commands, "resume-work")
     return textwrap.dedent(
-        """\
+        f"""\
         ## Quick Start
 
-        If you only remember one order, use this: `help -> start -> tour -> new-project / map-research -> resume-work`.
-        In runtime terms, that means `gpd:help`, then `gpd:start`, then `gpd:tour`, then `gpd:new-project` or `gpd:map-research`, and later `gpd:resume-work` when you return.
+        If you only remember one order, use this: {beginner_startup_ladder_text()}.
+        {_runtime_ladder_sentence(startup_ladder)}
 
         Use the path that matches your current situation:
 
         **New work**
-        1. `gpd:start` - Guided first-run router that chooses the safest first step for this folder
-        2. `gpd:tour` - Get a read-only overview before choosing
-        3. `gpd:new-project` - Create a full GPD project
+        1. `{start_command}` - Guided first-run router that chooses the safest first step for this folder
+        2. `{tour_command}` - Get a read-only overview before choosing
+        3. `{new_project_command}` - Create a full GPD project
         4. `gpd:new-project --minimal` - Create a project through the shortest setup path
 
         **Existing work**
-        1. `gpd:map-research` - Map an existing folder before turning it into a GPD project
-        2. `gpd:new-project` - Turn that mapped context into a full GPD project
+        1. `{map_research_command}` - Map an existing folder before turning it into a GPD project
+        2. `{new_project_command}` - Turn that mapped context into a full GPD project
 
         **Returning work**
-        1. `gpd resume` - Reopen the current-workspace recovery snapshot from your normal terminal
-        2. `gpd resume --recent` - Find a different workspace first from your normal terminal
-        3. `gpd:resume-work` - Continue inside the reopened project's canonical state
+        1. `{local_resume}` - Reopen the current-workspace recovery snapshot from your normal terminal
+        2. `{local_resume_recent}` - Find a different workspace first from your normal terminal
+        3. `{resume_work_command}` - Continue inside the reopened project's canonical state
         4. `gpd:progress` - See the broader project snapshot
         5. `gpd:suggest-next` - Get the fastest next action
-        6. `gpd observe execution` - Read-only progress / waiting state snapshot, conservative `possibly stalled` wording, and the next read-only checks from your normal terminal
-        7. `gpd cost` - Review recorded machine-local usage / cost from your normal terminal
+        6. `{local_observe_execution}` - Read-only progress / waiting state snapshot, conservative `possibly stalled` wording, and the next read-only checks from your normal terminal
+        7. `{local_cost}` - Review recorded machine-local usage / cost from your normal terminal
 
         **Post-startup settings**
         1. `gpd:settings` - Change autonomy, permissions, and broader runtime preferences after your first successful start or later

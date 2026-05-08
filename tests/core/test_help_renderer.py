@@ -7,6 +7,14 @@ import re
 import pytest
 
 from gpd.core import help_renderer
+from gpd.core.public_surface_contract import (
+    beginner_startup_ladder,
+    beginner_startup_ladder_text,
+    local_cli_cost_command,
+    local_cli_observe_execution_command,
+    local_cli_resume_command,
+    local_cli_resume_recent_command,
+)
 from gpd.registry import list_commands
 
 _COMMAND_ROW_RE = re.compile(r"^- `([^`]+)` - (.+)$", re.MULTILINE)
@@ -28,43 +36,44 @@ def _assert_in_order(text: str, fragments: tuple[str, ...]) -> None:
     assert positions == sorted(positions)
 
 
+def _runtime_ladder_commands() -> tuple[str, ...]:
+    return tuple(
+        f"gpd:{part.strip()}"
+        for step in beginner_startup_ladder()
+        for part in step.split("/")
+        if part.strip()
+    )
+
+
 def test_help_renderer_renders_quick_start_structure_without_freezing_marker_body() -> None:
     quick_start = help_renderer.render_quick_start_markdown()
 
     assert quick_start.startswith("## Quick Start")
+    assert beginner_startup_ladder_text() in quick_start
     for section_heading in ("**New work**", "**Existing work**", "**Returning work**", "**Post-startup settings**"):
         assert section_heading in quick_start
 
     _assert_in_order(
         quick_start,
-        (
-            "`gpd:help`",
-            "`gpd:start`",
-            "`gpd:tour`",
-            "`gpd:new-project`",
-            "`gpd:map-research`",
-            "`gpd:resume-work`",
-        ),
+        tuple(f"`{command}`" for command in _runtime_ladder_commands()),
     )
 
     rows = _numbered_command_rows(quick_start)
     commands = {command for command, _description in rows}
-    expected_rows = {
-        "gpd:start",
-        "gpd:tour",
-        "gpd:new-project",
-        "gpd:new-project --minimal",
-        "gpd:map-research",
-        "gpd resume",
-        "gpd resume --recent",
-        "gpd:resume-work",
-        "gpd:progress",
-        "gpd:suggest-next",
-        "gpd observe execution",
-        "gpd cost",
-        "gpd:settings",
-        "gpd:set-tier-models",
-    }
+    expected_rows = set(_runtime_ladder_commands()[1:])
+    expected_rows.update(
+        {
+            "gpd:new-project --minimal",
+            "gpd:progress",
+            "gpd:suggest-next",
+            "gpd:settings",
+            "gpd:set-tier-models",
+            local_cli_resume_command(),
+            local_cli_resume_recent_command(),
+            local_cli_observe_execution_command(),
+            local_cli_cost_command(),
+        }
+    )
     assert expected_rows <= commands
     assert all(description.strip() for _command, description in rows)
 

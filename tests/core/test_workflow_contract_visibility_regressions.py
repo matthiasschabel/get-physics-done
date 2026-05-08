@@ -6,6 +6,7 @@ import pytest
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.public_surface_contract import resume_authority_fields
+from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.doc_surface_contracts import resume_authority_public_vocabulary_intro, resume_backend_only_fields
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -48,13 +49,9 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
         ("plan-phase.md", "Parse only the fields named by", "project_contract_gate"),
         ("execute-phase.md", "**If `project_contract_gate.authoritative` is not true", "project_contract_gate"),
         ("execute-plan.md", "Extract from init JSON:", "project_contract_gate"),
-        ("quick.md", "Parse JSON for:", "project_contract_gate"),
-        ("literature-review.md", "Parse JSON for:", "project_contract_gate"),
         ("compare-experiment.md", "Parse JSON for:", "project_contract_gate"),
         ("compare-results.md", "Parse JSON for:", "project_contract_gate"),
         ("new-project.md", "Treat `project_contract` as approved scope only when", "project_contract_gate"),
-        ("new-milestone.md", "Parse JSON for:", "project_contract_gate"),
-        ("map-research.md", "Extract from init JSON:", "project_contract_gate"),
         ("progress.md", "Extract from init JSON:", "project_contract_gate"),
         ("audit-milestone.md", "Extract from init JSON:", "project_contract_gate"),
         ("resume-work.md", "- **Availability and contract authority:**", "project_contract_gate"),
@@ -75,11 +72,41 @@ def test_contract_gate_is_visible_before_authoritative_use(
     assert workflow.index(surface_line) < workflow.index("project_contract_gate.authoritative")
 
 
+@pytest.mark.parametrize(
+    ("workflow_id", "stage_id"),
+    [
+        ("quick", "task_bootstrap"),
+        ("literature-review", "review_bootstrap"),
+        ("new-milestone", "milestone_bootstrap"),
+        ("map-research", "map_bootstrap"),
+    ],
+)
+def test_manifest_owned_contract_gate_is_visible_before_authoritative_use(
+    workflow_id: str,
+    stage_id: str,
+) -> None:
+    workflow = _workflow_text(f"{workflow_id}.md")
+    manifest = load_workflow_stage_manifest(workflow_id)
+    helper_line = next(
+        line
+        for line in workflow.splitlines()
+        if f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction" in line
+    )
+
+    assert "project_contract_gate" in manifest.stage(stage_id).required_init_fields
+    assert workflow.index(helper_line) < workflow.index("project_contract_gate.authoritative")
+
+
 def test_literature_review_workflow_surfaces_contract_gate_before_deferred_reference_artifacts() -> None:
     workflow = _workflow_text("literature-review.md")
-    surface_line = next(line for line in workflow.splitlines() if "Parse JSON for:" in line)
+    manifest = load_workflow_stage_manifest("literature-review")
+    surface_line = next(
+        line
+        for line in workflow.splitlines()
+        if "gpd --raw stage field-access literature-review --stage review_bootstrap --style instruction" in line
+    )
 
-    assert "project_contract_gate" in surface_line
+    assert "project_contract_gate" in manifest.stage("review_bootstrap").required_init_fields
     assert workflow.index(surface_line) < workflow.index("project_contract_gate.authoritative")
     assert workflow.index(surface_line) < workflow.index(
         "Do not use `reference_artifact_files` or `reference_artifacts_content` yet."

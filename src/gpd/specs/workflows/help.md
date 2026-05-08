@@ -65,15 +65,32 @@ This reference lists the canonical in-runtime command names for the installed ru
 - Runtime label: Show `gpd:` as native labels; keep local CLI `gpd ...` unchanged.
 - If a reference section shows canonical `gpd:` names, treat them as lookup labels unless you are copying a normal-terminal command exactly.
 - Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly.
-- Use `gpd permissions status --runtime <runtime> --autonomy <mode>` when you want the read-only runtime-owned approval/alignment snapshot from your normal terminal. Use `supervised` unless you intentionally selected a different autonomy mode.
-- Use `gpd doctor` to check the selected install target and runtime-local readiness signals. Use `gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>` for the unattended or overnight verdict, `gpd permissions sync --runtime <runtime> --autonomy <mode>` when runtime-owned permissions need realignment, and `--live-executable-probes` if you also want cheap local executable probes such as `pdflatex --version`, `tectonic --version`, or `wolframscript -version`.
+- Use the generated local CLI summary below for the read-only runtime-owned approval/alignment snapshot, unattended readiness, and permissions sync commands. Use `supervised` unless you intentionally selected a different autonomy mode.
+- Use `gpd doctor` to check the selected install target and runtime-local readiness signals; add `--live-executable-probes` when you also want cheap local executable probes such as `pdflatex --version`, `tectonic --version`, or `wolframscript -version`.
 - If you need to validate whether a public runtime command can run in the current workspace, use `gpd validate command-context <name>`.
 - That is the generic typed command-policy check for the public runtime surface. Today, `gpd validate review-contract <command>` and `gpd validate review-preflight <command> [subject] --strict` are specialized typed surfaces for commands that expose review/publication contracts.
 - If a plan declares specialized `tool_requirements`, use `gpd validate plan-preflight <PLAN.md>` from your normal terminal before execution.
-- For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`.
-- For cross-project discovery from your normal terminal, use `gpd resume --recent` to find the workspace first, then open the selected project and continue there with the runtime `gpd:resume-work` command.
-- After resuming inside the runtime, use `gpd:suggest-next` when you only need the next action.
-- For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`.
+
+<!-- gpd-public-surface:local-cli-bridge-summary:start -->
+Use `gpd --help` from your normal terminal for the broader local CLI surface: install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost, presets, and shared Wolfram integration.
+
+- `gpd --help`
+- `gpd doctor`
+- `gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>`
+- `gpd permissions status --runtime <runtime> --autonomy <mode>`
+- `gpd permissions sync --runtime <runtime> --autonomy <mode>`
+- `gpd resume`
+- `gpd resume --recent`
+- `gpd observe execution`
+- `gpd cost`
+- `gpd presets list`
+- `gpd validate plan-preflight <PLAN.md>`
+- `gpd integrations status wolfram`
+<!-- gpd-public-surface:local-cli-bridge-summary:end -->
+
+<!-- gpd-public-surface:recovery-note:start -->
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+<!-- gpd-public-surface:recovery-note:end -->
 
 <!-- gpd-help:quick-start:start -->
 ## Quick Start

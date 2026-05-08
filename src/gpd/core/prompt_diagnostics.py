@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import difflib
-import json
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
@@ -42,7 +41,6 @@ from gpd.core.return_contract import (
 )
 from gpd.core.workflow_staging import (
     WorkflowStage,
-    WorkflowStageConditionalAuthority,
     WorkflowStageManifest,
     known_init_fields_for_workflow,
     load_workflow_stage_manifest_from_path,
@@ -2086,11 +2084,19 @@ def _build_stage_diagnostics(
         manifest_path = _stage_manifest_path_for_command(source)
         if not manifest_path.is_file():
             continue
-        metric = _build_stage_diagnostic_for_command(source, command_item, manifest_path)
+        warning_count = len(report_warnings)
+        metric = _build_stage_diagnostic_for_command(
+            source,
+            command_item,
+            manifest_path,
+            report_warnings=report_warnings,
+        )
         if metric is None:
-            report_warnings.append(
-                f"could not load stage diagnostics for {source.name}: {_relative_path(manifest_path, source.repo_root)}"
-            )
+            if len(report_warnings) == warning_count:
+                report_warnings.append(
+                    f"could not load stage diagnostics for {source.name}: "
+                    f"{_relative_path(manifest_path, source.repo_root)}"
+                )
             continue
         diagnostics.append(metric)
     return tuple(sorted(diagnostics, key=lambda metric: (metric.workflow_id, metric.command_name)))
@@ -2104,10 +2110,13 @@ def _build_stage_diagnostic_for_command(
     source: PromptSource,
     command_item: PromptSurfaceItem,
     manifest_path: Path,
+    *,
+    report_warnings: list[str],
 ) -> StageAwareWorkflowPromptMetric | None:
     warnings: list[str] = []
     manifest = _load_stage_manifest_for_source(source, manifest_path, warnings)
     if manifest is None:
+        report_warnings.extend(f"could not load stage diagnostics for {source.name}: {warning}" for warning in warnings)
         return None
 
     command_text = source.absolute_path.read_text(encoding="utf-8")
@@ -2153,170 +2162,11 @@ def _load_stage_manifest_for_source(
             manifest_path,
             expected_workflow_id=source.name,
             known_init_fields=known_init_fields_for_workflow(source.name),
+            specs_root=source.src_root / "specs",
         )
     except ValueError as exc:
-        if _is_package_source_root(source.src_root):
-            warnings.append(str(exc))
-            return None
-        try:
-            return _load_local_source_stage_manifest(manifest_path, source)
-        except (OSError, ValueError, json.JSONDecodeError) as fallback_exc:
-            warnings.append(f"{exc}; fallback parser failed: {fallback_exc}")
-            return None
-
-
-def _is_package_source_root(src_root: Path) -> bool:
-    try:
-        return src_root.resolve() == Path(__file__).resolve().parents[1]
-    except OSError:
-        return False
-
-
-def _load_local_source_stage_manifest(manifest_path: Path, source: PromptSource) -> WorkflowStageManifest:
-    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError("workflow stage manifest must be a JSON object")
-    if raw.get("schema_version") != 1:
-        raise ValueError("workflow stage manifest schema_version must be 1")
-    workflow_id = _manifest_string(raw.get("workflow_id"), label="workflow_id")
-    if workflow_id != source.name:
-        raise ValueError(f"workflow stage manifest workflow_id must be {source.name!r}, got {workflow_id!r}")
-    stages_raw = raw.get("stages")
-    if not isinstance(stages_raw, list) or not stages_raw:
-        raise ValueError("stages must be a non-empty list")
-
-    stages = tuple(
-        _load_local_source_stage(stage_raw, index=index, source=source) for index, stage_raw in enumerate(stages_raw)
-    )
-    stage_orders = [stage.order for stage in stages]
-    if stage_orders != list(range(1, len(stages) + 1)):
-        raise ValueError("stage order values must start at 1 and increase by 1")
-    stage_ids = [stage.id for stage in stages]
-    if len(stage_ids) != len(set(stage_ids)):
-        raise ValueError("stage ids must be unique")
-    return WorkflowStageManifest(
-        schema_version=1,
-        workflow_id=workflow_id,
-        stages=stages,
-        prompt_usage=_manifest_string(raw.get("prompt_usage", "staged_init"), label="prompt_usage"),
-    )
-
-
-def _load_local_source_stage(raw: object, *, index: int, source: PromptSource) -> WorkflowStage:
-    if not isinstance(raw, dict):
-        raise ValueError(f"stages[{index}] must be a JSON object")
-    mode_paths = tuple(
-        _normalize_local_authority_id(value, source=source, label=f"stages[{index}].mode_paths")
-        for value in _manifest_string_list(raw.get("mode_paths"), label=f"stages[{index}].mode_paths")
-    )
-    loaded_authorities = tuple(
-        _normalize_local_authority_id(value, source=source, label=f"stages[{index}].loaded_authorities")
-        for value in _manifest_string_list(
-            raw.get("loaded_authorities", []),
-            label=f"stages[{index}].loaded_authorities",
-        )
-    )
-    conditional_authorities = tuple(
-        _load_local_conditional_authority(entry, index=index, conditional_index=conditional_index, source=source)
-        for conditional_index, entry in enumerate(
-            _manifest_list(raw.get("conditional_authorities", []), label=f"stages[{index}].conditional_authorities")
-        )
-    )
-    must_not_eager_load = tuple(
-        _normalize_local_authority_id(value, source=source, label=f"stages[{index}].must_not_eager_load")
-        for value in _manifest_string_list(
-            raw.get("must_not_eager_load", []),
-            label=f"stages[{index}].must_not_eager_load",
-        )
-    )
-    return WorkflowStage(
-        id=_manifest_string(raw.get("id"), label=f"stages[{index}].id"),
-        order=_manifest_int(raw.get("order"), label=f"stages[{index}].order"),
-        purpose=_manifest_string(raw.get("purpose"), label=f"stages[{index}].purpose"),
-        mode_paths=mode_paths,
-        required_init_fields=tuple(
-            _manifest_string_list(
-                raw.get("required_init_fields", []),
-                label=f"stages[{index}].required_init_fields",
-            )
-        ),
-        loaded_authorities=loaded_authorities,
-        conditional_authorities=conditional_authorities,
-        must_not_eager_load=must_not_eager_load,
-        allowed_tools=tuple(
-            _manifest_string_list(raw.get("allowed_tools", []), label=f"stages[{index}].allowed_tools")
-        ),
-        writes_allowed=tuple(
-            _manifest_string_list(raw.get("writes_allowed", []), label=f"stages[{index}].writes_allowed")
-        ),
-        produced_state=tuple(
-            _manifest_string_list(raw.get("produced_state", []), label=f"stages[{index}].produced_state")
-        ),
-        next_stages=tuple(_manifest_string_list(raw.get("next_stages", []), label=f"stages[{index}].next_stages")),
-        checkpoints=tuple(_manifest_string_list(raw.get("checkpoints", []), label=f"stages[{index}].checkpoints")),
-    )
-
-
-def _load_local_conditional_authority(
-    raw: object,
-    *,
-    index: int,
-    conditional_index: int,
-    source: PromptSource,
-) -> WorkflowStageConditionalAuthority:
-    if not isinstance(raw, dict):
-        raise ValueError(f"stages[{index}].conditional_authorities[{conditional_index}] must be an object")
-    return WorkflowStageConditionalAuthority(
-        when=_manifest_string(
-            raw.get("when"),
-            label=f"stages[{index}].conditional_authorities[{conditional_index}].when",
-        ),
-        authorities=tuple(
-            _normalize_local_authority_id(
-                value,
-                source=source,
-                label=f"stages[{index}].conditional_authorities[{conditional_index}].authorities",
-            )
-            for value in _manifest_string_list(
-                raw.get("authorities", []),
-                label=f"stages[{index}].conditional_authorities[{conditional_index}].authorities",
-            )
-        ),
-    )
-
-
-def _manifest_string(raw: object, *, label: str) -> str:
-    if not isinstance(raw, str) or not raw:
-        raise ValueError(f"{label} must be a non-empty string")
-    return raw
-
-
-def _manifest_int(raw: object, *, label: str) -> int:
-    if not isinstance(raw, int):
-        raise ValueError(f"{label} must be an integer")
-    return raw
-
-
-def _manifest_list(raw: object, *, label: str) -> tuple[object, ...]:
-    if not isinstance(raw, list):
-        raise ValueError(f"{label} must be a list")
-    return tuple(raw)
-
-
-def _manifest_string_list(raw: object, *, label: str) -> tuple[str, ...]:
-    values = _manifest_list(raw, label=label)
-    for value in values:
-        if not isinstance(value, str):
-            raise ValueError(f"{label} must contain only strings")
-    return cast(tuple[str, ...], values)
-
-
-def _normalize_local_authority_id(raw: str, *, source: PromptSource, label: str) -> str:
-    authority = _normalize_authority_id(raw, label=label)
-    path = _authority_path(source.src_root, authority)
-    if not path.is_file():
-        raise ValueError(f"{label} must reference an existing markdown file: {authority}")
-    return authority
+        warnings.append(str(exc))
+        return None
 
 
 def _measure_workflow_stage(

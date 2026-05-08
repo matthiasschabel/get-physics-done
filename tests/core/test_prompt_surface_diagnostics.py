@@ -167,6 +167,64 @@ def test_stage_diagnostics_detect_transitive_eager_loading_violations(tmp_path: 
     assert payload["stage_diagnostics"][0]["runtime_projection"][0]["runtime"] == runtime_name
 
 
+def test_stage_diagnostics_uses_workflow_staging_group_validation_for_local_sources(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/quick.md",
+        """
+        ---
+        name: gpd:quick
+        description: Quick command
+        ---
+        @{GPD_INSTALL_DIR}/workflows/quick.md
+        """,
+    )
+    _write(tmp_path, "src/gpd/specs/workflows/quick.md", "Quick bootstrap body.\n")
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/quick-stage-manifest.json",
+        """
+        {
+          "schema_version": 1,
+          "workflow_id": "quick",
+          "required_init_field_groups": {
+            "reference_runtime": [
+              "selected_protocol_bundle_ids",
+              "protocol_bundle_count",
+              "protocol_bundle_context",
+              "not_a_quick_field"
+            ]
+          },
+          "stages": [
+            {
+              "id": "bootstrap",
+              "order": 1,
+              "purpose": "Load local quick bootstrap.",
+              "mode_paths": ["workflows/quick.md"],
+              "required_init_field_groups": ["reference_runtime"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/quick.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": [],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": [],
+              "checkpoints": []
+            }
+          ]
+        }
+        """,
+    )
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
+
+    assert payload["stage_diagnostics"] == []
+    assert any(
+        "unknown field name" in warning and "not_a_quick_field" in warning for warning in payload["warnings"]
+    )
+
+
 def test_report_detects_invalid_schema_and_forbidden_child_return_synthesis(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -306,3 +364,10 @@ def test_production_prompt_diagnostics_does_not_import_from_tests() -> None:
 
     assert "from tests" not in source
     assert "import tests" not in source
+
+
+def test_prompt_diagnostics_does_not_define_local_stage_manifest_parser() -> None:
+    source = PROMPT_DIAGNOSTICS_PATH.read_text(encoding="utf-8")
+
+    assert "_load_local_source_stage_manifest" not in source
+    assert "_manifest_string_list" not in source

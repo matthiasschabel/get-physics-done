@@ -504,6 +504,80 @@ def test_workflow_stage_manifest_adds_protocol_bundle_load_manifest_with_context
     )
 
 
+def test_load_workflow_stage_manifest_from_local_specs_root_expands_groups_and_separates_cache(
+    tmp_path: Path,
+) -> None:
+    specs_root = tmp_path / "src" / "gpd" / "specs"
+    (specs_root / "workflows").mkdir(parents=True)
+    (specs_root / "templates").mkdir(parents=True)
+    (specs_root / "workflows" / "probe.md").write_text("Probe bootstrap.\n", encoding="utf-8")
+    (specs_root / "templates" / "deferred.md").write_text("Deferred authority.\n", encoding="utf-8")
+    manifest_path = specs_root / "workflows" / "probe-stage-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "workflow_id": "probe",
+                "required_init_field_groups": {
+                    "reference_runtime": [
+                        "selected_protocol_bundle_ids",
+                        "protocol_bundle_count",
+                        "protocol_bundle_context",
+                    ],
+                },
+                "stages": [
+                    {
+                        "id": "bootstrap",
+                        "order": 1,
+                        "purpose": "Load local bootstrap authority.",
+                        "mode_paths": ["workflows/probe.md"],
+                        "required_init_field_groups": ["reference_runtime"],
+                        "required_init_fields": ["autonomy"],
+                        "loaded_authorities": ["workflows/probe.md"],
+                        "conditional_authorities": [
+                            {"when": "need_deferred", "authorities": ["templates/deferred.md"]},
+                        ],
+                        "must_not_eager_load": ["templates/deferred.md"],
+                        "allowed_tools": [],
+                        "writes_allowed": [],
+                        "produced_state": [],
+                        "next_stages": [],
+                        "checkpoints": [],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = load_workflow_stage_manifest_from_path(
+        manifest_path,
+        expected_workflow_id="probe",
+        specs_root=specs_root,
+    )
+    manifest_by_id = load_workflow_stage_manifest("probe", specs_root=specs_root)
+
+    expected_fields = (
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
+        "protocol_bundle_context",
+        "autonomy",
+    )
+    assert manifest_by_id is manifest
+    assert manifest.stage("bootstrap").required_init_fields == expected_fields
+    assert manifest.staged_loading_payload("bootstrap")["required_init_fields"] == list(expected_fields)
+
+    other_specs_root = tmp_path / "other" / "specs"
+    other_specs_root.mkdir(parents=True)
+    with pytest.raises(ValueError, match="existing markdown file"):
+        load_workflow_stage_manifest_from_path(
+            manifest_path,
+            expected_workflow_id="probe",
+            specs_root=other_specs_root,
+        )
+
+
 @pytest.mark.parametrize("workflow_id", ["new-project", "quick"])
 def test_workflow_stage_manifest_serialized_payload_round_trips_expanded_fields(workflow_id: str) -> None:
     manifest = validate_workflow_stage_manifest_payload(

@@ -2,6 +2,17 @@
 
 from __future__ import annotations
 
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+
+_RUNTIME_DESCRIPTORS = iter_runtime_descriptors()
+
+RUNTIME_PROJECTION_TARGETS = tuple(descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS)
+NON_NATIVE_RUNTIME_PROJECTION_TARGETS = tuple(
+    descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS if not descriptor.native_include_support
+)
+
+NORMALIZED_RUNTIME_BRIDGE_MARKER = "<runtime-bridge>"
+
 STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
     "plan-phase": {
         "claude-code": 4_196,
@@ -31,8 +42,6 @@ STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
 STAGED_INIT_TARGET_COMMANDS = tuple(STAGED_INIT_COMMAND_PROJECTION_BUDGETS)
 STAGED_PROJECTED_COMMAND_CHAR_BUDGET = 20_000
 
-NON_NATIVE_RUNTIME_PROJECTION_TARGETS = ("codex", "gemini", "opencode")
-
 TARGET_AGENT_PROJECTION_BUDGETS = {
     "gpd-planner": {"lines": 750, "chars": 40_000},
     "gpd-research-synthesizer": {"lines": 1_100, "chars": 58_000},
@@ -50,3 +59,7 @@ SELECTED_AGENT_PROJECTION_BUDGETS = {
     "gpd-verifier": {"lines": 440, "chars": 30_000},
 }
 SELECTED_AGENT_PROJECTION_TARGETS = tuple(SELECTED_AGENT_PROJECTION_BUDGETS)
+
+NATIVE_AGENT_PROJECTION_BUDGETS = {
+    "gpd-verifier": {"lines": 500, "chars": 35_000},
+}

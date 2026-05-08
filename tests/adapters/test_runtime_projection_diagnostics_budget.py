@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core import prompt_diagnostics
 from tests.adapters.projection_budget_support import (
     NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
+    NORMALIZED_RUNTIME_BRIDGE_MARKER,
+    RUNTIME_PROJECTION_TARGETS,
     SELECTED_AGENT_PROJECTION_BUDGETS,
     STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
     STAGED_PROJECTED_COMMAND_CHAR_BUDGET,
@@ -15,8 +18,6 @@ from tests.adapters.projection_budget_support import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NON_NATIVE_RUNTIMES = ("codex", "gemini", "opencode")
-NORMALIZED_RUNTIME_BRIDGE_MARKER = "<runtime-bridge>"
 KNOWN_PROJECTION_HOTSPOTS = {
     "execute-phase",
     "gpd-executor",
@@ -42,11 +43,22 @@ def _normalized_runtime_projection_char_count(metric: prompt_diagnostics.Runtime
     return metric.char_count - (len(bridge_command) - len(NORMALIZED_RUNTIME_BRIDGE_MARKER)) * bridge_occurrences
 
 
+def test_projection_budget_fixture_tracks_runtime_catalog() -> None:
+    descriptors = iter_runtime_descriptors()
+    runtime_names = tuple(descriptor.runtime_name for descriptor in descriptors)
+    non_native_names = tuple(descriptor.runtime_name for descriptor in descriptors if not descriptor.native_include_support)
+
+    assert RUNTIME_PROJECTION_TARGETS == runtime_names
+    assert NON_NATIVE_RUNTIME_PROJECTION_TARGETS == non_native_names
+    for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_BUDGETS.items():
+        assert set(budget_by_runtime) == set(runtime_names), command_name
+
+
 def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None:
     report = prompt_diagnostics.build_prompt_surface_report(
         REPO_ROOT,
         surfaces=("command", "agent"),
-        runtime_names=NON_NATIVE_RUNTIMES,
+        runtime_names=NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
         include_tests=False,
         include_runtime_projections=True,
     )
@@ -56,11 +68,11 @@ def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None
     assert "runtime_top_prompts" in payload
     runtime_top_prompts = payload["runtime_top_prompts"]
     assert isinstance(runtime_top_prompts, dict)
-    assert set(NON_NATIVE_RUNTIMES) <= set(runtime_top_prompts)
+    assert set(NON_NATIVE_RUNTIME_PROJECTION_TARGETS) <= set(runtime_top_prompts)
 
     hotspot_names: set[str] = set()
     saw_shell_rewrite_pressure = False
-    for runtime in NON_NATIVE_RUNTIMES:
+    for runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS:
         rows = runtime_top_prompts[runtime]
         assert isinstance(rows, list)
         assert rows, f"{runtime} should expose at least one runtime top prompt row"
@@ -95,11 +107,10 @@ def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None
 
 
 def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budgets() -> None:
-    runtime_names = ("claude-code", *NON_NATIVE_RUNTIMES)
     report = prompt_diagnostics.build_prompt_surface_report(
         REPO_ROOT,
         surfaces=("command",),
-        runtime_names=runtime_names,
+        runtime_names=RUNTIME_PROJECTION_TARGETS,
         include_tests=False,
         include_runtime_projections=True,
     )
@@ -111,13 +122,13 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
     for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_BUDGETS.items():
         item = items_by_name[command_name]
         metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
-        assert set(runtime_names) <= set(metrics_by_runtime)
+        assert set(RUNTIME_PROJECTION_TARGETS) <= set(metrics_by_runtime)
 
         for runtime, budget in budget_by_runtime.items():
             metric = metrics_by_runtime[runtime]
             assert _normalized_runtime_projection_char_count(metric) <= budget
             assert metric.char_count <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
-            if runtime in NON_NATIVE_RUNTIMES:
+            if runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS:
                 assert metric.bridge_command_occurrences > 0
                 assert metric.shell_rewrite_count > 0
 

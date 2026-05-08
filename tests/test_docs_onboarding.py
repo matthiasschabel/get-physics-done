@@ -213,7 +213,7 @@ def test_os_quickstarts_install_matrix_matches_runtime_catalog(doc_name: str) ->
 def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str) -> None:
     content = _read(f"docs/{doc_name}")
     assert_public_surface_generated_file_current(content, context=f"docs/{doc_name}")
-    for block_id in ("runtime-doc-links", "supported-runtimes-table", "os-next-steps-table"):
+    for block_id in ("runtime-doc-links", "supported-runtimes-table", "os-next-steps-table", "recovery-note"):
         assert_public_surface_generated_region(
             content,
             block_id,
@@ -233,9 +233,6 @@ def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str)
         (
             "Confirm success",
             "gpd --help",
-            "gpd resume",
-            "gpd resume --recent",
-            "resume-work",
             *runtime_commands,
         ),
         context=f"docs/{doc_name}",
@@ -245,17 +242,6 @@ def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str)
         where_next,
         beginner_runtime_surfaces(),
         context=f"docs/{doc_name} where-to-go-next table",
-    )
-    _assert_semantic_anchor(
-        where_next,
-        "OS guide recovery bridge",
-        (
-            "normal terminal first",
-            "different recent workspace",
-            "right workspace",
-            "resume-work",
-        ),
-        context=f"docs/{doc_name} where-to-go-next section",
     )
     assert_markdown_link(content, "GPD Onboarding Hub", "./README.md", context=f"docs/{doc_name}")
     for surface in beginner_runtime_surfaces():
@@ -274,7 +260,9 @@ def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
         "beginner-preflight",
         "beginner-caveats",
         "beginner-startup-ladder",
+        "terminal-runtime-bridge",
         "post-start-settings",
+        "recovery-note",
     ):
         assert_public_surface_generated_region(content, block_id, context=f"docs/README.md generated {block_id}")
     assert_beginner_hub_preflight_contract(content)
@@ -342,6 +330,16 @@ def test_root_readme_settings_short_wording_matches_model_profile_contract() -> 
         "beginner-startup-ladder",
         context="README.md generated startup ladder",
     )
+    assert_public_surface_generated_region(
+        content,
+        "recovery-note",
+        context="README.md generated recovery note",
+    )
+    assert_public_surface_generated_region(
+        content,
+        "local-cli-bridge-summary",
+        context="README.md generated local CLI bridge",
+    )
     quick_start = extract_markdown_section(content, "## Quick Start", context="README.md")
 
     _assert_semantic_anchor(
@@ -362,6 +360,11 @@ def test_root_readme_settings_short_wording_matches_model_profile_contract() -> 
 
 def test_root_readme_start_here_links_to_docs_onboarding_hub() -> None:
     content = _read("README.md")
+    assert_public_surface_generated_region(
+        content,
+        "terminal-runtime-bridge",
+        context="README.md generated terminal/runtime bridge",
+    )
     start_here = extract_markdown_section(content, "## Start Here", context="README.md")
 
     assert_markdown_link(

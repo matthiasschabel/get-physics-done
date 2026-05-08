@@ -63,7 +63,7 @@ if [ -z "$PROJECT_ROOT" ] || [ -z "$RESEARCH_MAP_DIR_ABS" ]; then
 fi
 ```
 
-Extract from init JSON: `mapper_model`, `workspace_root`, `project_root`, `commit_docs`, `research_mode`, `map_focus`, `map_focus_provided`, `research_map_dir`, `research_map_dir_absolute`, `existing_maps`, `has_maps`, `research_map_dir_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+Use `gpd --raw stage field-access map-research --stage map_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `BOOTSTRAP_INIT`; `BOOTSTRAP_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 `{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
 
 All filesystem actions in this workflow must use `PROJECT_ROOT` / `RESEARCH_MAP_DIR_ABS` from the staged payload. Do not create, delete, archive, verify, or commit `GPD/research-map` relative to the shell launch directory; a nested launch cwd inside a project is valid and must still target the resolved project root.
@@ -174,7 +174,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Extract from the staged refresh: `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_references`, `citation_source_files`, and the manuscript-reference status fields. Use that refresh for mapper prompts; do not reuse bootstrap state for authoring.
+Use `gpd --raw stage field-access map-research --stage mapper_authoring --style instruction` to confirm the manifest-selected authoring fields. Read only those keys from `MAPPER_AUTHORING_INIT`; `MAPPER_AUTHORING_INIT.staged_loading.required_init_fields` is the runtime confirmation. Use that refresh for mapper prompts; do not reuse bootstrap state for authoring.
 
 Use task tool with `subagent_type="gpd-research-mapper"`, `model="{mapper_model}"`, `readonly=false`, and `run_in_background=true` for parallel execution.
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md

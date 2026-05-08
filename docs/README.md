@@ -53,11 +53,11 @@ Follow one linear path:
 6. Run `tour` if you want a read-only overview of what GPD can do before choosing.
 7. Then choose `new-project`, `map-research`, or `resume-work`.
 
-If you already have a GPD project, `gpd resume` is the normal-terminal,
-current-workspace read-only recovery snapshot, and `resume-work` is the
-in-runtime continue command after you open the right folder. If you need to
-reopen a different workspace first, use `gpd resume --recent`, then come back
-into the runtime.
+If you already have a GPD project, use the generated recovery ladder:
+
+<!-- gpd-public-surface:recovery-note:start -->
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+<!-- gpd-public-surface:recovery-note:end -->
 
 </details>
 
@@ -65,10 +65,12 @@ GPD favors scientific rigor and explicit uncertainty. Treat preferred answers as
 
 ## First: terminal vs runtime
 
-You will use two different places:
+You will use two different places: your normal terminal and your runtime.
 
-- Your **normal terminal** is where you install GPD and check basic tools like Node and Python.
-- Your **runtime** is the AI app where you actually use GPD commands after install.
+<!-- gpd-public-surface:terminal-runtime-bridge:start -->
+Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gemini`, `opencode`.
+Use the opened runtime for the installed GPD command ladder (`help -> start -> tour -> new-project / map-research -> resume-work`); start with `/gpd:help`, `$gpd-help`, `/gpd-help`.
+<!-- gpd-public-surface:terminal-runtime-bridge:end -->
 
 <details>
 <summary>Common beginner terms</summary>

@@ -76,13 +76,12 @@ The hub owns the beginner preflight and caveats: prerequisites, runtime/account
 expectations, and the reminder that GPD does not install your runtime or provide
 model access, billing, or API credits.
 
-Here, "runtime" means the AI terminal app you talk to, such as Claude Code,
-Codex, Gemini CLI, or OpenCode.
+There are two places you type commands: your normal system terminal and the AI runtime.
 
-There are two places you type commands:
-
-- In your normal system terminal: `npx ...`, `gpd ...`, `claude`, `codex`, `gemini`, `opencode`
-- Inside your AI runtime: `/gpd:...`, `$gpd-...`, or `/gpd-...`
+<!-- gpd-public-surface:terminal-runtime-bridge:start -->
+Use your normal terminal for installs, local `gpd ...` diagnostics, and runtime launchers such as `claude`, `codex`, `gemini`, `opencode`.
+Use the opened runtime for the installed GPD command ladder (`help -> start -> tour -> new-project / map-research -> resume-work`); start with `/gpd:help`, `$gpd-help`, `/gpd-help`.
+<!-- gpd-public-surface:terminal-runtime-bridge:end -->
 
 </details>
 
@@ -140,14 +139,33 @@ prefix for your runtime from [Supported Runtimes](#supported-runtimes).
 | Find a workspace to reopen first | `gpd resume --recent`, then `resume-work` |
 | Continue in an existing GPD project | `resume-work` |
 
-`gpd resume` is the normal-terminal recovery step; `resume-work` is the in-runtime continue command after the right folder is open.
+Use the generated recovery ladder for return-to-work cases:
 
-After resuming, the runtime `suggest-next` command is the fastest post-resume next command when you only need the next action.
+<!-- gpd-public-surface:recovery-note:start -->
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+<!-- gpd-public-surface:recovery-note:end -->
 
 <details>
 <summary><strong>Optional Terminal-Side Readiness And Troubleshooting Reference</strong></summary>
 
 Use this when you want to verify install health, unattended readiness, paper-toolchain prerequisites, or local CLI surfaces from your normal terminal. If you want the full beginner path, stay with the onboarding hub and your selected OS/runtime guides.
+
+<!-- gpd-public-surface:local-cli-bridge-summary:start -->
+Use `gpd --help` from your normal terminal for the broader local CLI surface: install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost, presets, and shared Wolfram integration.
+
+- `gpd --help`
+- `gpd doctor`
+- `gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>`
+- `gpd permissions status --runtime <runtime> --autonomy <mode>`
+- `gpd permissions sync --runtime <runtime> --autonomy <mode>`
+- `gpd resume`
+- `gpd resume --recent`
+- `gpd observe execution`
+- `gpd cost`
+- `gpd presets list`
+- `gpd validate plan-preflight <PLAN.md>`
+- `gpd integrations status wolfram`
+<!-- gpd-public-surface:local-cli-bridge-summary:end -->
 
 **Bootstrap hard blockers**
 
@@ -162,7 +180,6 @@ If any of those fail, fix them before troubleshooting GPD itself. These are boot
 - Choose `--local` or `--global` explicitly if you do not want the installer's default path selection
 - Runtime permissions are runtime-owned permission alignment only; use the guided checks after startup to decide whether the runtime is ready.
 - Use your runtime-specific `settings` command after the first successful launch to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides. Safest model-cost start: `review` plus runtime defaults.
-- For the broader terminal-side diagnostics, readiness, recovery, visibility, cost, and preset surface, start with `gpd --help` from your normal terminal.
 - Use `gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>` when you want a terminal-side unattended or overnight verdict. Use `supervised` unless you intentionally selected a different autonomy mode.
 - If you plan paper/manuscript work later, use `gpd doctor --runtime <runtime> --local` for the project-local target or `gpd doctor --runtime <runtime> --global` for the global target first. For the fuller preset catalog, shared Wolfram integration details, and plan-preflight boundaries, use `gpd presets list`, `gpd integrations status wolfram`, and `gpd validate plan-preflight <PLAN.md>` from your normal terminal.
 - Provider authentication is checked manually in the runtime itself; GPD will point this out, but it does not hard-block installation readiness on it
@@ -316,7 +333,7 @@ Typical artifacts include derivation notes, numerical scripts, convergence studi
 
 ## Key GPD Paths
 
-Most research actions run inside your installed AI runtime after GPD has been installed there. Recovery and diagnostics commands like `gpd resume`, `gpd resume --recent`, and `gpd --help` still run from your normal system terminal. The table below uses prefixless command names unless a normal-terminal `gpd ...` command is shown.
+Most research actions run inside your installed AI runtime after GPD has been installed there. The table below uses prefixless command names unless a normal-terminal `gpd ...` command is shown.
 
 ### Core Runtime Paths
 
@@ -335,7 +352,11 @@ Typical publication loop: `write-paper -> peer-review -> respond-to-referees -> 
 
 Publication boundary: `write-paper` supports current-project manuscripts plus one bounded external-authoring lane driven by an explicit intake manifest only. In that lane, `GPD/publication/{subject_slug}/manuscript` is the only manuscript/build root and `GPD/publication/{subject_slug}/intake/` keeps intake/provenance state only; it does not mine arbitrary folders or infer claim/evidence bindings from loose notes. `peer-review` can review the current project manuscript or one explicit manuscript/artifact path or paper directory target. `peer-review` remains the standalone follow-on command when the bounded external-authoring lane needs review. `respond-to-referees` stays tied to the resolved manuscript root, and `arxiv-submission` only packages a GPD-owned manuscript root or `.tex` entrypoint. Project-backed review/response/package outputs stay on the `GPD/` and `GPD/review/` paths; the subject-owned publication root at `GPD/publication/{subject_slug}` is only for the bounded external-authoring lane. This is not a full publication-root migration. See `help` Research Publishing for the full boundary.
 
-Leave / return path: `pause-work` before leaving mid-phase, `resume-work` when you return in-runtime, `suggest-next` when you only need the next action, and `gpd resume` from your normal system terminal for a current-workspace read-only recovery snapshot. Use `gpd resume --recent` first if you need to find the workspace before resuming it, then continue inside that workspace with the runtime `resume-work` command.
+Leave / return path:
+
+<!-- gpd-public-surface:recovery-note:start -->
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+<!-- gpd-public-surface:recovery-note:end -->
 
 ### Command Context
 
@@ -364,8 +385,24 @@ The full in-runtime reference is runtime-specific; the shared examples here stay
 This README is the onboarding and orientation surface, not the complete in-runtime command manual.
 
 - For the full in-runtime command reference, examples, and per-command usage details, run your runtime's help command such as `/gpd:help --all`, `$gpd-help --all`, or `/gpd-help --all`.
-- For local CLI commands such as install checks, readiness, validation, permissions, observability, recovery, and diagnostics, run `gpd --help` in your normal system terminal.
-Use the runtime-specific `pause-work` command when you want an explicit context handoff to restore on return.
+For normal-terminal local CLI commands:
+
+<!-- gpd-public-surface:local-cli-bridge-summary:start -->
+Use `gpd --help` from your normal terminal for the broader local CLI surface: install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost, presets, and shared Wolfram integration.
+
+- `gpd --help`
+- `gpd doctor`
+- `gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>`
+- `gpd permissions status --runtime <runtime> --autonomy <mode>`
+- `gpd permissions sync --runtime <runtime> --autonomy <mode>`
+- `gpd resume`
+- `gpd resume --recent`
+- `gpd observe execution`
+- `gpd cost`
+- `gpd presets list`
+- `gpd validate plan-preflight <PLAN.md>`
+- `gpd integrations status wolfram`
+<!-- gpd-public-surface:local-cli-bridge-summary:end -->
 
 #### Tangents & Hypothesis Branches
 

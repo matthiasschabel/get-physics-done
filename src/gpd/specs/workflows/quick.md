@@ -45,9 +45,9 @@ fi
 INIT="$TASK_BOOTSTRAP_INIT"
 ```
 
-Parse JSON for: `planner_model`, `executor_model`, `commit_docs`, `autonomy`, `next_num`, `slug`, `date`, `timestamp`, `quick_dir`, `task_dir`, `roadmap_exists`, `project_exists`, `planning_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`.
+Use `gpd --raw stage field-access quick --stage task_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `TASK_BOOTSTRAP_INIT`; `TASK_BOOTSTRAP_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
-The bootstrap and default `task_authoring` payloads intentionally do not include `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, protocol bundles, literature maps, research maps, manuscript proof-review status, or publication runtime fields. Before the planner handoff, reload either:
+The bootstrap and default `task_authoring` payloads intentionally do not include the staged reference-runtime payload. Before the planner handoff, reload either:
 
 - `task_authoring` for the default small-task path.
 - `reference_context` only when the quick-mode boundary rules say the task really needs active project references, reference artifacts, literature/research-map files, or a targeted source lookup.
@@ -116,6 +116,8 @@ INIT="$TASK_AUTHORING_INIT"
 
 `NEEDS_REFERENCE_CONTEXT` must be false by default. Do not set it just because `project_contract_gate` exists; contract-gate fields are already present in the default small-task payload.
 
+Use `gpd --raw stage field-access quick --stage task_authoring --style instruction`, or `gpd --raw stage field-access quick --stage reference_context --style instruction` when `NEEDS_REFERENCE_CONTEXT=true`. Read only staged-loading fields.
+
 Spawn gpd-planner with the quick-mode context:
 
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
@@ -163,7 +165,7 @@ If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append 
 - Quick tasks should be atomic and self-contained
 - No literature review phase, no checker phase
 - Use the `staged_loading` fields from `TASK_AUTHORING_INIT` as the source of truth for the handoff instead of inventing a separate quick-only contract
-- If `staged_loading.stage_id` is `task_authoring`, do not invent `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, protocol bundles, literature maps, research maps, proof-review status, or publication context.
+- If `staged_loading.stage_id` is `task_authoring`, do not invent reference-runtime, protocol, literature/research-map, proof-review, or publication context that is not present in `TASK_AUTHORING_INIT.staged_loading.required_init_fields`.
 - If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` instead of drafting a plan from guessed scope.
 - If the task is theorem-style or proof-bearing, return `gpd_return.status: checkpoint` and tell the user quick mode is blocked pending the full proof-redteam workflow.
 - Proof-obligation command block: theorem-style, lemma/corollary/proposition, or explicit `proof_obligation` work must route to the full proof-redteam workflow.

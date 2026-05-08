@@ -17,11 +17,6 @@ PATH_PREFIX = "/runtime/"
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 
 
-def _projected_budget_for_runtime(runtime: str) -> tuple[int, int]:
-    next(descriptor for descriptor in iter_runtime_descriptors() if descriptor.runtime_name == runtime)
-    return (700, 45000)
-
-
 def _projected_verifier_prompt(runtime: str) -> str:
     return project_markdown_for_runtime(
         (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8"),
@@ -51,14 +46,11 @@ def test_gpd_verifier_prompt_surface_stays_within_expected_budget() -> None:
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
-def test_projected_gpd_verifier_prompt_surface_stays_within_runtime_budget(runtime: str) -> None:
+def test_projected_gpd_verifier_prompt_surface_keeps_expected_section_order(runtime: str) -> None:
     projected = _projected_verifier_prompt(runtime)
-    max_lines, max_chars = _projected_budget_for_runtime(runtime)
 
     assert projected.count("## Agent Requirements") == 1
     assert projected.count("## Bootstrap Discipline") == 1
     assert projected.count("## Canonical LLM Error References") == 1
     assert projected.index("## Agent Requirements") < projected.index("## Bootstrap Discipline")
     assert projected.index("## Bootstrap Discipline") < projected.index("## Canonical LLM Error References")
-    assert len(projected.splitlines()) <= max_lines
-    assert len(projected) <= max_chars

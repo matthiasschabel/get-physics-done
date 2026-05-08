@@ -54,7 +54,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `commit_docs`, `state_exists`, `project_exists`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `topic`, `slug`.
+Use `gpd --raw stage field-access literature-review --stage review_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `BOOTSTRAP_INIT`; `BOOTSTRAP_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 `{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
 
 - If `topic` is empty, do not invent or auto-derive it from project state, active references, or deferred artifacts.
@@ -118,7 +118,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-- Parse the staged refresh for `reference_artifact_files`, `reference_artifacts_content`, `literature_review_files`, `research_map_reference_files`, `knowledge_doc_files`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, and `active_references`.
+- Use `gpd --raw stage field-access literature-review --stage scope_locked --style instruction` to confirm the manifest-selected scoped-reference fields. Read only those keys from `SCOPE_LOCKED_INIT`; `SCOPE_LOCKED_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 - If `reference_artifact_files` is populated, read those files now and keep only the entries that support the confirmed scope.
 - If `reference_artifacts_content` is available, use it now as supporting evidence for already-scoped anchors, baselines, prior outputs, and citation reuse.
 - Only read or propagate the deferred reference-artifact context after the scope has been fixed.
@@ -399,7 +399,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse the staged refresh for `citation_source_files`, `derived_citation_sources`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_references`, `derived_manuscript_reference_status`, and `derived_manuscript_proof_review_status` before spawning the bibliographer or accepting a completed review handoff.
+Use `gpd --raw stage field-access literature-review --stage review_handoff --style instruction` to confirm the manifest-selected handoff fields. Read only those keys from `REVIEW_HANDOFF_INIT`; `REVIEW_HANDOFF_INIT.staged_loading.required_init_fields` is the runtime confirmation before spawning the bibliographer or accepting a completed review handoff.
 
 Resolve bibliographer model:
 
@@ -455,7 +455,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse the completion refresh for `topic`, `slug`, and any final presentation/runtime fields before presenting results.
+Use `gpd --raw stage field-access literature-review --stage completion_gate --style instruction` to confirm the manifest-selected completion fields. Read only those keys from `COMPLETION_GATE_INIT`; `COMPLETION_GATE_INIT.staged_loading.required_init_fields` is the runtime confirmation before presenting results.
 
 On completion:
 

@@ -1430,11 +1430,8 @@ def test_help_like_skills_keep_canonical_local_cli_language(tmp_path: Path) -> N
         "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly."
         in help_reference
     )
-    assert (
-        "For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`."
-        in help_reference
-    )
-    assert "For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`." in help_reference
+    assert "Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot." in help_reference
+    assert "- `gpd cost`" in help_reference
     assert "The normal terminal is where you install GPD, run `gpd --help`, and run" in tour_skill
     assert "`gpd resume` is the normal-terminal recovery step for reopening the right" in tour_skill
     assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_reference

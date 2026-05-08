@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -18,7 +19,50 @@ runner = CliRunner()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "stage0"
-TARGET_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+FIELD_ACCESS_WORKFLOWS = (
+    "plan-phase",
+    "execute-phase",
+    "new-project",
+    "write-paper",
+    "new-milestone",
+    "quick",
+    "map-research",
+    "literature-review",
+)
+PAYLOAD_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+STAGED_PROMPT_HYGIENE_WORKFLOWS = ("new-milestone", "quick", "map-research", "literature-review")
+EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
+    "plan-phase": ("phase_bootstrap", "planner_authoring", "checker_revision"),
+    "execute-phase": (
+        "phase_bootstrap",
+        "phase_classification",
+        "wave_planning",
+        "pre_execution_specialists",
+        "wave_dispatch",
+        "checkpoint_resume",
+        "aggregate_and_verify",
+        "closeout",
+    ),
+    "new-project": ("scope_intake", "scope_approval", "post_scope"),
+    "write-paper": (
+        "paper_bootstrap",
+        "outline_and_scaffold",
+        "figure_and_section_authoring",
+        "consistency_and_references",
+        "publication_review",
+    ),
+    "new-milestone": ("milestone_bootstrap", "survey_objectives", "roadmap_authoring"),
+    "quick": ("task_bootstrap", "task_authoring", "reference_context"),
+    "map-research": ("map_bootstrap", "mapper_authoring"),
+    "literature-review": ("review_bootstrap", "scope_locked", "review_handoff", "completion_gate"),
+}
+STAGED_FIELD_INVENTORY_PATTERNS = (
+    re.compile(r"\bParse JSON for\s*:?\s*`", re.IGNORECASE),
+    re.compile(r"\bExtract from init JSON\s*:?\s*`", re.IGNORECASE),
+    re.compile(r"\bExtract from the staged refresh\s*:?\s*`", re.IGNORECASE),
+    re.compile(r"\bParse the staged refresh for\s*`", re.IGNORECASE),
+    re.compile(r"\bParse the completion refresh for\s*`", re.IGNORECASE),
+)
 
 
 def _setup_manifest_owned_payload_project(project_root: Path) -> None:
@@ -85,7 +129,7 @@ def test_default_instruction_style_is_shell_free_and_manifest_backed() -> None:
     assert "staged_loading" not in payload["selected_fields"]
 
 
-@pytest.mark.parametrize("workflow_id", TARGET_WORKFLOWS)
+@pytest.mark.parametrize("workflow_id", FIELD_ACCESS_WORKFLOWS)
 def test_instruction_style_matches_manifest_for_all_target_workflow_stages(workflow_id: str) -> None:
     manifest = load_workflow_stage_manifest(workflow_id)
 
@@ -102,7 +146,7 @@ def test_instruction_style_matches_manifest_for_all_target_workflow_stages(workf
         assert "shell_bindings" not in payload
 
 
-@pytest.mark.parametrize("workflow_id", TARGET_WORKFLOWS)
+@pytest.mark.parametrize("workflow_id", PAYLOAD_WORKFLOWS)
 def test_staged_payload_fields_remain_manifest_owned(tmp_path: Path, workflow_id: str) -> None:
     _setup_manifest_owned_payload_project(tmp_path)
     manifest = load_workflow_stage_manifest(workflow_id)
@@ -119,42 +163,20 @@ def test_staged_payload_fields_remain_manifest_owned(tmp_path: Path, workflow_id
 
 
 def test_target_workflow_prompts_use_field_access_helper_for_staged_reloads() -> None:
-    expected_stage_mentions = {
-        "plan-phase": ("phase_bootstrap", "planner_authoring", "checker_revision"),
-        "execute-phase": (
-            "phase_bootstrap",
-            "phase_classification",
-            "wave_planning",
-            "pre_execution_specialists",
-            "wave_dispatch",
-            "checkpoint_resume",
-            "aggregate_and_verify",
-            "closeout",
-        ),
-        "new-project": ("scope_intake", "scope_approval", "post_scope"),
-        "write-paper": (
-            "paper_bootstrap",
-            "outline_and_scaffold",
-            "figure_and_section_authoring",
-            "consistency_and_references",
-            "publication_review",
-        ),
-    }
-    removed_staged_inventories = (
-        "Parse JSON for: `executor_model`",
-        "Parse JSON for: `selected_protocol_bundle_ids`",
-        "Parse JSON for: `commit_docs`",
-        "Parse JSON for: `researcher_model`",
-    )
-
-    for workflow_id, stage_ids in expected_stage_mentions.items():
+    for workflow_id, stage_ids in EXPECTED_FIELD_ACCESS_STAGE_MENTIONS.items():
         source = workflow_authority_text(WORKFLOWS_DIR, workflow_id)
 
         assert f"gpd --raw stage field-access {workflow_id}" in source
         for stage_id in stage_ids:
             assert f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction" in source
-        for stale_inventory in removed_staged_inventories:
-            assert stale_inventory not in source
+
+
+@pytest.mark.parametrize("workflow_id", STAGED_PROMPT_HYGIENE_WORKFLOWS)
+def test_staged_workflow_prompts_do_not_reintroduce_hand_written_field_inventories(workflow_id: str) -> None:
+    source = workflow_authority_text(WORKFLOWS_DIR, workflow_id)
+
+    for pattern in STAGED_FIELD_INVENTORY_PATTERNS:
+        assert pattern.search(source) is None
 
 
 def test_json_style_exposes_exact_fields_and_requested_aliases() -> None:
@@ -205,8 +227,8 @@ def test_shell_style_binds_only_requested_aliases() -> None:
         {"alias": "PHASE_DIR", "field": "phase_dir"},
     ]
     assert payload["shell_bindings"] == [
-        "PHASE=$(printf '%s\\n' \"${INIT}\" | gpd json get .phase_number --default \"\")",
-        "PHASE_DIR=$(printf '%s\\n' \"${INIT}\" | gpd json get .phase_dir --default \"\")",
+        'PHASE=$(printf \'%s\\n\' "${INIT}" | gpd json get .phase_number --default "")',
+        'PHASE_DIR=$(printf \'%s\\n\' "${INIT}" | gpd json get .phase_dir --default "")',
     ]
     assert all("researcher_model" not in line for line in payload["shell_bindings"])
 

@@ -76,6 +76,7 @@ Cross-runtime release checks:
   prepares deferred settings; adapter-level tests or direct callers must call `finalize_install()`
   before asserting complete Gemini artifacts.
 - OpenCode installs are expected to leave `opencode.json` complete on disk with GPD-managed `permission.read` / `permission.external_directory` entries and built-in MCP servers under the `mcp` key.
+- Phase 8 live-provider smoke is not part of local pytest or PR CI. Run `.github/workflows/phase8-live-provider-matrix.yml` only by manual dispatch or nightly schedule behind the `phase8-live-providers` environment. Leave `dry_run` enabled unless the live runner and budget approval are explicitly ready. The publish workflow can require and validate the sanitized report artifact, but it must not launch providers.
 
 ## Sharing Published Research
 
@@ -107,6 +108,7 @@ You don't need to share your full manuscript or data — even a brief write-up w
 - `main` is protected: direct pushes are blocked, and pull requests must pass the required `tests` workflow before merge.
 - Feature and fix PRs must not bump package versions or publish releases.
 - Add public release notes under `## vNEXT` in `CHANGELOG.md` so the release workflows can prepare the next tagged release from reviewed notes.
+- If a release requires Phase 8 provider smoke, attach the sanitized report run id to `Publish release`; do not add provider credentials, provider launches, or raw logs to release workflows.
 - Add or update tests when behavior changes.
 - Update public docs when install flow, commands, or release messaging changes.
 - Keep commit messages concise and descriptive.

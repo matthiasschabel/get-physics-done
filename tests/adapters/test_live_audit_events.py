@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from gpd.adapters.runtime_catalog import get_runtime_descriptor, list_runtime_names
 from tests.helpers.live_audit_harness.events import (
     NormalizedEvent,
     extract_transcript_features,
@@ -14,6 +15,7 @@ from tests.helpers.live_audit_harness.events import (
 )
 
 FIXTURE_ROOT = Path(__file__).parents[1] / "fixtures" / "live_audit" / "provider_streams"
+PROVIDER_STREAM_RUNTIMES = tuple(list_runtime_names())
 
 
 def test_load_jsonl_events_accepts_fake_records(tmp_path: Path) -> None:
@@ -73,20 +75,17 @@ def test_extract_transcript_features_detects_stop_then_command_and_write() -> No
 
 
 @pytest.mark.parametrize(
-    ("runtime", "final_text"),
-    [
-        ("codex", "Codex final response."),
-        ("claude-code", "Claude final response."),
-        ("gemini", "Gemini final response."),
-    ],
+    "runtime",
+    PROVIDER_STREAM_RUNTIMES,
 )
-def test_provider_shaped_stream_normalization(runtime: str, final_text: str) -> None:
+def test_provider_shaped_stream_normalization_uses_catalog_runtime_names(runtime: str) -> None:
     events = normalize_provider_stream(FIXTURE_ROOT / f"{runtime}.jsonl", runtime)
 
     features = extract_transcript_features(f"{runtime}-row", "", events)
+    expected_display_token = get_runtime_descriptor(runtime).display_name.split()[0]
 
     assert "command_started" in features.event_kinds
     assert "command_completed" in features.event_kinds
     assert features.command_count == 1
-    assert features.final_text == final_text
+    assert features.final_text == f"{expected_display_token} final response."
     assert all(event.metadata["runtime"] == runtime for event in events)

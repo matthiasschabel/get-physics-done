@@ -482,6 +482,18 @@ def test_contributor_docs_describe_gemini_completion_at_cli_boundary() -> None:
     assert "policies/gpd-auto-edit.toml" in contributing
 
 
+def test_contributor_docs_keep_phase8_live_provider_smoke_out_of_pr_ci() -> None:
+    repo_root = _repo_root()
+    contributing = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+
+    assert "Phase 8 live-provider smoke is not part of local pytest or PR CI" in contributing
+    assert ".github/workflows/phase8-live-provider-matrix.yml" in contributing
+    assert "`phase8-live-providers` environment" in contributing
+    assert "The publish workflow can require and validate the sanitized report artifact" in contributing
+    assert "must not launch providers" in contributing
+    assert "do not add provider credentials, provider launches, or raw logs to release workflows" in contributing
+
+
 def test_public_release_surfaces_share_agentic_system_positioning() -> None:
     repo_root = _repo_root()
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
@@ -711,6 +723,9 @@ def test_prepare_release_workflow_creates_release_pr_without_publishing() -> Non
     assert "--jq '.[0].url')" not in workflow
     assert "git add CHANGELOG.md CITATION.cff README.md package.json pyproject.toml uv.lock" in workflow
     assert "Publish release" in workflow
+    assert "Phase 8 live provider matrix" in workflow
+    assert "sanitized report run id" in workflow
+    assert "publishing validates the report only and never launches providers" in workflow
     assert "pypa/gh-action-pypi-publish@release/v1" not in workflow
     assert "npm publish" not in workflow
     assert "gh release create" not in workflow
@@ -858,6 +873,10 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     assert "name: publish release" in workflow
     assert "workflow_dispatch:" in workflow
     assert "release_sha:" in workflow
+    assert "require_phase8_smoke:" in workflow
+    assert "phase8_smoke_run_id:" in workflow
+    assert "phase8_smoke_artifact_name:" in workflow
+    assert "default: phase8-sanitized-provider-report" in workflow
     assert "ref: ${{ inputs.release_sha || github.sha }}" in workflow
     assert "git merge-base --is-ancestor HEAD" in workflow
     assert "scripts/release_workflow.py show-version" in workflow
@@ -871,6 +890,22 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     assert 'TAG_SHA="$(git rev-list -n 1 "v${VERSION}")"' in workflow
     assert "Tag v${VERSION} already points at release commit ${RELEASE_SHA}; continuing publish recovery." in workflow
     assert "Tag v${VERSION} already exists at ${TAG_SHA}, not release commit ${RELEASE_SHA}." in workflow
+    assert "Validate sanitized Phase 8 smoke report if required" in workflow
+    assert "REQUIRE_PHASE8_SMOKE: ${{ inputs.require_phase8_smoke }}" in workflow
+    assert "PHASE8_SMOKE_RUN_ID: ${{ inputs.phase8_smoke_run_id }}" in workflow
+    assert "gh run download \"$PHASE8_SMOKE_RUN_ID\"" in workflow
+    assert "scripts/validate_phase8_provider_report.py is required for Phase 8 smoke validation" in workflow
+    assert 'uv run python scripts/validate_phase8_provider_report.py --input "$REPORT_PATH" --require-smoke' in workflow
+    assert "status=not-required" in workflow
+    assert "status=validated" in workflow
+    assert workflow.index("Validate sanitized Phase 8 smoke report if required") < workflow.index(
+        "Run release validation suite"
+    )
+    assert workflow.index("Validate sanitized Phase 8 smoke report if required") < workflow.index(
+        "Build Python distributions"
+    )
+    for forbidden_provider_surface in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", " claude ", " codex "):
+        assert forbidden_provider_surface not in workflow
     assert "environment:" in workflow
     assert "name: PyPI" in workflow
     assert re.search(
@@ -958,11 +993,14 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     assert 'echo "status=skipped" >> "$GITHUB_OUTPUT"' in workflow
     assert 'echo "status=dispatched" >> "$GITHUB_OUTPUT"' in workflow
     assert "PYPI_PUBLISH_STATUS: ${{ needs.publish-pypi.outputs.status }}" in workflow
+    assert "PHASE8_SMOKE_STATUS: ${{ needs.build-release.outputs.phase8_smoke_status }}" in workflow
     assert 'if [ "${PYPI_PUBLISH_STATUS}" = "already-published" ]; then' in workflow
     assert 'echo "- PyPI: already published; skipped trusted-publishing rerun"' in workflow
     assert 'elif [ "${PYPI_PUBLISH_STATUS}" = "recovered" ]; then' in workflow
     assert 'echo "- PyPI: publish recovery completed; version is present on PyPI"' in workflow
     assert 'echo "- PyPI: published via trusted publishing from environment \\`PyPI\\`"' in workflow
+    assert 'echo "- Phase 8 smoke report: sanitized report validated before publish"' in workflow
+    assert 'echo "- Phase 8 smoke report: not required for this publish"' in workflow
     assert "NPM_PUBLISH_STATUS: ${{ steps.npm_publish.outputs.status }}" in workflow
     assert 'if [ "${NPM_PUBLISH_STATUS}" = "already-published" ]; then' in workflow
     assert 'echo "- npm: already published; skipped trusted-publishing rerun"' in workflow

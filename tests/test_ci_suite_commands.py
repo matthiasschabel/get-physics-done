@@ -35,6 +35,7 @@ def test_all_github_workflows_parse_with_github_actions_shape() -> None:
     workflow_paths = _workflow_paths()
 
     assert {path.name for path in workflow_paths} == {
+        "phase8-live-provider-matrix.yml",
         "publish-release.yml",
         "release.yml",
         "staging-rebuild.yml",
@@ -71,6 +72,75 @@ def test_github_actions_loader_preserves_on_key_without_losing_boolean_inputs() 
     assert True not in workflow
     assert dry_run["type"] == "boolean"
     assert dry_run["default"] is False
+
+
+def test_phase8_live_provider_workflow_is_manual_or_nightly_and_sanitized_only() -> None:
+    workflow = load_repo_github_actions_workflow(REPO_ROOT, "phase8-live-provider-matrix.yml")
+    triggers = workflow["on"]
+
+    assert set(triggers) == {"workflow_dispatch", "schedule"}
+    assert "pull_request" not in triggers
+    assert "push" not in triggers
+    assert "workflow_run" not in triggers
+    assert triggers["schedule"] == [{"cron": "17 8 * * *"}]
+
+    dispatch_inputs = triggers["workflow_dispatch"]["inputs"]
+    assert set(dispatch_inputs) == {
+        "source_ref",
+        "provider_set",
+        "matrix_mode",
+        "scenario_set_id",
+        "row_set_hash",
+        "budget_id",
+        "max_attempts",
+        "max_mutating_rows",
+        "dry_run",
+    }
+    assert dispatch_inputs["provider_set"]["default"] == "metadata-only"
+    assert dispatch_inputs["provider_set"]["type"] == "string"
+    assert dispatch_inputs["matrix_mode"]["default"] == "smoke"
+    assert dispatch_inputs["scenario_set_id"]["default"] == "phase8-smoke"
+    assert dispatch_inputs["budget_id"]["default"] == "dry-run-only"
+    assert dispatch_inputs["max_attempts"]["default"] == 1
+    assert dispatch_inputs["max_mutating_rows"]["default"] == 0
+    assert dispatch_inputs["dry_run"]["type"] == "boolean"
+    assert dispatch_inputs["dry_run"]["default"] is True
+
+    job = workflow_job(workflow, "phase8-live-provider-matrix")
+    assert job["environment"] == {"name": "phase8-live-providers"}
+    effective_permissions = job.get("permissions", workflow["permissions"])
+    assert effective_permissions == {"contents": "read"}
+
+    run_commands = "\n".join(str(step.get("run", "")) for _, step in iter_workflow_steps(workflow))
+    assert "uv run pytest" not in run_commands
+    assert " pytest" not in run_commands
+    assert "GEMINI_API_KEY" not in run_commands
+    assert "ANTHROPIC_API_KEY" not in run_commands
+    assert "OPENAI_API_KEY" not in run_commands
+    assert "Phase 8 live-provider launch is not wired in this skeleton" in run_commands
+
+    upload_steps = workflow_steps_using(workflow, "actions/upload-artifact@v7")
+    assert len(upload_steps) == 1
+    upload_step = upload_steps[0][1]
+    assert upload_step["with"]["name"] == "phase8-sanitized-provider-report"
+    upload_path = upload_step["with"]["path"]
+    assert "phase8-sanitized-report/phase8-provider-smoke-report.json" in upload_path
+    assert "phase8-sanitized-report/phase8-provider-smoke-summary.md" in upload_path
+    assert all(forbidden not in upload_path.lower() for forbidden in ("raw", "stdout", "stderr", "transcript"))
+
+
+def test_default_ci_workflow_has_no_live_provider_credentials_or_phase8_launch_path() -> None:
+    workflow = _workflow_data()
+    workflow_text = (REPO_ROOT / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
+
+    assert "phase8-live-provider-matrix" not in workflow_text
+    assert "phase8-live-providers" not in workflow_text
+    for secret_name in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+        assert secret_name not in workflow_text
+
+    run_commands = "\n".join(str(step.get("run", "")) for _, step in iter_workflow_steps(workflow))
+    assert "provider_set" not in run_commands
+    assert "phase8-provider-smoke" not in run_commands
 
 
 def test_ci_workflow_runs_human_author_check_on_pull_requests_and_main_pushes() -> None:

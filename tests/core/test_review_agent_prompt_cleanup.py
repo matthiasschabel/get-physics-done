@@ -6,6 +6,7 @@ from tests.prompt_metrics_support import count_unfenced_heading
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
+REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references"
 
 
 def _read_agent(name: str) -> str:
@@ -49,12 +50,16 @@ def test_project_researcher_uses_presentation_only_heading_mapping_and_base_fiel
 
 def test_plan_checker_uses_typed_status_and_drops_nested_return_payload_examples() -> None:
     source = _read_agent("gpd-plan-checker.md")
+    return_protocol = (REFERENCES_DIR / "verification" / "plan-checker" / "checker-return-protocol.md").read_text(
+        encoding="utf-8"
+    )
 
     assert (
-        "Headings such as `## VERIFICATION PASSED`, `## ISSUES FOUND`, and `## PLAN_BLOCKED — Escalation to User` are presentation only."
+        "The label examples in `checker-return-protocol.md` are UI only; use `gpd_return.status` for the machine decision."
         in source
     )
-    assert "Route on `gpd_return.status`." in source
+    assert "the machine decision comes from `gpd_return.status`" in source
+    assert "Headings above are presentation only. Route on `gpd_return.status`" in return_protocol
     assert "`gpd_return.status: completed`" in source
     assert "`gpd_return.status: checkpoint`" in source
     assert "`gpd_return.status: failed`" in source

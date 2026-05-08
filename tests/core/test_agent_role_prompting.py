@@ -13,6 +13,7 @@ from gpd.core.model_visible_text import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
+REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references"
 
 
 def _read_agent(name: str) -> str:
@@ -62,7 +63,10 @@ def test_public_worker_prompts_identify_writable_production_surface() -> None:
     paper_writer = _read_agent("gpd-paper-writer")
 
     assert "Public production boundary: public writable production agent for bounded implementation work" in executor
-    assert "Public production boundary: public writable production agent specialized for discrepancy investigation" in debugger
+    assert (
+        "Public production boundary: public writable production agent specialized for discrepancy investigation"
+        in debugger
+    )
     assert "Public production boundary: public writable production agent for manuscript sections" in paper_writer
     assert (
         "On demand only: shared protocols, verification core, physics subfields, agent infrastructure, and cross-project patterns."
@@ -147,12 +151,15 @@ def test_public_agent_prompts_avoid_legacy_ai_assistant_role_labels() -> None:
 
 def test_planner_backtracks_guidance_is_capped_before_injection() -> None:
     source = _read_agent("gpd-planner")
+    execution_procedure = (REFERENCES_DIR / "planning" / "planner-execution-procedure.md").read_text(encoding="utf-8")
 
-    assert "awk -F'|'" in source
-    assert 'row_stage != stage' in source
-    assert "tail -n 10" in source
-    assert "head -n 30" in source
-    assert "do not inject the full file or an unfiltered tail" in source
+    assert "GPD/BACKTRACKS.md" in execution_procedure
+    assert "same planning stage" in execution_procedure
+    assert "overlapping technique" in execution_procedure
+    assert "last 10 matching rows" in execution_procedure
+    assert "cap the rendered block" in execution_procedure
+    assert "patterns_consulted:" in execution_procedure
+    assert "backtracks: []" in execution_procedure
     assert "for f in GPD/INSIGHTS.md GPD/ERROR-PATTERNS.md GPD/BACKTRACKS.md; do" not in source
     assert "tail -n 30 GPD/BACKTRACKS.md" not in source
 

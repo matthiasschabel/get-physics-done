@@ -11,6 +11,16 @@ PLANNER_PATH = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-planner.md"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 PLANNING_REFERENCES_DIR = SOURCE_ROOT / "specs" / "references" / "planning"
+PLANNER_JIT_MODULES = {
+    "autonomy": PLANNING_REFERENCES_DIR / "planner-autonomy-policy.md",
+    "research_mode": PLANNING_REFERENCES_DIR / "planner-research-mode-policy.md",
+    "tangent": PLANNING_REFERENCES_DIR / "planner-tangent-decision-model.md",
+    "proof": PLANNING_REFERENCES_DIR / "planner-proof-bearing-plan-checklist.md",
+    "protocol_bundle": PLANNING_REFERENCES_DIR / "planner-protocol-bundle-planning.md",
+    "task_dependency": PLANNING_REFERENCES_DIR / "planner-task-and-dependency-guide.md",
+    "gap_revision": PLANNING_REFERENCES_DIR / "planner-gap-and-revision-policy.md",
+    "execution": PLANNING_REFERENCES_DIR / "planner-execution-procedure.md",
+}
 
 OLD_DOMAIN_CATALOG_HEADINGS = (
     "QFT Perturbative Calculation",
@@ -41,6 +51,10 @@ def _read_planner_prompt() -> str:
     return PLANNER_PATH.read_text(encoding="utf-8")
 
 
+def _read_reference(name: str) -> str:
+    return PLANNER_JIT_MODULES[name].read_text(encoding="utf-8")
+
+
 def _between(text: str, start: str, end: str) -> str:
     _, start_marker, tail = text.partition(start)
     assert start_marker, f"Missing marker: {start}"
@@ -64,6 +78,12 @@ def test_planner_bootstrap_does_not_eagerly_load_execution_or_completion_only_ma
     assert "planner contract schema is carried there" in role
 
 
+def test_raw_planner_prompt_stays_under_phase6_cap() -> None:
+    planner = _read_planner_prompt()
+
+    assert len(planner.splitlines()) < 800
+
+
 def test_expanded_planner_prompt_stays_under_budget() -> None:
     metrics = measure_prompt_surface(
         PLANNER_PATH,
@@ -72,8 +92,8 @@ def test_expanded_planner_prompt_stays_under_budget() -> None:
     )
 
     assert metrics.raw_include_count <= 3
-    assert metrics.expanded_char_count < 112_000
-    assert metrics.expanded_line_count < 2_350
+    assert metrics.expanded_char_count < 66_000
+    assert metrics.expanded_line_count < 1_325
 
 
 def test_planner_prompt_no_longer_carries_the_removed_high_level_boilerplate() -> None:
@@ -95,6 +115,76 @@ def test_domain_blueprint_catalog_is_on_demand_not_in_base_prompt() -> None:
 
     for removed_heading in OLD_DOMAIN_CATALOG_HEADINGS:
         assert removed_heading not in planner
+
+
+def test_planner_policy_detail_lives_in_jit_modules_not_base_prompt() -> None:
+    planner = _read_planner_prompt()
+
+    expected_reference_paths = {
+        "planner-autonomy-policy.md",
+        "planner-research-mode-policy.md",
+        "planner-tangent-decision-model.md",
+        "planner-proof-bearing-plan-checklist.md",
+        "planner-protocol-bundle-planning.md",
+        "planner-task-and-dependency-guide.md",
+        "planner-gap-and-revision-policy.md",
+        "planner-execution-procedure.md",
+    }
+    for filename in expected_reference_paths:
+        assert f"references/planning/{filename}" in planner
+        assert (PLANNING_REFERENCES_DIR / filename).is_file()
+
+    for detailed_marker in (
+        "### Planning Decision Matrix",
+        "### Explore Mode (`research_mode: \"explore\"`)",
+        "Example outcome in explore mode when alternatives remain live",
+        "Gap-specific fields to insert into the canonical `phase-prompt.md` template",
+        "Triage decision matrix",
+        "Always-visible fallback skeleton:",
+    ):
+        assert detailed_marker not in planner
+
+    autonomy = _read_reference("autonomy")
+    assert "Supervised mode" in autonomy
+    assert "Balanced mode" in autonomy
+    assert "YOLO mode" in autonomy
+    assert "[Y/n/e]" in autonomy
+    assert "Planning Decision Matrix" in autonomy
+
+    research_mode = _read_reference("research_mode")
+    assert "Research mode controls breadth, not correctness." in research_mode
+    assert "Explore Mode" in research_mode
+    assert "Exploit Mode" in research_mode
+    assert "Adaptive Mode" in research_mode
+
+    tangent = _read_reference("tangent")
+    assert "Branch as alternative hypothesis" in tangent
+    assert "gpd:tangent" in tangent
+    assert "gpd:quick" in tangent
+    assert "gpd:add-todo" in tangent
+    assert "## CHECKPOINT REACHED" in tangent
+
+    proof = _read_reference("proof")
+    assert "claim_kind: theorem" in proof
+    assert "proof_deliverables" in proof
+    assert "*-PROOF-REDTEAM.md" in proof
+
+    protocol_bundle = _read_reference("protocol_bundle")
+    assert "planning_guides" in protocol_bundle
+    assert "Fallback Skeleton" in protocol_bundle
+    assert "never changes `project_contract`" in protocol_bundle
+
+    task_dependency = _read_reference("task_dependency")
+    assert "Task Anatomy" in task_dependency
+    assert "Dependency Graph Detail" in task_dependency
+
+    gap_revision = _read_reference("gap_revision")
+    assert "gap_closure: true" in gap_revision
+    assert "Revision From Checker Feedback" in gap_revision
+
+    execution = _read_reference("execution")
+    assert "Optional Context Triage" in execution
+    assert "gpd validate plan-preflight <PLAN.md>" in execution
 
 
 def test_on_demand_domain_planning_guides_are_reachable() -> None:

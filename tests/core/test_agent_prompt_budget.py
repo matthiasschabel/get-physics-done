@@ -27,15 +27,15 @@ AGENT_BASELINES = {
     "gpd-check-proof": (81, 6_231),
     "gpd-consistency-checker": (64, 3_993),
     "gpd-debugger": (246, 9_494),
-    "gpd-executor": (1_125, 70_023),
+    "gpd-executor": (783, 49_384),
     "gpd-experiment-designer": (807, 45_334),
     "gpd-explainer": (241, 9_508),
     "gpd-literature-reviewer": (394, 14_734),
     "gpd-notation-coordinator": (629, 36_452),
     "gpd-paper-writer": (672, 36_231),
     "gpd-phase-researcher": (366, 15_409),
-    "gpd-plan-checker": (1_387, 61_950),
-    "gpd-planner": (2_237, 107_487),
+    "gpd-plan-checker": (399, 22_456),
+    "gpd-planner": (1_306, 64_535),
     "gpd-project-researcher": (987, 61_844),
     "gpd-referee": (569, 36_661),
     "gpd-research-mapper": (743, 37_100),
@@ -69,15 +69,20 @@ MODE_TABLE_ALLOWLIST = {
     "gpd-project-researcher",
 }
 WORST_AGENT_HARD_CAPS = {
-    "gpd-planner": (2_320, 112_000),
-    "gpd-executor": (1_200, 80_000),
+    "gpd-planner": (1_326, 66_000),
+    "gpd-executor": (807, 50_866),
     "gpd-research-mapper": (800, 39_000),
     "gpd-roadmapper": (2_000, 94_000),
     "gpd-project-researcher": (1_500, 81_000),
     "gpd-experiment-designer": (850, 47_000),
     "gpd-research-synthesizer": (1_560, 85_000),
-    "gpd-plan-checker": (1_450, 65_000),
+    "gpd-plan-checker": (419, 23_456),
     "gpd-verifier": (430, 30_000),
+}
+PHASE6_RAW_AGENT_LINE_CAPS = {
+    "gpd-planner": 799,
+    "gpd-executor": 799,
+    "gpd-plan-checker": 899,
 }
 TOP_AGENT_HARD_CAP_COUNT = 6
 BULKY_REFERENCE_INCLUDE_FILES = (
@@ -101,6 +106,10 @@ def _assert_prompt_baseline_is_current(
         measured_chars,
         minimum_margin=MIN_CHAR_MARGIN,
     )
+
+
+def _raw_line_count(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8").splitlines())
 
 
 def test_agent_prompt_budget_table_covers_registered_agents() -> None:
@@ -153,6 +162,14 @@ def test_expanded_agent_prompt_stays_under_budget(agent_name: str) -> None:
         baseline_chars,
         minimum_margin=MIN_CHAR_MARGIN,
     )
+
+
+@pytest.mark.parametrize("agent_name", sorted(PHASE6_RAW_AGENT_LINE_CAPS))
+def test_phase6_selected_agent_raw_source_prompt_caps(agent_name: str) -> None:
+    max_lines = PHASE6_RAW_AGENT_LINE_CAPS[agent_name]
+    observed_lines = _raw_line_count(AGENTS_DIR / f"{agent_name}.md")
+
+    assert observed_lines <= max_lines
 
 
 def test_full_autonomy_and_research_mode_tables_stay_on_allowlisted_agents() -> None:

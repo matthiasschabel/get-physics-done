@@ -125,7 +125,7 @@ Every stage must be executed in a fresh subagent context. The orchestrator shoul
 - the target journal and scope
 
 Do not pass the entire orchestration transcript into later stages. The stage artifacts are the handoff.
-Use `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for child retirement, retry freshness, and stale-output rejection; this protocol owns the stage artifact names and Stage 6 upstream boundary.
+Use `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for child retirement, retry freshness, and stale-output rejection; this protocol owns the stage artifact names and Stage 6 upstream boundary. Use `{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md` only as the compact checklist form; do not remove the local Stage 6 allowlist and validators from active callsites.
 
 ## Stage Dependency Graph
 

@@ -391,6 +391,9 @@ class TestInstall:
         workflow = (target / "get-physics-done" / "workflows" / "set-profile.md").read_text(encoding="utf-8")
         execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase.md").read_text(encoding="utf-8")
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
+        planner_procedure = (
+            target / "get-physics-done" / "references" / "planning" / "planner-execution-procedure.md"
+        ).read_text(encoding="utf-8")
 
         assert "`gpd convention set <key> <value>`" in command
         assert expected_bridge + " config ensure-section" in workflow
@@ -398,10 +401,11 @@ class TestInstall:
         assert expected_bridge + " --raw init progress --include state,config" not in workflow
         assert 'echo "ERROR: gpd initialization failed: $INIT"' not in workflow
         assert f'if ! {expected_bridge} verify plan "$plan"; then' in execute_phase
-        assert f'INIT=$({expected_bridge} --raw init plan-phase "${{PHASE}}")' in agent
+        assert f'INIT=$({expected_bridge} --raw init plan-phase "${{PHASE}}")' in planner_procedure
         assert f"`{expected_bridge} convention set" not in command
         assert "gpd --raw init progress --include state,config" not in workflow
         assert 'if ! gpd verify plan "$plan"; then' not in execute_phase
+        assert 'INIT=$(gpd --raw init plan-phase "${PHASE}")' not in planner_procedure
         assert 'INIT=$(gpd --raw init plan-phase "${PHASE}")' not in agent
 
     def test_install_configures_update_hook(self, adapter: ClaudeCodeAdapter, gpd_root: Path, tmp_path: Path) -> None:

@@ -146,6 +146,9 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
     workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
     panel = (REFERENCES_DIR / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
     reliability = (REFERENCES_DIR / "publication" / "peer-review-reliability.md").read_text(encoding="utf-8")
+    boundary = (REFERENCES_DIR / "publication" / "publication-final-adjudication-boundary.md").read_text(
+        encoding="utf-8"
+    )
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
 
     stage_six_outputs = (
@@ -167,6 +170,7 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
         "${selected_review_root}/REFEREE-DECISION{round_suffix}.json",
     ):
         assert artifact in reliability
+        assert artifact in boundary
     for artifact in (
         "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json",
         "${selected_review_root}/REFEREE-DECISION{round_suffix}.json",
@@ -175,6 +179,7 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
 
     assert "fresh `gpd_return.files_written`" in workflow
     assert "fresh `gpd_return.files_written`" in reliability
+    assert "fresh `gpd_return.files_written`" in boundary
     assert "fresh `gpd_return.files_written`" in referee
 
     assert (
@@ -189,6 +194,7 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
         "Treat `${selected_review_root}/CLAIMS{round_suffix}.json`, any `${selected_review_root}/STAGE-*.json`, "
         "and `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md` as read-only upstream artifacts during Stage 6."
     ) in reliability
+    assert "Never create, rewrite, patch, rename, backfill, or list in `files_written`:" in boundary
     assert (
         "Never modify upstream staged-review inputs such as `${selected_review_root}/CLAIMS{round_suffix}.json`, "
         "any `${selected_review_root}/STAGE-*.json`, or `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md`."
@@ -197,6 +203,7 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
     assert "return `gpd_return.status: blocked`" in workflow
     assert "route the inconsistency back to the earliest failing upstream stage" in panel
     assert "gpd_return.status: blocked" in reliability
+    assert "return `gpd_return.status: blocked`" in boundary
     assert "return `gpd_return.status: blocked`" in referee
     assert "Stage 6 repaired upstream artifacts" in reliability
 

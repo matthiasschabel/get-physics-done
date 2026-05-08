@@ -847,18 +847,24 @@ class TestInstall:
         workflow = (target / "get-physics-done" / "workflows" / "settings.md").read_text(encoding="utf-8")
         execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase.md").read_text(encoding="utf-8")
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
+        planner_procedure = (
+            target / "get-physics-done" / "references" / "planning" / "planner-execution-procedure.md"
+        ).read_text(encoding="utf-8")
 
         assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in command
         assert expected_bridge + " config ensure-section" not in command
-        assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" not in command
+        assert (
+            f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" not in command
+        )
         assert expected_bridge + " config ensure-section" in workflow
         assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" in workflow
         assert 'echo "ERROR: gpd initialization failed: $INIT"' in workflow
         assert f'if ! {expected_bridge} verify plan "$plan"; then' in execute_phase
-        assert f'INIT=$({expected_bridge} --raw init plan-phase "<PHASE>")' in agent
+        assert f'INIT=$({expected_bridge} --raw init plan-phase "${{PHASE}}")' in planner_procedure
         assert "```bash\ngpd config ensure-section\n" not in workflow
         assert "INIT=$(gpd --raw init progress --include state,config --no-project-reentry)" not in workflow
         assert 'if ! gpd verify plan "$plan"; then' not in execute_phase
+        assert 'INIT=$(gpd --raw init plan-phase "${PHASE}")' not in planner_procedure
         assert 'INIT=$(gpd --raw init plan-phase "<PHASE>")' not in agent
 
     def test_install_preserves_existing_mcp_overrides(

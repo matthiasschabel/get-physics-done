@@ -180,6 +180,7 @@ def test_lifecycle_workflow_prompts_reference_every_real_stage_id() -> None:
 def test_planner_agent_does_not_duplicate_canonical_plan_template_blocks() -> None:
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
     phase_template = (TEMPLATES_DIR / "phase-prompt.md").read_text(encoding="utf-8")
+    gap_policy = (REFERENCES_DIR / "planning" / "planner-gap-and-revision-policy.md").read_text(encoding="utf-8")
 
     canonical_only_markers = (
         "# Phase Plan Prompt Template",
@@ -196,7 +197,7 @@ def test_planner_agent_does_not_duplicate_canonical_plan_template_blocks() -> No
         assert marker not in planner_agent
 
     assert "## PLAN.md Source Of Truth" in planner_agent
-    assert "Gap-specific fields to insert into the canonical `phase-prompt.md` template:" in planner_agent
+    assert "## Gap-Specific Contract Fields" in gap_policy
 
 
 def test_new_project_workflow_keeps_contract_preservation_rules_single_sourced() -> None:

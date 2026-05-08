@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 PLAN_CHECKER = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-plan-checker.md"
+PLAN_CHECKER_REFS = REPO_ROOT / "src" / "gpd" / "specs" / "references" / "verification" / "plan-checker"
 
 
 def _read_plan_checker() -> str:
@@ -24,8 +25,26 @@ def test_plan_checker_prompt_stays_thin_while_preserving_direct_schema_visibilit
     )
 
     assert metrics.raw_include_count == 0
-    assert metrics.expanded_char_count < 110_000
-    assert metrics.expanded_line_count < 2_300
+    assert len(_read_plan_checker().splitlines()) < 900
+    assert metrics.expanded_char_count < 45_000
+    assert metrics.expanded_line_count < 900
+
+
+def test_plan_checker_points_to_jit_references_without_inlining_full_catalogs() -> None:
+    source = _read_plan_checker()
+    dimensions_ref = (PLAN_CHECKER_REFS / "checker-dimensions.md").read_text(encoding="utf-8")
+    depth_ref = (PLAN_CHECKER_REFS / "checker-depth-profiles.md").read_text(encoding="utf-8")
+    returns_ref = (PLAN_CHECKER_REFS / "checker-return-protocol.md").read_text(encoding="utf-8")
+
+    assert "{GPD_INSTALL_DIR}/references/verification/plan-checker/checker-dimensions.md" in source
+    assert "{GPD_INSTALL_DIR}/references/verification/plan-checker/checker-depth-profiles.md" in source
+    assert "{GPD_INSTALL_DIR}/references/verification/plan-checker/checker-return-protocol.md" in source
+    assert "Exact diagonalization planned for Hilbert space dimension > 10^6" not in source
+    assert "Exact diagonalization planned for Hilbert space dimension > 10^6" in dimensions_ref
+    assert "| **yolo** | **Maximum scrutiny.**" not in source
+    assert "| **yolo** | **Maximum scrutiny.**" in depth_ref
+    assert "## PARTIAL APPROVAL" not in source
+    assert "## PARTIAL APPROVAL" in returns_ref
 
 
 def test_plan_checker_collapses_duplicate_dimension_steps_but_keeps_all_dimensions() -> None:
@@ -57,8 +76,6 @@ def test_plan_checker_collapses_duplicate_dimension_steps_but_keeps_all_dimensio
         assert removed_step not in source
 
     assert (
-        source.count(
-            "When a phase has multiple plans, some may pass while others have blockers. Rather than blocking the entire phase, use partial approval to let passing plans proceed."
-        )
-        == 1
+        "When a phase has multiple plans, some may pass while others have blockers. Rather than blocking the entire phase, use partial approval to let passing plans proceed."
+        in (PLAN_CHECKER_REFS / "checker-return-protocol.md").read_text(encoding="utf-8")
     )

@@ -9,10 +9,15 @@ from gpd.adapters.install_utils import expand_at_includes
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 SPECS_DIR = REPO_ROOT / "src/gpd/specs"
+EXECUTION_DIR = SPECS_DIR / "references/execution"
 
 
 def _read_executor_prompt() -> str:
     return (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
+
+
+def _read_execution_reference(name: str) -> str:
+    return (EXECUTION_DIR / name).read_text(encoding="utf-8")
 
 
 def _between(text: str, start: str, end: str) -> str:
@@ -54,9 +59,62 @@ def test_expanded_executor_prompt_stays_under_budget_and_excludes_late_publicati
 
     bootstrap, _, _ = expanded.partition("<summary_creation>")
 
-    assert len(expanded) < 80_000
+    assert len(expanded) < 60_000
     assert "Order-of-Limits Awareness" not in bootstrap
     assert "main.tex" not in expanded
+
+
+def test_executor_base_stays_under_phase6_raw_line_budget_and_names_jit_modules() -> None:
+    executor = _read_executor_prompt()
+
+    assert len(executor.splitlines()) < 800
+    assert "@{GPD_INSTALL_DIR}" not in executor
+    for module_name in (
+        "executor-derivation-checkpoints.md",
+        "executor-numerical-protocol.md",
+        "executor-tool-preflight.md",
+        "executor-protocol-bundle-execution.md",
+        "executor-completion.md",
+    ):
+        assert f"references/execution/{module_name}" in executor
+
+
+def test_executor_jit_modules_hold_extracted_execution_detail() -> None:
+    executor = _read_executor_prompt()
+    derivation = _read_execution_reference("executor-derivation-checkpoints.md")
+    numerical = _read_execution_reference("executor-numerical-protocol.md")
+    tool_preflight = _read_execution_reference("executor-tool-preflight.md")
+    bundle_execution = _read_execution_reference("executor-protocol-bundle-execution.md")
+    completion = _read_execution_reference("executor-completion.md")
+
+    assert "% IDENTITY_CLAIM:" not in executor
+    assert "BOUNDARY_CONDITIONS:" not in executor
+    assert "EXPANSION_ORDER:" not in executor
+    assert "External Tool Failure Table" not in executor
+    assert "Final Self-Check" not in executor
+
+    assert "% IDENTITY_CLAIM:" in derivation
+    assert "BOUNDARY_CONDITIONS:" in derivation
+    assert "EXPANSION_ORDER:" in derivation
+    assert "cancellation ratio" in derivation
+
+    assert "references/protocols/numerical-computation.md" in numerical
+    assert "references/verification/core/verification-numerical.md" in numerical
+    assert "references/protocols/symbolic-to-numerical.md" in numerical
+    assert "references/protocols/reproducibility.md" in numerical
+    assert "[UNVERIFIED - training data]" in numerical
+
+    assert "gpd validate plan-preflight <PLAN.md path>" in tool_preflight
+    assert "`required: true` specialized tool is blocking" in tool_preflight
+    assert "use `wolfram`" in tool_preflight
+    assert "External Tool Failure Table" in tool_preflight
+
+    assert "Load only selected asset paths" in bundle_execution
+    assert "additive specialized guidance only" in bundle_execution
+    assert "Keep unselected bundle catalogs absent" in bundle_execution
+
+    assert "Final Self-Check" in completion
+    assert "profiles and autonomy modes do NOT relax contract-result emission" in completion
 
 
 def test_executor_guard_catalogs_are_on_demand_assets_not_base_prompt() -> None:

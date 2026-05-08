@@ -69,6 +69,34 @@ def test_publication_review_round_artifacts_define_canonical_round_family() -> N
     assert "publication-artifact-gates.md" not in source
 
 
+def test_publication_final_adjudication_boundary_preserves_stage_six_guards() -> None:
+    source = (REFERENCES_DIR / "publication-final-adjudication-boundary.md").read_text(encoding="utf-8")
+    referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
+
+    assert "Compact Stage 6 reference for the final `gpd-referee` adjudication pass." in source
+    assert "the workflow callsite and referee prompt must still keep the local write allowlist" in source
+    assert "selected_publication_root" in source
+    assert "selected_review_root" in source
+    assert "round_suffix" in source
+    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in source
+    assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex" in source
+    assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in source
+    assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in source
+    assert "${selected_publication_root}/CONSISTENCY-REPORT.md" in source
+    assert "${selected_review_root}/CLAIMS{round_suffix}.json" in source
+    assert "any `${selected_review_root}/STAGE-*.json`" in source
+    assert "${selected_review_root}/PROOF-REDTEAM{round_suffix}.md" in source
+    assert "gpd validate review-ledger ${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in source
+    assert (
+        "gpd validate referee-decision ${selected_review_root}/REFEREE-DECISION{round_suffix}.json --strict "
+        "--ledger ${selected_review_root}/REVIEW-LEDGER{round_suffix}.json"
+    ) in source
+    assert "Stage-review validation alone is not proof-redteam clearance." in source
+    assert "publication-final-adjudication-boundary.md" in referee
+    assert "During the staged peer-review workflow, Stage 6 is read-only" in referee
+    assert "Stage 6 writable allowlist" in referee
+
+
 def test_publication_response_artifacts_define_paired_completion_gate() -> None:
     source = (REFERENCES_DIR / "publication-response-artifacts.md").read_text(encoding="utf-8")
 

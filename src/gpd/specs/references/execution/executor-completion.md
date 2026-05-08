@@ -1,6 +1,6 @@
 # Executor Completion Protocols
 
-Load this reference after all tasks complete, before creating the canonical `{phase}-{plan}-SUMMARY.md`.
+Load this reference after all tasks complete, before creating the canonical `{phase}-{plan}-SUMMARY.md`, final self-check, typed return, and completion commit.
 
 ## Summary Creation
 
@@ -158,6 +158,57 @@ Or: "None --- plan executed exactly as written."
 ```
 
 **Environment gates section** (if any occurred): Document which task, what was needed, outcome.
+
+## Final Self-Check
+
+After writing SUMMARY.md, verify claims before proceeding to typed return or completion commit.
+
+1. Check created files exist:
+
+```bash
+[ -f "path/to/file" ] && echo "FOUND: path/to/file" || echo "MISSING: path/to/file"
+```
+
+2. Check task checkpoint commits exist:
+
+```bash
+git log --oneline | grep -q "{hash}" && echo "FOUND: {hash}" || echo "MISSING: {hash}"
+```
+
+3. Verify numerical results are reproducible by rerunning the key command and comparing with the SUMMARY.md value.
+
+4. Verify LaTeX compiles when applicable:
+
+```bash
+cd documents/ && latexmk -pdf -interaction=nonstopmode "${MANUSCRIPT_TEX}" 2>&1 | tail -5
+```
+
+5. Verify figures are newer than their generating scripts when applicable.
+
+6. Verify convention consistency across all created or modified outputs.
+
+7. Apply selected bundle final checks: load the selected verification-domain docs, `protocol_bundle_verifier_extensions`, and matching `execution_guides` from `<protocol_bundle_context>`. If no selected bundle covers the final result domain, load `{GPD_INSTALL_DIR}/references/execution/guards/final-verification-guards.md` on demand and apply only matching rows.
+
+Minimum final checks:
+
+- Contract-backed anchors and first-result gates outrank every bundle or guard asset.
+- Analytical results need dimension, convention, sign/factor, limiting-case, and symmetry checks.
+- Numerical results need convergence, benchmark or known-answer comparison, uncertainty/error bars, and reproducibility commands.
+- Claims that use a proxy must explicitly state why the proxy is forbidden, inadequate, decisive, or unresolved under the contract.
+- If no domain or selected guard matches, skip topic-specific rows and rely on generic execution flow plus contract-backed anchors and checks.
+
+Append `## Self-Check: PASSED` or `## Self-Check: FAILED` to SUMMARY.md with missing items listed.
+
+For contract-backed plans, also confirm:
+
+- every decisive claim ID has a `contract_results.claims` entry;
+- every deliverable has produced, partial, or failed status and a path when applicable;
+- every acceptance test has an explicit outcome plus evidence or notes;
+- every must-surface reference has completed or missing required actions recorded;
+- every forbidden proxy is rejected, violated, or unresolved;
+- profiles and autonomy modes do NOT relax contract-result emission.
+
+Do not proceed to typed return or completion commit if the self-check fails.
 
 ## State Updates
 
@@ -324,7 +375,7 @@ Include ALL checkpoints (previous + new if continuation agent).
 ## Final Commit
 
 ```bash
-gpd commit "docs({phase}-{plan}): complete [plan-name] research plan" --files ${phase_dir}/{phase}-{plan}-SUMMARY.md ${phase_dir}/{phase}-{plan}-LOG.md ${phase_dir}/{phase}-{plan}-STATE-TRACKING.md GPD/STATE.md
+gpd commit "docs({phase}-{plan}): complete [plan-name] research plan" --files ${phase_dir}/{phase}-{plan}-SUMMARY.md ${phase_dir}/{phase}-{plan}-LOG.md ${phase_dir}/{phase}-{plan}-STATE-TRACKING.md
 ```
 
-Separate from per-task checkpoints --- captures execution metadata only.
+Separate from per-task checkpoints --- captures execution metadata only. The default spawned executor completion commit excludes `GPD/STATE.md`; durable shared-state effects flow through `gpd_return` and `gpd apply-return-updates`. If a workflow explicitly delegates shared-state ownership, follow that workflow's separate state-write and commit instructions.

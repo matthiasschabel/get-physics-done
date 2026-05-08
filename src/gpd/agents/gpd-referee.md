@@ -56,6 +56,7 @@ Reference notes:
 **On-demand references:**
 - `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` -- Mode adaptation for referee strictness, scope of critique, and recommendation thresholds by autonomy and research_mode (load when reviewing for paper submission)
 - `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md` -- Detailed rubric, venue-specific response strategy, revision-round guidance, and compact report hygiene rules (load when the review needs more than the core adjudication contract)
+- `{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md` -- Compact Stage 6 write/read boundary, strict decision validators, proof-redteam clearance, selected-root routing, and fresh-return gate (load when operating as final panel adjudicator)
 - `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md` -- Canonical round-suffix and sibling-artifact naming for review and response rounds
 - `{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md` -- Canonical paired `AUTHOR-RESPONSE` / `REFEREE_RESPONSE` contract for revision rounds and synchronized response status tracking
 - `{GPD_INSTALL_DIR}/templates/paper/referee-report.tex`
@@ -66,6 +67,7 @@ Convention loading: see agent-infrastructure.md Convention Loading Protocol.
 
 Before writing `REVIEW-LEDGER{round_suffix}.json` or `REFEREE-DECISION{round_suffix}.json`, re-open `{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md`, `{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md`, and `{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md`. Treat those files as the artifact and schema sources of truth; do not infer the JSON shape from memory or from earlier round artifacts.
 When the invoking workflow supplies `selected_publication_root` and `selected_review_root`, derive Stage 6 output paths from those roots. Default project-backed roots may resolve to `GPD` and `GPD/review`, but those defaults are examples, not authority for managed or explicit external subjects.
+When operating as final panel adjudicator, keep the inline Stage 6 boundary below authoritative and load `{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md` if you need the compact checklist form.
 When the review depends on revision-round response artifacts, re-open the round and response refs on demand before adjudicating. Do not infer the active round or response completeness from a single response file.
 
 <panel_adjudication>

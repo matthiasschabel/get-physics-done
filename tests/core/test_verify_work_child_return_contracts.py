@@ -209,14 +209,8 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
     assert "- `failed`: present the issues and offer retry or manual revision." in workflow
     assert "Use the structured fields, not the human-readable approval table, as the source of truth." in workflow
 
-    assert (
-        "Headings such as `## VERIFICATION PASSED`, `## ISSUES FOUND`, and `## PLAN_BLOCKED — Escalation to User` are presentation only. Route on `gpd_return.status`."
-        in checker
-    )
-    assert (
-        "Headings above are presentation only. Route on `gpd_return.status`, the approved/blocked plan lists, and `issues`."
-        in checker
-    )
+    assert "The label examples in `checker-return-protocol.md` are UI only" in checker
+    assert "the machine decision comes from `gpd_return.status`, approved/blocked plan lists, and `issues`" in checker
     assert "approved_plans:" in checker
     assert '    - "04-01"' in checker
     assert "blocked_plans: []" in checker

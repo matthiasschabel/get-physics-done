@@ -414,6 +414,7 @@ def test_shared_protocols_require_permission_before_dependency_installs() -> Non
     verifier_raw = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
     verifier = expand_at_includes(verifier_raw, REPO_ROOT / "src/gpd", "/runtime/")
     planner = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
+    planner_execution = (REFERENCES_DIR / "planning" / "planner-execution-procedure.md").read_text(encoding="utf-8")
 
     assert "Agents must NEVER install dependencies silently." in shared
     assert "Ask the user before any install attempt" in shared
@@ -425,7 +426,7 @@ def test_shared_protocols_require_permission_before_dependency_installs() -> Non
     assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" not in verifier_raw
     assert "Ask the user before any install attempt; keep dependency changes permission-gated." in verifier_raw
     assert "ask the user before any install attempt" in verifier.lower()
-    assert "permission-gated" in planner
+    assert "permission-gated" in planner + planner_execution
 
 
 def test_agent_infrastructure_requires_concrete_next_actions_and_continuation_block() -> None:
@@ -570,9 +571,10 @@ def test_executor_prompt_defaults_to_return_only_shared_state_updates() -> None:
 
 def test_return_only_planner_and_executor_do_not_commit_shared_state_files_by_default() -> None:
     planner = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
+    planner_execution = (REFERENCES_DIR / "planning" / "planner-execution-procedure.md").read_text(encoding="utf-8")
     executor = (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
 
-    planner_commit_blocks = re.findall(r"```bash\n(gpd commit[\s\S]*?)\n```", planner)
+    planner_commit_blocks = re.findall(r"```bash\n(gpd commit[\s\S]*?)\n```", planner + "\n" + planner_execution)
     executor_commit_blocks = re.findall(r"```bash\n(gpd commit[\s\S]*?)\n```", executor)
 
     assert planner_commit_blocks
@@ -2024,7 +2026,12 @@ def test_stable_knowledge_remains_background_only_across_planning_verification_a
         verify_workflow,
         semantic_anchor(
             "verify-work treats stable knowledge as background",
-            ("Stable knowledge docs", "reviewed background synthesis", "stronger sources", "never as decisive evidence"),
+            (
+                "Stable knowledge docs",
+                "reviewed background synthesis",
+                "stronger sources",
+                "never as decisive evidence",
+            ),
             context="verify-work stable knowledge boundary",
         ),
     )
@@ -2032,7 +2039,13 @@ def test_stable_knowledge_remains_background_only_across_planning_verification_a
         verify_phase,
         semantic_anchor(
             "verify-phase treats stable knowledge as background",
-            ("Stable knowledge docs", "reviewed background synthesis", "check selection", "do not override", "decisive evidence"),
+            (
+                "Stable knowledge docs",
+                "reviewed background synthesis",
+                "check selection",
+                "do not override",
+                "decisive evidence",
+            ),
             context="verify-phase stable knowledge boundary",
         ),
     )
@@ -2129,7 +2142,7 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     assert "GPD/REQUIREMENTS.md" in new_project_roadmapper
     assert "do not rely on runtime completion text alone." in new_project_roadmapper
     assert "expected_artifacts:" in new_milestone
-    assert "freshness_marker: \"after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT\"" in new_milestone
+    assert 'freshness_marker: "after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT"' in new_milestone
     assert "Intermediate Results" in state_template
     assert "stop with `gpd_return.status: blocked`" in roadmapper_agent
     assert (
@@ -2569,6 +2582,8 @@ def test_sensitivity_analysis_workflow_uses_canonical_cli_commands() -> None:
 def test_phase_research_and_verification_surfaces_keep_anchor_checks_mandatory() -> None:
     phase_researcher = (AGENTS_DIR / "gpd-phase-researcher.md").read_text(encoding="utf-8")
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
+    planner_execution = (REFERENCES_DIR / "planning" / "planner-execution-procedure.md").read_text(encoding="utf-8")
+    planner_surface = planner_agent + "\n" + planner_execution
     verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
     verify_workflow_expanded = expand_at_includes(verify_workflow, REPO_ROOT / "src/gpd", "/runtime/")
 
@@ -2580,9 +2595,9 @@ def test_phase_research_and_verification_surfaces_keep_anchor_checks_mandatory()
         },
         context="phase researcher anchor checks",
     )
-    assert "FORMALISM.md" in planner_agent
+    assert "FORMALISM.md" in planner_execution
     _assert_prompt_concepts(
-        planner_agent,
+        planner_surface,
         {
             "derivation reference table row": ("derivation, analytical, symbolic", "CONVENTIONS.md", "FORMALISM.md"),
             "validation reference table row": ("validation, testing, benchmarks", "VALIDATION.md", "REFERENCES.md"),
@@ -5103,13 +5118,15 @@ def test_show_phase_workflow_distinguishes_verification_status_from_session_stat
 
 def test_execute_phase_and_related_agents_surface_only_plan_scoped_verification_artifacts() -> None:
     execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
-    planner = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
+    planner_gap_policy = (REFERENCES_DIR / "planning" / "planner-gap-and-revision-policy.md").read_text(
+        encoding="utf-8"
+    )
     verifier = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
     audit_milestone = (WORKFLOWS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
 
     assert "- Verification: {phase_dir}/{phase}-VERIFICATION.md" in execute_phase
     assert '"$phase_dir"/VERIFICATION.md "$phase_dir"/*-VERIFICATION.md' not in execute_phase
-    assert 'ls "$phase_dir"/*-VERIFICATION.md 2>/dev/null' in planner
+    assert 'ls "$phase_dir"/*-VERIFICATION.md 2>/dev/null' in planner_gap_policy
     assert 'find_files("$PHASE_DIR/*-VERIFICATION.md")' in verifier
     assert "`find_files` `GPD/phases/*/*-VERIFICATION.md` by hand" in audit_milestone
     assert "GPD/phases/01-*/VERIFICATION.md" not in audit_milestone
@@ -5604,7 +5621,13 @@ def test_decisive_comparisons_paper_quality_artifacts_and_profile_invariants_are
     assert "all required contract-aware checks" in profiles
     assert "current registry: 5.1-5.19" in quick_reference
     assert "still run every contract-aware check required by the plan" in verifier_profiles
-    assert "required first-result, anchor, and pre-fanout checkpoints" in planner
+    _assert_prompt_concepts(
+        planner,
+        {
+            "yolo gates": ("first-result gates", "anchor checks", "pre-fanout gates"),
+        },
+        context="planner autonomy gates",
+    )
     assert "Do NOT change conventions mid-project without an explicit checkpoint" in planner
     assert "Required first-result, anchor, and pre-fanout gates still apply even in yolo mode" in executor
     assert "suggested_contract_checks" in verifier_agent
@@ -5904,18 +5927,28 @@ def test_help_and_execution_surfaces_wire_tangent_control_path() -> None:
 
 def test_planner_and_plan_phase_keep_no_silent_branching_and_exploit_tangent_suppression() -> None:
     planner = (REPO_ROOT / "src/gpd/agents/gpd-planner.md").read_text(encoding="utf-8")
+    tangent_model = (REFERENCES_DIR / "planning" / "planner-tangent-decision-model.md").read_text(encoding="utf-8")
     plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
 
-    for content in (planner, plan_phase):
-        assert "do NOT silently" in content
+    for content in (planner + "\n" + tangent_model, plan_phase):
+        assert "silently" in content
         assert "gpd:tangent" in content
         assert "gpd:branch-hypothesis" in content
 
-    assert "Explore mode widens analysis and comparison, not branch creation." in planner
-    assert "Explore mode alone does not authorize git-backed branches" in planner
-    assert (
-        "Suppress optional tangent surfacing unless the user explicitly requests it or the current approach is blocked"
-        in planner
+    assert "Explore mode widens analysis and comparison, not branch creation." in tangent_model
+    _assert_prompt_concepts(
+        tangent_model,
+        {
+            "explicit tangent branch outcome": ("Hypothesis branches", "explicit tangent outcome"),
+        },
+        context="planner tangent branch policy",
+    )
+    _assert_prompt_concepts(
+        planner + "\n" + tangent_model,
+        {
+            "optional tangent suppression": ("Exploit suppresses optional tangents", "current approach is blocked"),
+        },
+        context="planner optional tangent suppression",
     )
     assert "do not auto-create git-backed branches or branch-like plans" in plan_phase
     assert "`git.branching_strategy` does not override this rule." in plan_phase
@@ -6087,7 +6120,13 @@ def test_expanded_artifact_intake_surfaces_use_cli_text_extraction_helper() -> N
         digest_workflow,
         semantic_anchor(
             "digest workflow extracts non-plain text through artifact helper",
-            ("`.pdf`", "`.docx`", "`.xlsx`", "working text surface", "`gpd validate artifact-text <path> --output <txt-path>`"),
+            (
+                "`.pdf`",
+                "`.docx`",
+                "`.xlsx`",
+                "working text surface",
+                "`gpd validate artifact-text <path> --output <txt-path>`",
+            ),
             context="digest-knowledge workflow source intake",
         ),
         semantic_anchor(

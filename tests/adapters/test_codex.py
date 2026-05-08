@@ -853,6 +853,9 @@ class TestInstall:
         workflow = (target / "get-physics-done" / "workflows" / "set-profile.md").read_text(encoding="utf-8")
         execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase.md").read_text(encoding="utf-8")
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
+        planner_procedure = (
+            target / "get-physics-done" / "references" / "planning" / "planner-execution-procedure.md"
+        ).read_text(encoding="utf-8")
         snippet = (target / CODEX_RUNTIME_SNIPPET_REL).read_text(encoding="utf-8")
 
         _assert_codex_runtime_note_guidance(skill, expected_bridge)
@@ -866,9 +869,10 @@ class TestInstall:
         assert f"{expected_bridge} --raw init progress --include state,config" not in workflow
         assert "$ARGUMENTS.profile" not in workflow
         assert f'if ! {expected_bridge} verify plan "$plan"; then' in execute_phase
-        assert f'INIT=$({expected_bridge} --raw init plan-phase "${{PHASE}}")' in agent
+        assert f'INIT=$({expected_bridge} --raw init plan-phase "${{PHASE}}")' in planner_procedure
         assert "```bash\ngpd config ensure-section\n" not in workflow
         assert 'if ! gpd verify plan "$plan"; then' not in execute_phase
+        assert 'INIT=$(gpd --raw init plan-phase "${PHASE}")' not in planner_procedure
         assert 'INIT=$(gpd --raw init plan-phase "${PHASE}")' not in agent
 
     def test_install_uses_compact_staged_command_shim_in_generated_skill(

@@ -96,6 +96,32 @@ def _string_literals(tree: ast.AST) -> Iterable[str]:
             yield node.value
 
 
+def _provider_secret_env_literals_outside_forbidden_markers(tree: ast.AST) -> list[str]:
+    allowed_literal_node_ids: set[int] = set()
+    for node in ast.walk(tree):
+        target_names: list[str] = []
+        if isinstance(node, ast.Assign):
+            target_names.extend(target.id for target in node.targets if isinstance(target, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target_names.append(node.target.id)
+        if not any("FORBIDDEN" in target_name for target_name in target_names):
+            continue
+        allowed_literal_node_ids.update(
+            id(child) for child in ast.walk(node) if isinstance(child, ast.Constant) and isinstance(child.value, str)
+        )
+
+    hits: list[str] = []
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in allowed_literal_node_ids
+            and PROVIDER_SECRET_ENV_RE.search(node.value)
+        ):
+            hits.append(node.value)
+    return hits
+
+
 def _call_name(node: ast.Call) -> tuple[str, str] | None:
     func = node.func
     if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
@@ -189,7 +215,8 @@ def test_phase8_default_harness_does_not_launch_providers_or_read_provider_secre
                 offenders.append(f"{relpath}: provider launch API {_call_name(node)}")
             if _reads_environment(node):
                 offenders.append(f"{relpath}: environment lookup")
-        if PROVIDER_SECRET_ENV_RE.search("\n".join(_string_literals(tree))):
+        secret_env_literals = _provider_secret_env_literals_outside_forbidden_markers(tree)
+        if secret_env_literals:
             offenders.append(f"{relpath}: provider secret env literal")
 
     assert offenders == []

@@ -57,7 +57,7 @@ class GuardedWorkspace:
         if _path_is_or_contains_symlink(raw_row_root, stop_at=self.tmp_root):
             raise ValueError("row_root must not contain symlink path components")
 
-    def resolve_allowed(self, relative_path: str) -> Path:
+    def resolve_allowed(self, relative_path: str, *, allow_harness_artifact: bool = False) -> Path:
         candidate = Path(relative_path)
         if candidate.is_absolute():
             raise ValueError("absolute paths are refused by the fake runner")
@@ -68,6 +68,8 @@ class GuardedWorkspace:
             raise ValueError("path traversal is refused by the fake runner")
         if any(part == "~" or part.startswith("~/") for part in parts):
             raise ValueError("home-directory writes are refused by the fake runner")
+        if not allow_harness_artifact and _is_reserved_harness_artifact_path(candidate):
+            raise ValueError("reserved harness sidecar writes are refused by the fake runner")
 
         target = self.row_root.joinpath(*parts)
         self._refuse_symlink_components(target)
@@ -80,8 +82,8 @@ class GuardedWorkspace:
             raise ValueError("active checkout writes are refused")
         return target
 
-    def write_text(self, relative_path: str, text: str) -> Path:
-        target = self.resolve_allowed(relative_path)
+    def write_text(self, relative_path: str, text: str, *, allow_harness_artifact: bool = False) -> Path:
+        target = self.resolve_allowed(relative_path, allow_harness_artifact=allow_harness_artifact)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
 
@@ -130,9 +132,11 @@ def run_fake_scenario(row: object, repo_root: Path, output_root: Path) -> FakeRu
     stdout_events = _stdout_events(row, final_text)
     normalized_events = _normalized_events(row, final_text)
 
-    stdout_path = workspace.write_text("stdout.jsonl", _jsonl(stdout_events))
-    normalized_events_path = workspace.write_text("normalized-events.jsonl", _jsonl(normalized_events))
-    final_path = workspace.write_text("final.md", final_text)
+    stdout_path = workspace.write_text("stdout.jsonl", _jsonl(stdout_events), allow_harness_artifact=True)
+    normalized_events_path = workspace.write_text(
+        "normalized-events.jsonl", _jsonl(normalized_events), allow_harness_artifact=True
+    )
+    final_path = workspace.write_text("final.md", final_text, allow_harness_artifact=True)
 
     for relative_path, text in _materialized_writes(row):
         workspace.write_text(relative_path, text)
@@ -153,10 +157,12 @@ def run_fake_scenario(row: object, repo_root: Path, output_root: Path) -> FakeRu
             "evidence_packet": "evidence-packet.json",
         },
     }
-    status_path = workspace.write_text("status.json", _json(status_payload))
+    status_path = workspace.write_text("status.json", _json(status_payload), allow_harness_artifact=True)
 
     classification_payload = _write_classification(row_id, workspace.write_records, refused_writes)
-    write_classification_path = workspace.write_text("write-classification.json", _json(classification_payload))
+    write_classification_path = workspace.write_text(
+        "write-classification.json", _json(classification_payload), allow_harness_artifact=True
+    )
 
     evidence_payload = _evidence_packet(
         row_id=row_id,
@@ -169,7 +175,9 @@ def run_fake_scenario(row: object, repo_root: Path, output_root: Path) -> FakeRu
         evidence_packet_path=row_root / "evidence-packet.json",
     )
     evidence_payload = _merge_evidence_overrides(evidence_payload, _evidence_overrides(row))
-    evidence_packet_path = workspace.write_text("evidence-packet.json", _json(evidence_payload))
+    evidence_packet_path = workspace.write_text(
+        "evidence-packet.json", _json(evidence_payload), allow_harness_artifact=True
+    )
 
     return FakeRunResult(
         row_id=row_id,
@@ -206,6 +214,10 @@ def _path_is_or_contains_symlink(path: Path, *, stop_at: Path) -> bool:
         if not current.exists():
             break
     return False
+
+
+def _is_reserved_harness_artifact_path(path: Path) -> bool:
+    return len(path.parts) == 1 and path.parts[0] in _HARNESS_ARTIFACT_NAMES
 
 
 def _row_attr(row: object, name: str, default: object = _NO_DEFAULT) -> object:
@@ -340,6 +352,8 @@ def _classify_materialized_write(relative_path: str) -> str:
 
 
 def _classify_refusal(reason: str) -> str:
+    if "reserved harness sidecar" in reason:
+        return "reserved_harness_sidecar_refused"
     if "symlink" in reason:
         return "symlink_escape"
     if "absolute" in reason:

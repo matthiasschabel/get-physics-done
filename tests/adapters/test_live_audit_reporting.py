@@ -59,6 +59,10 @@ def test_fake_matrix_report_counts_and_orders_rows_deterministically() -> None:
         "row_count": 2,
         "status_counts": {"completed": 2},
         "result_class_counts": {"green": 1, "yellow": 1},
+        "behavior_acceptance_counts": {"accepted": 1, "pending": 1},
+        "accepted_row_count": 1,
+        "rejected_row_count": 0,
+        "pending_behavior_row_count": 1,
         "provider_runtime_counts": {"codex": 1, "gemini": 1},
         "fake_mode_counts": {"missing-final": 1, "success": 1},
         "read_only_expected_count": 2,
@@ -69,7 +73,24 @@ def test_fake_matrix_report_counts_and_orders_rows_deterministically() -> None:
         "network_attempts": 0,
         "unique_finding_count": 0,
         "unique_s0_s1_finding_count": 0,
+        "s0_s1_finding_count": 0,
+        "setup_turn_count": 0,
+        "recovery_turn_count": 0,
+        "duplicate_question_count": 0,
+        "false_success_count": 0,
+        "write_violation_count": 0,
+        "stop_violation_count": 0,
+        "post_stop_activity_count": 0,
+        "prompt_budget_finding_count": 0,
+        "schema_failure_count": 0,
+        "finding_class_counts": {},
+        "finding_severity_counts": {},
+        "prompt_budget_class_counts": {},
+        "schema_failure_class_counts": {},
     }
+    assert report["behavior_metrics"]["accepted_row_count"] == 1
+    assert report["behavior_metrics"]["pending_behavior_row_count"] == 1
+    assert report["committed_evidence_policy"]["raw_transcripts_committed"] is False
     assert "SHOULD_NOT_LEAK" not in json.dumps(report, sort_keys=True)
 
 

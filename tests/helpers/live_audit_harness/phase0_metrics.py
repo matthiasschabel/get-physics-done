@@ -40,7 +40,12 @@ class Phase0LiveAuditMetrics:
     result_class_counts: dict[str, int]
     finding_class_counts: dict[str, int]
     finding_id_counts: dict[str, int]
+    finding_severity_counts: dict[str, int]
     finding_count: int
+    accepted_row_count: int
+    rejected_row_count: int
+    pending_behavior_row_count: int
+    s0_s1_finding_count: int
     setup_turn_count: int
     recovery_turn_count: int
     duplicate_question_count: int
@@ -64,7 +69,12 @@ class Phase0LiveAuditMetrics:
             "result_class_counts": self.result_class_counts,
             "finding_class_counts": self.finding_class_counts,
             "finding_id_counts": self.finding_id_counts,
+            "finding_severity_counts": self.finding_severity_counts,
             "finding_count": self.finding_count,
+            "accepted_row_count": self.accepted_row_count,
+            "rejected_row_count": self.rejected_row_count,
+            "pending_behavior_row_count": self.pending_behavior_row_count,
+            "s0_s1_finding_count": self.s0_s1_finding_count,
             "setup_turn_count": self.setup_turn_count,
             "recovery_turn_count": self.recovery_turn_count,
             "duplicate_question_count": self.duplicate_question_count,
@@ -133,6 +143,8 @@ class _MetricsBuilder:
         self.result_class_counts: Counter[str] = Counter()
         self.finding_class_counts: Counter[str] = Counter()
         self.finding_id_counts: Counter[str] = Counter()
+        self.finding_severity_counts: Counter[str] = Counter()
+        self.behavior_acceptance_counts: Counter[str] = Counter()
         self.launch_policy_counts: Counter[str] = Counter()
         self.default_pytest_row_count = 0
         self.setup_turn_count = 0
@@ -146,6 +158,7 @@ class _MetricsBuilder:
         self._stop_violation_incidents: set[tuple[str, str]] = set()
         self._post_stop_incidents: set[tuple[str, str]] = set()
         self._prompt_budget_incidents: set[tuple[str, str]] = set()
+        self._s0_s1_finding_incidents: set[tuple[str, str]] = set()
 
     def add_phase8_matrix(self, matrix: Phase8Matrix) -> None:
         for row in matrix.rows:
@@ -165,6 +178,7 @@ class _MetricsBuilder:
         self._add_write_metrics(row, row_id=row_id)
         self._add_prompt_budget(row, row_id=row_id)
         self._add_stop_activity(row, row_id=row_id)
+        self._add_behavior_acceptance(row, row_id=row_id)
         if include_findings:
             self._add_findings(_records(_read(row, "findings")), default_row_id=row_id)
             for finding_id in _string_items(_read(row, "finding_ids")):
@@ -181,6 +195,7 @@ class _MetricsBuilder:
             self.result_class_counts[result_class] += 1
         if result_class == "invalid_evidence":
             self._add_incident(self._schema_failure_incidents, row_id, "schema_failure")
+        self._add_behavior_acceptance(score, row_id=row_id)
         self._add_findings(_records(_read(score, "findings")), default_row_id=row_id)
 
     def add_report(self, report: Mapping[str, object]) -> None:
@@ -223,7 +238,12 @@ class _MetricsBuilder:
             result_class_counts=_counter_payload(self.result_class_counts),
             finding_class_counts=_counter_payload(self.finding_class_counts),
             finding_id_counts=_counter_payload(self.finding_id_counts),
+            finding_severity_counts=_counter_payload(self.finding_severity_counts),
             finding_count=sum(self.finding_id_counts.values()),
+            accepted_row_count=self.behavior_acceptance_counts.get("accepted", 0),
+            rejected_row_count=self.behavior_acceptance_counts.get("rejected", 0),
+            pending_behavior_row_count=self.behavior_acceptance_counts.get("pending", 0),
+            s0_s1_finding_count=len(self._s0_s1_finding_incidents),
             setup_turn_count=self.setup_turn_count,
             recovery_turn_count=self.recovery_turn_count,
             duplicate_question_count=len(self._duplicate_question_incidents),
@@ -360,12 +380,16 @@ class _MetricsBuilder:
         if not finding_id:
             return
         finding_class = _finding_class(finding)
+        severity = _finding_severity(finding)
         row_ids = _finding_row_ids(finding, default_row_id=default_row_id)
         impact_count = max(len(row_ids), 1)
         self.finding_id_counts[finding_id] += impact_count
         self.finding_class_counts[finding_class] += impact_count
+        self.finding_severity_counts[severity] += impact_count
         for row_id in row_ids or ("",):
             marker = f"{finding_id} {finding_class}".casefold()
+            if severity in {"S0", "S1"}:
+                self._add_incident(self._s0_s1_finding_incidents, row_id, finding_id)
             if "duplicate_question" in marker or "duplicate_questions" in marker or "asks_duplicate_question" in marker:
                 self._add_incident(self._duplicate_question_incidents, row_id, finding_id)
             if "invalid_evidence" in marker or "schema_failure" in marker or "schema_validation" in marker:
@@ -380,6 +404,11 @@ class _MetricsBuilder:
                 self._add_incident(self._post_stop_incidents, row_id, finding_id)
             if "prompt_budget" in marker or "prompt_budget_leakage" in marker:
                 self._add_incident(self._prompt_budget_incidents, row_id, finding_id)
+
+    def _add_behavior_acceptance(self, source: object, *, row_id: str) -> None:
+        acceptance = _behavior_acceptance(source)
+        if acceptance:
+            self.behavior_acceptance_counts[acceptance] += 1
 
     def _add_incident(self, incidents: set[tuple[str, str]], row_id: str, incident_id: str) -> None:
         incidents.add((row_id or f"anonymous-{len(incidents)}", incident_id))
@@ -580,6 +609,11 @@ def _finding_class(finding: object) -> str:
     )
 
 
+def _finding_severity(finding: object) -> str:
+    severity = _as_string(_read(finding, "severity", "max_severity"), default="unknown").upper()
+    return severity if severity in {"S0", "S1", "S2", "S3"} else "unknown"
+
+
 def _finding_row_ids(finding: object, *, default_row_id: str) -> tuple[str, ...]:
     row_ids = _string_items(_read(finding, "row_ids"))
     row_id = _as_string(_read(finding, "row_id"), default="")
@@ -588,6 +622,74 @@ def _finding_row_ids(finding: object, *, default_row_id: str) -> tuple[str, ...]
     if not row_ids and default_row_id:
         row_ids = (default_row_id,)
     return tuple(sorted(set(row_ids)))
+
+
+def _behavior_acceptance(source: object) -> str:
+    explicit = _explicit_behavior_acceptance(source)
+    if explicit == "rejected":
+        return "rejected"
+
+    findings = _records(_read(source, "findings"))
+    if any(_finding_severity(finding) in {"S0", "S1"} for finding in findings):
+        return "rejected"
+    if _non_negative_int(_read(source, "false_success_count")) > 0:
+        return "rejected"
+    if _non_negative_int(_read(source, "write_violation_count", "unexpected_write_count")) > 0:
+        return "rejected"
+    if _non_negative_int(_read(source, "stop_violation_count", "post_stop_activity_count")) > 0:
+        return "rejected"
+    if _truthy(_read(source, "post_stop_activity")) is True:
+        return "rejected"
+    if _write_status_is_violation(_read(source, "write_status", "write_class")):
+        return "rejected"
+
+    result_class = _normalize_result_class(_read(source, "result", "result_class", "observed_result_class"))
+    if result_class in {"red", "invalid_evidence"}:
+        return "rejected"
+    if explicit:
+        return explicit
+    if result_class == "green":
+        return "accepted"
+    if result_class in {"yellow"}:
+        return "pending"
+    return ""
+
+
+def _explicit_behavior_acceptance(source: object) -> str:
+    rejected = _read(source, "rejected", "behavior_rejected", "semantic_rejected")
+    if isinstance(rejected, bool) and rejected:
+        return "rejected"
+
+    accepted = _read(source, "accepted", "behavior_accepted", "semantic_accepted")
+    if isinstance(accepted, bool):
+        return "accepted" if accepted else "rejected"
+
+    value = _read(
+        source,
+        "behavior_acceptance",
+        "semantic_acceptance",
+        "acceptance",
+        "acceptance_status",
+        "row_acceptance",
+    )
+    normalized = _as_string(value, default="").casefold().replace("-", "_")
+    if normalized in {"accept", "accepted", "green", "pass", "passed", "ready"}:
+        return "accepted"
+    if normalized in {
+        "fail",
+        "failed",
+        "hard_fail",
+        "invalid",
+        "invalid_evidence",
+        "not_accepted",
+        "red",
+        "reject",
+        "rejected",
+    }:
+        return "rejected"
+    if normalized in {"blocked", "needs_repair", "pending", "warn", "warning", "yellow"}:
+        return "pending"
+    return ""
 
 
 def _write_is_violation(write: object) -> bool:

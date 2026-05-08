@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from hashlib import sha256
 
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from tests.helpers.live_audit_harness.phase0_metrics import collect_phase0_live_audit_metrics
 
 FAKE_MATRIX_REPORT_SCHEMA = "phase7.fake_matrix_report.v1"
 TREND_DASHBOARD_SCHEMA = "phase7.trend_dashboard.v1"
@@ -18,6 +19,7 @@ _GENERATED_AT = "1970-01-01T00:00:00Z"
 _MISSING = object()
 _NESTED_SOURCES = ("row", "run", "scenario", "score", "metadata", "contract")
 _SEVERITY_RANK = {"S0": 0, "S1": 1, "S2": 2, "S3": 3, "unknown": 99}
+_HARD_BEHAVIOR_SEVERITIES = frozenset({"S0", "S1"})
 _PROVIDER_FINDING_CLASSES = frozenset(
     {
         "product_behavior",
@@ -111,7 +113,8 @@ def render_fake_matrix_report(
 
     rows = sorted(rendered_rows, key=_row_order_key)
     findings = _aggregate_findings(finding_records)
-    aggregates = _aggregate_rows(rows, findings)
+    behavior_metrics = _class_only_behavior_metrics(scores=scores, rows=rows, findings=findings)
+    aggregates = _aggregate_rows(rows, findings, behavior_metrics)
     row_set_sha256 = _stable_sha256(rows)
 
     return {
@@ -126,7 +129,14 @@ def render_fake_matrix_report(
         "provider_subprocess_allowed": False,
         "rows": rows,
         "aggregates": aggregates,
+        "behavior_metrics": behavior_metrics,
         "findings": findings,
+        "committed_evidence_policy": {
+            "class_only_rows": True,
+            "class_only_behavior_metrics": True,
+            "raw_transcripts_committed": False,
+            "raw_provider_output_committed": False,
+        },
         "quarantine": [str(row["row_id"]) for row in rows if row.get("quarantined") is True],
     }
 
@@ -137,11 +147,17 @@ def render_trend_dashboard(matrix_report: Mapping[str, object]) -> dict[str, obj
     rows = _rows_from_report(matrix_report)
     findings = _findings_from_report(matrix_report)
     aggregates = _mapping_from_report(matrix_report, "aggregates")
+    behavior_metrics = _mapping_from_report(matrix_report, "behavior_metrics")
     row_count = len(rows)
     provider_subprocess_attempts = _as_int(aggregates.get("provider_subprocess_attempts"), default=0)
     network_attempts = _as_int(aggregates.get("network_attempts"), default=0)
+    s0_s1_findings = _s0_s1_findings(findings)
+    s0_s1_finding_rows = _s0_s1_finding_row_ids(s0_s1_findings)
     red_or_invalid_rows = [str(row.get("row_id", "")) for row in rows if _is_red_or_invalid(row)]
+    rejected_behavior_rows = _rejected_behavior_rows(rows, hard_finding_row_ids=s0_s1_finding_rows)
+    pending_behavior_rows = _pending_behavior_rows(rows)
     non_green_rows = [str(row.get("row_id", "")) for row in rows if row.get("result_class") != "green"]
+    hard_behavior_metric_count = _hard_behavior_metric_count(behavior_metrics, aggregates)
 
     gates = {
         "fake_runner_contract": _gate(row_count > 0 and _all_rows_have(rows, "fake_mode")),
@@ -149,13 +165,24 @@ def render_trend_dashboard(matrix_report: Mapping[str, object]) -> dict[str, obj
         "persona_identity": _identity_gate(rows, "persona_id"),
         "adapter_policy": _gate(provider_subprocess_attempts == 0 and _all_rows_have(rows, "provider_adapter")),
         "auth_quota_metadata": _gate(provider_subprocess_attempts == 0),
-        "acceptance_classification": _classification_gate(red_or_invalid_rows, non_green_rows, row_count),
+        "acceptance_classification": _classification_gate(
+            red_or_invalid_rows,
+            non_green_rows,
+            row_count,
+            rejected_behavior_rows=rejected_behavior_rows,
+        ),
+        "behavior_acceptance": _behavior_acceptance_gate(rejected_behavior_rows, pending_behavior_rows, row_count),
+        "behavior_hard_findings": _gate(not s0_s1_findings),
+        "behavior_hard_metrics": _gate(hard_behavior_metric_count == 0),
         "report_rendering": _gate(matrix_report.get("schema") == FAKE_MATRIX_REPORT_SCHEMA),
         "default_pytest_no_network": _gate(provider_subprocess_attempts == 0 and network_attempts == 0),
     }
     decision = _trend_decision(
         row_count=row_count,
         red_or_invalid_rows=red_or_invalid_rows,
+        rejected_behavior_rows=rejected_behavior_rows,
+        s0_s1_finding_count=len(s0_s1_findings),
+        hard_behavior_metric_count=hard_behavior_metric_count,
         non_green_rows=non_green_rows,
         provider_subprocess_attempts=provider_subprocess_attempts,
         network_attempts=network_attempts,
@@ -177,6 +204,29 @@ def render_trend_dashboard(matrix_report: Mapping[str, object]) -> dict[str, obj
             "status_counts": _counter_dict(str(row.get("status", "unknown")) for row in rows),
             "result_class_counts": _counter_dict(str(row.get("result_class", "unknown")) for row in rows),
             "unique_s0_s1_finding_count": sum(1 for finding in findings if finding.get("severity") in {"S0", "S1"}),
+            "s0_s1_finding_row_count": len(s0_s1_finding_rows),
+            "behavior_acceptance_counts": _counter_dict(str(row.get("behavior_acceptance", "unknown")) for row in rows),
+            "accepted_behavior_row_count": _as_int(
+                behavior_metrics.get("accepted_row_count"), default=len(_accepted_behavior_rows(rows))
+            ),
+            "rejected_behavior_row_count": len(rejected_behavior_rows),
+            "pending_behavior_row_count": len(pending_behavior_rows),
+            "false_success_count": _as_int(
+                behavior_metrics.get("false_success_count"),
+                default=_as_int(aggregates.get("false_success_count"), default=0),
+            ),
+            "write_violation_count": _as_int(
+                behavior_metrics.get("write_violation_count"),
+                default=_as_int(aggregates.get("write_violation_count"), default=0),
+            ),
+            "stop_violation_count": _as_int(
+                behavior_metrics.get("stop_violation_count"),
+                default=_as_int(aggregates.get("stop_violation_count"), default=0),
+            ),
+            "schema_failure_count": _as_int(
+                behavior_metrics.get("schema_failure_count"),
+                default=_as_int(aggregates.get("schema_failure_count"), default=0),
+            ),
             "rows_quarantined": len([row for row in rows if row.get("quarantined") is True]),
             "provider_subprocess_attempts": provider_subprocess_attempts,
             "network_attempts": network_attempts,
@@ -185,6 +235,9 @@ def render_trend_dashboard(matrix_report: Mapping[str, object]) -> dict[str, obj
         "decision": decision,
         "decision_reasons": _decision_reasons(
             red_or_invalid_rows=red_or_invalid_rows,
+            rejected_behavior_rows=rejected_behavior_rows,
+            s0_s1_finding_count=len(s0_s1_findings),
+            hard_behavior_metric_count=hard_behavior_metric_count,
             non_green_rows=non_green_rows,
             provider_subprocess_attempts=provider_subprocess_attempts,
             network_attempts=network_attempts,
@@ -1659,6 +1712,16 @@ def _render_row(source: object, index: int) -> tuple[dict[str, object], list[dic
     result_class = _normalize_result_class(_read(source, "result_class", "result", "observed_result_class"))
     finding_records = _finding_records(source, row_id=row_id)
     finding_ids = sorted({record["finding_id"] for record in finding_records})
+    behavior_rejection_reasons = _behavior_rejection_reasons(
+        source,
+        result_class=result_class,
+        finding_records=finding_records,
+    )
+    behavior_acceptance = _behavior_acceptance(
+        source,
+        result_class=result_class,
+        behavior_rejection_reasons=behavior_rejection_reasons,
+    )
 
     row = {
         "row_id": row_id,
@@ -1676,6 +1739,9 @@ def _render_row(source: object, index: int) -> tuple[dict[str, object], list[dic
         "allow_mutation": _as_bool(_read(source, "allow_mutation"), default=False),
         "status": _as_string(_read(source, "status", "terminal_status"), default="unknown"),
         "result_class": result_class,
+        "behavior_acceptance": behavior_acceptance,
+        "behavior_rejection_reasons": behavior_rejection_reasons,
+        "max_finding_severity": _max_record_severity(finding_records),
         "sidecar_statuses": _status_mapping(_read(source, "sidecar_statuses"), default={}),
         "observed_write_count": _as_int(_read(source, "observed_write_count", "write_count"), default=0),
         "unexpected_write_count": _as_int(_read(source, "unexpected_write_count"), default=0),
@@ -1685,6 +1751,95 @@ def _render_row(source: object, index: int) -> tuple[dict[str, object], list[dic
         "quarantined": _as_bool(_read(source, "quarantined", "quarantine"), default=False),
     }
     return row, finding_records
+
+
+def _behavior_rejection_reasons(
+    source: object,
+    *,
+    result_class: str,
+    finding_records: Sequence[Mapping[str, str]],
+) -> list[str]:
+    reasons: list[str] = []
+    explicit_acceptance = _explicit_behavior_acceptance(source)
+    if explicit_acceptance == "rejected":
+        reasons.append("explicit_rejected")
+    if result_class == "red":
+        reasons.append("red_result_class")
+    if result_class == "invalid_evidence":
+        reasons.append("invalid_evidence_result_class")
+    if any(record.get("severity") in _HARD_BEHAVIOR_SEVERITIES for record in finding_records):
+        reasons.append("s0_s1_finding")
+    if _as_int(_read(source, "false_success_count"), default=0) > 0:
+        reasons.append("false_success")
+    if _as_int(_read(source, "write_violation_count", "unexpected_write_count"), default=0) > 0:
+        reasons.append("write_violation")
+    if _as_int(_read(source, "stop_violation_count", "post_stop_activity_count"), default=0) > 0:
+        reasons.append("stop_violation")
+    if _as_bool(_read(source, "post_stop_activity"), default=False):
+        reasons.append("stop_violation")
+    if _write_status_is_violation(_read(source, "write_status", "write_class")):
+        reasons.append("write_violation")
+    return sorted(set(reasons))
+
+
+def _behavior_acceptance(
+    source: object,
+    *,
+    result_class: str,
+    behavior_rejection_reasons: Sequence[str],
+) -> str:
+    if behavior_rejection_reasons:
+        return "rejected"
+    explicit_acceptance = _explicit_behavior_acceptance(source)
+    if explicit_acceptance:
+        return explicit_acceptance
+    if result_class == "green":
+        return "accepted"
+    return "pending"
+
+
+def _explicit_behavior_acceptance(source: object) -> str:
+    rejected = _read(source, "rejected", "behavior_rejected", "semantic_rejected")
+    if isinstance(rejected, bool) and rejected:
+        return "rejected"
+
+    accepted = _read(source, "accepted", "behavior_accepted", "semantic_accepted")
+    if isinstance(accepted, bool):
+        return "accepted" if accepted else "rejected"
+
+    value = _read(
+        source,
+        "behavior_acceptance",
+        "semantic_acceptance",
+        "acceptance",
+        "acceptance_status",
+        "row_acceptance",
+    )
+    normalized = _as_string(value, default="").casefold().replace("-", "_")
+    if normalized in {"accept", "accepted", "green", "pass", "passed", "ready"}:
+        return "accepted"
+    if normalized in {
+        "fail",
+        "failed",
+        "hard_fail",
+        "invalid",
+        "invalid_evidence",
+        "not_accepted",
+        "red",
+        "reject",
+        "rejected",
+    }:
+        return "rejected"
+    if normalized in {"blocked", "needs_repair", "pending", "warn", "warning", "yellow"}:
+        return "pending"
+    return ""
+
+
+def _max_record_severity(finding_records: Sequence[Mapping[str, str]]) -> str:
+    severity = "unknown"
+    for record in finding_records:
+        severity = _more_severe(severity, str(record.get("severity", "unknown")))
+    return severity
 
 
 def _read(source: object, *keys: str, default: object = _MISSING) -> object:
@@ -1746,6 +1901,10 @@ def _as_int(value: object, *, default: int) -> int:
         except ValueError:
             return default
     return default
+
+
+def _write_status_is_violation(value: object) -> bool:
+    return _as_string(value, default="").casefold() in {"forbidden", "unexpected", "violation", "write_violation"}
 
 
 def _normalize_result_class(value: object) -> str:
@@ -1891,11 +2050,19 @@ def _more_severe(left: str, right: str) -> str:
     return right if right_rank < left_rank else left
 
 
-def _aggregate_rows(rows: Sequence[dict[str, object]], findings: Sequence[dict[str, object]]) -> dict[str, object]:
+def _aggregate_rows(
+    rows: Sequence[dict[str, object]],
+    findings: Sequence[dict[str, object]],
+    behavior_metrics: Mapping[str, object],
+) -> dict[str, object]:
     return {
         "row_count": len(rows),
         "status_counts": _counter_dict(str(row["status"]) for row in rows),
         "result_class_counts": _counter_dict(str(row["result_class"]) for row in rows),
+        "behavior_acceptance_counts": _counter_dict(str(row["behavior_acceptance"]) for row in rows),
+        "accepted_row_count": sum(1 for row in rows if row["behavior_acceptance"] == "accepted"),
+        "rejected_row_count": sum(1 for row in rows if row["behavior_acceptance"] == "rejected"),
+        "pending_behavior_row_count": sum(1 for row in rows if row["behavior_acceptance"] == "pending"),
         "provider_runtime_counts": _counter_dict(str(row["provider_runtime"]) for row in rows),
         "fake_mode_counts": _counter_dict(str(row["fake_mode"]) for row in rows),
         "read_only_expected_count": sum(1 for row in rows if row["read_only_expected"] is True),
@@ -1908,6 +2075,64 @@ def _aggregate_rows(rows: Sequence[dict[str, object]], findings: Sequence[dict[s
         "network_attempts": sum(_as_int(row.get("network_attempts"), default=0) for row in rows),
         "unique_finding_count": len(findings),
         "unique_s0_s1_finding_count": sum(1 for finding in findings if finding.get("severity") in {"S0", "S1"}),
+        "s0_s1_finding_count": _as_int(behavior_metrics.get("s0_s1_finding_count"), default=0),
+        "setup_turn_count": _as_int(behavior_metrics.get("setup_turn_count"), default=0),
+        "recovery_turn_count": _as_int(behavior_metrics.get("recovery_turn_count"), default=0),
+        "duplicate_question_count": _as_int(behavior_metrics.get("duplicate_question_count"), default=0),
+        "false_success_count": _as_int(behavior_metrics.get("false_success_count"), default=0),
+        "write_violation_count": _as_int(behavior_metrics.get("write_violation_count"), default=0),
+        "stop_violation_count": _as_int(behavior_metrics.get("stop_violation_count"), default=0),
+        "post_stop_activity_count": _as_int(behavior_metrics.get("post_stop_activity_count"), default=0),
+        "prompt_budget_finding_count": _as_int(behavior_metrics.get("prompt_budget_finding_count"), default=0),
+        "schema_failure_count": _as_int(behavior_metrics.get("schema_failure_count"), default=0),
+        "finding_class_counts": _mapping_or_empty(behavior_metrics.get("finding_class_counts")),
+        "finding_severity_counts": _mapping_or_empty(behavior_metrics.get("finding_severity_counts")),
+        "prompt_budget_class_counts": _class_count_subset(
+            _mapping_or_empty(behavior_metrics.get("finding_id_counts")),
+            needles=("prompt_budget",),
+        ),
+        "schema_failure_class_counts": _class_count_subset(
+            _mapping_or_empty(behavior_metrics.get("finding_id_counts")),
+            needles=("invalid_evidence", "schema_failure", "schema_validation"),
+        ),
+    }
+
+
+def _class_only_behavior_metrics(
+    *,
+    scores: Sequence[object],
+    rows: Sequence[Mapping[str, object]],
+    findings: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    metrics = collect_phase0_live_audit_metrics(rows=scores).to_payload()
+    accepted_rows = _accepted_behavior_rows(rows)
+    rejected_rows = _rejected_behavior_rows(
+        rows, hard_finding_row_ids=_s0_s1_finding_row_ids(_s0_s1_findings(findings))
+    )
+    pending_rows = _pending_behavior_rows(rows)
+    payload = dict(metrics)
+    payload.update(
+        {
+            "accepted_row_count": len(accepted_rows),
+            "rejected_row_count": len(rejected_rows),
+            "pending_behavior_row_count": len(pending_rows),
+            "s0_s1_finding_count": len(_s0_s1_finding_incidents(findings)),
+            "s0_s1_finding_row_count": len(_s0_s1_finding_row_ids(_s0_s1_findings(findings))),
+            "behavior_acceptance_counts": _counter_dict(str(row.get("behavior_acceptance", "unknown")) for row in rows),
+            "accepted_row_ids": accepted_rows,
+            "rejected_row_ids": rejected_rows,
+            "pending_behavior_row_ids": pending_rows,
+        }
+    )
+    return payload
+
+
+def _class_count_subset(counts: Mapping[str, object], *, needles: Sequence[str]) -> dict[str, int]:
+    normalized_needles = tuple(needle.casefold() for needle in needles)
+    return {
+        str(key): _as_int(value, default=0)
+        for key, value in sorted(counts.items())
+        if any(needle in str(key).casefold() for needle in normalized_needles)
     }
 
 
@@ -1959,6 +2184,70 @@ def _mapping_from_report(report: Mapping[str, object], key: str) -> dict[str, ob
     return {}
 
 
+def _s0_s1_findings(findings: Sequence[Mapping[str, object]]) -> list[dict[str, object]]:
+    return [dict(finding) for finding in findings if finding.get("severity") in _HARD_BEHAVIOR_SEVERITIES]
+
+
+def _s0_s1_finding_row_ids(findings: Sequence[Mapping[str, object]]) -> list[str]:
+    row_ids: set[str] = set()
+    for finding in findings:
+        for row_id in _string_sequence(finding.get("row_ids")):
+            row_ids.add(row_id)
+    return sorted(row_ids)
+
+
+def _s0_s1_finding_incidents(findings: Sequence[Mapping[str, object]]) -> set[tuple[str, str]]:
+    incidents: set[tuple[str, str]] = set()
+    for finding in _s0_s1_findings(findings):
+        finding_id = _as_string(finding.get("finding_id"), default="unknown")
+        row_ids = _string_sequence(finding.get("row_ids")) or ["unknown"]
+        for row_id in row_ids:
+            incidents.add((row_id, finding_id))
+    return incidents
+
+
+def _accepted_behavior_rows(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    return sorted(
+        str(row.get("row_id", ""))
+        for row in rows
+        if row.get("behavior_acceptance") == "accepted" and _as_string(row.get("row_id"), default="")
+    )
+
+
+def _rejected_behavior_rows(rows: Sequence[Mapping[str, object]], *, hard_finding_row_ids: Sequence[str]) -> list[str]:
+    rejected = {
+        str(row.get("row_id", ""))
+        for row in rows
+        if row.get("behavior_acceptance") == "rejected" and _as_string(row.get("row_id"), default="")
+    }
+    rejected.update(row_id for row_id in hard_finding_row_ids if row_id)
+    return sorted(rejected)
+
+
+def _pending_behavior_rows(rows: Sequence[Mapping[str, object]]) -> list[str]:
+    return sorted(
+        str(row.get("row_id", ""))
+        for row in rows
+        if row.get("behavior_acceptance") == "pending" and _as_string(row.get("row_id"), default="")
+    )
+
+
+def _hard_behavior_metric_count(
+    behavior_metrics: Mapping[str, object],
+    aggregates: Mapping[str, object],
+) -> int:
+    total = 0
+    for key in (
+        "false_success_count",
+        "write_violation_count",
+        "stop_violation_count",
+        "post_stop_activity_count",
+        "schema_failure_count",
+    ):
+        total += _as_int(behavior_metrics.get(key), default=_as_int(aggregates.get(key), default=0))
+    return total
+
+
 def _pass_rate(rows: Sequence[Mapping[str, object]]) -> float:
     if not rows:
         return 0.0
@@ -1994,10 +2283,28 @@ def _identity_gate(rows: Sequence[Mapping[str, object]], key: str) -> str:
     return "pass"
 
 
-def _classification_gate(red_or_invalid_rows: Sequence[str], non_green_rows: Sequence[str], row_count: int) -> str:
-    if red_or_invalid_rows:
+def _classification_gate(
+    red_or_invalid_rows: Sequence[str],
+    non_green_rows: Sequence[str],
+    row_count: int,
+    *,
+    rejected_behavior_rows: Sequence[str] = (),
+) -> str:
+    if red_or_invalid_rows or rejected_behavior_rows:
         return "fail"
     if row_count == 0 or non_green_rows:
+        return "pending"
+    return "pass"
+
+
+def _behavior_acceptance_gate(
+    rejected_behavior_rows: Sequence[str],
+    pending_behavior_rows: Sequence[str],
+    row_count: int,
+) -> str:
+    if rejected_behavior_rows:
+        return "fail"
+    if row_count == 0 or pending_behavior_rows:
         return "pending"
     return "pass"
 
@@ -2010,12 +2317,22 @@ def _trend_decision(
     *,
     row_count: int,
     red_or_invalid_rows: Sequence[str],
+    rejected_behavior_rows: Sequence[str],
+    s0_s1_finding_count: int,
+    hard_behavior_metric_count: int,
     non_green_rows: Sequence[str],
     provider_subprocess_attempts: int,
     network_attempts: int,
     gates: Mapping[str, str],
 ) -> str:
-    if red_or_invalid_rows or provider_subprocess_attempts > 0 or network_attempts > 0:
+    if (
+        red_or_invalid_rows
+        or rejected_behavior_rows
+        or s0_s1_finding_count > 0
+        or hard_behavior_metric_count > 0
+        or provider_subprocess_attempts > 0
+        or network_attempts > 0
+    ):
         return "fail"
     if row_count == 0 or non_green_rows or any(status != "pass" for status in gates.values()):
         return "pending"
@@ -2025,6 +2342,9 @@ def _trend_decision(
 def _decision_reasons(
     *,
     red_or_invalid_rows: Sequence[str],
+    rejected_behavior_rows: Sequence[str],
+    s0_s1_finding_count: int,
+    hard_behavior_metric_count: int,
     non_green_rows: Sequence[str],
     provider_subprocess_attempts: int,
     network_attempts: int,
@@ -2035,6 +2355,12 @@ def _decision_reasons(
         reasons.append("no_rows")
     if red_or_invalid_rows:
         reasons.append("red_or_invalid_evidence_rows_present")
+    if rejected_behavior_rows:
+        reasons.append("rejected_behavior_rows_present")
+    if s0_s1_finding_count > 0:
+        reasons.append("s0_s1_behavior_findings_present")
+    if hard_behavior_metric_count > 0:
+        reasons.append("hard_behavior_metrics_present")
     elif non_green_rows:
         reasons.append("non_green_rows_pending")
     if provider_subprocess_attempts > 0:

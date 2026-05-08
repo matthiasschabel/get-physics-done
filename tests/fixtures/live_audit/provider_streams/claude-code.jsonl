@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"I will check the fixture."}]}}
+{"type":"content_block_start","content_block":{"type":"tool_use","name":"Bash","input":{"command":"uv run pytest tests/adapters/test_live_audit_events.py"}}}
+{"type":"tool_result","name":"Bash","input":{"command":"uv run pytest tests/adapters/test_live_audit_events.py"},"status":"completed","exit_code":0,"content":"ok"}
+{"type":"result","result":"Claude final response."}

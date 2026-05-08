@@ -1,0 +1,5 @@
+{"type":"thread.started","id":"codex-session"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"cmd-1","type":"command_execution","command":"uv run pytest tests/adapters/test_live_audit_events.py","status":"running"}}
+{"type":"item.completed","item":{"id":"cmd-1","type":"command_execution","command":"uv run pytest tests/adapters/test_live_audit_events.py","status":"completed","exit_code":0}}
+{"type":"final_message","text":"Codex final response."}

@@ -11,10 +11,18 @@ def test_load_settings_uses_current_home_for_default_storage_root(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
+    from gpd.core.arxiv_source_download import ARXIV_SOURCE_STORAGE_ENV_VAR
     from gpd.mcp.servers.arxiv_bridge import ArxivBridgeConfig, load_settings
 
+    monkeypatch.delenv(ARXIV_SOURCE_STORAGE_ENV_VAR, raising=False)
     home = tmp_path / "home"
     monkeypatch.setattr("gpd.core.arxiv_source_download.Path.home", lambda: home)
+
+    # Run the resolver from a directory that has no GPD/ markers so we
+    # exercise the legacy home fallback rather than auto-detecting a project.
+    bare_dir = tmp_path / "bare"
+    bare_dir.mkdir()
+    monkeypatch.chdir(bare_dir)
 
     config = load_settings()
     dataclass_default = ArxivBridgeConfig()
@@ -395,6 +403,63 @@ def test_build_server_registers_expected_server_name() -> None:
 
     assert server.name == "gpd-arxiv"
     assert bridge.config.storage_path.is_absolute()
+
+
+def _make_verified_gpd_project(root):
+    gpd_dir = root / "GPD"
+    gpd_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text("# project\n", encoding="utf-8")
+    return root
+
+
+def test_load_settings_honors_env_var_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from gpd.core.arxiv_source_download import ARXIV_SOURCE_STORAGE_ENV_VAR
+    from gpd.mcp.servers.arxiv_bridge import load_settings
+
+    override = tmp_path / "env-cache"
+    override.mkdir()
+    monkeypatch.setenv(ARXIV_SOURCE_STORAGE_ENV_VAR, str(override))
+
+    config = load_settings()
+
+    assert config.storage_path == override.resolve()
+
+
+def test_load_settings_prefers_project_local_cache_when_workspace_in_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from gpd.core.arxiv_source_download import (
+        ARXIV_PROJECT_LOCAL_CACHE_DIRNAME,
+        ARXIV_SOURCE_STORAGE_ENV_VAR,
+    )
+    from gpd.mcp.servers.arxiv_bridge import load_settings
+
+    monkeypatch.delenv(ARXIV_SOURCE_STORAGE_ENV_VAR, raising=False)
+    project = _make_verified_gpd_project(tmp_path / "paper-2401-12345")
+
+    config = load_settings(workspace=project)
+
+    expected = (project / ARXIV_PROJECT_LOCAL_CACHE_DIRNAME).resolve()
+    assert config.storage_path == expected
+
+
+def test_load_settings_explicit_storage_path_overrides_env_and_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from gpd.core.arxiv_source_download import ARXIV_SOURCE_STORAGE_ENV_VAR
+    from gpd.mcp.servers.arxiv_bridge import load_settings
+
+    project = _make_verified_gpd_project(tmp_path / "proj")
+    explicit = tmp_path / "explicit-storage"
+    explicit.mkdir()
+    monkeypatch.setenv(ARXIV_SOURCE_STORAGE_ENV_VAR, str(tmp_path / "env-cache"))
+
+    config = load_settings(storage_path=explicit, workspace=project)
+
+    assert config.storage_path == explicit.resolve()
 
 
 def test_module_entrypoint_runs_main(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -17,16 +17,15 @@ from gpd.adapters.install_utils import (
     DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     build_runtime_cli_bridge_command,
     expand_at_includes,
-    parse_at_include_path,
     project_markdown_for_runtime,
     projection_target_dir_from_path_prefix,
-    split_markdown_frontmatter,
 )
 from gpd.adapters.runtime_catalog import (
     get_runtime_descriptor,
     iter_runtime_descriptors,
     normalize_runtime_name,
 )
+from gpd.core import prompt_markdown_scan as _prompt_markdown_scan
 from gpd.core.frontmatter import (
     UNSUPPORTED_FRONTMATTER_FIELDS,
     VERIFICATION_REPORT_STATUSES,
@@ -60,6 +59,16 @@ from gpd.core.return_contract import (
     GpdReturnEnvelope,
     validate_gpd_return_markdown,
 )
+
+MarkdownFence = _prompt_markdown_scan.MarkdownFence
+_body_without_frontmatter = _prompt_markdown_scan.body_without_frontmatter
+_body_without_frontmatter_with_line_offset = _prompt_markdown_scan.body_without_frontmatter_with_line_offset
+_count_raw_includes = _prompt_markdown_scan.count_raw_includes
+_iter_markdown_fences = _prompt_markdown_scan.iter_markdown_fences
+_iter_unfenced_lines = _prompt_markdown_scan.iter_unfenced_lines
+_line_count = _prompt_markdown_scan.line_count
+_relative_path = _prompt_markdown_scan.relative_path
+_top_limit = _prompt_markdown_scan.top_limit
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
@@ -448,16 +457,6 @@ class PromptSource:
     absolute_path: Path
     repo_root: Path
     src_root: Path
-
-
-@dataclass(frozen=True, slots=True)
-class MarkdownFence:
-    """One fenced code block with line metadata."""
-
-    info: str
-    body: str
-    start_line: int
-    end_line: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -1325,105 +1324,10 @@ def _normalize_runtime_names(runtime_names: Iterable[str] | str) -> tuple[str, .
     return tuple(normalized)
 
 
-def _relative_path(path: Path, repo_root: Path) -> str:
-    try:
-        return path.resolve().relative_to(repo_root).as_posix()
-    except ValueError:
-        return path.resolve().as_posix()
-
-
-def _line_count(text: str) -> int:
-    return len(text.splitlines())
-
-
 def _percent_delta(delta: int, baseline: int) -> float:
     if baseline <= 0:
         return 0.0
     return round(100 * delta / baseline, 6)
-
-
-def _body_without_frontmatter(text: str) -> str:
-    body, _line_offset = _body_without_frontmatter_with_line_offset(text)
-    return body
-
-
-def _body_without_frontmatter_with_line_offset(text: str) -> tuple[str, int]:
-    _preamble, _frontmatter, _separator, body = split_markdown_frontmatter(text)
-    prefix = text[: len(text) - len(body)]
-    return body, prefix.count("\n")
-
-
-def _markdown_fence_marker(stripped_line: str) -> str | None:
-    if stripped_line.startswith("```"):
-        return "```"
-    if stripped_line.startswith("~~~"):
-        return "~~~"
-    return None
-
-
-def _iter_markdown_fences(text: str) -> tuple[MarkdownFence, ...]:
-    fences: list[MarkdownFence] = []
-    active_marker: str | None = None
-    active_info = ""
-    active_start_line = 0
-    active_body: list[str] = []
-
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        marker = _markdown_fence_marker(stripped)
-        if marker is None:
-            if active_marker is not None:
-                active_body.append(line)
-            continue
-
-        if active_marker is None:
-            active_marker = marker
-            active_info = stripped[len(marker) :].strip()
-            active_start_line = line_number
-            active_body = []
-            continue
-
-        if marker == active_marker:
-            fences.append(
-                MarkdownFence(
-                    info=active_info,
-                    body="\n".join(active_body),
-                    start_line=active_start_line,
-                    end_line=line_number,
-                )
-            )
-            active_marker = None
-            active_info = ""
-            active_start_line = 0
-            active_body = []
-            continue
-
-        active_body.append(line)
-
-    return tuple(fences)
-
-
-def _iter_unfenced_lines(text: str) -> tuple[tuple[int, str], ...]:
-    lines: list[tuple[int, str]] = []
-    active_marker: str | None = None
-
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        marker = _markdown_fence_marker(stripped)
-        if marker is not None:
-            if active_marker is None:
-                active_marker = marker
-            elif marker == active_marker:
-                active_marker = None
-            continue
-        if active_marker is not None:
-            continue
-        lines.append((line_number, line))
-    return tuple(lines)
-
-
-def _count_raw_includes(text: str) -> int:
-    return sum(1 for _line_number, line in _iter_unfenced_lines(text) if parse_at_include_path(line.strip()))
 
 
 def _count_shell_fences(text: str) -> int:
@@ -2920,12 +2824,6 @@ def _top_items(items: Sequence[PromptSurfaceItem], top: int | None) -> tuple[Pro
     if top is None or top <= 0:
         return tuple(sorted_items)
     return tuple(sorted_items[:top])
-
-
-def _top_limit(top: int | None) -> int | None:
-    if top is None or top <= 0:
-        return None
-    return top
 
 
 def _bounded_exact_assertion_diagnostics(

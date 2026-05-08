@@ -923,6 +923,51 @@ assert.throws(
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
+def test_bootstrap_installer_metadata_validator_rejects_shared_surface_unknown_keys() -> None:
+    result = _run_node_contract_validation(
+        r"""
+const assert = require("node:assert/strict");
+const { validateBootstrapInstallerMetadata } = require("./bin/install.js");
+const metadata = JSON.parse(process.env.GPD_BOOTSTRAP_TEST_INSTALLER_METADATA_JSON);
+
+const cases = [
+  [
+    "shared top level",
+    (candidate) => { candidate.shared_public_surface_text.extraUnexpectedKey = "unexpected"; },
+    /bootstrap installer metadata\.shared_public_surface_text contains unknown key\(s\): extraUnexpectedKey/,
+  ],
+  [
+    "local CLI bridge",
+    (candidate) => { candidate.shared_public_surface_text.localCliBridge.extraUnexpectedKey = "unexpected"; },
+    /bootstrap installer metadata\.shared_public_surface_text\.localCliBridge contains unknown key\(s\): extraUnexpectedKey/,
+  ],
+  [
+    "resume authority",
+    (candidate) => { candidate.shared_public_surface_text.resumeAuthority.extraUnexpectedKey = "unexpected"; },
+    /bootstrap installer metadata\.shared_public_surface_text\.resumeAuthority contains unknown key\(s\): extraUnexpectedKey/,
+  ],
+  [
+    "recovery ladder",
+    (candidate) => { candidate.shared_public_surface_text.recoveryLadder.extraUnexpectedKey = "unexpected"; },
+    /bootstrap installer metadata\.shared_public_surface_text\.recoveryLadder contains unknown key\(s\): extraUnexpectedKey/,
+  ],
+];
+
+for (const [label, mutate, expectedError] of cases) {
+  const candidate = JSON.parse(JSON.stringify(metadata));
+  mutate(candidate);
+  assert.throws(
+    () => validateBootstrapInstallerMetadata(candidate),
+    expectedError,
+    `${label} metadata should reject unknown keys`
+  );
+}
+"""
+    )
+
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+
+
 def test_bootstrap_public_surface_text_is_loaded_from_generated_metadata() -> None:
     metadata_payload = json.loads(json.dumps(_BOOTSTRAP_INSTALLER_METADATA_PAYLOAD))
     shared_text = metadata_payload["shared_public_surface_text"]

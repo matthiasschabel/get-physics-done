@@ -20,6 +20,7 @@ import yaml
 from gpd._python_compat import MIN_SUPPORTED_PYTHON_LABEL, PREFERRED_PYTHON_VERSIONS
 from gpd.adapters.runtime_catalog import get_shared_install_metadata, iter_runtime_descriptors
 from scripts import release_workflow as release_workflow_module
+from scripts import render_bootstrap_installer_metadata as bootstrap_metadata_module
 from scripts.release_workflow import (
     ReleaseError,
     bump_version,
@@ -49,14 +50,15 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _bootstrap_json_assets_from_metadata_generator(repo_root: Path) -> tuple[str, ...]:
+    return (
+        bootstrap_metadata_module.INSTALLER_METADATA_PATH.relative_to(repo_root).as_posix(),
+        *(source_path.as_posix() for source_path in bootstrap_metadata_module.SOURCE_PATHS),
+    )
+
+
 _SHARED_INSTALL = get_shared_install_metadata()
-_BOOTSTRAP_JSON_ASSETS = (
-    "src/gpd/adapters/runtime_catalog.json",
-    "src/gpd/adapters/runtime_catalog_schema.json",
-    "src/gpd/bootstrap/installer_metadata.json",
-    "src/gpd/core/public_surface_contract.json",
-    "src/gpd/core/public_surface_contract_schema.json",
-)
+_BOOTSTRAP_JSON_ASSETS = _bootstrap_json_assets_from_metadata_generator(_repo_root())
 _PUBLIC_BOOTSTRAP_PREREQUISITE = "Install GPD before enabling built-in MCP servers."
 _ARXIV_EXTRA_PREREQUISITE = (
     "Install GPD with the `arxiv` Python extra in the same environment before enabling gpd-arxiv."
@@ -587,6 +589,20 @@ def test_public_bootstrap_package_exposes_npx_installer() -> None:
     assert package_json.get("bin", {}).get("get-physics-done") == "bin/install.js"
     assert set(packaged_files) == {"bin/install.js", *_BOOTSTRAP_JSON_ASSETS}
     assert (repo_root / "bin" / "install.js").is_file()
+
+
+def test_public_bootstrap_package_json_assets_follow_metadata_generator_sources() -> None:
+    repo_root = _repo_root()
+    package_json = json.loads((repo_root / "package.json").read_text(encoding="utf-8"))
+    packaged_json_assets = {path for path in package_json.get("files", []) if path.endswith(".json")}
+
+    assert packaged_json_assets == set(_bootstrap_json_assets_from_metadata_generator(repo_root))
+
+    installer_metadata_path = bootstrap_metadata_module.INSTALLER_METADATA_PATH.relative_to(repo_root)
+    installer_metadata = json.loads((repo_root / installer_metadata_path).read_text(encoding="utf-8"))
+    assert set(installer_metadata["source_hashes"]) == {
+        source_path.as_posix() for source_path in bootstrap_metadata_module.SOURCE_PATHS
+    }
 
 
 def test_public_bootstrap_installer_uses_python_cli_without_uv() -> None:

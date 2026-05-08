@@ -510,90 +510,86 @@ function validateRuntimeMetadataList(runtimes) {
 }
 
 function validateSharedPublicSurfaceTextMetadata(publicSurfaceText) {
+  const sharedPublicSurfaceTextLabel = "bootstrap installer metadata.shared_public_surface_text";
+  const sharedPublicSurfaceTextKeys = [
+    "schemaVersion",
+    "beginnerHubUrl",
+    "beginnerPreflightRequirements",
+    "beginnerCaveats",
+    "beginnerStartupLadder",
+    "localCliBridgeCommands",
+    "localCliBridge",
+    "resumeAuthority",
+    "recoveryLadder",
+    "settingsCommandSentence",
+    "settingsRecommendationSentence",
+  ];
   const payload = requireJsonObject(
     publicSurfaceText,
-    "bootstrap installer metadata.shared_public_surface_text"
+    sharedPublicSurfaceTextLabel
   );
-  requirePresentKeys(
-    payload,
-    [
-      "schemaVersion",
-      "beginnerHubUrl",
-      "beginnerPreflightRequirements",
-      "beginnerCaveats",
-      "beginnerStartupLadder",
-      "localCliBridgeCommands",
-      "localCliBridge",
-      "resumeAuthority",
-      "recoveryLadder",
-      "settingsCommandSentence",
-      "settingsRecommendationSentence",
-    ],
-    "bootstrap installer metadata.shared_public_surface_text"
-  );
+  requireKnownKeys(payload, new Set(sharedPublicSurfaceTextKeys), sharedPublicSurfaceTextLabel);
+  requirePresentKeys(payload, sharedPublicSurfaceTextKeys, sharedPublicSurfaceTextLabel);
   if (payload.schemaVersion !== 1) {
     throw new Error(
       `Unsupported bootstrap public surface text schemaVersion: ${JSON.stringify(payload.schemaVersion)}`
     );
   }
 
+  const localCliBridgeLabel = "bootstrap installer metadata.shared_public_surface_text.localCliBridge";
+  const localCliBridgeKeys = [
+    "doctorCommand",
+    "helpCommand",
+    "permissionsStatusCommand",
+    "permissionsSyncCommand",
+    "resumeCommand",
+    "resumeRecentCommand",
+    "observeExecutionCommand",
+    "costCommand",
+    "presetsListCommand",
+    "planPreflightCommand",
+    "integrationsStatusWolframCommand",
+    "terminalPhrase",
+    "purposePhrase",
+    "installLocalExample",
+    "doctorLocalCommand",
+    "doctorGlobalCommand",
+    "validateCommandContextCommand",
+    "unattendedReadinessCommand",
+  ];
   const localCliBridge = requireJsonObject(
     payload.localCliBridge,
-    "bootstrap installer metadata.shared_public_surface_text.localCliBridge"
+    localCliBridgeLabel
   );
-  requirePresentKeys(
-    localCliBridge,
-    [
-      "doctorCommand",
-      "helpCommand",
-      "permissionsStatusCommand",
-      "permissionsSyncCommand",
-      "resumeCommand",
-      "resumeRecentCommand",
-      "observeExecutionCommand",
-      "costCommand",
-      "presetsListCommand",
-      "planPreflightCommand",
-      "integrationsStatusWolframCommand",
-      "terminalPhrase",
-      "purposePhrase",
-      "installLocalExample",
-      "doctorLocalCommand",
-      "doctorGlobalCommand",
-      "validateCommandContextCommand",
-      "unattendedReadinessCommand",
-    ],
-    "bootstrap installer metadata.shared_public_surface_text.localCliBridge"
-  );
+  requireKnownKeys(localCliBridge, new Set(localCliBridgeKeys), localCliBridgeLabel);
+  requirePresentKeys(localCliBridge, localCliBridgeKeys, localCliBridgeLabel);
 
+  const resumeAuthorityLabel = "bootstrap installer metadata.shared_public_surface_text.resumeAuthority";
+  const resumeAuthorityKeys = ["durableAuthorityPhrase", "publicVocabularyIntro", "publicFields"];
   const resumeAuthority = requireJsonObject(
     payload.resumeAuthority,
-    "bootstrap installer metadata.shared_public_surface_text.resumeAuthority"
+    resumeAuthorityLabel
   );
-  requirePresentKeys(
-    resumeAuthority,
-    ["durableAuthorityPhrase", "publicVocabularyIntro", "publicFields"],
-    "bootstrap installer metadata.shared_public_surface_text.resumeAuthority"
-  );
+  requireKnownKeys(resumeAuthority, new Set(resumeAuthorityKeys), resumeAuthorityLabel);
+  requirePresentKeys(resumeAuthority, resumeAuthorityKeys, resumeAuthorityLabel);
 
+  const recoveryLadderLabel = "bootstrap installer metadata.shared_public_surface_text.recoveryLadder";
+  const recoveryLadderKeys = [
+    "title",
+    "localSnapshotCommand",
+    "localSnapshotPhrase",
+    "crossWorkspaceCommand",
+    "crossWorkspacePhrase",
+    "resumePhrase",
+    "nextPhrase",
+    "pausePhrase",
+  ];
   const recoveryLadder = requireJsonObject(
     payload.recoveryLadder,
-    "bootstrap installer metadata.shared_public_surface_text.recoveryLadder"
+    recoveryLadderLabel
   );
-  requirePresentKeys(
-    recoveryLadder,
-    [
-      "title",
-      "localSnapshotCommand",
-      "localSnapshotPhrase",
-      "crossWorkspaceCommand",
-      "crossWorkspacePhrase",
-      "resumePhrase",
-      "nextPhrase",
-      "pausePhrase",
-    ],
-    "bootstrap installer metadata.shared_public_surface_text.recoveryLadder"
-  );
+  requireKnownKeys(recoveryLadder, new Set(recoveryLadderKeys), recoveryLadderLabel);
+  requirePresentKeys(recoveryLadder, recoveryLadderKeys, recoveryLadderLabel);
 
   return {
     schemaVersion: 1,

@@ -11,14 +11,21 @@ from typing import Literal, Protocol, cast
 from gpd.adapters.install_utils import (
     expand_at_includes,
     parse_at_include_path,
-    split_markdown_frontmatter,
 )
+from gpd.core import prompt_markdown_scan as _prompt_markdown_scan
 from gpd.core.workflow_staging import (
     WorkflowStage,
     WorkflowStageManifest,
     known_init_fields_for_workflow,
     load_workflow_stage_manifest_from_path,
 )
+
+_body_without_frontmatter = _prompt_markdown_scan.body_without_frontmatter
+_count_raw_includes = _prompt_markdown_scan.count_raw_includes
+_iter_unfenced_lines = _prompt_markdown_scan.iter_unfenced_lines
+_line_count = _prompt_markdown_scan.line_count
+_relative_path = _prompt_markdown_scan.relative_path
+_top_limit = _prompt_markdown_scan.top_limit
 
 
 class StagePromptSource(Protocol):
@@ -607,56 +614,3 @@ def _runtime_projection_metric_to_dict(metric: RuntimeProjectionLike) -> dict[st
         "shell_rewrite_count": metric.shell_rewrite_count,
         "bridge_command_occurrences": metric.bridge_command_occurrences,
     }
-
-
-def _body_without_frontmatter(text: str) -> str:
-    _preamble, _frontmatter, _separator, body = split_markdown_frontmatter(text)
-    return body
-
-
-def _iter_unfenced_lines(text: str) -> tuple[tuple[int, str], ...]:
-    lines: list[tuple[int, str]] = []
-    active_marker: str | None = None
-
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        marker = _markdown_fence_marker(stripped)
-        if marker is not None:
-            if active_marker is None:
-                active_marker = marker
-            elif marker == active_marker:
-                active_marker = None
-            continue
-        if active_marker is not None:
-            continue
-        lines.append((line_number, line))
-    return tuple(lines)
-
-
-def _markdown_fence_marker(stripped_line: str) -> str | None:
-    if stripped_line.startswith("```"):
-        return "```"
-    if stripped_line.startswith("~~~"):
-        return "~~~"
-    return None
-
-
-def _count_raw_includes(text: str) -> int:
-    return sum(1 for _line_number, line in _iter_unfenced_lines(text) if parse_at_include_path(line.strip()))
-
-
-def _line_count(text: str) -> int:
-    return len(text.splitlines())
-
-
-def _relative_path(path: Path, repo_root: Path) -> str:
-    try:
-        return path.resolve().relative_to(repo_root).as_posix()
-    except ValueError:
-        return path.resolve().as_posix()
-
-
-def _top_limit(top: int | None) -> int | None:
-    if top is None or top <= 0:
-        return None
-    return top

@@ -11,6 +11,7 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_diagnostics.py"
+PROMPT_MARKDOWN_SCAN_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_markdown_scan.py"
 PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_850
 PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP = 3_200
 PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 1_200
@@ -376,6 +377,7 @@ def test_production_prompt_diagnostics_does_not_import_from_tests() -> None:
 def test_prompt_diagnostics_modules_stay_small_enough_for_phase_6_split() -> None:
     module_paths = sorted(
         {
+            PROMPT_MARKDOWN_SCAN_PATH,
             *PROMPT_DIAGNOSTICS_PATH.parent.glob("prompt_diagnostics*.py"),
             *PROMPT_DIAGNOSTICS_PATH.parent.glob("prompt_*_diagnostics.py"),
         }

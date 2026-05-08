@@ -51,9 +51,9 @@ def test_executor_handoff_recovery_treats_commits_as_partial_evidence_only() -> 
 
     assert "Commits or files do not prove success" in quick
     assert "Commits or output files do not prove success" in execute_plan
-    assert "Commits or files do not prove success" in execute_phase
+    assert "files and commits stay recovery evidence until that tuple passes" in execute_phase
     assert "If the return envelope is missing or invalid, keep the child handoff incomplete" in execute_plan
-    assert "If the envelope is missing or invalid, keep that child handoff incomplete" in execute_phase
+    assert "files and commits stay recovery evidence until that tuple passes" in execute_phase
     assert "git commits are partial evidence only" in quick
     assert "git commits are partial evidence only" in execute_plan
     assert "git commits are partial evidence only" in execute_phase
@@ -73,9 +73,7 @@ def test_execute_plan_recovery_records_commits_as_partial_evidence_until_return_
 def test_execute_phase_fails_closed_on_reverification_and_notation_handoffs() -> None:
     execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
 
-    assert "Stop in a blocked state. Do not mark the phase complete or clear gap-closure state on this path." in (
-        execute_phase
-    )
+    assert "keeps gap-closure state intact" in execute_phase
     assert "Convention repair is intentionally out-of-line here." in execute_phase
     assert "The next step is `gpd:validate-conventions`" in execute_phase
     assert "fresh `gpd:execute-phase {PHASE_NUMBER}` continuation after that workflow reports a typed result" in (

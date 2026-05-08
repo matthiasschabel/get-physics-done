@@ -225,12 +225,9 @@ Write to: GPD/literature/{FILE}
 Use template: {GPD_INSTALL_DIR}/templates/research-project/{FILE}
 </output>
 
-<return_contract>
-This is a one-shot handoff. Return a typed `gpd_return` envelope with `status` and `files_written`.
-Route on `gpd_return.status` and `gpd_return.files_written`, not on the human-readable handoff text.
-If you need user input, return `status: checkpoint` and stop; do not wait inside the same run.
-Treat `GPD/literature/{FILE}` as fresh only when the file exists on disk and the same path appears in `gpd_return.files_written`.
-</return_contract>
+<handoff_expectation>
+Use the researcher `gpd_return` profile from your role prompt. Local completed output is `GPD/literature/{FILE}`.
+</handoff_expectation>
 ", subagent_type="gpd-project-researcher", model="{researcher_model}", readonly=false, description="{DIMENSION} survey")
 ```
 
@@ -249,8 +246,6 @@ shared_state_policy: return_only
 ```
 
 Each scout contract is task-local. Do not widen the write scope or reuse a shared survey contract across dimensions.
-Treat each scout as a one-shot handoff: if it needs user input, it must return `status: checkpoint` and stop, not wait in place.
-Treat `gpd_return.status` and `gpd_return.files_written` as the only freshness signal for a scout result.
 
 **Dimension-specific fields:**
 
@@ -262,21 +257,32 @@ Treat `gpd_return.status` and `gpd_return.files_written` as the only freshness s
 | GATES            | References specific, conditions stated, relevance explained            | Methods specific to this physics domain, cost noted, limitations identified | Algorithms defined with convergence criteria, versions current, dependencies mapped | Pitfalls specific to this extension, numerical issues covered, prevention actionable |
 | FILE             | PRIOR-WORK.md                                                          | METHODS.md                                                                  | COMPUTATIONAL.md                                                                    | PITFALLS.md                                                                          |
 
-Before trusting the scout handoff, route on `gpd_return.status` and `gpd_return.files_written`, then re-read the expected output files from disk and count only artifacts that actually exist. Do not trust the runtime handoff status by itself.
+**Handle scout returns with the child artifact gate:**
 
-**If `gpd_return.status: completed`:** verify that the expected `GPD/literature/{FILE}` path is readable on disk and named in `gpd_return.files_written`. If the same path already existed before this handoff, it only counts as fresh output when it appears in `gpd_return.files_written`.
+```yaml
+child_gate:
+  id: "milestone_literature_scouts"
+  role: "gpd-project-researcher"
+  return_profile: "researcher"
+  required_status: "completed"
+  expected_artifacts:
+    - "GPD/literature/PRIOR-WORK.md"
+    - "GPD/literature/METHODS.md"
+    - "GPD/literature/COMPUTATIONAL.md"
+    - "GPD/literature/PITFALLS.md"
+  allowed_roots:
+    - "GPD/literature"
+  freshness_marker: "after $SCOUT_HANDOFF_STARTED_AT per scout"
+  validators:
+    - "gpd validate handoff-artifacts - --expected GPD/literature/{FILE} --allowed-root GPD/literature --require-status completed --require-files-written --fresh-after \"$SCOUT_HANDOFF_STARTED_AT\""
+    - "readable artifact check for GPD/literature/{FILE}"
+  applicator: none
+  failure_route: "retry missing scout once | repair prompt once | stop survey path | retry missing scout once in the same task-local write scope | repair path once | fail closed | ..."
+```
 
-**If `gpd_return.status: checkpoint`:** present the checkpoint, collect the user's input, and spawn a fresh continuation for the same scout dimension. Do not let the original scout run continue after the checkpoint.
+Status route: `checkpoint`, `blocked`, or final `failed` -> `## > Next Up` primary `gpd:new-milestone [milestone name]`, also `gpd:suggest-next`.
 
-**If `gpd_return.status: blocked`:** surface the blocker, work with the user to resolve it, and spawn a fresh continuation once the blocker is resolved.
-
-**If `gpd_return.status: failed`:** surface the failure details, retry only the missing scout once in the same task-local write scope if the artifact is absent, and stop the survey path if freshness still cannot be proven.
-
-Any scout `checkpoint`, `blocked`, or final `failed` stop must end with `## > Next Up`: primary `gpd:new-milestone [milestone name]` to re-enter staged milestone setup, plus `gpd:suggest-next`.
-
-**If any research agent fails to spawn or returns an error:** Verify which required scout artifacts exist (`PRIOR-WORK.md`, `METHODS.md`, `COMPUTATIONAL.md`, `PITFALLS.md`). Retry only the missing scout tasks once with the same task-local write scope. If any required research file is still missing after the retry, STOP this survey path and present the missing artifacts. Do not synthesize from incomplete scout output and do not continue the milestone on partial survey results.
-
-**Artifact gate:** If a scout reports success but its `expected_artifacts` entry (`GPD/literature/{FILE}`) is missing, treat that scout as incomplete. Retry only the missing scout once in the same task-local write scope. If the artifact is still missing, stop the survey path. Do not substitute main-context research for the missing scout and do not continue with a partial survey.
+Apply `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md` before counting any scout as complete.
 
 After all 4 complete and required artifacts are present, spawn synthesizer:
 
@@ -318,12 +324,9 @@ Use template: {GPD_INSTALL_DIR}/templates/research-project/SUMMARY.md
 Do NOT commit — the orchestrator handles commits.
 </output>
 
-<return_contract>
-This is a one-shot handoff. Return a typed `gpd_return` envelope with `status` and `files_written`.
-Route on `gpd_return.status` and `gpd_return.files_written`, not on the human-readable handoff text.
-If you need user input, return `status: checkpoint` and stop; do not wait inside the same run.
-Treat `GPD/literature/SUMMARY.md` as fresh only when the file exists on disk and the same path appears in `gpd_return.files_written`.
-</return_contract>
+<handoff_expectation>
+Use the synthesizer `gpd_return` profile from your role prompt. Local completed output is `GPD/literature/SUMMARY.md`.
+</handoff_expectation>
 ", subagent_type="gpd-research-synthesizer", model="{synthesizer_model}", readonly=false, description="Synthesize literature survey")
 ```
 
@@ -343,17 +346,29 @@ shared_state_policy: return_only
 
 This synthesizer contract is task-local. Do not reuse survey write scopes or widen the summary handoff.
 
-**If the synthesizer agent fails to spawn or returns an error:** Retry once if `GPD/literature/SUMMARY.md` is missing. If the summary artifact is still missing after the retry, STOP and surface the blocker. Do not fabricate a fallback summary in the main context, do not infer survey conclusions from partial files, and do not display or commit from a preexisting summary without a fresh `gpd_return.files_written` proof.
+**Handle synthesizer return with the child artifact gate:**
 
-**If `gpd_return.status: checkpoint`:** Present the checkpoint, collect the user's input, and spawn a fresh continuation for the synthesizer after the response.
+```yaml
+child_gate:
+  id: "milestone_literature_synthesizer"
+  role: "gpd-research-synthesizer"
+  return_profile: "synthesizer"
+  required_status: "completed"
+  expected_artifacts:
+    - "GPD/literature/SUMMARY.md"
+  allowed_roots:
+    - "GPD/literature"
+  freshness_marker: "after $SYNTHESIZER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected GPD/literature/SUMMARY.md --allowed-root GPD/literature --require-status completed --require-files-written --fresh-after \"$SYNTHESIZER_HANDOFF_STARTED_AT\""
+    - "readable SUMMARY.md"
+  applicator: none
+  failure_route: "retry once | repair prompt once | stop synth path | repair path once | fail closed | stop; no stale SUMMARY.md or partial scout synthesis | ..."
+```
 
-**If `gpd_return.status: blocked`:** Present the blocker, work with the user to resolve it, and spawn a fresh continuation once the blocker is resolved.
+Status route: `checkpoint`, `blocked`, or final `failed` -> `## > Next Up` primary `gpd:new-milestone [milestone name]`, also `gpd:suggest-next`.
 
-**If `gpd_return.status: failed`:** Present the failure details, ask whether to retry the same continuation once or stop, and do not infer success from preexisting files.
-
-Any synthesizer `checkpoint`, `blocked`, or final `failed` stop must end with `## > Next Up`: primary `gpd:new-milestone [milestone name]`, plus `gpd:suggest-next`.
-
-**Artifact gate:** If the synthesizer reports `gpd_return.status: completed`, verify that `GPD/literature/SUMMARY.md` is readable and named in `gpd_return.files_written`. If the summary artifact is missing from disk or from `gpd_return.files_written`, treat the handoff as incomplete. Retry the synthesizer once if the summary file is still missing. If it remains missing, stop and review the missing inputs. Do not create SUMMARY.md in the main context from partial scout output or from a stale summary that was not named in the fresh return.
+Apply the gate before displaying or committing `SUMMARY.md`. Do not create `SUMMARY.md` in the main context from partial scout output or from a stale summary that was not named in the fresh return.
 
 Display key findings from SUMMARY.md:
 
@@ -528,7 +543,7 @@ Reference artifacts: {reference_artifacts_content}
 <!-- Milestones keep the full-detail roadmap so scoped continuations inherit every phase's contract coverage and success criteria up front. -->
 
 <continuation_context>
-This is a fresh continuation handoff for the current milestone roadmap. Carry forward the approved objectives, requirement traceability, prior survey findings, and any unresolved context gaps. Edit the existing roadmap files in place and return a fresh typed `gpd_return` envelope.
+This is a fresh continuation handoff for the current milestone roadmap. Carry forward the approved objectives, requirement traceability, prior survey findings, and any unresolved context gaps. Edit the existing roadmap files in place and return the roadmapper `gpd_return` profile.
 </continuation_context>
 
 <instructions>
@@ -541,10 +556,8 @@ Create research roadmap for milestone v[X.Y]:
 6. Derive 2-5 success criteria per phase (concrete, verifiable results)
 7. Validate 100% objective coverage and surface all contract-critical items touched by this milestone
 8. Write files immediately (ROADMAP.md and REQUIREMENTS.md traceability). Do not write STATE.md directly; return any proposed state status, position, or decision-log update for the orchestrator to apply with `gpd state` commands after the artifact gate.
-9. Return a typed `gpd_return` envelope with `status` and `files_written`; treat existing files as stale unless the same paths appear in `gpd_return.files_written`
-10. Do not rely on runtime completion text alone
-11. If `gpd_return.status` is `checkpoint`, `blocked`, or `failed`, handle each case separately and do not display or commit until fresh ROADMAP/REQUIREMENTS proof is available
-12. Route freshness on the canonical `gpd_return` envelope, using both `status` and `files_written`
+9. Return the roadmapper `gpd_return` profile; completed local artifacts are `GPD/ROADMAP.md` and `GPD/REQUIREMENTS.md`.
+10. If blocked, checkpointed, or failed, return the typed status with concrete issues and next actions; the parent gate below owns retry, freshness, display, and commit routing.
 
 </instructions>
 ", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Create research roadmap")
@@ -568,23 +581,32 @@ shared_state_policy: return_only
 
 This roadmapper contract is task-local. Do not widen the write scope or reuse it outside this handoff. The roadmapper does not own shared state; apply any accepted STATE.md updates in the main workflow with `gpd state` commands only after the roadmap artifacts pass the freshness gate.
 
-**Handle return:**
+**Handle roadmapper return with the child artifact gate:**
 
-**If the roadmapper agent fails to spawn or returns an error:** Treat the handoff as incomplete. Surface partial writes only as diagnostics. Do not fall back to any preexisting ROADMAP.md, STATE.md, or REQUIREMENTS.md content. Ask the user whether to retry this continuation or stop. If the user retries, spawn a fresh continuation handoff that includes the current objectives, the current milestone context, and any revision notes.
+```yaml
+child_gate:
+  id: "milestone_roadmapper"
+  role: "gpd-roadmapper"
+  return_profile: "roadmapper"
+  required_status: "completed"
+  expected_artifacts:
+    - "GPD/ROADMAP.md"
+    - "GPD/REQUIREMENTS.md"
+  allowed_roots:
+    - "GPD"
+  freshness_marker: "after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md --allowed-root GPD --require-status completed --require-files-written --fresh-after \"$MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT\""
+    - "readable ROADMAP.md / REQUIREMENTS.md"
+  applicator:
+    command: "main workflow applies accepted state changes with gpd state patch / gpd state add-decision after the artifact gate"
+    require_passed_true: false
+  failure_route: "ask retry or stop | repair prompt once | stop roadmapper path | request fresh continuation | repair path once | fail closed | ..."
+```
 
-**If `gpd_return.status: checkpoint`:** Present the checkpoint, collect user input, and spawn a fresh roadmapper continuation after the user responds.
+Status route: `checkpoint` -> present checkpoint and spawn a fresh roadmapper continuation; `blocked` -> resolve then fresh continuation; `failed` -> ask retry or stop; Next Up primary `gpd:new-milestone [milestone name]`, also `gpd:suggest-next`.
 
-**If `gpd_return.status: blocked`:** Present the blocker, work with the user to resolve it, and spawn a fresh continuation once the blocker is resolved.
-
-**If `gpd_return.status: failed`:** Present the failure details, ask whether to retry the same continuation once or stop, and do not infer success from preexisting files.
-
-Any roadmapper `checkpoint`, `blocked`, or final `failed` stop must end with `## > Next Up`: primary `gpd:new-milestone [milestone name]`, plus `gpd:suggest-next`.
-
-**Artifact gate:** If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md` and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`. If any expected artifact was already present before this handoff, it only counts as fresh output when the same path appears in `gpd_return.files_written`. If any expected artifact is missing from disk or from `gpd_return.files_written`, treat the handoff as incomplete and request a fresh continuation. Do not trust runtime completion text alone.
-
-**One-shot freshness rule:** the only proof of success is a completed typed return naming the updated files. Existing files on disk are stale unless the same paths appear in `gpd_return.files_written` from this run.
-
-**Shared-state update:** Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow with `gpd state patch` / `gpd state add-decision`. Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof.
+Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow with `gpd state patch` / `gpd state add-decision`. Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof.
 
 **If `gpd_return.status: completed`:** Read ROADMAP.md only after the fresh file proof is satisfied, then present the roadmap inline:
 

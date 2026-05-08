@@ -853,7 +853,7 @@ def test_new_milestone_roadmapper_stage_parse_and_artifact_words_match_payload()
 
     assert "`planning_exists`" not in roadmap_authoring.split("Use the bootstrap init", maxsplit=1)[0]
     assert "fresh `SUMMARY.md` proof" not in roadmap_authoring
-    assert "fresh ROADMAP/REQUIREMENTS proof" in roadmap_authoring
+    assert "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md" in roadmap_authoring
     assert "shared_state_policy: return_only" in roadmap_authoring
     assert "Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof." in roadmap_authoring
 

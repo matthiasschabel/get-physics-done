@@ -209,6 +209,27 @@ If the manuscript root is not already `paper/`, stage the package in a temporary
 
 Then materialize and validate with the executable package boundary. It reruns strict `arxiv-submission` review preflight, keeps `${SUBMISSION_DIR}` and `${PACKAGE_TARBALL}` under `${PACKAGE_ROOT}`, rejects unsafe tar paths, symlinks, aux files, placeholders, empty cites/refs, missing bibliography material, and requires the main `.tex` at tar root:
 
+```yaml
+executable_gate:
+  id: arxiv_package_validator
+  role: arxiv-package-validator
+  expected_artifacts:
+    - GPD/publication/${subject_slug}/arxiv/arxiv-submission.tar.gz
+    - ${PAPER_DIR}/ARTIFACT-MANIFEST.json
+    - ${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json
+    - latest REVIEW-LEDGER and REFEREE-DECISION pair
+    - current PROOF-REDTEAM artifact when theorem-bearing
+  allowed_root: GPD/publication/${subject_slug}/arxiv
+  freshness_marker: PACKAGE_VALIDATION from current package/finalize stage
+  validators:
+    - gpd --raw validate arxiv-package --materialize
+    - strict manuscript preflight
+    - review_gate latest-round checks
+    - paper-build manuscript-root refresh
+  applicator: arxiv-package validator materialization
+  failure_route: response_gate/review_gate/manuscript_preflight/package stop; route response freshness back to gpd:peer-review
+```
+
 ```bash
 if [ -n "${ARGUMENTS:-}" ]; then
   PACKAGE_VALIDATION=$(gpd --raw validate arxiv-package --materialize --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL" -- "$ARGUMENTS")

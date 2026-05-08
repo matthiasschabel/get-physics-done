@@ -51,7 +51,9 @@ def test_peer_review_and_referee_skill_surfaces_keep_lifecycle_cleanup_boundary(
     assert "stage-recovery-gate.md" in peer_review_content
     assert "spawned reviewer/proof-auditor/referee lifecycle" in peer_review_content
     assert "stale-output rejection" in peer_review_content
-    assert "Apply the publication stage-recovery gate to the Stage 6 typed return" in peer_review_content
+    assert "Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` after every child return" in peer_review_content
+    assert "peer_review_stage6_referee" in peer_review_content
+    assert "gpd_return.files_written stays within Stage 6 write_allowlist" in peer_review_content
     assert "Checkpoint ownership is orchestrator-side" in referee_content
     assert "owns the fresh continuation handoff" in referee_content
     assert "Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run." in referee_content

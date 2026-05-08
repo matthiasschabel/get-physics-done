@@ -141,7 +141,8 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
     assert "fixed" in paper_writer and "on disk" in paper_writer
     assert "fixed" in referee and "on disk" in referee
     assert "gpd_return.files_written" in write_paper
-    assert "both files present on disk" in write_paper
+    assert "gpd validate handoff-artifacts for both response paths" in write_paper
+    assert "publication-response-writer-handoff.md frontmatter, round, and manuscript binding" in write_paper
     assert "publication-bootstrap-preflight.md" in write_paper
     assert "publication-response-writer-handoff.md" in write_paper
     assert "publication-bootstrap-preflight.md" in respond
@@ -149,16 +150,19 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
     assert "selected_publication_root` / `selected_review_root" in respond
     assert "publication-response-artifacts.md" not in write_paper
     assert "publication-response-artifacts.md" not in respond
-    assert "fresh child `gpd_return.files_written`" in respond
-    assert "revised section file plus both response artifacts" in respond
+    assert "fresh child handoff and named in current-run `files_written` / `gpd_return.files_written`" in respond
+    assert "gpd validate handoff-artifacts for revised section plus both response artifacts" in respond
 
 
 def test_peer_review_stage_six_requires_fresh_referee_return_and_artifacts() -> None:
     workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
-    assert "status: completed | checkpoint | blocked | failed" in workflow
+    assert "child_gates:" in workflow
+    assert "peer_review_stage6_referee" in workflow
+    assert "required_status: completed" in workflow
     assert "stage-recovery-gate.md" in workflow
     assert "checkpoint continuation" in workflow
+    assert "gpd_return.files_written stays within Stage 6 write_allowlist" in workflow
 
 
 def test_peer_review_parallel_wave_stops_terminal_children_before_stage_4() -> None:
@@ -232,7 +236,7 @@ def test_stage_six_handoff_closure_and_retry_freshness_remain_explicit() -> None
 
     assert "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree." in workflow
     assert (
-        "Treat the Stage 6 return as incomplete if the fresh `gpd_return.files_written` set omits a Stage 6 artifact written in this run or lists any upstream staged-review artifact path."
+        "gpd_return.files_written stays within Stage 6 write_allowlist and contains no upstream staged-review paths"
         in workflow
     )
     assert "Only retry Stage 6 for Stage 6-owned artifacts." in workflow

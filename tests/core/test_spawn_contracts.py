@@ -267,7 +267,8 @@ def test_new_project_roadmapper_spawn_contract_uses_direct_shared_state_and_arti
             "GPD/REQUIREMENTS.md",
         ),
     )
-    assert "Do not trust the runtime handoff status by itself." in content
+    assert "child_gate:\n  id: \"project_roadmapper\"" in content
+    assert "Apply the child gate before displaying, approving, or committing the roadmap." in content
     assert 'subagent_type="gpd-roadmapper"' in task.text
     assert 'model="{roadmapper_model}"' in task.text
     assert "Write files immediately (ROADMAP.md, STATE.md, update REQUIREMENTS.md traceability)" in task.text
@@ -275,7 +276,7 @@ def test_new_project_roadmapper_spawn_contract_uses_direct_shared_state_and_arti
     assert "GPD/REQUIREMENTS.md" in task.text
     assert "do not rely on runtime completion text alone." in task.text
     assert (
-        "If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md`, `GPD/STATE.md`, and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`."
+        "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/STATE.md --expected GPD/REQUIREMENTS.md"
         in content
     )
 
@@ -296,7 +297,7 @@ def test_new_milestone_roadmapper_spawn_contract_keeps_return_only_shared_state_
             "GPD/REQUIREMENTS.md",
         ),
     )
-    assert "Do not trust the runtime handoff status by itself." in content
+    assert "child_gate:\n  id: \"milestone_roadmapper\"" in content
     assert "<contract_context>" in task.text
     assert "Project contract gate: {project_contract_gate}" in task.text
     assert "Project contract load info: {project_contract_load_info}" in task.text
@@ -304,16 +305,16 @@ def test_new_milestone_roadmapper_spawn_contract_keeps_return_only_shared_state_
     assert "Contract intake: {contract_intake}" in task.text
     assert "Active references: {active_reference_context}" in task.text
     assert "Effective reference intake: {effective_reference_intake}" in task.text
-    assert "gpd_return.files_written" in task.text
-    assert "treat existing files as stale unless the same paths appear in `gpd_return.files_written`" in task.text
+    assert "expected_artifacts:" in content
+    assert "freshness_marker: \"after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT\"" in content
     assert "Do not write STATE.md directly" in task.text
     assert "GPD/REQUIREMENTS.md" in content
     assert (
-        "If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md` and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`."
+        "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md"
         in content
     )
     assert (
-        "If any expected artifact is missing from disk or from `gpd_return.files_written`, treat the handoff as incomplete and request a fresh continuation."
+        "Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow"
         in content
     )
 
@@ -459,13 +460,10 @@ def test_new_project_parallel_researchers_write_to_disjoint_artifacts() -> None:
     assert "GPD/PROJECT.md" in synth.text
     assert "GPD/config.json" in synth.text
     assert "GPD/literature/SUMMARY.md (if re-synthesizing an existing survey)" in synth.text
-    assert "Do not trust the runtime handoff status by itself." in content
-    assert "If a scout reports success but its `expected_artifacts` entry" in content
-    assert "`GPD/literature/{FILE}`" in content
-    assert "If `completed`, verify `GPD/literature/SUMMARY.md` exists and is named in the fresh return." in content
+    assert "child_gate:\n  id: \"literature_scouts\"" in content
+    assert "child_gate:\n  id: \"literature_synthesizer\"" in content
+    assert "gpd validate handoff-artifacts - --expected GPD/literature/SUMMARY.md" in content
     assert "Do not proceed with a partial literature survey" in content
-    assert "Do not synthesize from incomplete scout output" in content
-    assert "Do not fabricate a fallback summary in the main context" in content
 
 
 def test_map_research_parallel_mappers_use_spawn_contracts_and_return_only_artifacts() -> None:
@@ -515,17 +513,16 @@ def test_new_project_roadmapper_uses_spawn_contract_and_artifact_gate() -> None:
     assert "gpd_return.files_written" in roadmapper.text
     assert "GPD/literature/SUMMARY.md" in roadmapper.text
     assert "allowed_paths:" in roadmapper.text
-    assert "If the roadmapper reports `gpd_return.status: completed`" in content
-    assert "`GPD/ROADMAP.md` or `GPD/STATE.md` is missing" in content
-    assert "Do not trust the runtime handoff status by itself." in content
-    assert "Do not create a second main-context roadmap implementation path" in content
+    assert "child_gate:\n  id: \"project_roadmapper\"" in content
+    assert "Apply the child gate before displaying, approving, or committing the roadmap." in content
+    assert "retry once; partial writes are diagnostics only" in content
 
 
 def test_new_project_notation_coordinator_uses_explicit_model_and_spawn_contract() -> None:
     path = WORKFLOWS_DIR / "new-project.md"
     content = _read(path)
     start = content.index("## 8.5. Establish Conventions")
-    end = content.index("**Handle notation-coordinator return:**", start)
+    end = content.index("**Handle notation-coordinator return with the child artifact gate:**", start)
     notation_section = content[start:end]
 
     assert _find_single_task(path, "gpd-notation-coordinator")
@@ -566,24 +563,24 @@ def test_new_milestone_research_and_roadmapper_gate_success_path_artifacts() -> 
     content = _read(WORKFLOWS_DIR / "new-milestone.md")
 
     assert content.count("<spawn_contract>") >= 3
-    assert "Do not trust the runtime handoff status by itself." in content
+    assert "child_gate:\n  id: \"milestone_roadmapper\"" in content
     assert (
-        "If a scout reports success but its `expected_artifacts` entry (`GPD/literature/{FILE}`) is missing" in content
+        "child_gate:\n  id: \"milestone_literature_scouts\"" in content
     )
     assert (
-        "If the synthesizer reports `gpd_return.status: completed`, verify that `GPD/literature/SUMMARY.md` is readable and named in `gpd_return.files_written`."
+        "child_gate:\n  id: \"milestone_literature_synthesizer\""
         in content
     )
     assert (
-        "If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md` and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`."
+        "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md"
         in content
     )
     assert (
-        "If any expected artifact is missing from disk or from `gpd_return.files_written`, treat the handoff as incomplete and request a fresh continuation."
+        "Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow"
         in content
     )
     assert "GPD/REQUIREMENTS.md" in content
-    assert "gpd_return.files_written" in content
+    assert "require-files-written" in content
     assert "shared_state_policy: return_only" in content
 
     assert 'subagent_type="gpd-project-researcher"' in content

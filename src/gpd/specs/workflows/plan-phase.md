@@ -310,6 +310,7 @@ shared_state_policy: return_only
 ```
 
 ```
+RESEARCH_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 RESEARCH_RETURN=$(
 task(
   prompt="First, read {GPD_AGENTS_DIR}/gpd-phase-researcher.md for your role and instructions.\n\n" + research_prompt,
@@ -325,19 +326,39 @@ task(
 
 ### Handle Researcher Return
 
-Researcher gate: fresh RESEARCH.md in return; else continue/skip/abort.
+Researcher child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
 
-Human-readable headings such as `## RESEARCH COMPLETE` and `## RESEARCH BLOCKED` are presentation only. Route on typed status and gate.
+```yaml
+child_gate:
+  id: "phase_researcher_context_refresh"
+  role: "gpd-phase-researcher"
+  return_profile: "researcher"
+  required_status: "completed"
+  expected_artifacts:
+    - "${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md"
+  allowed_roots:
+    - "${PHASE_DIR}"
+  freshness_marker: "after $RESEARCH_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected '${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md' --allowed-root '${PHASE_DIR}' --require-files-written --require-status completed --fresh-after \"$RESEARCH_HANDOFF_STARTED_AT\""
+    - "readable artifact check"
+  applicator: none
+  failure_route: "retry_or_main_context_research_or_skip | repair_prompt_once | skip_or_abort | retry_once | repair_path_once | abort | ..."
+```
 
-- **`gpd_return.status: completed`:** Run the gate, then display confirmation and continue to step 6.
-- **`gpd_return.status: checkpoint`:** Present the checkpoint, collect the response, and spawn a fresh continuation handoff. Do not wait inside the child run.
-- **`gpd_return.status: blocked` or `failed`:** Display blocker, offer: 1) Provide context, 2) Skip research, 3) Abort
+Status route: `completed` runs the tuple before step 6; `checkpoint` uses the continuation boundary; `blocked|failed` asks for context, skips, or aborts.
 
 **Verify RESEARCH.md was written (guard against silent researcher failure):**
 
 ```bash
 EXPECTED_RESEARCH_FILE="${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md"
 RESEARCH_FILES=$(echo "$RESEARCH_RETURN" | gpd json list .gpd_return.files_written --default "")
+printf '%s\n' "$RESEARCH_RETURN" | gpd validate handoff-artifacts - \
+  --expected "$EXPECTED_RESEARCH_FILE" \
+  --allowed-root "$PHASE_DIR" \
+  --require-files-written \
+  --require-status completed \
+  --fresh-after "$RESEARCH_HANDOFF_STARTED_AT" || exit 1
 if ! printf '%s\n' "$RESEARCH_FILES" | grep -Fxq "$EXPECTED_RESEARCH_FILE"; then
   echo "ERROR: researcher returned completed without naming ${EXPECTED_RESEARCH_FILE}"
   exit 1
@@ -405,7 +426,7 @@ task(
 )
 ```
 
-After the continuation returns, rerun the same `gpd_return.files_written` and on-disk artifact gate above before advancing.
+After the continuation returns, rerun the same researcher `child_gate` before advancing.
 
 ## 5.5. Numerical/Computational Planning Guard
 
@@ -503,15 +524,35 @@ task(
 )
 ```
 
-Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-planner`; expected=`${PHASE_DIR}/*-PLAN.md`; root=`${PHASE_DIR}`; freshness=`after $PLANNER_HANDOFF_STARTED_AT`; validators=`gpd validate handoff-artifacts`, `gpd validate plan-contract`, `gpd validate plan-preflight`; failure=`retry | main | abort`.
+Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
 
-Planner checkpoint: apply `references/orchestration/continuation-boundary.md`; trigger=user input; resume fresh.
+```yaml
+child_gate:
+  id: "planner_initial_plan"
+  role: "gpd-planner"
+  return_profile: "planner"
+  required_status: "completed"
+  expected_artifacts:
+    - path: "${PHASE_DIR}/*-PLAN.md"
+      kind: "glob"
+  allowed_roots:
+    - "${PHASE_DIR}"
+  freshness_marker: "after $PLANNER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected-glob '${PHASE_DIR}/*-PLAN.md' --allowed-root '${PHASE_DIR}' --required-suffix=-PLAN.md --require-files-written --require-status completed --fresh-after \"$PLANNER_HANDOFF_STARTED_AT\""
+    - "gpd validate plan-contract <each fresh plan>"
+    - "gpd validate plan-preflight <each fresh plan>"
+  applicator: none
+  failure_route: "retry_planner_or_main_context_plan_or_abort | repair_prompt_once | fail_closed | retry_once | repair_path_once | abort | ..."
+```
+
+Status route: `checkpoint` uses the continuation boundary; unresolved planner blockers choose retry, main-context plan, or abort.
 
 ## 9. Handle Planner Return
 
 **If the planner agent fails to spawn or returns an error:** Keep the child handoff incomplete under the planner gate. Existing `PLAN.md` files are recovery evidence only. Offer: Retry planner / Main-context plan / Abort.
 
-Planner return validation and main-context fallback are separate paths. The child artifact gate owns the no-synthetic-child-return rule; an explicit main-context authoring path must own its own artifacts and return envelope.
+Planner return validation and main-context fallback are separate paths. The shared child artifact gate owns the no-synthetic-child-return rule; an explicit main-context authoring path owns its own artifacts and return envelope.
 
 If the user chooses Main-context plan or any manual bounded authoring branch, it is not an override: set `PLANNER_HANDOFF_STARTED_AT`, write only `${PHASE_DIR}/*-PLAN.md`, set `FRESH_PLAN_FILES` to the newly created path(s), and run one gate with a complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`. No full planner/checker loop is required for this fallback unless requested, but a failing gate means `status: blocked`, not `planned_ready`/`green`, and no `gpd:execute-phase` route.
 
@@ -575,7 +616,7 @@ done
 
 If the planner returns `gpd_return.status: checkpoint`, present the checkpoint to the user, collect the response, and spawn a fresh `gpd-planner` continuation handoff with the updated context. Keep this path distinct from checker-driven revision.
 
-Before continuing, verify that the planner's expected `PLAN.md` artifacts still exist and are readable. If the planner continuation changes the plans, re-run the explicit plan-contract and plan-preflight validation against the refreshed `gpd_return.files_written` set before checker review.
+Before continuing, rerun the planner `child_gate`. If the planner continuation changes the plans, re-run the explicit plan-contract and plan-preflight validation against the refreshed `gpd_return.files_written` set before checker review.
 
 Only after the planner returns `completed` should the workflow advance to checker review.
 
@@ -675,6 +716,7 @@ In addition to structural checks, verify:
 ```
 
 ```
+CHECKER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 CHECKER_RETURN=$(
 task(
   prompt="First, read {GPD_AGENTS_DIR}/gpd-plan-checker.md for your role and instructions.\n\n" + checker_prompt + "\n\n<spawn_contract>\nwrite_scope:\n  mode: read_only\n  allowed_paths: []\nexpected_artifacts: []\nshared_state_policy: return_only\n</spawn_contract>",
@@ -686,13 +728,31 @@ task(
 )
 ```
 
-Checker child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-plan-checker`; expected=none; validators=approved/blocked plan-ID reconciliation against `FRESH_PLAN_FILES` and `files_written: []`; failure=`revision | fail-closed | manual`.
+Checker child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "plan_checker_review"
+  role: "gpd-plan-checker"
+  return_profile: "checker"
+  required_status: "completed"
+  expected_artifacts: []
+  allowed_roots: []
+  validators:
+    - "approved/blocked plan-ID reconciliation against FRESH_PLAN_FILES"
+    - "files_written: []"
+    - "blocked_plans empty for completed status"
+  applicator: none
+  failure_route: "fail_closed_or_manual_review | repair_prompt_once | revision_loop_or_fail_closed"
+```
+
+Status route: `checkpoint` uses the continuation boundary; `blocked` or `failed` routes to revision loop or manual review.
 
 ## 11. Handle Checker Return
 
 **If the plan-checker agent fails to spawn or returns an error:** Proceed without plan verification. Plans are still executable. Note that verification was skipped and recommend the user review the plans manually before executing. If any plan is proof-bearing, do NOT waive this gate: run an equivalent main-context proof-plan audit against the checker criteria above or STOP and report that proof-obligation planning could not be cleared safely.
 
-Human-readable headings such as `## VERIFICATION PASSED`, `## ISSUES FOUND`, and `## PARTIAL APPROVAL` are presentation only. Route on the checker's structured `gpd_return.status` and plan lists.
+Checker presentation headings are non-authority; route through the checker tuple's structured status and plan-list validators.
 
 - **`gpd_return.status: completed`:** Treat as a full pass only after plan-ID reconciliation succeeds. Before accepting the success state, verify:
 
@@ -809,7 +869,29 @@ task(
 )
 ```
 
-Revision planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-planner`; expected=`${PHASE_DIR}/*-PLAN.md`; root=`${PHASE_DIR}`; freshness=`after $PLANNER_HANDOFF_STARTED_AT`; validators=`gpd validate handoff-artifacts`, `gpd validate plan-contract`, `gpd validate plan-preflight`; failure=`retry | manual | force`.
+Revision planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "planner_revision"
+  role: "gpd-planner"
+  return_profile: "planner"
+  required_status: "completed"
+  expected_artifacts:
+    - path: "${PHASE_DIR}/*-PLAN.md"
+      kind: "glob"
+  allowed_roots:
+    - "${PHASE_DIR}"
+  freshness_marker: "after $PLANNER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected-glob '${PHASE_DIR}/*-PLAN.md' --allowed-root '${PHASE_DIR}' --required-suffix=-PLAN.md --require-files-written --require-status completed --fresh-after \"$PLANNER_HANDOFF_STARTED_AT\""
+    - "gpd validate plan-contract <each fresh plan>"
+    - "gpd validate plan-preflight <each fresh plan>"
+  applicator: none
+  failure_route: "retry_revision_planner_or_manual_revision_or_force_decision | repair_prompt_once | fail_closed | retry_once | repair_path_once | recheck_or_manual_decision"
+```
+
+Status route: `checkpoint` uses the continuation boundary; unresolved revision blockers choose retry, manual revision, or force decision.
 
 **If the revision planner agent fails to spawn or returns an error:** Do not proceed to re-check just because revised `PLAN.md` files exist on disk. Treat any such files as incomplete until a fresh typed planner return explicitly names them in `gpd_return.files_written`. If no fresh revision return is available, keep the loop fail-closed and offer: 1) Retry revision planner, 2) Apply revisions manually in the main context using checker feedback, 3) Force proceed with current plans despite checker issues.
 

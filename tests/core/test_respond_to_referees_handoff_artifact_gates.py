@@ -12,13 +12,14 @@ def test_respond_to_referees_group_b_completion_requires_fresh_child_files_writt
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert (
-        "Return only after the fresh `gpd_return.files_written` set names the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`."
+        "Return through the `respond_to_referees_revision_section` child_gate so the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` are all named."
         in source
     )
-    assert (
-        "Re-apply the shared publication response-artifact and stage-recovery contracts first; for this workflow, the section is complete only when fresh `gpd_return.files_written` names the revised section file plus both response artifacts."
-        in source
-    )
+    assert 'id: "respond_to_referees_revision_section"' in source
+    assert "${PAPER_DIR}/{resolved_section_file}" in source
+    assert "publication-response-writer-handoff.md frontmatter, round, and manuscript binding" in source
+    assert "target section has expected revision markers or substantive edits" in source
+    assert "Re-apply the `respond_to_referees_revision_section` tuple first." in source
     assert "stage-recovery-gate.md" in source
     assert "If the section file changed but the response trackers did not, or vice versa, treat that section as failed" in source
 
@@ -26,10 +27,10 @@ def test_respond_to_referees_group_b_completion_requires_fresh_child_files_writt
 def test_respond_to_referees_response_letter_generation_stays_file_backed_and_fresh_return_based() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert (
-        "Treat those files as complete only if the expected mirrored artifacts exist on disk, their response frontmatter binds to the active manuscript path and review round when the subject is explicit, and the orchestrator has aggregated every section handoff under the publication stage-recovery gate"
-        in source
-    )
+    assert "aggregate_child_gate:" in source
+    assert "id: respond_to_referees_response_pair_current" in source
+    assert "respond_to_referees_revision_section for every launched Group B section" in source
+    assert "expected mirrored artifacts exist on disk" in source
+    assert "response frontmatter binds to the active manuscript path and review round when the subject is explicit" in source
     assert "Those two GPD-owned response artifacts stay canonical even when the manuscript subject is explicit or external." in source
     assert "If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots" in source
-    assert "fresh child `gpd_return.files_written` names all required outputs" in source

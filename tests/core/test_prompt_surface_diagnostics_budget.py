@@ -11,18 +11,27 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 82_700, "chars": 3_810_000}
+PROMPT_TOTAL_BUDGET = {"lines": 83_500, "chars": 3_825_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 34_420, "chars": 1_506_000},
+    "command": {"lines": 34_900, "chars": 1_515_000},
     "agent": {"lines": 14_900, "chars": 778_000},
-    "workflow": {"lines": 33_330, "chars": 1_526_000},
+    "workflow": {"lines": 34_000, "chars": 1_526_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 11_700, "chars": 620_000}
+STAGE_FIRST_TURN_BUDGET = {"lines": 12_500, "chars": 635_000}
 SHELL_PARSING_LINE_BUDGET = 920
+PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
+    "status_handling": 110,
+    "files_written_freshness": 26,
+    "stale_artifact_rejection": 30,
+    "fresh_continuation": 38,
+    "heading_prose_non_authority": 20,
+    "no_synthesized_child_gpd_return": 3,
+}
 ZERO_SAFETY_TOTAL_FIELDS = (
     "unresolved_include_count",
     "invalid_gpd_return_example_count",
     "invalid_frontmatter_example_count",
+    "disallowed_return_field_mention_count",
     "forbidden_child_return_synthesis_mention_count",
 )
 
@@ -151,6 +160,35 @@ def test_phase3_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings(
         "stage_diagnostics first-turn char budget exceeded: "
         f"observed={first_turn_chars} max={STAGE_FIRST_TURN_BUDGET['chars']}"
     )
+
+
+def test_phase5_non_reference_semantic_duplicate_budgets_stay_under_caps() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    groups = payload["semantic_duplicate_invariants"]
+    assert isinstance(groups, list)
+    groups_by_category = {
+        group["category"]: group
+        for group in groups
+        if isinstance(group, dict) and isinstance(group.get("category"), str)
+    }
+
+    missing_categories = sorted(set(PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS) - set(groups_by_category))
+    assert missing_categories == []
+
+    for category, budget in PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS.items():
+        group = groups_by_category[category]
+        observed = group["non_reference_occurrence_count"]
+        occurrence_count = group["occurrence_count"]
+        canonical_references = group["canonical_references"]
+        assert isinstance(observed, int)
+        assert isinstance(occurrence_count, int)
+        assert isinstance(canonical_references, list)
+        assert canonical_references
+        assert observed <= occurrence_count
+        assert observed <= budget, (
+            f"{category} non-reference semantic duplicate budget exceeded: "
+            f"observed={observed} max={budget}; move generic invariant prose to shared references"
+        )
 
 
 def test_runtime_projection_aggregate_budgets_stay_under_phase1_ceilings() -> None:

@@ -25,7 +25,11 @@ def test_plan_phase_planner_and_checker_handoffs_carry_inline_spawn_contracts() 
 
     assert "Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in workflow
     assert "Revision planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in workflow
-    assert "validators=`gpd validate handoff-artifacts`, `gpd validate plan-contract`, `gpd validate plan-preflight`" in workflow
+    assert 'id: "phase_researcher_context_refresh"' in workflow
+    assert 'id: "planner_initial_plan"' in workflow
+    assert 'id: "planner_revision"' in workflow
+    assert "gpd validate plan-contract <each fresh plan>" in workflow
+    assert "gpd validate plan-preflight <each fresh plan>" in workflow
 
     checker = _find_single_task(path, "gpd-plan-checker")
     _assert_spawn_contract(checker, ())
@@ -33,4 +37,4 @@ def test_plan_phase_planner_and_checker_handoffs_carry_inline_spawn_contracts() 
     assert "artifact_gate:" not in checker.text
     assert "Checker child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in workflow
     assert "files_written: []" in workflow
-    assert "approved/blocked plan-ID reconciliation against `FRESH_PLAN_FILES`" in workflow
+    assert "approved/blocked plan-ID reconciliation against FRESH_PLAN_FILES" in workflow

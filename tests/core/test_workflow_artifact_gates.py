@@ -15,13 +15,13 @@ def _read(name: str) -> str:
 def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
     plan_phase = _read("plan-phase.md")
 
-    assert "Planner checkpoint: apply `references/orchestration/continuation-boundary.md`" in plan_phase
+    assert "Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`" in plan_phase
     assert "Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in plan_phase
-    assert "expected=`${PHASE_DIR}/*-PLAN.md`" in plan_phase
-    assert "freshness=`after $PLANNER_HANDOFF_STARTED_AT`" in plan_phase
-    assert 'gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}"' in plan_phase
+    assert 'path: "${PHASE_DIR}/*-PLAN.md"' in plan_phase
+    assert 'freshness_marker: "after $PLANNER_HANDOFF_STARTED_AT"' in plan_phase
+    assert "gpd validate handoff-artifacts - --expected-glob '${PHASE_DIR}/*-PLAN.md'" in plan_phase
     assert 'gpd validate plan-contract "$plan_file"' in plan_phase
-    assert "The child artifact gate owns the no-synthetic-child-return rule" in plan_phase
+    assert "The shared child artifact gate owns the no-synthetic-child-return rule" in plan_phase
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in plan_phase
 
 

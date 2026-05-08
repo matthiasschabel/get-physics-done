@@ -258,6 +258,8 @@ def test_phase0_prompt_diagnostics_and_visible_return_examples_agree(
             body = match.group("body")
             if "gpd_return" not in body:
                 continue
+            if "child_gate:" in body or "child_gates:" in body:
+                continue
             checked_examples += 1
             result = validate_gpd_return_markdown(f"```yaml\n{body.rstrip()}\n```")
             if result.passed:

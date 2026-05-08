@@ -95,49 +95,28 @@ def test_verify_work_verifier_handoff_stays_one_shot_and_routes_on_typed_status(
     assert "Spawn `gpd-verifier` once and let it own the physics policy." in workflow
     assert 'subagent_type="gpd-verifier"' in workflow
     assert "<spawn_contract>" in workflow
-    assert (
-        "Route only on the canonical verification frontmatter and `gpd_return.status`; do not route on headings or marker strings."
-        in workflow
-    )
-    assert (
-        "If the artifact is missing, unreadable, absent from `gpd_return.files_written`, or fails validation, treat the handoff as incomplete: request a fresh verifier continuation when possible; otherwise surface a non-green stop with validator errors. Never present it as accepted or passed."
-        in workflow
-    )
-    assert (
-        "Human-readable headings in the verifier output are presentation only; route on the canonical verification frontmatter and `gpd_return.status`, not on headings or marker strings."
-        in workflow
-    )
-    assert (
-        "> Runtime delegation rule: this is a one-shot handoff. If the spawned verifier needs user input, it must checkpoint and return."
-        in workflow
-    )
-    assert (
-        "The wrapper must start a fresh continuation after the user responds instead of trying to keep the original verifier alive."
-        in workflow
-    )
+    assert 'id: "verify_work_verifier_report"' in workflow
+    assert "Verifier presentation headings are non-authority" in workflow
+    assert "Verifier checkpoints use `references/orchestration/continuation-boundary.md`" in workflow
+    assert "Missing/unreadable/unnamed/invalid artifacts use the tuple failure route" in workflow
     assert "Do not recompute canonical verification status in this workflow." in workflow
 
 
 def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_routing() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
-    assert (
-        "Route only on the canonical verification frontmatter and `gpd_return.status`; do not route on headings or marker strings."
-        in workflow
-    )
-    assert "`${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md` exists on disk and is readable" in workflow
-    assert "the same path appears in `gpd_return.files_written`" in workflow
+    assert "Apply the `verify_work_verifier_report` child_gate before downstream routing." in workflow
+    assert '"${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"' in workflow
+    assert "--require-status completed --require-files-written" in workflow
     assert 'gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"' in workflow
+    assert "gpd validate verification-contract ${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md" in workflow
     assert (
         'Any verifier-written canonical `VERIFICATION.md`, including gap reports and `blocked`/`failed` handoffs, must pass `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before this wrapper accepts it as canonical.'
         in workflow
     )
-    assert (
-        "If the artifact is missing, unreadable, absent from `gpd_return.files_written`, or fails validation, treat the handoff as incomplete: request a fresh verifier continuation when possible; otherwise surface a non-green stop with validator errors. Never present it as accepted or passed."
-        in workflow
-    )
+    assert "Missing/unreadable/unnamed/invalid artifacts use the tuple failure route" in workflow
     assert "Do not recompute canonical verification status in this workflow." in workflow
-    assert "If a canonical verification file already existed before this run" in workflow
+    assert "preexisting reports are not authority" in workflow
     assert (
         "If a canonical verification file already exists, preserve its authoritative frontmatter and append only the session-local overlay here."
         in workflow
@@ -153,8 +132,8 @@ def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_rout
         )
         == 1
     )
-    assert "If the verifier agent fails to spawn or returns an error, keep the session fail-closed." in workflow
-    assert "Do not let a stale existing verification file satisfy the success path." in workflow
+    assert 'failure_route: "fail_closed -> gpd:verify-work ${phase_number}' in workflow
+    assert "preexisting reports are not authority" in workflow
 
 
 def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
@@ -251,18 +230,15 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
         "Use `templates/planner-subagent-prompt.md` to build the gap_closure planner handoff from the staged payload."
         in workflow
     )
-    assert (
-        "Before treating the handoff as complete, verify that the expected `PLAN.md` files exist in the phase directory and are listed in `gpd_return.files_written` from the fresh planner run."
-        in workflow
-    )
+    assert 'id: "verify_work_gap_planner"' in workflow
+    assert "path: \"${PHASE_DIR_ABS}/*-PLAN.md\"" in workflow
+    assert "gpd validate plan-contract <each fresh gap plan>" in workflow
     assert (
         "If the planner fails to spawn or returns an error, keep the session fail-closed and offer retry or manual plan creation. Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone."
         in workflow
     )
-    assert (
-        "Before accepting the handoff as complete, confirm the expected `PLAN.md` files are present, readable, and listed in `gpd_return.files_written` from the planner turn."
-        in workflow
-    )
+    assert 'id: "verify_work_gap_plan_checker"' in workflow
+    assert "fresh planner PLAN.md artifacts remain readable and named in planner files_written" in workflow
     assert (
         "If the checker fails to spawn or returns an error, proceed without plan verification but note that the plans were not verified."
         in workflow
@@ -294,10 +270,8 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
     assert "ignore `phase_proof_review_status.state=not_reviewed|fresh` alone" in workflow
     assert "Classify proof-bearing only from research artifacts" in workflow
     assert "exclude installed runtime/config/skills trees" in workflow
-    assert (
-        "> Runtime delegation rule: this is a single-turn handoff. If the spawned agent needs user input, it checkpoints and returns; do not keep the original run waiting inside the same task."
-        in workflow
-    )
+    assert 'id: "verify_work_proof_critic"' in workflow
+    assert "Apply the canonical runtime delegation convention above; this proof handoff uses the tuple below" in workflow
     assert "Return `status: checkpoint` instead of waiting for user input inside this run." not in workflow
     assert (
         "Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation."

@@ -110,6 +110,11 @@ def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_witho
     )
     assert 'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"' in workflow
     assert 'PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"' in workflow
+    assert "executable_gate:" in workflow
+    assert "id: arxiv_package_validator" in workflow
+    assert "role: arxiv-package-validator" in workflow
+    assert "GPD/publication/${subject_slug}/arxiv/arxiv-submission.tar.gz" in workflow
+    assert "route response freshness back to gpd:peer-review" in workflow
     assert (
         'gpd --raw validate arxiv-package --materialize --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"'
         in workflow

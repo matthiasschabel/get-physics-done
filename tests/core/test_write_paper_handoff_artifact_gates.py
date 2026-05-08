@@ -12,27 +12,37 @@ def test_write_paper_writer_completion_requires_typed_status_files_written_and_d
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert "stage-recovery-gate.md" in source
-    assert "completion requires `status: completed`, fresh `gpd_return.files_written` naming the expected `.tex` file" in source
-    assert "Treat the emitted `.tex` file as the success artifact gate for each section" in source
+    assert 'id: "write_paper_section_writer"' in source
+    assert 'role: "gpd-paper-writer"' in source
+    assert "${PAPER_DIR}/{section_path}.tex" in source
+    assert "--require-status completed --require-files-written --fresh-after $SECTION_WRITER_HANDOFF_STARTED_AT" in source
+    assert "Existing `.tex` files can make a resumed wave current, but they are not fresh child handoff success." in source
+    assert "Treat the emitted `.tex` file as the success artifact gate for each section only after the tuple passes" in source
 
 
 def test_write_paper_bibliography_completion_requires_typed_status_files_written_and_disk_artifacts() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "Use `status: completed` when the bibliography task finished" in source
-    assert "A completed return must always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`; list `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography file changed." in source
+    assert 'id: "write_paper_bibliographer"' in source
+    assert "Return a typed `gpd_return` envelope for the `write_paper_bibliographer` child_gate." in source
+    assert "Always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`; list `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography file changed." in source
     assert "and `{ACTIVE_BIBLIOGRAPHY_PATH}` only if the bibliography file changed" not in source
     assert "Bibliography: `{ACTIVE_BIBLIOGRAPHY_PATH}` (the resolved active bibliography for this manuscript)" in source
-    assert "The typed return must name `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json`, and must name `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography changed" in source
-    assert "keep the pass incomplete even if older audit files are still on disk" in source
+    assert "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json after paper-build refresh" in source
+    assert "bibliography_audit_clean before strict review" in source
+    assert "Older audit files are recovery evidence only." in source
 
 
 def test_write_paper_response_artifact_completion_requires_typed_status_files_written_and_disk_artifacts() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert "stage-recovery-gate.md" in source
-    assert "completion requires `status: completed`, fresh `gpd_return.files_written` naming both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`" in source
-    assert "Treat `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md`, `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and the writer's typed `gpd_return` envelope as the response success gate." in source
+    assert 'id: "write_paper_response_pair"' in source
+    assert 'role: "gpd-paper-writer"' in source
+    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in source
+    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in source
+    assert "publication-response-writer-handoff.md frontmatter, round, and manuscript binding" in source
+    assert "Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` through this tuple before treating the response pair as complete." in source
 
 
 def test_write_paper_bootstrap_contract_is_explicit_about_project_and_bounded_external_lanes() -> None:

@@ -19,7 +19,7 @@ def test_phase0_baseline_report_shape_uses_prompt_diagnostics_and_class_only_sum
 
     assert report["schema"] == "phase0.baseline_report.v1"
     assert report["schema_id"] == "phase0.baseline_report.v1"
-    assert report["prompt_diagnostics_schema"] == "prompt_surface_diagnostics.v6"
+    assert report["prompt_diagnostics_schema"] == "prompt_surface_diagnostics.v7"
     assert report["repo"] == {"head": "unavailable", "tree_status_class": "not_git"}
     assert report["prompt_totals"]["item_count"] == 3
     assert report["kind_totals"]["command"]["item_count"] == 1

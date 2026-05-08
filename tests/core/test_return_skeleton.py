@@ -23,6 +23,7 @@ from gpd.core.return_skeleton import (
     KNOWN_RETURN_FIELD_NAMES,
     RETURN_STATUS_ORDER,
     build_gpd_return_skeleton,
+    list_gpd_return_profiles,
     render_gpd_return_markdown,
     render_gpd_return_yaml,
 )
@@ -72,6 +73,28 @@ def test_return_profile_status_fields_obey_status_contract() -> None:
     executor = GPD_RETURN_ROLE_PROFILES["executor"]
     assert "blockers" not in executor.role_fields_by_status["completed"]
     assert "blockers" in executor.role_fields_by_status["checkpoint"]
+
+
+def test_list_gpd_return_profiles_matches_profile_registry_and_filters() -> None:
+    all_payload = list_gpd_return_profiles()
+
+    assert all_payload["mutated"] is False
+    assert all_payload["mutates"] is False
+    assert all_payload["roles"] == sorted(GPD_RETURN_ROLE_PROFILES)
+    assert all_payload["statuses"] == list(RETURN_STATUS_ORDER)
+    assert {profile["profile_id"] for profile in all_payload["profiles"]} == set(GPD_RETURN_ROLE_PROFILES)
+
+    executor_payload = list_gpd_return_profiles(role="executor", status="checkpoint")
+
+    assert [profile["profile_id"] for profile in executor_payload["profiles"]] == ["executor"]
+    assert set(executor_payload["profiles"][0]["statuses"]) == {"checkpoint"}
+    assert "blockers" in executor_payload["profiles"][0]["statuses"]["checkpoint"]["role_fields"]
+
+    with pytest.raises(ValueError, match="unknown gpd_return role profile"):
+        list_gpd_return_profiles(role="observer")
+
+    with pytest.raises(ValueError, match="unknown gpd_return status"):
+        list_gpd_return_profiles(status="done")
 
 
 def test_new_project_role_profiles_use_conservative_existing_defaults() -> None:

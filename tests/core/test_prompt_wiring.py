@@ -1974,7 +1974,7 @@ def test_planning_prompts_keep_contract_gate_in_light_mode_and_all_modes() -> No
     )
     assert "gpd_return.status: completed" in workflow_text
     assert (
-        "Human-readable headings such as `## VERIFICATION PASSED`, `## ISSUES FOUND`, and `## PARTIAL APPROVAL` are presentation only."
+        "Checker presentation headings are non-authority; route through the checker tuple's structured status and plan-list validators."
         in workflow_text
     )
     assert "Human review does not replace those requirements." in checker_agent
@@ -2106,7 +2106,6 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
     new_milestone = (WORKFLOWS_DIR / "new-milestone.md").read_text(encoding="utf-8")
     new_project_roadmapper = _find_single_task(WORKFLOWS_DIR / "new-project.md", "gpd-roadmapper").text
-    new_milestone_roadmapper = _find_single_task(WORKFLOWS_DIR / "new-milestone.md", "gpd-roadmapper").text
 
     assert "## Contract Overview" in roadmap_template
     assert "**Contract Coverage:**" in roadmap_template
@@ -2129,10 +2128,8 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     assert "gpd_return.files_written" in new_project_roadmapper
     assert "GPD/REQUIREMENTS.md" in new_project_roadmapper
     assert "do not rely on runtime completion text alone." in new_project_roadmapper
-    assert "gpd_return.files_written" in new_milestone_roadmapper
-    assert "treat existing files as stale unless the same paths appear in `gpd_return.files_written`" in (
-        new_milestone_roadmapper
-    )
+    assert "expected_artifacts:" in new_milestone
+    assert "freshness_marker: \"after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT\"" in new_milestone
     assert "Intermediate Results" in state_template
     assert "stop with `gpd_return.status: blocked`" in roadmapper_agent
     assert (
@@ -4507,7 +4504,7 @@ def test_peer_review_workflow_and_generated_skill_surface_keep_lifecycle_cleanup
         "spawned reviewer/proof-auditor/referee lifecycle",
         "stale-output rejection",
         "declared carry-forward inputs",
-        "Apply the publication stage-recovery gate to the Stage 6 typed return",
+        "Apply the `peer_review_stage6_referee` tuple and publication stage-recovery gate",
     )
 
     _assert_contains_fragments(peer_review_workflow, *expected_fragments)
@@ -4518,32 +4515,25 @@ def test_peer_review_spawned_stage_prompts_keep_stage_identity_callsite_owned() 
     peer_review = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
     assert '<step name="child_return_contract">' in peer_review
-    assert "Human-readable completion labels are presentation only" in peer_review
-    assert "status: completed | checkpoint | blocked | failed" in peer_review
-    assert "Stage identity is callsite-owned, not return-envelope data." in peer_review
-    assert (
-        "Derive it from the stage task callsite, expected artifact paths, write allowlist, "
-        "canonical artifact filenames, and validator-checked artifact bodies."
-    ) in peer_review
-    assert "route on `gpd_return.status` plus the stage-recovery artifact gate" in peer_review
-    assert "peer" + "_review_stage" not in peer_review
+    assert "Stage identity is callsite-owned: derive it from the tuple `role`" in peer_review
+    assert "fresh `gpd_return.files_written` evidence is accepted only through the matching tuple gate" in peer_review
+    assert "peer_review_stage6_referee" in peer_review
 
     expected_stage_contracts = (
-        "child return contract for the Stage 1 reader callsite",
-        "fresh `files_written` entries for `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`",
-        "`stage_id: reader` / `stage_kind: reader`",
-        "child return contract for the Stage 2 literature callsite",
-        "`stage_id: literature` / `stage_kind: literature`",
-        "child return contract for the Stage 3 math callsite",
-        "`stage_id: math` / `stage_kind: math`",
-        "child return contract for the proof-redteam callsite",
-        "fresh `files_written` entry for `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`",
-        "child return contract for the Stage 4 physics callsite",
-        "`stage_id: physics` / `stage_kind: physics`",
-        "child return contract for the Stage 5 interestingness callsite",
-        "`stage_id: interestingness` / `stage_kind: interestingness`",
-        "child return contract for the Stage 6 final-adjudication callsite",
-        "fresh `files_written` naming only Stage 6-owned artifacts written in this run",
+        "peer_review_stage1_reader",
+        "stage_id=reader and stage_kind=reader",
+        "peer_review_stage2_literature",
+        "stage_id=literature and stage_kind=literature",
+        "peer_review_stage3_math",
+        "stage_id=math and stage_kind=math",
+        "peer_review_proof_redteam",
+        "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+        "peer_review_stage4_physics",
+        "stage_id=physics and stage_kind=physics",
+        "peer_review_stage5_significance",
+        "stage_id=interestingness and stage_kind=interestingness",
+        "peer_review_stage6_referee",
+        "gpd_return.files_written stays within Stage 6 write_allowlist",
     )
     _assert_contains_fragments(peer_review, *expected_stage_contracts)
 

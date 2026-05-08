@@ -22,7 +22,7 @@ def test_verify_work_routes_on_structured_checker_statuses() -> None:
 def test_verify_work_references_one_shot_checker_contract_in_the_gap_closure_loop() -> None:
     workflow = VERIFY_WORK.read_text(encoding="utf-8")
 
-    assert "this checker is single-shot." in workflow
-    assert "Do not keep the same checker run open across user interaction." in workflow
+    assert "Gap plan-checker child artifact gate" in workflow
+    assert "checkpoint handling applies `references/orchestration/continuation-boundary.md`" in workflow
     assert "use the structured `approved_plans`, `blocked_plans`, and `issues` fields" in workflow
     assert "Use the structured fields, not the human-readable approval table, as the source of truth." in workflow

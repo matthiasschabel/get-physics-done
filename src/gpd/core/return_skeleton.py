@@ -26,6 +26,7 @@ __all__ = [
     "GpdReturnRoleProfile",
     "GpdReturnSkeleton",
     "build_gpd_return_skeleton",
+    "list_gpd_return_profiles",
     "render_gpd_return_markdown",
     "render_gpd_return_yaml",
 ]
@@ -220,6 +221,47 @@ def render_gpd_return_markdown(envelope: Mapping[str, object]) -> str:
     """Render a fenced Markdown ``gpd_return`` block."""
 
     return f"```yaml\n{render_gpd_return_yaml(envelope).rstrip()}\n```\n"
+
+
+def list_gpd_return_profiles(*, role: str | None = None, status: str | None = None) -> dict[str, object]:
+    """List role/status rendering metadata for CLI and prompt snippet surfaces."""
+
+    normalized_role = _normalize_identifier(role, field_name="role") if role is not None else None
+    if normalized_role is not None and normalized_role not in GPD_RETURN_ROLE_PROFILES:
+        roles = ", ".join(sorted(GPD_RETURN_ROLE_PROFILES))
+        raise ValueError(f"unknown gpd_return role profile '{role}'. Must be one of: {roles}")
+
+    normalized_status = _normalize_status(status) if status is not None else None
+    selected_statuses = [normalized_status] if normalized_status is not None else list(RETURN_STATUS_ORDER)
+
+    profiles: list[dict[str, object]] = []
+    for profile_id in sorted(GPD_RETURN_ROLE_PROFILES):
+        if normalized_role is not None and profile_id != normalized_role:
+            continue
+        profile = GPD_RETURN_ROLE_PROFILES[profile_id]
+        profiles.append(
+            {
+                "profile_id": profile.profile_id,
+                "agent_names": list(profile.agent_names),
+                "required_fields": list(profile.required_fields),
+                "local_callsite_fields": list(profile.local_callsite_fields),
+                "statuses": {
+                    status_id: {
+                        "role_fields": list(profile.role_fields_by_status[status_id]),
+                        "default_render_fields": list(profile.default_render_fields_by_status[status_id]),
+                    }
+                    for status_id in selected_statuses
+                },
+            }
+        )
+
+    return {
+        "profiles": profiles,
+        "roles": sorted(GPD_RETURN_ROLE_PROFILES),
+        "statuses": list(RETURN_STATUS_ORDER),
+        "mutated": False,
+        "mutates": False,
+    }
 
 
 def _profile_for_role(role: str) -> GpdReturnRoleProfile:

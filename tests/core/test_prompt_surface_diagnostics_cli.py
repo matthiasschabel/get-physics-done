@@ -83,6 +83,26 @@ EXPECTED_FORBIDDEN_CHILD_RETURN_SYNTHESIS_MENTION_KEYS = {
     "severity",
     "snippet",
 }
+EXPECTED_SEMANTIC_DUPLICATE_GROUP_KEYS = {
+    "category",
+    "label",
+    "occurrence_count",
+    "file_count",
+    "non_reference_occurrence_count",
+    "non_reference_file_count",
+    "severity",
+    "canonical_references",
+    "suggested_action",
+    "examples",
+}
+EXPECTED_SEMANTIC_DUPLICATE_EXAMPLE_KEYS = {
+    "path",
+    "line",
+    "category",
+    "snippet",
+    "matched_terms",
+    "is_reference_or_template",
+}
 EXPECTED_STAGE_DIAGNOSTIC_KEYS = {
     "workflow_id",
     "command_name",
@@ -198,6 +218,13 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert isinstance(payload["forbidden_child_return_synthesis_mentions"], list)
     assert isinstance(payload["duplicate_invariants"], list)
     assert isinstance(payload["semantic_duplicate_invariants"], list)
+    if payload["semantic_duplicate_invariants"]:
+        semantic_group = payload["semantic_duplicate_invariants"][0]
+        assert set(semantic_group) == EXPECTED_SEMANTIC_DUPLICATE_GROUP_KEYS
+        assert isinstance(semantic_group["non_reference_occurrence_count"], int)
+        assert semantic_group["non_reference_occurrence_count"] <= semantic_group["occurrence_count"]
+        if semantic_group["examples"]:
+            assert set(semantic_group["examples"][0]) == EXPECTED_SEMANTIC_DUPLICATE_EXAMPLE_KEYS
     assert isinstance(payload["exact_assertion_diagnostics"], dict)
     assert isinstance(payload["exact_prose_assertion_files"], list)
     assert isinstance(payload["warnings"], list)

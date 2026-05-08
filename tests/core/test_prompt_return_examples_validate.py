@@ -37,6 +37,8 @@ def test_visible_gpd_return_yaml_examples_match_return_contract() -> None:
             body = match.group("body")
             if "gpd_return" not in body:
                 continue
+            if "child_gate:" in body or "child_gates:" in body:
+                continue
             checked_examples += 1
             result = validate_gpd_return_markdown(f"```yaml\n{body.rstrip()}\n```")
             if result.passed:

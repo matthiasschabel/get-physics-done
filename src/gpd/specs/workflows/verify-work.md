@@ -172,15 +172,37 @@ This additional mandatory floor applies.
 CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)
 ```
 
-> Runtime delegation rule: this is a single-turn handoff. If the spawned agent needs user input, it checkpoints and returns; do not keep the original run waiting inside the same task. If it cannot produce a passed audit, keep the session fail-closed.
+> Apply the canonical runtime delegation convention above; this proof handoff uses the tuple below for status, freshness, and fail-closed routing.
 
 ```
+PROOF_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 task(
   subagent_type="gpd-check-proof",
   model="{check_proof_model}",
   readonly=false,
   prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions. Use `gpd proof-redteam skeleton` for non-passing helper-owned proof-redteam frontmatter; for passed audits use `proof_redteam_finalizer_bridge` / `gpd proof-redteam finalize` before `gpd validate proof-redteam`. Use {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md as authority references when helper/validator errors require them. Write `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md`; audit phase proof artifacts, PLAN contract slice, and any current verification artifact; return through the typed proof-redteam handoff contract."
 )
+```
+
+Proof critic child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "verify_work_proof_critic"
+  role: "gpd-check-proof"
+  return_profile: "proof_redteam"
+  required_status: "completed"
+  expected_artifacts:
+    - "${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md"
+  allowed_roots:
+    - "${PHASE_DIR_ABS}"
+  freshness_marker: "after $PROOF_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd proof-redteam finalize ... when producing passed audits"
+    - "gpd validate proof-redteam ${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md"
+    - "frontmatter status: passed before finalizing the gap ledger"
+  applicator: none
+  failure_route: "fail_closed_or_fresh_proof_continuation | repair_prompt_once | fail_closed | fresh_proof_continuation"
 ```
 
 After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` after a successful `gpd proof-redteam finalize ...` and `gpd validate proof-redteam` run before finalizing the gap ledger. Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation.
@@ -227,11 +249,13 @@ Spawn `gpd-verifier` once and let it own the physics policy. Use `subagent_type=
 Pass the project contract, proof freshness summary, active reference context, and protocol bundle handoff fields into the handoff so the verifier can build its own authoritative ledger.
 Point the verifier at `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` for scientific status ownership, target status vocabulary, top-level verification status, and runtime return-status distinction.
 Use `protocol_bundle_verifier_extensions` as primary bundle checklist surface; `protocol_bundle_context` is readable projection. Use `suggest_contract_checks(contract)` for ambiguous decisive anchors or prior-output paths. Required decisive comparisons should stay legible enough that the researcher can recognize in the phase promise which `claim`, acceptance test, or reference is still unresolved. Do not mark the parent claim or acceptance test as passed until that decisive comparison is resolved.
-Human-readable headings in the verifier output are presentation only; route on the canonical verification frontmatter and `gpd_return.status`, not on headings or marker strings.
+Verifier presentation headings are non-authority; route through the verifier tuple plus `verification-status-authority.md`.
 
-> Runtime delegation rule: this is a one-shot handoff. If the spawned verifier needs user input, it must checkpoint and return. The wrapper must start a fresh continuation after the user responds instead of trying to keep the original verifier alive.
+> Verifier checkpoints use `references/orchestration/continuation-boundary.md`; the wrapper starts a fresh continuation after the user responds.
 
 Use `verification_report_finalizer_bridge` as the canonical report finalizer bridge for passed, `human_needed`, `expert_needed`, and typed non-gap outcomes. Gap-only conservative reports may use `verification_report_skeleton_bridge`; stronger statuses must run `gpd verification-report finalize` with a typed patch JSON plus body-only evidence and pass `gpd validate verification-contract` before the wrapper routes on the report.
+
+Set `VERIFIER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
 Prompt: "First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instructions." Then verify Phase {phase_number}; use `Verification flags from the normalized parser: $VERIFY_FLAG_TEXT`; treat `--dimensional`, `--limits`, `--convergence`, and `--regression` as optional-breadth narrowing only.
 
@@ -268,23 +292,39 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
+Verifier child artifact gate: apply `references/orchestration/child-artifact-gate.md`; scientific status routing applies `references/verification/verification-status-authority.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "verify_work_verifier_report"
+  role: "gpd-verifier"
+  return_profile: "verifier"
+  required_status: "completed"
+  expected_artifacts:
+    - "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"
+  allowed_roots:
+    - "${PHASE_DIR_ABS}"
+  freshness_marker: "after $VERIFIER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected '${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md' --allowed-root '${PHASE_DIR_ABS}' --required-suffix=-VERIFICATION.md --require-status completed --require-files-written --fresh-after \"$VERIFIER_HANDOFF_STARTED_AT\""
+    - "gpd validate verification-contract ${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"
+    - "verification-status-authority.md status rules"
+    - "required proof-redteam artifacts report status: passed"
+  applicator:
+    command: "sync_verifier_output only after tuple passes"
+    require_passed_true: false
+  failure_route: "fail_closed -> gpd:verify-work ${phase_number} | repair_prompt_once | fresh_verifier_continuation_or_non_green_stop | non_green_stop_with_validator_errors"
+```
+
 If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge` and `verification_report_finalizer_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict). For conservative gap reports, replace `BODY.md` in the skeleton bridge `writer_command` with that file and run it. For passed, `human_needed`, `expert_needed`, or typed non-gap outcomes, write the finalizer bridge patch JSON, replace `PATCH.json` and `BODY.md` in its `writer_command_template`, and run `gpd verification-report finalize`. The helper serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
 </step>
 
 <step name="sync_verifier_output">
 Read the verifier-produced verification file or report path.
 
-- Route only on the canonical verification frontmatter and `gpd_return.status`; do not route on headings or marker strings.
-- `gpd_return.status: completed` means success only after verifying that:
-  1. `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md` exists on disk and is readable
-  2. the same path appears in `gpd_return.files_written`
-  3. `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` passes before any downstream routing
-- If a canonical verification file already existed before this run, do not treat it as fresh verifier output unless the child reported that same path in `gpd_return.files_written`.
-- `gpd_return.status: checkpoint` means present the verifier checkpoint, collect user input, spawn a fresh verifier continuation, and end the stop with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:verify-work ${phase_number}` and `gpd:suggest-next`. Do not overwrite canonical verification status in this workflow.
-- `gpd_return.status: blocked` or `failed` means keep the session fail-closed, present the issues, and end with `## > Next Up`: primary `gpd:verify-work ${phase_number}`, plus `gpd:resume-work` and `gpd:suggest-next`. Do not treat any preexisting verification file as a new verifier result on this path.
-- If the verifier agent fails to spawn or returns an error, keep the session fail-closed. End with the same `gpd:verify-work ${phase_number}` Next Up route. Do not let a stale existing verification file satisfy the success path.
+Apply the `verify_work_verifier_report` child_gate before downstream routing. Route only on canonical verification frontmatter plus `gpd_return.status`; headings, marker strings, runtime success, and preexisting reports are not authority.
 - Any verifier-written canonical `VERIFICATION.md`, including gap reports and `blocked`/`failed` handoffs, must pass `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before this wrapper accepts it as canonical.
-- If the artifact is missing, unreadable, absent from `gpd_return.files_written`, or fails validation, treat the handoff as incomplete: request a fresh verifier continuation when possible; otherwise surface a non-green stop with validator errors. Never present it as accepted or passed.
+- Missing/unreadable/unnamed/invalid artifacts use the tuple failure route; never present them as accepted or passed.
 - Fallback executions that reach this step after failed report validation stop here: emit the blocked/final response with latest validator errors. Do not list the invalid `VERIFICATION.md` as an authoritative artifact, do not route to gaps unless a schema-valid gap report exists, do not enter `gap_repair` or `complete_session`, and do not patch the canonical verification report from this wrapper.
 - Do not patch canonical verification frontmatter in this wrapper. Surface bounded-loop validator errors fail-closed with `## > Next Up`: `gpd:verify-work ${phase_number}`, `gpd:resume-work`, `gpd:suggest-next`.
 - If a canonical verification file already exists, preserve its authoritative frontmatter and append only the session-local overlay here.
@@ -449,12 +489,31 @@ First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
 Use `templates/planner-subagent-prompt.md` to build the gap_closure planner handoff from the staged payload. Keep `tool_requirements`, the checker feedback, and other machine-checkable hard requirements explicit.
 Bind the template's protocol fields from the gap-repair payload: `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}`. Do not collapse verifier extensions into the rendered context block.
 
-> Runtime delegation rule: the planner is single-shot. If it needs user input, it checkpoints and returns. Do not keep the same planner run open across user interaction.
+> Apply the canonical runtime delegation convention above; planner status, freshness, continuation, and failure routing use the tuple below.
 
-Before treating the handoff as complete, verify that the expected `PLAN.md` files exist in the phase directory and are listed in `gpd_return.files_written` from the fresh planner run.
-After the planner returns, route on `gpd_return.status`, not on headings. If `gpd_return.status` is `completed`, verify that each expected path is present on disk, readable, and present in `gpd_return.files_written` before treating the handoff as complete.
-If `gpd_return.status` is `checkpoint`, present the checkpoint, collect user input, spawn a fresh planner continuation from the staged gap-repair payload instead of waiting inside the same run, and end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:plan-phase ${phase_number} --gaps` and `gpd:suggest-next`.
-If the planner reports `blocked` or `failed`, or if the expected `PLAN.md` files are missing, unreadable, stale, or absent from `gpd_return.files_written`, keep the session fail-closed and end with `## > Next Up`: primary `gpd:plan-phase ${phase_number} --gaps`, plus `gpd:resume-work` and `gpd:suggest-next`.
+Set `GAP_PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
+
+Gap planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "verify_work_gap_planner"
+  role: "gpd-planner"
+  return_profile: "planner"
+  required_status: "completed"
+  expected_artifacts:
+    - path: "${PHASE_DIR_ABS}/*-PLAN.md"
+      kind: "glob"
+  allowed_roots:
+    - "${PHASE_DIR_ABS}"
+  freshness_marker: "after $GAP_PLANNER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected-glob '${PHASE_DIR_ABS}/*-PLAN.md' --allowed-root '${PHASE_DIR_ABS}' --required-suffix=-PLAN.md --require-files-written --require-status completed --fresh-after \"$GAP_PLANNER_HANDOFF_STARTED_AT\""
+    - "gpd validate plan-contract <each fresh gap plan>"
+    - "gpd validate plan-preflight <each fresh gap plan>"
+  applicator: none
+  failure_route: "fail_closed -> gpd:plan-phase ${phase_number} --gaps | repair_prompt_once | fresh_gap_planner_continuation"
+```
 
 If the planner fails to spawn or returns an error, keep the session fail-closed and offer retry or manual plan creation. Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone. End with the same `gpd:plan-phase ${phase_number} --gaps` Next Up route.
 </step>
@@ -474,9 +533,29 @@ Display:
 
 Spawn `gpd-plan-checker` as a fresh one-shot delegation.
 
-> Runtime delegation rule: this checker is single-shot. If it needs user input, it checkpoints and returns. Do not keep the same checker run open across user interaction.
+> Apply the canonical runtime delegation convention above; checker status and continuation routing use the tuple below.
 
-Before accepting the handoff as complete, confirm the expected `PLAN.md` files are present, readable, and listed in `gpd_return.files_written` from the planner turn.
+Set `GAP_CHECKER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
+
+Gap plan-checker child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "verify_work_gap_plan_checker"
+  role: "gpd-plan-checker"
+  return_profile: "checker"
+  required_status: "completed"
+  expected_artifacts: []
+  allowed_roots: []
+  validators:
+    - "fresh planner PLAN.md artifacts remain readable and named in planner files_written"
+    - "approved_plans and blocked_plans reconcile to fresh gap plans"
+    - "files_written: []"
+  applicator: none
+  failure_route: "manual_review_or_fail_closed | repair_prompt_once | fail_closed | revision_loop_or_fail_closed"
+```
+
+Status route: `checkpoint` records approved/blocked plans for gap revision; `blocked` routes to `gpd:plan-phase ${phase_number} --gaps`; `failed` routes to retry or manual revision.
 
 If the checker fails to spawn or returns an error, proceed without plan verification but note that the plans were not verified.
 

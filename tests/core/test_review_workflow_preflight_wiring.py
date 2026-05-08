@@ -97,7 +97,7 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
     assert "bibliography_audit_clean" in shared_preflight
     assert "reproducibility_ready" in shared_preflight
-    assert "Treat those files as complete only if the expected mirrored artifacts exist on disk" in workflow
+    assert "expected mirrored artifacts exist on disk" in workflow
     assert (
         "import or normalize it into `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` before parsing comments"
         in workflow

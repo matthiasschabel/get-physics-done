@@ -341,11 +341,84 @@ Use one short sentence that names each stage's job, for example:
 <step name="child_return_contract">
 **Peer-review child return contract:**
 
-Every spawned review child must return a typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, `files_written` naming only artifacts that genuinely landed on disk in that child run, `issues`, and `next_actions`. Human-readable completion labels are presentation only and do not satisfy the handoff without the typed envelope.
+Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` after every child return. Stage identity is callsite-owned: derive it from the tuple `role`, expected artifact paths, write allowlist, canonical filenames, and validator-checked artifact bodies; never require or trust a stage label inside `gpd_return`. Each child must still return a typed `gpd_return` envelope, and fresh `gpd_return.files_written` evidence is accepted only through the matching tuple gate.
 
-Stage identity is callsite-owned, not return-envelope data. Derive it from the stage task callsite, expected artifact paths, write allowlist, canonical artifact filenames, and validator-checked artifact bodies. Never require or trust a stage label inside `gpd_return`; route on `gpd_return.status` plus the stage-recovery artifact gate.
+Use these local stage tuples for the panel and final-adjudication callsites:
 
-Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` after every child return. The stage callsites below keep the exact expected artifacts, validator commands, retry prompt, and write allowlist local.
+```yaml
+child_gates:
+  - id: peer_review_stage1_reader
+    role: gpd-review-reader
+    return_profile: review_reader
+    required_status: completed
+    expected_artifacts: ["${REVIEW_ROOT}/CLAIMS{round_suffix}.json", "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json"]
+    allowed_roots: ["${REVIEW_ROOT}"]
+    freshness_marker: "after $STAGE1_HANDOFF_STARTED_AT"
+    validators: ["gpd validate review-claim-index ${REVIEW_ROOT}/CLAIMS{round_suffix}.json", "gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-reader{round_suffix}.json with stage_id=reader and stage_kind=reader"]
+    applicator: none
+    failure_route: retry_stage_once_then_stop_before_stages_2_6
+  - id: peer_review_stage2_literature
+    role: gpd-review-literature
+    return_profile: review_stage_report
+    required_status: completed
+    expected_artifacts: ["${REVIEW_ROOT}/STAGE-literature{round_suffix}.json"]
+    allowed_roots: ["${REVIEW_ROOT}"]
+    freshness_marker: "after $STAGE2_HANDOFF_STARTED_AT"
+    validators: ["gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-literature{round_suffix}.json with stage_id=literature and stage_kind=literature"]
+    applicator: none
+    failure_route: retry_stage_once_then_stop_before_stage_4
+  - id: peer_review_stage3_math
+    role: gpd-review-math
+    return_profile: review_stage_report
+    required_status: completed
+    expected_artifacts: ["${REVIEW_ROOT}/STAGE-math{round_suffix}.json"]
+    allowed_roots: ["${REVIEW_ROOT}"]
+    freshness_marker: "after $STAGE3_HANDOFF_STARTED_AT"
+    validators: ["gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-math{round_suffix}.json with stage_id=math and stage_kind=math"]
+    applicator: none
+    failure_route: retry_stage_once_then_stop_before_stage_4
+  - id: peer_review_proof_redteam
+    role: gpd-check-proof
+    return_profile: proof_redteam
+    required_status: completed
+    expected_artifacts: ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"]
+    allowed_roots: ["${REVIEW_ROOT}"]
+    freshness_marker: "after $PROOF_REVIEW_HANDOFF_STARTED_AT"
+    validators: ["gpd validate proof-redteam ${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md", "required frontmatter, sections, same-round theorem binding, and reviewer=gpd-check-proof"]
+    applicator: none
+    failure_route: retry_proof_redteam_once_then_stop; favorable_decisions_require_same_round_status_passed
+  - id: peer_review_stage4_physics
+    role: gpd-review-physics
+    return_profile: review_stage_report
+    required_status: completed
+    expected_artifacts: ["${REVIEW_ROOT}/STAGE-physics{round_suffix}.json"]
+    allowed_roots: ["${REVIEW_ROOT}"]
+    freshness_marker: "after $STAGE4_HANDOFF_STARTED_AT"
+    validators: ["gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-physics{round_suffix}.json with stage_id=physics and stage_kind=physics"]
+    applicator: none
+    failure_route: retry_stage_once_then_stop_before_stage_5
+  - id: peer_review_stage5_significance
+    role: gpd-review-significance
+    return_profile: review_stage_report
+    required_status: completed
+    expected_artifacts: ["${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json"]
+    allowed_roots: ["${REVIEW_ROOT}"]
+    freshness_marker: "after $STAGE5_HANDOFF_STARTED_AT"
+    validators: ["gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json with stage_id=interestingness and stage_kind=interestingness"]
+    applicator: none
+    failure_route: retry_stage_once_then_stop_before_stage_6
+  - id: peer_review_stage6_referee
+    role: gpd-referee
+    return_profile: referee
+    required_status: completed
+    expected_artifacts: ["${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md", "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex", "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json", "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json"]
+    allowed_roots: ["${PUBLICATION_ROOT}", "${REVIEW_ROOT}"]
+    freshness_marker: "after $STAGE6_HANDOFF_STARTED_AT"
+    validators: ["gpd validate review-ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json", "gpd validate referee-decision ${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json --strict --ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json", "referee report .md and .tex exist", "gpd_return.files_written stays within Stage 6 write_allowlist and contains no upstream staged-review paths"]
+    write_allowlist: ["${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md", "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex", "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json", "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json", "${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md"]
+    applicator: none
+    failure_route: retry_stage6_once_only_for_stage6_owned_artifacts; upstream_failure_reruns_earliest_failing_stage
+```
 
 Panel-stage artifacts use {GPD_INSTALL_DIR}/references/publication/peer-review-panel.md. Final adjudication uses {GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md and {GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md. Load these only in panel or final-adjudication stages.
 </step>
@@ -406,7 +479,7 @@ Focus on:
 3. Flag where abstract/introduction/conclusion overclaim the physics.
 4. Do NOT use `STATE.md`, `ROADMAP.md`, or phase summaries as a source of truth for the manuscript's validity.
 
-Use the child return contract for the Stage 1 reader callsite; completion requires fresh `files_written` entries for `${REVIEW_ROOT}/CLAIMS{round_suffix}.json` and `${REVIEW_ROOT}/STAGE-reader{round_suffix}.json`, and `gpd validate review-claim-index` plus `gpd validate review-stage-report` must confirm the claim index and `stage_id: reader` / `stage_kind: reader`. Optional prose may say STAGE 1 COMPLETE with assessment, blocker count, and major concern count.",
+Return through the `peer_review_stage1_reader` child_gate tuple; the parent accepts this handoff only after the claim index and reader stage validators pass.",
   description="Peer review stage 1: manuscript read"
 )
 ```
@@ -480,7 +553,7 @@ Files to read:
 - All `*.bib` files under `${MANUSCRIPT_ROOT}`, plus `references/references.bib` if present
 
 Use targeted web search when novelty, significance, or prior-work positioning is uncertain. Treat novelty-heavy claims as requiring external comparison, not trust. Use bundle reference prompts only as additive hints about prior-work or benchmark framing; do not infer novelty or correctness from bundle presence alone.
-Use the child return contract for the Stage 2 literature callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-literature{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: literature` / `stage_kind: literature`. Optional prose may say STAGE 2 COMPLETE with assessment, blocker count, and major concern count.",
+Return through the `peer_review_stage2_literature` child_gate tuple; the parent accepts this handoff only after the literature stage validator passes.",
   description="Peer review stage 2: literature context"
 )
 ```
@@ -523,7 +596,7 @@ Files to read:
 
 Focus on key equations, limits, internal consistency, and approximation validity.
 If theorem-bearing claims are present, `gpd-check-proof` may be running in parallel and will produce `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`; do not wait on that artifact to begin the math review, and do not duplicate the proof audit yourself.
-Use the child return contract for the Stage 3 math callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-math{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: math` / `stage_kind: math`. Optional prose may say STAGE 3 COMPLETE with assessment, blocker count, and major concern count.",
+Return through the `peer_review_stage3_math` child_gate tuple; the parent accepts this handoff only after the math stage validator passes.",
   description="Peer review stage 3: mathematical soundness"
 )
 ```
@@ -573,7 +646,7 @@ Files to read:
 - `${REPRODUCIBILITY_MANIFEST_PATH}` if present
 
 Reconstruct the theorem / proof inventory explicitly before judging the proof. If any named parameter, hypothesis, quantifier, or conclusion clause disappears from the proof, set `status: gaps_found`. Do not silently accept a proof of a narrower special case. Run at least one adversarial probe against scope, quantifier coverage, or hidden assumptions before you pass the proof.
-Use the child return contract for the proof-redteam callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` within the proof-redteam write allowlist.",
+Return through the `peer_review_proof_redteam` child_gate tuple; the parent accepts this handoff only after the proof-redteam validator confirms same-round theorem binding.",
   description="Peer review auxiliary proof critique"
 )
 ```
@@ -668,7 +741,7 @@ Focus on:
 
 Treat bundle guidance as additive skepticism only: it may highlight missing decisive comparisons or estimator caveats, but it must not replace authoritative evidence required by the resolved review target or project contract or create new manuscript obligations out of thin air.
 
-Use the child return contract for the Stage 4 physics callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: physics` / `stage_kind: physics`. Optional prose may say STAGE 4 COMPLETE with assessment, blocker count, and major concern count.",
+Return through the `peer_review_stage4_physics` child_gate tuple; the parent accepts this handoff only after the physics stage validator passes.",
   description="Peer review stage 4: physical soundness"
 )
 ```
@@ -740,7 +813,7 @@ You must explicitly decide whether the paper is:
 2. Merely technically competent
 3. Overclaimed relative to its actual contribution
 
-Use the child return contract for the Stage 5 interestingness callsite; completion requires a fresh `files_written` entry for `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json`, and `gpd validate review-stage-report` must confirm `stage_id: interestingness` / `stage_kind: interestingness`. Optional prose may say STAGE 5 COMPLETE with assessment, blocker count, and major concern count.",
+Return through the `peer_review_stage5_significance` child_gate tuple; the parent accepts this handoff only after the interestingness stage validator passes.",
   description="Peer review stage 5: significance and venue fit"
 )
 ```
@@ -863,24 +936,24 @@ Write `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` and the matching `${
 Treat the referee report files as required final-stage artifacts. If either report file is missing after adjudication, the stage is incomplete even if the JSON validators passed.
 Also write `${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md` when applicable.
 
-Use the child return contract for the Stage 6 final-adjudication callsite; completion requires fresh `files_written` naming only Stage 6-owned artifacts written in this run, and the review-ledger, referee-decision, and referee-report artifact gates must pass. Optional prose may summarize the recommendation, confidence, issue counts, and whether prior major concerns are resolved.",
+Return through the `peer_review_stage6_referee` child_gate tuple; the parent accepts this handoff only after Stage 6-owned report, ledger, decision, and write-allowlist gates pass.",
   description="Peer review stage 6: final adjudication"
 )
 ```
 
 If the referee agent fails to spawn or returns an error, STOP; do not skip final adjudication.
 Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree.
-Treat the Stage 6 return as incomplete if the fresh `gpd_return.files_written` set omits a Stage 6 artifact written in this run or lists any upstream staged-review artifact path.
+Enforce the `peer_review_stage6_referee` tuple: missing a Stage 6 artifact or listing any upstream staged-review path in `gpd_return.files_written` is a failed handoff.
 </step>
 
 <step name="stage_recovery_6">
 **Stage 6 recovery -- Validate the adjudication outputs before proceeding.**
 
-Apply the publication stage-recovery gate to the Stage 6 typed return before classifying the outcome as recovery-eligible, upstream-blocked, or complete. Recovery routing, validation, and final summaries use persisted Stage 6 artifacts plus the typed return only.
+Apply the `peer_review_stage6_referee` tuple and publication stage-recovery gate before classifying the outcome as recovery-eligible, upstream-blocked, or complete. Recovery routing, validation, and final summaries use persisted Stage 6 artifacts plus the typed return only.
 
 Check that both `${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json` and `${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json` exist and parse as valid JSON.
 Also confirm `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` and `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex` exist before treating the final recommendation as complete.
-Require the fresh `gpd_return.files_written` set to stay within the Stage 6-owned allowlist: report `.md`/`.tex`, ledger, decision, and optional consistency report. Any upstream staged-review path is a failed handoff.
+The Stage 6 tuple write allowlist is report `.md`/`.tex`, ledger, decision, and optional consistency report. Any upstream staged-review path in `gpd_return.files_written` is a failed handoff.
 
 Then run the built-in validators. These are the authoritative fail-closed schema and consistency checks for every final recommendation:
 

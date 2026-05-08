@@ -34,7 +34,7 @@ def test_plan_phase_uses_structured_status_and_artifact_gating_for_research_and_
     assert "gpd_return.status: checkpoint" in workflow
     assert "gpd_return.status: failed" in workflow
     assert "gpd_return.files_written" in workflow
-    assert "Human-readable headings such as `## VERIFICATION PASSED`, `## ISSUES FOUND`, and `## PARTIAL APPROVAL` are presentation only." in workflow
+    assert "Checker presentation headings are non-authority" in workflow
 
 
 def test_research_phase_routes_on_typed_status_and_expected_artifacts() -> None:
@@ -70,6 +70,6 @@ def test_verify_work_uses_status_payload_session_lookup_and_canonical_verificati
     assert "gpd frontmatter get \"$file\" --field session_status" not in workflow
     assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in workflow
     assert "Active sessions are payload entries with `session_status` of `validating` or `diagnosed`." in workflow
-    assert "Human-readable headings in the verifier output are presentation only; route on the canonical verification frontmatter and `gpd_return.status`, not on headings or marker strings." in workflow
+    assert "Route only on canonical verification frontmatter plus `gpd_return.status`" in workflow
     assert "gpd_return.status" in workflow
     assert "rg -l '^session_status: (validating|diagnosed)$' GPD/phases/*/*-VERIFICATION.md 2>/dev/null | sort | head-5" not in workflow

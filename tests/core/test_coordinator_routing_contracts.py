@@ -36,23 +36,31 @@ def test_new_project_and_new_milestone_route_roadmaps_on_typed_status() -> None:
 
     for workflow in (new_project, new_milestone):
         assert "gpd_return.status: completed" in workflow
-        assert "gpd_return.status: blocked" in workflow
-        assert "gpd_return.files_written" in workflow
+        assert "failure_route:" in workflow
+        assert "`blocked`" in workflow
+        assert "--require-status completed --require-files-written" in workflow
         assert "GPD/REQUIREMENTS.md" in workflow
-        assert "Do not trust the runtime handoff status by itself." in workflow
+        assert "child artifact gate" in workflow
 
-    assert "If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md`, `GPD/STATE.md`, and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`." in new_project
-    assert "Do not create a second main-context roadmap implementation path" in new_project
-    assert "Do not route on the `## ROADMAP CREATED` heading alone." in new_project
-    assert "Do not route on the `## ROADMAP BLOCKED` heading alone." in new_project
-    assert "If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md` and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`." in new_milestone
+    assert 'id: "project_roadmapper"' in new_project
+    assert '"GPD/ROADMAP.md"' in new_project
+    assert '"GPD/STATE.md"' in new_project
+    assert '"GPD/REQUIREMENTS.md"' in new_project
+    assert 'return_profile: "roadmapper"' in new_project
+    assert "shared_state_policy=direct for this legacy init handoff" in new_project
+    assert "do not invent an alternate roadmap path" in new_project
+    assert "Headings such as `## ROADMAP CREATED` or `## ROADMAP BLOCKED` are not authority" in new_project
+    assert 'id: "milestone_roadmapper"' in new_milestone
+    assert '"GPD/ROADMAP.md"' in new_milestone
+    assert '"GPD/REQUIREMENTS.md"' in new_milestone
+    assert 'return_profile: "roadmapper"' in new_milestone
     assert "shared_state_policy: return_only" in new_milestone
     assert "Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof." in new_milestone
     assert "Project contract gate: {project_contract_gate}" in new_milestone
     assert "Project contract load info: {project_contract_load_info}" in new_milestone
     assert "Project contract validation: {project_contract_validation}" in new_milestone
-    assert "treat existing files as stale unless the same paths appear in `gpd_return.files_written`" in new_milestone
-    assert "If any expected artifact is missing from disk or from `gpd_return.files_written`, treat the handoff as incomplete and request a fresh continuation." in new_milestone
+    assert "request fresh continuation" in new_milestone
+    assert "main workflow applies accepted state changes with gpd state patch / gpd state add-decision after the artifact gate" in new_milestone
 
 
 def test_parameter_sweep_balanced_mode_is_not_unconditionally_paused() -> None:

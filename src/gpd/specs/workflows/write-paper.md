@@ -750,10 +750,28 @@ task(
 )
 ```
 
-**If a writer agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`. For this section callsite, completion requires `status: completed`, fresh `gpd_return.files_written` naming the expected `.tex` file, and that file present on disk; otherwise the section stays incomplete.
+Section writer child gate:
 
-Treat the emitted `.tex` file as the success artifact gate for each section.
-Route on the writer's typed return envelope. A writer response that does not report `status: completed`, does not list the emitted path in `files_written`, or does not leave the expected file on disk is not a completed section, even if the agent returned success text.
+```yaml
+child_gate:
+  id: "write_paper_section_writer"
+  role: "gpd-paper-writer"
+  return_profile: "paper_writer"
+  required_status: "completed"
+  expected_artifacts:
+    - "${PAPER_DIR}/{section_path}.tex"
+  allowed_roots:
+    - "${PAPER_DIR}"
+  freshness_marker: "after $SECTION_WRITER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected ${PAPER_DIR}/{section_path}.tex --allowed-root ${PAPER_DIR} --required-suffix=.tex --require-status completed --require-files-written --fresh-after $SECTION_WRITER_HANDOFF_STARTED_AT"
+    - "readable section file"
+    - "claim/proof scope does not exceed passed proof-redteam artifacts"
+  applicator: "none"
+  failure_route: "stage-recovery-gate -> retry writer | main-context section drafting | stop or leave incomplete"
+```
+
+Existing `.tex` files can make a resumed wave current, but they are not fresh child handoff success. Treat the emitted `.tex` file as the success artifact gate for each section only after the tuple passes.
 
 **Each writer agent receives:**
 
@@ -975,13 +993,36 @@ Tasks:
 
 Write audit report to ${PAPER_DIR}/CITATION-AUDIT.md
 
-Return a typed `gpd_return` envelope. Use `status: completed` when the bibliography task finished, even if the human-readable heading is `## CITATION ISSUES FOUND`; use `status: checkpoint` only when researcher input is required to continue. A completed return must always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`; list `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography file changed. The active bibliography file must exist on disk before the bibliography pass is accepted."
+Return a typed `gpd_return` envelope for the `write_paper_bibliographer` child_gate. Always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`; list `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography file changed. The active bibliography file must exist on disk before the bibliography pass is accepted."
 )
 ```
 
-**If the bibliographer agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`. Do not mark bibliography verification complete or proceed to strict review, reproducibility-manifest generation, or final review until `${PAPER_DIR}/CITATION-AUDIT.md` and the refreshed `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` exist. Offer: 1) Retry the bibliographer, 2) Run the audit in the main context, 3) Stop and leave citation status unverified.
+Bibliographer child gate:
 
-Treat `${PAPER_DIR}/CITATION-AUDIT.md`, the refreshed `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`, the existing `{ACTIVE_BIBLIOGRAPHY_PATH}`, and the bibliographer's typed `gpd_return` envelope as the bibliography success gate. The typed return must name `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json`, and must name `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography changed; otherwise keep the pass incomplete even if older audit files are still on disk.
+```yaml
+child_gate:
+  id: "write_paper_bibliographer"
+  role: "gpd-bibliographer"
+  return_profile: "bibliographer"
+  required_status: "completed"
+  expected_artifacts:
+    - "${PAPER_DIR}/CITATION-AUDIT.md"
+    - "GPD/references-status.json"
+    - "{ACTIVE_BIBLIOGRAPHY_PATH} only when changed"
+    - "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json after paper-build refresh"
+  allowed_roots:
+    - "${PAPER_DIR}"
+    - "GPD"
+  freshness_marker: "after $BIBLIO_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts for child-written audit, status, and changed bibliography paths"
+    - "gpd paper-build refresh emits ${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json"
+    - "bibliography_audit_clean before strict review"
+  applicator: "none"
+  failure_route: "stage-recovery-gate -> retry bibliographer | main-context audit | stop unverified"
+```
+
+Do not mark bibliography verification complete or proceed to strict review, reproducibility-manifest generation, or final review until this tuple passes. Older audit files are recovery evidence only.
 
 **If the bibliographer completed with issues recorded in the audit report or `GPD/references-status.json`:**
 
@@ -1153,8 +1194,29 @@ When revising a paper in response to referee reports:
    )
    ```
 
-   **If the response-handoff agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`. For this response callsite, completion requires `status: completed`, fresh `gpd_return.files_written` naming both `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and both files present on disk.
-   Treat `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md`, `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`, and the writer's typed `gpd_return` envelope as the response success gate. If the shared gate is not satisfied, offer: 1) Retry the agent, 2) Draft the response artifacts in the main context using the referee report and revised manuscript, 3) Skip structured response and proceed directly to calculation tracking.
+   Response-pair child gate:
+
+   ```yaml
+   child_gate:
+     id: "write_paper_response_pair"
+     role: "gpd-paper-writer"
+     return_profile: "response_writer"
+     required_status: "completed"
+     expected_artifacts:
+       - "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md"
+       - "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md"
+     allowed_roots:
+       - "${selected_publication_root}"
+       - "${selected_review_root}"
+     freshness_marker: "after $RESPONSE_HANDOFF_STARTED_AT"
+     validators:
+       - "gpd validate handoff-artifacts for both response paths"
+       - "publication-response-writer-handoff.md frontmatter, round, and manuscript binding"
+     applicator: "none"
+     failure_route: "retry agent | main-context response drafting | skip structured response and proceed to calculation tracking"
+```
+
+   Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` through this tuple before treating the response pair as complete.
 
    See the canonical `templates/paper/author-response.md` and `templates/paper/referee-response.md` contracts plus the shared publication response-writer handoff for the full response-tracker format.
 

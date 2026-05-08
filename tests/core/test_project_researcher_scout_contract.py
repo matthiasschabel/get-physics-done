@@ -33,20 +33,28 @@ def test_new_project_scout_returns_route_on_typed_status_and_files_written() -> 
     workflow = _read_workflow("new-project.md")
 
     assert "Use the staged `research_mode` from `POST_SCOPE_INIT` for all scout handoffs." in workflow
-    assert "Handle scout returns:" in workflow
-    assert "Route on `gpd_return.status` and `gpd_return.files_written`." in workflow
+    assert "Handle scout returns with the child artifact gate:" in workflow
+    assert 'id: "literature_scouts"' in workflow
+    assert 'role: "gpd-project-researcher"' in workflow
+    assert "GPD/literature/PRIOR-WORK.md" in workflow
+    assert "GPD/literature/METHODS.md" in workflow
+    assert "GPD/literature/COMPUTATIONAL.md" in workflow
+    assert "GPD/literature/PITFALLS.md" in workflow
+    assert "gpd validate handoff-artifacts - --expected GPD/literature/{FILE}" in workflow
+    assert 'freshness_marker: "after $SCOUT_HANDOFF_STARTED_AT per scout"' in workflow
+    assert "--require-status completed --require-files-written" in workflow
     assert "spawn a fresh continuation" in workflow
-    assert "Treat any preexisting scout file as stale unless the same path appears in the fresh return." in workflow
-    assert "Do not trust runtime completion text alone." in workflow
+    assert "references/orchestration/child-artifact-gate.md" in workflow
 
 
 def test_new_project_synthesizer_return_stays_typed_and_file_backed() -> None:
     workflow = _read_workflow("new-project.md")
 
-    assert "Handle the synthesizer return:" in workflow
-    assert "Route on `gpd_return.status` and `gpd_return.files_written`." in workflow
-    assert (
-        "If `checkpoint`, present it to the user, collect the response, and spawn a fresh continuation after the response."
-        in workflow
-    )
-    assert "If `completed`, verify `GPD/literature/SUMMARY.md` exists and is named in the fresh return." in workflow
+    assert "Handle the synthesizer return with the child artifact gate:" in workflow
+    assert 'id: "literature_synthesizer"' in workflow
+    assert 'role: "gpd-research-synthesizer"' in workflow
+    assert 'return_profile: "synthesizer"' in workflow
+    assert "GPD/literature/SUMMARY.md" in workflow
+    assert "gpd validate handoff-artifacts - --expected GPD/literature/SUMMARY.md" in workflow
+    assert 'failure_route: "retry once | repair prompt once | stop synth path' in workflow
+    assert "rather than creating a fallback summary in the main context" in workflow

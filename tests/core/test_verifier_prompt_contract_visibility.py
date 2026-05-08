@@ -617,7 +617,7 @@ def test_verify_work_template_keeps_session_overlay_after_verifier_output() -> N
             "`project_contract_gate.authoritative`",
             "protocol_bundle_verifier_extensions",
             "Do not mark the parent claim or acceptance test as passed until",
-            "Human-readable headings",
+                "headings, marker strings",
             "canonical verification frontmatter",
             "`gpd_return.status`",
             "one-shot handoff",

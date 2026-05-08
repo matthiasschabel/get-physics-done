@@ -91,7 +91,7 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
 def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None:
     source = PLAN_PHASE.read_text(encoding="utf-8")
 
-    assert "The child artifact gate owns the no-synthetic-child-return rule" in source
+    assert "The shared child artifact gate owns the no-synthetic-child-return rule" in source
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in source
     assert "printf '```yaml\\ngpd_return:\\n'" in source
     assert '{"gpd_return":{"files_written"' not in source
@@ -131,7 +131,7 @@ def test_plan_phase_researcher_checkpoint_path_is_a_fresh_continuation_handoff()
     assert "{phase_dir}/{phase_number}-RESEARCH.md" in source
     assert "{phase_dir}/{phase}-RESEARCH.md" not in source
     assert (
-        "After the continuation returns, rerun the same `gpd_return.files_written` and on-disk artifact gate above before advancing."
+            "After the continuation returns, rerun the same researcher `child_gate` before advancing."
         in source
     )
 

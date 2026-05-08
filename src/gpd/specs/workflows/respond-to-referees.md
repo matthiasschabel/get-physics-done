@@ -451,16 +451,40 @@ Group revision items by affected section to minimize agent spawns. For each affe
 
 > Apply the canonical runtime delegation convention already loaded above.
 
-Apply the shared publication round, response-artifact, and stage-recovery contracts exactly for the response-artifact pair. The workflow-specific addition for each section handoff is that the same fresh child return must also name the revised section file.
-
 ```
 task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-paper-writer.md for your role and instructions.\n\nRead the canonical <author_response> protocol at {GPD_INSTALL_DIR}/templates/paper/author-response.md, the canonical referee response template at {GPD_INSTALL_DIR}/templates/paper/referee-response.md, and the shared publication response-writer handoff at {GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md. You own both the manuscript edits and the response-tracker updates for this section. Make the manuscript changes first, then update the response trackers for the same comments. Return only after the fresh `gpd_return.files_written` set names the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n" + revision_prompt,
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-paper-writer.md for your role and instructions.\n\nRead the canonical <author_response> protocol at {GPD_INSTALL_DIR}/templates/paper/author-response.md, the canonical referee response template at {GPD_INSTALL_DIR}/templates/paper/referee-response.md, and the shared publication response-writer handoff at {GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md. You own both the manuscript edits and the response-tracker updates for this section. Make the manuscript changes first, then update the response trackers for the same comments. Return through the `respond_to_referees_revision_section` child_gate so the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` are all named.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n" + revision_prompt,
   subagent_type="gpd-paper-writer",
   model="{writer_model}",
   readonly=false,
   description="Revise: {section_name}"
 )
+```
+
+Revision-section child gate:
+
+```yaml
+child_gate:
+  id: "respond_to_referees_revision_section"
+  role: "gpd-paper-writer"
+  return_profile: "response_writer"
+  required_status: "completed"
+  expected_artifacts:
+    - "${PAPER_DIR}/{resolved_section_file}"
+    - "${RESPONSE_AUTHOR_PATH}"
+    - "${RESPONSE_REFEREE_PATH}"
+  allowed_roots:
+    - "${PAPER_DIR}"
+    - "${selected_publication_root}"
+    - "${selected_review_root}"
+  freshness_marker: "after $REVISION_SECTION_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts for revised section plus both response artifacts"
+    - "publication-response-writer-handoff.md frontmatter, round, and manuscript binding"
+    - "target section has expected revision markers or substantive edits"
+    - "affected comment block updated in both response artifacts"
+  applicator: "none"
+  failure_route: "continue other sections, then retry failed sections | main-context targeted revision | skip failed sections; checkpoint -> stage-recovery gate and fresh continuation"
 ```
 
 Each revision agent receives:
@@ -474,10 +498,10 @@ Each revision agent receives:
 - Instruction to make minimal, targeted changes (do NOT rewrite the section)
 - Instruction to mark changed text with `% REVISED: Referee X, Comment Y` LaTeX comments for tracking
 
-**If a revision agent fails to spawn or returns an error:** Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for that section. Continue with other sections, then report failed sections and offer: 1) Retry failed sections, 2) Apply revisions manually in the main context, 3) Skip failed sections and proceed.
+**If a revision agent fails to spawn or returns an error:** Apply the `respond_to_referees_revision_section` tuple and `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for that section. Continue with other sections, then report failed sections and offer: 1) Retry failed sections, 2) Apply revisions manually in the main context, 3) Skip failed sections and proceed.
 
 After each agent returns, verify the promised artifacts before trusting the handoff text:
-- Re-apply the shared publication response-artifact and stage-recovery contracts first; for this workflow, the section is complete only when fresh `gpd_return.files_written` names the revised section file plus both response artifacts.
+- Re-apply the `respond_to_referees_revision_section` tuple first.
 - Re-read the targeted resolved section file under `${PAPER_DIR}` and confirm the expected revision markers or substantive edits landed.
 - Re-open `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` and confirm the affected comment block now contains the updated assessment / changes-made text.
 - If the section file changed but the response trackers did not, or vice versa, treat that section as failed and route it through the retry/manual options above instead of silently proceeding.
@@ -537,7 +561,24 @@ Options:
 
 Apply the already-loaded shared publication response-writer handoff before treating the response-artifact pair as complete.
 
-Read the completed `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` (all comments should have status "Response drafted" or "Final"). Treat those files as complete only if the expected mirrored artifacts exist on disk, their response frontmatter binds to the active manuscript path and review round when the subject is explicit, and the orchestrator has aggregated every section handoff under the publication stage-recovery gate: the revised section file exists, both response artifacts exist, and fresh child `gpd_return.files_written` names all required outputs.
+Read the completed `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` (all comments should have status "Response drafted" or "Final"). Treat those files as complete only through this aggregate:
+
+```yaml
+aggregate_child_gate:
+  id: respond_to_referees_response_pair_current
+  required_child_gates:
+    - respond_to_referees_revision_section for every launched Group B section
+  expected_artifacts:
+    - every required revised section under ${PAPER_DIR}
+    - ${RESPONSE_AUTHOR_PATH}
+    - ${RESPONSE_REFEREE_PATH}
+  validators:
+    - expected mirrored artifacts exist on disk
+    - response frontmatter binds to the active manuscript path and review round when the subject is explicit
+    - every launched section tuple passed with current section and response artifacts
+  failure_route: retry failed sections | main-context targeted revision | leave response pair incomplete
+```
+
 Those two Markdown artifacts under the selected GPD publication/review roots are the canonical required outputs for this workflow. `${PAPER_DIR}/response-letter.tex` or `${PAPER_DIR}/response-letter.md` is optional and should be generated only when the journal or user asked for a manuscript-local submission companion. If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots and do not write sidecars beside that external manuscript unless the main integration later exposes a subject-local export hook.
 If centralized preflight resolved a subject-owned publication root at `GPD/publication/{subject_slug}` for that explicit external subject, apply the same rule there: keep the canonical response pair under `selected_publication_root` / `selected_review_root`, not beside the manuscript, and do not infer a full publication-tree relocation from this bounded continuation path.
 

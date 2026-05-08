@@ -52,7 +52,7 @@ VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS = (
     "Every spawned agent is a one-shot delegation",
     "File-producing handoffs must prove the expected artifact exists before success is accepted.",
     "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once",
-    "Route only on the canonical verification frontmatter and `gpd_return.status`",
+    "Route only on canonical verification frontmatter plus `gpd_return.status`",
     "Do not recompute canonical verification status in this workflow.",
     "verification_report_skeleton_bridge",
     "writer_command",

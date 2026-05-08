@@ -114,6 +114,7 @@ EXPECTED_SEMANTIC_DUPLICATE_GROUP_KEYS = {
     "label",
     "occurrence_count",
     "file_count",
+    "non_reference_occurrence_count",
     "non_reference_file_count",
     "severity",
     "canonical_references",
@@ -767,6 +768,10 @@ def test_semantic_duplicate_invariants_group_paraphrased_categories(tmp_path: Pa
     }
     assert groups_by_category["no_synthesized_child_gpd_return"].severity == "high"
     assert all(group.occurrence_count >= 2 for group in groups_by_category.values())
+    assert all(
+        group.non_reference_occurrence_count == group.occurrence_count
+        for group in groups_by_category.values()
+    )
     assert all(group.non_reference_file_count == 2 for group in groups_by_category.values())
     assert all(group.examples for group in groups_by_category.values())
 
@@ -893,6 +898,7 @@ def test_semantic_duplicate_invariants_reference_only_occurrences_are_info(tmp_p
     group = report.semantic_duplicate_invariants[0]
     assert group.category == "files_written_freshness"
     assert group.severity == "info"
+    assert group.non_reference_occurrence_count == 0
     assert group.non_reference_file_count == 0
     assert group.examples[0].is_reference_or_template is True
 
@@ -1916,6 +1922,7 @@ def test_markdown_render_lists_semantic_duplicate_invariants(tmp_path: Path) -> 
 
     assert "## Semantic Duplicate Invariants" in markdown
     assert "`files_written_freshness`" in markdown
+    assert "Non-ref occurrences" in markdown
     assert "### `files_written_freshness` Examples" in markdown
     assert "`src/gpd/commands/semantic-render-a.md:" in markdown
 

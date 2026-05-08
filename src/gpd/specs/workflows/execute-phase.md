@@ -648,6 +648,7 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`,
    The shared note owns runtime-neutral task construction and handoff gates. Later handoff blocks reference it instead of restating those rules.
 
    ```
+   EXECUTOR_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
    task(
      subagent_type="gpd-executor",
      model="{executor_model}",
@@ -719,6 +720,7 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`,
    > Apply the canonical runtime delegation convention above.
 
    ```
+   PROOF_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
    task(
      subagent_type="gpd-check-proof",
      model="{check_proof_model}",
@@ -738,7 +740,27 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
    )
    ```
 
-   If `gpd-check-proof` cannot be spawned, returns malformed output, or reports `status != passed`, route the plan to `wave_failure_handling`. Do not treat executor self-review as an acceptable substitute.
+   Proof critic child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+   ```yaml
+   child_gate:
+     id: "proof_critic_wave_audit"
+     role: "gpd-check-proof"
+     return_profile: "proof_redteam"
+     required_status: "completed"
+     expected_artifacts:
+       - "{phase_dir}/{plan_id}-PROOF-REDTEAM.md"
+     allowed_roots:
+       - "{phase_dir}"
+     freshness_marker: "after $PROOF_HANDOFF_STARTED_AT"
+     validators:
+       - "gpd validate proof-redteam {phase_dir}/{plan_id}-PROOF-REDTEAM.md"
+       - "frontmatter status: passed before executor wave success"
+     applicator: none
+     failure_route: "wave_failure_handling | repair_prompt_once | retry_once_then_wave_failure_handling"
+```
+
+   Gate failure routes the plan to `wave_failure_handling`; executor self-review is not a substitute.
 
 5. **Wait for all agents in wave to complete.**
 
@@ -751,9 +773,33 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
    This ensures the user sees progress even when waves have multiple parallel plans. Do not wait for the entire wave to finish before showing any output.
 
-   Wave child artifact gate: `gpd-executor`; expect `SUMMARY_FILE`, required/final deliverables, and required proof-redteam artifact, all fresh under the phase/plan stem; validate spot checks, deliverables, self-check/validation markers, proof-redteam `status: passed`, and `gpd --raw apply-return-updates "${SUMMARY_FILE}"` with `passed: true`; otherwise route to `wave_failure_handling`, retry, main-context execution, or user-approved skip/continue.
+   Wave child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
 
-   **If any executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without the wave child artifact gate above. If the envelope is missing or invalid, keep that child handoff incomplete and mark the plan failed for this wave unless the user chooses explicit main-context fallback. Then offer: 1) Retry in a new wave, 2) Execute in main context, 3) Skip and continue.
+   ```yaml
+   child_gate:
+     id: "wave_executor_plan_result"
+     role: "gpd-executor"
+     return_profile: "executor"
+     required_status: "completed"
+     expected_artifacts:
+       - "${SUMMARY_FILE}"
+     allowed_roots:
+       - "{phase_dir}"
+     freshness_marker: "after $EXECUTOR_HANDOFF_STARTED_AT"
+     validators:
+       - "gpd validate handoff-artifacts - --expected '${SUMMARY_FILE}' --allowed-root '{phase_dir}' --required-suffix=-SUMMARY.md --require-status completed --require-files-written --fresh-after \"$EXECUTOR_HANDOFF_STARTED_AT\""
+       - "SUMMARY key-files.created / key-files.modified required/final deliverables exist"
+       - "no Self-Check: FAILED or Validation: FAILED marker"
+       - "proof-redteam artifact exists and reports status: passed when proof-bearing"
+     applicator:
+       command: "gpd --raw apply-return-updates ${SUMMARY_FILE}"
+       require_passed_true: true
+     failure_route: "wave_failure_handling | repair_prompt_once | retry_new_wave | repair_path_once | fail_closed_with_mutation_report"
+```
+
+   Status route: `checkpoint` uses checkpoint handling; other incomplete routes choose retry, main-context execution, or user-approved skip outside the child gate.
+
+   **If any executor agent fails to spawn or returns an error:** use the tuple failure route. Git commits/files are recovery evidence only until the wave gate passes.
 
 6. **Report completion -- spot-check claims first:**
 
@@ -1490,6 +1536,7 @@ Spawn `gpd-verifier` in a fresh context; the child reads `{GPD_INSTALL_DIR}/work
 > Apply the canonical runtime delegation convention above.
 
 ```
+VERIFIER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 task(
   subagent_type="gpd-verifier",
   model="{verifier_model}",
@@ -1535,14 +1582,33 @@ Return one typed `gpd_return` envelope with `status`, `files_written`, and canon
 )
 ```
 
-Read status after verification completes through the typed child-return contract:
+Post-execution verifier child artifact gate: apply `references/orchestration/child-artifact-gate.md`; scientific status routing applies `references/verification/verification-status-authority.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
 
-- `gpd_return.status: completed` means success only after verifying that:
-  1. `${phase_dir}/${phase_number}-VERIFICATION.md` exists on disk and is readable
-  2. the same path appears in `gpd_return.files_written`
-  3. `gpd validate verification-contract "${phase_dir}/${phase_number}-VERIFICATION.md"` passes before any downstream routing
-- If a canonical verification file already existed before this run, do not treat it as fresh verifier output unless the child reported that same path in `gpd_return.files_written`.
-- Route only on `gpd_return.status` and the validated frontmatter; do not use `grep "^status:"`, headings, or marker strings to decide success.
+```yaml
+child_gate:
+  id: "post_execution_verifier"
+  role: "gpd-verifier"
+  return_profile: "verifier"
+  required_status: "completed"
+  expected_artifacts:
+    - "{phase_dir}/{phase_number}-VERIFICATION.md"
+  allowed_roots:
+    - "{phase_dir}"
+  freshness_marker: "after $VERIFIER_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected '{phase_dir}/{phase_number}-VERIFICATION.md' --allowed-root '{phase_dir}' --required-suffix=-VERIFICATION.md --require-status completed --require-files-written --fresh-after \"$VERIFIER_HANDOFF_STARTED_AT\""
+    - "gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md"
+    - "verification-status-authority.md status rules"
+    - "proof-redteam status: passed for proof-bearing work"
+  applicator:
+    command: "phase closeout/update_roadmap only after verifier gate and status route"
+    require_passed_true: false
+  failure_route: "route_to_gpd_verify_work | repair_prompt_once | retry_once_then_gpd_verify_work | repair_path_once | fail_closed"
+```
+
+Verifier status route: gaps found -> `gpd:plan-phase {phase} --gaps`; human/expert-needed -> present or escalate review.
+
+Read status after the verifier tuple passes: use `gpd_return.status` plus the validated frontmatter; do not route on headings or marker strings.
 
 | Status         | Action                                                      |
 | -------------- | ----------------------------------------------------------- |
@@ -1707,6 +1773,7 @@ VERIFIER_MODEL=$(gpd resolve-model gpd-verifier)
 > Apply the canonical runtime delegation convention above.
 
 ```
+REVERIFY_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 task(
   subagent_type="gpd-verifier",
   model="{verifier_model}",
@@ -1743,21 +1810,33 @@ Re-verify Phase {PHASE_NUMBER} after gap closure.
 )
 ```
 
-**If the verifier agent fails to spawn or returns an error:** Stop in a blocked state. Do not mark the phase complete or clear gap-closure state on this path. End with `## > Next Up`: primary `gpd:verify-work {PHASE_NUMBER}` to confirm gaps are closed, plus `gpd:resume-work` and `gpd:suggest-next`. If the phase is proof-bearing, do NOT mark it complete on this path; proof-obligation work remains blocked until re-verification and proof-redteam audits actually clear. Do not trust the runtime handoff status by itself. Do not let a stale existing verification file satisfy the success path.
+Gap re-verifier child artifact gate: apply `references/orchestration/child-artifact-gate.md`; scientific status routing applies `references/verification/verification-status-authority.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
 
-**Handle the verifier response through `gpd_return.status`:**
+```yaml
+child_gate:
+  id: "gap_closure_reverification"
+  role: "gpd-verifier"
+  return_profile: "verifier"
+  required_status: "completed"
+  expected_artifacts:
+    - "{phase_dir}/{phase}-VERIFICATION.md"
+  allowed_roots:
+    - "{phase_dir}"
+  freshness_marker: "after $REVERIFY_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected '{phase_dir}/{phase}-VERIFICATION.md' --allowed-root '{phase_dir}' --required-suffix=-VERIFICATION.md --require-status completed --require-files-written --fresh-after \"$REVERIFY_HANDOFF_STARTED_AT\""
+    - "gpd validate verification-contract {phase_dir}/{phase}-VERIFICATION.md"
+    - "verification-status-authority.md status rules"
+    - "proof-redteam status: passed for proof-bearing work"
+  applicator:
+    command: "mark phase complete/update_roadmap only after verifier gate and passed verdict"
+    require_passed_true: false
+  failure_route: "blocked -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_verify_work"
+```
 
-- `gpd_return.status: completed`:
-  1. Do not accept `gpd_return.status: completed` until `{phase_dir}/{phase}-VERIFICATION.md` exists on disk.
-  2. The same path appears in `gpd_return.files_written`.
-  3. If either check fails, treat the re-verification handoff as blocked. Do not let a stale existing verification file satisfy the success path.
-  4. After the artifact gate passes, use the canonical verifier verdict from `gpd_return.verification_status` or the written report frontmatter:
-     - `passed` -> mark phase complete, proceed to `update_roadmap`
-     - `gaps_found` / `expert_needed` / `human_needed` -> report remaining gaps and STOP -- do not auto-loop. Present: "Re-verification found {N} remaining gaps. Review: {phase_dir}/{phase}-VERIFICATION.md" and end with `## > Next Up`: primary `gpd:plan-phase {PHASE_NUMBER} --gaps`, then `gpd:execute-phase {PHASE_NUMBER} --gaps-only`, `gpd:verify-work {PHASE_NUMBER}`, and `gpd:suggest-next`.
-- `gpd_return.status: checkpoint`: stop, surface the checkpoint payload, and end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:verify-work {PHASE_NUMBER}` and `gpd:suggest-next`. Do not wait in place for user input inside this run.
-- `gpd_return.status: blocked` / `gpd_return.status: failed`: stop in a blocked state, surface the issues, keep gap-closure state intact, and end with `## > Next Up`: primary `gpd:verify-work {PHASE_NUMBER}`, plus `gpd:resume-work` and `gpd:suggest-next`.
+Verifier status route: passed verdict updates roadmap; non-passing verdict reports remaining gaps without auto-looping.
 
-**If the verifier output is malformed or omits `gpd_return.status`:** Treat it as blocked. Do not infer success from prose headings or untyped routing.
+Spawn/error, malformed output, failed tuple, or non-passing verifier verdict keeps gap-closure state intact and routes to `gpd:verify-work {PHASE_NUMBER}` or the listed gap commands; do not mark the phase complete on those paths.
 
 </step>
 
@@ -1800,7 +1879,25 @@ Return exactly one typed `gpd_return` envelope, include `files_written`, and wri
 ", subagent_type="gpd-consistency-checker", model="{consistency_model}", readonly=false, description="Rapid consistency check")
 )
 
-**Consistency checker child artifact gate:** apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-consistency-checker`; expected=`{phase_dir}/CONSISTENCY-CHECK.md`; allowed_root=`{phase_dir}`; freshness=`after $CONSISTENCY_HANDOFF_STARTED_AT`; validators=`gpd validate handoff-artifacts --require-status completed` plus readability; applicator=none here; failure=`blocked -> gpd:validate-conventions | retry/fresh execute continuation`.
+**Consistency checker child artifact gate:** apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "rapid_consistency_check"
+  role: "gpd-consistency-checker"
+  return_profile: "consistency_checker"
+  required_status: "completed"
+  expected_artifacts:
+    - "{phase_dir}/CONSISTENCY-CHECK.md"
+  allowed_roots:
+    - "{phase_dir}"
+  freshness_marker: "after $CONSISTENCY_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected {phase_dir}/CONSISTENCY-CHECK.md --allowed-root {phase_dir} --required-suffix=CONSISTENCY-CHECK.md --require-status completed --require-files-written --fresh-after \"$CONSISTENCY_HANDOFF_STARTED_AT\""
+    - "readable artifact check"
+  applicator: none
+  failure_route: "blocked -> gpd:validate-conventions | repair_prompt_once | retry_fresh_execute_continuation | retry_once"
+```
 
 ```bash
 CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"
@@ -1946,7 +2043,7 @@ Orchestrator stays lean per `references/orchestration/context-budget.md`; subage
 
 <failure_handling>
 
-- **False failure report despite delivered work:** Commits/files are partial evidence. Accept success only if the local child artifact gate passes; otherwise route to wave_failure_handling, retry, or explicit main-context fallback.
+- **False failure report despite delivered work:** Use the `wave_executor_plan_result` child_gate failure route; files and commits stay recovery evidence until that tuple passes.
 - **Agent fails mid-plan:** Missing SUMMARY.md -> report, route to wave_failure_handling for user decision
 - **Dependency chain breaks:** Wave N plan fails -> identify Wave N+1 dependents via `depends_on` frontmatter -> auto-skip with clear message -> user chooses at wave level
 - **All agents in wave fail:** Systemic issue -> stop, report for investigation, offer wave-level rollback

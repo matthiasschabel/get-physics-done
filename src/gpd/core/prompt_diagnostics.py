@@ -50,7 +50,7 @@ from gpd.core.workflow_staging import (
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
-PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v6"
+PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v7"
 DEFAULT_PATH_PREFIX = "/runtime/"
 DEFAULT_SURFACES: tuple[PromptSurfaceKind, ...] = ("command", "agent", "workflow")
 
@@ -572,6 +572,7 @@ class SemanticDuplicateGroup:
     label: str
     occurrence_count: int
     file_count: int
+    non_reference_occurrence_count: int
     non_reference_file_count: int
     severity: Literal["info", "warn", "high"]
     canonical_references: tuple[str, ...]
@@ -895,6 +896,7 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
                 "label": group.label,
                 "occurrence_count": group.occurrence_count,
                 "file_count": group.file_count,
+                "non_reference_occurrence_count": group.non_reference_occurrence_count,
                 "non_reference_file_count": group.non_reference_file_count,
                 "severity": group.severity,
                 "canonical_references": list(group.canonical_references),
@@ -1103,15 +1105,16 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 "",
                 "## Semantic Duplicate Invariants",
                 "",
-                "| Severity | Category | Occurrences | Files | Non-ref files | Canonical refs | Suggested action |",
-                "|---|---|---:|---:|---:|---|---|",
+                "| Severity | Category | Occurrences | Non-ref occurrences | Files | Non-ref files | Canonical refs | Suggested action |",
+                "|---|---|---:|---:|---:|---:|---|---|",
             ]
         )
         for group in semantic_groups:
             refs = ", ".join(Path(reference).name for reference in group.canonical_references)
             lines.append(
-                f"| {group.severity} | `{group.category}` | {group.occurrence_count} | {group.file_count} | "
-                f"{group.non_reference_file_count} | {_markdown_table_cell(refs)} | "
+                f"| {group.severity} | `{group.category}` | {group.occurrence_count} | "
+                f"{group.non_reference_occurrence_count} | {group.file_count} | {group.non_reference_file_count} | "
+                f"{_markdown_table_cell(refs)} | "
                 f"{_markdown_table_cell(group.suggested_action)} |"
             )
         example_limit = _semantic_example_limit(top)
@@ -2829,6 +2832,9 @@ def _semantic_duplicate_invariant_groups(
     for category_id, occurrences in occurrences_by_category.items():
         category = _SEMANTIC_DUPLICATE_CATEGORY_BY_ID[category_id]
         file_count = len(files_by_category[category_id])
+        non_reference_occurrence_count = sum(
+            1 for occurrence in occurrences if not occurrence.is_reference_or_template
+        )
         non_reference_file_count = len(non_reference_files_by_category[category_id])
         sorted_examples = tuple(
             sorted(
@@ -2847,6 +2853,7 @@ def _semantic_duplicate_invariant_groups(
                 label=category.label,
                 occurrence_count=len(occurrences),
                 file_count=file_count,
+                non_reference_occurrence_count=non_reference_occurrence_count,
                 non_reference_file_count=non_reference_file_count,
                 severity=_semantic_duplicate_severity(category.category, non_reference_file_count),
                 canonical_references=category.canonical_references,

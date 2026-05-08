@@ -37,6 +37,9 @@ def test_return_profiles_cover_phase3_roles() -> None:
         "verifier",
         "referee",
         "researcher",
+        "reviewer",
+        "synthesizer",
+        "roadmapper",
     }
     assert set(RETURN_STATUS_ORDER) == VALID_RETURN_STATUSES
 
@@ -69,6 +72,21 @@ def test_return_profile_status_fields_obey_status_contract() -> None:
     executor = GPD_RETURN_ROLE_PROFILES["executor"]
     assert "blockers" not in executor.role_fields_by_status["completed"]
     assert "blockers" in executor.role_fields_by_status["checkpoint"]
+
+
+def test_new_project_role_profiles_use_conservative_existing_defaults() -> None:
+    assert (
+        GPD_RETURN_ROLE_PROFILES["reviewer"].default_render_fields_by_status["completed"]
+        == GPD_RETURN_ROLE_PROFILES["referee"].default_render_fields_by_status["completed"]
+    )
+    assert (
+        GPD_RETURN_ROLE_PROFILES["synthesizer"].default_render_fields_by_status["completed"]
+        == GPD_RETURN_ROLE_PROFILES["researcher"].default_render_fields_by_status["completed"]
+    )
+    assert (
+        GPD_RETURN_ROLE_PROFILES["roadmapper"].default_render_fields_by_status["completed"]
+        == GPD_RETURN_ROLE_PROFILES["planner"].default_render_fields_by_status["completed"]
+    )
 
 
 @pytest.mark.parametrize("role", sorted(GPD_RETURN_ROLE_PROFILES))
@@ -114,6 +132,7 @@ def test_checker_checkpoint_skeleton_contains_partial_approval_fields() -> None:
     assert skeleton.envelope["blocked_plans"] == []
     assert skeleton.envelope["revision_round"] == 1
     assert "blockers" in skeleton.envelope
+    assert any("checkpoint_intent" in warning for warning in skeleton.warnings)
 
 
 def test_verifier_skeleton_keeps_verification_status_distinct() -> None:
@@ -180,6 +199,40 @@ def test_checkpoint_applicator_fields_require_explicit_resume_file(tmp_path: Pat
     }
     assert skeleton.applicator_ready is True
     assert "gpd apply-return-updates <return-file.md>" in skeleton.validation_commands
+
+
+def test_checkpoint_intent_skeleton_uses_child_owned_fields_when_contract_allows() -> None:
+    if "checkpoint_intent" not in KNOWN_RETURN_FIELD_NAMES:
+        with pytest.raises(ValueError, match="checkpoint_intent skeletons require canonical return contract support"):
+            build_gpd_return_skeleton(
+                role="executor",
+                status="checkpoint",
+                include_checkpoint_intent=True,
+            )
+        return
+
+    skeleton = build_gpd_return_skeleton(
+        role="executor",
+        status="checkpoint",
+        include_checkpoint_intent=True,
+        checkpoint_reason="pre_fanout",
+        checkpoint_waiting_reason="Review the first result before dependent fanout.",
+        phase="01",
+        plan="02",
+    )
+
+    checkpoint_intent = skeleton.envelope["checkpoint_intent"]
+    assert checkpoint_intent == {
+        "checkpoint_reason": "pre_fanout",
+        "waiting_reason": "Review the first result before dependent fanout.",
+        "phase": "01",
+        "plan": "02",
+    }
+    assert "continuation_update" not in skeleton.envelope
+    assert "resume_file" not in json.dumps(skeleton.envelope, sort_keys=True)
+    assert skeleton.applicator_ready is False
+    assert "gpd apply-return-updates <return-file.md>" not in skeleton.validation_commands
+    assert any("durable resume context" in warning for warning in skeleton.warnings)
 
 
 def test_checkpoint_applicator_skeleton_applies_with_existing_resume_file(

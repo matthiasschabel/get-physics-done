@@ -10621,6 +10621,40 @@ def test_return_skeleton_raw_outputs_payload() -> None:
     assert payload["envelope"]["files_written"] == []
 
 
+def test_return_profiles_raw_lists_role_metadata() -> None:
+    result = runner.invoke(app, ["--raw", "return", "profiles"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["mutated"] is False
+    profile_ids = {profile["profile_id"] for profile in payload["profiles"]}
+    assert {"executor", "planner", "checker", "verifier", "referee", "researcher"} <= profile_ids
+    executor = next(profile for profile in payload["profiles"] if profile["profile_id"] == "executor")
+    assert "completed" in executor["statuses"]
+    assert "status" in executor["required_fields"]
+
+
+def test_return_profiles_raw_filters_role_and_status() -> None:
+    result = runner.invoke(app, ["--raw", "return", "profiles", "--role", "executor", "--status", "checkpoint"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert [profile["profile_id"] for profile in payload["profiles"]] == ["executor"]
+    assert set(payload["profiles"][0]["statuses"]) == {"checkpoint"}
+    assert "blockers" in payload["profiles"][0]["statuses"]["checkpoint"]["role_fields"]
+
+
+def test_return_classify_raw_stdin_reports_missing_return_without_mutation() -> None:
+    result = runner.invoke(app, ["--raw", "return", "classify", "-"], input="# Report\n\nNo return block here.\n")
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["passed"] is False
+    assert payload["mutated"] is False
+    assert any(token in json.dumps(payload) for token in ("return_missing", "missing_block", "missing_gpd_return"))
+    assert "No gpd_return YAML block found" in payload["errors"]
+
+
 def test_return_skeleton_rejects_unknown_role_before_rendering() -> None:
     result = runner.invoke(
         app,
@@ -10693,6 +10727,42 @@ def test_apply_return_updates_uses_project_root_and_project_relative_file_from_n
 
     assert result.exit_code == 0, result.output
     mock_apply.assert_called_once_with(project_root.resolve(), project_return.resolve())
+
+
+def test_apply_return_updates_threads_checkpoint_resume_file_when_core_accepts_kwarg(tmp_path: Path) -> None:
+    project_root, nested_cwd = _nested_project_root(tmp_path)
+    project_return = project_root / "GPD" / "phases" / "01" / "RETURN.md"
+    project_return.parent.mkdir(parents=True, exist_ok=True)
+    project_return.write_text("project return\n", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    def fake_apply(cwd: Path, file_path: Path, *, checkpoint_resume_file: str | None = None):
+        captured["cwd"] = cwd
+        captured["file_path"] = file_path
+        captured["checkpoint_resume_file"] = checkpoint_resume_file
+        result = _cli_model_result({"passed": True, "status": "checkpoint"})
+        result.passed = True
+        return result
+
+    with patch("gpd.core.commands.cmd_apply_return_updates", new=fake_apply):
+        result = runner.invoke(
+            app,
+            [
+                "--cwd",
+                str(nested_cwd),
+                "apply-return-updates",
+                "GPD/phases/01/RETURN.md",
+                "--checkpoint-resume-file",
+                "GPD/phases/01/.continue-here.md",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "cwd": project_root.resolve(),
+        "file_path": project_return.resolve(),
+        "checkpoint_resume_file": "GPD/phases/01/.continue-here.md",
+    }
 
 
 @patch("gpd.core.commands.cmd_regression_check")

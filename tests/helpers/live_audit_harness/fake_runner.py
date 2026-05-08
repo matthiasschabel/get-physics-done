@@ -168,6 +168,7 @@ def run_fake_scenario(row: object, repo_root: Path, output_root: Path) -> FakeRu
         write_classification_path=write_classification_path,
         evidence_packet_path=row_root / "evidence-packet.json",
     )
+    evidence_payload = _merge_evidence_overrides(evidence_payload, _evidence_overrides(row))
     evidence_packet_path = workspace.write_text("evidence-packet.json", _json(evidence_payload))
 
     return FakeRunResult(
@@ -408,6 +409,31 @@ def _evidence_packet(
         "raw_provider_output_recorded": False,
         "provider_cli_argv_recorded": False,
     }
+
+
+def _evidence_overrides(row: object) -> Mapping[str, object]:
+    value = _row_attr(row, "evidence_packet_overrides", _MISSING)
+    if value is _MISSING:
+        value = _row_attr(row, "evidence_packet", _MISSING)
+    if value is _MISSING or value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise TypeError("evidence packet overrides must be a mapping")
+    return value
+
+
+def _merge_evidence_overrides(
+    base: Mapping[str, object],
+    overrides: Mapping[str, object],
+) -> dict[str, object]:
+    merged = dict(base)
+    for key, value in overrides.items():
+        existing = merged.get(str(key))
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            merged[str(key)] = _merge_evidence_overrides(existing, value)
+        else:
+            merged[str(key)] = _json_ready(value)
+    return merged
 
 
 def _json(payload: Mapping[str, object]) -> str:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from gpd.cli import app
-from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
+from gpd.core.handoff_artifacts import HandoffFailureClass, validate_handoff_artifacts_markdown
 
 
 def _return_block(files_written: list[str], *, status: str = "completed") -> str:
@@ -39,6 +39,20 @@ def _files_only_return_block(files_written: list[str]) -> str:
     return "```yaml\n" "gpd_return:\n" f"{files_written_yaml}" "```\n"
 
 
+def _blocked_return_with_state_updates() -> str:
+    return (
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: blocked\n"
+        "  files_written: []\n"
+        "  issues: []\n"
+        "  next_actions: []\n"
+        "  state_updates:\n"
+        "    phase: 1\n"
+        "```\n"
+    )
+
+
 def test_handoff_artifact_validator_rejects_raw_files_only_json_envelope(tmp_path: Path) -> None:
     result = validate_handoff_artifacts_markdown(
         tmp_path,
@@ -49,6 +63,10 @@ def test_handoff_artifact_validator_rejects_raw_files_only_json_envelope(tmp_pat
     )
 
     assert result.passed is False
+    assert result.mutated is False
+    assert result.primary_failure_class == HandoffFailureClass.RETURN_MISSING
+    assert result.failure_classes == [HandoffFailureClass.RETURN_MISSING]
+    assert result.failures[0].code == "missing_gpd_return_block"
     assert "No gpd_return YAML block found" in result.errors
 
 
@@ -62,9 +80,25 @@ def test_handoff_artifact_validator_rejects_fenced_files_only_envelope(tmp_path:
     )
 
     assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE
+    assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE]
+    assert {failure.code for failure in result.failures} == {"missing_required_field"}
+    assert all(failure.repairable for failure in result.failures)
     assert "Missing required field: status" in result.errors
     assert "Missing required field: issues" in result.errors
     assert "Missing required field: next_actions" in result.errors
+
+
+def test_handoff_artifact_validator_classifies_status_disallowed_update_as_malformed_blocking(
+    tmp_path: Path,
+) -> None:
+    result = validate_handoff_artifacts_markdown(tmp_path, _blocked_return_with_state_updates())
+
+    assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+    assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_BLOCKING]
+    assert result.failures[0].code == "status_disallowed_field"
+    assert "status 'blocked' does not allow gpd_return field(s): state_updates" in result.errors
 
 
 def test_handoff_artifact_validator_accepts_fresh_in_scope_expected_plan(tmp_path: Path) -> None:
@@ -84,6 +118,10 @@ def test_handoff_artifact_validator_accepts_fresh_in_scope_expected_plan(tmp_pat
     )
 
     assert result.passed is True
+    assert result.mutated is False
+    assert result.primary_failure_class is None
+    assert result.failure_classes == []
+    assert result.failures == []
     assert result.checked_files == ["GPD/phases/01-test/01-01-PLAN.md"]
 
 
@@ -105,6 +143,9 @@ def test_handoff_artifact_validator_require_completed_rejects_non_completed_stat
 
         assert result.passed is False
         assert result.status == status
+        assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+        assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_BLOCKING]
+        assert result.failures[0].code == "required_status_mismatch"
         assert f"gpd_return.status must be 'completed' for this artifact gate, got '{status}'" in result.errors
 
 
@@ -118,6 +159,9 @@ def test_handoff_artifact_validator_rejects_missing_claimed_artifact(tmp_path: P
     )
 
     assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_MISSING
+    assert result.failure_classes == [HandoffFailureClass.ARTIFACT_MISSING]
+    assert result.failures[0].code == "artifact_missing_or_not_file"
     assert "artifact is missing or not a file: GPD/phases/01-test/01-01-PLAN.md" in result.errors
 
 
@@ -134,8 +178,84 @@ def test_handoff_artifact_validator_rejects_out_of_scope_and_absolute_paths(tmp_
     )
 
     assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_ROOT_BLOCKED
+    assert result.failure_classes == [HandoffFailureClass.ARTIFACT_ROOT_BLOCKED]
+    assert {failure.code for failure in result.failures} == {"outside_allowed_roots", "absolute_outside_allowed_roots"}
     assert "artifact path is outside allowed roots: GPD/other/01-01-PLAN.md" in result.errors
     assert any("artifact path must be project-local, not absolute" in error for error in result.errors)
+
+
+def test_handoff_artifact_validator_classifies_absolute_project_path_as_path_repairable(tmp_path: Path) -> None:
+    plan_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-PLAN.md"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("plan\n", encoding="utf-8")
+
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        _return_block([plan_path.as_posix()]),
+        allowed_roots=["GPD/phases/01-test"],
+        required_suffixes=["-PLAN.md"],
+    )
+
+    assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_PATH_REPAIRABLE
+    assert result.failure_classes == [HandoffFailureClass.ARTIFACT_PATH_REPAIRABLE]
+    assert result.failures[0].code == "absolute_project_local"
+    assert result.failures[0].repairable is True
+    assert any("artifact path must be project-local, not absolute" in error for error in result.errors)
+
+
+def test_handoff_artifact_validator_classifies_absolute_outside_project_as_root_blocked(tmp_path: Path) -> None:
+    outside_path = tmp_path.parent / f"{tmp_path.name}-outside-PLAN.md"
+
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        _return_block([outside_path.as_posix()]),
+        allowed_roots=["."],
+        required_suffixes=["-PLAN.md"],
+    )
+
+    assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_ROOT_BLOCKED
+    assert result.failure_classes == [HandoffFailureClass.ARTIFACT_ROOT_BLOCKED]
+    assert result.failures[0].code == "absolute_outside_project"
+    assert any("artifact path must be project-local, not absolute" in error for error in result.errors)
+
+
+def test_handoff_artifact_validator_classifies_traversal_as_root_blocked(tmp_path: Path) -> None:
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        _return_block(["GPD/phases/01-test/../outside/01-01-PLAN.md"]),
+        allowed_roots=["GPD/phases/01-test"],
+        required_suffixes=["-PLAN.md"],
+    )
+
+    assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_ROOT_BLOCKED
+    assert result.failure_classes == [HandoffFailureClass.ARTIFACT_ROOT_BLOCKED]
+    assert result.failures[0].code == "path_traversal"
+    assert "artifact path must not traverse outside the project: GPD/phases/01-test/../outside/01-01-PLAN.md" in (
+        result.errors
+    )
+
+
+def test_handoff_artifact_validator_classifies_allowed_root_outside_project_as_root_blocked(tmp_path: Path) -> None:
+    plan_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-PLAN.md"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("plan\n", encoding="utf-8")
+
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        _return_block(["GPD/phases/01-test/01-01-PLAN.md"]),
+        allowed_roots=["../outside"],
+        required_suffixes=["-PLAN.md"],
+    )
+
+    assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_ROOT_BLOCKED
+    assert HandoffFailureClass.ARTIFACT_ROOT_BLOCKED in result.failure_classes
+    assert "allowed_root_outside_project" in {failure.code for failure in result.failures}
+    assert "allowed root is outside project root: ../outside" in result.errors
 
 
 def test_handoff_artifact_validator_rejects_expected_artifact_omitted_from_files_written(tmp_path: Path) -> None:
@@ -153,6 +273,9 @@ def test_handoff_artifact_validator_rejects_expected_artifact_omitted_from_files
     )
 
     assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_MISSING
+    assert result.failure_classes == [HandoffFailureClass.ARTIFACT_MISSING]
+    assert {failure.code for failure in result.failures} == {"files_written_empty", "expected_artifact_omitted"}
     assert "gpd_return.files_written is empty" in result.errors
     assert (
         "expected artifact not named in gpd_return.files_written: GPD/phases/01-test/01-01-PLAN.md" in result.errors
@@ -175,6 +298,9 @@ def test_handoff_artifact_validator_rejects_stale_artifact(tmp_path: Path) -> No
     )
 
     assert result.passed is False
+    assert result.primary_failure_class == HandoffFailureClass.ARTIFACT_STALE
+    assert result.failure_classes == [HandoffFailureClass.ARTIFACT_STALE]
+    assert result.failures[0].code == "artifact_stale"
     assert "artifact is stale relative to --fresh-after: GPD/phases/01-test/01-01-PLAN.md" in result.errors
 
 
@@ -204,7 +330,12 @@ def test_validate_handoff_artifacts_cli_accepts_stdin_return(tmp_path: Path) -> 
     )
 
     assert result.exit_code == 0, result.output
-    assert json.loads(result.output)["passed"] is True
+    payload = json.loads(result.output)
+    assert payload["passed"] is True
+    assert payload["mutated"] is False
+    assert payload["primary_failure_class"] is None
+    assert payload["failure_classes"] == []
+    assert payload["failures"] == []
 
 
 def test_validate_handoff_artifacts_cli_require_status_completed_rejects_checkpoint(tmp_path: Path) -> None:
@@ -237,5 +368,9 @@ def test_validate_handoff_artifacts_cli_require_status_completed_rejects_checkpo
     payload = json.loads(result.output)
     assert result.exit_code == 1
     assert payload["passed"] is False
+    assert payload["mutated"] is False
+    assert payload["primary_failure_class"] == "return_malformed_blocking"
+    assert payload["failure_classes"] == ["return_malformed_blocking"]
+    assert payload["failures"][0]["code"] == "required_status_mismatch"
     assert payload["status"] == "checkpoint"
     assert "gpd_return.status must be 'completed' for this artifact gate, got 'checkpoint'" in payload["errors"]

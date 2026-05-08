@@ -49,6 +49,10 @@ _STATUS_RESTRICTED_FIELDS: frozenset[str] = frozenset(
 _CHECKPOINT_RESUME_FILE_REQUIRED = (
     "checkpoint applicator skeletons require resume_file with an existing continuation target supplied by the callsite"
 )
+_CHECKPOINT_INTENT_FIELD = "checkpoint_intent"
+_CHECKPOINT_INTENT_UNAVAILABLE = (
+    "checkpoint_intent skeletons require canonical return contract support from the checkpoint-intent applicator slice"
+)
 
 
 class GpdReturnRoleProfile(BaseModel):
@@ -93,6 +97,9 @@ def build_gpd_return_skeleton(
     phase: str | None = None,
     plan: str | None = None,
     include_applicator_fields: bool = False,
+    include_checkpoint_intent: bool = False,
+    checkpoint_reason: str | None = None,
+    checkpoint_waiting_reason: str | None = None,
     resume_file: str | None = None,
     project_root: str | Path | None = None,
     extra_fields: Mapping[str, object] | None = None,
@@ -134,6 +141,9 @@ def build_gpd_return_skeleton(
 
     warnings: list[str] = []
     applicator_ready = False
+    if include_applicator_fields and include_checkpoint_intent:
+        raise ValueError("choose either checkpoint_intent or checkpoint applicator fields, not both")
+
     if include_applicator_fields:
         if normalized_status == "checkpoint":
             normalized_resume_file = _normalize_checkpoint_resume_file(resume_file, project_root=project_root)
@@ -147,9 +157,23 @@ def build_gpd_return_skeleton(
             applicator_ready = True
         else:
             warnings.append("Applicator continuation fields are generated only for checkpoint skeletons.")
+    elif include_checkpoint_intent:
+        if normalized_status != "checkpoint":
+            raise ValueError("checkpoint_intent skeletons require status 'checkpoint'")
+        if not _contract_supports_checkpoint_intent():
+            raise ValueError(_CHECKPOINT_INTENT_UNAVAILABLE)
+        envelope[_CHECKPOINT_INTENT_FIELD] = _checkpoint_intent_payload(
+            checkpoint_reason=checkpoint_reason,
+            checkpoint_waiting_reason=checkpoint_waiting_reason,
+            phase=normalized_phase,
+            plan=normalized_plan,
+        )
+        warnings.append(
+            "Checkpoint intent is child-authored pause intent; durable resume context must be supplied to the applicator."
+        )
     elif normalized_status == "checkpoint":
         warnings.append(
-            "Checkpoint envelope shape validates; durable continuation application still needs an explicit resume_file."
+            "Checkpoint envelope shape validates; add checkpoint_intent for child-owned pause intent or applicator fields for durable continuation."
         )
 
     payload = _validate_and_dump_envelope(envelope)
@@ -284,6 +308,29 @@ def _checkpoint_bounded_segment_payload(resume_file: str, *, phase: str | None, 
     return payload
 
 
+def _checkpoint_intent_payload(
+    *,
+    checkpoint_reason: str | None,
+    checkpoint_waiting_reason: str | None,
+    phase: str | None,
+    plan: str | None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "checkpoint_reason": _normalize_optional_text(checkpoint_reason, field_name="checkpoint_reason")
+        or "checkpoint",
+        "waiting_reason": _normalize_optional_text(
+            checkpoint_waiting_reason,
+            field_name="checkpoint_waiting_reason",
+        )
+        or "Parent/applicator resume context required.",
+    }
+    if phase is not None:
+        payload["phase"] = phase
+    if plan is not None:
+        payload["plan"] = plan
+    return payload
+
+
 def _validate_and_dump_envelope(envelope: Mapping[str, object]) -> dict[str, object]:
     try:
         validated = GpdReturnEnvelope.model_validate(dict(envelope))
@@ -325,9 +372,15 @@ def _fields_allowed_for_status(status: str) -> tuple[str, ...]:
 def _field_allowed_for_status(field_name: str, status: str) -> bool:
     if field_name not in KNOWN_RETURN_FIELD_NAMES:
         return False
+    if field_name == _CHECKPOINT_INTENT_FIELD and status != "checkpoint":
+        return False
     if field_name in _STATUS_RESTRICTED_FIELDS:
         return field_name in RETURN_ENVELOPE_STATUS_CONTRACTS[status].structured_fields
     return True
+
+
+def _contract_supports_checkpoint_intent() -> bool:
+    return _field_allowed_for_status(_CHECKPOINT_INTENT_FIELD, "checkpoint")
 
 
 def _default_value_for_field(field_name: str, *, phase: str | None, plan: str | None) -> object:
@@ -573,6 +626,31 @@ GPD_RETURN_ROLE_PROFILES: dict[str, GpdReturnRoleProfile] = {
         ),
         local_callsite_fields=_CALLSITE_FIELDS,
     ),
+    "reviewer": _profile(
+        profile_id="reviewer",
+        agent_names=("gpd-literature-reviewer",),
+        role_fields=(
+            "recommendation",
+            "confidence",
+            "score",
+            "major_issues",
+            "minor_issues",
+            "issues_found",
+            "dimensions_evaluated",
+            "blockers",
+            "continuation_update",
+        ),
+        default_render_fields=(
+            "recommendation",
+            "confidence",
+            "score",
+            "major_issues",
+            "minor_issues",
+            "issues_found",
+            "dimensions_evaluated",
+        ),
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
     "researcher": _profile(
         profile_id="researcher",
         agent_names=("gpd-project-researcher", "gpd-phase-researcher"),
@@ -586,6 +664,48 @@ GPD_RETURN_ROLE_PROFILES: dict[str, GpdReturnRoleProfile] = {
             "continuation_update",
         ),
         default_render_fields=("focus", "papers_reviewed", "field_assessment", "reference_maps", "confidence"),
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
+    "synthesizer": _profile(
+        profile_id="synthesizer",
+        agent_names=("gpd-research-synthesizer",),
+        role_fields=(
+            "focus",
+            "papers_reviewed",
+            "field_assessment",
+            "reference_maps",
+            "confidence",
+            "blockers",
+            "continuation_update",
+        ),
+        default_render_fields=("focus", "papers_reviewed", "field_assessment", "reference_maps", "confidence"),
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
+    "roadmapper": _profile(
+        profile_id="roadmapper",
+        agent_names=("gpd-roadmapper",),
+        role_fields=(
+            "phase",
+            "plans_created",
+            "waves",
+            "plans",
+            "roadmap_updates",
+            "conventions",
+            "approximations",
+            "context_pressure",
+            "blockers",
+            "continuation_update",
+        ),
+        default_render_fields=(
+            "phase",
+            "plans_created",
+            "waves",
+            "plans",
+            "roadmap_updates",
+            "conventions",
+            "approximations",
+            "context_pressure",
+        ),
         local_callsite_fields=_CALLSITE_FIELDS,
     ),
 }

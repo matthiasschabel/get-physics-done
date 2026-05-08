@@ -43,6 +43,10 @@ def test_agent_delegation_reference_makes_one_shot_checkpoint_and_artifact_gate_
     assert "callsite applicator" in gate
     assert "Files, commits, runtime success, and preexisting artifacts are recovery" in gate
     assert "synthesize, patch, or paste a child `gpd_return`" in gate
+    assert "`return_missing`" in gate
+    assert "`artifact_path_repairable`" in gate
+    assert "`applicator_failed`" in gate
+    assert "mutated: false" in gate
 
 
 def test_runtime_delegation_note_reuses_the_same_one_shot_and_artifact_language() -> None:

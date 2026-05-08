@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -11,10 +12,39 @@ from pydantic import BaseModel, Field
 from gpd.core.return_contract import VALID_RETURN_STATUSES, validate_gpd_return_markdown
 
 
+class HandoffFailureClass(StrEnum):
+    """Stable failure classes for child return/artifact handoff routing."""
+
+    RETURN_MISSING = "return_missing"
+    RETURN_MALFORMED_REPAIRABLE = "return_malformed_repairable"
+    RETURN_MALFORMED_BLOCKING = "return_malformed_blocking"
+    ARTIFACT_MISSING = "artifact_missing"
+    ARTIFACT_STALE = "artifact_stale"
+    ARTIFACT_PATH_REPAIRABLE = "artifact_path_repairable"
+    ARTIFACT_ROOT_BLOCKED = "artifact_root_blocked"
+    VALIDATOR_FAILED = "validator_failed"
+    APPLICATOR_FAILED = "applicator_failed"
+
+
+class HandoffFailure(BaseModel):
+    """Structured detail for one handoff validation failure."""
+
+    failure_class: HandoffFailureClass
+    code: str
+    message: str
+    path: str | None = None
+    command: str | None = None
+    repairable: bool = False
+
+
 class HandoffArtifactValidationResult(BaseModel):
     """Result for reconciling a child ``gpd_return`` with on-disk artifacts."""
 
     passed: bool
+    mutated: bool = False
+    primary_failure_class: HandoffFailureClass | None = None
+    failure_classes: list[HandoffFailureClass] = Field(default_factory=list)
+    failures: list[HandoffFailure] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     status: str | None = None
@@ -58,13 +88,23 @@ def validate_handoff_artifacts_markdown(
     root = project_root.expanduser().resolve(strict=False)
     errors: list[str] = []
     warnings: list[str] = []
+    failures: list[HandoffFailure] = []
 
     normalized_required_status = _normalize_required_status(require_status)
     if require_status is not None and normalized_required_status is None:
         allowed = ", ".join(sorted(VALID_RETURN_STATUSES))
-        return HandoffArtifactValidationResult(
+        message = f"required status must be one of: {allowed}"
+        return _build_result(
             passed=False,
-            errors=[f"required status must be one of: {allowed}"],
+            errors=[message],
+            failures=[
+                _failure(
+                    HandoffFailureClass.VALIDATOR_FAILED,
+                    "invalid_required_status",
+                    message,
+                    repairable=True,
+                )
+            ],
             expected_artifacts=list(expected_artifacts),
             expected_globs=list(expected_globs),
             allowed_roots=list(allowed_roots),
@@ -72,10 +112,11 @@ def validate_handoff_artifacts_markdown(
 
     return_validation = validate_gpd_return_markdown(return_markdown)
     if not return_validation.passed or return_validation.envelope is None:
-        return HandoffArtifactValidationResult(
+        return _build_result(
             passed=False,
             errors=list(return_validation.errors),
             warnings=list(return_validation.warnings),
+            failures=_classify_return_validation_errors(return_validation.errors),
             expected_artifacts=list(expected_artifacts),
             expected_globs=list(expected_globs),
             allowed_roots=list(allowed_roots),
@@ -83,8 +124,17 @@ def validate_handoff_artifacts_markdown(
 
     envelope = return_validation.envelope
     if normalized_required_status is not None and envelope.status != normalized_required_status:
-        errors.append(
+        message = (
             f"gpd_return.status must be {normalized_required_status!r} for this artifact gate, got {envelope.status!r}"
+        )
+        errors.append(message)
+        failures.append(
+            _failure(
+                HandoffFailureClass.RETURN_MALFORMED_BLOCKING,
+                "required_status_mismatch",
+                message,
+                repairable=False,
+            )
         )
 
     files_written = [_normalize_project_local_path(path) for path in envelope.files_written]
@@ -92,11 +142,14 @@ def validate_handoff_artifacts_markdown(
     globs = [_normalize_project_local_path(pattern) for pattern in expected_globs]
     suffixes = tuple(suffix for suffix in required_suffixes if suffix)
 
-    allowed_resolved, allowed_display, allowed_errors = _normalize_allowed_roots(root, allowed_roots)
+    allowed_resolved, allowed_display, allowed_errors, allowed_failures = _normalize_allowed_roots(root, allowed_roots)
     errors.extend(allowed_errors)
+    failures.extend(allowed_failures)
 
     if require_files_written and not files_written:
-        errors.append("gpd_return.files_written is empty")
+        message = "gpd_return.files_written is empty"
+        errors.append(message)
+        failures.append(_failure(HandoffFailureClass.ARTIFACT_MISSING, "files_written_empty", message))
 
     checked_files: list[str] = []
     seen_files: set[str] = set()
@@ -109,6 +162,7 @@ def validate_handoff_artifacts_markdown(
             root,
             relpath,
             errors=errors,
+            failures=failures,
             checked_files=checked_files,
             allowed_roots=allowed_resolved,
             required_suffixes=suffixes,
@@ -118,12 +172,22 @@ def validate_handoff_artifacts_markdown(
     files_written_set = set(files_written)
     for relpath in expected:
         if relpath not in files_written_set:
-            errors.append(f"expected artifact not named in gpd_return.files_written: {relpath}")
+            message = f"expected artifact not named in gpd_return.files_written: {relpath}"
+            errors.append(message)
+            failures.append(
+                _failure(
+                    HandoffFailureClass.ARTIFACT_MISSING,
+                    "expected_artifact_omitted",
+                    message,
+                    path=relpath,
+                )
+            )
         if relpath not in seen_files:
             _validate_one_artifact(
                 root,
                 relpath,
                 errors=errors,
+                failures=failures,
                 checked_files=checked_files,
                 allowed_roots=allowed_resolved,
                 required_suffixes=suffixes,
@@ -132,11 +196,21 @@ def validate_handoff_artifacts_markdown(
 
     for pattern in globs:
         if not any(fnmatch.fnmatch(relpath, pattern) for relpath in files_written):
-            errors.append(f"no files_written artifact matched expected glob: {pattern}")
+            message = f"no files_written artifact matched expected glob: {pattern}"
+            errors.append(message)
+            failures.append(
+                _failure(
+                    HandoffFailureClass.ARTIFACT_MISSING,
+                    "expected_glob_unmatched",
+                    message,
+                    path=pattern,
+                )
+            )
 
-    return HandoffArtifactValidationResult(
+    return _build_result(
         passed=not errors,
         errors=errors,
+        failures=failures,
         warnings=warnings + list(return_validation.warnings),
         status=envelope.status,
         files_written=files_written,
@@ -163,23 +237,36 @@ def _normalize_project_local_path(path_text: str) -> str:
     return Path(raw).as_posix()
 
 
-def _normalize_allowed_roots(root: Path, allowed_roots: list[str] | tuple[str, ...]) -> tuple[list[Path], list[str], list[str]]:
+def _normalize_allowed_roots(
+    root: Path,
+    allowed_roots: list[str] | tuple[str, ...],
+) -> tuple[list[Path], list[str], list[str], list[HandoffFailure]]:
     if not allowed_roots:
-        return [root], ["."], []
+        return [root], ["."], [], []
 
     resolved_roots: list[Path] = []
     display_roots: list[str] = []
     errors: list[str] = []
+    failures: list[HandoffFailure] = []
     for raw_root in allowed_roots:
         normalized = _normalize_project_local_path(raw_root)
         candidate = Path(normalized).expanduser()
         resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (root / candidate).resolve(strict=False)
         if not resolved.is_relative_to(root):
-            errors.append(f"allowed root is outside project root: {raw_root}")
+            message = f"allowed root is outside project root: {raw_root}"
+            errors.append(message)
+            failures.append(
+                _failure(
+                    HandoffFailureClass.ARTIFACT_ROOT_BLOCKED,
+                    "allowed_root_outside_project",
+                    message,
+                    path=raw_root,
+                )
+            )
             continue
         resolved_roots.append(resolved)
         display_roots.append(_display_project_path(root, resolved))
-    return resolved_roots, display_roots, errors
+    return resolved_roots, display_roots, errors, failures
 
 
 def _validate_one_artifact(
@@ -187,50 +274,142 @@ def _validate_one_artifact(
     relpath: str,
     *,
     errors: list[str],
+    failures: list[HandoffFailure],
     checked_files: list[str],
     allowed_roots: list[Path],
     required_suffixes: tuple[str, ...],
     fresh_after: datetime | None,
 ) -> None:
     if not relpath:
-        errors.append("artifact path is empty")
+        message = "artifact path is empty"
+        errors.append(message)
+        failures.append(_failure(HandoffFailureClass.ARTIFACT_ROOT_BLOCKED, "empty_artifact_path", message))
         return
 
     raw_path = Path(relpath)
     if raw_path.is_absolute():
-        errors.append(f"artifact path must be project-local, not absolute: {relpath}")
+        message = f"artifact path must be project-local, not absolute: {relpath}"
+        errors.append(message)
+        resolved_absolute = raw_path.expanduser().resolve(strict=False)
+        if resolved_absolute.is_relative_to(root) and any(
+            resolved_absolute.is_relative_to(allowed_root) for allowed_root in allowed_roots
+        ):
+            failures.append(
+                _failure(
+                    HandoffFailureClass.ARTIFACT_PATH_REPAIRABLE,
+                    "absolute_project_local",
+                    message,
+                    path=relpath,
+                    repairable=True,
+                )
+            )
+        else:
+            code = "absolute_outside_project"
+            if resolved_absolute.is_relative_to(root):
+                code = "absolute_outside_allowed_roots"
+            failures.append(
+                _failure(
+                    HandoffFailureClass.ARTIFACT_ROOT_BLOCKED,
+                    code,
+                    message,
+                    path=relpath,
+                )
+            )
         return
     if any(part == ".." for part in raw_path.parts):
-        errors.append(f"artifact path must not traverse outside the project: {relpath}")
+        message = f"artifact path must not traverse outside the project: {relpath}"
+        errors.append(message)
+        failures.append(
+            _failure(
+                HandoffFailureClass.ARTIFACT_ROOT_BLOCKED,
+                "path_traversal",
+                message,
+                path=relpath,
+            )
+        )
         return
 
     resolved = (root / raw_path).resolve(strict=False)
     if not resolved.is_relative_to(root):
-        errors.append(f"artifact path resolves outside project root: {relpath}")
+        message = f"artifact path resolves outside project root: {relpath}"
+        errors.append(message)
+        failures.append(
+            _failure(
+                HandoffFailureClass.ARTIFACT_ROOT_BLOCKED,
+                "resolved_outside_project",
+                message,
+                path=relpath,
+            )
+        )
         return
 
     if not any(resolved.is_relative_to(allowed_root) for allowed_root in allowed_roots):
-        errors.append(f"artifact path is outside allowed roots: {relpath}")
+        message = f"artifact path is outside allowed roots: {relpath}"
+        errors.append(message)
+        failures.append(
+            _failure(
+                HandoffFailureClass.ARTIFACT_ROOT_BLOCKED,
+                "outside_allowed_roots",
+                message,
+                path=relpath,
+            )
+        )
 
     if required_suffixes and not any(relpath.endswith(suffix) for suffix in required_suffixes):
         suffix_text = ", ".join(required_suffixes)
-        errors.append(f"artifact path does not end with required suffix ({suffix_text}): {relpath}")
+        message = f"artifact path does not end with required suffix ({suffix_text}): {relpath}"
+        errors.append(message)
+        failures.append(
+            _failure(
+                HandoffFailureClass.VALIDATOR_FAILED,
+                "required_suffix_mismatch",
+                message,
+                path=relpath,
+            )
+        )
 
     if not resolved.is_file():
-        errors.append(f"artifact is missing or not a file: {relpath}")
+        message = f"artifact is missing or not a file: {relpath}"
+        errors.append(message)
+        failures.append(
+            _failure(
+                HandoffFailureClass.ARTIFACT_MISSING,
+                "artifact_missing_or_not_file",
+                message,
+                path=relpath,
+            )
+        )
         return
 
     try:
         with resolved.open("rb"):
             pass
     except OSError as exc:
-        errors.append(f"artifact is not readable: {relpath}: {exc}")
+        message = f"artifact is not readable: {relpath}: {exc}"
+        errors.append(message)
+        failures.append(
+            _failure(
+                HandoffFailureClass.ARTIFACT_MISSING,
+                "artifact_unreadable",
+                message,
+                path=relpath,
+            )
+        )
         return
 
     if fresh_after is not None:
         file_mtime = datetime.fromtimestamp(resolved.stat().st_mtime, tz=fresh_after.tzinfo)
         if file_mtime < fresh_after:
-            errors.append(f"artifact is stale relative to --fresh-after: {relpath}")
+            message = f"artifact is stale relative to --fresh-after: {relpath}"
+            errors.append(message)
+            failures.append(
+                _failure(
+                    HandoffFailureClass.ARTIFACT_STALE,
+                    "artifact_stale",
+                    message,
+                    path=relpath,
+                )
+            )
 
     if relpath not in checked_files:
         checked_files.append(relpath)
@@ -241,3 +420,105 @@ def _display_project_path(root: Path, path: Path) -> str:
         return path.relative_to(root).as_posix() or "."
     except ValueError:
         return path.as_posix()
+
+
+def _failure(
+    failure_class: HandoffFailureClass,
+    code: str,
+    message: str,
+    *,
+    path: str | None = None,
+    command: str | None = None,
+    repairable: bool = False,
+) -> HandoffFailure:
+    return HandoffFailure(
+        failure_class=failure_class,
+        code=code,
+        message=message,
+        path=path,
+        command=command,
+        repairable=repairable,
+    )
+
+
+def _build_result(
+    *,
+    passed: bool,
+    errors: list[str] | None = None,
+    warnings: list[str] | None = None,
+    failures: list[HandoffFailure] | None = None,
+    status: str | None = None,
+    files_written: list[str] | None = None,
+    checked_files: list[str] | None = None,
+    expected_artifacts: list[str] | None = None,
+    expected_globs: list[str] | None = None,
+    allowed_roots: list[str] | None = None,
+) -> HandoffArtifactValidationResult:
+    result_failures = failures or []
+    failure_classes: list[HandoffFailureClass] = []
+    for failure in result_failures:
+        if failure.failure_class not in failure_classes:
+            failure_classes.append(failure.failure_class)
+
+    return HandoffArtifactValidationResult(
+        passed=passed,
+        primary_failure_class=failure_classes[0] if failure_classes else None,
+        failure_classes=failure_classes,
+        failures=result_failures,
+        errors=errors or [],
+        warnings=warnings or [],
+        status=status,
+        files_written=files_written or [],
+        checked_files=checked_files or [],
+        expected_artifacts=expected_artifacts or [],
+        expected_globs=expected_globs or [],
+        allowed_roots=allowed_roots or [],
+    )
+
+
+def _classify_return_validation_errors(errors: list[str]) -> list[HandoffFailure]:
+    failures: list[HandoffFailure] = []
+    for message in errors:
+        if message == "No gpd_return YAML block found":
+            failures.append(_failure(HandoffFailureClass.RETURN_MISSING, "missing_gpd_return_block", message))
+            continue
+
+        failure_class = HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE
+        code = "malformed_return"
+        repairable = True
+
+        if message.startswith("Missing required field:"):
+            code = "missing_required_field"
+        elif message.startswith("gpd_return YAML parse error:"):
+            code = "yaml_parse_error"
+        elif "canonical lowercase spelling" in message:
+            code = "status_case_drift"
+        elif "Invalid status" in message:
+            code = "invalid_status"
+        elif "Unknown gpd_return top-level field" in message:
+            code = "unknown_top_level_field"
+        elif "must be a list" in message or "Input should be a valid list" in message:
+            code = "invalid_list_field"
+        elif "must be a string" in message or "Input should be a valid string" in message:
+            code = "invalid_string_field"
+        elif "must be a mapping" in message or "Input should be a valid dictionary" in message:
+            code = "invalid_mapping_field"
+        elif "not a number" in message or "Input should be a valid integer" in message:
+            code = "invalid_number_field"
+
+        if "does not allow gpd_return field(s)" in message:
+            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+            code = "status_disallowed_field"
+            repairable = False
+        elif "applicator-owned" in message:
+            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+            code = "applicator_owned_metadata"
+            repairable = False
+        elif "continuation_update" in message:
+            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+            code = "invalid_continuation_update"
+            repairable = False
+
+        failures.append(_failure(failure_class, code, message, repairable=repairable))
+
+    return failures

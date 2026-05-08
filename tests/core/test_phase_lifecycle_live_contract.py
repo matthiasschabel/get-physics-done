@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from gpd.adapters import get_adapter
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.cli import app
+from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.state import default_state_dict, generate_state_markdown
 from gpd.core.suggest import suggest_next
 from tests.runtime_install_helpers import seed_complete_runtime_install
@@ -166,7 +167,50 @@ def test_apply_return_updates_rejects_report_without_gpd_return_without_mutating
     payload = json.loads(result.output)
     assert payload["passed"] is False
     assert payload["errors"] == ["No gpd_return YAML block found"]
+    assert payload["primary_failure_class"] == "return_missing"
+    assert payload["failure_classes"] == ["return_missing"]
     assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
+
+
+def test_checkpoint_intent_core_apply_updates_exposes_bounded_segment_resume(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Executing", summaries=1)
+    resume_file = phase_dir / ".continue-here.md"
+    resume_file.write_text("Resume from first-result checkpoint.\n", encoding="utf-8")
+    return_file = phase_dir / "02-02-CHECKPOINT.md"
+    return_file.write_text(
+        "# Checkpoint\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: checkpoint\n"
+        "  files_written: []\n"
+        "  issues: []\n"
+        "  next_actions: [gpd:resume-work]\n"
+        "  phase: \"02\"\n"
+        "  plan: \"02\"\n"
+        "  checkpoint_intent:\n"
+        "    checkpoint_reason: first_result_gate\n"
+        "    awaiting: user_review\n"
+        "    first_result_gate_pending: true\n"
+        "    downstream_locked: true\n"
+        "```\n",
+        encoding="utf-8",
+    )
+
+    apply_result = cmd_apply_return_updates(
+        tmp_path,
+        return_file,
+        checkpoint_resume_file="GPD/phases/02-analysis/.continue-here.md",
+    )
+
+    assert apply_result.passed is True
+    assert apply_result.applied_continuation_operations == ["set_bounded_segment"]
+    resume_result = RUNNER.invoke(app, ["--raw", "--cwd", str(tmp_path), "init", "resume"])
+    assert resume_result.exit_code == 0, resume_result.output
+    payload = json.loads(resume_result.output)
+    assert payload["active_resume_kind"] == "bounded_segment"
+    assert payload["active_resume_pointer"] == "GPD/phases/02-analysis/.continue-here.md"
+    assert payload["active_bounded_segment"]["checkpoint_reason"] == "first_result_gate"
+    assert payload["active_bounded_segment"]["first_result_gate_pending"] is True
 
 
 @pytest.mark.parametrize("report_status", ["gaps_found", "human_needed", "expert_needed"])

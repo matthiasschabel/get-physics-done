@@ -18,6 +18,7 @@ import asyncio
 import dataclasses
 import glob
 import hashlib
+import importlib
 import inspect
 import json
 import logging
@@ -12681,6 +12682,226 @@ def _load_return_skeleton_builder() -> Callable[..., object]:
     return build_gpd_return_skeleton
 
 
+def _mapping_payload(raw_payload: object, *, label: str) -> dict[str, object]:
+    if hasattr(raw_payload, "model_dump"):
+        payload = raw_payload.model_dump(mode="json", by_alias=True)
+    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
+        payload = dataclasses.asdict(raw_payload)
+    else:
+        payload = raw_payload
+    if not isinstance(payload, Mapping):
+        raise GPDError(f"{label} must return a mapping")
+    return dict(payload)
+
+
+def _load_return_classifier() -> Callable[..., object] | None:
+    """Load the optional read-only return classifier when Worker A has landed."""
+
+    for module_name in ("gpd.core.return_repair_classifier", "gpd.core.return_classification"):
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError as exc:
+            if exc.name == module_name:
+                continue
+            raise
+        for attr_name in ("classify_gpd_return_markdown", "classify_gpd_return_repair", "classify_return_markdown"):
+            classifier = getattr(module, attr_name, None)
+            if callable(classifier):
+                return classifier
+    return None
+
+
+def _fallback_return_failure(error: str) -> tuple[str, str, bool]:
+    normalized = error.casefold()
+    if "no gpd_return yaml block" in normalized:
+        return "return_missing", "missing_gpd_return_block", True
+    if "yaml parse error" in normalized:
+        return "return_malformed_repairable", "malformed_yaml", True
+    if "missing required field" in normalized:
+        return "return_malformed_repairable", "missing_required_field", True
+    if "canonical lowercase spelling" in normalized:
+        return "return_malformed_repairable", "invalid_status_case", True
+    if "invalid status" in normalized:
+        return "return_malformed_repairable", "invalid_status", True
+    if "unknown gpd_return top-level field" in normalized:
+        return "return_malformed_repairable", "unknown_top_level_field", True
+    if "applicator-owned" in normalized:
+        return "return_malformed_blocking", "applicator_owned_metadata", False
+    if "does not allow gpd_return field" in normalized:
+        return "return_malformed_blocking", "status_disallows_field", False
+    return "return_malformed_repairable", "invalid_gpd_return", True
+
+
+def _fallback_return_classification(content: str) -> dict[str, object]:
+    """Small CLI fallback until the core return classifier module is available."""
+
+    from gpd.core.return_contract import validate_gpd_return_markdown
+
+    validation = validate_gpd_return_markdown(content)
+    if validation.passed:
+        status = validation.envelope.status if validation.envelope is not None else None
+        return {
+            "passed": True,
+            "safe_to_apply": False,
+            "status": status,
+            "primary_failure_class": "none",
+            "primary_classification": "valid",
+            "failure_classes": [],
+            "failures": [],
+            "errors": [],
+            "warnings": list(validation.warnings),
+            "fields": validation.fields,
+            "mutated": False,
+            "mutates": False,
+        }
+
+    failures: list[dict[str, object]] = []
+    failure_classes: list[str] = []
+    for error in validation.errors:
+        failure_class, code, repairable = _fallback_return_failure(error)
+        if failure_class not in failure_classes:
+            failure_classes.append(failure_class)
+        failures.append(
+            {
+                "failure_class": failure_class,
+                "code": code,
+                "message": error,
+                "repairable": repairable,
+            }
+        )
+
+    primary = failure_classes[0] if failure_classes else "return_malformed_repairable"
+    return {
+        "passed": False,
+        "safe_to_apply": False,
+        "status": None,
+        "primary_failure_class": primary,
+        "primary_classification": primary,
+        "failure_classes": failure_classes or [primary],
+        "failures": failures,
+        "errors": list(validation.errors),
+        "warnings": list(validation.warnings),
+        "fields": validation.fields,
+        "mutated": False,
+        "mutates": False,
+    }
+
+
+def _classify_return_markdown(content: str, *, project_root: Path) -> dict[str, object]:
+    classifier = _load_return_classifier()
+    if classifier is None:
+        return _fallback_return_classification(content)
+
+    kwargs: dict[str, object] = {}
+    if _callable_accepts_kwarg(classifier, "project_root"):
+        kwargs["project_root"] = project_root
+    elif _callable_accepts_kwarg(classifier, "cwd"):
+        kwargs["cwd"] = project_root
+    if _callable_accepts_kwarg(classifier, "require_status"):
+        kwargs["require_status"] = None
+    raw_payload = classifier(content, **kwargs)
+    payload = _mapping_payload(raw_payload, label="return classifier")
+    if "passed" not in payload and isinstance(payload.get("valid"), bool):
+        payload["passed"] = payload["valid"]
+    if "safe_to_apply" not in payload and isinstance(payload.get("accepted_for_success"), bool):
+        payload["safe_to_apply"] = payload["accepted_for_success"]
+    if "errors" not in payload and isinstance(payload.get("original_errors"), list):
+        payload["errors"] = payload["original_errors"]
+    if "warnings" not in payload and isinstance(payload.get("original_warnings"), list):
+        payload["warnings"] = payload["original_warnings"]
+    if "primary_classification" not in payload and isinstance(payload.get("primary_class"), str):
+        payload["primary_classification"] = payload["primary_class"]
+    payload.setdefault("mutated", False)
+    payload.setdefault("mutates", False)
+    return payload
+
+
+def _return_classification_passed(payload: Mapping[str, object]) -> bool:
+    for key in ("passed", "valid", "ok"):
+        value = payload.get(key)
+        if isinstance(value, bool):
+            return value
+    return True
+
+
+def _load_return_profiles_provider() -> Callable[..., object] | None:
+    try:
+        module = importlib.import_module("gpd.core.return_skeleton")
+    except ImportError as exc:
+        if exc.name == "gpd.core.return_skeleton":
+            return None
+        raise
+    provider = getattr(module, "list_gpd_return_profiles", None)
+    if not callable(provider):
+        return None
+    return provider
+
+
+def _fallback_return_profiles(*, role: str | None, status: str | None) -> dict[str, object]:
+    from gpd.core.return_skeleton import GPD_RETURN_ROLE_PROFILES, RETURN_STATUS_ORDER
+
+    normalized_role = role.strip().lower() if role is not None else None
+    if normalized_role == "":
+        raise ValueError("return profiles --role must be a non-empty string")
+    if normalized_role is not None and normalized_role not in GPD_RETURN_ROLE_PROFILES:
+        roles = ", ".join(sorted(GPD_RETURN_ROLE_PROFILES))
+        raise ValueError(f"unknown gpd_return role profile '{role}'. Must be one of: {roles}")
+
+    normalized_status = status.strip().lower() if status is not None else None
+    if normalized_status == "":
+        raise ValueError("return profiles --status must be a non-empty string")
+    if normalized_status is not None and normalized_status not in RETURN_STATUS_ORDER:
+        statuses = ", ".join(RETURN_STATUS_ORDER)
+        raise ValueError(f"unknown gpd_return status '{status}'. Must be one of: {statuses}")
+
+    selected_statuses = [normalized_status] if normalized_status is not None else list(RETURN_STATUS_ORDER)
+    profiles: list[dict[str, object]] = []
+    for profile_id in sorted(GPD_RETURN_ROLE_PROFILES):
+        if normalized_role is not None and profile_id != normalized_role:
+            continue
+        profile = GPD_RETURN_ROLE_PROFILES[profile_id]
+        profiles.append(
+            {
+                "profile_id": profile.profile_id,
+                "agent_names": list(profile.agent_names),
+                "required_fields": list(profile.required_fields),
+                "local_callsite_fields": list(profile.local_callsite_fields),
+                "statuses": {
+                    status_id: {
+                        "role_fields": list(profile.role_fields_by_status[status_id]),
+                        "default_render_fields": list(profile.default_render_fields_by_status[status_id]),
+                    }
+                    for status_id in selected_statuses
+                },
+            }
+        )
+
+    return {
+        "profiles": profiles,
+        "roles": sorted(GPD_RETURN_ROLE_PROFILES),
+        "statuses": list(RETURN_STATUS_ORDER),
+        "mutated": False,
+        "mutates": False,
+    }
+
+
+def _return_profiles_payload(*, role: str | None, status: str | None) -> dict[str, object]:
+    provider = _load_return_profiles_provider()
+    if provider is None:
+        return _fallback_return_profiles(role=role, status=status)
+
+    kwargs: dict[str, object] = {}
+    if role is not None or _callable_accepts_kwarg(provider, "role"):
+        kwargs["role"] = role
+    if status is not None or _callable_accepts_kwarg(provider, "status"):
+        kwargs["status"] = status
+    raw_payload = provider(**kwargs)
+    payload = _mapping_payload(raw_payload, label="return profiles provider")
+    payload.setdefault("mutated", False)
+    payload.setdefault("mutates", False)
+    return payload
+
+
 def _normalize_return_skeleton_format(output_format: str) -> str:
     normalized = output_format.strip().lower()
     if normalized not in {"markdown", "yaml", "json"}:
@@ -12802,6 +13023,44 @@ def return_skeleton_cmd(
         _error(str(exc))
     except GPDError as exc:
         _error(str(exc))
+
+
+@return_app.command("classify")
+def return_classify_cmd(
+    input_path: str = typer.Argument(..., help="Path to a file containing a gpd_return YAML block, or '-' for stdin"),
+) -> None:
+    """Classify one child-return envelope without repairing or mutating it."""
+
+    launch_cwd = _get_cwd()
+    project_root = _read_only_project_scoped_cwd(launch_cwd)
+    if input_path == "-":
+        content = sys.stdin.read()
+    else:
+        resolved = _resolve_return_file_path(input_path, launch_cwd=launch_cwd, project_root=project_root)
+        _, content = _load_text_document_or_error(str(resolved))
+
+    try:
+        payload = _classify_return_markdown(content, project_root=project_root)
+    except (GPDError, ValueError) as exc:
+        _error(str(exc))
+
+    _output(payload)
+    if not _return_classification_passed(payload):
+        raise typer.Exit(code=1)
+
+
+@return_app.command("profiles")
+def return_profiles_cmd(
+    role: str | None = typer.Option(None, "--role", help="Limit output to one return role profile."),
+    status: str | None = typer.Option(None, "--status", help="Limit status metadata to one gpd_return status."),
+) -> None:
+    """List read-only role/profile metadata for gpd_return skeletons."""
+
+    try:
+        payload = _return_profiles_payload(role=role, status=status)
+    except (GPDError, ValueError) as exc:
+        _error(str(exc))
+    _output(payload)
 
 
 def _proof_redteam_output_target(output_path: str | None) -> Path:
@@ -13903,6 +14162,11 @@ def validate_handoff_artifacts_cmd(
         "--fresh-after",
         help="ISO 8601 timestamp; checked artifacts must be modified at or after this time.",
     ),
+    classify: bool = typer.Option(
+        False,
+        "--classify",
+        help="Include structured failure classes when the core handoff validator supports them.",
+    ),
 ) -> None:
     """Validate that a spawned-agent return names real, fresh, in-scope artifacts."""
     from gpd.core.handoff_artifacts import parse_fresh_after, validate_handoff_artifacts_markdown
@@ -13919,17 +14183,21 @@ def validate_handoff_artifacts_cmd(
     except ValueError as exc:
         _error(str(exc))
 
-    result = validate_handoff_artifacts_markdown(
-        project_root,
-        content,
-        expected_artifacts=expected or [],
-        expected_globs=expected_glob or [],
-        allowed_roots=allowed_root or [],
-        required_suffixes=required_suffix or [],
-        require_files_written=require_files_written,
-        require_status=require_status,
-        fresh_after=freshness_cutoff,
-    )
+    kwargs: dict[str, object] = {
+        "expected_artifacts": expected or [],
+        "expected_globs": expected_glob or [],
+        "allowed_roots": allowed_root or [],
+        "required_suffixes": required_suffix or [],
+        "require_files_written": require_files_written,
+        "require_status": require_status,
+        "fresh_after": freshness_cutoff,
+    }
+    if classify and _callable_accepts_kwarg(validate_handoff_artifacts_markdown, "classify"):
+        kwargs["classify"] = True
+    elif classify and _callable_accepts_kwarg(validate_handoff_artifacts_markdown, "include_classification"):
+        kwargs["include_classification"] = True
+
+    result = validate_handoff_artifacts_markdown(project_root, content, **kwargs)
     _output(result)
     if not result.passed:
         raise typer.Exit(code=1)
@@ -14234,6 +14502,11 @@ def validate_return(
 @app.command("apply-return-updates")
 def apply_return_updates(
     file_path: str = typer.Argument(..., help="Path to file containing gpd_return YAML block"),
+    checkpoint_resume_file: str | None = typer.Option(
+        None,
+        "--checkpoint-resume-file",
+        help="Parent-owned project-relative resume file for checkpoint-intent application.",
+    ),
 ) -> None:
     """Validate one gpd_return envelope and apply its durable child-return updates."""
     from gpd.core.commands import cmd_apply_return_updates
@@ -14241,7 +14514,12 @@ def apply_return_updates(
     launch_cwd = _get_cwd()
     project_root = _project_scoped_cwd(launch_cwd)
     resolved = _resolve_return_file_path(file_path, launch_cwd=launch_cwd, project_root=project_root)
-    result = cmd_apply_return_updates(project_root, resolved)
+    kwargs: dict[str, object] = {}
+    if checkpoint_resume_file is not None:
+        if not _callable_accepts_kwarg(cmd_apply_return_updates, "checkpoint_resume_file"):
+            _error("--checkpoint-resume-file requires core cmd_apply_return_updates checkpoint_resume_file support")
+        kwargs["checkpoint_resume_file"] = checkpoint_resume_file
+    result = cmd_apply_return_updates(project_root, resolved, **kwargs)
     _output(result)
     if not result.passed:
         raise typer.Exit(code=1)

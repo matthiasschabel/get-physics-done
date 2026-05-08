@@ -51,6 +51,16 @@ def test_unknown_command_is_display_only() -> None:
     assert "unrecognized_command_display_only" in hint["notes"]
 
 
+def test_structural_verify_phase_route_is_not_runtime_verify_work_hint() -> None:
+    hint = build_command_run_hint(command="gpd verify phase 02", source="test", action="verify-work", phase="02")
+
+    assert hint is not None
+    assert hint["kind"] == KIND_UNKNOWN_DISPLAY_ONLY
+    assert hint["execution"] == "not_executed"
+    assert hint["requires_user_initiated_runtime_command"] is False
+    assert "unrecognized_command_display_only" in hint["notes"]
+
+
 def test_shell_metacharacters_are_not_classified_as_executable_runtime_labels() -> None:
     command = f"{_runtime_command('verify-work', '02')} && echo should-not-run"
 

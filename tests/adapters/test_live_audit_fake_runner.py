@@ -12,7 +12,7 @@ import pytest
 import tests.helpers.live_audit_harness.fake_runner as fake_runner
 from tests.helpers.live_audit_harness.events import extract_transcript_features, load_jsonl_events
 from tests.helpers.live_audit_harness.fake_runner import GuardedWorkspace, run_fake_scenario
-from tests.helpers.live_audit_harness.scorer import RESULT_GREEN, score_behavior
+from tests.helpers.live_audit_harness.scorer import RESULT_GREEN, RESULT_RED, score_behavior
 
 
 def _repo_roots(tmp_path: Path) -> tuple[Path, Path]:
@@ -143,6 +143,47 @@ def test_run_fake_scenario_evidence_scores_against_required_artifacts(tmp_path: 
 
     assert score.result == RESULT_GREEN
     assert score.findings == ()
+
+
+def test_run_fake_scenario_preserves_lifecycle_evidence_overrides_for_scorer(tmp_path: Path) -> None:
+    repo_root, repo_tmp = _repo_roots(tmp_path)
+    row = SimpleNamespace(
+        row_id="PHASE4-APPLICATOR-ONLY",
+        child_handoff_required=True,
+        requires_child_report_evidence=True,
+        requires_artifact_gate=True,
+        required_child_artifacts=("GPD/phases/02/02-SUMMARY.md",),
+        final_text="The apply-return-updates output is sufficient: the child report is valid and complete.",
+        evidence_packet_overrides={
+            "applicator_result": {
+                "status": "completed",
+                "files_written": ("GPD/phases/02/02-SUMMARY.md",),
+            }
+        },
+    )
+
+    result = run_fake_scenario(row, repo_root=repo_root, output_root=repo_tmp / "phase4")
+
+    evidence = json.loads(result.evidence_packet_path.read_text(encoding="utf-8"))
+    assert evidence["applicator_result"]["files_written"] == ["GPD/phases/02/02-SUMMARY.md"]
+    assert evidence["provider_launched"] is False
+    assert evidence["subprocess_invoked"] is False
+
+    features = extract_transcript_features(
+        row.row_id,
+        result.final_path.read_text(encoding="utf-8"),
+        load_jsonl_events(result.normalized_events_path),
+    )
+    score = score_behavior(
+        row,
+        features,
+        json.loads(result.status_path.read_text(encoding="utf-8")),
+        json.loads(result.write_classification_path.read_text(encoding="utf-8")),
+        evidence,
+    )
+
+    assert score.result == RESULT_RED
+    assert "child_report.applicator_output_only" in {finding.finding_id for finding in score.findings}
 
 
 def test_guarded_workspace_refuses_absolute_escape(tmp_path: Path) -> None:

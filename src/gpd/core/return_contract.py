@@ -25,10 +25,12 @@ from pydantic import (
     ValidationError as PydanticValidationError,
 )
 
+from gpd.core.checkpoint_intent import GpdReturnCheckpointIntent
 from gpd.core.continuation import ContinuationBoundedSegment, ContinuationHandoff
 
 __all__ = [
     "GPD_RETURN_BLOCK_RE",
+    "GpdReturnCheckpointIntent",
     "GpdReturnContinuationBoundedSegment",
     "GpdReturnContinuationHandoff",
     "GpdReturnContinuationUpdate",
@@ -242,6 +244,7 @@ RETURN_ENVELOPE_STATUS_CONTRACTS: dict[str, GpdReturnStatusContract] = {
             "blocked_plans",
             "blockers",
             "continuation_update",
+            "checkpoint_intent",
             "checkpoint_hashes",
         ),
     ),
@@ -278,6 +281,7 @@ class GpdReturnEnvelope(BaseModel):
     blocked_plans: list[StrictStr] | None = None
     blockers: list[object] | None = None
     continuation_update: GpdReturnContinuationUpdate | None = None
+    checkpoint_intent: GpdReturnCheckpointIntent | None = None
     conventions_used: dict[str, object] | None = None
     checkpoint_hashes: list[dict[str, object]] | None = None
 

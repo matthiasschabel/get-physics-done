@@ -20,6 +20,10 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 
+from gpd.core.checkpoint_intent import (
+    CheckpointIntentResolutionContext,
+    resolve_checkpoint_intent_bounded_segment,
+)
 from gpd.core.constants import ProjectLayout
 from gpd.core.continuation import (
     RESUMABLE_SEGMENT_STATUSES,
@@ -49,9 +53,13 @@ from gpd.core.state import (
 from gpd.core.utils import atomic_write, file_lock
 
 __all__ = [
+    "APPLICATOR_FAILED_FAILURE_CLASS",
     "ApplyChildReturnResult",
+    "ApplyChildReturnFailure",
     "SUPPORTED_CONTINUATION_UPDATE_FIELDS",
     "SUPPORTED_STATE_UPDATE_FIELDS",
+    "RETURN_MALFORMED_BLOCKING_FAILURE_CLASS",
+    "RETURN_MISSING_FAILURE_CLASS",
     "apply_child_return_updates",
 ]
 
@@ -63,6 +71,9 @@ _CHILD_RETURN_BOUNDED_SEGMENT_RECORDED_BY = "apply_child_return_updates"
 _CHECKPOINT_BOUNDED_SEGMENT_RESUME_FILE_REQUIRED_ERROR = (
     "set_bounded_segment: checkpoint returns must include continuation_update.bounded_segment.resume_file"
 )
+APPLICATOR_FAILED_FAILURE_CLASS = "applicator_failed"
+RETURN_MISSING_FAILURE_CLASS = "return_missing"
+RETURN_MALFORMED_BLOCKING_FAILURE_CLASS = "return_malformed_blocking"
 
 
 @dataclass(frozen=True)
@@ -104,11 +115,23 @@ class _BlockerPayload(BaseModel):
     text: str
 
 
+class ApplyChildReturnFailure(BaseModel):
+    """Structured child-return application failure diagnostic."""
+
+    failure_class: str
+    code: str
+    message: str
+    path: str | None = None
+    command: str | None = None
+    repairable: bool = False
+
+
 class ApplyChildReturnResult(BaseModel):
     """Outcome of applying the durable subset of one child return."""
 
     passed: bool
     status: str
+    mutated: bool = False
     files_written: list[str] = Field(default_factory=list)
     applied_state_operations: list[str] = Field(default_factory=list)
     applied_continuation_operations: list[str] = Field(default_factory=list)
@@ -117,9 +140,17 @@ class ApplyChildReturnResult(BaseModel):
     contract_updates: dict[str, object] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    primary_failure_class: str | None = None
+    failure_classes: list[str] = Field(default_factory=list)
+    failures: list[ApplyChildReturnFailure] = Field(default_factory=list)
 
 
-def apply_child_return_updates(cwd: Path, envelope: GpdReturnEnvelope) -> ApplyChildReturnResult:
+def apply_child_return_updates(
+    cwd: Path,
+    envelope: GpdReturnEnvelope,
+    *,
+    checkpoint_resume_file: str | Path | None = None,
+) -> ApplyChildReturnResult:
     """Apply the durable shared-state subset of a validated child return."""
 
     errors: list[str] = []
@@ -133,6 +164,13 @@ def apply_child_return_updates(cwd: Path, envelope: GpdReturnEnvelope) -> ApplyC
     decisions = _validate_decisions(envelope.decisions, errors)
     blockers = _validate_blockers(envelope.blockers, errors)
     continuation_update = _validate_continuation_update(envelope.continuation_update, errors)
+    continuation_update = _resolve_checkpoint_intent_continuation_update(
+        cwd,
+        envelope,
+        continuation_update,
+        checkpoint_resume_file=checkpoint_resume_file,
+        errors=errors,
+    )
     _validate_continuation_update_semantics(cwd, envelope.status, continuation_update, errors)
     contract_updates = dict(envelope.contract_updates or {})
 
@@ -143,6 +181,7 @@ def apply_child_return_updates(cwd: Path, envelope: GpdReturnEnvelope) -> ApplyC
             files_written=list(envelope.files_written),
             contract_updates=contract_updates,
             errors=errors,
+            **_failure_fields(errors, failure_class=APPLICATOR_FAILED_FAILURE_CLASS),
         )
 
     state_snapshot = _capture_state_mutation_snapshot(cwd)
@@ -324,9 +363,19 @@ def apply_child_return_updates(cwd: Path, envelope: GpdReturnEnvelope) -> ApplyC
         applied_blockers = 0
 
     passed = not errors
+    mutated = bool(
+        passed
+        and (
+            _has_mutating_operations(applied_state_operations)
+            or _has_mutating_operations(applied_continuation_operations)
+            or applied_decisions
+            or applied_blockers
+        )
+    )
     return ApplyChildReturnResult(
         passed=passed,
         status=envelope.status if passed else "failed",
+        mutated=mutated,
         files_written=list(envelope.files_written),
         applied_state_operations=applied_state_operations,
         applied_continuation_operations=applied_continuation_operations,
@@ -335,6 +384,7 @@ def apply_child_return_updates(cwd: Path, envelope: GpdReturnEnvelope) -> ApplyC
         contract_updates=contract_updates,
         errors=errors,
         warnings=warnings,
+        **({} if passed else _failure_fields(errors, failure_class=APPLICATOR_FAILED_FAILURE_CLASS)),
     )
 
 
@@ -394,6 +444,41 @@ def _validate_continuation_update(raw: object, errors: list[str]) -> GpdReturnCo
     except PydanticValidationError as exc:
         errors.extend(_format_validation_errors(exc, prefix="continuation_update"))
         return None
+
+
+def _resolve_checkpoint_intent_continuation_update(
+    cwd: Path,
+    envelope: GpdReturnEnvelope,
+    continuation_update: GpdReturnContinuationUpdate | None,
+    *,
+    checkpoint_resume_file: str | Path | None,
+    errors: list[str],
+) -> GpdReturnContinuationUpdate | None:
+    if envelope.status != "checkpoint" or envelope.checkpoint_intent is None:
+        return continuation_update
+    if continuation_update is not None and "bounded_segment" in continuation_update.model_fields_set:
+        return continuation_update
+
+    bounded_segment, resolution_errors = resolve_checkpoint_intent_bounded_segment(
+        intent=envelope.checkpoint_intent,
+        context=CheckpointIntentResolutionContext(checkpoint_resume_file=checkpoint_resume_file),
+        envelope_phase=envelope.phase,
+        envelope_plan=envelope.plan,
+    )
+    if resolution_errors:
+        errors.extend(resolution_errors)
+        return continuation_update
+    if bounded_segment is None:
+        errors.append("checkpoint_intent: failed to resolve bounded_segment")
+        return continuation_update
+
+    payload: dict[str, object] = {}
+    if continuation_update is not None:
+        payload.update(continuation_update.model_dump(mode="python", exclude_unset=True))
+    payload["bounded_segment"] = GpdReturnContinuationBoundedSegment.model_validate(
+        bounded_segment.model_dump(mode="python", exclude_none=True)
+    )
+    return GpdReturnContinuationUpdate.model_validate(payload)
 
 
 def _with_applicator_owned_bounded_segment_metadata(
@@ -669,6 +754,35 @@ def _is_noop_reason(reason: str | None) -> bool:
         or normalized == "last_plan"
         or "no session fields found" in normalized
     )
+
+
+def _failure_fields(errors: list[str], *, failure_class: str) -> dict[str, object]:
+    if not errors:
+        return {}
+    return {
+        "primary_failure_class": failure_class,
+        "failure_classes": [failure_class],
+        "failures": [
+            ApplyChildReturnFailure(
+                failure_class=failure_class,
+                code=_failure_code(error, fallback=failure_class),
+                message=error,
+                repairable=False,
+            )
+            for error in errors
+        ],
+    }
+
+
+def _has_mutating_operations(operations: list[str]) -> bool:
+    return any(not operation.endswith(":noop") for operation in operations)
+
+
+def _failure_code(error: str, *, fallback: str) -> str:
+    prefix = error.split(":", 1)[0].strip().lower()
+    if not prefix:
+        return fallback
+    return "".join(character if character.isalnum() else "_" for character in prefix).strip("_") or fallback
 
 
 def _format_validation_errors(exc: PydanticValidationError, *, prefix: str) -> list[str]:

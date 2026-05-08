@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,12 +20,17 @@ from tests.helpers.live_audit_harness.scorer import (
     score_behavior,
 )
 
+PHASE4_PERSONA_FIXTURE = Path(__file__).parents[1] / "fixtures" / "live_audit" / "phase4_lifecycle_personas.json"
+
 
 @dataclass(frozen=True, slots=True)
 class RowStub:
     row_id: str = "ROW-1"
     child_handoff_required: bool = False
     required_artifacts: tuple[str, ...] = ()
+    required_child_artifacts: tuple[str, ...] = ()
+    requires_artifact_gate: bool = False
+    requires_child_report_evidence: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +65,12 @@ def _score(
 
 def _finding_ids(score: BehaviorScore) -> set[str]:
     return {finding.finding_id for finding in score.findings}
+
+
+def _phase4_persona_cases() -> tuple[dict[str, object], ...]:
+    payload = json.loads(PHASE4_PERSONA_FIXTURE.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "phase4.lifecycle-persona-regressions.v1"
+    return tuple(payload["cases"])
 
 
 def test_behavior_score_to_payload_is_json_ready() -> None:
@@ -268,3 +281,63 @@ def test_missing_required_artifacts_returns_invalid_evidence() -> None:
     assert score.result == RESULT_INVALID
     assert score.max_severity == "S0"
     assert _finding_ids(score) == {"invalid_evidence.missing_required_artifacts"}
+
+
+@pytest.mark.parametrize("case", _phase4_persona_cases(), ids=lambda case: str(case["case_id"]))
+def test_phase4_lifecycle_persona_regressions_score_red(case: dict[str, object]) -> None:
+    row_payload = dict(case.get("row", {}))
+    row = SimpleNamespace(row_id=f"PHASE4-{case['case_id']}", **row_payload)
+
+    score = _score(
+        row=row,
+        features=FeaturesStub(visible_final_text=str(case["final_text"])),
+        evidence_packet=dict(case.get("evidence_packet", {})),
+    )
+
+    assert score.result == RESULT_RED
+    assert set(case["expected_findings"]).issubset(_finding_ids(score))
+
+
+def test_phase4_lifecycle_persona_accepts_full_child_report_and_artifact_gate() -> None:
+    required_artifact = "GPD/phases/02/02-SUMMARY.md"
+    score = _score(
+        row=RowStub(
+            child_handoff_required=True,
+            requires_child_report_evidence=True,
+            requires_artifact_gate=True,
+            required_child_artifacts=(required_artifact,),
+        ),
+        features=FeaturesStub(visible_final_text="The child report is valid and complete."),
+        evidence_packet={
+            "child_reports": (
+                {
+                    "path": "tmp/child-report.md",
+                    "has_embedded_gpd_return": True,
+                },
+            ),
+            "child_returns": (
+                {
+                    "run_id": "child-3",
+                    "status": "completed",
+                    "owner": "executor",
+                    "files_written": (required_artifact,),
+                },
+            ),
+            "child_artifact_gate": {
+                "status": "passed",
+                "checked_paths": (required_artifact,),
+            },
+        },
+    )
+
+    assert score.result == RESULT_GREEN
+    assert score.findings == ()
+
+
+def test_phase4_lifecycle_persona_allows_runtime_prefixed_verify_work() -> None:
+    score = _score(
+        features=FeaturesStub(visible_final_text="Next: `$gpd-verify-work 02` or `gpd:verify-work 02`."),
+    )
+
+    assert score.result == RESULT_GREEN
+    assert "command_surface.invalid_verify_work_command" not in _finding_ids(score)

@@ -2519,6 +2519,16 @@ class TestReturnSkeleton:
         assert parsed["fields"]["files_written"] == ["GPD/phases/01-test-phase/01-SUMMARY.md"]
         assert parsed["fields"]["next_actions"] == ["gpd validate-return RETURN-SKELETON.md"]
 
+    def test_return_profiles_raw_exposes_skeleton_registry(self, gpd_project: Path) -> None:
+        """Profile discovery should expose role/status metadata without writes."""
+        result = _invoke("--raw", "return", "profiles", "--role", "executor", "--status", "checkpoint")
+        parsed = json.loads(result.output)
+
+        assert parsed["mutated"] is False
+        assert [profile["profile_id"] for profile in parsed["profiles"]] == ["executor"]
+        assert set(parsed["profiles"][0]["statuses"]) == {"checkpoint"}
+        assert "blockers" in parsed["profiles"][0]["statuses"]["checkpoint"]["role_fields"]
+
 
 class TestValidateReturn:
     def test_validate_return_valid(self, gpd_project: Path) -> None:
@@ -2536,6 +2546,28 @@ class TestValidateReturn:
         parsed = json.loads(result.output)
         assert parsed["passed"] is True
         assert len(parsed["errors"]) == 0
+
+    def test_return_classify_raw_valid_file_is_read_only(self, gpd_project: Path) -> None:
+        """The classifier should report a valid envelope without mutating project state."""
+        state_path = gpd_project / "GPD" / "STATE.md"
+        before = state_path.read_text(encoding="utf-8")
+        return_file = gpd_project / "valid_classify_return.md"
+        return_file.write_text(
+            "# Summary\n\n```yaml\ngpd_return:\n"
+            "  status: completed\n"
+            '  files_written: ["GPD/phases/01-test-phase/01-SUMMARY.md"]\n'
+            "  issues: []\n"
+            '  next_actions: ["gpd validate-return valid_classify_return.md"]\n'
+            "  duration_seconds: 1\n```\n",
+            encoding="utf-8",
+        )
+
+        result = _invoke("--raw", "return", "classify", str(return_file))
+        parsed = json.loads(result.output)
+        assert parsed["passed"] is True
+        assert parsed["status"] == "completed"
+        assert parsed["mutated"] is False
+        assert state_path.read_text(encoding="utf-8") == before
 
     def test_validate_return_missing_fields(self, gpd_project: Path) -> None:
         """A file with missing required fields should fail."""
@@ -2740,6 +2772,42 @@ class TestValidateReturn:
         assert parsed["status"] == "failed"
         assert any("state_updates" in error and "unexpected_operation" in error for error in parsed["errors"])
         assert state_path.read_text(encoding="utf-8") == before
+
+    def test_validate_handoff_artifacts_raw_failure_classes_when_available(self, gpd_project: Path) -> None:
+        """Assert handoff failure classes when Worker B's classifier fields are present."""
+        result = runner.invoke(
+            app,
+            [
+                "--raw",
+                "validate",
+                "handoff-artifacts",
+                "-",
+                "--classify",
+                "--allowed-root",
+                "GPD/phases/01-test-phase",
+                "--required-suffix=-SUMMARY.md",
+                "--require-files-written",
+            ],
+            input=(
+                "```yaml\n"
+                "gpd_return:\n"
+                "  status: completed\n"
+                "  files_written:\n"
+                '    - "GPD/phases/01-test-phase/missing-SUMMARY.md"\n'
+                "  issues: []\n"
+                "  next_actions: []\n"
+                "```\n"
+            ),
+            catch_exceptions=False,
+        )
+
+        payload = json.loads(result.output)
+        assert result.exit_code == 1
+        assert payload["passed"] is False
+        if not any(key in payload for key in ("failure_classes", "finding_codes", "failures")):
+            pytest.skip("handoff artifact failure classes are not available in this core checkout")
+        assert "artifact_missing" in json.dumps(payload)
+        assert payload.get("mutated", payload.get("mutates")) is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════

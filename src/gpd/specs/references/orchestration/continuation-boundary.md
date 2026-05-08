@@ -4,7 +4,7 @@ A spawned `task()` run is one-shot. If it cannot finish without user input, huma
 
 The orchestrator owns the pause: present the checkpoint, collect the response, record durable continuation state when needed, and start a fresh continuation handoff with explicit state plus the user response.
 
-Checkpoint rules: keep domain content in the returned body or extended fields; name files in `files_written` only after they exist; Use `files_written: []` when the checkpoint intentionally defers writes; include `continuation_update.bounded_segment.resume_file` when durable resume is required; if expected artifacts are named, verify them on disk before accepting success or continuing.
+Checkpoint rules: keep domain content in the returned body or extended fields; name files in `files_written` only after they exist; use `files_written: []` when the checkpoint intentionally defers writes. Include durable bounded-segment resume details only when the child prompt explicitly owns that callsite detail; otherwise return child-owned `checkpoint_intent` with the reason, waiting condition, and cursor/gate hints. `checkpoint_intent` is not durable authority until the parent/applicator supplies parent-owned resume context, result/session identifiers, and timestamps, then resolves and persists a bounded segment. If expected artifacts are named, verify them on disk before accepting success or continuing.
 
 Fresh continuation rules: verify resume preconditions, check named artifacts, perform only approved follow-up work, and return a fresh typed `gpd_return` envelope.
 

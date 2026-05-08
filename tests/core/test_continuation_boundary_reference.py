@@ -27,8 +27,10 @@ def test_continuation_boundary_reference_defines_the_one_shot_contract() -> None
     assert "returns a typed `gpd_return.status: checkpoint` envelope and stops" in content
     assert "must not wait for the user" in content
     assert "start a fresh continuation handoff" in content
-    assert "Use `files_written: []` when the checkpoint intentionally defers writes" in content
-    assert "continuation_update.bounded_segment.resume_file" in content
+    assert "use `files_written: []` when the checkpoint intentionally defers writes" in content
+    assert "Include durable bounded-segment resume details only when the child prompt explicitly owns" in content
+    assert "return child-owned `checkpoint_intent`" in content
+    assert "`checkpoint_intent` is not durable authority until the parent/applicator supplies parent-owned resume context" in content
     assert "verify them on disk" in content
 
 

@@ -19,7 +19,13 @@ from gpd.contracts import (
     parse_comparison_verdicts_data_strict,
     parse_contract_results_data_artifact,
 )
-from gpd.core.child_return_application import ApplyChildReturnResult, apply_child_return_updates
+from gpd.core.child_return_application import (
+    RETURN_MALFORMED_BLOCKING_FAILURE_CLASS,
+    RETURN_MISSING_FAILURE_CLASS,
+    ApplyChildReturnFailure,
+    ApplyChildReturnResult,
+    apply_child_return_updates,
+)
 from gpd.core.constants import (
     PHASES_DIR_NAME,
     PLAN_SUFFIX,
@@ -824,7 +830,12 @@ def cmd_validate_return(file_path: Path) -> ValidateReturnResult:
 
 
 @instrument_gpd_function("commands.apply_return_updates")
-def cmd_apply_return_updates(cwd: Path, file_path: Path) -> ApplyChildReturnResult:
+def cmd_apply_return_updates(
+    cwd: Path,
+    file_path: Path,
+    *,
+    checkpoint_resume_file: str | Path | None = None,
+) -> ApplyChildReturnResult:
     """Validate and apply the durable subset of one ``gpd_return`` envelope."""
     content = safe_read_file(file_path)
     if content is None:
@@ -832,17 +843,35 @@ def cmd_apply_return_updates(cwd: Path, file_path: Path) -> ApplyChildReturnResu
 
     validation = validate_gpd_return_markdown(content)
     if not validation.passed or validation.envelope is None:
+        failure_class = _return_validation_failure_class(validation.errors)
         return ApplyChildReturnResult(
             passed=False,
             status="failed",
             errors=list(validation.errors),
             warnings=list(validation.warnings),
+            primary_failure_class=failure_class,
+            failure_classes=[failure_class],
+            failures=[
+                ApplyChildReturnFailure(
+                    failure_class=failure_class,
+                    code=failure_class,
+                    message=error,
+                    repairable=False,
+                )
+                for error in validation.errors
+            ],
         )
 
-    result = apply_child_return_updates(cwd, validation.envelope)
+    result = apply_child_return_updates(cwd, validation.envelope, checkpoint_resume_file=checkpoint_resume_file)
     if validation.warnings:
         result.warnings.extend(warning for warning in validation.warnings if warning not in result.warnings)
     return result
+
+
+def _return_validation_failure_class(errors: list[str]) -> str:
+    if any(error == "No gpd_return YAML block found" for error in errors):
+        return RETURN_MISSING_FAILURE_CLASS
+    return RETURN_MALFORMED_BLOCKING_FAILURE_CLASS
 
 
 _MISSING = object()

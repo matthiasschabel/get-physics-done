@@ -79,4 +79,3 @@ plan and load `{GPD_INSTALL_DIR}/references/planning/planner-tdd.md`.
 If the task needs credentials, licenses, cluster access, or other human-only
 setup, record that in `researcher_setup`. If a specialized tool is a hard
 execution prerequisite, declare it in `tool_requirements`.
-

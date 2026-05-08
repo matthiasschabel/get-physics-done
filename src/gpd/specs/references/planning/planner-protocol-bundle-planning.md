@@ -45,4 +45,3 @@ contract gate -> convention lock -> approximation/regime declaration
 - Preserve return-only ownership: roadmap updates and shared-state changes are
   returned through `gpd_return`, not silently written unless explicitly
   delegated.
-

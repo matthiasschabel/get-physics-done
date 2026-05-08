@@ -39,4 +39,3 @@ Multiple viable approaches remain:
 3. Capture and defer -> gpd:add-todo
 4. Stay on the main line -> plan the recommended perturbative approach only
 ```
-

@@ -26,4 +26,3 @@ canonical schema remains `phase-prompt.md` -> `plan-contract-schema.md` ->
   required by the workflow or contract.
 - Do not treat generic manuscript `claim` prose as equivalent to planner
   contract proof semantics.
-

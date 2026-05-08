@@ -95,4 +95,3 @@ Triggered by `<revision_context>`. This is targeted update mode.
 
 Do not rewrite whole plans for minor issues, add unnecessary tasks, break valid
 dependencies, or change conventions mid-stream.
-

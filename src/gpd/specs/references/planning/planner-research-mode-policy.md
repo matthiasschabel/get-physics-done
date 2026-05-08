@@ -60,4 +60,3 @@ Use for multi-phase projects where approach choice may evolve.
 
 Read `research_mode` from the planner handoff. If absent, default to
 `balanced`.
-

@@ -59,4 +59,3 @@ or acceptance tests.
 | Supervised | User approves each tangent decision before it becomes a branch or side investigation | Standard plus checkpoints | Focused and verified at each step |
 | Balanced | Broad search, but tangent choices are surfaced explicitly | Default research flow | Efficient execution with key checkpoints |
 | YOLO | Broad search inside approved scope; tangent choices still stay explicit | Fast auto research loop | Fast convergent execution |
-

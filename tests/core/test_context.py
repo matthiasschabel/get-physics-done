@@ -1726,7 +1726,7 @@ class TestInitExecutePhaseStagedWiring:
             calls.append(include_content)
             raise AssertionError("phase_classification should not scan reference artifacts")
 
-        monkeypatch.setattr("gpd.core.context._reference_artifact_payload", _record_artifact_payload)
+        monkeypatch.setattr(context_module, "_reference_artifact_payload", _record_artifact_payload)
 
         ctx = init_execute_phase(tmp_path, "1", stage="phase_classification")
 
@@ -2839,7 +2839,7 @@ class TestInitNewProject:
         def _boom(*args, **kwargs):  # type: ignore[no-untyped-def]
             raise AssertionError("reference artifact ingestion should not run during new-project bootstrap")
 
-        monkeypatch.setattr("gpd.core.context.ingest_reference_artifacts", _boom)
+        monkeypatch.setattr(context_module, "ingest_reference_artifacts", _boom)
 
         ctx = init_new_project(tmp_path)
 
@@ -2961,7 +2961,7 @@ class TestInitNewProject:
             calls.append(include_content)
             raise AssertionError("state_restore should not scan reference artifacts")
 
-        monkeypatch.setattr("gpd.core.context._reference_artifact_payload", _record_artifact_payload)
+        monkeypatch.setattr(context_module, "_reference_artifact_payload", _record_artifact_payload)
 
         ctx = init_resume(tmp_path, stage="state_restore")
 
@@ -3885,11 +3885,13 @@ class TestInitQuick:
         (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
         _write_project_contract_state(tmp_path)
         monkeypatch.setattr(
-            "gpd.core.context._resolve_model",
+            context_module,
+            "_resolve_model",
             lambda cwd, agent_type, config=None, runtime=None: f"{agent_type}-model",
         )
         monkeypatch.setattr(
-            "gpd.core.context._build_reference_runtime_context",
+            context_module,
+            "_build_reference_runtime_context",
             _fail_if_context_builder_runs("_build_reference_runtime_context"),
         )
         manifest = load_workflow_stage_manifest("quick")
@@ -3950,7 +3952,7 @@ class TestInitQuick:
                 "derived_manuscript_proof_review_status": {"status": "not applicable"},
             }
 
-        monkeypatch.setattr("gpd.core.context._build_reference_runtime_context", reference_runtime_context)
+        monkeypatch.setattr(context_module, "_build_reference_runtime_context", reference_runtime_context)
         manifest = load_workflow_stage_manifest("quick")
 
         ctx = init_quick(tmp_path, "Look up benchmark source", stage="reference_context")
@@ -4030,9 +4032,7 @@ class TestInitQuick:
         assert "stage=task_authoring" in message
         assert "init_spec_id=quick.task_authoring.v1" in message
         assert "description has wrong type" in message
-        assert calls == [
-            ("quick", "task_authoring", "quick.task_authoring.v1", {"description": "Bad staged payload"})
-        ]
+        assert calls == [("quick", "task_authoring", "quick.task_authoring.v1", {"description": "Bad staged payload"})]
 
     def test_staged_quick_init_blocks_without_initialized_project(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
@@ -4487,7 +4487,7 @@ class TestInitResume:
         def _boom(*_args, **_kwargs):
             raise RuntimeError("canonical resolution exploded")
 
-        monkeypatch.setattr("gpd.core.context.resolve_continuation", _boom)
+        monkeypatch.setattr(context_module, "resolve_continuation", _boom)
 
         with pytest.raises(RuntimeError, match="canonical resolution exploded"):
             init_resume(tmp_path)
@@ -4777,7 +4777,7 @@ class TestInitVerifyWork:
                 "reference_artifacts_content": "should not surface" if include_content else None,
             }
 
-        monkeypatch.setattr("gpd.core.context._reference_artifact_payload", _record_artifact_payload)
+        monkeypatch.setattr(context_module, "_reference_artifact_payload", _record_artifact_payload)
 
         ctx = init_verify_work(tmp_path, "1", stage="inventory_build")
 
@@ -5328,7 +5328,8 @@ class TestInitMapResearch:
         _write_project_contract_state(tmp_path)
         _write_literature_review_anchor_file(tmp_path)
         monkeypatch.setattr(
-            "gpd.core.context._build_reference_runtime_context",
+            context_module,
+            "_build_reference_runtime_context",
             _fail_if_context_builder_runs("_build_reference_runtime_context"),
         )
 
@@ -5412,7 +5413,8 @@ class TestInitLiteratureReview:
         _write_project_contract_state(tmp_path)
         _write_literature_review_anchor_file(tmp_path)
         monkeypatch.setattr(
-            "gpd.core.context._build_reference_runtime_context",
+            context_module,
+            "_build_reference_runtime_context",
             _fail_if_context_builder_runs("_build_reference_runtime_context"),
         )
 
@@ -6421,34 +6423,27 @@ class TestInitPhaseOp:
         def structured_state_context(cwd: Path) -> dict[str, object]:
             calls.append("structured_state")
             return {
-                field: f"structured_state::{field}"
-                for field in context_module._EXECUTE_PHASE_STRUCTURED_STATE_FIELDS
+                field: f"structured_state::{field}" for field in context_module._EXECUTE_PHASE_STRUCTURED_STATE_FIELDS
             }
 
         def state_memory_context(cwd: Path) -> dict[str, object]:
             calls.append("state_memory")
             return {
-                **{
-                    field: f"state_memory::{field}"
-                    for field in context_module._EXECUTE_PHASE_STATE_MEMORY_FIELDS
-                },
+                **{field: f"state_memory::{field}" for field in context_module._EXECUTE_PHASE_STATE_MEMORY_FIELDS},
                 "derived_convention_lock": {"metric_signature": "mostly-plus"},
             }
 
         def execution_context(cwd: Path) -> dict[str, object]:
             calls.append("execution")
             return {
-                **{
-                    field: f"execution::{field}"
-                    for field in context_module._EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS
-                },
+                **{field: f"execution::{field}" for field in context_module._EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS},
                 "current_execution": {"phase": "01", "segment_status": "running"},
             }
 
-        monkeypatch.setattr("gpd.core.context._build_reference_runtime_context", reference_context)
-        monkeypatch.setattr("gpd.core.context._build_structured_state_runtime_context", structured_state_context)
-        monkeypatch.setattr("gpd.core.context._build_state_memory_runtime_context", state_memory_context)
-        monkeypatch.setattr("gpd.core.context._build_execution_runtime_context", execution_context)
+        monkeypatch.setattr(context_module, "_build_reference_runtime_context", reference_context)
+        monkeypatch.setattr(context_module, "_build_structured_state_runtime_context", structured_state_context)
+        monkeypatch.setattr(context_module, "_build_state_memory_runtime_context", state_memory_context)
+        monkeypatch.setattr(context_module, "_build_execution_runtime_context", execution_context)
 
         result = init_phase_op(tmp_path, phase="1", stage="research_handoff")
 

@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
 
-def test_map_research_stage_manifest_defers_heavy_context_and_delegation_until_authoring() -> None:
+def test_map_research_stage_manifest_defers_heavy_context_and_tracks_visible_delegation() -> None:
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "map-research-stage-manifest.json").read_text(encoding="utf-8")),
         expected_workflow_id="map-research",
@@ -32,7 +32,7 @@ def test_map_research_stage_manifest_defers_heavy_context_and_delegation_until_a
     assert "workspace_root" in bootstrap.required_init_fields
     assert "research_map_dir_absolute" in bootstrap.required_init_fields
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
-    assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" not in bootstrap.must_not_eager_load
     assert bootstrap.writes_allowed == (
         "GPD/research-map",
         "GPD/research-map.archive-*",

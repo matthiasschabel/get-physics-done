@@ -1,10 +1,16 @@
 <purpose>
-Execute small, ad-hoc physics tasks with GPD guarantees (atomic commits and durable state updates) while skipping optional agents (literature search, plan-checker, verifier). Quick mode routes through the canonical planner handoff, loads staged quick init at the task-bootstrap and task-authoring boundaries, tracks artifacts in `GPD/quick/`, and records completion through the structured state commands plus the quick-task summary files. Typical quick tasks include: quick derivation, dimensional check, order-of-magnitude estimate, limiting case verification, and bibliography lookup. Quick mode is NOT authorized to close theorem-style or `proof_obligation` work.
+Execute small, ad-hoc physics tasks with GPD guarantees (atomic commits and durable state updates) while skipping optional agents (literature search, plan-checker, verifier). Quick mode routes through the canonical planner handoff, loads staged quick init at the task-bootstrap and default task-authoring boundaries, selects the separate `reference_context` stage only when a task actually needs project reference artifacts, tracks artifacts in `GPD/quick/`, and records completion through the structured state commands plus the quick-task summary files. Typical quick tasks include: quick derivation, dimensional check, order-of-magnitude estimate, limiting case verification, and targeted bibliography lookup. Quick mode is NOT authorized to close theorem-style or `proof_obligation` work.
 </purpose>
 
 <required_reading>
 Read all files referenced by the invoking prompt's execution_context before starting.
 </required_reading>
+
+<quick_authorities>
+@{GPD_INSTALL_DIR}/references/quick/quick-mode-boundary.md
+@{GPD_INSTALL_DIR}/references/quick/quick-durability-minimum.md
+@{GPD_INSTALL_DIR}/references/quick/quick-reroute-rules.md
+</quick_authorities>
 
 <process>
 **Step 1: Get task description**
@@ -19,7 +25,7 @@ What quick task do you want to do? Examples:
   - Dimensional check on the cross-section formula in eq. (3.14)
   - Order-of-magnitude estimate for the tunneling rate
   - Verify the non-relativistic limiting case of the dispersion relation
-  - Look up the original reference for the Mermin-Wagner theorem
+  - Look up the DOI for a specific bibliography item
 ```
 
 Store response as `$DESCRIPTION`.
@@ -39,9 +45,14 @@ fi
 INIT="$TASK_BOOTSTRAP_INIT"
 ```
 
-Parse JSON for: `planner_model`, `executor_model`, `commit_docs`, `autonomy`, `next_num`, `slug`, `date`, `timestamp`, `quick_dir`, `task_dir`, `roadmap_exists`, `project_exists`, `planning_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`.
+Parse JSON for: `planner_model`, `executor_model`, `commit_docs`, `autonomy`, `next_num`, `slug`, `date`, `timestamp`, `quick_dir`, `task_dir`, `roadmap_exists`, `project_exists`, `planning_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`.
 
-Before the planner handoff, reload the `task_authoring` staged init payload and treat its `staged_loading` block as authoritative for the planner handoff shape rather than reconstructing a separate quick-specific prompt contract.
+The bootstrap and default `task_authoring` payloads intentionally do not include `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, protocol bundles, literature maps, research maps, manuscript proof-review status, or publication runtime fields. Before the planner handoff, reload either:
+
+- `task_authoring` for the default small-task path.
+- `reference_context` only when the quick-mode boundary rules say the task really needs active project references, reference artifacts, literature/research-map files, or a targeted source lookup.
+
+Treat the selected staged init payload's `staged_loading` block as authoritative for the planner handoff shape rather than reconstructing a separate quick-specific prompt contract.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Pause after the plan for user approval before execution.
@@ -53,9 +64,9 @@ Before the planner handoff, reload the `task_authoring` staged init payload and 
 **If `planning_exists` is false:** Error -- Quick mode requires the `GPD/` workspace directory. Run `gpd:new-project` first.
 
 Quick tasks can run mid-phase and do NOT require ROADMAP.md. They still require an initialized project workspace with `GPD/PROJECT.md` and the `GPD/` directory.
-Quick mode still inherits the approved `project_contract` only when `project_contract_gate.authoritative` is true, and it still inherits the active reference ledger. Do not bypass required anchors, baselines, or forbidden-proxy constraints just because the task is small.
+Quick mode still inherits the approved `project_contract` only when `project_contract_gate.authoritative` is true. The default small-task path does not load the full active reference ledger; select `reference_context` only when the task needs that ledger. Do not bypass required anchors, baselines, or forbidden-proxy constraints just because the task is small.
 
-**Proof-obligation command block:** If the description or inherited contract indicates theorem-style or contract-backed proof work (`proof_obligation`, `claim_kind: theorem`, `claim_kind: lemma`, `claim_kind: corollary`, `claim_kind: proposition`, ProjectContract `claim_kind: claim`, `proof`, `prove`, `we prove`, theorem metadata, proof fields, or a formal `show that` / existence / uniqueness target with named hypotheses, parameters, quantifiers, domains, or conclusion clauses), STOP instead of using quick mode. A generic manuscript or task "claim" is not enough by itself. Do not bypass this by asking for a "quick sketch", "light proof", or "just the main idea". Route explicitly to:
+**Reroute block:** Apply `quick-reroute-rules.md`. If the description or inherited contract indicates theorem-style, proof-bearing, publication-grade, referee-response, manuscript proof-review, or claim-adjudication work, STOP instead of using quick mode. A generic manuscript or task "claim" is not enough by itself, but a formal proof target or `proof_obligation` is enough. Do not bypass this by asking for a "quick sketch", "light proof", or "just the main idea". Route explicitly to:
 
 - `gpd:plan-phase <phase>` when this belongs in planned phase work
 - `gpd:derive-equation "<goal>"` when you need a derivation/proof draft
@@ -83,16 +94,27 @@ Directory: ${QUICK_DIR}
 
 **Step 4: Spawn planner (quick mode)**
 
-Load the staged task-authoring payload before assembling the quick planner prompt:
+Choose the staged authoring payload before assembling the quick planner prompt:
+
+- Default to `task_authoring` for local calculations, dimensional checks, unit conversions, one-file numerical spot-checks, formatting, and other self-contained small tasks.
+- Use `reference_context` only for targeted source lookup or tasks whose answer depends on active project anchors, existing reference artifacts, literature/research-map files, or protocol/reference context.
+
+Set `NEEDS_REFERENCE_CONTEXT` to `true` only for the second case; otherwise set it to `false`.
 
 ```bash
-TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_authoring)
+if [ "$NEEDS_REFERENCE_CONTEXT" = "true" ]; then
+  TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage reference_context)
+else
+  TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_authoring)
+fi
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd quick task-authoring init failed: $TASK_AUTHORING_INIT"
   # STOP; surface the error.
 fi
 INIT="$TASK_AUTHORING_INIT"
 ```
+
+`NEEDS_REFERENCE_CONTEXT` must be false by default. Do not set it just because `project_contract_gate` exists; contract-gate fields are already present in the default small-task payload.
 
 Spawn gpd-planner with the quick-mode context:
 
@@ -119,6 +141,10 @@ Read the file at GPD/STATE.md
 **Project Contract Gate:** {project_contract_gate}
 **Project Contract Load Info:** {project_contract_load_info}
 **Project Contract Validation:** {project_contract_validation}
+
+**Default Reference Runtime:** not loaded for `task_authoring`.
+
+If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append this selected reference payload:
 **Contract Intake:** {contract_intake}
 **Effective Reference Intake:** {effective_reference_intake}
 **Active References:** {active_reference_context}
@@ -131,8 +157,11 @@ Read the file at GPD/STATE.md
 - Quick tasks should be atomic and self-contained
 - No literature review phase, no checker phase
 - Use the `staged_loading` fields from `TASK_AUTHORING_INIT` as the source of truth for the handoff instead of inventing a separate quick-only contract
+- If `staged_loading.stage_id` is `task_authoring`, do not invent `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, protocol bundles, literature maps, research maps, proof-review status, or publication context.
 - If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` instead of drafting a plan from guessed scope.
 - If the task is theorem-style or proof-bearing, return `gpd_return.status: checkpoint` and tell the user quick mode is blocked pending the full proof-redteam workflow.
+- Proof-obligation command block: theorem-style, lemma/corollary/proposition, or explicit `proof_obligation` work must route to the full proof-redteam workflow.
+- ProjectContract `claim_kind: claim` is not proof-bearing by itself. A generic manuscript or task "claim" is not enough by itself. Require theorem/proof/formal metadata before routing generic manuscript claims through proof-redteam.
 - Target ~30% context usage (simple, focused)
 </constraints>
 
@@ -194,6 +223,10 @@ Project contract: {project_contract}
 Project contract gate: {project_contract_gate}
 Project contract load info: {project_contract_load_info}
 Project contract validation: {project_contract_validation}
+
+Reference runtime: not loaded for default `task_authoring`.
+
+If the selected planner stage was `reference_context`, pass through the selected reference payload:
 Contract intake: {contract_intake}
 Effective reference intake: {effective_reference_intake}
 Active references: {active_reference_context}
@@ -204,6 +237,7 @@ Reference artifacts: {reference_artifacts_content}
 - Commit each task atomically
 - Create summary at: ${QUICK_DIR}/${next_num}-SUMMARY.md
 - Do NOT update ROADMAP.md (quick tasks are separate from planned phases)
+- Do not invent reference artifacts or publication/proof-review context when the selected planner stage was the default `task_authoring`.
 - If proof-bearing work slipped through planning, STOP and return the reroute instead of executing. Quick mode must not produce a proof result without the mandatory proof-redteam gate.
 - Return a structured `gpd_return` envelope with `gpd_return.status` and `gpd_return.files_written`; local completed output is `${QUICK_DIR}/${next_num}-SUMMARY.md`.
 </constraints>

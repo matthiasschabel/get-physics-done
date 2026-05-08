@@ -1192,7 +1192,6 @@ class TestInstall:
         state_schema = (target / "get-physics-done" / "templates" / "state-json-schema.md").read_text(encoding="utf-8")
 
         assert f"Runtime bridge for runnable shell GPD CLI calls: {expected_bridge}" in command
-        assert "Run the init command as its own shell call in Gemini auto-edit mode." in workflow
         assert "INIT=$(gpd --raw init new-project)" not in workflow
         assert f"INIT=$({expected_bridge} --raw init new-project)" not in workflow
         assert f"{expected_bridge} --raw init new-project" in workflow

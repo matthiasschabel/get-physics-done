@@ -989,7 +989,7 @@ class TestParseCommandFile:
 
         assert "project-contract-schema.md" in command_text
         assert "project-contract-grounding-linkage.md" in command_text
-        assert "staged_loading" not in command_text
+        assert "staged_loading.eager_authorities" in command_text
         assert "new-project-stage-manifest.json" not in command_text
         assert "<!-- [included:" not in command_text
         assert "<!-- [end included] -->" not in command_text
@@ -997,7 +997,7 @@ class TestParseCommandFile:
     def test_new_project_command_source_stays_prompt_budget_thin(self) -> None:
         command_text = NEW_PROJECT_COMMAND_PATH.read_text(encoding="utf-8")
 
-        assert "staged_loading" not in command_text
+        assert "staged_loading.eager_authorities" in command_text
         assert "new-project-stage-manifest.json" not in command_text
         assert "conditional_authorities" not in command_text
 
@@ -2106,8 +2106,9 @@ class TestRegistryPromptIncludeInlining:
             "one fenced executed `python`/`bash` block",
             "adjacent `**Output:**` plus fenced `output`",
             "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-            "replace `BODY.md` in its `writer_command`",
-            "The writer serializes YAML and validates before canonical acceptance.",
+            "replace `BODY.md` in the skeleton bridge `writer_command`",
+            "write the finalizer bridge patch JSON",
+            "The helper serializes YAML and validates before canonical acceptance.",
             "Use `skeleton_command` only as read-only preview context",
             "do not hand-author or reflow frontmatter",
             "keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML",
@@ -2810,7 +2811,9 @@ class TestPublicAPI:
         assert cmd.staged_loading is not None
         assert cmd.staged_loading.workflow_id == "new-project"
         assert cmd.staged_loading.stage_ids() == ("scope_intake", "scope_approval", "post_scope")
-        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/new-project.md",)
+        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/new-project/scope-intake.md",)
+        assert "researcher_model" not in cmd.staged_loading.stages[0].required_init_fields
+        assert "synthesizer_model" not in cmd.staged_loading.stages[0].required_init_fields
         assert "project_contract_gate" in cmd.staged_loading.stages[0].required_init_fields
         assert "project_contract_load_info" in cmd.staged_loading.stages[0].required_init_fields
         assert cmd.staged_loading.stages[0].produced_state == (
@@ -3221,7 +3224,7 @@ class TestPublicAPI:
             "workflows/research-phase.md",
             "references/orchestration/model-profile-resolution.md",
         )
-        assert "references/orchestration/runtime-delegation-note.md" in cmd.staged_loading.stages[0].must_not_eager_load
+        assert "references/orchestration/runtime-delegation-note.md" not in cmd.staged_loading.stages[0].must_not_eager_load
         assert cmd.staged_loading.stages[1].loaded_authorities == (
             "workflows/research-phase.md",
             "references/orchestration/model-profile-resolution.md",

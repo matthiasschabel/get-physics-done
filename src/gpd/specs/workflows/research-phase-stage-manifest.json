@@ -41,8 +41,7 @@
       "must_not_eager_load": [
         "references/shared/shared-protocols.md",
         "references/research/researcher-shared.md",
-        "references/orchestration/agent-infrastructure.md",
-        "references/orchestration/runtime-delegation-note.md"
+        "references/orchestration/agent-infrastructure.md"
       ],
       "allowed_tools": [
         "ask_user",

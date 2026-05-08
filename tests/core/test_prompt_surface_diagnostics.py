@@ -249,6 +249,7 @@ def _report(
     *,
     surfaces: tuple[str, ...] = ("command", "agent", "workflow"),
     runtime_names: tuple[str, ...] = (),
+    include_runtime_projections: bool = True,
 ):
     diagnostics = _diagnostics()
     return diagnostics.build_prompt_surface_report(
@@ -256,6 +257,7 @@ def _report(
         surfaces=surfaces,
         runtime_names=runtime_names,
         include_tests=False,
+        include_runtime_projections=include_runtime_projections,
         top=10_000,
     )
 
@@ -450,11 +452,41 @@ def test_stage_diagnostics_measure_staged_commands_and_transitive_lazy_violation
     assert "first_turn_transitive_include" in violation_sources
     assert "stage_eager_transitive_include" in violation_sources
     assert "conditional_eager_overlap" not in violation_sources
+    assert {
+        (
+            violation["workflow_id"],
+            violation["stage_id"],
+            violation["authority"],
+            violation["violation_source"],
+        )
+        for violation in violations
+    } >= {
+        ("probe", "bootstrap", "templates/deferred.md", "first_turn_transitive_include"),
+        ("probe", "bootstrap", "templates/deferred.md", "stage_eager_transitive_include"),
+    }
+    assert all(violation["eager_via"] for violation in violations)
     first_turn_violation = next(
         violation for violation in violations if violation["violation_source"] == "first_turn_transitive_include"
     )
     assert "workflows/probe.md" in first_turn_violation["eager_via"]
     assert stage_diagnostic["violation_count"] == len(violations)
+
+
+def test_checked_in_stage_manifests_have_no_must_not_eager_load_violations() -> None:
+    diagnostics = _diagnostics()
+    report = _report(REPO_ROOT, runtime_names=(), include_runtime_projections=False)
+    payload = diagnostics.report_to_dict(report)
+    stage_totals = payload["totals"]["stage_diagnostics"]
+
+    violations = [
+        violation
+        for workflow in payload["stage_diagnostics"]
+        for stage in workflow["stages"]
+        for violation in stage["must_not_eager_load_violations"]
+    ]
+
+    assert stage_totals["must_not_eager_load_violation_count"] == 0, violations
+    assert violations == []
 
 
 def test_include_counting_ignores_fenced_code_and_uses_installer_expansion(tmp_path: Path) -> None:

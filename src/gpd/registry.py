@@ -1908,6 +1908,16 @@ def _parse_interactive_spawn_contracts(content: str, *, owner_name: str) -> tupl
     return tuple(contracts)
 
 
+def _command_workflow_metadata_content(command_name: str) -> str:
+    """Return same-stem workflow content used for command metadata discovery only."""
+
+    workflow_slug = command_slug_from_label(command_name)
+    workflow_path = _PKG_ROOT / "specs" / "workflows" / f"{workflow_slug}.md"
+    if not workflow_path.is_file():
+        return ""
+    return _inline_model_visible_includes(workflow_path.read_text(encoding="utf-8"))
+
+
 def _spawn_contract_key(value: object) -> tuple[object, ...]:
     """Return a hashable, order-preserving key for parsed spawn-contract metadata."""
 
@@ -2346,8 +2356,13 @@ def _parse_command_file(path: Path, source: str) -> CommandDef:
         requires=requires,
         command_policy=command_policy,
     )
-    spawn_contracts = _parse_spawn_contracts(content, owner_name=command_name)
-    interactive_spawn_contracts = _parse_interactive_spawn_contracts(content, owner_name=command_name)
+    metadata_content = content
+    if staged_loading is not None:
+        metadata_content = "\n\n".join(
+            part for part in (content, _command_workflow_metadata_content(command_name)) if part
+        )
+    spawn_contracts = _parse_spawn_contracts(metadata_content, owner_name=command_name)
+    interactive_spawn_contracts = _parse_interactive_spawn_contracts(metadata_content, owner_name=command_name)
 
     return CommandDef(
         name=command_name,

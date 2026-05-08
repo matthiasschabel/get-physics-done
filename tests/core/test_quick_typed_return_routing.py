@@ -18,9 +18,15 @@ def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -
     assert "gpd_return.files_written" in workflow
     assert "loads staged quick init" in workflow
     assert "staged_loading" in workflow
+    assert "reference_context" in workflow
+    assert "default small-task path" in workflow
+    assert "gpd --raw init quick \"$DESCRIPTION\" --stage reference_context" in workflow
     assert "tool_requirements" in workflow
     assert "gpd validate plan-preflight" in workflow
     assert "gpd apply-return-updates" in workflow
+    assert "gpd state add-decision" in workflow
+    assert "gpd state update" in workflow
+    assert "gpd commit" in workflow
     assert "references/orchestration/child-artifact-gate.md" in workflow
     assert "references/orchestration/continuation-boundary.md" in workflow
     assert "role=`gpd-planner`" in workflow

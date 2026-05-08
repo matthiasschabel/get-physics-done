@@ -28,16 +28,16 @@ def test_regression_check_searches_canonical_phase_summary_artifacts() -> None:
 def test_verify_work_searches_canonical_phase_summary_artifacts() -> None:
     workflow_text = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
 
-    assert 'ls "$PHASE_DIR_ABS"/*SUMMARY.md 2>/dev/null' in workflow_text
-    assert 'ls "$PROJECT_ROOT"/GPD/phases/*/*SUMMARY.md 2>/dev/null | sort' in workflow_text
+    assert "Use canonical artifact discovery helpers during bootstrap." in workflow_text
+    assert "verification_report_status_payload" in workflow_text
 
 
 def test_verify_work_searches_canonical_phase_verification_artifacts() -> None:
     workflow_text = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
 
-    assert 'session_status=$(gpd frontmatter get "$file" --field session_status 2>/dev/null)' in workflow_text
-    assert 'done | sort | head -5' in workflow_text
-    assert 'ls "$PHASE_DIR_ABS"/*-VERIFICATION.md 2>/dev/null | head -1' in workflow_text
+    assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in workflow_text
+    assert "Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here." in workflow_text
+    assert "Route on each entry's canonical `status` / `routing_status`" in workflow_text
 
 
 def test_execute_plan_searches_standalone_and_numbered_phase_artifacts() -> None:

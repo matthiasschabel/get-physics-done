@@ -58,16 +58,25 @@ def test_autonomous_prompt_uses_supported_transition_and_discuss_contracts() -> 
     assert "workflow.skip_discuss" not in autonomous
     assert "--no-transition" not in autonomous
     assert "execute-phase` owns its normal phase transition / closeout path" in autonomous
-    assert "Execute-phase invoked with only the phase number" in autonomous
+    assert "`gpd:execute-phase` with `{phase: PHASE_NUM}`" in autonomous
 
 
-def test_autonomous_assigns_phase_dir_before_first_verification_status_read() -> None:
+def test_autonomous_uses_child_delegation_not_local_grep_status_readers() -> None:
     autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
 
-    assignment_index = autonomous.index('PHASE_DIR=$(echo "$PHASE_STATE" | gpd json get .phase_dir --default "")')
-    first_status_read_index = autonomous.index('VERIFY_STATUS=$(grep "^status:" "${PHASE_DIR}"/*-VERIFICATION.md')
-
-    assert assignment_index < first_status_read_index
+    forbidden_fragments = (
+        'VERIFY_STATUS=$(grep',
+        'AUDIT_STATUS=$(grep',
+        'grep "^status:"',
+        'grep -iE "^status:"',
+        "Read the human_verification section from VERIFICATION.md",
+        "Read gap summary from VERIFICATION.md",
+    )
+    for fragment in forbidden_fragments:
+        assert fragment not in autonomous
+    assert "Autonomous mode is an orchestrator, not a Markdown status parser." in autonomous
+    assert "`gpd:verify-work` with `{phase: PHASE_NUM}`" in autonomous
+    assert "verification_report_status" in autonomous
 
 
 def test_autonomous_stops_at_bounded_checkpoint_before_verification_routing() -> None:

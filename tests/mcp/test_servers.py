@@ -1972,6 +1972,7 @@ class TestSkillsServer:
         assert result["staged_loading"]["workflow_id"] == "new-project"
         assert result["staged_loading"]["stages"][0]["id"] == "scope_intake"
         assert result["staged_loading"]["stages"][1]["loaded_authorities"] == [
+            "workflows/new-project/scope-approval.md",
             "templates/project-contract-schema.md",
             "templates/project-contract-grounding-linkage.md",
             "references/shared/canonical-schema-discipline.md",

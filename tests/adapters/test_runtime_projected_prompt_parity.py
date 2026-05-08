@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import tomllib
 from pathlib import Path
 
@@ -22,6 +21,7 @@ from gpd.core.model_visible_text import (
     review_contract_visibility_note,
 )
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
+from tests.adapters.projection_test_utils import StagedCommandProjectionCase, iter_staged_command_projection_cases
 from tests.prompt_metrics_support import iter_markdown_fences, runtime_command_visibility_note
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -76,8 +76,14 @@ UNRESOLVED_INCLUDE_MARKERS = (
 )
 STAGED_SHIM_CONTRACT_FRAGMENTS = (
     "staged_loading",
+    "workflow_id",
+    "stage_id",
+    "order",
     "required_init_fields",
+    "mode_paths",
+    "loaded_authorities",
     "eager_authorities",
+    "conditional_authorities",
     "must_not_eager_load",
     "next_stages",
     "allowed_tools",
@@ -85,6 +91,7 @@ STAGED_SHIM_CONTRACT_FRAGMENTS = (
     "produced_state",
     "checkpoints",
 )
+STAGED_PROJECTED_COMMAND_CHAR_BUDGET = 20_000
 
 
 def _read(path: Path) -> str:
@@ -141,6 +148,10 @@ def _spawn_contract_commands() -> tuple[str, ...]:
 
 COMMAND_SURFACES = _contract_bearing_command_surfaces()
 SPAWN_CONTRACT_COMMANDS = _spawn_contract_commands()
+STAGED_COMMAND_PROJECTION_CASES = iter_staged_command_projection_cases(
+    commands_dir=COMMANDS_DIR,
+    workflows_dir=WORKFLOWS_DIR,
+)
 PLAN_AGENT_SURFACES = {
     "gpd-planner": (
         agent_visibility_note(),
@@ -245,18 +256,6 @@ def _assert_no_unresolved_include_markers(text: str, *, label: str) -> None:
     assert offenders == [], f"{label} contains unresolved include marker(s): {', '.join(offenders)}"
 
 
-def _first_stage_id(command_name: str) -> str:
-    manifest_path = WORKFLOWS_DIR / f"{command_name}-stage-manifest.json"
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    stages = payload.get("stages")
-    assert isinstance(stages, list) and stages, f"{manifest_path.name} has no stages"
-    first_stage = stages[0]
-    assert isinstance(first_stage, dict)
-    stage_id = first_stage.get("id")
-    assert isinstance(stage_id, str) and stage_id
-    return stage_id
-
-
 def _workflow_authority_for_shimmed_projection(command_name: str, projected: str, runtime: str) -> str:
     if _has_compact_non_native_shim(projected):
         return projected + "\n" + _project_installed_shared_markdown(WORKFLOWS_DIR / f"{command_name}.md", runtime)
@@ -325,30 +324,50 @@ def _extract_spawn_contracts(text: str) -> list[dict[str, object]]:
     return list(_parse_spawn_contracts(text, owner_name="runtime-projected"))
 
 
+@pytest.mark.parametrize(
+    "case",
+    STAGED_COMMAND_PROJECTION_CASES,
+    ids=lambda case: case.command_name,
+)
 @pytest.mark.parametrize("runtime", RUNTIMES)
-def test_runtime_projected_execute_phase_uses_native_include_or_compact_stage_shim(runtime: str) -> None:
-    projected = _project_markdown(COMMANDS_DIR / "execute-phase.md", runtime, is_agent=False)
+def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_shim(
+    case: StagedCommandProjectionCase,
+    runtime: str,
+) -> None:
+    command_name = case.command_name
+    projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
     descriptor = get_runtime_descriptor(runtime)
-    first_stage = _first_stage_id("execute-phase")
 
-    _assert_no_unresolved_include_markers(projected, label=f"{runtime} execute-phase")
-    assert get_adapter(runtime).format_command("execute-phase") in projected
+    _assert_no_unresolved_include_markers(projected, label=f"{runtime} {command_name}")
+    assert get_adapter(runtime).format_command(command_name) in projected
 
     if descriptor.native_include_support:
-        assert _raw_include_count(projected, "workflows/execute-phase.md") == 1
-        assert "<!-- [included: execute-phase.md] -->" not in projected
+        for include_path in case.native_include_paths:
+            assert _raw_include_count(projected, include_path) == 1
+        assert _raw_include_count(projected, f"workflows/{command_name}-stage-manifest.json") == 0
+        assert f"<!-- [included: {command_name}.md] -->" not in projected
         assert not _has_staged_shim_sentinel(projected)
         return
 
-    assert _raw_include_count(projected, "workflows/execute-phase.md") == 0
-    assert "<!-- [included: execute-phase.md] -->" not in projected
+    workflow_source = _read(WORKFLOWS_DIR / f"{command_name}.md")
+    expanded_workflow = expand_at_includes(
+        workflow_source,
+        REPO_ROOT / "src/gpd",
+        "/runtime/",
+        runtime=runtime,
+    )
+    init_lines = tuple(line.strip() for line in projected.splitlines() if f"--raw init {command_name}" in line)
+
+    assert _raw_include_count(projected, f"workflows/{command_name}.md") == 0
+    assert f"<!-- [included: {command_name}.md] -->" not in projected
     assert _has_staged_shim_sentinel(projected)
     assert not _has_help_bridge_shim_sentinel(projected)
-    assert "--raw init execute-phase" in projected
-    assert f"--stage {first_stage}" in projected
-    for fragment in STAGED_SHIM_CONTRACT_FRAGMENTS:
+    assert any(f"--stage {case.first_stage_id}" in line for line in init_lines)
+    assert f'first_stage="{case.first_stage_id}"' in projected
+    for fragment in (*STAGED_SHIM_CONTRACT_FRAGMENTS, *case.staged_loading_keys):
         assert fragment in projected
-    assert len(projected) < 20_000
+    assert len(projected) <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
+    assert len(projected) <= len(expanded_workflow) * 0.85
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)

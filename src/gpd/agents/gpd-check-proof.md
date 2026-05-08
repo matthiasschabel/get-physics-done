@@ -25,6 +25,7 @@ Be skeptical enough that the proof can survive hostile scrutiny before anyone tr
 
 **Proof-redteam contract on demand:**
 - `gpd proof-redteam skeleton` -- Frontmatter/body scaffold writer for conservative proof-redteam artifacts.
+- `gpd proof-redteam finalize` -- Passed-audit finalizer that computes hashes and writes helper-owned `status: passed` frontmatter.
 - `gpd validate proof-redteam` -- Public validation gate for proof-redteam artifacts.
 - `{GPD_INSTALL_DIR}/templates/proof-redteam-schema.md` -- Canonical proof-redteam artifact shape; use as authority when helper/validator errors require it.
 - `{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md` -- Proof-redteam operating rules and fail-closed semantics; load when the exact write contract is needed.
@@ -50,7 +51,7 @@ Before writing the artifact, reread the orchestrator-provided output contract an
 </process>
 
 <artifact_format>
-Use helper-owned frontmatter. For non-passing audits, start from `gpd proof-redteam skeleton --claim-id CLAIM_ID --claim-text TEXT --status gaps_found|human_needed --write --output PATH --force`, then fill the body with inventory, coverage, probe, and rationale. Do not hand-author or reflow proof-redteam YAML. Passed proof-redteam frontmatter is helper/finalizer-owned; do not hand-author `status: passed` YAML. If no passed helper is available, return blocked.
+Use helper-owned frontmatter. For non-passing audits, start from `gpd proof-redteam skeleton --claim-id CLAIM_ID --claim-text TEXT --status gaps_found|human_needed --write --output PATH --force`, then fill the body with inventory, coverage, probe, and rationale. Do not hand-author or reflow proof-redteam YAML. Passed proof-redteam frontmatter is helper/finalizer-owned; run `gpd proof-redteam finalize PATH --claim-id CLAIM_ID --claim-text TEXT --proof-artifact-path PROOF_ARTIFACT_PATH` and then `gpd validate proof-redteam PATH`. Do not hand-author `status: passed` YAML; do not hand-author `status: passed` YAML from memory or prose. If finalization or validation cannot produce an accepted artifact, return blocked.
 
 Use the canonical Markdown + YAML artifact shape from `{GPD_INSTALL_DIR}/templates/proof-redteam-schema.md` only as the schema authority, not as prose to copy into the artifact.
 

@@ -2177,9 +2177,45 @@ review_summary:
         assert payload["has_git"] is False
         assert payload["has_research_files"] is True
         assert payload["needs_research_map"] is True
+        assert "researcher_model" not in payload
+        assert "synthesizer_model" not in payload
+        assert "roadmapper_model" not in payload
+        assert payload["staged_loading"]["loaded_authorities"] == ["workflows/new-project/scope-intake.md"]
+        assert payload["staged_loading"]["eager_authorities"] == ["workflows/new-project/scope-intake.md"]
         assert payload["staged_loading"]["writes_allowed"] == []
         assert not (workspace / ".git").exists()
         assert not (workspace / "GPD").exists()
+
+    def test_new_project_init_scope_intake_does_not_resolve_late_models(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import gpd.core.context as context_module
+
+        workspace = tmp_path.parent / f"{tmp_path.name}-candidate-scope-intake-models"
+        workspace.mkdir()
+        resolved_agents: list[str] = []
+
+        def _fail_if_resolved(cwd: Path, agent_type: str, _config: dict | None = None, runtime: str | None = None):
+            del cwd, _config, runtime
+            resolved_agents.append(agent_type)
+            return f"{agent_type}-model"
+
+        monkeypatch.setattr(context_module, "_resolve_model", _fail_if_resolved)
+
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_intake"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert resolved_agents == []
+        assert "researcher_model" not in payload
+        assert "synthesizer_model" not in payload
+        assert "roadmapper_model" not in payload
 
     def test_new_project_init_scope_intake_exposes_interrupted_init_progress(self, tmp_path: Path) -> None:
         workspace = tmp_path.parent / f"{tmp_path.name}-interrupted-init"
@@ -2323,9 +2359,40 @@ review_summary:
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"]["workflow_id"] == "quick"
         assert payload["staged_loading"]["stage_id"] == "task_authoring"
-        assert payload["staged_loading"]["loaded_authorities"] == ["workflows/quick.md"]
+        assert payload["staged_loading"]["loaded_authorities"] == list(stage.loaded_authorities)
+        assert "project_contract_gate" in payload
+        assert "active_reference_context" not in payload
+        assert "effective_reference_intake" not in payload
+        assert "reference_artifacts_content" not in payload
+        assert "derived_manuscript_proof_review_status" not in payload
+
+    def test_quick_init_stage_reference_context_loads_reference_payload(self, gpd_project: Path) -> None:
+        from gpd.core.workflow_staging import load_workflow_stage_manifest
+
+        state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
+        state["project_contract"] = json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
+        (gpd_project / "GPD" / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+        (gpd_project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+
+        manifest = load_workflow_stage_manifest("quick")
+        stage = manifest.get_stage("reference_context")
+
+        result = runner.invoke(
+            app,
+            ["--raw", "init", "quick", "Quick reference check", "--stage", "reference_context"],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+
+        assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
+        assert payload["staged_loading"]["workflow_id"] == "quick"
+        assert payload["staged_loading"]["stage_id"] == "reference_context"
+        assert payload["staged_loading"]["loaded_authorities"] == list(stage.loaded_authorities)
         assert "active_reference_context" in payload
         assert "effective_reference_intake" in payload
+        assert "reference_artifacts_content" in payload
+        assert "derived_manuscript_proof_review_status" in payload
 
     def test_quick_init_stage_task_bootstrap_blocks_without_project_file(self, tmp_path: Path) -> None:
         workspace = tmp_path / "quick-without-project"

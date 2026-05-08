@@ -12,6 +12,25 @@ Read all files referenced by the invoking prompt's execution_context before star
 
 <process>
 
+<delegation_contract>
+Autonomous mode is an orchestrator, not a Markdown status parser. Invoke runtime-installed child commands with structured arguments and route on the child `gpd_return` envelope or a canonical init/status payload owned by that command.
+
+Child command table:
+- discuss phase: `gpd:discuss-phase` with `{phase: PHASE_NUM}`
+- plan phase: `gpd:plan-phase` with `{phase: PHASE_NUM}`
+- execute phase: `gpd:execute-phase` with `{phase: PHASE_NUM}`
+- verify work: `gpd:verify-work` with `{phase: PHASE_NUM}`
+- write paper: `gpd:write-paper` with `{phase: PHASE_NUM}` when the user chooses the dedicated paper workflow
+- gap plan: `gpd:plan-phase` with `{phase: PHASE_NUM, mode: "gaps"}`
+- gap execution: `gpd:execute-phase` with `{phase: PHASE_NUM, mode: "gaps_only"}`
+- convention validation: `gpd:validate-conventions` with `{phase: PHASE_NUM}`
+- milestone audit: `gpd:audit-milestone` with `{}`
+- milestone gap planning: `gpd:plan-milestone-gaps` with `{}`
+- milestone completion: `gpd:complete-milestone` with `{milestone_version: milestone_version}`
+
+Do not route on report headings, prose marker strings, or local `status:` scans. Missing, unparseable, or unknown status payloads are non-passing and stop at the matching child command route.
+</delegation_contract>
+
 <step name="initialize" priority="first">
 
 ## 1. Initialize
@@ -96,10 +115,10 @@ Before completion, stale/missing/non-passing verification blocks audit/paper.
 
 ```bash
 for COMPLETE_PHASE in "${COMPLETED_PHASES[@]}"; do
-  D=$(gpd --raw init phase-op "${COMPLETE_PHASE}" | gpd json get .phase_dir --default "")
-  VS=$(grep -iE "^status:" "$D"/*-VERIFICATION.md 2>/dev/null | head -1 | cut -d: -f2 | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+  VERIFY_PAYLOAD=$(gpd --raw init verify-work "${COMPLETE_PHASE}" --stage session_router)
+  VS=$(echo "$VERIFY_PAYLOAD" | gpd json get .verification_report_status --default "missing")
   case "$VS" in
-    passed|verified|complete|completed) ;;
+    passed) ;;
     *)
       echo "Phase ${COMPLETE_PHASE}: verify before closeout."
       echo "Next: verify work for phase ${COMPLETE_PHASE}"
@@ -108,7 +127,7 @@ for COMPLETE_PHASE in "${COMPLETED_PHASES[@]}"; do
 done
 ```
 
-When this verification guard blocks closeout, make the user-facing continuation explicit outside shell output: `Next: gpd:verify-work ${COMPLETE_PHASE}`.
+When this verification guard blocks closeout, make the user-facing continuation explicit outside shell output: invoke child command `gpd:verify-work` with `{phase: COMPLETE_PHASE}`.
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -197,7 +216,7 @@ Ask user via ask_user:
 On **"Use gpd:write-paper":**
 
 ```
-Invoke the runtime-installed `gpd:write-paper` command.
+Invoke the runtime-installed `gpd:write-paper` child command with structured arguments `{phase: PHASE_NUM}`.
 ```
 
 After write-paper completes, proceed to iterate step (skip normal discuss/plan/execute/verify).
@@ -250,7 +269,7 @@ fi
 ```
 
 ```
-Invoke the runtime-installed `gpd:plan-phase` command with `${PHASE_NUM}`.
+Invoke the runtime-installed `gpd:plan-phase` child command with structured arguments `{phase: PHASE_NUM}`.
 ```
 
 Verify plan produced output — re-run `init phase-op` and check `has_plans`. If false → go to handle_blocker: "Plan phase ${PHASE_NUM} did not produce any plans."
@@ -260,7 +279,7 @@ Before invoking execute-phase, run gate: `gpd --raw validate lifecycle-contract-
 
 On failure, stop before workspace scripts, numerical computations, task dispatches, subagents, artifact writes, or result claims. Route to the matching repair surface: `gpd:sync-state` / `gpd:new-project`, `gpd:discuss-phase ${PHASE_NUM}` then `gpd:plan-phase ${PHASE_NUM}`, or `gpd:plan-phase ${PHASE_NUM}`.
 ```
-Invoke the runtime-installed `gpd:execute-phase` command with `${PHASE_NUM}`.
+Invoke the runtime-installed `gpd:execute-phase` child command with structured arguments `{phase: PHASE_NUM}`.
 ```
 
 `gpd:execute-phase` owns its normal phase transition / closeout path. Autonomous mode invokes it with only the phase number and must not run a duplicate transition for the same successful phase.
@@ -269,33 +288,21 @@ Invoke the runtime-installed `gpd:execute-phase` command with `${PHASE_NUM}`.
 
 **3e. Post-Execution Verification Routing**
 
-After execute-phase returns, refetch the phase state and assign `PHASE_DIR` before reading any verification artifact:
+After execute-phase returns, do not inspect `VERIFICATION.md` directly. Unless the bounded checkpoint stop override has already returned, invoke verification as a child command:
+
+```
+Invoke the runtime-installed `gpd:verify-work` child command with structured arguments `{phase: PHASE_NUM}`.
+```
+
+After the child returns, route on its structured `gpd_return.status` and the canonical phase status payload. If the return envelope is absent or ambiguous, load the verify-work session-router status payload:
 
 ```bash
-PHASE_STATE=$(gpd --raw init phase-op ${PHASE_NUM})
-PHASE_DIR=$(echo "$PHASE_STATE" | gpd json get .phase_dir --default "")
-if [ -z "$PHASE_DIR" ]; then
-  echo "ERROR: could not resolve phase directory for phase ${PHASE_NUM}"
-  # STOP — route to handle_blocker.
-fi
-VERIFY_STATUS=$(grep "^status:" "${PHASE_DIR}"/*-VERIFICATION.md 2>/dev/null | head -1 | cut -d: -f2 | tr -d ' ')
+VERIFY_PAYLOAD=$(gpd --raw init verify-work "${PHASE_NUM}" --stage session_router)
+VERIFY_STATUS=$(echo "$VERIFY_PAYLOAD" | gpd json get .verification_report_status --default "missing")
+VERIFY_SCORE=$(echo "$VERIFY_PAYLOAD" | gpd json get .verification_report_status_payload.score --default "")
 ```
 
-**If VERIFY_STATUS is empty** (no VERIFICATION.md or no status field):
-
-Run verification explicitly:
-
-```
-Invoke the runtime-installed `gpd:verify-work` command with `${PHASE_NUM}`.
-```
-
-Re-read verification status:
-
-```bash
-VERIFY_STATUS=$(grep "^status:" "${PHASE_DIR}"/*-VERIFICATION.md 2>/dev/null | head -1 | cut -d: -f2 | tr -d ' ')
-```
-
-If still empty after explicit verification: go to handle_blocker: "Verification for phase ${PHASE_NUM} did not produce results."
+If `VERIFY_STATUS` is `missing`, `missing_status`, `unparseable`, or `unknown_status`, go to handle_blocker: "Verification for phase ${PHASE_NUM} did not produce a routable canonical status." Do not infer from report prose.
 
 **If `passed`:**
 
@@ -308,9 +315,7 @@ Proceed to convention_check step.
 
 **If `human_needed`:**
 
-Read the human_verification section from VERIFICATION.md to get items requiring manual review.
-
-Display the items, then ask user via ask_user:
+Display the child-return issues or verifier-provided status payload details, then ask user via ask_user:
 - **question:** "Phase ${PHASE_NUM} has items needing manual verification. Validate now or continue?"
 - **options:** "Validate now" / "Continue without validation"
 
@@ -323,9 +328,18 @@ On "Found issues": Go to handle_blocker with the user's reported issues.
 
 On **"Continue without validation"**: Display `Phase ${PHASE_NUM} -- Human validation deferred` and proceed to convention_check step.
 
+**If `expert_needed`:**
+
+Display the child-return issues or verifier-provided status payload details, then ask user via ask_user:
+- **question:** "Phase ${PHASE_NUM} needs expert review. Continue with this limitation or stop?"
+- **options:** "Continue with limitation" / "Stop autonomous mode"
+
+On **"Continue with limitation"**: Display `Phase ${PHASE_NUM} -- Expert review deferred` and proceed to convention_check step.
+On **"Stop autonomous mode"**: Go to handle_blocker with "Expert review needed for phase ${PHASE_NUM}."
+
 **If `gaps_found`:**
 
-Read gap summary from VERIFICATION.md (score and missing items). Display:
+Use `VERIFY_SCORE` and child-return issues to summarize gaps. Display:
 ```
 Phase ${PHASE_NUM}: {PHASE_NAME} — Gaps Found
 Score: {N}/{M} checks verified
@@ -338,24 +352,25 @@ Ask user via ask_user:
 On **"Run gap closure"**: Execute gap closure cycle (limit: 1 attempt):
 
 ```
-Invoke the runtime-installed `gpd:plan-phase` command with `${PHASE_NUM} --gaps`.
+Invoke the runtime-installed `gpd:plan-phase` child command with structured arguments `{phase: PHASE_NUM, mode: "gaps"}`.
 ```
 
 Verify gap plans were created — re-run `init phase-op ${PHASE_NUM}` and check `has_plans`. If no new gap plans → go to handle_blocker: "Gap closure planning for phase ${PHASE_NUM} did not produce plans."
 
 Re-execute with `--gaps-only` to run ONLY gap-closure plans.
 ```
-Invoke the runtime-installed `gpd:execute-phase` command with `${PHASE_NUM} --gaps-only`.
+Invoke the runtime-installed `gpd:execute-phase` child command with structured arguments `{phase: PHASE_NUM, mode: "gaps_only"}`.
 ```
 
 Force fresh verification after gap closure — do NOT read stale VERIFICATION.md:
 ```
-Invoke the runtime-installed `gpd:verify-work` command with `${PHASE_NUM}`.
+Invoke the runtime-installed `gpd:verify-work` child command with structured arguments `{phase: PHASE_NUM}`.
 ```
 
-Re-read verification status from the FRESH artifact:
+Reload the canonical status payload after the fresh child verification:
 ```bash
-VERIFY_STATUS=$(grep "^status:" "${PHASE_DIR}"/*-VERIFICATION.md 2>/dev/null | head -1 | cut -d: -f2 | tr -d ' ')
+VERIFY_PAYLOAD=$(gpd --raw init verify-work "${PHASE_NUM}" --stage session_router)
+VERIFY_STATUS=$(echo "$VERIFY_PAYLOAD" | gpd json get .verification_report_status --default "missing")
 ```
 
 If `passed`: Route normally (continue to convention_check).
@@ -723,7 +738,7 @@ ls GPD/CONVENTIONS.md 2>/dev/null
 **If CONVENTIONS.md exists:** Run the command-backed convention validation on the just-completed phase. This is the authoritative check — no ad-hoc scanning.
 
 ```
-Invoke the runtime-installed `gpd:validate-conventions` command with `${PHASE_NUM}`.
+Invoke the runtime-installed `gpd:validate-conventions` child command with structured arguments `{phase: PHASE_NUM}`.
 ```
 
 Read the validation result. The command writes a validation artifact or reports to stdout.
@@ -798,19 +813,14 @@ Display lifecycle transition banner:
 **5a. Audit**
 
 ```
-Invoke the runtime-installed `gpd:audit-milestone` command.
+Invoke the runtime-installed `gpd:audit-milestone` child command with structured arguments `{}`.
 ```
 
-After audit completes, detect the result:
+After audit completes, route on the child `gpd_return.status` and any structured audit status payload returned by the command. Do not read `status:` from the audit Markdown locally.
 
-```bash
-AUDIT_FILE="GPD/v${milestone_version}-MILESTONE-AUDIT.md"
-AUDIT_STATUS=$(grep "^status:" "${AUDIT_FILE}" 2>/dev/null | head -1 | cut -d: -f2 | tr -d ' ')
-```
+**If audit status is missing or malformed:**
 
-**If AUDIT_STATUS is empty** (no audit file or no status field):
-
-Go to handle_blocker: "Audit did not produce results — audit file missing or malformed."
+Go to handle_blocker: "Audit did not produce routable structured results — audit file missing or malformed."
 
 **If `passed`:**
 
@@ -834,7 +844,7 @@ Ask user via ask_user:
 
 On **"Plan gap closure phases":**
 ```
-Invoke the runtime-installed `gpd:plan-milestone-gaps` command.
+Invoke the runtime-installed `gpd:plan-milestone-gaps` child command with structured arguments `{}`.
 ```
 
 After gap phases are planned, display: "Gap closure phases added to roadmap. Returning to autonomous execution." and loop back to discover_phases to pick up the new phases.
@@ -856,7 +866,7 @@ On **"Stop"**: Go to handle_blocker with "User stopped — audit issues to addre
 **5b. Complete Milestone**
 
 ```
-Invoke the runtime-installed `gpd:complete-milestone` command with `${milestone_version}`.
+Invoke the runtime-installed `gpd:complete-milestone` child command with structured arguments `{milestone_version: milestone_version}`.
 ```
 
 After complete-milestone returns, verify it produced output:
@@ -927,8 +937,8 @@ When any phase operation fails or a blocker is detected, present 3 options via a
 - [ ] Model profile (deep-theory/numerical/exploratory/review/paper-writing) adjusts smart discuss depth and focus
 - [ ] Progress banners displayed between phases
 - [ ] Execute-phase invoked with only the phase number; execute-phase owns normal phase transition / closeout
-- [ ] Post-execution verification reads VERIFICATION.md and routes on status
-- [ ] Missing VERIFICATION.md triggers explicit gpd:verify-work invocation
+- [ ] Post-execution verification delegates to `gpd:verify-work` and routes on child return/status payloads
+- [ ] Missing or unroutable verification status triggers explicit `gpd:verify-work` / blocker routing without prose inference
 - [ ] Passed verification → automatic continue to convention check then next phase
 - [ ] Gaps-found → user offered gap closure, continue, or stop
 - [ ] Gap closure limited to 1 retry (prevents infinite loops)

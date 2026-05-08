@@ -40,21 +40,26 @@ If no project config exists yet, start with physics questioning, surface a prese
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/new-project.md
+@{GPD_INSTALL_DIR}/workflows/new-project/scope-intake.md
 </execution_context>
 
 <process>
-**CRITICAL: First, read the full workflow file using the file_read tool:**
-Read the included workflow first and follow it exactly.
+**CRITICAL: First, read the included stage authority using the file_read tool:**
+Start from the included `scope_intake` authority. It owns read-only setup,
+recovery routing, existing-work routing, and the first narrow scope/anchor
+question.
 
-After that, load late-stage authorities only when the workflow reaches the matching stage:
-- Read {GPD_INSTALL_DIR}/references/research/questioning.md only when entering the full questioning path.
-- Read {GPD_INSTALL_DIR}/templates/project-contract-schema.md and {GPD_INSTALL_DIR}/templates/project-contract-grounding-linkage.md only when preparing the approval gate and validating the raw scoping contract.
-- Read {GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md only when authoring or repairing the scoping contract.
-- Read {GPD_INSTALL_DIR}/templates/project.md only when writing `GPD/PROJECT.md`.
-- Read {GPD_INSTALL_DIR}/templates/requirements.md only when writing `GPD/REQUIREMENTS.md`.
-- Read {GPD_INSTALL_DIR}/templates/state.md only when writing `GPD/STATE.md`.
-- Read {GPD_INSTALL_DIR}/references/ui/ui-brand.md only when rendering branded completion or status blocks.
+After each staged reload, follow `staged_loading.eager_authorities` for the active
+stage and do not read `staged_loading.must_not_eager_load`. Load later authorities
+only when the staged payload reaches the matching stage:
+- Load `references/research/questioning.md` only when entering the full questioning path.
+- Load `templates/project-contract-schema.md` and `templates/project-contract-grounding-linkage.md` only when preparing the approval gate and validating the raw scoping contract.
+- Load `references/shared/canonical-schema-discipline.md` only when authoring or repairing the scoping contract.
+- Load `workflows/new-project.md` only after `scope_approval` hands off to `post_scope`.
+- Load `templates/project.md` only when writing `GPD/PROJECT.md`.
+- Load `templates/requirements.md` only when writing `GPD/REQUIREMENTS.md`.
+- Load `templates/state.md` only when writing `GPD/STATE.md`.
+- Load `references/ui/ui-brand.md` only when rendering branded completion or status blocks.
 
 Execute the workflow end-to-end. Preserve all workflow gates (validation, approvals, routing).
 

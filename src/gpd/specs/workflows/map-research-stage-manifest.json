@@ -45,8 +45,7 @@
       "must_not_eager_load": [
         "references/shared/shared-protocols.md",
         "references/orchestration/agent-infrastructure.md",
-        "references/physics-subfields.md",
-        "references/orchestration/runtime-delegation-note.md"
+        "references/physics-subfields.md"
       ],
       "allowed_tools": [
         "ask_user",

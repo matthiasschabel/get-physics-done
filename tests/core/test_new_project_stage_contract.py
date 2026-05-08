@@ -49,11 +49,9 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
     assert contract.stages[0].order == 1
     assert contract.stages[1].order == 2
     assert contract.stages[2].order == 3
-    assert contract.stages[0].mode_paths == ("workflows/new-project.md",)
-    assert contract.stages[0].loaded_authorities == ("workflows/new-project.md",)
+    assert contract.stages[0].mode_paths == ("workflows/new-project/scope-intake.md",)
+    assert contract.stages[0].loaded_authorities == ("workflows/new-project/scope-intake.md",)
     assert contract.stages[0].required_init_fields == (
-        "researcher_model",
-        "synthesizer_model",
         "commit_docs",
         "autonomy",
         "research_mode",
@@ -83,15 +81,22 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
         "project_contract_load_info",
         "project_contract_validation",
     )
+    assert "researcher_model" not in contract.stages[0].required_init_fields
+    assert "synthesizer_model" not in contract.stages[0].required_init_fields
+    assert "roadmapper_model" not in contract.stages[0].required_init_fields
     assert "project_contract_gate" in contract.stages[0].required_init_fields
     assert "needs_research_map" in contract.stages[0].required_init_fields
     assert "init_progress_status" in contract.stages[0].required_init_fields
     assert contract.stages[0].conditional_authorities[0].when == "full_questioning_path"
     assert contract.stages[0].conditional_authorities[0].authorities == ("references/research/questioning.md",)
+    assert "workflows/new-project.md" in contract.stages[0].must_not_eager_load
+    assert "workflows/new-project/scope-approval.md" in contract.stages[0].must_not_eager_load
     assert "references/research/questioning.md" in contract.stages[0].must_not_eager_load
     assert "references/shared/canonical-schema-discipline.md" in contract.stages[0].must_not_eager_load
+    assert "templates/state.md" in contract.stages[0].must_not_eager_load
     assert "templates/project-contract-schema.md" in contract.stages[0].must_not_eager_load
     assert "templates/project-contract-grounding-linkage.md" in contract.stages[0].must_not_eager_load
+    assert contract.stages[0].allowed_tools == ("file_read", "ask_user", "shell")
     assert contract.stages[0].produced_state == ("intake routing state", "scoping-contract gate state")
     assert contract.stages[0].checkpoints == (
         "detect existing workspace state",
@@ -105,7 +110,9 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
         "project_contract_load_info",
         "project_contract_validation",
     )
+    assert contract.stages[1].mode_paths == ("workflows/new-project/scope-approval.md",)
     assert contract.stages[1].loaded_authorities == (
+        "workflows/new-project/scope-approval.md",
         "templates/project-contract-schema.md",
         "templates/project-contract-grounding-linkage.md",
         "references/shared/canonical-schema-discipline.md",
@@ -183,7 +190,7 @@ def test_new_project_post_scope_loads_templates_for_every_template_written_artif
     for output_path, template_path in required_template_by_output.items():
         assert output_path in post_scope.writes_allowed
         assert template_path in post_scope.loaded_authorities
-        assert f"Read {{GPD_INSTALL_DIR}}/{template_path} only when writing `{output_path}`." in command_text
+        assert f"Load `{template_path}` only when writing `{output_path}`." in command_text
 
 
 def test_new_project_stage_contract_loader_is_cached() -> None:
@@ -333,7 +340,9 @@ def test_new_project_stage_contract_rejects_invalid_ordering(tmp_path: Path) -> 
             "unknown field name",
         ),
         (
-            lambda payload: payload["stages"][0]["must_not_eager_load"].append("workflows/new-project.md"),
+            lambda payload: payload["stages"][0]["must_not_eager_load"].append(
+                "workflows/new-project/scope-intake.md"
+            ),
             "overlap with must_not_eager_load",
         ),
         (

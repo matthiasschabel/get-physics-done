@@ -64,11 +64,12 @@ def test_map_research_routes_on_typed_status_and_expected_artifacts() -> None:
     assert 'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)' in workflow
 
 
-def test_verify_work_uses_frontmatter_session_lookup_and_canonical_verification_status() -> None:
+def test_verify_work_uses_status_payload_session_lookup_and_canonical_verification_status() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
-    assert "gpd frontmatter get \"$file\" --field session_status" in workflow
-    assert "Active sessions are files with frontmatter `session_status` of `validating` or `diagnosed`." in workflow
+    assert "gpd frontmatter get \"$file\" --field session_status" not in workflow
+    assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in workflow
+    assert "Active sessions are payload entries with `session_status` of `validating` or `diagnosed`." in workflow
     assert "Human-readable headings in the verifier output are presentation only; route on the canonical verification frontmatter and `gpd_return.status`, not on headings or marker strings." in workflow
     assert "gpd_return.status" in workflow
     assert "rg -l '^session_status: (validating|diagnosed)$' GPD/phases/*/*-VERIFICATION.md 2>/dev/null | sort | head-5" not in workflow

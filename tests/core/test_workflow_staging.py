@@ -10,9 +10,16 @@ import pytest
 from gpd.core import context as context_module
 from gpd.core.context import (
     init_arxiv_submission,
+    init_literature_review,
+    init_map_research,
+    init_new_milestone,
+    init_new_project,
+    init_quick,
+    init_research_phase,
     init_respond_to_referees,
     init_resume,
     init_sync_state,
+    init_verify_work,
     init_write_paper,
 )
 from gpd.core.workflow_staging import (
@@ -44,6 +51,56 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def _workflow_payload(workflow_id: str) -> dict[str, object]:
     manifest_path = resolve_workflow_stage_manifest_path(workflow_id)
     return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _setup_generic_staged_init_project(cwd: Path) -> None:
+    gpd_dir = cwd / "GPD"
+    phase_dir = gpd_dir / "phases" / "01-test"
+    phase_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "config.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    (gpd_dir / "ROADMAP.md").write_text("## Milestone\n\n### Phase 1: Test\n", encoding="utf-8")
+    (gpd_dir / "STATE.md").write_text("# State\n", encoding="utf-8")
+
+
+def _staged_init_payload_for_workflow(cwd: Path, workflow_id: str, stage_id: str) -> dict[str, object]:
+    if workflow_id == "new-project":
+        return init_new_project(cwd, stage=stage_id)
+    if workflow_id == "new-milestone":
+        return init_new_milestone(cwd, stage=stage_id)
+    if workflow_id == "quick":
+        return init_quick(cwd, "Test quick task", stage=stage_id)
+    if workflow_id == "map-research":
+        return init_map_research(cwd, stage=stage_id)
+    if workflow_id == "literature-review":
+        return init_literature_review(cwd, topic="Curvature flow bounds", stage=stage_id)
+    if workflow_id == "research-phase":
+        return init_research_phase(cwd, phase="1", stage=stage_id)
+    if workflow_id == "verify-work":
+        return init_verify_work(cwd, "1", stage=stage_id)
+    if workflow_id == "resume-work":
+        return init_resume(cwd, stage=stage_id)
+    if workflow_id == "sync-state":
+        return init_sync_state(cwd, stage=stage_id)
+    if workflow_id == "write-paper":
+        return init_write_paper(cwd, stage=stage_id)
+    raise AssertionError(f"Unhandled staged init workflow {workflow_id}")
+
+
+def _assert_staged_init_payload_matches_manifest(
+    payload: dict[str, object],
+    *,
+    workflow_id: str,
+    stage_id: str,
+) -> None:
+    manifest = load_workflow_stage_manifest(workflow_id)
+    stage = manifest.stage(stage_id)
+
+    assert "staged_loading" in payload
+    assert tuple(field for field in payload if field != "staged_loading") == stage.required_init_fields
+    assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
+    assert payload["staged_loading"] == manifest.staged_loading_payload(stage_id)
 
 
 @pytest.mark.parametrize(
@@ -78,8 +135,6 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
     assert first.stage_ids() == ("scope_intake", "scope_approval", "post_scope")
     assert "references/shared/canonical-schema-discipline.md" in first.stages[0].must_not_eager_load
     assert first.stages[0].required_init_fields == (
-        "researcher_model",
-        "synthesizer_model",
         "commit_docs",
         "autonomy",
         "research_mode",
@@ -202,11 +257,14 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "references/verification/core/verification-core.md" in manifest.stages[0].must_not_eager_load
     assert "templates/verification-report.md" in manifest.stages[0].must_not_eager_load
     assert "phase_proof_review_status" in manifest.stages[0].required_init_fields
+    assert "active_verification_sessions" in manifest.stages[0].required_init_fields
+    assert "verification_report_status_payload" in manifest.stages[0].required_init_fields
     assert "project_contract_gate" in manifest.stages[0].required_init_fields
     assert "project_contract_load_info" in manifest.stages[0].required_init_fields
     assert "project_contract_validation" in manifest.stages[0].required_init_fields
     assert "references/verification/core/verification-core.md" in manifest.stages[1].must_not_eager_load
     assert "phase_proof_review_status" in manifest.stages[1].required_init_fields
+    assert "proof_redteam_finalizer_bridge" in manifest.stages[1].required_init_fields
     assert "proof-bearing work detected" not in manifest.stages[1].checkpoints
     assert (
         "proof-readiness context loaded; classify proof-bearing status from inspected proof metadata"
@@ -218,6 +276,8 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     )
     assert "protocol_bundle_verifier_extensions" in manifest.stages[2].required_init_fields
     assert "active_reference_context" in manifest.stages[2].required_init_fields
+    assert "verification_report_finalizer_bridge" in manifest.stages[2].required_init_fields
+    assert "verification_report_skeleton_bridge" in manifest.stages[2].required_init_fields
     assert "reference_artifacts_content" not in manifest.stages[2].required_init_fields
     assert set(VERIFY_WORK_MCP_VERIFICATION_TOOLS).issubset(manifest.stages[2].allowed_tools)
     assert set(VERIFY_WORK_MCP_VERIFICATION_TOOLS).isdisjoint(manifest.stages[0].allowed_tools)
@@ -498,44 +558,45 @@ def test_known_init_fields_for_verify_work_include_proof_gate_and_artifact_conte
     assert "project_contract_validation" in known_init_fields
     assert "selected_protocol_bundle_ids" in known_init_fields
     assert "protocol_bundle_verifier_extensions" in known_init_fields
+    assert "proof_redteam_finalizer_bridge" in known_init_fields
+    assert "verification_report_finalizer_bridge" in known_init_fields
     assert "verification_report_skeleton_bridge" in known_init_fields
+    assert "verification_report_status_payload" in known_init_fields
     assert "derived_manuscript_proof_review_status" in known_init_fields
     assert "reference_artifact_files" in known_init_fields
     assert "reference_artifacts_content" in known_init_fields
 
 
 @pytest.mark.parametrize(
-    ("workflow_id", "initializer"),
+    "workflow_id",
     [
-        ("resume-work", init_resume),
-        ("sync-state", init_sync_state),
-        ("write-paper", init_write_paper),
+        "literature-review",
+        "map-research",
+        "new-milestone",
+        "new-project",
+        "quick",
+        "research-phase",
+        "resume-work",
+        "sync-state",
+        "verify-work",
+        "write-paper",
     ],
 )
-def test_staged_init_fields_match_manifest_required_fields_for_resume_sync_and_write_paper(
+def test_staged_init_payloads_match_manifest_required_fields_and_loading_metadata(
     tmp_path: Path,
     workflow_id: str,
-    initializer,
 ) -> None:
-    manifest = validate_workflow_stage_manifest_payload(
-        _workflow_payload(workflow_id),
-        expected_workflow_id=workflow_id,
-    )
-
-    gpd_dir = tmp_path / "GPD"
-    gpd_dir.mkdir()
-    (gpd_dir / "config.json").write_text("{}", encoding="utf-8")
-    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    manifest = load_workflow_stage_manifest(workflow_id)
+    _setup_generic_staged_init_project(tmp_path)
 
     for stage_id in manifest.stage_ids():
-        payload = initializer(tmp_path, stage=stage_id)
-        stage = manifest.stage(stage_id)
+        payload = _staged_init_payload_for_workflow(tmp_path, workflow_id, stage_id)
 
-        assert "staged_loading" in payload
-        assert tuple(field for field in payload if field != "staged_loading") == stage.required_init_fields
-        assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
-        assert payload["staged_loading"]["workflow_id"] == workflow_id
-        assert payload["staged_loading"]["stage_id"] == stage_id
+        _assert_staged_init_payload_matches_manifest(
+            payload,
+            workflow_id=workflow_id,
+            stage_id=stage_id,
+        )
 
 
 def test_validate_workflow_stage_manifest_payload_loads_plan_phase_manifest() -> None:
@@ -577,16 +638,40 @@ def test_validate_workflow_stage_manifest_payload_loads_quick_manifest() -> None
     )
 
     assert manifest.workflow_id == "quick"
-    assert manifest.stage_ids() == ("task_bootstrap", "task_authoring")
-    assert manifest.stages[0].loaded_authorities == ("workflows/quick.md",)
-    assert "references/ui/ui-brand.md" in manifest.stages[0].must_not_eager_load
-    assert "project_contract_gate" in manifest.stages[0].required_init_fields
-    assert "project_contract_validation" in manifest.stages[0].required_init_fields
-    assert "contract_intake" in manifest.stages[1].required_init_fields
-    assert "effective_reference_intake" in manifest.stages[1].required_init_fields
-    assert "reference_artifacts_content" in manifest.stages[1].required_init_fields
-    assert "templates/planner-subagent-prompt.md" in manifest.stages[1].must_not_eager_load
-    assert manifest.stages[1].writes_allowed == ("GPD/quick/NNN-slug/PLAN.md",)
+    assert manifest.stage_ids() == ("task_bootstrap", "task_authoring", "reference_context")
+
+    bootstrap = manifest.stage("task_bootstrap")
+    authoring = manifest.stage("task_authoring")
+    reference_context = manifest.stage("reference_context")
+
+    assert bootstrap.loaded_authorities == (
+        "workflows/quick.md",
+        "references/quick/quick-mode-boundary.md",
+        "references/quick/quick-durability-minimum.md",
+        "references/quick/quick-reroute-rules.md",
+        "references/orchestration/runtime-delegation-note.md",
+    )
+    assert bootstrap.next_stages == ("task_authoring", "reference_context")
+    assert "references/ui/ui-brand.md" in bootstrap.must_not_eager_load
+    assert "references/publication/publication-pipeline-modes.md" in bootstrap.must_not_eager_load
+    assert "references/verification/core/proof-redteam-workflow-gate.md" in bootstrap.must_not_eager_load
+    assert "project_contract_gate" in bootstrap.required_init_fields
+    assert "project_contract_validation" in bootstrap.required_init_fields
+
+    assert "project_contract_gate" in authoring.required_init_fields
+    assert "contract_intake" not in authoring.required_init_fields
+    assert "effective_reference_intake" not in authoring.required_init_fields
+    assert "reference_artifacts_content" not in authoring.required_init_fields
+    assert "derived_manuscript_proof_review_status" not in authoring.required_init_fields
+    assert "templates/planner-subagent-prompt.md" in authoring.must_not_eager_load
+    assert authoring.writes_allowed == ("GPD/quick/NNN-slug/NNN-PLAN.md",)
+
+    assert "contract_intake" in reference_context.required_init_fields
+    assert "effective_reference_intake" in reference_context.required_init_fields
+    assert "active_reference_context" in reference_context.required_init_fields
+    assert "reference_artifacts_content" in reference_context.required_init_fields
+    assert "derived_manuscript_proof_review_status" in reference_context.required_init_fields
+    assert reference_context.writes_allowed == ("GPD/quick/NNN-slug/NNN-PLAN.md",)
 
 
 def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -> None:
@@ -753,6 +838,7 @@ def test_publication_staged_init_preserves_explicit_launch_arguments(tmp_path: P
 
 def test_known_init_fields_for_quick_cover_task_bootstrap_and_reference_context() -> None:
     known_init_fields = known_init_fields_for_workflow("quick")
+    manifest = load_workflow_stage_manifest("quick")
 
     assert known_init_fields is not None
     assert "executor_model" in known_init_fields
@@ -761,6 +847,10 @@ def test_known_init_fields_for_quick_cover_task_bootstrap_and_reference_context(
     assert "project_contract_gate" in known_init_fields
     assert "contract_intake" in known_init_fields
     assert "reference_artifacts_content" in known_init_fields
+    assert "contract_intake" not in manifest.stage("task_authoring").required_init_fields
+    assert "reference_artifacts_content" not in manifest.stage("task_authoring").required_init_fields
+    assert "contract_intake" in manifest.stage("reference_context").required_init_fields
+    assert "reference_artifacts_content" in manifest.stage("reference_context").required_init_fields
 
 
 @pytest.mark.parametrize(
@@ -892,7 +982,8 @@ def test_validate_workflow_stage_manifest_payload_loads_research_phase_manifest(
         "references/orchestration/model-profile-resolution.md",
     )
     assert (
-        "references/orchestration/runtime-delegation-note.md" in manifest.stage("phase_bootstrap").must_not_eager_load
+        "references/orchestration/runtime-delegation-note.md"
+        not in manifest.stage("phase_bootstrap").must_not_eager_load
     )
     assert "reference_artifacts_content" not in manifest.stage("phase_bootstrap").required_init_fields
     assert manifest.stage("research_handoff").loaded_authorities == (
@@ -1320,7 +1411,7 @@ def test_known_init_fields_for_arxiv_submission_include_publication_routing() ->
         (
             lambda payload: payload["stages"][0].__setitem__(
                 "must_not_eager_load",
-                [*payload["stages"][0]["must_not_eager_load"], "workflows/new-project.md"],
+                [*payload["stages"][0]["must_not_eager_load"], "workflows/new-project/scope-intake.md"],
             ),
             "overlap with must_not_eager_load",
         ),

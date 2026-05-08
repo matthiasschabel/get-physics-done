@@ -641,7 +641,7 @@ def test_verify_work_template_keeps_session_overlay_after_verifier_output() -> N
         completion,
         (
             "record-verification",
-            "reads frontmatter `status:`",
+            "uses the canonical verification-status reader",
             "`passed` -> `Verified`",
             "non-passed -> `Blocked`",
             "Do not relax verifier fail-closed results",

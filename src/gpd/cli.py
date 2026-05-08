@@ -1637,7 +1637,10 @@ def state_record_verification(
     status: str | None = typer.Option(
         None,
         "--status",
-        help="Verification outcome (passed|failed). If omitted, read from VERIFICATION.md frontmatter.",
+        help=(
+            "Verification outcome (passed|failed). If omitted, read canonical VERIFICATION.md "
+            "frontmatter and fail closed on missing, malformed, or unknown status."
+        ),
     ),
 ) -> None:
     """Atomically advance STATE.md past verification after a VERIFICATION.md result."""

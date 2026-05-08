@@ -113,7 +113,14 @@ def _create_phase(
     if research:
         (phase_dir / "RESEARCH.md").write_text("Research\n", encoding="utf-8")
     if verification:
-        (phase_dir / "01-VERIFICATION.md").write_text("Verification\n", encoding="utf-8")
+        (phase_dir / "01-VERIFICATION.md").write_text(
+            "---\n"
+            "status: passed\n"
+            'score: "1/1 checks verified"\n'
+            "---\n\n"
+            "# Verification\n",
+            encoding="utf-8",
+        )
     return phase_dir
 
 
@@ -808,12 +815,18 @@ def test_complete_unverified_suggests_verify(tmp_path: Path) -> None:
     assert "verify-work" in actions
 
 
-def test_stale_verification_blocks_audit_and_paper_suggestions(tmp_path: Path) -> None:
-    """Stale verification is verification debt, not milestone/paper readiness."""
+def test_unknown_verification_status_blocks_audit_and_paper_suggestions(tmp_path: Path) -> None:
+    """Unknown verification status is verification debt, not milestone/paper readiness."""
     root = _setup_project(tmp_path)
     _create_roadmap(root)
     phase_dir = _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
-    (phase_dir / "01-VERIFICATION.md").write_text("status: stale\n", encoding="utf-8")
+    (phase_dir / "01-VERIFICATION.md").write_text(
+        "---\n"
+        "status: stale\n"
+        "---\n\n"
+        "# Verification\n",
+        encoding="utf-8",
+    )
 
     result = suggest_next(root)
 
@@ -823,7 +836,26 @@ def test_stale_verification_blocks_audit_and_paper_suggestions(tmp_path: Path) -
     assert "write-paper" not in actions
     verify = next(s for s in result.suggestions if s.action == "verify-work")
     assert verify.command == "gpd init verify-work 01"
-    assert "stale" in verify.reason
+    assert "unknown_status" in verify.reason
+
+
+def test_verification_without_frontmatter_status_fails_closed(tmp_path: Path) -> None:
+    """Suggest must not infer passed verification from prose."""
+    root = _setup_project(tmp_path)
+    _create_roadmap(root)
+    phase_dir = _create_phase(root, "01-setup", plans=1, summaries=1)
+    (phase_dir / "01-VERIFICATION.md").write_text(
+        "# Verification\n\nAll checks passed in prose.\n",
+        encoding="utf-8",
+    )
+
+    result = suggest_next(root)
+
+    actions = [s.action for s in result.suggestions]
+    assert "verify-work" in actions
+    assert "audit-milestone" not in actions
+    verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert "missing_status" in verify.reason
 
 
 def test_researched_phase_suggests_plan(tmp_path: Path) -> None:

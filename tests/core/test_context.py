@@ -435,6 +435,7 @@ def _assert_staged_payload_matches_manifest(
     assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
     assert payload["staged_loading"]["workflow_id"] == workflow_id
     assert payload["staged_loading"]["stage_id"] == stage_id
+    assert payload["staged_loading"] == manifest.staged_loading_payload(stage_id)
 
 
 def _fail_if_context_builder_runs(name: str):
@@ -2702,7 +2703,11 @@ class TestInitNewProject:
         assert ctx["staged_loading"]["workflow_id"] == "new-project"
         assert ctx["staged_loading"]["stage_id"] == "scope_intake"
         assert ctx["staged_loading"]["order"] == 1
-        assert ctx["staged_loading"]["loaded_authorities"] == ["workflows/new-project.md"]
+        assert ctx["staged_loading"]["loaded_authorities"] == ["workflows/new-project/scope-intake.md"]
+        assert ctx["staged_loading"]["eager_authorities"] == ["workflows/new-project/scope-intake.md"]
+        assert "researcher_model" not in ctx
+        assert "synthesizer_model" not in ctx
+        assert "roadmapper_model" not in ctx
         assert "references/research/questioning.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert "templates/project-contract-schema.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert ctx["staged_loading"]["checkpoints"] == [
@@ -2727,6 +2732,7 @@ class TestInitNewProject:
         assert ctx["staged_loading"]["workflow_id"] == "new-project"
         assert ctx["staged_loading"]["stage_id"] == "scope_approval"
         assert ctx["staged_loading"]["loaded_authorities"] == [
+            "workflows/new-project/scope-approval.md",
             "templates/project-contract-schema.md",
             "templates/project-contract-grounding-linkage.md",
             "references/shared/canonical-schema-discipline.md",
@@ -2841,7 +2847,10 @@ class TestInitNewProject:
         assert ctx["staged_loading"]["workflow_id"] == "new-project"
         assert ctx["staged_loading"]["stage_id"] == "scope_intake"
         assert ctx["staged_loading"]["order"] == 1
-        assert ctx["staged_loading"]["loaded_authorities"] == ["workflows/new-project.md"]
+        assert ctx["staged_loading"]["loaded_authorities"] == ["workflows/new-project/scope-intake.md"]
+        assert "researcher_model" not in ctx
+        assert "synthesizer_model" not in ctx
+        assert "roadmapper_model" not in ctx
         assert "references/research/questioning.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert ctx["staged_loading"]["checkpoints"] == [
             "detect existing workspace state",
@@ -2875,6 +2884,7 @@ class TestInitNewProject:
         assert ctx["staged_loading"]["stage_id"] == "scope_approval"
         assert ctx["staged_loading"]["order"] == 2
         assert ctx["staged_loading"]["loaded_authorities"] == [
+            "workflows/new-project/scope-approval.md",
             "templates/project-contract-schema.md",
             "templates/project-contract-grounding-linkage.md",
             "references/shared/canonical-schema-discipline.md",
@@ -3852,20 +3862,75 @@ class TestInitQuick:
         # Falls back to default numbering when directory is unreadable
         assert ctx["next_num"] == 1
 
-    def test_stage_task_authoring_uses_quick_manifest_contract(self, tmp_path: Path) -> None:
+    def test_stage_task_authoring_uses_quick_manifest_contract(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         _setup_project(tmp_path)
         (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
         _write_project_contract_state(tmp_path)
+        monkeypatch.setattr(
+            "gpd.core.context._build_reference_runtime_context",
+            _fail_if_context_builder_runs("_build_reference_runtime_context"),
+        )
         manifest = load_workflow_stage_manifest("quick")
 
-        ctx = init_quick(tmp_path, "Quick reference check", stage="task_authoring")
+        ctx = init_quick(tmp_path, "Quick dimensional check", stage="task_authoring")
         stage = manifest.stage_by_id("task_authoring")
 
         assert ctx["staged_loading"]["stage_id"] == "task_authoring"
         assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
         assert "project_contract_gate" in ctx
-        assert "reference_artifacts_content" in ctx
-        assert "active_reference_context" in ctx
+        assert "reference_artifacts_content" not in ctx
+        assert "active_reference_context" not in ctx
+        assert "derived_manuscript_proof_review_status" not in ctx
+
+    def test_stage_reference_context_loads_reference_runtime_when_selected(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _setup_project(tmp_path)
+        (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        _write_project_contract_state(tmp_path)
+        calls: list[Path] = []
+
+        def reference_runtime_context(cwd: Path) -> dict[str, object]:
+            calls.append(cwd)
+            return {
+                "project_contract": {"version": 1},
+                "project_contract_gate": {"authoritative": True},
+                "project_contract_load_info": {"status": "loaded"},
+                "project_contract_validation": {"valid": True},
+                "contract_intake": {"must_read_refs": ["ref-benchmark"]},
+                "effective_reference_intake": {"must_read_refs": ["ref-benchmark"]},
+                "selected_protocol_bundle_ids": ["core"],
+                "protocol_bundle_count": 1,
+                "protocol_bundle_context": "protocol context",
+                "protocol_bundle_verifier_extensions": "verifier extensions",
+                "active_reference_context": "active reference context",
+                "reference_artifact_files": ["GPD/research-map/REFERENCES.md"],
+                "reference_artifacts_content": "reference artifacts",
+                "literature_review_files": ["GPD/literature/SUMMARY.md"],
+                "literature_review_count": 1,
+                "research_map_reference_files": ["GPD/research-map/REFERENCES.md"],
+                "research_map_reference_count": 1,
+                "derived_manuscript_proof_review_status": "not applicable",
+            }
+
+        monkeypatch.setattr("gpd.core.context._build_reference_runtime_context", reference_runtime_context)
+        manifest = load_workflow_stage_manifest("quick")
+
+        ctx = init_quick(tmp_path, "Look up benchmark source", stage="reference_context")
+        stage = manifest.stage_by_id("reference_context")
+
+        assert calls == [tmp_path]
+        assert ctx["staged_loading"]["stage_id"] == "reference_context"
+        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert ctx["contract_intake"] == {"must_read_refs": ["ref-benchmark"]}
+        assert ctx["active_reference_context"] == "active reference context"
+        assert ctx["reference_artifacts_content"] == "reference artifacts"
 
     def test_staged_quick_init_blocks_without_initialized_project(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
@@ -4387,6 +4452,9 @@ class TestInitVerifyWork:
         assert ctx["project_contract_gate"]["visible"] is True
         assert ctx["phase_proof_review_status"]["scope"] == "phase"
         assert ctx["phase_proof_review_status"]["state"] == "not_reviewed"
+        assert ctx["active_verification_sessions"] == []
+        assert ctx["verification_report_status"] == "missing"
+        assert ctx["verification_report_status_payload"]["routing_status"] == "missing"
         assert ctx["staged_loading"]["stage_id"] == "session_router"
         assert ctx["staged_loading"]["checkpoints"] == [
             "active session check completed",
@@ -4410,7 +4478,36 @@ class TestInitVerifyWork:
         assert ctx["phase_number"] is None
         assert ctx["project_root"] == tmp_path.resolve(strict=False).as_posix()
         assert ctx["project_contract_gate"]["visible"] is True
+        assert ctx["active_verification_sessions"] == []
         assert ctx["staged_loading"]["stage_id"] == "session_router"
+
+    def test_stage_session_router_surfaces_active_verification_sessions(self, tmp_path: Path) -> None:
+        _setup_project(tmp_path)
+        phase_dir = _create_phase_dir(tmp_path, "01-setup")
+        _write_project_contract_state(tmp_path)
+        (phase_dir / "01-VERIFICATION.md").write_text(
+            "---\n"
+            "status: gaps_found\n"
+            "session_status: validating\n"
+            'score: "2/6 checks verified"\n'
+            "---\n\n"
+            "# Verification\n",
+            encoding="utf-8",
+        )
+
+        ctx = init_verify_work(tmp_path, "", stage="session_router")
+
+        assert ctx["active_verification_sessions"] == [
+            {
+                "path": (phase_dir / "01-VERIFICATION.md").as_posix(),
+                "phase": "01",
+                "status": "gaps_found",
+                "routing_status": "gaps_found",
+                "session_status": "validating",
+                "score": "2/6 checks verified",
+                "errors": [],
+            }
+        ]
 
     def test_staged_verify_work_init_does_not_bootstrap_phase_proof_review_manifest(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
@@ -4423,6 +4520,21 @@ class TestInitVerifyWork:
         assert ctx["phase_proof_review_status"]["state"] == "fresh"
         assert ctx["phase_proof_review_status"]["manifest_bootstrapped"] is False
         assert not (phase_dir / "01-PROOF-REVIEW-MANIFEST.json").exists()
+
+    def test_stage_phase_bootstrap_surfaces_proof_redteam_finalizer_bridge(self, tmp_path: Path) -> None:
+        _setup_project(tmp_path)
+        phase_dir = _create_phase_dir(tmp_path, "01-setup")
+        _write_project_contract_state(tmp_path)
+
+        ctx = init_verify_work(tmp_path, "1", stage="phase_bootstrap")
+
+        bridge = ctx["proof_redteam_finalizer_bridge"]
+        assert ctx["staged_loading"]["stage_id"] == "phase_bootstrap"
+        assert "proof_redteam_finalizer_bridge" in ctx["staged_loading"]["required_init_fields"]
+        assert bridge["command_name"] == "gpd proof-redteam finalize"
+        assert bridge["supported_statuses"] == ["passed"]
+        assert bridge["expected_proof_redteam_path"] == (phase_dir / "01-PROOF-REDTEAM.md").as_posix()
+        assert "gpd proof-redteam finalize" in bridge["writer_command_template"]
 
     def test_missing_phase_raises(self, tmp_path: Path) -> None:
         with pytest.raises(ValidationError, match="phase is required"):
@@ -4457,9 +4569,11 @@ class TestInitVerifyWork:
 
         ctx = init_verify_work(tmp_path, "1", stage="inventory_build")
         bridge = ctx["verification_report_skeleton_bridge"]
+        finalizer_bridge = ctx["verification_report_finalizer_bridge"]
 
         assert ctx["staged_loading"]["stage_id"] == "inventory_build"
         assert "verification_report_skeleton_bridge" in ctx["staged_loading"]["required_init_fields"]
+        assert "verification_report_finalizer_bridge" in ctx["staged_loading"]["required_init_fields"]
         assert bridge["command_name"] == "gpd verification-report skeleton"
         assert bridge["skeleton_command"] == (
             f"gpd verification-report skeleton {(phase_dir / '01-PLAN.md').as_posix()} --format markdown"
@@ -4493,6 +4607,13 @@ class TestInitVerifyWork:
         assert all(Path(source["source_path"]).is_file() for source in schema_sources)
         assert bridge["expected_target_plan_path"] == (phase_dir / "01-PLAN.md").as_posix()
         assert bridge["expected_verification_path"] == (phase_dir / "01-VERIFICATION.md").as_posix()
+        assert finalizer_bridge["command_name"] == "gpd verification-report finalize"
+        assert finalizer_bridge["writer_command_template"] == (
+            f"gpd verification-report finalize {(phase_dir / '01-PLAN.md').as_posix()} --patch PATCH.json "
+            f"--body-file BODY.md --output {(phase_dir / '01-VERIFICATION.md').as_posix()} "
+            "--validate contract --force"
+        )
+        assert "passed" in finalizer_bridge["supported_statuses"]
         assert bridge["validation_command"] == (
             f"gpd validate verification-contract {(phase_dir / '01-VERIFICATION.md').as_posix()}"
         )

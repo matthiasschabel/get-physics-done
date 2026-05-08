@@ -16,7 +16,7 @@ SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 
 
-def test_research_phase_stage_manifest_defers_runtime_delegation_until_the_handoff_stage() -> None:
+def test_research_phase_stage_manifest_tracks_visible_runtime_delegation_authority() -> None:
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "research-phase-stage-manifest.json").read_text(encoding="utf-8")),
         expected_workflow_id="research-phase",
@@ -34,7 +34,7 @@ def test_research_phase_stage_manifest_defers_runtime_delegation_until_the_hando
         "workflows/research-phase.md",
         "references/orchestration/model-profile-resolution.md",
     )
-    assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" not in bootstrap.must_not_eager_load
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
 
     assert handoff.loaded_authorities == (

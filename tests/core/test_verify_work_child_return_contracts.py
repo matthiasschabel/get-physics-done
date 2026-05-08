@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gpd.core.context import _build_verification_report_skeleton_bridge
+from gpd.core.context import (
+    _build_proof_redteam_finalizer_bridge,
+    _build_verification_report_finalizer_bridge,
+    _build_verification_report_skeleton_bridge,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
@@ -50,6 +54,39 @@ def test_verify_work_inventory_bridge_exposes_writer_command_and_preview_command
     assert "Use skeleton_command as preview context only" in str(bridge["fallback_rule"])
     assert "hand-author or reflow VERIFICATION.md frontmatter" in str(bridge["fallback_rule"])
     assert "use the generated frontmatter as the starting YAML" not in str(bridge["fallback_rule"])
+
+
+def test_verify_work_finalizer_bridges_expose_helper_commands(tmp_path: Path) -> None:
+    phase_info = {
+        "directory": "GPD/phases/01-setup",
+        "phase_number": "01",
+        "plans": ["01-PLAN.md"],
+    }
+
+    verification_bridge = _build_verification_report_finalizer_bridge(tmp_path, phase_info)
+    proof_bridge = _build_proof_redteam_finalizer_bridge(tmp_path, phase_info)
+
+    assert verification_bridge["command_name"] == "gpd verification-report finalize"
+    assert verification_bridge["writer_command_template"] == (
+        f"gpd verification-report finalize {(tmp_path / 'GPD/phases/01-setup/01-PLAN.md').as_posix()} "
+        f"--patch PATCH.json --body-file BODY.md --output "
+        f"{(tmp_path / 'GPD/phases/01-setup/01-VERIFICATION.md').as_posix()} --validate contract --force"
+    )
+    assert verification_bridge["supported_statuses"] == [
+        "passed",
+        "gaps_found",
+        "expert_needed",
+        "human_needed",
+    ]
+    assert "typed verification outcome patch" in str(verification_bridge["patch_contract"])
+    assert "Do not hand-author VERIFICATION.md YAML" in str(verification_bridge["status_policy"])
+
+    assert proof_bridge["command_name"] == "gpd proof-redteam finalize"
+    assert proof_bridge["supported_statuses"] == ["passed"]
+    assert proof_bridge["expected_proof_redteam_path"] == (
+        tmp_path / "GPD/phases/01-setup/01-PROOF-REDTEAM.md"
+    ).as_posix()
+    assert "gpd proof-redteam finalize" in str(proof_bridge["writer_command_template"])
 
 
 def test_verify_work_verifier_handoff_stays_one_shot_and_routes_on_typed_status() -> None:
@@ -126,13 +163,16 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
     fallback_fragments = (
         "fallback verifier execution is still `gpd-verifier` execution",
         "verification_report_skeleton_bridge",
+        "verification_report_finalizer_bridge",
         "write body-only evidence",
         "satisfies bridge `body_contract`",
         "one fenced executed `python`/`bash` block",
         "adjacent `**Output:**` plus fenced `output`",
         "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-        "replace `BODY.md` in its `writer_command`",
-        "The writer serializes YAML and validates before canonical acceptance.",
+        "replace `BODY.md` in the skeleton bridge `writer_command`",
+        "The helper serializes YAML and validates before canonical acceptance.",
+        "write the finalizer bridge patch JSON",
+        "run `gpd verification-report finalize`",
         "Use `skeleton_command` only as read-only preview context",
         "do not hand-author or reflow frontmatter",
         "keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML",
@@ -155,7 +195,7 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
     )
 
     assert workflow.index("verification_report_skeleton_bridge") < workflow.index('<step name="sync_verifier_output">')
-    assert workflow.index("replace `BODY.md` in its `writer_command`") < workflow.index(
+    assert workflow.index("replace `BODY.md` in the skeleton bridge `writer_command`") < workflow.index(
         '<step name="sync_verifier_output">'
     )
     assert workflow.index(sync_stop) < workflow.index(
@@ -246,8 +286,10 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     assert "Use `phase_proof_review_status` as the proof-review freshness summary." in workflow
-    assert "Use `gpd proof-redteam skeleton` for helper-owned proof-redteam frontmatter" in workflow
-    assert "`gpd validate proof-redteam` before reporting completion" in workflow
+    assert "Use `proof_redteam_finalizer_bridge` as the helper-owned passed-audit bridge." in workflow
+    assert "Use `gpd proof-redteam skeleton` for non-passing helper-owned proof-redteam frontmatter" in workflow
+    assert "gpd proof-redteam finalize" in workflow
+    assert "before `gpd validate proof-redteam`" in workflow
     assert "`staged_loading.checkpoints` is not a proof classifier" in workflow
     assert "ignore `phase_proof_review_status.state=not_reviewed|fresh` alone" in workflow
     assert "Classify proof-bearing only from research artifacts" in workflow
@@ -262,7 +304,7 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
         in workflow
     )
     assert (
-        "After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` before finalizing the gap ledger."
+        "After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` after a successful `gpd proof-redteam finalize ...` and `gpd validate proof-redteam` run before finalizing the gap ledger."
         in workflow
     )
     assert (
@@ -288,7 +330,10 @@ def test_verify_work_record_verification_state_closeout_is_sequential() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     assert 'gpd --raw state record-verification --phase "${phase_number}"' in workflow
-    assert "`record-verification` reads frontmatter `status:` (`passed` -> `Verified`; non-passed -> `Blocked`)." in workflow
+    assert (
+        "`record-verification` uses the canonical verification-status reader (`passed` -> `Verified`; canonical non-passed -> `Blocked`; missing, unparseable, or unknown status fails closed without changing state)."
+        in workflow
+    )
     assert "Do not pass `--status` here or for acknowledgement" in workflow
     assert "legacy/admin overrides require no verifier frontmatter" in workflow
     assert "cannot turn limitations into passes" in workflow

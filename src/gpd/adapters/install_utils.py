@@ -837,7 +837,12 @@ def compact_staged_command_shim_for_runtime(
         first_stage_id=first_stage.id,
         bridge_command=bridge_command or "gpd",
     )
-    replaced = _replace_workflow_include_with_shim(content, workflow_id=workflow_id, shim=shim)
+    replaced = _replace_workflow_include_with_shim(
+        content,
+        workflow_id=workflow_id,
+        shim=shim,
+        include_paths=first_stage.mode_paths,
+    )
     if replaced is None:
         return None
     return _rewrite_compact_shim_followup_guidance(replaced)
@@ -876,6 +881,10 @@ def _render_compact_staged_command_shim(
         "error.\n\n"
         "Parse JSON and use the returned top-level keys as only the active-stage payload. Treat only "
         "`payload.staged_loading` as the authority map:\n\n"
+        "Expected keys on `payload.staged_loading`: `workflow_id`, `stage_id`, `order`, "
+        "`required_init_fields`, `mode_paths`, `loaded_authorities`, `eager_authorities`, "
+        "`conditional_authorities`, `must_not_eager_load`, `allowed_tools`, `writes_allowed`, "
+        "`produced_state`, `next_stages`, `checkpoints`.\n\n"
         "- parse the fields named by `staged_loading.required_init_fields`;\n"
         "- read only active `staged_loading.eager_authorities`;\n"
         "- do not read `staged_loading.must_not_eager_load` until a later stage makes it eager;\n"
@@ -1022,19 +1031,27 @@ def _replace_execution_context_with_shim(content: str, *, workflow_id: str, shim
     return content.replace(include_line, shim, 1)
 
 
-def _replace_workflow_include_with_shim(content: str, *, workflow_id: str, shim: str) -> str | None:
-    include_line = f"@{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md"
+def _replace_workflow_include_with_shim(
+    content: str,
+    *,
+    workflow_id: str,
+    shim: str,
+    include_paths: Sequence[str] = (),
+) -> str | None:
+    candidate_include_paths = tuple(dict.fromkeys((f"workflows/{workflow_id}.md", *include_paths)))
     replacement_block = f"<execution_context>\n{shim}\n</execution_context>"
-    block_re = re.compile(
-        rf"<execution_context>\s*{re.escape(include_line)}\s*</execution_context>",
-        re.DOTALL,
-    )
-    replaced, count = block_re.subn(replacement_block, content, count=1)
-    if count:
-        return replaced
-    if include_line not in content:
-        return None
-    return content.replace(include_line, shim, 1)
+    for include_path in candidate_include_paths:
+        include_line = f"@{{GPD_INSTALL_DIR}}/{include_path}"
+        block_re = re.compile(
+            rf"<execution_context>\s*{re.escape(include_line)}\s*</execution_context>",
+            re.DOTALL,
+        )
+        replaced, count = block_re.subn(replacement_block, content, count=1)
+        if count:
+            return replaced
+        if include_line in content:
+            return content.replace(include_line, shim, 1)
+    return None
 
 
 def _rewrite_compact_shim_followup_guidance(content: str) -> str:

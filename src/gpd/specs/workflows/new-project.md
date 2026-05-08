@@ -436,14 +436,14 @@ Runtime label: Show `gpd:` as native labels; keep local CLI `gpd ...` unchanged.
 **MANDATORY FIRST STEP — Execute these checks before ANY user interaction:**
 
 ```bash
-INIT=$(gpd --raw init new-project --stage scope_intake)
+SCOPE_INIT=$(gpd --raw init new-project --stage scope_intake)
 if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
+  echo "ERROR: gpd initialization failed: $SCOPE_INIT"
   # STOP; surface the error.
 fi
 ```
 
-Parse JSON for: `researcher_model`, `synthesizer_model`, `commit_docs`, `autonomy`, `research_mode`, `project_exists`, `state_exists`, `roadmap_exists`, `recoverable_project_exists`, `partial_project_exists`, `project_recovery_status`, `has_research_map`, `planning_exists`, `has_research_files`, `research_file_samples`, `has_project_manifest`, `needs_research_map`, `has_git`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+Parse JSON for: `commit_docs`, `autonomy`, `research_mode`, `project_exists`, `state_exists`, `roadmap_exists`, `recoverable_project_exists`, `partial_project_exists`, `project_recovery_status`, `init_progress_exists`, `init_progress_status`, `init_progress_valid`, `init_progress_corrupt`, `init_progress_step`, `init_progress_description`, `init_progress_path`, `has_research_map`, `planning_exists`, `has_research_files`, `research_file_samples`, `has_project_manifest`, `needs_research_map`, `has_git`, `platform`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Pause for user confirmation after each major step (questioning, scoping contract, research, roadmap). Show summaries and wait for approval before proceeding.

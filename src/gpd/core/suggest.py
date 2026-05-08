@@ -66,6 +66,7 @@ from gpd.core.utils import (
 from gpd.core.utils import (
     phase_unpad as _phase_unpad,
 )
+from gpd.core.verification_status import read_verification_status
 from gpd.mcp.paper.bibliography import BibliographyAudit
 from gpd.mcp.paper.models import ArtifactManifest
 
@@ -202,40 +203,14 @@ def _phase_verification_status(phase_path: Path, files: list[str]) -> str:
 
     statuses: list[str] = []
     for filename in verification_files:
-        try:
-            text = (phase_path / filename).read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            statuses.append("invalid")
-            continue
-        match = re.search(r"(?im)^\s*status\s*:\s*([a-zA-Z0-9_-]+)\s*$", text)
-        if match:
-            statuses.append(match.group(1).strip().lower())
-            continue
-        lowered = text.lower()
-        if re.search(r"\b(stale|expired|outdated)\b", lowered):
-            statuses.append("stale")
-        elif re.search(r"\b(gaps?_found|gap[s ]+found|failed|invalid)\b", lowered):
-            statuses.append("gaps_found")
-        else:
-            statuses.append("passed")
+        payload = read_verification_status(phase_path / filename)
+        statuses.append(payload.routing_status)
 
-    blocking = {
-        "stale",
-        "gaps_found",
-        "gap_found",
-        "failed",
-        "failure",
-        "invalid",
-        "human_needed",
-        "expert_needed",
-        "needs_human",
-        "needs_expert",
-        "missing",
-    }
+    blocking = {"unreadable", "unparseable", "missing_status", "unknown_status", "gaps_found", "human_needed", "expert_needed"}
     for status in statuses:
         if status in blocking:
-            return "gaps_found" if status in {"gap_found", "failed", "failure"} else status
-    if any(status in {"passed", "verified", "complete", "completed"} for status in statuses):
+            return status
+    if any(status == "passed" for status in statuses):
         return "passed"
     return "present"
 

@@ -7,11 +7,9 @@
       "order": 1,
       "purpose": "startup routing, lean scoping intake, and continuation detection",
       "mode_paths": [
-        "workflows/new-project.md"
+        "workflows/new-project/scope-intake.md"
       ],
       "required_init_fields": [
-        "researcher_model",
-        "synthesizer_model",
         "commit_docs",
         "autonomy",
         "research_mode",
@@ -42,7 +40,7 @@
         "project_contract_validation"
       ],
       "loaded_authorities": [
-        "workflows/new-project.md"
+        "workflows/new-project/scope-intake.md"
       ],
       "conditional_authorities": [
         {
@@ -53,20 +51,21 @@
         }
       ],
       "must_not_eager_load": [
+        "workflows/new-project.md",
+        "workflows/new-project/scope-approval.md",
         "references/research/questioning.md",
         "references/ui/ui-brand.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/project.md",
         "templates/requirements.md",
+        "templates/state.md",
         "templates/project-contract-grounding-linkage.md",
         "templates/project-contract-schema.md"
       ],
       "allowed_tools": [
         "file_read",
         "ask_user",
-        "shell",
-        "file_write",
-        "task"
+        "shell"
       ],
       "writes_allowed": [],
       "produced_state": [
@@ -87,7 +86,7 @@
       "order": 2,
       "purpose": "scoping contract approval and approval-state persistence",
       "mode_paths": [
-        "workflows/new-project.md"
+        "workflows/new-project/scope-approval.md"
       ],
       "required_init_fields": [
         "project_contract",
@@ -96,12 +95,14 @@
         "project_contract_validation"
       ],
       "loaded_authorities": [
+        "workflows/new-project/scope-approval.md",
         "templates/project-contract-schema.md",
         "templates/project-contract-grounding-linkage.md",
         "references/shared/canonical-schema-discipline.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/new-project.md",
         "references/research/questioning.md",
         "references/ui/ui-brand.md",
         "templates/project.md",

@@ -24,7 +24,7 @@ MIN_CHAR_MARGIN = 1_000
 
 AGENT_BASELINES = {
     "gpd-bibliographer": (132, 6_015),
-    "gpd-check-proof": (78, 4_900),
+    "gpd-check-proof": (81, 6_231),
     "gpd-consistency-checker": (64, 3_993),
     "gpd-debugger": (246, 9_494),
     "gpd-executor": (3_017, 202_551),

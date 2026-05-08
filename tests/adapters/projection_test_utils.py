@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import Path
 
 from gpd.adapters.install_utils import DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES
+from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
 from tests.prompt_metrics_support import MarkdownFence, iter_markdown_fences
 
 __all__ = [
     "ProjectedSection",
     "ProjectedText",
+    "StagedCommandProjectionCase",
     "first_runnable_shell_command",
+    "iter_staged_command_projection_cases",
     "normalize_projected_text",
 ]
 
@@ -32,6 +36,16 @@ class ProjectedSection:
     def text(self) -> str:
         heading_line = f"{'#' * self.level} {self.heading}"
         return f"{heading_line}\n{self.body}" if self.body else heading_line
+
+
+@dataclass(frozen=True, slots=True)
+class StagedCommandProjectionCase:
+    """One checked-in staged command/workflow manifest pair."""
+
+    command_name: str
+    first_stage_id: str
+    native_include_paths: tuple[str, ...]
+    staged_loading_keys: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +87,39 @@ class ProjectedText:
 
 def normalize_projected_text(text: str) -> ProjectedText:
     return ProjectedText(text=text)
+
+
+def iter_staged_command_projection_cases(
+    *,
+    commands_dir: Path,
+    workflows_dir: Path,
+) -> tuple[StagedCommandProjectionCase, ...]:
+    """Return projection cases discovered from checked-in stage manifests."""
+
+    cases: list[StagedCommandProjectionCase] = []
+    for manifest_path in sorted(workflows_dir.glob("*-stage-manifest.json")):
+        command_name = manifest_path.name.removesuffix("-stage-manifest.json")
+        command_path = commands_dir / f"{command_name}.md"
+        assert command_path.is_file(), f"{manifest_path.name} has no command surface at {command_path}"
+
+        manifest = load_workflow_stage_manifest_from_path(
+            manifest_path,
+            expected_workflow_id=command_name,
+        )
+        if manifest.prompt_usage != "staged_init":
+            continue
+        assert manifest.stages, f"{manifest_path.name} has no stages"
+        first_stage = manifest.stages[0]
+        cases.append(
+            StagedCommandProjectionCase(
+                command_name=command_name,
+                first_stage_id=first_stage.id,
+                native_include_paths=tuple(first_stage.mode_paths),
+                staged_loading_keys=tuple(manifest.staged_loading_payload(first_stage.id)),
+            )
+        )
+
+    return tuple(cases)
 
 
 def first_runnable_shell_command(fence_or_body: MarkdownFence | str) -> str | None:

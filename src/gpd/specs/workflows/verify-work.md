@@ -74,26 +74,16 @@ Do not assume reference ledgers, protocol bundles, or report schemas are loaded 
 
 **If no phase was provided:**
 
-```bash
-ACTIVE_VERIFY_SESSIONS=$(
-  for file in "$PROJECT_ROOT"/GPD/phases/*/*-VERIFICATION.md; do
-    [ -f "$file" ] || continue
-    session_status=$(gpd frontmatter get "$file" --field session_status 2>/dev/null)
-    if [ "$session_status" = "validating" ] || [ "$session_status" = "diagnosed" ]; then
-      printf '%s\n' "$file"
-    fi
-  done | sort | head -5
-)
-```
+Read `active_verification_sessions` from `SESSION_ROUTER_INIT`. This payload is produced by the canonical verification-status reader from structured frontmatter and is capped to the first five active sessions. Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here.
 
-Active sessions are files with frontmatter `session_status` of `validating` or `diagnosed`. Read frontmatter for canonical `status`, `session_status`, `phase`, and Current Check; never let `session_status` overwrite `status`.
+Active sessions are payload entries with `session_status` of `validating` or `diagnosed`. Route on each entry's canonical `status` / `routing_status` and keep `session_status` conversational only; never let `session_status` overwrite `status`.
 
 If active sessions exist, display:
 
 ```
 ## Active Verification Sessions
 
-1. Phase N: validating; verification gaps_found; check 3; progress 2/6
+1. Phase N: validating; verification gaps_found; score 2/6
 
 Reply with a number to resume, or provide a phase number.
 ```
@@ -145,13 +135,10 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use canonical artifact discovery helpers during bootstrap:
+Use canonical artifact discovery helpers during bootstrap. `verification_report_status_payload` is the fail-closed status surface for the current phase; if it reports `missing`, `missing_status`, `unparseable`, or `unknown_status`, treat that as pending verification rather than a pass.
 
 ```bash
 PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")
-ls "$PHASE_DIR_ABS"/*SUMMARY.md 2>/dev/null
-ls "$PHASE_DIR_ABS"/*-VERIFICATION.md 2>/dev/null | head -1
-ls "$PROJECT_ROOT"/GPD/phases/*/*SUMMARY.md 2>/dev/null | sort
 ```
 
 Use `phase_dir_abs` for shell/file IO; `phase_dir` stays the project-relative label. Read all PLAN.md files in `${PHASE_DIR_ABS}/` using the file_read tool.
@@ -178,7 +165,7 @@ Use `phase_bootstrap.required_init_fields` as the refreshed payload.
 `staged_loading.checkpoints` is not a proof classifier; ignore `phase_proof_review_status.state=not_reviewed|fresh` alone.
 Classify proof-bearing only from research artifacts; exclude installed runtime/config/skills trees and generated manifests.
 
-Use `phase_proof_review_status` as the proof-review freshness summary. For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once before finalizing gaps.
+Use `phase_proof_review_status` as the proof-review freshness summary. For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once before finalizing gaps. Use `proof_redteam_finalizer_bridge` as the helper-owned passed-audit bridge.
 This additional mandatory floor applies.
 
 ```bash
@@ -192,11 +179,11 @@ task(
   subagent_type="gpd-check-proof",
   model="{check_proof_model}",
   readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions. Use `gpd proof-redteam skeleton` for helper-owned proof-redteam frontmatter and `gpd validate proof-redteam` before reporting completion; use {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md as authority references when helper/validator errors require them. Write `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md`; audit phase proof artifacts, PLAN contract slice, and any current verification artifact; return through the typed proof-redteam handoff contract."
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions. Use `gpd proof-redteam skeleton` for non-passing helper-owned proof-redteam frontmatter; for passed audits use `proof_redteam_finalizer_bridge` / `gpd proof-redteam finalize` before `gpd validate proof-redteam`. Use {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md as authority references when helper/validator errors require them. Write `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md`; audit phase proof artifacts, PLAN contract slice, and any current verification artifact; return through the typed proof-redteam handoff contract."
 )
 ```
 
-After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` before finalizing the gap ledger. Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation.
+After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` after a successful `gpd proof-redteam finalize ...` and `gpd validate proof-redteam` run before finalizing the gap ledger. Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation.
 If `gpd-check-proof` still cannot produce a passed audit, keep the verification status fail-closed.
 Do not stop with only the proof-redteam artifact: the canonical verification report must still record the proof gap ledger. Continue to verifier handoff with reopened proof content/freshness so `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md` is written/updated with a gap report or blocked `gpd_return.status`; otherwise route to `gpd:verify-work ${phase_number}`.
 </step>
@@ -244,6 +231,8 @@ Human-readable headings in the verifier output are presentation only; route on t
 
 > Runtime delegation rule: this is a one-shot handoff. If the spawned verifier needs user input, it must checkpoint and return. The wrapper must start a fresh continuation after the user responds instead of trying to keep the original verifier alive.
 
+Use `verification_report_finalizer_bridge` as the canonical report finalizer bridge for passed, `human_needed`, `expert_needed`, and typed non-gap outcomes. Gap-only conservative reports may use `verification_report_skeleton_bridge`; stronger statuses must run `gpd verification-report finalize` with a typed patch JSON plus body-only evidence and pass `gpd validate verification-contract` before the wrapper routes on the report.
+
 Prompt: "First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instructions." Then verify Phase {phase_number}; use `Verification flags from the normalized parser: $VERIFY_FLAG_TEXT`; treat `--dimensional`, `--limits`, `--convergence`, and `--regression` as optional-breadth narrowing only.
 
 Read with `file_read`: `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`, all PLAN/SUMMARY/`*-PROOF-REDTEAM.md` files in `${PHASE_DIR_ABS}/`, `${PROJECT_ROOT}/GPD/STATE.md`, and `${PROJECT_ROOT}/GPD/ROADMAP.md`.
@@ -263,7 +252,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict); replace `BODY.md` in its `writer_command` with that file; run it. The writer serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
+If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge` and `verification_report_finalizer_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict). For conservative gap reports, replace `BODY.md` in the skeleton bridge `writer_command` with that file and run it. For passed, `human_needed`, `expert_needed`, or typed non-gap outcomes, write the finalizer bridge patch JSON, replace `PATCH.json` and `BODY.md` in its `writer_command_template`, and run `gpd verification-report finalize`. The helper serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
 </step>
 
 <step name="sync_verifier_output">
@@ -522,7 +511,7 @@ gpd commit "verify(${phase_number}): complete research validation - {passed} pas
 gpd --raw state record-verification --phase "${phase_number}"
 ```
 
-`record-verification` reads frontmatter `status:` (`passed` -> `Verified`; non-passed -> `Blocked`).
+`record-verification` uses the canonical verification-status reader (`passed` -> `Verified`; canonical non-passed -> `Blocked`; missing, unparseable, or unknown status fails closed without changing state).
 Do not pass `--status` here or for acknowledgement; legacy/admin overrides require no verifier frontmatter and cannot turn limitations into passes. Barrier: wait before state get/validate/repair; never parallelize state mutation with validation.
 
 Present the summary of passed, issue, and skipped checks. Do not relax verifier fail-closed results.

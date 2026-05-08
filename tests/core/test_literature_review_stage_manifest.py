@@ -15,7 +15,7 @@ SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 
 
-def test_literature_review_stage_manifest_defers_reference_artifacts_and_delegation_authorities() -> None:
+def test_literature_review_stage_manifest_defers_reference_artifacts_and_tracks_visible_delegation() -> None:
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "literature-review-stage-manifest.json").read_text(encoding="utf-8")),
         expected_workflow_id="literature-review",
@@ -36,11 +36,12 @@ def test_literature_review_stage_manifest_defers_reference_artifacts_and_delegat
     assert bootstrap.loaded_authorities == ("workflows/literature-review.md",)
     assert "reference_artifact_files" not in bootstrap.required_init_fields
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
-    assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" not in bootstrap.must_not_eager_load
 
     assert "reference_artifact_files" in scope_locked.required_init_fields
     assert "reference_artifacts_content" in scope_locked.required_init_fields
     assert scope_locked.loaded_authorities == ("workflows/literature-review.md",)
+    assert "references/orchestration/runtime-delegation-note.md" not in scope_locked.must_not_eager_load
 
     assert review_handoff.loaded_authorities == (
         "workflows/literature-review.md",
@@ -51,6 +52,7 @@ def test_literature_review_stage_manifest_defers_reference_artifacts_and_delegat
     assert "GPD/literature/slug-CITATION-AUDIT.md" in review_handoff.writes_allowed
 
     assert completion_gate.loaded_authorities == ("workflows/literature-review.md",)
+    assert "references/orchestration/runtime-delegation-note.md" not in completion_gate.must_not_eager_load
     assert completion_gate.writes_allowed == ()
 
 

@@ -303,7 +303,10 @@ def test_autonomous_surfaces_use_installed_command_wording_not_raw_skill_calls()
         "gpd:audit-milestone",
         "gpd:complete-milestone",
     ):
-        assert f"runtime-installed `{command_name}` command" in workflow
+        assert (
+            f"runtime-installed `{command_name}` command" in workflow
+            or f"runtime-installed `{command_name}` child command" in workflow
+        )
 
 
 def test_review_knowledge_command_delegates_schema_surfaces_to_workflow() -> None:

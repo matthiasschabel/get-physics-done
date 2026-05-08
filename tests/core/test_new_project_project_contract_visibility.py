@@ -64,25 +64,35 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
         in new_project_text
     )
     for field in (
-        "researcher_model",
-        "synthesizer_model",
         "commit_docs",
         "autonomy",
         "research_mode",
         "project_exists",
+        "state_exists",
+        "roadmap_exists",
+        "recoverable_project_exists",
+        "partial_project_exists",
+        "project_recovery_status",
+        "init_progress_status",
         "has_research_map",
         "planning_exists",
         "has_research_files",
+        "research_file_samples",
         "has_project_manifest",
         "needs_research_map",
         "has_git",
+        "platform",
         "project_contract",
         "project_contract_gate",
         "project_contract_load_info",
         "project_contract_validation",
     ):
         assert f"`{field}`" in parse_line
+    assert "`researcher_model`" not in parse_line
+    assert "`synthesizer_model`" not in parse_line
     assert "POST_SCOPE_INIT=$(gpd --raw init new-project --stage post_scope)" in new_project_text
+    assert "`researcher_model`" in new_project_text
+    assert "`synthesizer_model`" in new_project_text
     assert "`roadmapper_model`" in new_project_text
     assert "If the init JSON already contains `project_contract`, `project_contract_load_info`, or `project_contract_validation`, preserve that state in the approval gate and continuation decision." in new_project_text
     assert "preserve any init-surfaced `project_contract`, `project_contract_load_info`, and `project_contract_validation` state while deciding whether this is fresh work or a continuation" not in new_project_text

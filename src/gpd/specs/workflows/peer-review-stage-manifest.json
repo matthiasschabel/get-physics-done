@@ -289,9 +289,7 @@
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md"
+        "templates/paper/reproducibility-manifest.md"
       ],
       "allowed_tools": [
         "ask_user",

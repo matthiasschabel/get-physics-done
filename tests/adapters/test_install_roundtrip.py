@@ -562,6 +562,13 @@ def _assert_installed_contract_visibility(
             command_name="new-project",
             first_stage="scope_intake",
         )
+    elif "scope_intake" in new_project and "staged_loading.eager_authorities" in new_project:
+        assert "scope_intake" in new_project
+        assert "staged_loading.eager_authorities" in new_project
+        assert "Load `workflows/new-project.md` only after `scope_approval` hands off to `post_scope`." in new_project
+        assert "templates/project-contract-schema.md" in new_project
+        assert "project_contract_load_info" in new_project
+        assert "project_contract_validation" in new_project
     else:
         assert "templates/project-contract-schema.md" in new_project
         assert "project_contract_load_info" in new_project

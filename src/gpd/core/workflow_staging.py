@@ -731,6 +731,11 @@ VERIFY_WORK_BASE_INIT_FIELDS = frozenset(
         "phase_name",
         "has_verification",
         "has_validation",
+        "active_verification_sessions",
+        "verification_report_path",
+        "verification_report_status",
+        "verification_session_status",
+        "verification_report_status_payload",
         "phase_proof_review_status",
         "platform",
     }
@@ -806,6 +811,8 @@ VERIFY_WORK_STATE_MEMORY_FIELDS = frozenset(
 )
 VERIFY_WORK_SCHEMA_BRIDGE_FIELDS = frozenset(
     {
+        "proof_redteam_finalizer_bridge",
+        "verification_report_finalizer_bridge",
         "verification_report_skeleton_bridge",
     }
 )

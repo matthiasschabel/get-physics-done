@@ -129,6 +129,7 @@ from gpd.core.utils import phase_normalize as _phase_normalize_impl
 from gpd.core.utils import phase_sort_key as _phase_sort_key
 from gpd.core.utils import safe_read_file as _safe_read_file
 from gpd.core.utils import safe_read_file_truncated as _safe_read_file_truncated
+from gpd.core.verification_status import read_verification_status
 from gpd.core.workflow_staging import (
     ARXIV_SUBMISSION_BOOTSTRAP_FIELDS,
     ARXIV_SUBMISSION_SNAPSHOT_FIELDS,
@@ -3656,6 +3657,64 @@ def _verify_work_expected_verification_path(cwd: Path, phase_info: dict | None) 
     return (cwd / str(phase_dir) / f"{phase_number}{VERIFICATION_SUFFIX}").as_posix()
 
 
+def _verify_work_existing_verification_path(cwd: Path, phase_info: dict | None) -> Path | None:
+    expected = _verify_work_expected_verification_path(cwd, phase_info)
+    if expected:
+        expected_path = Path(expected)
+        if expected_path.exists():
+            return expected_path
+    if not phase_info or not phase_info.get("directory"):
+        return None
+    phase_dir = cwd / str(phase_info["directory"])
+    if not phase_dir.exists():
+        return None
+    verification_files = sorted(path for path in phase_dir.glob(f"*{VERIFICATION_SUFFIX}") if path.is_file())
+    return verification_files[0] if verification_files else None
+
+
+def _verify_work_status_payload(cwd: Path, phase_info: dict | None) -> tuple[str | None, dict[str, object]]:
+    path = _verify_work_existing_verification_path(cwd, phase_info)
+    if path is None:
+        expected = _verify_work_expected_verification_path(cwd, phase_info)
+        return expected, {
+            "path": expected,
+            "exists": False,
+            "readable": False,
+            "parseable": False,
+            "status": None,
+            "session_status": None,
+            "score": None,
+            "source": None,
+            "errors": ["verification report missing"],
+            "routing_status": "missing",
+        }
+    payload = read_verification_status(path).model_dump()
+    return path.as_posix(), payload
+
+
+def _active_verification_sessions(cwd: Path) -> list[dict[str, object]]:
+    phases_dir = cwd / PLANNING_DIR_NAME / PHASES_DIR_NAME
+    if not phases_dir.exists():
+        return []
+    active: list[dict[str, object]] = []
+    for path in sorted(phases_dir.glob(f"*/*{VERIFICATION_SUFFIX}")):
+        status_payload = read_verification_status(path).model_dump()
+        if status_payload.get("session_status") not in {"validating", "diagnosed"}:
+            continue
+        active.append(
+            {
+                "path": path.as_posix(),
+                "phase": path.parent.name.split("-", 1)[0],
+                "status": status_payload.get("status"),
+                "routing_status": status_payload.get("routing_status"),
+                "session_status": status_payload.get("session_status"),
+                "score": status_payload.get("score"),
+                "errors": status_payload.get("errors", []),
+            }
+        )
+    return active[:5]
+
+
 def _verify_work_schema_sources() -> list[dict[str, str]]:
     package_root = Path(__file__).resolve().parents[1]
     return [
@@ -3716,6 +3775,70 @@ def _build_verification_report_skeleton_bridge(cwd: Path, phase_info: dict | Non
             "run writer_command, and accept expected_verification_path only when writer validation passes. "
             "Use skeleton_command as preview context only; do not hand-author or reflow VERIFICATION.md frontmatter."
         ),
+    }
+
+
+def _verify_work_expected_proof_redteam_path(cwd: Path, phase_info: dict | None) -> str | None:
+    if not phase_info:
+        return None
+    phase_dir = phase_info.get("directory")
+    phase_number = phase_info.get("phase_number")
+    if not phase_dir or not phase_number:
+        return None
+    return (cwd / str(phase_dir) / f"{phase_number}-PROOF-REDTEAM.md").as_posix()
+
+
+def _build_verification_report_finalizer_bridge(cwd: Path, phase_info: dict | None) -> dict[str, object]:
+    plan_path = _verify_work_expected_plan_path(cwd, phase_info)
+    verification_path = _verify_work_expected_verification_path(cwd, phase_info)
+    writer_command_template = (
+        f"gpd verification-report finalize {shlex.quote(plan_path)} --patch PATCH.json "
+        f"--body-file BODY.md --output {shlex.quote(verification_path)} --validate contract --force"
+        if plan_path and verification_path
+        else None
+    )
+    validation_command = (
+        f"gpd validate verification-contract {shlex.quote(verification_path)}" if verification_path else None
+    )
+    return {
+        "command_name": "gpd verification-report finalize",
+        "supported_statuses": ["passed", "gaps_found", "expert_needed", "human_needed"],
+        "writer_command_template": writer_command_template,
+        "patch_contract": (
+            "PATCH.json is a typed verification outcome patch consumed by the finalizer. It carries "
+            "target status, contract results, comparison verdicts, proof-audit linkage, suggested contract "
+            "checks, and status rationale; body evidence stays in BODY.md."
+        ),
+        "body_contract": "BODY.md is body-only Markdown; do not include YAML frontmatter.",
+        "status_policy": (
+            "Use the finalizer for passed, human_needed, expert_needed, and typed non-gap outcomes. "
+            "Do not hand-author VERIFICATION.md YAML; route on finalizer validation output."
+        ),
+        "expected_target_plan_path": plan_path,
+        "expected_verification_path": verification_path,
+        "validation_command": validation_command,
+    }
+
+
+def _build_proof_redteam_finalizer_bridge(cwd: Path, phase_info: dict | None) -> dict[str, object]:
+    proof_redteam_path = _verify_work_expected_proof_redteam_path(cwd, phase_info)
+    validation_command = f"gpd validate proof-redteam {shlex.quote(proof_redteam_path)}" if proof_redteam_path else None
+    writer_command_template = (
+        f"gpd proof-redteam finalize {shlex.quote(proof_redteam_path)} --claim-id CLAIM_ID "
+        "--claim-text CLAIM_TEXT --proof-artifact-path PROOF_ARTIFACT_PATH"
+        if proof_redteam_path
+        else None
+    )
+    return {
+        "command_name": "gpd proof-redteam finalize",
+        "supported_statuses": ["passed"],
+        "writer_command_template": writer_command_template,
+        "status_policy": (
+            "Passed proof-redteam frontmatter is finalizer-owned. Non-passing proof audits use "
+            "gpd proof-redteam skeleton; passed audits must run this finalizer before validation."
+        ),
+        "expected_proof_redteam_path": proof_redteam_path,
+        "validation_command": validation_command,
     }
 
 
@@ -4363,11 +4486,7 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
     else:
         project_recovery_status = "none"
 
-    result = {
-        # Models
-        "researcher_model": _resolve_model(project_cwd, "gpd-project-researcher", config),
-        "synthesizer_model": _resolve_model(project_cwd, "gpd-research-synthesizer", config),
-        "roadmapper_model": _resolve_model(project_cwd, "gpd-roadmapper", config),
+    base_result = {
         # Config
         "commit_docs": config["commit_docs"],
         "autonomy": config["autonomy"],
@@ -4390,13 +4509,21 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
         and not _path_exists(project_cwd, f"{PLANNING_DIR_NAME}/{RESEARCH_MAP_DIR_NAME}"),
         # Git state
         "has_git": _path_exists(project_cwd, ".git"),
-        # Bootstrap only needs the scoping contract gate, not the full reference ledger.
-        **_build_new_project_contract_runtime_context(project_cwd),
         # Platform
         "platform": _detect_platform(project_cwd),
     }
 
     if stage is None:
+        result = dict(base_result)
+        result.update(
+            {
+                # Models
+                "researcher_model": _resolve_model(project_cwd, "gpd-project-researcher", config),
+                "synthesizer_model": _resolve_model(project_cwd, "gpd-research-synthesizer", config),
+                "roadmapper_model": _resolve_model(project_cwd, "gpd-roadmapper", config),
+            }
+        )
+        result.update(_build_new_project_contract_runtime_context(project_cwd))
         return result
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
@@ -4404,7 +4531,6 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
     manifest = load_workflow_stage_manifest(
         "new-project",
         allowed_tools={"ask_user", "file_read", "file_write", "shell", "task"},
-        known_init_fields=set(result),
     )
     try:
         stage_def = manifest.stage_by_id(stage)
@@ -4413,11 +4539,30 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
             f"Unknown new-project stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
         ) from exc
 
-    missing_fields = [field for field in stage_def.required_init_fields if field not in result]
+    required_fields = set(stage_def.required_init_fields)
+    staged_source = dict(base_result)
+
+    if "researcher_model" in required_fields:
+        staged_source["researcher_model"] = _resolve_model(project_cwd, "gpd-project-researcher", config)
+    if "synthesizer_model" in required_fields:
+        staged_source["synthesizer_model"] = _resolve_model(project_cwd, "gpd-research-synthesizer", config)
+    if "roadmapper_model" in required_fields:
+        staged_source["roadmapper_model"] = _resolve_model(project_cwd, "gpd-roadmapper", config)
+
+    contract_gate_fields = {
+        "project_contract",
+        "project_contract_gate",
+        "project_contract_load_info",
+        "project_contract_validation",
+    }
+    if required_fields & contract_gate_fields:
+        staged_source.update(_build_new_project_contract_runtime_context(project_cwd))
+
+    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
     if missing_fields:
         raise ValueError(f"new-project stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
 
-    staged_payload = {field: result[field] for field in stage_def.required_init_fields}
+    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
     staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
     return staged_payload
 
@@ -4892,6 +5037,7 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
     phase_info = _try_find_phase(cwd, phase) if phase else None
     phase_dir = phase_info["directory"] if phase_info else None
     phase_dir_abs = (cwd / str(phase_dir)).as_posix() if phase_dir else None
+    verification_report_path, verification_report_status_payload = _verify_work_status_payload(cwd, phase_info)
     phase_proof_review_status = resolve_phase_proof_review_status(
         cwd,
         cwd / phase_dir if phase_dir else None,
@@ -4917,6 +5063,11 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
         # Existing artifacts
         "has_verification": phase_info.get("has_verification", False) if phase_info else False,
         "has_validation": phase_info.get("has_validation", False) if phase_info else False,
+        "active_verification_sessions": _active_verification_sessions(cwd),
+        "verification_report_path": verification_report_path,
+        "verification_report_status": verification_report_status_payload["routing_status"],
+        "verification_session_status": verification_report_status_payload["session_status"],
+        "verification_report_status_payload": verification_report_status_payload,
         "phase_proof_review_status": phase_proof_review_status.to_context_dict(cwd),
         # Platform
         "platform": _detect_platform(cwd),
@@ -4963,10 +5114,21 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
             raise ValueError(
                 f"verify-work stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
             )
-        staged_source["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
-            cwd,
-            phase_info,
-        )
+        if "verification_report_skeleton_bridge" in required_fields:
+            staged_source["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
+                cwd,
+                phase_info,
+            )
+        if "verification_report_finalizer_bridge" in required_fields:
+            staged_source["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
+                cwd,
+                phase_info,
+            )
+        if "proof_redteam_finalizer_bridge" in required_fields:
+            staged_source["proof_redteam_finalizer_bridge"] = _build_proof_redteam_finalizer_bridge(
+                cwd,
+                phase_info,
+            )
 
     missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
     if missing_fields:

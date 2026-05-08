@@ -620,7 +620,18 @@ def test_commands_reference_same_stem_workflows() -> None:
         content = command_path.read_text(encoding="utf-8")
         expected_standalone = f"@{{GPD_INSTALL_DIR}}/workflows/{command_path.stem}.md"
         expected_inline = f"{{GPD_INSTALL_DIR}}/workflows/{command_path.stem}.md"
-        assert expected_standalone in content or expected_inline in content, command_path
+        if expected_standalone in content or expected_inline in content:
+            continue
+        manifest_path = WORKFLOWS_DIR / f"{command_path.stem}-stage-manifest.json"
+        if manifest_path.is_file():
+            manifest = validate_workflow_stage_manifest_payload(
+                json.loads(manifest_path.read_text(encoding="utf-8")),
+                expected_workflow_id=command_path.stem,
+            )
+            first_stage_include = f"@{{GPD_INSTALL_DIR}}/{manifest.stages[0].mode_paths[0]}"
+            if first_stage_include in content:
+                continue
+        raise AssertionError(command_path)
 
 
 def test_commands_are_workflow_backed_or_explicitly_exempt() -> None:
@@ -1600,8 +1611,6 @@ def test_new_project_wiring_mentions_contract_persistence_and_contract_first_dow
     _assert_parse_line_includes_tokens(
         parse_line,
         (
-            "researcher_model",
-            "synthesizer_model",
             "commit_docs",
             "autonomy",
             "research_mode",
@@ -1669,7 +1678,7 @@ def test_new_project_defers_workflow_setup_until_after_scope_approval() -> None:
 def test_new_project_command_avoids_stale_workflow_line_counts() -> None:
     command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
 
-    assert "Read the included workflow first and follow it exactly." in command_text
+    assert "read the included stage authority" in command_text
     assert "step-by-step instructions" not in command_text
     assert "lines)" not in command_text
 
@@ -4025,9 +4034,10 @@ def test_verify_work_workflow_uses_body_only_subject_kind_fields() -> None:
 def test_verify_work_active_sessions_use_canonical_verification_path_and_keep_status_separate() -> None:
     verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
 
-    assert 'gpd frontmatter get "$file" --field session_status' in verify_work
-    assert "Active sessions are files with frontmatter `session_status` of `validating` or `diagnosed`." in verify_work
-    assert "Read frontmatter for canonical `status`, `session_status`, `phase`, and Current Check" in verify_work
+    assert 'gpd frontmatter get "$file" --field session_status' not in verify_work
+    assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in verify_work
+    assert "Active sessions are payload entries with `session_status` of `validating` or `diagnosed`." in verify_work
+    assert "Route on each entry's canonical `status` / `routing_status`" in verify_work
     assert "never let `session_status` overwrite `status`" in verify_work
     assert "`session_status` if present, otherwise `status`" not in verify_work
 
@@ -4873,9 +4883,11 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
     assert "False failure report despite delivered work" in execute_phase
     assert "Handoff verification" in quick
     assert "First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions." in quick
-    assert "loads staged quick init at the task-bootstrap and task-authoring boundaries" in quick
+    assert "loads staged quick init at the task-bootstrap and default task-authoring boundaries" in quick
+    assert "selects the separate `reference_context` stage only when a task actually needs project reference artifacts" in quick
     assert 'gpd --raw init quick "$DESCRIPTION" --stage task_bootstrap' in quick
     assert 'gpd --raw init quick "$DESCRIPTION" --stage task_authoring' in quick
+    assert 'gpd --raw init quick "$DESCRIPTION" --stage reference_context' in quick
     assert "project_contract_load_info.status" in quick
     assert "project_contract_validation.valid" in quick
     assert "project_contract_validation" in quick
@@ -4884,6 +4896,7 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
         "Quick mode still inherits the approved `project_contract` only when `project_contract_gate.authoritative` is true"
         in quick
     )
+    assert "The default small-task path does not load the full active reference ledger" in quick
     assert "**Project Contract Gate:** {project_contract_gate}" in quick
     assert "**Project Contract Load Info:** {project_contract_load_info}" in quick
     assert "**Project Contract Validation:** {project_contract_validation}" in quick
@@ -5574,7 +5587,7 @@ def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verifica
     assert "ERROR: Convention verification failed -- resolve before planning" in plan_phase
 
     assert "stale/missing/non-passing verification blocks audit/paper" in autonomous
-    assert "Next: gpd:verify-work ${COMPLETE_PHASE}" in autonomous
+    assert "invoke child command `gpd:verify-work` with `{phase: COMPLETE_PHASE}`" in autonomous
     assert "gpd --raw validate lifecycle-contract-gate plan-phase" in autonomous
     assert "Do not relabel this as missing plan authority" in autonomous
 

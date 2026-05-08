@@ -7,6 +7,7 @@ import pytest
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.public_surface_contract import resume_authority_fields
 from tests.doc_surface_contracts import resume_authority_public_vocabulary_intro, resume_backend_only_fields
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -15,7 +16,7 @@ ORCHESTRATION_REFS_DIR = REPO_ROOT / "src/gpd/specs/references/orchestration"
 
 
 def _workflow_text(name: str) -> str:
-    return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def test_contract_authority_gate_reference_defines_shared_boundary() -> None:
@@ -339,10 +340,9 @@ def test_write_paper_and_scoring_docs_distinguish_builder_supported_vs_manual_on
     workflow = _workflow_text("write-paper.md")
     scoring = (REPO_ROOT / "src/gpd/specs/references/publication/paper-quality-scoring.md").read_text(encoding="utf-8")
 
-    assert (
-        "These are the only valid `journal` values in `PAPER-CONFIG.json` and `${PAPER_DIR}/ARTIFACT-MANIFEST.json`."
-        in workflow
-    )
+    assert "These are the only valid `journal` values" in workflow
+    assert "`PAPER-CONFIG.json`" in workflow
+    assert "`${PAPER_DIR}/ARTIFACT-MANIFEST.json`" in workflow
     assert "artifact-driven `--from-project` path" in scoring
     assert "Manual JSON is also the only supported path today for scoring-only profiles" in scoring
     assert "`prd`, `prb`, `prc`, and `nature_physics`" in scoring

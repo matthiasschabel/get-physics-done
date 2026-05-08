@@ -102,6 +102,6 @@ def test_runtime_projected_peer_review_keeps_canonical_manuscript_roots_and_expl
         "draft/*.tex",
         "draft/*.md",
         "The default in-project manuscript family is limited to `paper/`, `manuscript/`, and `draft/`.",
-        "Explicit external artifact intake may also target `.tex`, `.md`, `.txt`, or `.pdf`.",
+        "External artifact intake may target `.tex`, `.md`, `.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, `.xlsx`, or `.xlsm`.",
     ):
         assert fragment in projected

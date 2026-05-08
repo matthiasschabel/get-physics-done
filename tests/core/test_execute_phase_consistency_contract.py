@@ -6,14 +6,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
 
 
 def _read(name: str) -> str:
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 
+def _read_execute_phase_stage(name: str) -> str:
+    return (EXECUTE_PHASE_STAGE_DIR / name).read_text(encoding="utf-8")
+
+
 def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> None:
-    workflow = _read("execute-phase.md")
+    workflow = _read_execute_phase_stage("aggregate-and-verify.md")
 
     assert "gpd-consistency-checker.md" in workflow
     assert "<spawn_contract>" in workflow
@@ -40,7 +45,7 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
 
 
 def test_execute_phase_consistency_check_no_longer_routes_on_legacy_status() -> None:
-    workflow = _read("execute-phase.md")
+    workflow = _read_execute_phase_stage("aggregate-and-verify.md")
 
     assert "Return consistency_status with any issues found." not in workflow
     assert "Proceed without cross-phase consistency checking for this wave." not in workflow

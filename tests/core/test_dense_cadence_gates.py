@@ -144,7 +144,8 @@ def test_dense_cadence_forces_pre_fanout_review_required() -> None:
         / "gpd"
         / "specs"
         / "workflows"
-        / "execute-phase.md"
+        / "execute-phase"
+        / "wave-planning.md"
     ).read_text(encoding="utf-8")
 
     assert "Dense cadence override:" in execute_phase

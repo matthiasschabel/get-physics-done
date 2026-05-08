@@ -39,6 +39,7 @@ from gpd.core.review_contract_prompt import (
 )
 from tests.assertion_taxonomy_support import FragmentMode, fragment_count, machine_exact, semantic_anchor
 from tests.markdown_test_support import extract_markdown_section, parse_yaml_fences, require_mapping
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
@@ -63,7 +64,7 @@ def _read_command(name: str) -> str:
 
 
 def _read_workflow(name: str) -> str:
-    return (WORKFLOWS_DIR / f"{name}.md").read_text(encoding="utf-8")
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def _single_yaml_mapping(text: str, *, context: str) -> dict[object, object]:
@@ -1512,7 +1513,7 @@ def test_write_paper_review_contract_uses_round_suffixed_referee_outputs() -> No
         "GPD/REFEREE-REPORT{round_suffix}.tex",
     ]
     write_command = _read_command("write-paper")
-    write_workflow = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_workflow = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
     assert "GPD/REFEREE-REPORT{round_suffix}.md" in write_command
     assert "GPD/REFEREE-REPORT{round_suffix}.tex" in write_command
     assert "templates/paper/author-response.md" in write_workflow
@@ -1746,7 +1747,8 @@ def test_write_paper_stage_visibility_delays_publication_review_schemas_until_th
     review = staging.stage("publication_review")
 
     assert bootstrap.loaded_authorities == (
-        "workflows/write-paper.md",
+        "workflows/write-paper/paper-bootstrap.md",
+        "references/publication/publication-bootstrap-preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md",
     )
     assert "templates/paper/paper-config-schema.md" in outline.loaded_authorities

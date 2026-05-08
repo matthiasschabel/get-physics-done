@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
@@ -68,7 +70,10 @@ def test_publication_workflows_and_agents_reference_only_the_canonical_publicati
         WORKFLOWS_DIR / "peer-review.md",
         WORKFLOWS_DIR / "arxiv-submission.md",
     ):
-        text = path.read_text(encoding="utf-8")
+        if path.parent == WORKFLOWS_DIR and path.stem in {"write-paper", "peer-review"}:
+            text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
+        else:
+            text = path.read_text(encoding="utf-8")
         assert "publication-artifact-gates.md" not in text, path
         assert "review-round-artifact-contract.md" not in text, path
         assert "response-artifact-contract.md" not in text, path
@@ -86,14 +91,14 @@ def test_publication_workflows_and_agents_reference_only_the_canonical_publicati
 def test_publication_workflow_prompt_surfaces_surface_the_shared_manuscript_root_contract_before_round_or_response_policy() -> (
     None
 ):
-    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_paper = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
     respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    peer_review = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    peer_review = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
     arxiv = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
     bootstrap_include = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
     handoff_include = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 
-    assert bootstrap_include in write_paper
+    assert "publication-bootstrap-preflight.md" in write_paper
     assert bootstrap_include in respond
     assert bootstrap_include in arxiv
     assert "templates/paper/publication-manuscript-root-preflight.md" in peer_review

@@ -9,6 +9,7 @@ from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.assertion_taxonomy_support import assert_prompt_contracts, forbidden_duplicate, semantic_anchor
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -21,6 +22,10 @@ RESULT_LOOKUP_WORKFLOWS = ("explain.md", "compare-experiment.md", "limiting-case
 
 def _read(name: str) -> str:
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+
+
+def _read_authority(name: str) -> str:
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def _expand(name: str) -> str:
@@ -184,7 +189,7 @@ def test_lifecycle_workflow_prompts_reference_every_real_stage_id() -> None:
         ("plan-phase", "plan-phase.md"),
         ("execute-phase", "execute-phase.md"),
     ):
-        workflow = _read(workflow_name)
+        workflow = _read_authority(workflow_id) if workflow_id == "execute-phase" else _read(workflow_name)
         manifest = load_workflow_stage_manifest(workflow_id)
 
         missing = [
@@ -358,7 +363,7 @@ def test_state_portability_uses_canonical_continuation_prose() -> None:
 
 
 def test_execute_phase_runtime_delegation_rules_are_single_sourced() -> None:
-    execute_phase = _read("execute-phase.md")
+    execute_phase = _read_authority("execute-phase")
 
     assert execute_phase.count("references/orchestration/runtime-delegation-note.md") == 1
     assert "The shared note owns runtime-neutral task construction and handoff gates." in execute_phase
@@ -380,7 +385,7 @@ def test_runtime_delegation_note_is_loaded_once_per_workflow() -> None:
     }
 
     for path in sorted(WORKFLOWS_DIR.glob("*.md")):
-        text = path.read_text(encoding="utf-8")
+        text = _read_authority(path.stem) if path.stem == "write-paper" else path.read_text(encoding="utf-8")
         assert text.count(include) <= 1, path.name
         if path.name in workflows_using_short_references:
             assert text.count(include) == 1, path.name
@@ -403,7 +408,7 @@ def test_numeric_context_budget_guidance_is_single_sourced() -> None:
     context_budget = (REFERENCES_DIR / "orchestration" / "context-budget.md").read_text(encoding="utf-8")
     infra = (REFERENCES_DIR / "orchestration" / "agent-infrastructure.md").read_text(encoding="utf-8")
     meta = (REFERENCES_DIR / "orchestration" / "meta-orchestration.md").read_text(encoding="utf-8")
-    execute_phase = _read("execute-phase.md")
+    execute_phase = _read_authority("execute-phase")
 
     assert "## Phase-Class Budget Targets" in context_budget
     assert "Summary aggregation heuristic" in context_budget

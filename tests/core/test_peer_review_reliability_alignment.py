@@ -7,10 +7,23 @@ COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references"
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
+PEER_REVIEW_STAGE_FILES = (
+    "bootstrap.md",
+    "preflight.md",
+    "artifact-discovery.md",
+    "panel-stages.md",
+    "final-adjudication.md",
+    "finalize.md",
+)
+
+
+def _peer_review_stage_text(*names: str) -> str:
+    stage_names = names or PEER_REVIEW_STAGE_FILES
+    return "\n".join((WORKFLOWS_DIR / "peer-review" / name).read_text(encoding="utf-8") for name in stage_names)
 
 
 def test_peer_review_workflow_references_canonical_reliability_doc_and_round_suffixed_artifacts() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _peer_review_stage_text()
 
     assert "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md" in workflow
     assert "${REVIEW_ROOT}/CLAIMS{round_suffix}.json" in workflow
@@ -73,7 +86,7 @@ def test_peer_review_reliability_reference_uses_selected_review_roots() -> None:
 
 def test_peer_review_surfaces_describe_dual_mode_project_and_external_artifact_review() -> None:
     command = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _peer_review_stage_text()
     reliability = (REFERENCES_DIR / "publication" / "peer-review-reliability.md").read_text(encoding="utf-8")
     publication_modes = (REFERENCES_DIR / "publication" / "publication-pipeline-modes.md").read_text(encoding="utf-8")
 
@@ -90,7 +103,7 @@ def test_peer_review_surfaces_describe_dual_mode_project_and_external_artifact_r
 
 
 def test_peer_review_finalize_separates_review_completion_from_manuscript_quality() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _peer_review_stage_text("finalize.md")
 
     assert "A completed staged review of a rejected manuscript is still a completed review run." in workflow
     assert "present `BIBLIOGRAPHY-AUDIT.json` with no failed or unverified sources as verified" in workflow
@@ -143,7 +156,7 @@ def test_publication_reference_docs_keep_gpd_aux_outputs_separate_from_manuscrip
 
 
 def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_referee() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _peer_review_stage_text("final-adjudication.md")
     panel = (REFERENCES_DIR / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
     reliability = (REFERENCES_DIR / "publication" / "peer-review-reliability.md").read_text(encoding="utf-8")
     boundary = (REFERENCES_DIR / "publication" / "publication-final-adjudication-boundary.md").read_text(
@@ -177,7 +190,7 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
     ):
         assert artifact in referee
 
-    assert "fresh `gpd_return.files_written`" in workflow
+    assert "gpd_return.files_written stays within Stage 6 write_allowlist" in workflow
     assert "fresh `gpd_return.files_written`" in reliability
     assert "fresh `gpd_return.files_written`" in boundary
     assert "fresh `gpd_return.files_written`" in referee
@@ -209,11 +222,12 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
 
 
 def test_peer_review_reliability_reference_documents_runtime_neutral_stage_cleanup() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _peer_review_stage_text("panel-stages.md")
     reliability = (REFERENCES_DIR / "publication" / "peer-review-reliability.md").read_text(encoding="utf-8")
     recovery = (REFERENCES_DIR / "publication" / "stage-recovery-gate.md").read_text(encoding="utf-8")
 
-    assert "Each stage runs in a fresh subagent context and writes a compact artifact." in workflow
+    assert "Each stage runs in a fresh subagent context" in workflow
+    assert "writes a compact artifact" in workflow
     assert "stage-recovery-gate.md" in workflow
 
     assert "Runtime-Neutral Stage Cleanup" in reliability

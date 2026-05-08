@@ -11,7 +11,21 @@ from __future__ import annotations
 from pathlib import Path
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / "src" / "gpd" / "specs" / "workflows"
-EXECUTE_PHASE = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
+EXECUTE_PHASE_STAGE_FILES = (
+    "phase-bootstrap.md",
+    "phase-classification.md",
+    "wave-planning.md",
+    "pre-execution-specialists.md",
+    "wave-dispatch.md",
+    "checkpoint-resume.md",
+    "aggregate-and-verify.md",
+    "closeout.md",
+)
+EXECUTE_PHASE = "\n\n".join(
+    (EXECUTE_PHASE_STAGE_DIR / stage_file).read_text(encoding="utf-8")
+    for stage_file in EXECUTE_PHASE_STAGE_FILES
+)
 
 _PRECHECK_OPEN_TAG = '<step name="claim_deliverable_alignment_check">'
 _STEP_CLOSE_TAG = "</step>"

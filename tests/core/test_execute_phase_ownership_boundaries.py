@@ -9,10 +9,29 @@ from gpd.core.config import GPDProjectConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
+
+
+def _execute_phase_stage(name: str) -> str:
+    return (EXECUTE_PHASE_STAGE_DIR / name).read_text(encoding="utf-8")
+
+
+def _execute_phase_combined() -> str:
+    stage_files = (
+        "phase-bootstrap.md",
+        "phase-classification.md",
+        "wave-planning.md",
+        "pre-execution-specialists.md",
+        "wave-dispatch.md",
+        "checkpoint-resume.md",
+        "aggregate-and-verify.md",
+        "closeout.md",
+    )
+    return "\n\n".join(_execute_phase_stage(stage_file) for stage_file in stage_files)
 
 
 def test_execute_phase_has_no_commented_pre_execution_specialist_task_spawns() -> None:
-    workflow_text = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    workflow_text = _execute_phase_combined()
 
     commented_task_lines = re.findall(
         r"(?m)^\s*#\s*task\(subagent_type=\"gpd-(notation-coordinator|experiment-designer)\"",
@@ -23,7 +42,7 @@ def test_execute_phase_has_no_commented_pre_execution_specialist_task_spawns() -
 
 
 def test_execute_phase_still_owns_wave_risk_and_artifact_gate_routing() -> None:
-    workflow_text = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    workflow_text = _execute_phase_stage("wave-dispatch.md")
 
     assert "probe_then_fanout" in workflow_text
     assert "artifact gate" in workflow_text.lower()
@@ -31,7 +50,7 @@ def test_execute_phase_still_owns_wave_risk_and_artifact_gate_routing() -> None:
 
 
 def test_execute_phase_explicitly_defers_plan_local_semantics_to_execute_plan() -> None:
-    workflow_text = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    workflow_text = _execute_phase_stage("wave-planning.md")
     execute_plan_text = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
 
     assert "execute-plan.md owns plan-local execution semantics" in workflow_text
@@ -41,7 +60,7 @@ def test_execute_phase_explicitly_defers_plan_local_semantics_to_execute_plan() 
 
 
 def test_execute_workflow_fallback_defaults_match_project_config_defaults() -> None:
-    execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    execute_phase = _execute_phase_stage("wave-planning.md") + "\n" + _execute_phase_stage("wave-dispatch.md")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     defaults = GPDProjectConfig()
 

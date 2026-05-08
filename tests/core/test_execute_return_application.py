@@ -2,12 +2,16 @@
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 ROOT = Path(__file__).resolve().parents[2]
 EXECUTE_PHASE = ROOT / "src" / "gpd" / "specs" / "workflows" / "execute-phase.md"
 EXECUTE_PLAN = ROOT / "src" / "gpd" / "specs" / "workflows" / "execute-plan.md"
 
 
 def _read(path: Path) -> str:
+    if path == EXECUTE_PHASE:
+        return workflow_authority_text(ROOT / "src/gpd/specs/workflows", "execute-phase")
     return path.read_text(encoding="utf-8")
 
 

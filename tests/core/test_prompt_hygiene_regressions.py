@@ -7,6 +7,7 @@ from gpd.core.model_visible_text import (
     review_contract_visibility_note,
     skeptical_rigor_guardrails_section,
 )
+from tests.workflow_authority_support import workflow_authority_text
 
 WORKFLOWS_DIR = Path("src/gpd/specs/workflows")
 COMMANDS_DIR = Path("src/gpd/commands")
@@ -80,18 +81,14 @@ def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_st
 
 
 def test_peer_review_init_fields_are_manifest_owned_and_interestingness_stage_bullets_are_space_indented() -> None:
-    peer_review = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    peer_review = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
-    assert "Parse bootstrap JSON using the manifest-owned `bootstrap.required_init_fields`" in peer_review
-    assert "Parse target-aware init JSON using the same manifest-owned `bootstrap.required_init_fields`" in peer_review
-    assert "do not duplicate the manifest's required-field list in prose" in peer_review
-    assert "peer-review-stage-manifest.json" in peer_review
+    assert "Parse only fields named by `staged_loading.required_init_fields`" in peer_review
+    assert "stage field-access peer-review" in peer_review
     assert "Parse bootstrap JSON for: `project_exists`" not in peer_review
     assert "Parse target-aware init JSON for: `project_exists`" not in peer_review
 
-    stage_5 = peer_review[
-        peer_review.index("**Stage 5") : peer_review.index("You must explicitly decide whether the paper is:")
-    ]
+    stage_5 = peer_review[peer_review.index("Stage 5 judges") : peer_review.index("Validate before Stage 6:")]
     assert "\t-" not in stage_5
 
 
@@ -157,7 +154,7 @@ def test_branch_hypothesis_and_transition_workflows_keep_state_updates_structure
 
 
 def test_write_paper_workflow_drops_authoring_note_placeholders() -> None:
-    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_paper = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
     assert "Default bootstrap wording:" not in write_paper
 
@@ -196,7 +193,7 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         assert text.count(PUBLICATION_RESPONSE_ARTIFACTS_INCLUDE) == 0, path
         assert text.count(PUBLICATION_REVIEW_RELIABILITY_INCLUDE) == 0, path
         if path.name in {"write-paper.md", "peer-review.md"}:
-            assert PUBLICATION_PIPELINE_MODES_INLINE in text, path
+            assert "publication-pipeline-modes.md" in text, path
             assert "embedded review/submission parity" not in text, path
             assert "current global `GPD/` / `GPD/review/` round-artifact layout" not in text, path
 
@@ -206,16 +203,21 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         WORKFLOWS_DIR / "respond-to-referees.md",
         WORKFLOWS_DIR / "arxiv-submission.md",
     ):
-        text = path.read_text(encoding="utf-8")
+        if path.stem in {"write-paper", "peer-review"}:
+            text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
+        else:
+            text = path.read_text(encoding="utf-8")
         expected_bootstrap_counts = {
-            "write-paper.md": 1,
+            "write-paper.md": 0,
             "peer-review.md": 0,
             "respond-to-referees.md": 1,
             "arxiv-submission.md": 1,
         }
         assert text.count(PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE) == expected_bootstrap_counts[path.name], path
+        if path.name == "write-paper.md":
+            assert "publication-bootstrap-preflight.md" in text, path
         expected_round_counts = {
-            "write-paper.md": 1,
+            "write-paper.md": 0,
             "peer-review.md": 0,
             "respond-to-referees.md": 0,
             "arxiv-submission.md": 1,
@@ -227,6 +229,8 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         }
 
         assert text.count(PUBLICATION_ROUND_ARTIFACTS_INCLUDE) >= expected_round_counts[path.name], path
+        if path.name == "write-paper.md":
+            assert "publication-review-round-artifacts.md" in text, path
         if path.name in expected_response_artifact_counts:
             assert text.count(PUBLICATION_RESPONSE_ARTIFACTS_INCLUDE) >= expected_response_artifact_counts[path.name], (
                 path
@@ -303,12 +307,13 @@ def test_research_phase_command_drops_dead_command_local_mode_labels() -> None:
 
 def test_write_paper_command_defers_the_route_list_to_the_workflow() -> None:
     write_paper = (COMMANDS_DIR / "write-paper.md").read_text(encoding="utf-8")
-    write_paper_workflow = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_paper_workflow = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
     assert "Routes to the write-paper workflow:" not in write_paper
-    assert "@{GPD_INSTALL_DIR}/workflows/write-paper.md" in write_paper
-    assert PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE in write_paper_workflow
-    assert PUBLICATION_ROUND_ARTIFACTS_INCLUDE in write_paper_workflow
+    assert "@{GPD_INSTALL_DIR}/workflows/write-paper/paper-bootstrap.md" in write_paper
+    assert "@{GPD_INSTALL_DIR}/workflows/write-paper.md" not in write_paper
+    assert "publication-bootstrap-preflight.md" in write_paper_workflow
+    assert "publication-review-round-artifacts.md" in write_paper_workflow
     assert (
         "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md" not in write_paper_workflow
     )

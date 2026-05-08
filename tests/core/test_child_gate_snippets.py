@@ -194,7 +194,7 @@ def test_workflow_child_gate_yaml_blocks_parse_as_child_gate_tuples() -> None:
     parsed = 0
     errors: list[str] = []
 
-    for path in sorted(WORKFLOWS_DIR.glob("*.md")):
+    for path in sorted(WORKFLOWS_DIR.rglob("*.md")):
         text = path.read_text(encoding="utf-8")
         offset = 0
         for block in text.split("```yaml")[1:]:

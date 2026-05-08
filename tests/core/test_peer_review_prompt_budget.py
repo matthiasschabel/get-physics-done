@@ -15,15 +15,15 @@ SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 
 
-def test_peer_review_command_stays_thin_and_only_eagerly_loads_the_workflow() -> None:
+def test_peer_review_command_stays_thin_and_only_eagerly_loads_bootstrap_authority() -> None:
     command_text = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
     metrics = measure_prompt_surface(
         COMMANDS_DIR / "peer-review.md",
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
-    workflow = measure_prompt_surface(
-        WORKFLOWS_DIR / "peer-review.md",
+    bootstrap = measure_prompt_surface(
+        WORKFLOWS_DIR / "peer-review" / "bootstrap.md",
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
@@ -34,19 +34,23 @@ def test_peer_review_command_stays_thin_and_only_eagerly_loads_the_workflow() ->
     )
 
     assert metrics.raw_include_count == 1
-    assert "@{GPD_INSTALL_DIR}/workflows/peer-review.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/peer-review/bootstrap.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/peer-review.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/paper/paper-config-schema.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md" not in command_text
-    assert "Follow the included workflow file exactly." in command_text
+    assert "Follow the included bootstrap authority exactly." in command_text
     assert "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md" not in expanded_command
     assert "Canonical manuscript-root publication preflight." not in expanded_command
-    assert metrics.expanded_line_count > workflow.expanded_line_count
-    assert metrics.expanded_char_count > workflow.expanded_char_count
-    assert metrics.expanded_line_count < workflow.expanded_line_count + 250
-    assert metrics.expanded_char_count < workflow.expanded_char_count + 15000
+    assert "@{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" not in expanded_command
+    assert "review-ledger-schema.md" not in expanded_command
+    assert "proof-redteam-protocol.md" not in expanded_command
+    assert metrics.expanded_line_count > bootstrap.expanded_line_count
+    assert metrics.expanded_char_count > bootstrap.expanded_char_count
+    assert metrics.expanded_line_count < bootstrap.expanded_line_count + 250
+    assert metrics.expanded_char_count < 30000
 
 
 def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages_need_them() -> None:
@@ -66,14 +70,21 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
 
     bootstrap = manifest.stages[0]
     preflight = manifest.stages[1]
+    artifact_discovery = manifest.stages[2]
     panel_execution = manifest.stages[3]
     final_adjudication = manifest.stages[4]
+    finalize = manifest.stages[5]
 
-    assert bootstrap.loaded_authorities == ("workflows/peer-review.md",)
+    assert bootstrap.loaded_authorities == ("workflows/peer-review/bootstrap.md",)
+    assert "workflows/peer-review.md" in bootstrap.must_not_eager_load
+    assert "workflows/peer-review/panel-stages.md" in bootstrap.must_not_eager_load
+    assert "workflows/peer-review/final-adjudication.md" in bootstrap.must_not_eager_load
+    assert "workflows/peer-review/finalize.md" in bootstrap.must_not_eager_load
     assert "references/publication/publication-review-round-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/publication-response-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-panel.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-reliability.md" in bootstrap.must_not_eager_load
+    assert "references/verification/core/proof-redteam-protocol.md" in bootstrap.must_not_eager_load
     assert "templates/paper/paper-config-schema.md" in bootstrap.must_not_eager_load
     assert "templates/paper/artifact-manifest-schema.md" in bootstrap.must_not_eager_load
     assert "templates/paper/bibliography-audit-schema.md" in bootstrap.must_not_eager_load
@@ -82,7 +93,7 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
     assert "templates/paper/referee-decision-schema.md" in bootstrap.must_not_eager_load
 
     assert preflight.loaded_authorities == (
-        "workflows/peer-review.md",
+        "workflows/peer-review/preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md",
         "references/publication/peer-review-reliability.md",
         "templates/paper/paper-config-schema.md",
@@ -90,18 +101,27 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
     )
-    assert "workflows/peer-review.md" in manifest.stages[2].loaded_authorities
-    assert manifest.stages[2].loaded_authorities == (
-        "workflows/peer-review.md",
+    assert artifact_discovery.loaded_authorities == (
+        "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
     )
     assert panel_execution.loaded_authorities == (
-        "workflows/peer-review.md",
+        "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
         "references/publication/stage-recovery-gate.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
+        "templates/proof-redteam-schema.md",
     )
-    assert "workflows/peer-review.md" in final_adjudication.loaded_authorities
+    assert "workflows/peer-review/final-adjudication.md" in final_adjudication.loaded_authorities
+    assert "references/publication/publication-final-adjudication-boundary.md" in final_adjudication.loaded_authorities
     assert "references/publication/peer-review-panel.md" in final_adjudication.loaded_authorities
     assert "templates/paper/review-ledger-schema.md" in final_adjudication.loaded_authorities
     assert "templates/paper/referee-decision-schema.md" in final_adjudication.loaded_authorities
+    assert finalize.loaded_authorities == (
+        "workflows/peer-review/finalize.md",
+        "references/publication/publication-review-round-artifacts.md",
+        "references/publication/publication-response-artifacts.md",
+        "references/publication/publication-response-writer-handoff.md",
+    )

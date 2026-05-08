@@ -102,7 +102,7 @@
       "order": 1,
       "purpose": "phase lookup, contract-gate validation, and bootstrap routing",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/phase-bootstrap.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -118,10 +118,18 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/phase-bootstrap.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/execute-phase.md",
+        "workflows/execute-phase/phase-classification.md",
+        "workflows/execute-phase/wave-planning.md",
+        "workflows/execute-phase/pre-execution-specialists.md",
+        "workflows/execute-phase/wave-dispatch.md",
+        "workflows/execute-phase/checkpoint-resume.md",
+        "workflows/execute-phase/aggregate-and-verify.md",
+        "workflows/execute-phase/closeout.md",
         "references/ui/ui-brand.md",
         "references/orchestration/meta-orchestration.md",
         "references/orchestration/artifact-surfacing.md",
@@ -134,7 +142,13 @@
         "references/orchestration/continuation-format.md",
         "references/orchestration/resume-vocabulary.md",
         "references/orchestration/state-portability.md",
+        "references/orchestration/runtime-delegation-note.md",
+        "references/orchestration/child-artifact-gate.md",
+        "references/orchestration/continuation-boundary.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
         "references/verification/core/verification-core.md",
+        "references/verification/verification-status-authority.md",
         "references/execution/executor-index.md",
         "references/execution/git-integration.md",
         "references/execution/github-lifecycle.md",
@@ -148,6 +162,8 @@
         "templates/contract-results-schema.md",
         "templates/recovery-plan.md",
         "templates/state-machine.md",
+        "templates/paper/figure-tracker.md",
+        "templates/paper/experimental-comparison.md",
         "workflows/execute-plan.md",
         "workflows/verify-phase.md",
         "workflows/transition.md"
@@ -180,7 +196,7 @@
       "order": 2,
       "purpose": "phase classification, context-hint selection, and execution policy",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/phase-classification.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -192,9 +208,9 @@
         "state_integrity_context"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/phase-classification.md",
         "references/orchestration/meta-orchestration.md",
-        "references/orchestration/artifact-surfacing.md"
+        "references/orchestration/model-profile-resolution.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [],
@@ -226,7 +242,7 @@
       "order": 3,
       "purpose": "wave grouping, dependency analysis, and proof-bearing routing",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/wave-planning.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -268,11 +284,11 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/wave-planning.md",
         "references/orchestration/checkpoints.md",
         "references/orchestration/context-budget.md",
-        "references/orchestration/model-profile-resolution.md",
-        "references/verification/core/verification-core.md"
+        "references/verification/core/verification-core.md",
+        "references/verification/core/proof-redteam-workflow-gate.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [],
@@ -304,7 +320,7 @@
       "order": 4,
       "purpose": "specialist routing and orchestration handoff",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/pre-execution-specialists.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -317,7 +333,7 @@
         "state_integrity_context"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/pre-execution-specialists.md",
         "references/orchestration/agent-delegation.md",
         "references/orchestration/runtime-delegation-note.md"
       ],
@@ -350,7 +366,7 @@
       "order": 5,
       "purpose": "wave execution, agent spawning, and checkpoint routing",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/wave-dispatch.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -362,10 +378,15 @@
         "state_integrity_context"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/wave-dispatch.md",
         "references/orchestration/agent-infrastructure.md",
         "references/orchestration/continuous-execution.md",
         "references/orchestration/checkpoints.md",
+        "references/orchestration/context-budget.md",
+        "references/orchestration/artifact-surfacing.md",
+        "references/orchestration/child-artifact-gate.md",
+        "references/orchestration/continuation-boundary.md",
+        "references/orchestration/runtime-delegation-note.md",
         "workflows/execute-plan.md"
       ],
       "conditional_authorities": [],
@@ -400,7 +421,7 @@
       "order": 6,
       "purpose": "continuation handling, resume transport, and bounded segment recovery",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/checkpoint-resume.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -412,11 +433,12 @@
         "state_integrity_context"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/checkpoint-resume.md",
         "templates/continuation-prompt.md",
         "references/orchestration/continuation-format.md",
         "references/orchestration/resume-vocabulary.md",
-        "references/orchestration/state-portability.md"
+        "references/orchestration/state-portability.md",
+        "references/orchestration/continuation-boundary.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [],
@@ -450,7 +472,7 @@
       "order": 7,
       "purpose": "result aggregation, verification routing, and summary/contract emission",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/aggregate-and-verify.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -483,7 +505,7 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/aggregate-and-verify.md",
         "workflows/verify-phase.md",
         "references/execution/executor-index.md",
         "references/execution/git-integration.md",
@@ -493,10 +515,15 @@
         "references/execution/execute-plan-recovery.md",
         "references/protocols/error-propagation-protocol.md",
         "references/verification/core/verification-core.md",
+        "references/verification/verification-status-authority.md",
+        "references/orchestration/child-artifact-gate.md",
+        "references/orchestration/continuation-boundary.md",
         "templates/summary.md",
         "templates/calculation-log.md",
         "templates/contract-results-schema.md",
-        "templates/recovery-plan.md"
+        "templates/recovery-plan.md",
+        "templates/paper/figure-tracker.md",
+        "templates/paper/experimental-comparison.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [],
@@ -531,7 +558,7 @@
       "order": 8,
       "purpose": "status rendering, transition handoff, and cleanup",
       "mode_paths": [
-        "workflows/execute-phase.md"
+        "workflows/execute-phase/closeout.md"
       ],
       "required_init_field_groups": [
         "execution_phase_base",
@@ -542,10 +569,11 @@
         "state_integrity_context"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/closeout.md",
         "workflows/transition.md",
         "references/ui/ui-brand.md",
         "references/orchestration/state-portability.md",
+        "references/orchestration/continuous-execution.md",
         "templates/state-machine.md"
       ],
       "conditional_authorities": [],

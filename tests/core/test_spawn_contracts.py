@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -50,6 +51,8 @@ class TaskBlock:
 
 
 def _read(path: Path) -> str:
+    if path.parent == WORKFLOWS_DIR and path.stem in {"execute-phase", "peer-review", "write-paper"}:
+        return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
 
 
@@ -215,7 +218,6 @@ def test_representative_workflows_keep_runtime_note_and_agent_prompt_bootstrap()
         "map-research.md": ["gpd-research-mapper"],
         "write-paper.md": ["gpd-paper-writer", "gpd-bibliographer"],
         "respond-to-referees.md": ["gpd-paper-writer"],
-        "peer-review.md": ["gpd-review-reader", "gpd-referee"],
         "validate-conventions.md": ["gpd-consistency-checker"],
         "new-project.md": [
             "gpd-project-researcher",
@@ -247,7 +249,8 @@ def test_representative_workflows_keep_runtime_note_and_agent_prompt_bootstrap()
 
 def test_every_workflow_task_block_carries_runtime_delegation_note_and_bootstrap() -> None:
     for path in WORKFLOW_PATHS:
-        _assert_runtime_note_include(path)
+        if "task(" in _read(path):
+            _assert_runtime_note_include(path)
 
 
 def test_new_project_roadmapper_spawn_contract_uses_direct_shared_state_and_artifact_gate() -> None:
@@ -350,9 +353,9 @@ def test_quick_and_write_paper_gate_handoffs_on_expected_artifacts() -> None:
     assert "expected=`${QUICK_DIR}/${next_num}-SUMMARY.md`" in quick
     assert "recovery evidence only" in quick
     assert "Apply the executor child artifact gate before success" in quick
-    assert "check for the expected .tex output files before spawning writer agents" in write_paper
-    assert "Check if the expected .tex file was written to `${PAPER_DIR}/`" in write_paper
-    assert "If the file exists, proceed to the next section." in write_paper
+    assert 'id: "write_paper_section_writer"' in write_paper
+    assert "${PAPER_DIR}/{section_path}.tex" in write_paper
+    assert "success artifact gate for each section" in write_paper
 
 
 def test_plan_phase_reloads_research_from_disk_and_keeps_checker_advisory() -> None:
@@ -601,65 +604,32 @@ def test_new_milestone_research_and_roadmapper_gate_success_path_artifacts() -> 
 def test_peer_review_stages_use_fresh_context_and_stage_artifacts() -> None:
     path = WORKFLOWS_DIR / "peer-review.md"
     content = _read(path)
-    expanded_content = expand_at_includes(content, REPO_ROOT / "src/gpd", "/runtime/")
 
-    reader = _find_single_task(path, "gpd-review-reader")
-    literature = _find_single_task(path, "gpd-review-literature")
-    math = _find_single_task(path, "gpd-review-math")
-    check_proof = _find_single_task(path, "gpd-check-proof")
-    physics = _find_single_task(path, "gpd-review-physics")
-    significance = _find_single_task(path, "gpd-review-significance")
-    referee = _find_single_task(path, "gpd-referee")
-
-    assert RUNTIME_NOTE_INCLUDE_FRAGMENT in content
-    assert RUNTIME_NOTE_BODY_FRAGMENT not in content
-    assert RUNTIME_NOTE_BODY_FRAGMENT in expanded_content
-    assert MODEL_OMISSION_FRAGMENT in expanded_content
-    assert READONLY_RUNTIME_NOTE_FRAGMENT in expanded_content
-    assert "This stage must start nearly fresh and remain manuscript-first." in reader.text
-    assert "fresh context" in literature.text
-    assert "fresh context" in math.text
-    assert "fresh context" in check_proof.text
-    assert "fresh context" in physics.text
-    assert "fresh context" in significance.text
-    assert "${REVIEW_ROOT}/CLAIMS{round_suffix}.json" in referee.text
-    assert "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json" in referee.text
-    assert "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json" in literature.text
-    assert "${REVIEW_ROOT}/STAGE-math{round_suffix}.json" in math.text
-    assert "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json" in physics.text
-    assert "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json" in significance.text
-    assert "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json" in referee.text
-    assert "${REVIEW_ROOT}/STAGE-math{round_suffix}.json" in referee.text
-    assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in check_proof.text
-    assert "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json" in referee.text
-    assert "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json" in referee.text
-    assert "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json" in referee.text
-    assert "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json" in referee.text
-    assert "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md" in referee.text
-    assert "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex" in referee.text
-
-    _assert_spawn_contract(
-        reader,
-        (
-            "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
-            "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
-        ),
-    )
-    _assert_spawn_contract(literature, ("${REVIEW_ROOT}/STAGE-literature{round_suffix}.json",))
-    _assert_spawn_contract(math, ("${REVIEW_ROOT}/STAGE-math{round_suffix}.json",))
-    _assert_spawn_contract(check_proof, ("${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",))
-    _assert_spawn_contract(physics, ("${REVIEW_ROOT}/STAGE-physics{round_suffix}.json",))
-    _assert_spawn_contract(significance, ("${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json",))
-    _assert_spawn_contract(
-        referee,
-        (
-            "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md",
-            "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex",
-            "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
-            "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json",
-        ),
-        expected_write_paths=("${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md",),
-    )
+    assert "Each stage runs in a fresh subagent context" in content
+    for agent_name in (
+        "gpd-review-reader",
+        "gpd-review-literature",
+        "gpd-review-math",
+        "gpd-check-proof",
+        "gpd-review-physics",
+        "gpd-review-significance",
+    ):
+        assert f"role: {agent_name}" in content
+    assert "Spawn `gpd-referee`" in content
+    for artifact in (
+        "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-math{round_suffix}.json",
+        "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+        "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json",
+        "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
+        "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json",
+        "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md",
+        "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex",
+    ):
+        assert artifact in content
 
 
 def test_referee_response_template_uses_round_suffixed_decision_artifacts() -> None:

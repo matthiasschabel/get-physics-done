@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 EXECUTION_REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references/execution"
@@ -30,7 +32,7 @@ def test_execute_plan_clean_wave_batching_uses_typed_verification_outcome() -> N
 
 
 def test_execute_phase_requires_on_disk_artifacts_before_accepting_success() -> None:
-    execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    execute_phase = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
     assert (
         "If the SUMMARY marks any `key-files.created` / `key-files.modified` paths as required or "
@@ -42,7 +44,7 @@ def test_execute_phase_requires_on_disk_artifacts_before_accepting_success() -> 
 def test_executor_handoff_recovery_treats_commits_as_partial_evidence_only() -> None:
     quick = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
-    execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    execute_phase = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
     for source in (quick, execute_plan, execute_phase):
         assert "partial evidence" in source
@@ -51,9 +53,8 @@ def test_executor_handoff_recovery_treats_commits_as_partial_evidence_only() -> 
 
     assert "Commits or files do not prove success" in quick
     assert "Commits or output files do not prove success" in execute_plan
-    assert "files and commits stay recovery evidence until that tuple passes" in execute_phase
+    assert "Apply the local child artifact gate before success" in execute_phase
     assert "If the return envelope is missing or invalid, keep the child handoff incomplete" in execute_plan
-    assert "files and commits stay recovery evidence until that tuple passes" in execute_phase
     assert "git commits are partial evidence only" in quick
     assert "git commits are partial evidence only" in execute_plan
     assert "git commits are partial evidence only" in execute_phase
@@ -71,7 +72,7 @@ def test_execute_plan_recovery_records_commits_as_partial_evidence_until_return_
 
 
 def test_execute_phase_fails_closed_on_reverification_and_notation_handoffs() -> None:
-    execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    execute_phase = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
     assert "keeps gap-closure state intact" in execute_phase
     assert "Convention repair is intentionally out-of-line here." in execute_phase

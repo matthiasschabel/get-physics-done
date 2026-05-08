@@ -9,6 +9,7 @@ from gpd.core.workflow_staging import load_workflow_stage_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
 
 
 def _write_phase(root: Path) -> None:
@@ -44,7 +45,7 @@ def test_execute_phase_manifest_scopes_bridges_to_aggregate_stage() -> None:
 
 
 def test_execute_phase_workflow_routes_report_construction_through_finalizer_bridge() -> None:
-    workflow = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    workflow = (EXECUTE_PHASE_STAGE_DIR / "aggregate-and-verify.md").read_text(encoding="utf-8")
 
     assert "verification_report_finalizer_bridge" in workflow
     assert "verification_report_skeleton_bridge" in workflow

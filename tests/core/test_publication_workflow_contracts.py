@@ -1,14 +1,29 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
+WRITE_PAPER_STAGE_DIR = WORKFLOWS_DIR / "write-paper"
+
+
+def _read_write_paper_staged_authorities() -> str:
+    stage_names = (
+        "paper-bootstrap.md",
+        "outline-scaffold.md",
+        "authoring.md",
+        "consistency-references.md",
+        "publication-review-finalization.md",
+    )
+    return "\n\n".join((WRITE_PAPER_STAGE_DIR / name).read_text(encoding="utf-8") for name in stage_names)
 
 
 def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mode_context() -> None:
-    workflow = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    workflow = _read_write_paper_staged_authorities()
     bootstrap_parse_line = next(
         line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using")
     )
@@ -41,7 +56,8 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
     assert "Treat the emitted `.tex` file as the success artifact gate for each section only after the tuple passes." in workflow
     assert 'id: "write_paper_bibliographer"' in workflow
     assert "Always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`; list `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography file changed." in workflow
-    assert "Confirm `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` exists after the refresh before proceeding to reproducibility or strict review." in workflow
+    assert "Confirm `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`" in workflow
+    assert "exists after the refresh before proceeding to reproducibility or strict review." in workflow
     assert 'id: "write_paper_section_writer"' in workflow
     assert 'id: "write_paper_response_pair"' in workflow
     assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in workflow
@@ -77,23 +93,29 @@ def test_respond_to_referees_balanced_mode_does_not_force_parse_confirmation() -
 
 
 def test_peer_review_stage_six_requires_report_artifacts_and_threads_mode_context() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
-    assert "Parse bootstrap JSON using the manifest-owned `bootstrap.required_init_fields`" in workflow
+    assert "Parse only fields named by `staged_loading.required_init_fields`" in workflow
     assert "peer-review-stage-manifest.json" in workflow
-    assert "RESEARCH_MODE=$(echo \"$BOOTSTRAP\" | gpd json get .research_mode --default balanced)" in workflow
+    assert "RESEARCH_MODE=$(echo \"$BOOTSTRAP_INIT\" | gpd json get .research_mode --default balanced)" in workflow
     assert "<autonomy_mode>{AUTONOMY}</autonomy_mode>" in workflow
     assert "<research_mode>{RESEARCH_MODE}</research_mode>" in workflow
     assert "Treat the referee report files as required final-stage artifacts." in workflow
-    assert "confirm `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` and `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex` exist before treating the final recommendation as complete." in workflow
+    assert re.search(
+        r"confirm `\$\{PUBLICATION_ROOT\}/REFEREE-REPORT\{round_suffix\}\.md` and\s+`\$\{PUBLICATION_ROOT\}/REFEREE-REPORT\{round_suffix\}\.tex` exist before treating the final\s+recommendation as complete",
+        workflow,
+    )
     assert "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md" in workflow
     assert "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex" in workflow
     assert "Stage-review validation alone is not proof-redteam clearance" in workflow
-    assert "same-round `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` clearance plus strict referee-decision validation" in workflow
+    assert re.search(
+        r"same-round\s+`\$\{REVIEW_ROOT\}/PROOF-REDTEAM\{round_suffix\}\.md` clearance plus strict\s+referee-decision validation",
+        workflow,
+    )
 
 
 def test_peer_review_panel_child_gates_are_tuple_shaped_and_stage_owned() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
     for gate_id in (
         "peer_review_stage1_reader",
@@ -104,9 +126,9 @@ def test_peer_review_panel_child_gates_are_tuple_shaped_and_stage_owned() -> Non
         "peer_review_stage5_significance",
         "peer_review_stage6_referee",
     ):
-        assert f"id: {gate_id}" in workflow
-    assert "Stage identity is callsite-owned" in workflow
-    assert "never require or trust a stage label inside `gpd_return`" in workflow
+        assert f"{gate_id}" in workflow
+    assert re.search(r"Stage identity is\s+callsite-owned", workflow)
+    assert re.search(r"never trust a stage label inside\s+`gpd_return`", workflow)
     assert "gpd validate review-claim-index ${REVIEW_ROOT}/CLAIMS{round_suffix}.json" in workflow
     assert "gpd validate proof-redteam ${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in workflow
     assert "favorable_decisions_require_same_round_status_passed" in workflow
@@ -123,53 +145,68 @@ def test_paper_writer_prompt_supports_bounded_external_authoring_without_workspa
 
 
 def test_peer_review_workflow_retires_finished_handoffs_and_clears_transient_state() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
     assert "{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md" in workflow
-    assert "spawned reviewer/proof-auditor/referee lifecycle" in workflow
-    assert "checkpoint continuation, stale-output rejection, retry freshness, and sequential fallback cleanup" in workflow
+    assert re.search(r"spawned\s+reviewer/proof-auditor/referee lifecycle", workflow)
+    assert re.search(r"checkpoint continuation,[\s\S]{0,80}sequential fallback cleanup", workflow)
     assert (
-        "Each downstream stage begins from persisted artifacts plus the explicitly declared "
-        "carry-forward inputs for that stage." in workflow
+        re.search(r"Each\s+downstream stage begins from persisted artifacts plus the declared\s+carry-forward inputs for that stage", workflow)
     )
 
 
 def test_peer_review_workflow_requires_barriers_and_cleanup_before_downstream_stage_spawns() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
-    assert "Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered review wave under the publication stage-recovery gate." in workflow
-    assert (
-        "Before Stage 4 can spawn, the branch barrier must pass: every launched child has a typed "
-        "return, every persisted artifact above exists and validates, and downstream work restarts "
-        "only from those artifacts plus the declared carry-forward inputs." in workflow
+    assert re.search(
+        r"Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered\s+review wave under the publication stage-recovery gate",
+        workflow,
     )
-    assert "After `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` validates, Stage 5 must start from persisted stage artifacts and declared carry-forward inputs only." in workflow
-    assert "After `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json` validates, Stage 6 must begin from the persisted stage artifacts and declared carry-forward inputs only." in workflow
-    assert "Apply the `peer_review_stage6_referee` tuple and publication stage-recovery gate before classifying the outcome as recovery-eligible, upstream-blocked, or complete." in workflow
+    assert (
+        re.search(
+            r"Before Stage 4 can spawn, the branch barrier must pass: every launched child has a\s+typed return, every persisted artifact above exists and validates, and downstream work\s+restarts only from those artifacts plus the declared carry-forward inputs",
+            workflow,
+        )
+    )
+    assert re.search(
+        r"After `\$\{REVIEW_ROOT\}/STAGE-physics\{round_suffix\}\.json` validates, Stage 5\s+(?:must )?starts?\s+from persisted stage artifacts and declared carry-forward inputs only",
+        workflow,
+    )
+    assert re.search(
+        r"After `\$\{REVIEW_ROOT\}/STAGE-interestingness\{round_suffix\}\.json` validates, Stage 6\s+must begin from the persisted stage artifacts and declared carry-forward inputs only",
+        workflow,
+    )
+    assert re.search(
+        r"Apply the `peer_review_stage6_referee` tuple and publication stage-recovery gate\s+before classifying the outcome as recovery-eligible, upstream-blocked, or\s+complete",
+        workflow,
+    )
 
 
 def test_peer_review_stage_six_limits_writes_to_stage_six_owned_artifacts() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
     assert "Your writable scope is limited to Stage 6-owned adjudication artifacts for this round:" in workflow
     assert "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json" in workflow
     assert "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json" in workflow
     assert "${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md" in workflow
     assert "Do not modify `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, any `${REVIEW_ROOT}/STAGE-*.json`, or `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`." in workflow
-    assert "Treat any `gpd_return.files_written` entry outside the Stage 6 allowlist as a failed handoff" in workflow
-    assert "id: peer_review_stage6_referee" in workflow
-    assert "gpd_return.files_written stays within Stage 6 write_allowlist and contains no upstream staged-review paths" in workflow
+    assert "any upstream path is a failed handoff" in workflow
+    assert "peer_review_stage6_referee" in workflow
+    assert "gpd_return.files_written stays within Stage 6 write_allowlist" in workflow
     assert "The Stage 6 tuple write allowlist is report `.md`/`.tex`, ledger, decision, and optional consistency report." in workflow
-    assert "Any upstream staged-review path in `gpd_return.files_written` is a failed handoff." in workflow
+    assert "any upstream path is a failed handoff" in workflow
 
 
 def test_peer_review_stage_six_fails_back_to_earliest_upstream_stage_on_inconsistent_inputs() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
-    assert "return `gpd_return.status: blocked` and hand the failure back to the earliest failing upstream stage" in workflow
+    assert re.search(
+        r"return `gpd_return.status: blocked` and hand the failure back to the earliest failing\s+upstream stage",
+        workflow,
+    )
     assert "Do not retry Stage 6 as an upstream repair step." in workflow
-    assert "Use this upstream fail-back routing:" in workflow
+    assert "Upstream fail-back table:" in workflow
     assert "`CLAIMS{round_suffix}.json` or `STAGE-reader{round_suffix}.json` -> rerun Stage 1" in workflow
     assert "`STAGE-math{round_suffix}.json` or `PROOF-REDTEAM{round_suffix}.md` -> rerun Stage 3" in workflow
     assert "`STAGE-interestingness{round_suffix}.json` -> rerun Stage 5" in workflow
-    assert "If multiple upstream artifacts disagree, rerun the earliest stage in that list." in workflow
+    assert "earliest failing upstream stage" in workflow

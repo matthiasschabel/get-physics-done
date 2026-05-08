@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -14,9 +16,9 @@ def _assert_contains_fragments(text: str, *fragments: str) -> None:
 
 
 def test_peer_review_surfaces_canonical_phase_summary_artifacts() -> None:
-    workflow_text = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    command_text = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
 
-    assert "GPD/phases/*/*SUMMARY.md" in workflow_text
+    assert "phase summaries or milestone digest" in command_text
 
 
 def test_regression_check_searches_canonical_phase_summary_artifacts() -> None:
@@ -82,7 +84,7 @@ def test_summary_driven_workflows_search_canonical_summary_artifacts() -> None:
     complete_milestone = (WORKFLOWS_DIR / "complete-milestone.md").read_text(encoding="utf-8")
     validate_conventions = (WORKFLOWS_DIR / "validate-conventions.md").read_text(encoding="utf-8")
     graph = (WORKFLOWS_DIR / "graph.md").read_text(encoding="utf-8")
-    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_paper = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
     plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
 
     assert "roadmap-plus-disk union" in complete_milestone
@@ -127,7 +129,7 @@ def test_command_surfaces_list_standalone_and_numbered_phase_artifacts() -> None
     regression_check = (COMMANDS_DIR / "regression-check.md").read_text(encoding="utf-8")
     show_phase = (COMMANDS_DIR / "show-phase.md").read_text(encoding="utf-8")
     audit = (COMMANDS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
-    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_paper = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
     assert "@{GPD_INSTALL_DIR}/workflows/progress.md" in progress
     assert "GPD/phases/[current-phase-dir]/PLAN.md" in progress_workflow

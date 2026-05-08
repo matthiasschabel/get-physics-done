@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -17,10 +19,25 @@ PUBLICATION_ROUND_ARTIFACTS_INCLUDE = (
 )
 PUBLICATION_REVIEW_RELIABILITY_INCLUDE = "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md"
 PUBLICATION_REVIEW_RELIABILITY_INLINE = "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md"
+PEER_REVIEW_STAGE_FILES = (
+    "bootstrap.md",
+    "preflight.md",
+    "artifact-discovery.md",
+    "panel-stages.md",
+    "final-adjudication.md",
+    "finalize.md",
+)
 
 
 def _workflow_text(name: str) -> str:
+    if name in {"write-paper.md", "peer-review.md"}:
+        return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+
+
+def _peer_review_stage_text(*names: str) -> str:
+    stage_names = names or PEER_REVIEW_STAGE_FILES
+    return "\n".join((WORKFLOWS_DIR / "peer-review" / name).read_text(encoding="utf-8") for name in stage_names)
 
 
 def _command_text(name: str) -> str:
@@ -38,8 +55,8 @@ def test_write_paper_workflow_runs_centralized_review_preflight() -> None:
     ).read_text(encoding="utf-8")
 
     assert "gpd validate review-preflight write-paper --strict" in workflow
-    assert "Run the centralized review preflight before continuing:" in workflow
-    assert PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE in workflow
+    assert "Run centralized command-context preflight for `write-paper` before continuing." in workflow
+    assert "publication-bootstrap-preflight.md" in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
     assert PUBLICATION_ROUND_ARTIFACTS_INCLUDE in workflow
     assert "artifacts copied from another manuscript root" in shared_preflight
@@ -48,8 +65,7 @@ def test_write_paper_workflow_runs_centralized_review_preflight() -> None:
     assert "bibliography_audit_clean" in shared_preflight
     assert "reproducibility_ready" in shared_preflight
     assert "missing manuscript" not in workflow
-    assert 'PAPER_DIR="${publication_bootstrap_root}"' in workflow
-    assert '# e.g. PAPER_DIR="paper" or PAPER_DIR="GPD/publication/${subject_slug}/manuscript"' in workflow
+    assert "`PAPER_DIR` to `publication_bootstrap_root`" in workflow
     assert '${PAPER_DIR}/{topic_specific_stem}.tex' in workflow
 
 
@@ -160,18 +176,20 @@ def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
 
 
 def test_peer_review_workflow_runs_centralized_review_preflight_with_explicit_arguments() -> None:
-    workflow = _workflow_text("peer-review.md")
+    preflight = _peer_review_stage_text("preflight.md")
+    panel = _peer_review_stage_text("panel-stages.md")
+    final = _peer_review_stage_text("final-adjudication.md")
 
-    assert 'gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict' in workflow
-    assert "gpd validate review-preflight peer-review --strict" not in workflow
-    assert "stage-recovery-gate.md" in workflow
-    assert "checkpoint continuation" in workflow
-    assert "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree." in workflow
+    assert 'gpd validate review-preflight peer-review "$REVIEW_TARGET" --strict' in preflight
+    assert "gpd validate review-preflight peer-review --strict" not in preflight
+    assert "stage-recovery-gate.md" in panel
+    assert "checkpoint continuation" in panel
+    assert "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree." in final
 
 
 def test_peer_review_prompts_do_not_route_managed_subjects_to_global_review_root() -> None:
     command = _command_text("peer-review.md")
-    workflow = _workflow_text("peer-review.md")
+    workflow = _peer_review_stage_text()
     round_reference = _publication_reference_text("publication-review-round-artifacts.md")
     reliability_reference = _publication_reference_text("peer-review-reliability.md")
 

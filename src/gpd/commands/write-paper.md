@@ -116,23 +116,26 @@ Keep the wrapper thin and let the workflow own the full pipeline.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/write-paper.md
+@{GPD_INSTALL_DIR}/workflows/write-paper/paper-bootstrap.md
 </execution_context>
 
 <context>
 Project manuscript context or intake: $ARGUMENTS
 
-This wrapper supports two truthful lanes only:
-- project-backed authoring from the current GPD project and its resolved manuscript subject
-- bounded external authoring from `--intake path/to/write-paper-authoring-input.json`
-
-The workflow normalizes either lane before calling `validate command-context` or `validate review-preflight`. External authoring is fail-closed and intake-manifest driven: no generic workspace mining, no positional-folder discovery, and no reuse of `PAPER-CONFIG.json` as the intake contract. See `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` for the canonical publication boundary.
-All durable external-authoring state lives under `GPD/publication/{subject_slug}/...`: `GPD/publication/{subject_slug}/intake/` for intake/provenance only, and `GPD/publication/{subject_slug}/manuscript/` as the only authoritative manuscript/build root.
-Project-backed runs may use the `paper/` root or a managed project manuscript lane such as `GPD/publication/{subject_slug}/manuscript`; GPD-owned review/response auxiliaries stay under `GPD/`.
+Two lanes only: project-backed authoring, or bounded external authoring from
+`--intake path/to/write-paper-authoring-input.json`. Validate before writing.
+External authoring is fail-closed: no workspace mining, positional-folder
+discovery, or `PAPER-CONFIG.json` as intake. Boundary reference:
+`{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`.
+Project-backed manuscripts may use `GPD/publication/{subject_slug}/manuscript`;
+review/response auxiliaries stay under `GPD/`. Durable external-authoring state
+uses `GPD/publication/{subject_slug}/...`; `.../intake/` is provenance only.
 </context>
 
 <process>
-Follow the included workflow file exactly.
+Follow the included first-stage authority exactly. After each staged reload, follow
+`staged_loading.eager_authorities` for the active stage and do not read
+`staged_loading.must_not_eager_load`. The root workflow index is only a staged-file map.
 </process>
 
 <success_criteria>

@@ -134,18 +134,20 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
     assert "references/publication/publication-response-artifacts.md" in bootstrap.must_not_eager_load
 
     assert consistency.loaded_authorities == (
-        "workflows/write-paper.md",
+        "workflows/write-paper/consistency-references.md",
         "references/publication/stage-recovery-gate.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
     )
     assert publication_review.loaded_authorities == (
-        "workflows/write-paper.md",
+        "workflows/write-paper/publication-review-finalization.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/stage-recovery-gate.md",
+        "templates/paper/author-response.md",
+        "templates/paper/referee-response.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
     )
@@ -184,14 +186,14 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
     assert "selected_publication_root" in bootstrap.required_init_fields
     assert "selected_review_root" in bootstrap.required_init_fields
 
-    assert preflight.loaded_authorities[0] == "workflows/peer-review.md"
+    assert preflight.loaded_authorities[0] == "workflows/peer-review/preflight.md"
     assert "references/publication/peer-review-reliability.md" in preflight.loaded_authorities
     assert "templates/paper/paper-config-schema.md" in preflight.loaded_authorities
     assert "templates/paper/artifact-manifest-schema.md" in preflight.loaded_authorities
     assert "templates/paper/bibliography-audit-schema.md" in preflight.loaded_authorities
     assert "templates/paper/reproducibility-manifest.md" in preflight.loaded_authorities
     assert artifact_discovery.loaded_authorities == (
-        "workflows/peer-review.md",
+        "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
     )

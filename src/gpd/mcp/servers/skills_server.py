@@ -622,6 +622,39 @@ def _extract_referenced_files(
     return direct_references, transitive_references
 
 
+def _merge_staged_loading_references(
+    referenced_files: list[dict[str, object]],
+    staged_loading: content_registry.WorkflowStageManifest,
+) -> list[dict[str, object]]:
+    """Add staged-loading authorities as metadata references without eager bodies."""
+
+    merged = list(referenced_files)
+    seen = {entry["path"] for entry in merged}
+
+    for stage in staged_loading.stages:
+        candidates = [*stage.mode_paths, *stage.loaded_authorities]
+        for conditional in stage.conditional_authorities:
+            candidates.extend(conditional.authorities)
+        for candidate in candidates:
+            normalized = _portable_reference_path(candidate)
+            if normalized is None:
+                continue
+            path, _referenced_path = normalized
+            if path in seen:
+                continue
+            seen.add(path)
+            merged.append(
+                {
+                    "path": path,
+                    "kind": _reference_kind(path),
+                    "source": "staged_loading",
+                    "stage": stage.id,
+                }
+            )
+
+    return merged
+
+
 def _is_schema_reference(path: str) -> bool:
     if Path(path).name.endswith("-schema.md"):
         return True
@@ -791,12 +824,15 @@ def get_skill(
                     error=f"Skill {name!r} not found",
                 )
 
+            command = content_registry.get_command(skill.registry_name) if skill.source_kind == "command" else None
             content, source_path = _canonical_skill_content(skill)
             referenced_files, transitive_referenced_files = _extract_referenced_files(
                 content,
                 source_path=source_path,
                 read_transitive_reference_bodies=include_transitive_reference_bodies,
             )
+            if command is not None and command.staged_loading is not None:
+                referenced_files = _merge_staged_loading_references(referenced_files, command.staged_loading)
             template_references = [entry["path"] for entry in referenced_files if entry["kind"] == "template"]
             schema_references, schema_documents = _expanded_reference_documents(
                 referenced_files,
@@ -848,7 +884,7 @@ def get_skill(
                 "loading_hint": loading_hint,
             }
             if skill.source_kind == "command":
-                command = content_registry.get_command(skill.registry_name)
+                assert command is not None
                 allowed_tools = _normalize_allowed_tools(command.allowed_tools)
                 payload.update(
                     {

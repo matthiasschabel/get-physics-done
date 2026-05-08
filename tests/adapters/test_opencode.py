@@ -845,7 +845,9 @@ class TestInstall:
         expected_bridge = expected_opencode_bridge(target, is_global=False)
         command = (target / "command" / "gpd-settings.md").read_text(encoding="utf-8")
         workflow = (target / "get-physics-done" / "workflows" / "settings.md").read_text(encoding="utf-8")
-        execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase.md").read_text(encoding="utf-8")
+        execute_phase = (
+            target / "get-physics-done" / "workflows" / "execute-phase" / "phase-bootstrap.md"
+        ).read_text(encoding="utf-8")
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
         planner_procedure = (
             target / "get-physics-done" / "references" / "planning" / "planner-execution-procedure.md"

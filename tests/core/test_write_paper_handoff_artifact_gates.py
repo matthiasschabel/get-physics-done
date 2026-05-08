@@ -5,11 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "write-paper.md"
+STAGE_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "write-paper"
+BOOTSTRAP = STAGE_DIR / "paper-bootstrap.md"
+AUTHORING = STAGE_DIR / "authoring.md"
+CONSISTENCY = STAGE_DIR / "consistency-references.md"
+FINALIZATION = STAGE_DIR / "publication-review-finalization.md"
 
 
 def test_write_paper_writer_completion_requires_typed_status_files_written_and_disk_artifact() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = AUTHORING.read_text(encoding="utf-8")
 
     assert "stage-recovery-gate.md" in source
     assert 'id: "write_paper_section_writer"' in source
@@ -21,7 +25,7 @@ def test_write_paper_writer_completion_requires_typed_status_files_written_and_d
 
 
 def test_write_paper_bibliography_completion_requires_typed_status_files_written_and_disk_artifacts() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = CONSISTENCY.read_text(encoding="utf-8")
 
     assert 'id: "write_paper_bibliographer"' in source
     assert "Return a typed `gpd_return` envelope for the `write_paper_bibliographer` child_gate." in source
@@ -34,7 +38,7 @@ def test_write_paper_bibliography_completion_requires_typed_status_files_written
 
 
 def test_write_paper_response_artifact_completion_requires_typed_status_files_written_and_disk_artifacts() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = FINALIZATION.read_text(encoding="utf-8")
 
     assert "stage-recovery-gate.md" in source
     assert 'id: "write_paper_response_pair"' in source
@@ -46,10 +50,11 @@ def test_write_paper_response_artifact_completion_requires_typed_status_files_wr
 
 
 def test_write_paper_bootstrap_contract_is_explicit_about_project_and_bounded_external_lanes() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = BOOTSTRAP.read_text(encoding="utf-8")
 
     assert "Use `publication_subject*`, `manuscript_*`, and `publication_bootstrap*` from init / strict preflight" in source
-    assert "The resolved manuscript root may already be the managed project lane `GPD/publication/{subject_slug}/manuscript`" in source
+    assert "The resolved manuscript root may already be" in source
+    assert "the managed project lane `GPD/publication/{subject_slug}/manuscript`" in source
     assert "For `external_authoring_intake`, use the strict command preflight's managed subject handoff" in source
     assert "`GPD/publication/{subject_slug}/intake/` is intake/provenance state only; it must not participate in manuscript-root discovery" in source
     assert "a resolved `${PAPER_DIR}` under `GPD/publication/{subject_slug}/manuscript` may be either the managed project lane or the bounded external-authoring lane" in source
@@ -58,7 +63,7 @@ def test_write_paper_bootstrap_contract_is_explicit_about_project_and_bounded_ex
 
 
 def test_write_paper_external_lane_stops_at_manuscript_root_handoff_and_routes_to_peer_review() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = FINALIZATION.read_text(encoding="utf-8")
 
     assert "**External-authoring lane:** do **not** run the embedded staged panel here." in source
     assert "Embedded `write-paper` review parity for the bounded external-authoring lane is deferred" in source

@@ -38,6 +38,7 @@ from tests.adapters.projection_budget_support import (
 )
 from tests.adapters.projection_test_utils import StagedCommandProjectionCase, iter_staged_command_projection_cases
 from tests.prompt_metrics_support import iter_markdown_fences, runtime_command_visibility_note
+from tests.workflow_authority_support import expanded_workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -767,11 +768,11 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
         assert not _has_staged_shim_sentinel(projected)
         return
 
-    workflow_source = _read(WORKFLOWS_DIR / f"{command_name}.md")
-    expanded_workflow = expand_at_includes(
-        workflow_source,
-        REPO_ROOT / "src/gpd",
-        "/runtime/",
+    expanded_workflow = expanded_workflow_authority_text(
+        WORKFLOWS_DIR,
+        command_name,
+        src_root=REPO_ROOT / "src/gpd",
+        path_prefix="/runtime/",
         runtime=runtime,
     )
     init_lines = tuple(line.strip() for line in projected.splitlines() if f"--raw init {command_name}" in line)
@@ -847,7 +848,8 @@ def test_runtime_projected_staged_commands_keep_protocol_bundle_jit_visible_with
         assert marker not in projected
 
     if descriptor.native_include_support:
-        assert _raw_include_count(projected, f"workflows/{case.command_name}.md") == 1
+        for include_path in case.native_include_paths:
+            assert _raw_include_count(projected, include_path) == 1
         assert "<protocol_bundle_jit>" not in projected
         return
 

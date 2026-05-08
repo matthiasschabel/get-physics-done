@@ -47,7 +47,7 @@ COMMAND_BASELINES = {
     "discuss-phase": (1_074, 41_437, 2),
     "error-patterns": (258, 6_372, 1),
     "error-propagation": (436, 18_556, 1),
-    "execute-phase": (1_807, 98_788, 1),
+    "execute-phase": (170, 6_791, 1),
     "explain": (357, 13_532, 1),
     "export": (502, 13_779, 1),
     "export-logs": (248, 9_260, 1),
@@ -65,7 +65,7 @@ COMMAND_BASELINES = {
     "numerical-convergence": (570, 27_086, 1),
     "parameter-sweep": (832, 31_119, 1),
     "pause-work": (302, 13_207, 1),
-    "peer-review": (1_306, 75_422, 1),
+    "peer-review": (297, 14_870, 1),
     "plan-milestone-gaps": (357, 11_407, 1),
     "plan-phase": (907, 50_454, 1),
     "progress": (612, 20_404, 1),
@@ -96,24 +96,27 @@ COMMAND_BASELINES = {
     "update": (269, 7_655, 1),
     "validate-conventions": (269, 10_508, 1),
     "verify-work": (763, 41_872, 1),
-    "write-paper": (1_427, 89_293, 1),
+    "write-paper": (433, 20_231, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
-    "write-paper": (1_600, 91_000),
+    "autonomous": (1_050, 41_000),
+    "discuss-phase": (1_100, 43_000),
+    "write-paper": (480, 22_000),
     "plan-phase": (1_060, 53_500),
-    "execute-phase": (2_180, 109_000),
+    "execute-phase": (260, 10_000),
     "new-project": (320, 14_000),
     "help": (1_480, 78_000),
-    "peer-review": (1_340, 77_000),
+    "peer-review": (340, 16_000),
     "respond-to-referees": (900, 52_000),
+    "verify-work": (800, 43_000),
 }
 PROJECTED_COMMAND_HARD_CAPS = {
-    "execute-phase": (2_100, 116_000),
+    "execute-phase": (300, 12_000),
     "new-project": (2_200, 107_000),
     "research-phase": (430, 22_000),
     "respond-to-referees": (1_000, 62_000),
     "verify-work": (850, 47_000),
-    "write-paper": (1_700, 100_000),
+    "write-paper": (520, 25_000),
 }
 RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 TOP_COMMAND_HARD_CAP_COUNT = 6
@@ -147,7 +150,7 @@ WORKFLOW_BASELINES = {
     "discuss-phase": (633, 25_137, 0),
     "error-patterns": (143, 3_937, 0),
     "error-propagation": (387, 17_136, 0),
-    "execute-phase": (1_766, 97_736, 2),
+    "execute-phase": (22, 1_191, 0),
     "execute-plan": (825, 52_486, 0),
     "explain": (270, 10_920, 1),
     "export-logs": (170, 6_195, 0),
@@ -165,7 +168,7 @@ WORKFLOW_BASELINES = {
     "numerical-convergence": (482, 23_756, 0),
     "parameter-sweep": (751, 29_022, 1),
     "pause-work": (275, 12_667, 0),
-    "peer-review": (1_117, 65_433, 2),
+    "peer-review": (26, 1_144, 0),
     "plan-milestone-gaps": (290, 7_888, 0),
     "plan-phase": (859, 48_858, 1),
     "progress": (576, 19_421, 0),
@@ -197,14 +200,14 @@ WORKFLOW_BASELINES = {
     "validate-conventions": (228, 9_317, 1),
     "verify-phase": (687, 42_370, 0),
     "verify-work": (690, 39_959, 2),
-    "write-paper": (1_279, 83_327, 2),
+    "write-paper": (54, 2_396, 0),
 }
 WORST_WORKFLOW_HARD_CAPS = {
     "verify-phase": (720, 44_000),
-    "write-paper": (1_420, 85_000),
+    "write-paper": (80, 4_000),
     "respond-to-referees": (800, 46_000),
     "new-project": (2_020, 94_000),
-    "execute-phase": (2_130, 108_000),
+    "execute-phase": (80, 4_000),
     "help": (1_420, 74_000),
 }
 EAGER_LOADED_BULKY_REFERENCE_INCLUDE_FILES = (

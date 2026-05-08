@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references" / "publication"
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
+
+
+def _workflow_authority(name: str) -> str:
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def test_publication_bootstrap_preflight_defines_the_shared_publication_gate() -> None:
@@ -153,7 +160,7 @@ def test_referee_revision_mode_requires_a_paired_response_package() -> None:
 def test_paper_writer_and_referee_load_the_canonical_publication_response_contracts() -> None:
     paper_writer = (AGENTS_DIR / "gpd-paper-writer.md").read_text(encoding="utf-8")
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
-    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_paper = _workflow_authority("write-paper")
     respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
 
     for source in (paper_writer, referee):
@@ -183,50 +190,44 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
 
 
 def test_peer_review_stage_six_requires_fresh_referee_return_and_artifacts() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _workflow_authority("peer-review")
 
-    assert "child_gates:" in workflow
+    assert "child_gate tuple" in workflow
     assert "peer_review_stage6_referee" in workflow
-    assert "required_status: completed" in workflow
+    assert re.search(r"required_status:\s+[\"']?completed", workflow)
     assert "stage-recovery-gate.md" in workflow
     assert "checkpoint continuation" in workflow
     assert "gpd_return.files_written stays within Stage 6 write_allowlist" in workflow
 
 
 def test_peer_review_parallel_wave_stops_terminal_children_before_stage_4() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _workflow_authority("peer-review")
 
-    assert (
-        "If the runtime supports parallel subagent execution, run Stage 2, Stage 3, and the conditional proof-critique pass in parallel when theorem-bearing claims are present."
-        in workflow
+    assert "If the runtime supports parallel subagent execution" in workflow
+    assert "conditional proof-critique pass in parallel when theorem-bearing claims are present" in workflow
+    assert re.search(r"If literature, math, or the conditional proof-critique stage fails[\s\S]{0,80}STOP", workflow)
+    assert "Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered" in workflow
+    assert "retry only the failed tuple once under the stage-recovery gate" in workflow
+    assert "Before Stage 4 can spawn, the branch barrier must pass" in workflow
+    assert re.search(
+        r"If the proof-redteam artifact is missing, malformed,[\s\S]{0,90}retry `gpd-check-proof` once with the same inputs",
+        workflow,
     )
-    assert "If literature, math, or the conditional proof-critique stage fails, STOP and report the failure." in workflow
-    assert "Stages 2-3 recovery -- Validate literature and math outputs before proceeding." in workflow
-    assert (
-        "Retry only the failed stage once with the same persisted inputs and an explicit reminder to match the `StageReviewReport` JSON schema from `peer-review-panel.md`"
-        in workflow
-    )
-    assert "Do not proceed to Stage 4." in workflow
-    assert (
-        "If the proof-redteam artifact is missing, malformed, lacks the canonical frontmatter, or omits required sections, retry `gpd-check-proof` once with the same inputs"
-        in workflow
-    )
-    assert "If the retry also fails, STOP the pipeline and report that proof review could not be completed." in workflow
+    assert re.search(r"If the retry also fails, STOP the pipeline[\s\S]{0,80}proof review could not\s+be completed", workflow)
 
 
 def test_peer_review_later_stages_restart_from_fresh_context_and_written_artifacts() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _workflow_authority("peer-review")
 
-    assert "Operate in physical-soundness stage mode with a fresh context." in workflow
-    assert "Operate in interestingness-and-venue-fit stage mode with a fresh context." in workflow
+    assert "Stage 4 checks physical soundness" in workflow
+    assert "Stage 5 judges interestingness and venue fit" in workflow
     assert "${REVIEW_ROOT}/STAGE-math{round_suffix}.json" in workflow
     assert "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json" in workflow
     assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` if proof-bearing review is active" in workflow
     assert "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json" in workflow
-    assert "Stage 4 recovery -- Validate the physics output before proceeding." in workflow
-    assert "Do not proceed to Stage 5." in workflow
-    assert "Stage 5 recovery -- Validate the significance output before proceeding." in workflow
-    assert "Do not proceed to Stage 6 adjudication." in workflow
+    assert "Validate before proceeding:" in workflow
+    assert re.search(r"do not\s+proceed to Stage 5", workflow)
+    assert "Validate before Stage 6:" in workflow
 
 
 def test_referee_stage_six_files_written_must_be_fresh_current_run_outputs() -> None:
@@ -259,18 +260,15 @@ def test_referee_stage_six_write_allowlist_stops_before_upstream_repairs() -> No
 
 
 def test_stage_six_handoff_closure_and_retry_freshness_remain_explicit() -> None:
-    workflow = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
+    workflow = _workflow_authority("peer-review")
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
 
     assert "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree." in workflow
-    assert (
-        "gpd_return.files_written stays within Stage 6 write_allowlist and contains no upstream staged-review paths"
-        in workflow
-    )
-    assert "Only retry Stage 6 for Stage 6-owned artifacts." in workflow
+    assert "gpd_return.files_written stays within Stage 6 write_allowlist" in workflow
+    assert "Only retry Stage 6 for Stage 6-owned artifact failures" in workflow
     assert "Do not retry Stage 6 as an upstream repair step." in workflow
-    assert "If the eligible Stage 6 retry also fails," in workflow
-    assert "Do not proceed to report summarization." in workflow
+    assert "If the eligible Stage 6 retry also fails" in workflow
+    assert "do not proceed to report summarization" in workflow
     assert "Checkpoint ownership is orchestrator-side: when you stop, the orchestrator presents the issue and owns the fresh continuation handoff." in referee
     assert (
         "`gpd_return.status: checkpoint` -- Stop for missing inputs or an orchestrator-owned decision. Use the checkpoint format below and preserve a fresh continuation handoff."

@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -20,11 +21,24 @@ REPEATED_PROOF_CHECKPOINT_LINES = (
 
 
 def _read(name: str) -> str:
-    return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def _expanded(name: str) -> str:
     return expand_at_includes(_read(name), SPECS_DIR, "/runtime/")
+
+
+def _peer_review_stage_text(*names: str) -> str:
+    stage_names = names or (
+        "artifact-discovery.md",
+        "panel-stages.md",
+        "final-adjudication.md",
+    )
+    return "\n".join((WORKFLOWS_DIR / "peer-review" / name).read_text(encoding="utf-8") for name in stage_names)
+
+
+def _expanded_peer_review_stage_text(*names: str) -> str:
+    return expand_at_includes(_peer_review_stage_text(*names), SPECS_DIR, "/runtime/")
 
 
 def test_plan_and_execute_phase_require_proof_redteam_gates() -> None:
@@ -80,15 +94,9 @@ def test_verification_workflows_fail_closed_on_missing_proof_coverage() -> None:
 
 
 def test_proof_redteam_handoffs_delegate_checkpoint_semantics_to_shared_contracts() -> None:
-    workflow_names = (
-        "derive-equation.md",
-        "execute-phase.md",
-        "verify-phase.md",
-        "verify-work.md",
-        "peer-review.md",
-    )
+    workflow_names = ("derive-equation.md", "execute-phase.md", "verify-phase.md", "verify-work.md")
 
-    combined = "\n".join(_read(name) for name in workflow_names)
+    combined = "\n".join((*(_read(name) for name in workflow_names), _peer_review_stage_text("panel-stages.md")))
 
     for phrase in REPEATED_PROOF_CHECKPOINT_LINES:
         assert phrase not in combined
@@ -101,24 +109,26 @@ def test_proof_redteam_handoffs_delegate_checkpoint_semantics_to_shared_contract
 def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
     quick = _read("quick.md")
     write_paper = _read("write-paper.md")
-    peer_review = _expanded("peer-review.md")
-    peer_review_raw = _read("peer-review.md")
+    peer_review = _expanded_peer_review_stage_text()
+    peer_review_raw = _peer_review_stage_text()
     settings = _read("settings.md")
 
     assert "Quick mode is NOT authorized to close theorem-style or `proof_obligation` work." in quick
     assert "Proof-obligation command block:" in quick
     assert "quick mode is blocked pending the full proof-redteam workflow" in quick
 
-    assert "### Check 7: Proof-obligation coverage" in write_paper
+    assert "proof-obligation coverage" in write_paper
     assert "GPD/review/PROOF-REDTEAM{round_suffix}.md" in write_paper
-    assert "must not strengthen, generalize, or rhetorically smooth theorem-style claims" in write_paper
+    assert "must not strengthen, generalize, or rhetorically smooth" in write_paper
+    assert "theorem-style claims beyond passed proof-redteam scope" in write_paper
 
-    assert '<step name="detect_proof_bearing_manuscript">' in peer_review
+    assert "<proof_bearing_routing>" in peer_review
     assert PROOF_GATE_REF in peer_review_raw
     assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in peer_review
     assert "gpd-check-proof" in peer_review
     assert "may be running in parallel" in peer_review
-    assert "do not wait on that artifact to begin the math review" in peer_review
+    assert "do not wait on that" in peer_review
+    assert "artifact to begin the math review" in peer_review
     assert "expect a sibling `GPD/review/PROOF-REDTEAM{round_suffix}.md` artifact" not in peer_review
     assert "Recommendation floor: `major_revision` or `reject`." in peer_review
 
@@ -127,7 +137,7 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
 
 
 def test_peer_review_final_decision_guardrail_requires_same_round_proof_redteam() -> None:
-    peer_review = _expanded("peer-review.md")
+    peer_review = _expanded_peer_review_stage_text("panel-stages.md", "final-adjudication.md")
     reliability = (SPECS_DIR / "references/publication/peer-review-reliability.md").read_text(encoding="utf-8")
 
     assert (
@@ -150,7 +160,7 @@ def test_peer_review_final_decision_guardrail_requires_same_round_proof_redteam(
 def test_proof_obligation_detection_distinguishes_generic_manuscript_claims() -> None:
     proof_gate = (SPECS_DIR / "references/verification/core/proof-redteam-workflow-gate.md").read_text(encoding="utf-8")
     quick = _read("quick.md")
-    peer_review = _expanded("peer-review.md")
+    peer_review = _expanded_peer_review_stage_text("artifact-discovery.md")
 
     assert (
         "ProjectContract` vocabulary such as `claim_kind: theorem | lemma | corollary | proposition | claim`"

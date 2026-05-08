@@ -32,6 +32,7 @@ from gpd.core.constants import (
 from gpd.core.health import _ALL_CHECKS
 from gpd.core.patterns import PatternDomain
 from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter
+from tests.workflow_authority_support import workflow_authority_text
 
 
 def _repo_root() -> Path:
@@ -40,6 +41,10 @@ def _repo_root() -> Path:
 
 def _read(relative_path: str) -> str:
     return (_repo_root() / relative_path).read_text(encoding="utf-8")
+
+
+def _workflow_authority(name: str) -> str:
+    return workflow_authority_text(_repo_root() / "src/gpd/specs/workflows", name)
 
 
 def _decorated_mcp_tools(relative_path: str) -> list[str]:
@@ -473,7 +478,7 @@ def test_settings_workflow_documents_runtime_native_model_override_guidance() ->
 def test_branching_strategy_docs_use_canonical_config_literals() -> None:
     settings = _read("src/gpd/specs/workflows/settings.md")
     planning = _read("src/gpd/specs/references/planning/planning-config.md")
-    execute_phase = _read("src/gpd/specs/workflows/execute-phase.md")
+    execute_phase = _workflow_authority("execute-phase")
     complete_milestone = _read("src/gpd/specs/workflows/complete-milestone.md")
 
     assert '"branching_strategy": "none" | "per-phase" | "per-milestone"' in settings
@@ -504,9 +509,10 @@ def test_help_and_settings_surface_current_commit_docs_and_review_cadence_shapes
 
 def test_execute_phase_docs_use_review_cadence_not_removed_verify_between_waves_knob() -> None:
     execute_command = _read("src/gpd/commands/execute-phase.md")
-    execute_workflow = _read("src/gpd/specs/workflows/execute-phase.md")
+    execute_workflow = _workflow_authority("execute-phase")
 
-    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" in execute_command
+    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase/phase-bootstrap.md" in execute_command
+    assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in execute_command
     assert "execution.review_cadence" not in execute_command
     assert "dense" not in execute_command
     assert "adaptive" not in execute_command
@@ -571,8 +577,8 @@ def test_update_workflow_uses_runtime_placeholders_for_cache_paths() -> None:
 
 
 def test_referee_response_round_suffix_convention_is_consistent() -> None:
-    write_paper = _read("src/gpd/specs/workflows/write-paper.md")
-    peer_review = _read("src/gpd/specs/workflows/peer-review.md")
+    write_paper = _workflow_authority("write-paper")
+    peer_review = _workflow_authority("peer-review")
     respond_command = _read("src/gpd/commands/respond-to-referees.md")
     referee = _read("src/gpd/agents/gpd-referee.md")
     respond = _read("src/gpd/specs/workflows/respond-to-referees.md")
@@ -581,7 +587,8 @@ def test_referee_response_round_suffix_convention_is_consistent() -> None:
     author_response = _read("src/gpd/specs/templates/paper/author-response.md")
     template = _read("src/gpd/specs/templates/paper/referee-response.md")
 
-    assert 'ROUND_SUFFIX="-R${ROUND}"' in peer_review
+    assert "round_suffix" in peer_review
+    assert "${REVIEW_ROOT}/REFEREE_RESPONSE{round_suffix}.md" in peer_review
     assert '`GPD/review/REFEREE_RESPONSE{round_suffix}.md`' in respond
     assert '`GPD/AUTHOR-RESPONSE{round_suffix}.md`' in respond
     assert "context_mode: project-aware" in respond_command
@@ -605,8 +612,8 @@ def test_referee_response_round_suffix_convention_is_consistent() -> None:
     assert "ls GPD/review/REFEREE_RESPONSE*.md 2>/dev/null" not in respond
     assert "ls GPD/review/REVIEW-LEDGER*.json 2>/dev/null" not in respond
     assert "ls GPD/review/REFEREE-DECISION*.json 2>/dev/null" not in respond
-    assert "GPD/AUTHOR-RESPONSE{ROUND_SUFFIX}.md" in peer_review
-    assert "${REVIEW_ROOT}/REFEREE_RESPONSE{ROUND_SUFFIX}.md" in peer_review
+    assert re.search(r"\$\{PUBLICATION_ROOT\}/AUTHOR-RESPONSE\{round_suffix\}\.md", peer_review)
+    assert re.search(r"\$\{REVIEW_ROOT\}/REFEREE_RESPONSE\{round_suffix\}\.md", peer_review)
     assert "matching paired response package exists for the same round" in referee
     assert re.search(
         r"If one response artifact is missing[\s\S]{0,140}stop fail-closed and report the incomplete response package",

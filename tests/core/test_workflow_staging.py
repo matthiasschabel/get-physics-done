@@ -237,7 +237,7 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
     assert execute_phase_manifest.stage("aggregate_and_verify").next_stages == ("closeout",)
     assert execute_phase_manifest.stage("closeout").next_stages == ()
     assert execute_phase_manifest.stage("pre_execution_specialists").loaded_authorities == (
-        "workflows/execute-phase.md",
+        "workflows/execute-phase/pre-execution-specialists.md",
         "references/orchestration/agent-delegation.md",
         "references/orchestration/runtime-delegation-note.md",
     )
@@ -795,7 +795,7 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
         "consistency_and_references",
         "publication_review",
     )
-    assert "workflows/write-paper.md" in bootstrap.loaded_authorities
+    assert "workflows/write-paper/paper-bootstrap.md" in bootstrap.loaded_authorities
     assert "references/publication/publication-review-round-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/publication-response-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/publication-pipeline-modes.md" in bootstrap.must_not_eager_load
@@ -813,7 +813,7 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
     assert "managed_publication_root" in bootstrap.required_init_fields
     assert "managed_manuscript_root" in bootstrap.required_init_fields
     assert outline.loaded_authorities == (
-        "workflows/write-paper.md",
+        "workflows/write-paper/outline-scaffold.md",
         "references/publication/publication-pipeline-modes.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
@@ -829,7 +829,7 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
         "GPD/config.json",
     )
     assert authoring.loaded_authorities == (
-        "workflows/write-paper.md",
+        "workflows/write-paper/authoring.md",
         "references/publication/stage-recovery-gate.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/figure-tracker.md",
@@ -850,12 +850,14 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
         "GPD/CONVENTIONS.md",
     )
     assert publication_review.loaded_authorities == (
-        "workflows/write-paper.md",
+        "workflows/write-paper/publication-review-finalization.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/stage-recovery-gate.md",
+        "templates/paper/author-response.md",
+        "templates/paper/referee-response.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
     )
@@ -1214,7 +1216,7 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
         "final_adjudication",
         "finalize",
     )
-    assert "workflows/peer-review.md" in bootstrap.loaded_authorities
+    assert "workflows/peer-review/bootstrap.md" in bootstrap.loaded_authorities
     assert "references/publication/publication-review-round-artifacts.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-panel.md" in bootstrap.must_not_eager_load
     assert "references/publication/peer-review-reliability.md" in bootstrap.must_not_eager_load
@@ -1232,7 +1234,7 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert "selected_publication_root" in bootstrap.required_init_fields
     assert "selected_review_root" in bootstrap.required_init_fields
     assert preflight.loaded_authorities == (
-        "workflows/peer-review.md",
+        "workflows/peer-review/preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md",
         "references/publication/peer-review-reliability.md",
         "templates/paper/paper-config-schema.md",
@@ -1246,7 +1248,7 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert "resolved_review_target" in preflight.required_init_fields
     assert "resolved_review_root" in preflight.required_init_fields
     assert artifact_discovery.loaded_authorities == (
-        "workflows/peer-review.md",
+        "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
     )
@@ -1254,15 +1256,19 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert "review_target_mode" in artifact_discovery.required_init_fields
     assert "resolved_review_target" in artifact_discovery.required_init_fields
     assert panel_stages.loaded_authorities == (
-        "workflows/peer-review.md",
+        "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
         "references/publication/stage-recovery-gate.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
+        "templates/proof-redteam-schema.md",
     )
     assert "GPD/review/CLAIMS{round_suffix}.json" in panel_stages.writes_allowed
     assert "GPD/publication/{subject_slug}/review/CLAIMS{round_suffix}.json" in panel_stages.writes_allowed
     assert "GPD/publication/{subject_slug}/review/PROOF-REDTEAM{round_suffix}.md" in panel_stages.writes_allowed
     assert final_adjudication.loaded_authorities == (
-        "workflows/peer-review.md",
+        "workflows/peer-review/final-adjudication.md",
+        "references/publication/publication-final-adjudication-boundary.md",
         "references/publication/peer-review-panel.md",
         "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",

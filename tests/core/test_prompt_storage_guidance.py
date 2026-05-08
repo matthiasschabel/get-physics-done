@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
@@ -72,7 +74,7 @@ def test_error_propagation_keeps_a_single_phase_report_contract() -> None:
 
 
 def test_execute_phase_figure_tracker_scans_durable_figure_roots() -> None:
-    workflow_text = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
     assert "artifacts/phases/${phase_number}-${phase_slug}/" in workflow_text
     assert "`figures/`, or `paper/figures/`" in workflow_text
@@ -80,10 +82,11 @@ def test_execute_phase_figure_tracker_scans_durable_figure_roots() -> None:
 
 
 def test_write_paper_uses_durable_figure_and_literature_roots() -> None:
-    workflow_text = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
-    assert "Check durable figure roots, not internal phase scratch paths" in workflow_text
-    assert "`artifacts/phases`, `figures`, `${PAPER_DIR}/figures`" in workflow_text
+    assert "figure readiness from durable roots" in workflow_text
+    assert "`artifacts/phases`, `figures`" in workflow_text
+    assert "`${PAPER_DIR}/figures`" in workflow_text
     assert "GPD/literature/*-REVIEW.md" in workflow_text
     assert "GPD/phases/*/figures/" not in workflow_text
     assert "GPD/phases/*/LITERATURE-REVIEW.md" not in workflow_text

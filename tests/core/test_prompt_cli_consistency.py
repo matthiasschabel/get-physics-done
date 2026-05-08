@@ -49,6 +49,7 @@ from tests.doc_surface_contracts import (
     resume_backend_only_fields,
 )
 from tests.prompt_metrics_support import iter_markdown_fences
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -107,11 +108,13 @@ APPROVED_RUNTIME_LABEL_SHELL_FENCE_LINES = {
     ),
     ("src/gpd/specs/workflows/discuss-phase.md", 'echo "Use gpd:progress to see available phases."'),
     (
-        "src/gpd/specs/workflows/execute-phase.md",
-        'echo "ERROR: missing phase. Usage: gpd:execute-phase <phase-number> [--gaps-only]"',
+        "src/gpd/specs/workflows/execute-phase/phase-bootstrap.md",
+        'echo "ERROR: missing phase. Usage: execute-phase <phase-number> [--gaps-only]"',
     ),
-    ("src/gpd/specs/workflows/execute-phase.md", 'echo "  gpd:validate-conventions"'),
-    ("src/gpd/specs/workflows/execute-phase.md", 'echo "Next Up: gpd:execute-phase {N}"'),
+    (
+        "src/gpd/specs/workflows/execute-phase/wave-planning.md",
+        'Emit a final line `"Next Up: gpd:execute-phase {N}"` so the operator can resume after resolving alignment.',
+    ),
     (
         "src/gpd/specs/workflows/plan-milestone-gaps.md",
         'echo "ERROR: No existing phases found. Create phases with gpd:plan-phase first."',
@@ -1182,7 +1185,7 @@ def test_new_project_prompt_surfaces_discuss_phase_before_planning_in_command_an
 
 
 def test_execute_phase_failure_recovery_counts_only_top_level_verification_statuses() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/execute-phase.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
     assert "FAILED_COUNT=$(rg -c '^status: (gaps_found|expert_needed|human_needed)$'" in workflow
     assert "TOTAL_COUNT=$(rg -c '^status: (passed|gaps_found|expert_needed|human_needed)$'" in workflow
@@ -1191,7 +1194,7 @@ def test_execute_phase_failure_recovery_counts_only_top_level_verification_statu
 
 
 def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/execute-phase.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
     offer_next = _extract_between(workflow, '<step name="offer_next">', "</step>")
 
     assert "## > Next Up" in offer_next

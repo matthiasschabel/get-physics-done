@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
@@ -139,7 +141,11 @@ def test_owned_completion_examples_use_canonical_next_up_heading() -> None:
 
     stale_heading_pattern = re.compile(r"(?m)^## (?:Next Up|>> Next Up|▶ Next Up)$")
     for path in paths:
-        text = path.read_text(encoding="utf-8")
+        text = (
+            workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
+            if path == WORKFLOWS_DIR / "execute-phase.md"
+            else path.read_text(encoding="utf-8")
+        )
         assert "## > Next Up" in text, path
         assert not stale_heading_pattern.search(text), path
 

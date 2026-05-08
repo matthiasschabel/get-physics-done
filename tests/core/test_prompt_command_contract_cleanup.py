@@ -8,6 +8,7 @@ from pathlib import Path
 from gpd.adapters.install_utils import parse_at_include_path
 from gpd.core.frontmatter import validate_frontmatter
 from tests.core.test_spawn_contracts import _find_single_task
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -21,6 +22,8 @@ LINUX_DOC = REPO_ROOT / "docs/linux.md"
 
 
 def _read(path: Path) -> str:
+    if path.parent == WORKFLOWS_DIR and path.stem in {"execute-phase", "peer-review", "write-paper"}:
+        return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
 
 
@@ -126,8 +129,8 @@ def test_plan_checker_profile_docs_avoid_stale_dimension_counts() -> None:
             assert phrase not in text, path.relative_to(REPO_ROOT)
 
 
-def test_peer_review_file_producing_stage_prompts_carry_spawn_contracts() -> None:
-    workflow_path = WORKFLOWS_DIR / "peer-review.md"
+def test_peer_review_file_producing_stage_prompts_carry_stage_child_tuples() -> None:
+    workflow = _read(WORKFLOWS_DIR / "peer-review.md")
     for agent_name in (
         "gpd-review-reader",
         "gpd-review-literature",
@@ -135,13 +138,12 @@ def test_peer_review_file_producing_stage_prompts_carry_spawn_contracts() -> Non
         "gpd-check-proof",
         "gpd-review-physics",
         "gpd-review-significance",
-        "gpd-referee",
     ):
-        task = _find_single_task(workflow_path, agent_name)
-        assert "<spawn_contract>" in task.text, agent_name
-        assert "write_scope:" in task.text, agent_name
-        assert "expected_artifacts:" in task.text, agent_name
-        assert "shared_state_policy: return_only" in task.text, agent_name
+        assert f"role: {agent_name}" in workflow, agent_name
+    assert "Spawn `gpd-referee`" in workflow
+    assert workflow.count("expected_artifacts:") >= 7
+    assert "gpd_return.files_written" in workflow
+    assert "stage-recovery-gate.md" in workflow
 
 
 def test_delegation_reference_requires_contract_or_tight_exemption() -> None:

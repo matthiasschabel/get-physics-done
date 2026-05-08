@@ -12,6 +12,7 @@ from gpd.core.context import init_execute_phase, init_new_project, init_plan_pha
 from gpd.core.staged_field_access import build_staged_field_access
 from gpd.core.state import default_state_dict
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.workflow_authority_support import workflow_authority_text
 
 runner = CliRunner()
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -147,7 +148,7 @@ def test_target_workflow_prompts_use_field_access_helper_for_staged_reloads() ->
     )
 
     for workflow_id, stage_ids in expected_stage_mentions.items():
-        source = (WORKFLOWS_DIR / f"{workflow_id}.md").read_text(encoding="utf-8")
+        source = workflow_authority_text(WORKFLOWS_DIR, workflow_id)
 
         assert f"gpd --raw stage field-access {workflow_id}" in source
         for stage_id in stage_ids:

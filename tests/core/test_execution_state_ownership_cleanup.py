@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXECUTE_PHASE = REPO_ROOT / "src/gpd/specs/workflows/execute-phase.md"
 AGENT_INFRASTRUCTURE = REPO_ROOT / "src/gpd/specs/references/orchestration/agent-infrastructure.md"
 
 
 def _read(path: Path) -> str:
+    if path == EXECUTE_PHASE:
+        return workflow_authority_text(REPO_ROOT / "src/gpd/specs/workflows", "execute-phase")
     return path.read_text(encoding="utf-8")
 
 

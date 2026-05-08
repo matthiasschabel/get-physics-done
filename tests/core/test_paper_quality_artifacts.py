@@ -2185,9 +2185,18 @@ contract_results:
 
 
 def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() -> None:
+    from tests.workflow_authority_support import workflow_authority_text
+
     repo_root = Path(__file__).resolve().parents[2]
-    write_paper = (repo_root / "src/gpd/specs/workflows/write-paper.md").read_text(encoding="utf-8")
-    peer_review = (repo_root / "src/gpd/specs/workflows/peer-review.md").read_text(encoding="utf-8")
+    write_paper_stage_dir = repo_root / "src/gpd/specs/workflows/write-paper"
+    write_paper = "\n\n".join(
+        (write_paper_stage_dir / name).read_text(encoding="utf-8")
+        for name in (
+            "paper-bootstrap.md",
+            "publication-review-finalization.md",
+        )
+    )
+    peer_review = workflow_authority_text(repo_root / "src/gpd/specs/workflows", "peer-review")
     respond = (repo_root / "src/gpd/specs/workflows/respond-to-referees.md").read_text(encoding="utf-8")
     internal_template = (repo_root / "src/gpd/specs/templates/paper/internal-comparison.md").read_text(encoding="utf-8")
     experimental_template = (repo_root / "src/gpd/specs/templates/paper/experimental-comparison.md").read_text(
@@ -2204,8 +2213,9 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
     assert "protocol_bundle_context" in peer_review
     assert "${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md" in peer_review
     assert "GPD/comparisons/*-COMPARISON.md" in peer_review
-    assert "Treat bundle guidance as additive skepticism only" in peer_review
-    assert "review-support artifacts are scaffolding, not substitutes for authoritative evidence" in peer_review
+    assert "Bundle guidance" in peer_review
+    assert "additive only" in peer_review
+    assert "review-support artifacts are scaffolding" in peer_review
 
     assert "protocol_bundle_context" in respond
     assert "missing decisive evidence we already owed" in respond

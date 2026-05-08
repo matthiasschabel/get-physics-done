@@ -253,6 +253,33 @@ def _first_stage_id(command_name: str) -> str:
     return stage_id
 
 
+def _first_stage_authority_suffix(command_name: str) -> str:
+    manifest_path = REPO_GPD_ROOT / "specs" / "workflows" / f"{command_name}-stage-manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    stages = payload.get("stages")
+    assert isinstance(stages, list) and stages, f"{manifest_path.name} has no stages"
+    first_stage = stages[0]
+    assert isinstance(first_stage, dict)
+    mode_paths = first_stage.get("mode_paths")
+    assert isinstance(mode_paths, list) and mode_paths
+    authority = mode_paths[0]
+    assert isinstance(authority, str) and authority.startswith("workflows/")
+    return authority
+
+
+def _has_native_staged_command_include(text: str, command_name: str) -> bool:
+    return _raw_include_count(text, _first_stage_authority_suffix(command_name)) == 1
+
+
+def _assert_native_staged_command_include(text: str, *, command_name: str) -> None:
+    assert _has_native_staged_command_include(text, command_name)
+    root_suffix = f"workflows/{command_name}.md"
+    if _first_stage_authority_suffix(command_name) != root_suffix:
+        assert _raw_include_count(text, root_suffix) == 0
+    assert "staged_loading.eager_authorities" in text
+    assert "staged_loading.must_not_eager_load" in text
+
+
 def _stage_manifest_has_protocol_bundle_fields(command_name: str) -> bool:
     manifest_path = REPO_GPD_ROOT / "specs" / "workflows" / f"{command_name}-stage-manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -601,9 +628,11 @@ def _assert_installed_contract_visibility(
             command_name="execute-phase",
             first_stage="phase_bootstrap",
         )
+    elif _has_native_staged_command_include(execute_phase, "execute-phase"):
+        _assert_native_staged_command_include(execute_phase, command_name="execute-phase")
     else:
-        assert "Execute phase plans through the workflow-owned wave executor" in execute_phase
-        assert "references/orchestration/context-budget.md" in execute_phase
+        assert "Read the included bootstrap authority first" in execute_phase
+        assert "staged_loading.eager_authorities" in execute_phase
         assert "<inline_guidance>" not in execute_phase
 
     assert "templates/contract-results-schema.md" in verifier
@@ -652,14 +681,12 @@ def _assert_installed_contract_visibility(
             command_name="write-paper",
             first_stage="paper_bootstrap",
         )
+    elif _has_native_staged_command_include(write_paper, "write-paper"):
+        _assert_native_staged_command_include(write_paper, command_name="write-paper")
     else:
+        assert "Follow the included first-stage authority exactly" in write_paper
+        assert "staged_loading.eager_authorities" in write_paper
         assert "review_mode: publication" in write_paper
-        assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in write_paper
-        assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in write_paper
-        assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in write_paper
-        assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in write_paper
-        assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in write_paper
-        assert "references/publication/publication-review-round-artifacts.md" in write_paper
 
     if _has_compact_staged_command_shim(plan_phase):
         _assert_compact_staged_command_shim(
@@ -682,7 +709,11 @@ def _assert_installed_contract_visibility(
     assert "`carry_forward_to[]` is optional free-text workflow scope" in plan_schema
     assert "`uncertainty_markers` must be a YAML object, not a string or list." in plan_schema
 
-    if not _has_compact_staged_command_shim(execute_phase):
+    if not (
+        _has_compact_staged_command_shim(execute_phase)
+        or _has_native_staged_command_include(execute_phase, "execute-phase")
+        or "staged_loading.eager_authorities" in execute_phase
+    ):
         assert "workflow.verifier=false" in execute_phase
         assert "skip verification" in execute_phase
         assert "proof red-teaming" in execute_phase
@@ -849,7 +880,8 @@ def test_installed_execute_phase_surface_uses_native_include_or_compact_stage_sh
     _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name="execute-phase")
 
     if descriptor.native_include_support:
-        assert _raw_include_count(prompt, "workflows/execute-phase.md") == 1
+        assert _raw_include_count(prompt, _first_stage_authority_suffix("execute-phase")) == 1
+        assert _raw_include_count(prompt, "workflows/execute-phase.md") == 0
         assert "<!-- [included: execute-phase.md] -->" not in prompt
         assert not _has_staged_shim_sentinel(prompt)
         return
@@ -881,7 +913,11 @@ def test_installed_staged_command_surfaces_protocol_bundle_jit_without_catalog_i
         assert marker not in prompt
 
     if descriptor.native_include_support:
-        assert _raw_include_count(prompt, f"workflows/{command_name}.md") == 1
+        first_stage_suffix = _first_stage_authority_suffix(command_name)
+        assert _raw_include_count(prompt, first_stage_suffix) == 1
+        root_suffix = f"workflows/{command_name}.md"
+        if first_stage_suffix != root_suffix:
+            assert _raw_include_count(prompt, root_suffix) == 0
         assert "<protocol_bundle_jit>" not in prompt
         return
 

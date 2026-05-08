@@ -17,21 +17,21 @@ allowed-tools:
 ---
 
 <objective>
-Execute phase plans through the workflow-owned wave executor.
-
-The workflow owns plan discovery, wave grouping, subagent dispatch, checkpoint routing, verification gates, state updates, and resumption.
+Run staged phase waves: select plans, dispatch work, verify, update state, resume.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/execute-phase.md
+@{GPD_INSTALL_DIR}/workflows/execute-phase/phase-bootstrap.md
 </execution_context>
 
 <arguments>
 Phase: $ARGUMENTS
 
-- `--gaps-only` executes only gap-closure plans (`gap_closure: true`).
+- `--gaps-only`: only gap-closure plans.
 </arguments>
 
 <process>
-Read the included workflow first and follow it end-to-end.
+Read the included bootstrap authority first. Later rerun init and read only
+`staged_loading.eager_authorities`; never read
+`staged_loading.must_not_eager_load`.
 </process>

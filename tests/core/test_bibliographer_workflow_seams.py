@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
+
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
 
 def _workflow(name: str) -> str:
+    if name == "write-paper.md":
+        return workflow_authority_text(WORKFLOWS_DIR, "write-paper")
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 
@@ -15,14 +20,13 @@ def test_write_paper_bibliographer_step_routes_on_typed_return_contract() -> Non
 
     assert "Return BIBLIOGRAPHY UPDATED or CITATION ISSUES FOUND." not in workflow
     assert "Return a typed `gpd_return` envelope for the `write_paper_bibliographer` child_gate." in workflow
-    assert (
-        "Do not mark bibliography verification complete or proceed to strict review, "
-        "reproducibility-manifest generation, or final review until"
-    ) in workflow
+    assert "Do not mark bibliography verification complete" in workflow
+    assert "strict review" in workflow
+    assert "reproducibility-manifest generation" in workflow
     assert "Bibliography: `{ACTIVE_BIBLIOGRAPHY_PATH}`" in workflow
     assert "Always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`" in workflow
-    assert "**If the bibliographer completed with issues recorded in the audit report or `GPD/references-status.json`:**" in workflow
-    assert "**If the bibliographer completed cleanly with no remaining citation issues:**" in workflow
+    assert re.search(r"If the bibliographer completed with issues recorded[\s\S]{0,80}`GPD/references-status.json`", workflow)
+    assert re.search(r"If the\s+bibliographer completed cleanly with no remaining citation issues", workflow)
 
 
 def test_literature_review_bibliographer_step_routes_on_typed_return_contract() -> None:

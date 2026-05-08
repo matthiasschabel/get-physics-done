@@ -43,17 +43,15 @@ def test_peer_review_and_referee_skill_surfaces_keep_lifecycle_cleanup_boundary(
 
     peer_review = get_skill("gpd-peer-review")
     referee = get_skill("gpd-referee")
-    peer_review_content = peer_review["content"]
+    peer_review_references = {Path(entry["path"]).name for entry in peer_review["referenced_files"]}
     referee_content = referee["content"]
 
     assert "error" not in peer_review
     assert "error" not in referee
-    assert "stage-recovery-gate.md" in peer_review_content
-    assert "spawned reviewer/proof-auditor/referee lifecycle" in peer_review_content
-    assert "stale-output rejection" in peer_review_content
-    assert "Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` after every child return" in peer_review_content
-    assert "peer_review_stage6_referee" in peer_review_content
-    assert "gpd_return.files_written stays within Stage 6 write_allowlist" in peer_review_content
+    assert "stage-recovery-gate.md" in peer_review_references
+    assert "panel-stages.md" in peer_review_references
+    assert "final-adjudication.md" in peer_review_references
+    assert peer_review["staged_loading"]["workflow_id"] == "peer-review"
     assert "Checkpoint ownership is orchestrator-side" in referee_content
     assert "owns the fresh continuation handoff" in referee_content
     assert "Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run." in referee_content

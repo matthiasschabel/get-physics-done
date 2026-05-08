@@ -1761,8 +1761,14 @@ class TestSkillsServer:
         assert result["contract_references"] == []
         assert result["contract_documents"] == []
         assert result["reference_count"] == len(direct_paths)
-        assert result["transitive_reference_count"] == 0
-        assert result["transitive_referenced_files"] == []
+        assert result["transitive_reference_count"] == 1
+        assert result["transitive_referenced_files"] == [
+            {
+                "path": "@{GPD_INSTALL_DIR}/references/orchestration/child-artifact-gate.md",
+                "kind": "reference",
+                "depth": 1,
+            }
+        ]
         assert "@GPD/CONVENTIONS.md" in direct_paths
         assert "@GPD/phases/{scope}/CONSISTENCY-CHECK.md" in direct_paths
         assert "@GPD/CONSISTENCY-CHECK.md" in direct_paths

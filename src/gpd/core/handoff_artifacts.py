@@ -42,6 +42,7 @@ class HandoffArtifactValidationResult(BaseModel):
 
     passed: bool
     mutated: bool = False
+    mutates: bool = False
     primary_failure_class: HandoffFailureClass | None = None
     failure_classes: list[HandoffFailureClass] = Field(default_factory=list)
     failures: list[HandoffFailure] = Field(default_factory=list)

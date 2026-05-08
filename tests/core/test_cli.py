@@ -10572,6 +10572,17 @@ def _return_skeleton_error_payload(result) -> dict[str, object]:
     return json.loads(text)
 
 
+def _valid_checkpoint_return_markdown() -> str:
+    return (
+        "# Summary\n\n```yaml\ngpd_return:\n"
+        "  status: checkpoint\n"
+        "  files_written: []\n"
+        "  issues: []\n"
+        "  next_actions: [gpd resume-work]\n"
+        "```\n"
+    )
+
+
 def test_return_skeleton_default_prints_markdown_not_rich_table() -> None:
     result = runner.invoke(app, ["return", "skeleton", "--role", "executor", "--status", "completed"])
 
@@ -10621,6 +10632,43 @@ def test_return_skeleton_raw_outputs_payload() -> None:
     assert payload["envelope"]["files_written"] == []
 
 
+def test_return_skeleton_checkpoint_intent_flags_render_child_owned_intent() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "return",
+            "skeleton",
+            "--role",
+            "executor",
+            "--status",
+            "checkpoint",
+            "--include-checkpoint-intent",
+            "--checkpoint-reason",
+            "pre_fanout",
+            "--checkpoint-waiting-reason",
+            "Review the first result before dependent fanout.",
+            "--phase",
+            "01",
+            "--plan",
+            "02",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["status"] == "checkpoint"
+    assert payload["applicator_ready"] is False
+    assert payload["envelope"]["checkpoint_intent"] == {
+        "checkpoint_reason": "pre_fanout",
+        "waiting_reason": "Review the first result before dependent fanout.",
+        "phase": "01",
+        "plan": "02",
+    }
+    assert "continuation_update" not in payload["envelope"]
+    assert "resume_file" not in json.dumps(payload["envelope"], sort_keys=True)
+
+
 def test_return_profiles_raw_lists_role_metadata() -> None:
     result = runner.invoke(app, ["--raw", "return", "profiles"])
 
@@ -10653,6 +10701,46 @@ def test_return_classify_raw_stdin_reports_missing_return_without_mutation() -> 
     assert payload["mutated"] is False
     assert any(token in json.dumps(payload) for token in ("return_missing", "missing_block", "missing_gpd_return"))
     assert "No gpd_return YAML block found" in payload["errors"]
+
+
+def test_return_classify_default_accepts_checkpoint_status_without_required_gate() -> None:
+    result = runner.invoke(app, ["--raw", "return", "classify", "-"], input=_valid_checkpoint_return_markdown())
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["passed"] is True
+    assert payload["accepted_for_success"] is True
+    assert payload["status"] == "checkpoint"
+    assert payload["required_status"] is None
+    assert payload["mutated"] is False
+
+
+def test_return_classify_require_status_checkpoint_accepts_checkpoint_status() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "classify", "--require-status", "checkpoint", "-"],
+        input=_valid_checkpoint_return_markdown(),
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["accepted_for_success"] is True
+    assert payload["status"] == "checkpoint"
+    assert payload["required_status"] == "checkpoint"
+
+
+def test_return_classify_require_status_any_maps_to_no_required_status() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "return", "classify", "--require-status", "any", "-"],
+        input=_valid_checkpoint_return_markdown(),
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["accepted_for_success"] is True
+    assert payload["status"] == "checkpoint"
+    assert payload["required_status"] is None
 
 
 def test_return_skeleton_rejects_unknown_role_before_rendering() -> None:

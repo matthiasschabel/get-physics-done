@@ -36,12 +36,33 @@ def test_agent_delegation_reference_makes_one_shot_checkpoint_and_artifact_gate_
     )
     assert "adjacent documented exemption" in text
 
-    assert "Use this gate after every spawned child return" in gate
+    assert "Canonical child-return acceptance gate" in gate
+    assert "local `child_gate` tuple" in gate
+    for field in (
+        "`id`",
+        "`role`",
+        "`return_profile`",
+        "`required_status`",
+        "`expected_artifacts`",
+        "`allowed_roots`",
+        "`freshness`",
+        "`validators`",
+        "`applicator`",
+        "`failure_route`",
+        "`status_route`",
+        "`write_allowlist`",
+    ):
+        assert field in gate
     assert "Route on a valid fenced `gpd_return.status`" in gate
+    assert "`completed`, `checkpoint`, `blocked`, `failed`" in gate
     assert "`gpd_return.files_written`" in gate
+    assert "gpd validate child-handoff --gate ... --return-file ..." in gate
     assert "gpd validate handoff-artifacts ... --require-status completed" in gate
     assert "callsite applicator" in gate
-    assert "Files, commits, runtime success, and preexisting artifacts are recovery" in gate
+    assert "Gate result concepts" in gate
+    assert "`primary_failure_class`" in gate
+    assert "`selected_route`" in gate
+    assert "Recovery evidence limit" in gate
     assert "synthesize, patch, or paste a child `gpd_return`" in gate
     assert "`return_missing`" in gate
     assert "`artifact_path_repairable`" in gate

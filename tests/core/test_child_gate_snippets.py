@@ -159,10 +159,16 @@ def test_static_snippets_render_short_authority_pointers_and_failure_classes() -
 
     assert "gpd return skeleton --role <role> --status <status>" in snippets["return_profile"]
     assert "references/orchestration/child-artifact-gate.md" in snippets["child_artifact_gate"]
+    assert "local `child_gate` tuple" in snippets["child_artifact_gate"]
+    assert "`primary_failure_class`" in snippets["child_artifact_gate"]
+    assert "`selected_route`" in snippets["child_artifact_gate"]
     assert "references/orchestration/continuation-boundary.md" in snippets["continuation_boundary"]
+    assert "child-owned `checkpoint_intent`" in snippets["continuation_boundary"]
+    assert "Parent/applicator owns durable resume context" in snippets["continuation_boundary"]
     assert "references/verification/verification-status-authority.md" in snippets["verification_status_authority"]
     assert "verification report frontmatter `status`" in snippets["verification_status_authority"]
     assert "Prose is not authority" in snippets["prose_is_not_authority"]
+    assert "child artifact gate result" in snippets["prose_is_not_authority"]
 
     for failure_class in HandoffFailureClass:
         assert f"`{failure_class.value}`" in snippets["child_artifact_gate"]

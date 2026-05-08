@@ -38,6 +38,7 @@ from gpd.core.return_contract import (
     GpdReturnContinuationUpdate,
     GpdReturnEnvelope,
 )
+from gpd.core.return_gate import ReturnGateFailureClass
 from gpd.core.state import (
     StateUpdateResult,
     load_state_json_readonly,
@@ -59,6 +60,7 @@ __all__ = [
     "SUPPORTED_CONTINUATION_UPDATE_FIELDS",
     "SUPPORTED_STATE_UPDATE_FIELDS",
     "RETURN_MALFORMED_BLOCKING_FAILURE_CLASS",
+    "RETURN_MALFORMED_REPAIRABLE_FAILURE_CLASS",
     "RETURN_MISSING_FAILURE_CLASS",
     "apply_child_return_updates",
 ]
@@ -71,9 +73,10 @@ _CHILD_RETURN_BOUNDED_SEGMENT_RECORDED_BY = "apply_child_return_updates"
 _CHECKPOINT_BOUNDED_SEGMENT_RESUME_FILE_REQUIRED_ERROR = (
     "set_bounded_segment: checkpoint returns must include continuation_update.bounded_segment.resume_file"
 )
-APPLICATOR_FAILED_FAILURE_CLASS = "applicator_failed"
-RETURN_MISSING_FAILURE_CLASS = "return_missing"
-RETURN_MALFORMED_BLOCKING_FAILURE_CLASS = "return_malformed_blocking"
+APPLICATOR_FAILED_FAILURE_CLASS = ReturnGateFailureClass.APPLICATOR_FAILED.value
+RETURN_MISSING_FAILURE_CLASS = ReturnGateFailureClass.RETURN_MISSING.value
+RETURN_MALFORMED_REPAIRABLE_FAILURE_CLASS = ReturnGateFailureClass.RETURN_MALFORMED_REPAIRABLE.value
+RETURN_MALFORMED_BLOCKING_FAILURE_CLASS = ReturnGateFailureClass.RETURN_MALFORMED_BLOCKING.value
 
 
 @dataclass(frozen=True)
@@ -124,6 +127,7 @@ class ApplyChildReturnFailure(BaseModel):
     path: str | None = None
     command: str | None = None
     repairable: bool = False
+    repair_hint: str | None = None
 
 
 class ApplyChildReturnResult(BaseModel):

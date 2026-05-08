@@ -168,7 +168,9 @@ def test_checkpoint_intent_with_parent_resume_file_applies_bounded_segment(tmp_p
 def test_checkpoint_intent_rejects_missing_parent_resume_file_before_mutation(tmp_path: Path) -> None:
     gpd_dir = _write_project_state(tmp_path)
     state_path = gpd_dir / "state.json"
+    state_md_path = gpd_dir / "STATE.md"
     original_state_json = state_path.read_bytes()
+    original_state_md = state_md_path.read_text(encoding="utf-8")
 
     from gpd.core import child_return_application as applicator
     from gpd.core.return_contract import GpdReturnEnvelope
@@ -194,8 +196,12 @@ def test_checkpoint_intent_rejects_missing_parent_resume_file_before_mutation(tm
     assert result.primary_failure_class == "applicator_failed"
     assert result.failure_classes == ["applicator_failed"]
     assert result.failures[0].failure_class == "applicator_failed"
+    assert result.applied_state_operations == []
+    assert result.applied_continuation_operations == []
+    assert result.applied_decisions == 0
     assert any("checkpoint_resume_file is required" in error for error in result.errors)
     assert state_path.read_bytes() == original_state_json
+    assert state_md_path.read_text(encoding="utf-8") == original_state_md
 
 
 def test_checkpoint_intent_rejects_nonresumable_segment_status_before_mutation(tmp_path: Path) -> None:
@@ -203,6 +209,10 @@ def test_checkpoint_intent_rejects_nonresumable_segment_status_before_mutation(t
     resume_path = gpd_dir / "phases" / "01-test-phase" / ".continue-here.md"
     resume_path.parent.mkdir(parents=True, exist_ok=True)
     resume_path.write_text("resume\n", encoding="utf-8")
+    state_path = gpd_dir / "state.json"
+    state_md_path = gpd_dir / "STATE.md"
+    original_state_json = state_path.read_bytes()
+    original_state_md = state_md_path.read_text(encoding="utf-8")
 
     from gpd.core import child_return_application as applicator
     from gpd.core.return_contract import GpdReturnEnvelope
@@ -227,11 +237,15 @@ def test_checkpoint_intent_rejects_nonresumable_segment_status_before_mutation(t
         envelope,
         checkpoint_resume_file="GPD/phases/01-test-phase/.continue-here.md",
     )
-    stored_state = json.loads((gpd_dir / "state.json").read_text(encoding="utf-8"))
 
     assert result.passed is False
+    assert result.mutated is False
+    assert result.applied_state_operations == []
+    assert result.applied_continuation_operations == []
+    assert result.applied_decisions == 0
     assert any("checkpoint bounded_segment.segment_status must be one of" in error for error in result.errors)
-    assert stored_state["continuation"]["bounded_segment"] is None
+    assert state_path.read_bytes() == original_state_json
+    assert state_md_path.read_text(encoding="utf-8") == original_state_md
 
 
 def test_explicit_bounded_segment_takes_precedence_over_checkpoint_intent(tmp_path: Path) -> None:

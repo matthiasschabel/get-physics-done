@@ -2566,8 +2566,39 @@ class TestValidateReturn:
         parsed = json.loads(result.output)
         assert parsed["passed"] is True
         assert parsed["status"] == "completed"
+        assert parsed["required_status"] is None
+        assert parsed["accepted_for_success"] is True
         assert parsed["mutated"] is False
         assert state_path.read_text(encoding="utf-8") == before
+
+    def test_return_classify_require_status_checkpoint_and_any(self, gpd_project: Path) -> None:
+        """The CLI should forward explicit status gates while preserving any-status triage."""
+        return_file = gpd_project / "checkpoint_classify_return.md"
+        return_file.write_text(
+            "# Summary\n\n```yaml\ngpd_return:\n"
+            "  status: checkpoint\n"
+            '  files_written: ["GPD/phases/01-test-phase/01-SUMMARY.md"]\n'
+            "  issues: []\n"
+            '  next_actions: ["gpd resume-work"]\n'
+            "```\n",
+            encoding="utf-8",
+        )
+
+        checkpoint_result = _invoke("--raw", "return", "classify", str(return_file), "--require-status", "checkpoint")
+        checkpoint_payload = json.loads(checkpoint_result.output)
+        assert checkpoint_payload["passed"] is True
+        assert checkpoint_payload["accepted_for_success"] is True
+        assert checkpoint_payload["status"] == "checkpoint"
+        assert checkpoint_payload["required_status"] == "checkpoint"
+        assert checkpoint_payload["mutated"] is False
+
+        any_result = _invoke("--raw", "return", "classify", str(return_file), "--require-status", "any")
+        any_payload = json.loads(any_result.output)
+        assert any_payload["passed"] is True
+        assert any_payload["accepted_for_success"] is True
+        assert any_payload["status"] == "checkpoint"
+        assert any_payload["required_status"] is None
+        assert any_payload["mutated"] is False
 
     def test_validate_return_missing_fields(self, gpd_project: Path) -> None:
         """A file with missing required fields should fail."""

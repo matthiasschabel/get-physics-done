@@ -443,19 +443,19 @@ def _render_return_profile_snippet(*, role: str | None, status: str | None) -> s
 def _render_child_artifact_gate_snippet() -> str:
     failure_classes = ", ".join(f"`{failure_class.value}`" for failure_class in HandoffFailureClass)
     return (
-        "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`; accept success only after "
-        "a valid fenced `gpd_return.status`, expected `files_written` artifacts, path/freshness checks, validators, "
-        "and any applicator pass. Failure classes: "
+        "Child artifact gate: run the local `child_gate` tuple using "
+        "`references/orchestration/child-artifact-gate.md`; route on the gate result (`passed`, "
+        "`primary_failure_class`, `selected_route`, `mutated`) before success, retry, fallback, or mutation. "
+        "Failure classes: "
         f"{failure_classes}."
     )
 
 
 def _render_continuation_boundary_snippet() -> str:
     return (
-        "Continuation boundary: apply `references/orchestration/continuation-boundary.md`; a spawned child is one-shot; "
-        "`status: checkpoint` stops the child. "
-        "The parent presents the checkpoint and starts a fresh continuation; `checkpoint_intent` is child intent, "
-        "while durable resume context is applicator-owned."
+        "Continuation boundary: apply `references/orchestration/continuation-boundary.md`; `status: checkpoint` "
+        "stops the one-shot child with child-owned `checkpoint_intent`. Parent/applicator owns durable resume context "
+        "and starts any fresh continuation."
     )
 
 
@@ -469,8 +469,8 @@ def _render_verification_status_authority_snippet() -> str:
 
 def _render_prose_is_not_authority_snippet() -> str:
     return (
-        "Prose is not authority: headings, success text, files, commits, and preexisting artifacts are presentation "
-        "or recovery evidence only; typed return, artifact gate, validators, and applicator decide acceptance."
+        "Prose is not authority: headings, success text, files, commits, and preexisting artifacts are evidence "
+        "only; route on typed status and the child artifact gate result."
     )
 
 

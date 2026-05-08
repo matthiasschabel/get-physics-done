@@ -64,6 +64,7 @@ def test_handoff_artifact_validator_rejects_multiple_return_blocks_before_artifa
 
     assert result.passed is False
     assert result.mutated is False
+    assert result.mutates is False
     assert result.status is None
     assert result.files_written == []
     assert result.checked_files == []
@@ -85,6 +86,7 @@ def test_handoff_artifact_validator_rejects_raw_files_only_json_envelope(tmp_pat
 
     assert result.passed is False
     assert result.mutated is False
+    assert result.mutates is False
     assert result.primary_failure_class == HandoffFailureClass.RETURN_MISSING
     assert result.failure_classes == [HandoffFailureClass.RETURN_MISSING]
     assert result.failures[0].code == "missing_gpd_return_block"
@@ -140,6 +142,7 @@ def test_handoff_artifact_validator_accepts_fresh_in_scope_expected_plan(tmp_pat
 
     assert result.passed is True
     assert result.mutated is False
+    assert result.mutates is False
     assert result.primary_failure_class is None
     assert result.failure_classes == []
     assert result.failures == []
@@ -163,6 +166,7 @@ def test_handoff_artifact_validator_require_completed_rejects_non_completed_stat
         )
 
         assert result.passed is False
+        assert result.mutates is False
         assert result.status == status
         assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_BLOCKING
         assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_BLOCKING]
@@ -352,6 +356,7 @@ def test_validate_handoff_artifacts_cli_accepts_stdin_return(tmp_path: Path) -> 
     payload = json.loads(result.output)
     assert payload["passed"] is True
     assert payload["mutated"] is False
+    assert payload["mutates"] is False
     assert payload["primary_failure_class"] is None
     assert payload["failure_classes"] == []
     assert payload["failures"] == []
@@ -388,6 +393,7 @@ def test_validate_handoff_artifacts_cli_require_status_completed_rejects_checkpo
     assert result.exit_code == 1
     assert payload["passed"] is False
     assert payload["mutated"] is False
+    assert payload["mutates"] is False
     assert payload["primary_failure_class"] == "return_malformed_blocking"
     assert payload["failure_classes"] == ["return_malformed_blocking"]
     assert payload["failures"][0]["code"] == "required_status_mismatch"

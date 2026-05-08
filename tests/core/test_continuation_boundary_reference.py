@@ -23,15 +23,27 @@ OWNED_SURFACES = [
 def test_continuation_boundary_reference_defines_the_one_shot_contract() -> None:
     content = REFERENCE.read_text(encoding="utf-8")
 
-    assert "A spawned `task()` run is one-shot." in content
-    assert "returns a typed `gpd_return.status: checkpoint` envelope and stops" in content
-    assert "must not wait for the user" in content
-    assert "start a fresh continuation handoff" in content
-    assert "use `files_written: []` when the checkpoint intentionally defers writes" in content
-    assert "Include durable bounded-segment resume details only when the child prompt explicitly owns" in content
-    assert "return child-owned `checkpoint_intent`" in content
-    assert "`checkpoint_intent` is not durable authority until the parent/applicator supplies parent-owned resume context" in content
-    assert "verify them on disk" in content
+    required_terms = (
+        "one-shot",
+        "`gpd_return.status: checkpoint`",
+        "must not wait for the user",
+        "fresh continuation handoff",
+        "`files_written` only after they exist",
+        "`files_written: []`",
+        "`checkpoint_intent` is child-owned",
+        "not durable authority",
+        "parent/applicator supplies parent-owned resume context",
+        "result/session identifiers",
+        "timestamps",
+        "resolved bounded-segment state",
+        "references/orchestration/child-artifact-gate.md",
+        "fresh typed `gpd_return` envelope",
+    )
+
+    for term in required_terms:
+        assert term in content
+
+    assert "Agent prompts should not duplicate these generic lifecycle rules." in content
 
 
 def test_owned_continuation_surfaces_reference_the_boundary_without_eager_include() -> None:

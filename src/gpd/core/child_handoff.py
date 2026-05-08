@@ -18,6 +18,7 @@ from gpd.core.handoff_artifacts import (
     HandoffFailureClass,
     validate_handoff_artifacts_markdown,
 )
+from gpd.core.return_contract import validate_gpd_return_markdown
 
 SafeChildHandoffValidatorId = Literal[
     "readable",
@@ -78,6 +79,10 @@ class ChildHandoffValidationResult(BaseModel):
     passed: bool
     mutated: bool = False
     mutates: bool = False
+    read_only_passed: bool = False
+    requires_applicator_pass: bool = False
+    acceptance_complete: bool = False
+    applicator_required_unrun: bool = False
     gate_id: str
     return_profile: str
     required_status: str
@@ -94,6 +99,8 @@ class ChildHandoffValidationResult(BaseModel):
     validator_results: list[ChildHandoffValidatorResult] = Field(default_factory=list)
     status_route: dict[str, str] = Field(default_factory=dict)
     failure_route: dict[str, str] = Field(default_factory=dict)
+    status_route_used: bool = False
+    status_route_reason: str | None = None
     selected_route: str
     next_action_class: str
     applicator_command: str = "none"
@@ -147,6 +154,10 @@ def validate_child_handoff(
         gate=gate_tuple,
         fresh_after=fresh_after,
     )
+
+    status_route_result = _valid_non_required_status_route_result(request)
+    if status_route_result is not None:
+        return status_route_result
 
     artifact_result = validate_handoff_artifacts_markdown(
         request.project_root,
@@ -211,6 +222,10 @@ def validate_child_handoff(
     failures = [*artifact_result.failures, *validator_failures]
     failure_classes = _failure_classes(failures)
     passed = artifact_result.passed and not validator_failures
+    read_only_passed = passed
+    requires_applicator_pass = _requires_applicator_pass(gate_tuple)
+    applicator_required_unrun = read_only_passed and requires_applicator_pass
+    acceptance_complete = read_only_passed and not applicator_required_unrun
     warnings = [*artifact_result.warnings, *validator_warnings]
     if gate_tuple.applicator.command != "none":
         warnings.append(
@@ -220,6 +235,10 @@ def validate_child_handoff(
     selected_route = _selected_route(gate_tuple, passed=passed, status=artifact_result.status, failures=failures)
     return ChildHandoffValidationResult(
         passed=passed,
+        read_only_passed=read_only_passed,
+        requires_applicator_pass=requires_applicator_pass,
+        acceptance_complete=acceptance_complete,
+        applicator_required_unrun=applicator_required_unrun,
         gate_id=gate_tuple.id,
         return_profile=gate_tuple.return_profile,
         required_status=gate_tuple.required_status,
@@ -236,6 +255,7 @@ def validate_child_handoff(
         validator_results=validator_results,
         status_route=dict(gate_tuple.status_route),
         failure_route={failure_class.value: route for failure_class, route in gate_tuple.failure_route.items()},
+        status_route_used=passed and artifact_result.status in gate_tuple.status_route,
         selected_route=selected_route,
         next_action_class=selected_route,
         applicator_command=gate_tuple.applicator.command,
@@ -252,6 +272,73 @@ def _coerce_gate(gate: ChildGateTuple | Mapping[str, object] | str) -> ChildGate
     return child_gate_tuple_from_payload(gate)
 
 
+def _valid_non_required_status_route_result(
+    request: ChildHandoffValidationRequest,
+) -> ChildHandoffValidationResult | None:
+    """Route valid non-success statuses without running completed-only acceptance gates."""
+
+    return_validation = validate_gpd_return_markdown(request.return_markdown)
+    if not return_validation.passed or return_validation.envelope is None:
+        return None
+
+    gate = request.gate
+    envelope = return_validation.envelope
+    if envelope.status == gate.required_status:
+        return None
+
+    selected_route = gate.status_route.get(envelope.status)
+    if selected_route is None:
+        return None
+
+    diagnostic = (
+        f"gpd_return.status {envelope.status!r} is valid but does not satisfy required success status "
+        f"{gate.required_status!r}; selected status_route[{envelope.status!r}]={selected_route!r}. "
+        "Artifact, validator, and applicator acceptance were not run for this non-success route."
+    )
+    artifact_result = HandoffArtifactValidationResult(
+        passed=False,
+        errors=[diagnostic],
+        warnings=list(return_validation.warnings),
+        status=envelope.status,
+        files_written=[_normalize_return_path(path) for path in envelope.files_written],
+        expected_artifacts=_expected_artifact_paths(gate),
+        expected_globs=_expected_artifact_globs(gate),
+        allowed_roots=list(gate.allowed_roots),
+    )
+    requires_applicator_pass = _requires_applicator_pass(gate)
+
+    return ChildHandoffValidationResult(
+        passed=False,
+        read_only_passed=False,
+        requires_applicator_pass=requires_applicator_pass,
+        acceptance_complete=False,
+        applicator_required_unrun=False,
+        gate_id=gate.id,
+        return_profile=gate.return_profile,
+        required_status=gate.required_status,
+        status=envelope.status,
+        primary_failure_class=None,
+        failure_classes=[],
+        failures=[],
+        errors=[diagnostic],
+        warnings=list(return_validation.warnings),
+        checked_files=[],
+        expected_artifacts=list(artifact_result.expected_artifacts),
+        expected_globs=list(artifact_result.expected_globs),
+        allowed_roots=list(artifact_result.allowed_roots),
+        validator_results=[],
+        status_route=dict(gate.status_route),
+        failure_route={failure_class.value: route for failure_class, route in gate.failure_route.items()},
+        status_route_used=True,
+        status_route_reason=diagnostic,
+        selected_route=selected_route,
+        next_action_class=selected_route,
+        applicator_command=gate.applicator.command,
+        applicator_ran=False,
+        artifact_result=artifact_result,
+    )
+
+
 def _candidate_yaml_payloads(content: str) -> tuple[str, ...]:
     stripped = content.strip()
     candidates: list[str] = []
@@ -259,6 +346,13 @@ def _candidate_yaml_payloads(content: str) -> tuple[str, ...]:
         candidates.append(stripped)
     candidates.extend(match.group(1).strip() for match in _YAML_FENCE_RE.finditer(content))
     return tuple(candidates)
+
+
+def _normalize_return_path(path_text: str) -> str:
+    raw = path_text.strip()
+    if not raw:
+        return raw
+    return Path(raw).as_posix()
 
 
 def _expected_artifact_paths(gate: ChildGateTuple) -> list[str]:
@@ -451,6 +545,10 @@ def _failure_classes(failures: list[HandoffFailure]) -> list[HandoffFailureClass
         if failure.failure_class not in classes:
             classes.append(failure.failure_class)
     return classes
+
+
+def _requires_applicator_pass(gate: ChildGateTuple) -> bool:
+    return gate.applicator.command != "none" and gate.applicator.require_passed_true
 
 
 def _selected_route(

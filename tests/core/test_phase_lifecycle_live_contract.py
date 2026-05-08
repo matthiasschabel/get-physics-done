@@ -161,6 +161,7 @@ def test_apply_return_updates_completes_last_plan_from_ready_to_execute_state(tm
     assert payload["passed"] is True
     assert "advance_plan:last_plan" in payload["applied_state_operations"]
     state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
+    assert str(state["position"]["current_plan"]) == "2"
     assert state["position"]["status"] == "Phase complete \u2014 ready for verification"
 
 
@@ -187,7 +188,52 @@ def test_apply_return_updates_rejects_report_without_gpd_return_without_mutating
     assert payload["errors"] == ["No gpd_return YAML block found"]
     assert payload["primary_failure_class"] == "return_missing"
     assert payload["failure_classes"] == ["return_missing"]
+    assert payload["failures"][0]["code"] == "missing_block"
+    assert payload["failures"][0]["repairable"] is True
+    assert payload["failures"][0]["repair_hint"].startswith("Retry the child with one fenced")
     assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
+
+
+def test_apply_return_updates_rejects_malformed_required_fields_as_repairable_without_mutating_state(
+    tmp_path: Path,
+) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Ready to execute")
+    report = phase_dir / "MALFORMED-RETURN.md"
+    report.write_text(
+        "# Malformed Return\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    state_path = tmp_path / "GPD" / "state.json"
+    before_state = state_path.read_text(encoding="utf-8")
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "apply-return-updates",
+            "GPD/phases/02-analysis/MALFORMED-RETURN.md",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["passed"] is False
+    assert payload["mutated"] is False
+    assert payload["primary_failure_class"] == "return_malformed_repairable"
+    assert payload["failure_classes"] == ["return_malformed_repairable"]
+    assert {failure["code"] for failure in payload["failures"]} == {"missing_required_fields"}
+    assert all(failure["repairable"] is True for failure in payload["failures"])
+    assert all(failure["repair_hint"].startswith("Retry with status, files_written") for failure in payload["failures"])
+    assert "Missing required field: status" in payload["errors"]
+    assert "Missing required field: issues" in payload["errors"]
+    assert "Missing required field: next_actions" in payload["errors"]
+    assert state_path.read_text(encoding="utf-8") == before_state
 
 
 def test_apply_return_updates_rejects_multiple_gpd_returns_without_mutating_state(tmp_path: Path) -> None:
@@ -237,8 +283,58 @@ def test_apply_return_updates_rejects_multiple_gpd_returns_without_mutating_stat
     assert payload["errors"] == ["Multiple gpd_return YAML blocks found: expected exactly one, got 2"]
     assert payload["primary_failure_class"] == "return_malformed_blocking"
     assert payload["failure_classes"] == ["return_malformed_blocking"]
+    assert payload["failures"][0]["code"] == "ambiguous_multiple_returns"
+    assert payload["failures"][0]["repairable"] is False
+    assert payload["failures"][0]["repair_hint"].startswith("Retry with exactly one canonical")
     assert payload["applied_state_operations"] == []
     assert state_path.read_text(encoding="utf-8") == before_state
+
+
+def test_apply_return_updates_rejects_intermediate_plan_direct_phase_completion_without_mutation(
+    tmp_path: Path,
+) -> None:
+    phase_dir = _write_phase_project(tmp_path, current_plan=1, total_plans=2, status="Ready to execute", summaries=1)
+    report = phase_dir / "02-01-DIRECT-COMPLETE.md"
+    report.write_text(
+        "# Direct Completion Attempt\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: completed\n"
+        "  files_written: [GPD/phases/02-analysis/02-01-SUMMARY.md]\n"
+        "  issues: []\n"
+        "  next_actions: [gpd:verify-work 02]\n"
+        '  phase: "02"\n'
+        '  plan: "01"\n'
+        "  state_updates:\n"
+        "    complete_phase: true\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    state_path = tmp_path / "GPD" / "state.json"
+    state_md_path = tmp_path / "GPD" / "STATE.md"
+    before_state = state_path.read_text(encoding="utf-8")
+    before_state_md = state_md_path.read_text(encoding="utf-8")
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "apply-return-updates",
+            "GPD/phases/02-analysis/02-01-DIRECT-COMPLETE.md",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["passed"] is False
+    assert payload["mutated"] is False
+    assert payload["primary_failure_class"] == "applicator_failed"
+    assert payload["applied_state_operations"] == []
+    assert any("state_updates.complete_phase" in error for error in payload["errors"])
+    assert state_path.read_text(encoding="utf-8") == before_state
+    assert state_md_path.read_text(encoding="utf-8") == before_state_md
 
 
 def test_checkpoint_intent_core_apply_updates_exposes_bounded_segment_resume(tmp_path: Path) -> None:

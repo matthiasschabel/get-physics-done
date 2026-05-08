@@ -12853,7 +12853,7 @@ def _fallback_return_failure(error: str) -> tuple[str, str, bool]:
     return "return_malformed_repairable", "invalid_gpd_return", True
 
 
-def _fallback_return_classification(content: str) -> dict[str, object]:
+def _fallback_return_classification(content: str, *, require_status: str | None = None) -> dict[str, object]:
     """Small CLI fallback until the core return classifier module is available."""
 
     from gpd.core.return_contract import validate_gpd_return_markdown
@@ -12861,13 +12861,19 @@ def _fallback_return_classification(content: str) -> dict[str, object]:
     validation = validate_gpd_return_markdown(content)
     if validation.passed:
         status = validation.envelope.status if validation.envelope is not None else None
+        accepted = require_status is None or status == require_status
+        primary_classification = "valid" if accepted else "valid_non_completed"
         return {
             "passed": True,
+            "valid": True,
+            "accepted_for_success": accepted,
             "safe_to_apply": False,
             "status": status,
-            "primary_failure_class": "none",
-            "primary_classification": "valid",
-            "failure_classes": [],
+            "required_status": require_status,
+            "primary_class": primary_classification,
+            "primary_failure_class": primary_classification,
+            "primary_classification": primary_classification,
+            "failure_classes": [] if accepted else [primary_classification],
             "failures": [],
             "errors": [],
             "warnings": list(validation.warnings),
@@ -12894,8 +12900,11 @@ def _fallback_return_classification(content: str) -> dict[str, object]:
     primary = failure_classes[0] if failure_classes else "return_malformed_repairable"
     return {
         "passed": False,
+        "valid": False,
+        "accepted_for_success": False,
         "safe_to_apply": False,
         "status": None,
+        "required_status": require_status,
         "primary_failure_class": primary,
         "primary_classification": primary,
         "failure_classes": failure_classes or [primary],
@@ -12908,10 +12917,24 @@ def _fallback_return_classification(content: str) -> dict[str, object]:
     }
 
 
-def _classify_return_markdown(content: str, *, project_root: Path) -> dict[str, object]:
+def _normalize_return_classify_required_status(require_status: str) -> str | None:
+    normalized = require_status.strip().lower()
+    if normalized == "any":
+        return None
+    if normalized in {"completed", "checkpoint", "blocked", "failed"}:
+        return normalized
+    raise GPDError("required status must be one of: any, blocked, checkpoint, completed, failed")
+
+
+def _classify_return_markdown(
+    content: str,
+    *,
+    project_root: Path,
+    require_status: str | None = None,
+) -> dict[str, object]:
     classifier = _load_return_classifier()
     if classifier is None:
-        return _fallback_return_classification(content)
+        return _fallback_return_classification(content, require_status=require_status)
 
     kwargs: dict[str, object] = {}
     if _callable_accepts_kwarg(classifier, "project_root"):
@@ -12919,7 +12942,9 @@ def _classify_return_markdown(content: str, *, project_root: Path) -> dict[str, 
     elif _callable_accepts_kwarg(classifier, "cwd"):
         kwargs["cwd"] = project_root
     if _callable_accepts_kwarg(classifier, "require_status"):
-        kwargs["require_status"] = None
+        kwargs["require_status"] = require_status
+    elif require_status is not None:
+        return _fallback_return_classification(content, require_status=require_status)
     raw_payload = classifier(content, **kwargs)
     payload = _mapping_payload(raw_payload, label="return classifier")
     if "passed" not in payload and isinstance(payload.get("valid"), bool):
@@ -13126,6 +13151,21 @@ def return_skeleton_cmd(
         "--include-applicator-fields",
         help="Include durable continuation fields when the skeleton can be applicator-ready.",
     ),
+    include_checkpoint_intent: bool = typer.Option(
+        False,
+        "--include-checkpoint-intent",
+        help="Include child-owned checkpoint intent fields for checkpoint skeletons.",
+    ),
+    checkpoint_reason: str | None = typer.Option(
+        None,
+        "--checkpoint-reason",
+        help="Seed checkpoint_intent.checkpoint_reason when checkpoint intent is included.",
+    ),
+    checkpoint_waiting_reason: str | None = typer.Option(
+        None,
+        "--checkpoint-waiting-reason",
+        help="Seed checkpoint_intent.waiting_reason when checkpoint intent is included.",
+    ),
     resume_file: str | None = typer.Option(
         None,
         "--resume-file",
@@ -13156,6 +13196,9 @@ def return_skeleton_cmd(
             phase=phase,
             plan=plan,
             include_applicator_fields=include_applicator_fields,
+            include_checkpoint_intent=include_checkpoint_intent,
+            checkpoint_reason=checkpoint_reason,
+            checkpoint_waiting_reason=checkpoint_waiting_reason,
             resume_file=resume_file,
             project_root=project_root,
         )
@@ -13170,8 +13213,18 @@ def return_skeleton_cmd(
 @return_app.command("classify")
 def return_classify_cmd(
     input_path: str = typer.Argument(..., help="Path to a file containing a gpd_return YAML block, or '-' for stdin"),
+    require_status: str = typer.Option(
+        "any",
+        "--require-status",
+        help="Require a return status: completed, checkpoint, blocked, failed, or any.",
+    ),
 ) -> None:
     """Classify one child-return envelope without repairing or mutating it."""
+
+    try:
+        normalized_required_status = _normalize_return_classify_required_status(require_status)
+    except GPDError as exc:
+        _error(str(exc))
 
     launch_cwd = _get_cwd()
     project_root = _read_only_project_scoped_cwd(launch_cwd)
@@ -13182,7 +13235,11 @@ def return_classify_cmd(
         _, content = _load_text_document_or_error(str(resolved))
 
     try:
-        payload = _classify_return_markdown(content, project_root=project_root)
+        payload = _classify_return_markdown(
+            content,
+            project_root=project_root,
+            require_status=normalized_required_status,
+        )
     except (GPDError, ValueError) as exc:
         _error(str(exc))
 

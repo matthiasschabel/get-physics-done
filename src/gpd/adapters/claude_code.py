@@ -7,8 +7,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
+from gpd.adapters.command_projection import rewrite_projection_shell_bridge
 from gpd.adapters.install_utils import (
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     HOOK_SCRIPTS,
     MANIFEST_NAME,
     _is_hook_command_for_script,
@@ -23,7 +23,6 @@ from gpd.adapters.install_utils import (
     read_settings,
     remove_empty_json_object_file,
     remove_stale_agents,
-    rewrite_gpd_cli_invocations_to_runtime_bridge,
     translate_frontmatter_tool_names,
     verify_installed,
     write_settings,
@@ -774,11 +773,7 @@ def _rewrite_gpd_cli_invocations(content: str, command: str) -> str:
     in a command position. This keeps model-visible prose and inline code spans
     canonical while still pinning runnable shell steps to the runtime bridge.
     """
-    return rewrite_gpd_cli_invocations_to_runtime_bridge(
-        content,
-        command,
-        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    )
+    return rewrite_projection_shell_bridge(content, command)
 
 
 def _render_claude_command_markdown(content: str, *, bridge_command: str) -> str:

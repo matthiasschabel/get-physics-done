@@ -742,11 +742,21 @@ _COMPACT_STAGED_COMMAND_ARGS_AFTER_STAGE = frozenset(
 )
 _COMPACT_WORKFLOW_COMMAND_ALLOWLIST = frozenset(
     {
+        "audit-milestone",
         "autonomous",
         "complete-milestone",
+        "debug",
         "derive-equation",
+        "discover",
         "discuss-phase",
+        "error-propagation",
+        "limiting-cases",
+        "numerical-convergence",
+        "parameter-sweep",
+        "progress",
         "settings",
+        "sensitivity-analysis",
+        "start",
     }
 )
 

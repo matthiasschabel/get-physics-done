@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import tests.ci_sharding as ci_sharding
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from tests.ci_sharding import assert_ci_workflow_pytest_shard_policy, assert_tests_readme_documents_ci_shard_policy
 from tests.helpers.github_actions import (
     github_actions_workflow_paths,
@@ -46,6 +47,16 @@ _PHASE0_BASELINE_HELPER_MARKERS = (
     "phase0_baseline_report.py",
     "phase0-baseline-report",
 )
+_DEFAULT_PROVIDER_FREE_WORKFLOWS = ("test.yml", "release.yml", "publish-release.yml")
+
+
+def _workflow_run_scripts(workflow: dict[str, object]) -> str:
+    return "\n".join(str(step.get("run", "")) for _, step in iter_workflow_steps(workflow))
+
+
+def _provider_launch_command_re() -> re.Pattern[str]:
+    provider_commands = {descriptor.launch_command for descriptor in iter_runtime_descriptors()}
+    return re.compile(rf"(?m)(?<![-./\w])(?:{'|'.join(sorted(provider_commands))})(?:\s|$)")
 
 
 def test_all_github_workflows_parse_with_github_actions_shape() -> None:
@@ -155,9 +166,26 @@ def test_default_ci_workflow_has_no_live_provider_credentials_or_phase8_launch_p
     for secret_name in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
         assert secret_name not in workflow_text
 
-    run_commands = "\n".join(str(step.get("run", "")) for _, step in iter_workflow_steps(workflow))
+    run_commands = _workflow_run_scripts(workflow)
     assert "provider_set" not in run_commands
     assert "phase8-provider-smoke" not in run_commands
+
+
+def test_default_ci_and_release_workflows_do_not_launch_provider_clis() -> None:
+    provider_command_re = _provider_launch_command_re()
+
+    offenders: list[str] = []
+    for workflow_name in _DEFAULT_PROVIDER_FREE_WORKFLOWS:
+        workflow = load_repo_github_actions_workflow(REPO_ROOT, workflow_name)
+        run_scripts = _workflow_run_scripts(workflow)
+        for marker in ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
+            if marker in run_scripts:
+                offenders.append(f"{workflow_name}: provider secret {marker}")
+        match = provider_command_re.search(run_scripts)
+        if match is not None:
+            offenders.append(f"{workflow_name}: provider launch command {match.group(0).strip()!r}")
+
+    assert offenders == []
 
 
 def test_pr_triggered_workflows_do_not_define_live_provider_or_phase0_provider_lanes() -> None:

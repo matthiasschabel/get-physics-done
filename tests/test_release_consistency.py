@@ -50,12 +50,14 @@ def _repo_root() -> Path:
 
 
 _SHARED_INSTALL = get_shared_install_metadata()
-_BOOTSTRAP_JSON_ASSETS = (
+_GENERATED_BOOTSTRAP_METADATA_ASSET = "src/gpd/bootstrap/installer_metadata.json"
+_RAW_BOOTSTRAP_JSON_ASSETS = (
     "src/gpd/adapters/runtime_catalog.json",
     "src/gpd/adapters/runtime_catalog_schema.json",
     "src/gpd/core/public_surface_contract.json",
     "src/gpd/core/public_surface_contract_schema.json",
 )
+_BOOTSTRAP_JSON_ASSETS = (_GENERATED_BOOTSTRAP_METADATA_ASSET, *_RAW_BOOTSTRAP_JSON_ASSETS)
 _PUBLIC_BOOTSTRAP_PREREQUISITE = "Install GPD before enabling built-in MCP servers."
 _ARXIV_EXTRA_PREREQUISITE = (
     "Install GPD with the `arxiv` Python extra in the same environment before enabling gpd-arxiv."
@@ -594,6 +596,7 @@ def test_public_bootstrap_package_exposes_npx_installer() -> None:
     assert package_json.get("engines") == {"node": ">=20"}
     assert package_json.get("bin", {}).get("get-physics-done") == "bin/install.js"
     assert set(packaged_files) == {"bin/install.js", *_BOOTSTRAP_JSON_ASSETS}
+    assert set(_RAW_BOOTSTRAP_JSON_ASSETS) <= set(packaged_files)
     assert (repo_root / "bin" / "install.js").is_file()
 
 
@@ -610,7 +613,8 @@ def test_public_bootstrap_installer_pins_the_matching_python_release() -> None:
     content = (repo_root / "bin" / "install.js").read_text(encoding="utf-8")
 
     assert 'require("../package.json")' in content
-    assert 'require("../src/gpd/core/public_surface_contract.json")' in content
+    assert "BOOTSTRAP_INSTALLER_METADATA_RELATIVE_PATH" in content
+    assert '"installer_metadata.json"' in content
     assert "gpdPythonVersion" in content
     assert '["-m", "venv", "--help"]' in content
     assert "managed environment" in content

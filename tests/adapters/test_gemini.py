@@ -28,6 +28,7 @@ from gpd.adapters.gemini import (
     _rewrite_gpd_cli_invocations,
     classify_gemini_shell_fence_body,
 )
+from gpd.adapters.gemini_shell_patches import GEMINI_SHELL_WORKFLOW_PATCHES
 from gpd.adapters.install_utils import (
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
@@ -308,6 +309,37 @@ class TestConvertToGeminiToml:
 
 
 class TestRewriteGeminiShellWorkflowGuidance:
+    def test_shell_workflow_patch_registry_ids_are_unique_and_ordered(self) -> None:
+        patch_ids = tuple(patch.id for patch in GEMINI_SHELL_WORKFLOW_PATCHES)
+
+        assert len(patch_ids) == len(set(patch_ids))
+        assert patch_ids == (
+            "new-project-init-block",
+            "set-profile-validation-exact-block",
+            "set-profile-validation-regex-block",
+            "set-profile-init-block",
+            "minimal-commit-block",
+            "health-tempfile-block",
+            "pre-check-capture-echo-lines",
+            "contract-validate-stdin",
+            "contract-persist-stdin",
+            "contract-persist-sentence",
+            "contract-persist-after-validation-sentence",
+            "contract-file-note",
+            "convention-check-unit-warning-block",
+            "convention-check-paper-warning-block",
+            "command-context-validate-conventions-block",
+            "command-context-write-paper-block",
+            "paper-quality-capture-block",
+            "comparison-pre-check-commit-block",
+            "dependency-graph-pre-check-commit-block",
+            "init-phase-op-block",
+            "init-progress-state-roadmap-config-block",
+            "init-progress-state-block",
+            "init-phase-op-state-config-phase-arg-block",
+            "init-progress-state-config-block",
+        )
+
     def test_rewrites_set_profile_validation_shell_block_to_non_shell_guidance(self) -> None:
         content = (
             "```bash\n"

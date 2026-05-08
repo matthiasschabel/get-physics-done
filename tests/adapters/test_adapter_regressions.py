@@ -252,6 +252,32 @@ def test_shared_runtime_shell_rewriter_handles_fenced_command_positions() -> Non
     assert "echo $(/runtime/gpd status)" in result
 
 
+def test_command_projection_shell_bridge_wrapper_uses_shared_rewriter() -> None:
+    from gpd.adapters.command_projection import rewrite_projection_shell_bridge
+
+    content = "```bash\ngpd status\n```\n```python\ngpd status\n```\n"
+
+    result = rewrite_projection_shell_bridge(content, "/runtime/gpd")
+
+    assert "```bash\n/runtime/gpd status\n```" in result
+    assert "```python\ngpd status\n```" in result
+
+
+def test_command_projection_note_prepend_preserves_frontmatter_and_replaces_old_note() -> None:
+    from gpd.adapters.command_projection import prepend_projection_note
+
+    old_note_re = re.compile(r"<runtime_note>\n.*?</runtime_note>\n*", re.DOTALL)
+    content = "---\nname: probe\n---\n<runtime_note>\nold\n</runtime_note>\n\nBody\n"
+    note = "<runtime_note>\nnew\n</runtime_note>\n\n"
+
+    result = prepend_projection_note(content, note, strip_patterns=(old_note_re,))
+    second = prepend_projection_note(result, note, strip_patterns=(old_note_re,))
+
+    assert result == second
+    assert result.startswith("---\nname: probe\n---\n<runtime_note>\nnew\n</runtime_note>\n\nBody\n")
+    assert "old" not in result
+
+
 def test_shared_runtime_shell_rewriter_handles_double_quoted_command_substitutions() -> None:
     from gpd.adapters.install_utils import rewrite_gpd_cli_invocations_to_runtime_bridge
 

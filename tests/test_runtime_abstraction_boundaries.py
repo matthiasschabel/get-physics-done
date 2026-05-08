@@ -164,6 +164,7 @@ _ALLOWED_RUNTIME_FILES = {
     ".gitignore",
     "package.json",
     "pyproject.toml",
+    "src/gpd/bootstrap/installer_metadata.json",
     "src/gpd/hooks/runtime_detect.py",
 }
 _ALLOWED_SHARED_PYTHON_RUNTIME_FILES = {

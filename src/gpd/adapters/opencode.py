@@ -20,9 +20,9 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
+from gpd.adapters.command_projection import rewrite_projection_shell_bridge
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
@@ -38,7 +38,6 @@ from gpd.adapters.install_utils import (
     remove_empty_json_object_file,
     remove_stale_agents,
     render_markdown_frontmatter,
-    rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
 )
 from gpd.adapters.install_utils import (
@@ -253,11 +252,7 @@ def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None
 
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
     """Rewrite fenced-shell command-position ``gpd`` calls to the runtime bridge."""
-    return rewrite_gpd_cli_invocations_to_runtime_bridge(
-        content,
-        bridge_command,
-        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    )
+    return rewrite_projection_shell_bridge(content, bridge_command)
 
 
 def _render_opencode_command_markdown(content: str, *, path_prefix: str, bridge_command: str | None = None) -> str:

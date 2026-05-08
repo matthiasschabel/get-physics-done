@@ -28,10 +28,10 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
 from gpd.adapters.base import RuntimeAdapter
+from gpd.adapters.command_projection import prepend_projection_note, rewrite_projection_shell_bridge
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
     COMMANDS_DIR_NAME,
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     GPD_INSTALL_DIR_NAME,
     HOOK_SCRIPTS,
     MANIFEST_NAME,
@@ -49,7 +49,6 @@ from gpd.adapters.install_utils import (
     prune_empty_ancestors,
     remove_empty_text_file,
     render_markdown_frontmatter,
-    rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
     verify_installed,
     write_manifest,
@@ -786,11 +785,7 @@ def _inject_codex_command_runtime_note(content: str, launcher: str, *, snippet_p
         launcher=launcher,
         snippet_path=snippet_path or _codex_runtime_snippet_path(),
     )
-    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
-    if not frontmatter:
-        return note + _CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE.sub("", content)
-    body = _CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE.sub("", body)
-    return render_markdown_frontmatter(preamble, frontmatter, separator, note + body)
+    return prepend_projection_note(content, note, strip_patterns=(_CODEX_COMMAND_RUNTIME_NOTE_BLOCK_RE,))
 
 
 def _render_codex_command_skill(
@@ -811,11 +806,7 @@ def _render_codex_command_skill(
 
 def _rewrite_codex_gpd_cli_invocations(content: str, launcher: str) -> str:
     """Rewrite shell-executable ``gpd`` calls to the shared runtime CLI bridge."""
-    return rewrite_gpd_cli_invocations_to_runtime_bridge(
-        content,
-        launcher,
-        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    )
+    return rewrite_projection_shell_bridge(content, launcher)
 
 
 def _normalize_codex_questioning(content: str, *, snippet_path: str | None = None) -> str:

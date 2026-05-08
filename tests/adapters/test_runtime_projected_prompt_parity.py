@@ -12,6 +12,7 @@ import pytest
 import gpd.adapters.gemini as gemini_module
 from gpd.adapters import get_adapter
 from gpd.adapters.install_utils import (
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
     DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     build_runtime_cli_bridge_command,
     expand_at_includes,
@@ -36,6 +37,18 @@ TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 PHASE7_TARGET_COMMANDS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+PHASE8_COMPACT_WORKFLOW_COMMANDS = (
+    "parameter-sweep",
+    "sensitivity-analysis",
+    "numerical-convergence",
+    "limiting-cases",
+    "progress",
+    "error-propagation",
+    "discover",
+    "start",
+    "audit-milestone",
+    "debug",
+)
 PHASE7_TARGET_COMMAND_PROJECTION_BUDGETS = {
     "plan-phase": {
         "claude-code": 4_196,
@@ -539,7 +552,11 @@ def _raw_include_count(text: str, include_suffix: str) -> int:
 
 
 def _has_compact_non_native_shim(text: str) -> bool:
-    return _has_staged_shim_sentinel(text) or _has_help_bridge_shim_sentinel(text)
+    return (
+        _has_staged_shim_sentinel(text)
+        or _has_help_bridge_shim_sentinel(text)
+        or _has_workflow_reference_shim_sentinel(text)
+    )
 
 
 def _has_staged_shim_sentinel(text: str) -> bool:
@@ -548,6 +565,10 @@ def _has_staged_shim_sentinel(text: str) -> bool:
 
 def _has_help_bridge_shim_sentinel(text: str) -> bool:
     return any(sentinel in text for sentinel in HELP_BRIDGE_SHIM_SENTINELS)
+
+
+def _has_workflow_reference_shim_sentinel(text: str) -> bool:
+    return COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in text
 
 
 def _assert_no_unresolved_include_markers(text: str, *, label: str) -> None:
@@ -721,6 +742,43 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
     for fragment in (*STAGED_SHIM_CONTRACT_FRAGMENTS, *case.staged_loading_keys):
         assert fragment in projected
     assert len(projected) <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
+    assert len(projected) <= len(expanded_workflow) * 0.85
+
+
+@pytest.mark.parametrize("command_name", PHASE8_COMPACT_WORKFLOW_COMMANDS)
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_phase8_hotspot_commands_use_native_include_or_compact_workflow_reference_shim(
+    command_name: str,
+    runtime: str,
+) -> None:
+    projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
+    descriptor = get_runtime_descriptor(runtime)
+
+    _assert_no_unresolved_include_markers(projected, label=f"{runtime} {command_name}")
+    assert get_adapter(runtime).format_command(command_name) in projected
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(projected, f"workflows/{command_name}.md") == 1
+        assert f"<!-- [included: {command_name}.md] -->" not in projected
+        assert not _has_workflow_reference_shim_sentinel(projected)
+        return
+
+    workflow_source = _read(WORKFLOWS_DIR / f"{command_name}.md")
+    expanded_workflow = expand_at_includes(
+        workflow_source,
+        REPO_ROOT / "src/gpd",
+        "/runtime/",
+        runtime=runtime,
+    )
+
+    assert _raw_include_count(projected, f"workflows/{command_name}.md") == 0
+    assert f"<!-- [included: {command_name}.md] -->" not in projected
+    assert _has_workflow_reference_shim_sentinel(projected)
+    assert not _has_staged_shim_sentinel(projected)
+    assert not _has_help_bridge_shim_sentinel(projected)
+    assert f'workflow="{command_name}"' in projected
+    assert f"workflows/{command_name}.md" in projected
+    assert "Read these installed authority files before acting:" in projected
     assert len(projected) <= len(expanded_workflow) * 0.85
 
 

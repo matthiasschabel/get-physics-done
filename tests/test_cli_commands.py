@@ -31,6 +31,7 @@ import gpd.registry as registry_module
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors, list_runtime_names
 from gpd.cli import app
 from gpd.command_labels import rewrite_runtime_command_surfaces, runtime_command_surface_pattern
+from gpd.core import help_renderer
 from gpd.core.artifact_text import PEER_REVIEW_ARTIFACT_SUFFIXES
 from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
@@ -5813,15 +5814,16 @@ class TestReviewValidationCommands:
         assert "gpd:new-project" in commands
         assert "gpd:help" in commands
         assert payload["rendered_sections"] == ["quick_start", "command_index", "detailed_help_follow_up"]
+        assert payload["quick_start"]["markdown"] == help_renderer.render_quick_start_markdown()
+        assert payload["command_index_markdown"] == help_renderer.render_command_index_markdown()
         assert "## Command Index" in payload["command_index_markdown"]
         assert "<!--" not in payload["command_index_markdown"]
+        assert payload["command_groups"] == help_renderer.command_groups_payload()
         assert payload["command_groups"][0]["name"] == "Starter commands"
         starter_commands = {entry["command"] for entry in payload["command_groups"][0]["commands"]}
         assert "gpd:help" in starter_commands
         assert "gpd:new-project --minimal" in starter_commands
-        assert payload["detailed_help_follow_up"] == (
-            "Use `gpd:help --command <name>` when you want detailed notes for one runtime command."
-        )
+        assert payload["detailed_help_follow_up"] == help_renderer.DETAILED_HELP_FOLLOW_UP
 
     @pytest.mark.parametrize(
         "descriptor",
@@ -5862,6 +5864,19 @@ class TestReviewValidationCommands:
         assert payload["canonical_command"] == "gpd:new-project"
         assert payload["context_mode"] == "projectless"
         assert payload["command_context"]["passed"] is True
+        assert payload["command_context"]["command"] == "gpd:new-project"
+
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(tmp_path), "help", "--command", "gpd:new-project --minimal", "--minimal"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["ok"] is True
+        assert payload["requested_command"] == "gpd:new-project --minimal"
+        assert payload["canonical_command"] == "gpd:new-project"
         assert payload["command_context"]["command"] == "gpd:new-project"
 
     def test_raw_help_bridge_unknown_command_fails_closed(self, tmp_path: Path) -> None:

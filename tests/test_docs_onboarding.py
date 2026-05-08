@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from gpd.adapters.runtime_catalog import get_runtime_descriptor, get_shared_install_metadata, iter_runtime_descriptors
-from gpd.core.onboarding_surfaces import beginner_runtime_surfaces
+from gpd.core.onboarding_surfaces import beginner_runtime_surface, beginner_runtime_surfaces
+from gpd.core.public_surface_contract import beginner_onboarding_hub_url
+from gpd.core.public_surface_renderer import runtime_doc_filename, runtime_quickstart_block_id
 from tests.assertion_taxonomy_support import FragmentMode, assert_fragments, public_exact, semantic_anchor
 from tests.doc_surface_contracts import (
     assert_beginner_hub_preflight_contract,
@@ -17,6 +19,8 @@ from tests.doc_surface_contracts import (
     assert_markdown_link,
     assert_os_install_matrix_contract,
     assert_os_next_steps_table_contract,
+    assert_public_surface_generated_file_current,
+    assert_public_surface_generated_region,
     assert_supported_runtimes_table_contract,
 )
 from tests.markdown_test_support import (
@@ -25,7 +29,6 @@ from tests.markdown_test_support import (
     extract_markdown_section,
 )
 from tests.prompt_metrics_support import iter_markdown_fences
-from tests.runtime_test_support import runtime_onboarding_doc_filename
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _SHARED_INSTALL = get_shared_install_metadata()
@@ -80,8 +83,14 @@ def _fenced_command_blocks(section: str, *, info: str) -> tuple[str, ...]:
 
 @pytest.mark.parametrize("surface", beginner_runtime_surfaces(), ids=lambda surface: surface.runtime_name)
 def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
-    doc_path = f"docs/{runtime_onboarding_doc_filename(surface.runtime_name)}"
+    doc_path = f"docs/{runtime_doc_filename(surface)}"
     content = _read(doc_path)
+    assert_public_surface_generated_file_current(content, context=doc_path)
+    assert_public_surface_generated_region(
+        content,
+        runtime_quickstart_block_id(surface),
+        context=f"{doc_path} generated quickstart",
+    )
     fragments = (
         surface.help_command,
         surface.start_command,
@@ -97,7 +106,7 @@ def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
     _assert_public_exact(
         content,
         "runtime guide stable headings",
-        ("## Choose this runtime if", "## What must already be true", "## Return to work"),
+        ("## Choose this runtime if", "## What must already be true", "## 2) Install, start, and use GPD"),
         context=doc_path,
     )
 
@@ -105,7 +114,8 @@ def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
 @pytest.mark.parametrize("runtime_name", _RUNTIME_DOCS_WITH_UNATTENDED_READINESS_LOOP)
 def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -> None:
     descriptor = get_runtime_descriptor(runtime_name)
-    doc_path = f"docs/{runtime_onboarding_doc_filename(runtime_name)}"
+    surface = beginner_runtime_surface(runtime_name)
+    doc_path = f"docs/{runtime_doc_filename(surface)}"
     content = _read(doc_path)
     readiness = extract_markdown_section(content, "## Readiness before unattended runs", context=doc_path)
     readiness_command = f"gpd validate unattended-readiness --runtime {runtime_name} --autonomy supervised"
@@ -161,6 +171,12 @@ def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -
 )
 def test_os_quickstarts_install_matrix_matches_runtime_catalog(doc_name: str) -> None:
     content = _read(f"docs/{doc_name}")
+    assert_public_surface_generated_file_current(content, context=f"docs/{doc_name}")
+    assert_public_surface_generated_region(
+        content,
+        "os-install-matrix",
+        context=f"docs/{doc_name} generated install matrix",
+    )
     install_section = extract_markdown_section(content, "## Install GPD", context=f"docs/{doc_name}")
 
     assert_os_install_matrix_contract(
@@ -177,6 +193,13 @@ def test_os_quickstarts_install_matrix_matches_runtime_catalog(doc_name: str) ->
 )
 def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str) -> None:
     content = _read(f"docs/{doc_name}")
+    assert_public_surface_generated_file_current(content, context=f"docs/{doc_name}")
+    for block_id in ("runtime-doc-links", "supported-runtimes-table", "os-next-steps-table"):
+        assert_public_surface_generated_region(
+            content,
+            block_id,
+            context=f"docs/{doc_name} generated {block_id}",
+        )
     runtime_commands = tuple(
         dict.fromkeys(
             command
@@ -220,13 +243,21 @@ def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str)
         assert_markdown_link(
             content,
             f"{surface.display_name} quickstart",
-            f"./{runtime_onboarding_doc_filename(surface.runtime_name)}",
+            f"./{runtime_doc_filename(surface)}",
             context=f"docs/{doc_name}",
         )
 
 
 def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
     content = _read("docs/README.md")
+    assert_public_surface_generated_file_current(content, context="docs/README.md")
+    for block_id in (
+        "beginner-preflight",
+        "beginner-caveats",
+        "beginner-startup-ladder",
+        "post-start-settings",
+    ):
+        assert_public_surface_generated_region(content, block_id, context=f"docs/README.md generated {block_id}")
     assert_beginner_hub_preflight_contract(content)
 
     _assert_public_exact(
@@ -248,7 +279,7 @@ def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
     )
     assert_beginner_startup_routing_contract(content)
     for surface in beginner_runtime_surfaces():
-        guide = runtime_onboarding_doc_filename(surface.runtime_name)
+        guide = runtime_doc_filename(surface)
         assert_markdown_link(content, f"{surface.display_name} quickstart", f"./{guide}", context="docs/README.md")
         _assert_public_exact(
             content,
@@ -279,6 +310,12 @@ def test_docs_onboarding_hub_surfaces_release_source_policy() -> None:
 
 def test_root_readme_settings_short_wording_matches_model_profile_contract() -> None:
     content = _read("README.md")
+    assert_public_surface_generated_file_current(content, context="README.md")
+    assert_public_surface_generated_region(
+        content,
+        "beginner-startup-ladder",
+        context="README.md generated startup ladder",
+    )
     quick_start = extract_markdown_section(content, "## Quick Start", context="README.md")
 
     _assert_semantic_anchor(
@@ -304,7 +341,7 @@ def test_root_readme_start_here_links_to_docs_onboarding_hub() -> None:
     assert_markdown_link(
         start_here,
         "Beginner Onboarding Hub",
-        "https://github.com/psi-oss/get-physics-done/blob/main/docs/README.md",
+        beginner_onboarding_hub_url(),
         context="README.md Start Here",
     )
     _assert_semantic_anchor(
@@ -428,6 +465,12 @@ def test_root_readme_project_contract_validation_placeholder_is_current() -> Non
 
 def test_root_readme_supported_runtimes_table_matches_beginner_runtime_surfaces() -> None:
     content = _read("README.md")
+    assert_public_surface_generated_file_current(content, context="README.md")
+    assert_public_surface_generated_region(
+        content,
+        "supported-runtimes-table",
+        context="README.md generated supported runtimes table",
+    )
     supported_runtimes = extract_markdown_section(content, "## Supported Runtimes", context="README.md")
 
     assert_supported_runtimes_table_contract(
@@ -478,7 +521,7 @@ def test_set_tier_models_workflow_keeps_runtime_model_examples_generic() -> None
 
 def test_runtime_quickstarts_keep_current_provider_specific_setup_notes() -> None:
     docs = {
-        surface.runtime_name: _read(f"docs/{runtime_onboarding_doc_filename(surface.runtime_name)}")
+        surface.runtime_name: _read(f"docs/{runtime_doc_filename(surface)}")
         for surface in beginner_runtime_surfaces()
     }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from gpd import registry as content_registry
 from tests.assertion_taxonomy_support import FragmentMode, fragment_count, semantic_anchor
@@ -48,6 +49,11 @@ def _help_command_inventory(*contents: str) -> set[str]:
     return surfaces
 
 
+def _detailed_command_headings(content: str) -> list[str]:
+    detailed_reference = _help_marker_range(content, "detailed-command-reference")
+    return re.findall(r"(?m)^\*\*`gpd:([a-z0-9-]+)\b", detailed_reference)
+
+
 def _assert_anchor(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
     semantic_anchor(label, fragments).check(text)
 
@@ -67,6 +73,21 @@ def test_help_inventory_covers_registry_command_inventory() -> None:
 
     missing = sorted(registry_commands - help_inventory)
     assert missing == []
+
+
+def test_detailed_help_reference_has_one_block_for_each_registry_command() -> None:
+    content_registry.invalidate_cache()
+
+    registry_commands = set(content_registry.list_commands())
+    detailed_headings = _detailed_command_headings(_read("src/gpd/specs/workflows/help.md"))
+
+    heading_counts = Counter(detailed_headings)
+    duplicate_headings = sorted(command for command, count in heading_counts.items() if count > 1)
+    assert duplicate_headings == []
+
+    detailed_commands = set(detailed_headings)
+    assert sorted(registry_commands - detailed_commands) == []
+    assert sorted(detailed_commands - registry_commands) == []
 
 
 def test_help_inventory_uses_runtime_neutral_framing_in_shared_source() -> None:

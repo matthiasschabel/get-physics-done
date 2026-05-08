@@ -24,7 +24,9 @@ from gpd.core.public_surface_contract import (
     recovery_cross_workspace_command,
     recovery_local_snapshot_command,
 )
+from gpd.core.public_surface_renderer import public_surface_runtime_surfaces, render_public_surface_block
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
+from scripts.render_public_surface import check_generated_regions, generated_region_markers
 from tests.assertion_taxonomy_support import FragmentMode, assert_fragments, public_exact, semantic_anchor
 
 _RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
@@ -153,6 +155,8 @@ __all__ = [
     "assert_markdown_link",
     "assert_os_install_matrix_contract",
     "assert_os_next_steps_table_contract",
+    "assert_public_surface_generated_file_current",
+    "assert_public_surface_generated_region",
     "assert_publication_lane_boundary_contract",
     "assert_recovery_ladder_contract",
     "assert_runtime_reset_rediscovery_contract",
@@ -328,6 +332,40 @@ def _rows_by(table: ParsedMarkdownTable, key_header: str, *, context: str) -> di
     return rows
 
 
+def _extract_generated_region(content: str, block_id: str, *, context: str) -> str:
+    start_marker, end_marker = generated_region_markers(block_id)
+    try:
+        start = content.index(start_marker) + len(start_marker)
+    except ValueError as exc:
+        raise AssertionError(f"missing generated public-surface start marker {block_id!r} in {context}") from exc
+    try:
+        end = content.index(end_marker, start)
+    except ValueError as exc:
+        raise AssertionError(f"missing generated public-surface end marker {block_id!r} in {context}") from exc
+    return content[start:end].strip("\n")
+
+
+def assert_public_surface_generated_region(content: str, block_id: str, *, context: str) -> None:
+    """Assert one checked-in generated public-surface region matches the renderer."""
+
+    actual = _extract_generated_region(content, block_id, context=context).strip()
+    expected = render_public_surface_block(block_id).strip()
+    if actual != expected:
+        raise AssertionError(
+            f"generated public-surface block {block_id!r} is stale in {context}:\n"
+            f"expected:\n{expected}\n\nactual:\n{actual}"
+        )
+
+
+def assert_public_surface_generated_file_current(content: str, *, context: str) -> None:
+    """Assert every public-surface generated region in a Markdown file is current."""
+
+    diffs = check_generated_regions(content)
+    if diffs:
+        rendered_diffs = "\n".join(diff.diff for diff in diffs)
+        raise AssertionError(f"generated public-surface regions are stale in {context}:\n{rendered_diffs}")
+
+
 def _assert_table_headers(table: ParsedMarkdownTable, expected_headers: tuple[str, ...], *, context: str) -> None:
     if table.headers != expected_headers:
         raise AssertionError(
@@ -349,7 +387,7 @@ def _surfaces_in_public_docs_order(surfaces: Iterable[object], *, context: str) 
     duplicates = sorted({flag for flag in install_flags if install_flags.count(flag) > 1})
     if duplicates:
         raise AssertionError(f"runtime metadata contains duplicate install flags in {context}: {duplicates!r}")
-    return tuple(sorted(surface_tuple, key=lambda surface: surface.install_flag))
+    return public_surface_runtime_surfaces(surface_tuple)
 
 
 def _next_step_command_key(surface: object) -> tuple[str, ...]:

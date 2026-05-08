@@ -67,7 +67,7 @@ normal system terminal, then come back here.
 <details>
 <summary><strong>New to terminals?</strong></summary>
 
-If you are new to terminals, start with the [Beginner Onboarding Hub](https://github.com/psi-oss/get-physics-done/blob/main/docs/README.md).
+If you are new to terminals, start with the [Beginner Onboarding Hub](https://github.com/psi-oss/get-physics-done/tree/main/docs).
 Use the hub as the single beginner path. It keeps the OS guides, runtime guides,
 and post-install checklist in one place, while this README keeps the reference
 tables and advanced surfaces.
@@ -101,11 +101,13 @@ We welcome contributions and feedback via GitHub issues or pull requests; if GPD
 
 ## Quick Start
 
-If you already know your runtime and are comfortable in a terminal, use this as the fast path. If not, go back to [Start Here](#start-here) and use the [Beginner Onboarding Hub](https://github.com/psi-oss/get-physics-done/blob/main/docs/README.md) instead.
+If you already know your runtime and are comfortable in a terminal, use this as the fast path. If not, go back to [Start Here](#start-here) and use the [Beginner Onboarding Hub](https://github.com/psi-oss/get-physics-done/tree/main/docs) instead.
 
 Canonical post-install order, shown as command names without runtime prefixes:
 
+<!-- gpd-public-surface:beginner-startup-ladder:start -->
 `help -> start -> tour -> new-project / map-research -> resume-work`
+<!-- gpd-public-surface:beginner-startup-ladder:end -->
 
 Run its help command first: Claude Code / Gemini CLI use `/gpd:help`. Codex uses `$gpd-help`, and OpenCode uses `/gpd-help`.
 
@@ -220,12 +222,14 @@ npx -y github:psi-oss/get-physics-done --upgrade
 
 GPD currently installs into four AI runtimes. To preselect one during install, use the matching `npx` flag, or use `--all` to install everything in one pass:
 
+<!-- gpd-public-surface:supported-runtimes-table:start -->
 | Runtime | `npx` flag | Help | Start | Tour | New work | Existing work | Return later |
-|---------|------------|------|-------|------|----------|---------------|--------------|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | Claude Code | `--claude` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
 | Codex | `--codex` | `$gpd-help` | `$gpd-start` | `$gpd-tour` | `$gpd-new-project --minimal` | `$gpd-map-research` | `$gpd-resume-work` |
 | Gemini CLI | `--gemini` | `/gpd:help` | `/gpd:start` | `/gpd:tour` | `/gpd:new-project --minimal` | `/gpd:map-research` | `/gpd:resume-work` |
 | OpenCode | `--opencode` | `/gpd-help` | `/gpd-start` | `/gpd-tour` | `/gpd-new-project --minimal` | `/gpd-map-research` | `/gpd-resume-work` |
+<!-- gpd-public-surface:supported-runtimes-table:end -->
 
 Each runtime uses its own command prefix, but the workflow is the same across all four. For install-path details, runtime-specific hooks, and launcher notes, use the onboarding hub and the runtime guides in `docs/`.
 

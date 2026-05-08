@@ -49,7 +49,6 @@ _RUNTIME_CONFIG_DIR_NAMES = {name: adapter.config_dir_name for name, adapter in 
 _RUNTIME_HELP_COMMANDS = {name: adapter.help_command for name, adapter in _RUNTIME_ADAPTERS.items()}
 _RUNTIME_START_COMMANDS = {name: adapter.format_command("start") for name, adapter in _RUNTIME_ADAPTERS.items()}
 _RUNTIME_TOUR_COMMANDS = {name: adapter.format_command("tour") for name, adapter in _RUNTIME_ADAPTERS.items()}
-_RUNTIME_NEW_PROJECT_COMMANDS = {name: adapter.new_project_command for name, adapter in _RUNTIME_ADAPTERS.items()}
 _RUNTIME_MAP_RESEARCH_COMMANDS = {name: adapter.map_research_command for name, adapter in _RUNTIME_ADAPTERS.items()}
 _RUNTIME_RESUME_WORK_COMMANDS = {name: adapter.format_command("resume-work") for name, adapter in _RUNTIME_ADAPTERS.items()}
 _RUNTIME_SUGGEST_NEXT_COMMANDS = {name: adapter.format_command("suggest-next") for name, adapter in _RUNTIME_ADAPTERS.items()}
@@ -73,11 +72,6 @@ _BEGINNER_ONBOARDING_HUB_URL = beginner_onboarding_hub_url()
 _LOCAL_CLI_BRIDGE_NOTE = public_surface_contract_module.local_cli_bridge_note()
 _CODEX_INSTALL_FLAG = runtime_install_flag(_CODEX_RUNTIME_NAME)
 _CLAUDE_INSTALL_FLAG = runtime_install_flag(_CLAUDE_RUNTIME_NAME)
-_GENERIC_RECOVERY_LADDER_NOTE = recovery_ladder_note(
-    resume_work_phrase="your runtime-specific `resume-work` command",
-    suggest_next_phrase="your runtime-specific `suggest-next` command",
-    pause_work_phrase="your runtime-specific `pause-work` command",
-)
 _RUNTIME_RECOVERY_LADDER_TEMPLATE = recovery_ladder_note(
     resume_work_phrase="{resume_work}",
     suggest_next_phrase="{suggest_next}",
@@ -95,31 +89,11 @@ def _render_runtime_recovery_ladder(runtime: str) -> str:
 
 
 def _assert_single_runtime_next_steps(output: str, runtime: str) -> None:
-    resume_work_command = _RUNTIME_RESUME_WORK_COMMANDS[runtime]
-    suggest_next_command = _RUNTIME_SUGGEST_NEXT_COMMANDS[runtime]
-    pause_work_command = _RUNTIME_PAUSE_WORK_COMMANDS[runtime]
     ordered_patterns = (
         re.escape("After install"),
-        re.escape(f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}"),
-        re.escape(
-            f"Runtime surface: Run {_RUNTIME_HELP_COMMANDS[runtime]} for the command list. "
-            "First-run order is `help -> start -> tour -> new-project / map-research -> resume-work`."
-        ),
-        re.escape(f"Selected runtime: {_RUNTIME_DISPLAY_NAMES[runtime]} ({_RUNTIME_LAUNCH_COMMANDS[runtime]});"),
-        re.escape(f"help {_RUNTIME_HELP_COMMANDS[runtime]};"),
-        re.escape(f"start {_RUNTIME_START_COMMANDS[runtime]};"),
-        re.escape(f"tour {_RUNTIME_TOUR_COMMANDS[runtime]};"),
-        re.escape(f"new work {_RUNTIME_NEW_PROJECT_COMMANDS[runtime]};"),
-        re.escape(f"existing work {_RUNTIME_MAP_RESEARCH_COMMANDS[runtime]}."),
-        re.escape(f"Fast bootstrap: {_RUNTIME_NEW_PROJECT_COMMANDS[runtime]} --minimal; return later with {resume_work_command}. "),
-        re.escape(
-            recovery_ladder_note(
-                resume_work_phrase=f"`{resume_work_command}`",
-                suggest_next_phrase=f"`{suggest_next_command}`",
-                pause_work_phrase=f"`{pause_work_command}`",
-            )
-        ),
-        re.escape("Use gpd --help for local diagnostics and later setup."),
+        re.escape(f"Docs hub: {_BEGINNER_ONBOARDING_HUB_URL}"),
+        re.escape(f"Next: open {_RUNTIME_DISPLAY_NAMES[runtime]} in this folder, then run {_RUNTIME_START_COMMANDS[runtime]}."),
+        re.escape("Diagnostics: use gpd --help for local diagnostics and later setup."),
     )
     cursor = 0
     for pattern in ordered_patterns:
@@ -129,45 +103,36 @@ def _assert_single_runtime_next_steps(output: str, runtime: str) -> None:
 
     _assert_install_summary_semantic_contract(
         output,
-        runtime_help_fragments=(
-            f"Run {_RUNTIME_HELP_COMMANDS[runtime]} for the command list.",
-        ),
-        resume_work_fragments=(f"`{_RUNTIME_RESUME_WORK_COMMANDS[runtime]}`",),
-        suggest_next_fragments=(f"`{_RUNTIME_SUGGEST_NEXT_COMMANDS[runtime]}`",),
-        pause_work_fragments=(f"`{_RUNTIME_PAUSE_WORK_COMMANDS[runtime]}`",),
     )
+    assert "Runtime surface:" not in output
+    assert "First-run order" not in output
+    assert "Recovery ladder:" not in output
+    assert _RUNTIME_HELP_COMMANDS[runtime] not in output
+    assert _RUNTIME_TOUR_COMMANDS[runtime] not in output
+    assert _RUNTIME_MAP_RESEARCH_COMMANDS[runtime] not in output
+    assert _RUNTIME_RESUME_WORK_COMMANDS[runtime] not in output
+    assert _RUNTIME_SUGGEST_NEXT_COMMANDS[runtime] not in output
+    assert _RUNTIME_PAUSE_WORK_COMMANDS[runtime] not in output
 
 
 def _assert_multi_runtime_next_steps_line(output: str, runtime: str) -> None:
     pattern = re.compile(
-        rf"- {re.escape(_RUNTIME_DISPLAY_NAMES[runtime])}.*?"
-        rf"{re.escape(_RUNTIME_LAUNCH_COMMANDS[runtime])}.*?"
-        rf"{re.escape(_RUNTIME_HELP_COMMANDS[runtime])}.*?"
-        rf"{re.escape(_RUNTIME_START_COMMANDS[runtime])}.*?"
-        rf"{re.escape(_RUNTIME_TOUR_COMMANDS[runtime])}.*?"
-        rf"{re.escape(_RUNTIME_NEW_PROJECT_COMMANDS[runtime])}.*?"
-        rf"{re.escape(_RUNTIME_MAP_RESEARCH_COMMANDS[runtime])}.*?"
-        rf"{re.escape(_RUNTIME_RESUME_WORK_COMMANDS[runtime])}",
+        rf"- {re.escape(_RUNTIME_DISPLAY_NAMES[runtime])}: "
+        rf"{re.escape(_RUNTIME_START_COMMANDS[runtime])}",
         re.S,
     )
     assert pattern.search(output), output
-    assert re.search(r"Fast bootstrap: use .*? --minimal", output, re.S), output
+    assert _RUNTIME_HELP_COMMANDS[runtime] not in output
+    assert _RUNTIME_TOUR_COMMANDS[runtime] not in output
+    assert _RUNTIME_MAP_RESEARCH_COMMANDS[runtime] not in output
+    assert _RUNTIME_RESUME_WORK_COMMANDS[runtime] not in output
 
 
 def _assert_install_summary_semantic_contract(
     output: str,
     *,
-    runtime_help_fragments: tuple[str, ...],
-    resume_work_fragments: tuple[str, ...],
-    suggest_next_fragments: tuple[str, ...],
-    pause_work_fragments: tuple[str, ...],
+    runtime_help_fragments: tuple[str, ...] = (),
 ) -> None:
-    assert_recovery_ladder_contract(
-        output,
-        resume_work_fragments=resume_work_fragments,
-        suggest_next_fragments=suggest_next_fragments,
-        pause_work_fragments=pause_work_fragments,
-    )
     assert_install_summary_runtime_follow_up_contract(output, runtime_help_fragments=runtime_help_fragments)
 
 
@@ -175,41 +140,26 @@ def _assert_bootstrap_concise_after_install_guidance(output: str) -> None:
     assert "Startup checklist" not in output
     assert "Beginner Onboarding Hub:" not in output
     assert output.count("After install") == 1
-    assert output.lower().count("first-run order is") == 1
-    assert output.count("Recovery ladder:") == 1
-    assert f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}" in output
-    assert "Runtime surface:" in output
-    assert "Use gpd --help for local diagnostics and later setup." in output
+    assert "First-run order" not in output
+    assert "Recovery ladder:" not in output
+    assert f"Docs hub: {_BEGINNER_ONBOARDING_HUB_URL}" in output
+    assert "Runtime surface:" not in output
+    assert "Diagnostics: use gpd --help for local diagnostics and later setup." in output
 
 
 def _assert_single_runtime_bootstrap_concise_line(output: str, runtime: str) -> None:
     assert (
-        f"Selected runtime: {_RUNTIME_DISPLAY_NAMES[runtime]} ({_RUNTIME_LAUNCH_COMMANDS[runtime]}); "
-        f"help {_RUNTIME_HELP_COMMANDS[runtime]}; "
-        f"start {_RUNTIME_START_COMMANDS[runtime]}; "
-        f"tour {_RUNTIME_TOUR_COMMANDS[runtime]}; "
-        f"new work {_RUNTIME_NEW_PROJECT_COMMANDS[runtime]}; "
-        f"existing work {_RUNTIME_MAP_RESEARCH_COMMANDS[runtime]}."
-    ) in output
-    assert (
-        f"Fast bootstrap: {_RUNTIME_NEW_PROJECT_COMMANDS[runtime]} --minimal; "
-        f"return later with {_RUNTIME_RESUME_WORK_COMMANDS[runtime]}."
+        f"Next: open {_RUNTIME_DISPLAY_NAMES[runtime]} in this folder, then run {_RUNTIME_START_COMMANDS[runtime]}."
     ) in output
 
 
 def _assert_multi_runtime_bootstrap_concise_lines(output: str, runtimes: tuple[str, ...]) -> None:
-    assert "Runtime surface: first-run order is `help -> start -> tour -> new-project / map-research -> resume-work`." in output
+    assert "Next: choose a runtime and run its GPD start command:" in output
     for runtime in runtimes:
         assert (
-            f"- {_RUNTIME_DISPLAY_NAMES[runtime]} ({_RUNTIME_LAUNCH_COMMANDS[runtime]}): "
-            f"help {_RUNTIME_HELP_COMMANDS[runtime]}; "
-            f"start {_RUNTIME_START_COMMANDS[runtime]}; "
-            f"tour {_RUNTIME_TOUR_COMMANDS[runtime]}; "
-            f"new work {_RUNTIME_NEW_PROJECT_COMMANDS[runtime]}; "
-            f"existing work {_RUNTIME_MAP_RESEARCH_COMMANDS[runtime]}; "
-            f"return later {_RUNTIME_RESUME_WORK_COMMANDS[runtime]}."
+            f"- {_RUNTIME_DISPLAY_NAMES[runtime]}: "
+            f"{_RUNTIME_START_COMMANDS[runtime]}"
         ) in output
-    assert f"Fast bootstrap: use {_RUNTIME_NEW_PROJECT_COMMANDS[runtimes[0]]} --minimal" in output
 
 
 def _assert_in_order(content: str, fragments: tuple[str, ...]) -> None:
@@ -290,7 +240,6 @@ CONFIG_DIR_NAMES = {_RUNTIME_CONFIG_DIR_NAMES!r}
 HELP_COMMANDS = {_RUNTIME_HELP_COMMANDS!r}
 START_COMMANDS = {_RUNTIME_START_COMMANDS!r}
 TOUR_COMMANDS = {_RUNTIME_TOUR_COMMANDS!r}
-NEW_PROJECT_COMMANDS = {_RUNTIME_NEW_PROJECT_COMMANDS!r}
 MAP_RESEARCH_COMMANDS = {_RUNTIME_MAP_RESEARCH_COMMANDS!r}
 RESUME_WORK_COMMANDS = {_RUNTIME_RESUME_WORK_COMMANDS!r}
 SUGGEST_NEXT_COMMANDS = {_RUNTIME_SUGGEST_NEXT_COMMANDS!r}
@@ -614,44 +563,20 @@ if args[:3] == ["-m", "gpd.cli", "install"]:
         record()
         raise SystemExit(1)
     print("After install")
-    print(f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}")
+    print(f"Docs hub: {_BEGINNER_ONBOARDING_HUB_URL}")
     if len(installed_runtimes) == 1:
         runtime = installed_runtimes[0]
         print(
-            f"Runtime surface: Run {{HELP_COMMANDS[runtime]}} for the command list. "
-            "First-run order is `help -> start -> tour -> new-project / map-research -> resume-work`."
+            f"Next: open {{RUNTIME_LABELS[runtime]}} in this folder, then run {{START_COMMANDS[runtime]}}."
         )
-        print(
-            f"Selected runtime: {{RUNTIME_LABELS[runtime]}} ({{LAUNCH_COMMANDS[runtime]}}); "
-            f"help {{HELP_COMMANDS[runtime]}}; "
-            f"start {{START_COMMANDS[runtime]}}; "
-            f"tour {{TOUR_COMMANDS[runtime]}}; "
-            f"new work {{NEW_PROJECT_COMMANDS[runtime]}}; "
-            f"existing work {{MAP_RESEARCH_COMMANDS[runtime]}}."
-        )
-        print(
-            f"Fast bootstrap: {{NEW_PROJECT_COMMANDS[runtime]}} --minimal; "
-            f"return later with {{RESUME_WORK_COMMANDS[runtime]}}. "
-            f"{{recovery_ladder_for_runtime(runtime)}}"
-        )
-        print("Use gpd --help for local diagnostics and later setup.")
     else:
-        print("Runtime surface: first-run order is `help -> start -> tour -> new-project / map-research -> resume-work`.")
+        print("Next: choose a runtime and run its GPD start command:")
         for runtime in installed_runtimes:
             print(
-                f"- {{RUNTIME_LABELS[runtime]}} ({{LAUNCH_COMMANDS[runtime]}}): "
-                f"help {{HELP_COMMANDS[runtime]}}; "
-                f"start {{START_COMMANDS[runtime]}}; "
-                f"tour {{TOUR_COMMANDS[runtime]}}; "
-                f"new work {{NEW_PROJECT_COMMANDS[runtime]}}; "
-                f"existing work {{MAP_RESEARCH_COMMANDS[runtime]}}; "
-                f"return later {{RESUME_WORK_COMMANDS[runtime]}}."
+                f"- {{RUNTIME_LABELS[runtime]}}: "
+                f"{{START_COMMANDS[runtime]}}"
             )
-        print(
-            f"Fast bootstrap: use {{NEW_PROJECT_COMMANDS[installed_runtimes[0]]}} --minimal for the shortest onboarding path."
-        )
-        print({_GENERIC_RECOVERY_LADDER_NOTE!r})
-        print("Use gpd --help for local diagnostics and later setup.")
+    print("Diagnostics: use gpd --help for local diagnostics and later setup.")
     record()
     raise SystemExit(0)
 
@@ -2563,6 +2488,8 @@ def test_bootstrap_does_not_add_after_install_guidance_when_python_install_fails
     assert "Installation failed. Check the output above for details." in result.stderr
     assert "After install" not in result.stdout
     assert f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}" not in result.stdout
+    assert f"Docs hub: {_BEGINNER_ONBOARDING_HUB_URL}" not in result.stdout
+    assert "Diagnostics: use gpd --help for local diagnostics and later setup." not in result.stdout
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -2921,13 +2848,7 @@ def test_bootstrap_supports_all_runtime_install_in_one_pass(tmp_path: Path) -> N
         _assert_multi_runtime_next_steps_line(result.stdout, runtime)
     _assert_bootstrap_concise_after_install_guidance(result.stdout)
     _assert_multi_runtime_bootstrap_concise_lines(result.stdout, _RUNTIME_NAMES)
-    _assert_install_summary_semantic_contract(
-        result.stdout,
-        runtime_help_fragments=tuple(_RUNTIME_HELP_COMMANDS[runtime] for runtime in _RUNTIME_NAMES),
-        resume_work_fragments=("your runtime-specific `resume-work` command",),
-        suggest_next_fragments=("your runtime-specific `suggest-next` command",),
-        pause_work_fragments=("your runtime-specific `pause-work` command",),
-    )
+    _assert_install_summary_semantic_contract(result.stdout)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")

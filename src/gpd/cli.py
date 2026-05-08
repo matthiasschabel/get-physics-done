@@ -79,7 +79,6 @@ from gpd.core.manuscript_artifacts import (
 )
 from gpd.core.onboarding_surfaces import (
     beginner_onboarding_hub_url,
-    beginner_startup_ladder_text,
 )
 from gpd.core.peer_review_mode import (
     PEER_REVIEW_INVALID_SUBJECT_MODE,
@@ -159,7 +158,6 @@ from gpd.core.runtime_command_surfaces import (
 from gpd.core.surface_phrases import (
     cost_inspect_action,
     recovery_action_lines,
-    recovery_ladder_note,
     recovery_recent_action,
     recovery_resume_action,
     tangent_branch_later_follow_up_lines,
@@ -1218,43 +1216,6 @@ def main(
     _cwd = Path(cwd)
 
 
-def _help_workflow_markdown() -> str:
-    return (Path(__file__).resolve().parent / "specs" / "workflows" / "help.md").read_text(encoding="utf-8")
-
-
-def _help_marker_section(name: str) -> str:
-    content = _help_workflow_markdown()
-    start = f"<!-- gpd-help:{name}:start -->"
-    end = f"<!-- gpd-help:{name}:end -->"
-    _, start_separator, tail = content.partition(start)
-    if not start_separator:
-        return ""
-    section, end_separator, _ = tail.partition(end)
-    if not end_separator:
-        return ""
-    return section.strip()
-
-
-def _help_command_groups(command_index_markdown: str) -> list[dict[str, object]]:
-    groups: list[dict[str, object]] = []
-    current_group: dict[str, object] | None = None
-    for line in command_index_markdown.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("### "):
-            current_group = {"name": stripped.removeprefix("### ").strip(), "commands": []}
-            groups.append(current_group)
-            continue
-        if current_group is None or not stripped.startswith("- `"):
-            continue
-        match = re.match(r"^- `([^`]+)` - (.+)$", stripped)
-        if match is None:
-            continue
-        commands = current_group["commands"]
-        if isinstance(commands, list):
-            commands.append({"command": match.group(1), "description": match.group(2)})
-    return groups
-
-
 @app.command("help")
 def help_bridge(
     command_name: str | None = typer.Option(
@@ -1266,10 +1227,17 @@ def help_bridge(
     minimal: bool = typer.Option(False, "--minimal", help="Return the minimal command-specific payload"),
 ) -> None:
     """Machine-readable bridge for the installed runtime help surface."""
-    from gpd.registry import get_command, list_commands
+    from gpd.core.help_renderer import (
+        DETAILED_HELP_FOLLOW_UP,
+        command_detail_payload,
+        command_groups_payload,
+        command_index_payload,
+        render_command_index_markdown,
+        render_quick_start_markdown,
+    )
 
-    quick_start_markdown = _help_marker_section("quick-start")
-    command_index_markdown = _help_marker_section("command-index")
+    quick_start_markdown = render_quick_start_markdown()
+    command_index_markdown = render_command_index_markdown()
     runtime_cwd = _get_cwd()
     payload: dict[str, object] = {
         "command": "gpd:help",
@@ -1292,7 +1260,7 @@ def help_bridge(
     if command_name:
         canonical = canonical_command_label(command_name)
         try:
-            command = get_command(canonical)
+            detail_payload = command_detail_payload(canonical, minimal=minimal)
         except KeyError:
             payload.update(
                 {
@@ -1311,14 +1279,7 @@ def help_bridge(
             {
                 "ok": True,
                 "requested_command": command_name,
-                "canonical_command": command.name,
-                "slug": parse_command_label(command.name).slug,
-                "description": command.description,
-                "argument_hint": command.argument_hint,
-                "context_mode": command.context_mode,
-                "project_reentry_capable": command.project_reentry_capable,
-                "allowed_tools": [] if minimal else command.allowed_tools,
-                "requires": {} if minimal else command.requires,
+                **detail_payload,
                 "command_context": preflight_payload,
             }
         )
@@ -1328,16 +1289,9 @@ def help_bridge(
                 "ok": True,
                 "rendered_sections": ["quick_start", "command_index", "detailed_help_follow_up"],
                 "command_index_markdown": command_index_markdown,
-                "command_groups": _help_command_groups(command_index_markdown),
-                "detailed_help_follow_up": "Use `gpd:help --command <name>` when you want detailed notes for one runtime command.",
-                "command_index": [
-                    {
-                        "command": canonical_command_label(slug),
-                        "slug": slug,
-                        "description": get_command(slug).description,
-                    }
-                    for slug in list_commands(name_format="slug")
-                ],
+                "command_groups": command_groups_payload(),
+                "detailed_help_follow_up": DETAILED_HELP_FOLLOW_UP,
+                "command_index": command_index_payload(),
             }
         )
     else:
@@ -15108,7 +15062,7 @@ def _print_install_summary(
 
     # Post-install next steps
     if results and include_next_steps:
-        next_step_entries: list[tuple[str, str, str, str, str, str, str, str]] = []
+        next_step_entries: list[tuple[str, str]] = []
         seen_runtime_names: set[str] = set()
         for runtime_name, _result in results:
             if runtime_name in seen_runtime_names:
@@ -15117,107 +15071,31 @@ def _print_install_summary(
             adapter = _get_adapter_or_error(runtime_name, action="install summary")
             next_step_entries.append(
                 (
-                    runtime_name,
                     adapter.display_name,
-                    adapter.launch_command,
-                    adapter.help_command,
                     adapter.format_command("start"),
-                    adapter.format_command("tour"),
-                    adapter.new_project_command,
-                    adapter.map_research_command,
                 )
             )
 
         console.print()
         console.print("[bold]After install[/]")
-        console.print(f"Beginner path: {beginner_onboarding_hub_url()}", soft_wrap=True)
+        console.print(f"Docs hub: {beginner_onboarding_hub_url()}", soft_wrap=True)
         if len(next_step_entries) == 1:
-            single_runtime_name, _ = results[0]
-            (
-                _runtime_name,
-                display_name,
-                launch_command,
-                help_command,
-                start_command,
-                tour_command,
-                new_project_command,
-                map_research_command,
-            ) = next_step_entries[0]
-            resume_work_command = _get_adapter_or_error(single_runtime_name, action="install summary").format_command(
-                "resume-work"
-            )
-            suggest_next_command = _get_adapter_or_error(single_runtime_name, action="install summary").format_command(
-                "suggest-next"
-            )
-            pause_work_command = _get_adapter_or_error(single_runtime_name, action="install summary").format_command(
-                "pause-work"
-            )
+            display_name, start_command = next_step_entries[0]
             console.print(
-                "Runtime surface: Run "
-                f"[{_INSTALL_ACCENT_COLOR} bold]{help_command}[/] for the command list. "
-                f"First-run order is {beginner_startup_ladder_text()}.",
+                f"Next: open {display_name} in this folder, then run [{_INSTALL_ACCENT_COLOR} bold]{start_command}[/].",
                 soft_wrap=True,
             )
-            console.print(
-                f"Selected runtime: [bold]{display_name}[/] ([{_INSTALL_ACCENT_COLOR} bold]{launch_command}[/]); "
-                f"help [{_INSTALL_ACCENT_COLOR} bold]{help_command}[/]; "
-                f"start [{_INSTALL_ACCENT_COLOR} bold]{start_command}[/]; "
-                f"tour [{_INSTALL_ACCENT_COLOR} bold]{tour_command}[/]; "
-                f"new work [{_INSTALL_ACCENT_COLOR} bold]{new_project_command}[/]; "
-                f"existing work [{_INSTALL_ACCENT_COLOR} bold]{map_research_command}[/].",
-                soft_wrap=True,
-            )
-            console.print(
-                f"Fast bootstrap: [{_INSTALL_ACCENT_COLOR} bold]{new_project_command} --minimal[/]; "
-                f"return later with [{_INSTALL_ACCENT_COLOR} bold]{resume_work_command}[/]. "
-                f"{recovery_ladder_note(resume_work_phrase=f'`{resume_work_command}`', suggest_next_phrase=f'`{suggest_next_command}`', pause_work_phrase=f'`{pause_work_command}`')}",
-                soft_wrap=True,
-            )
-            console.print(_install_summary_local_cli_bridge_line(), soft_wrap=True)
         else:
-            runtime_lines: list[str] = []
-            for (
-                runtime_name,
-                display_name,
-                launch_command,
-                help_command,
-                start_command,
-                tour_command,
-                new_project_command,
-                map_research_command,
-            ) in next_step_entries:
-                resume_work_command = _get_adapter_or_error(runtime_name, action="install summary").format_command(
-                    "resume-work"
+            console.print(
+                "Next: choose a runtime and run its GPD start command:",
+                soft_wrap=True,
+            )
+            for display_name, start_command in next_step_entries:
+                console.print(
+                    f"- {display_name}: [{_INSTALL_ACCENT_COLOR} bold]{start_command}[/]",
+                    soft_wrap=True,
                 )
-                runtime_lines.append(
-                    f"- {display_name} "
-                    f"([{_INSTALL_ACCENT_COLOR} bold]{launch_command}[/]): "
-                    f"help [{_INSTALL_ACCENT_COLOR} bold]{help_command}[/]; "
-                    f"start [{_INSTALL_ACCENT_COLOR} bold]{start_command}[/]; "
-                    f"tour [{_INSTALL_ACCENT_COLOR} bold]{tour_command}[/]; "
-                    f"new work [{_INSTALL_ACCENT_COLOR} bold]{new_project_command}[/]; "
-                    f"existing work [{_INSTALL_ACCENT_COLOR} bold]{map_research_command}[/]; "
-                    f"return later [{_INSTALL_ACCENT_COLOR} bold]{resume_work_command}[/]."
-                )
-            console.print(f"Runtime surface: first-run order is {beginner_startup_ladder_text()}.", soft_wrap=True)
-            for line in runtime_lines:
-                console.print(line, soft_wrap=True)
-            console.print(
-                f"Fast bootstrap: use [bold]{next_step_entries[0][6]} --minimal[/] for the shortest onboarding path.",
-                soft_wrap=True,
-            )
-            console.print(
-                recovery_ladder_note(
-                    resume_work_phrase="your runtime-specific `resume-work` command",
-                    suggest_next_phrase="your runtime-specific `suggest-next` command",
-                    pause_work_phrase="your runtime-specific `pause-work` command",
-                ),
-                soft_wrap=True,
-            )
-            console.print(
-                _install_summary_local_cli_bridge_line(),
-                soft_wrap=True,
-            )
+        console.print(_install_summary_local_cli_bridge_line(), soft_wrap=True)
         console.print()
 
 
@@ -15291,7 +15169,7 @@ def _install_summary_local_cli_bridge_line() -> str:
     The richer settings guidance stays in bootstrap/help surfaces that render
     post_start_settings_note() and post_start_settings_recommendation().
     """
-    return f"Use [bold]{local_cli_help_command()}[/] for local diagnostics and later setup."
+    return f"Diagnostics: use [bold]{local_cli_help_command()}[/] for local diagnostics and later setup."
 
 
 def _print_workflow_preset_list() -> None:

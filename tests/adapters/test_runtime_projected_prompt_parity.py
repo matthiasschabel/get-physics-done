@@ -26,6 +26,11 @@ from gpd.core.model_visible_text import (
 )
 from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
+from tests.adapters.projection_budget_support import (
+    STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
+    STAGED_INIT_TARGET_COMMANDS,
+    STAGED_PROJECTED_COMMAND_CHAR_BUDGET,
+)
 from tests.adapters.projection_test_utils import StagedCommandProjectionCase, iter_staged_command_projection_cases
 from tests.prompt_metrics_support import iter_markdown_fences, runtime_command_visibility_note
 
@@ -36,7 +41,6 @@ WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
-STAGED_INIT_TARGET_COMMANDS = ("plan-phase", "execute-phase", "new-project", "write-paper")
 COMPACT_WORKFLOW_COMMANDS = (
     "parameter-sweep",
     "sensitivity-analysis",
@@ -49,32 +53,6 @@ COMPACT_WORKFLOW_COMMANDS = (
     "audit-milestone",
     "debug",
 )
-STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
-    "plan-phase": {
-        "claude-code": 4_196,
-        "codex": 6_597,
-        "gemini": 7_095,
-        "opencode": 6_612,
-    },
-    "execute-phase": {
-        "claude-code": 3_426,
-        "codex": 5_987,
-        "gemini": 6_478,
-        "opencode": 5_902,
-    },
-    "new-project": {
-        "claude-code": 9_740,
-        "codex": 11_588,
-        "gemini": 12_080,
-        "opencode": 11_453,
-    },
-    "write-paper": {
-        "claude-code": 13_076,
-        "codex": 12_251,
-        "gemini": 12_692,
-        "opencode": 15_578,
-    },
-}
 TARGET_FIRST_STAGE_BY_COMMAND = {
     "plan-phase": "phase_bootstrap",
     "execute-phase": "phase_bootstrap",
@@ -145,7 +123,6 @@ STAGED_SHIM_CONTRACT_FRAGMENTS = (
     "produced_state",
     "checkpoints",
 )
-STAGED_PROJECTED_COMMAND_CHAR_BUDGET = 20_000
 
 
 def _read(path: Path) -> str:
@@ -647,10 +624,7 @@ def _extract_spawn_contracts(text: str) -> list[dict[str, object]]:
 
 def _expected_target_init_command(command_name: str, bridge: str) -> str:
     if command_name in {"plan-phase", "execute-phase"}:
-        return (
-            f'{bridge} --raw init {command_name} "$ARGUMENTS" '
-            f"--stage {TARGET_FIRST_STAGE_BY_COMMAND[command_name]}"
-        )
+        return f'{bridge} --raw init {command_name} "$ARGUMENTS" --stage {TARGET_FIRST_STAGE_BY_COMMAND[command_name]}'
     if command_name == "new-project":
         return f"{bridge} --raw init new-project --stage scope_intake"
     if command_name == "write-paper":
@@ -677,9 +651,7 @@ def test_staged_init_target_command_projection_stays_under_baseline_budget(
 @pytest.mark.parametrize(
     "runtime",
     tuple(
-        descriptor.runtime_name
-        for descriptor in iter_runtime_descriptors()
-        if not descriptor.native_include_support
+        descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support
     ),
 )
 def test_staged_init_target_non_native_command_shims_use_exact_runtime_bridge(

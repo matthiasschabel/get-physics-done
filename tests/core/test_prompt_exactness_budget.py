@@ -10,18 +10,14 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXACTNESS_TOTAL_BUDGETS = {
-    "brittle_prose_assertions": 2_122,
-    "exact_assertion_count": 8_180,
+    "brittle_prose_assertions": 1_792,
+    "exact_assertion_count": 7_576,
 }
 HIGH_SEVERITY_BASELINES = {
-    "tests/core/test_prompt_wiring.py": {"exact": 1_360, "brittle": 471},
+    "tests/core/test_prompt_wiring.py": {"exact": 921, "brittle": 258},
     "tests/core/test_contract_validation.py": {"exact": 100, "brittle": 69},
-    "tests/test_release_consistency.py": {"exact": 208, "brittle": 60},
-    "tests/core/test_review_contract_prompt_visibility.py": {"exact": 163, "brittle": 57},
-    "tests/core/test_new_project_project_contract_visibility.py": {"exact": 68, "brittle": 37},
-    "tests/ci_sharding.py": {"exact": 52, "brittle": 24},
+    "tests/test_release_consistency.py": {"exact": 189, "brittle": 50},
     "tests/mcp/test_tool_contract_visibility.py": {"exact": 39, "brittle": 23},
-    "tests/core/test_execution_delegation_contracts.py": {"exact": 33, "brittle": 20},
 }
 
 
@@ -59,11 +55,7 @@ def test_exactness_totals_do_not_grow_past_baseline() -> None:
 
 def test_exactness_has_no_new_high_severity_files() -> None:
     rows_by_path = _exactness_files_by_path()
-    high_paths = {
-        path
-        for path, row in rows_by_path.items()
-        if row["severity"] == "high"
-    }
+    high_paths = {path for path, row in rows_by_path.items() if row["severity"] == "high"}
     unexpected_high_paths = sorted(high_paths - set(HIGH_SEVERITY_BASELINES))
 
     assert unexpected_high_paths == []

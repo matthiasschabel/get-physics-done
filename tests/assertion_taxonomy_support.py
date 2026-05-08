@@ -19,14 +19,15 @@ __all__ = [
     "FragmentAssertion",
     "FragmentMode",
     "MarkerScope",
+    "MatchMode",
     "assert_fragments",
     "assert_prompt_contracts",
+    "forbidden_duplicate",
     "fragment_count",
     "machine_exact",
     "marker_range",
     "public_exact",
     "semantic_anchor",
-    "forbidden_duplicate",
 ]
 
 
@@ -47,6 +48,14 @@ class FragmentMode(StrEnum):
     ORDERED = "ordered"
     ABSENT = "absent"
     COUNT = "count"
+
+
+class MatchMode(StrEnum):
+    """Text normalization modes for fragment comparisons."""
+
+    EXACT = "exact"
+    NORMALIZED = "normalized"
+    CASEFOLD_NORMALIZED = "casefold_normalized"
 
 
 class AssertionTaxonomyError(AssertionError):
@@ -75,6 +84,7 @@ class FragmentAssertion:
     label: str
     fragments: tuple[str, ...]
     mode: FragmentMode = FragmentMode.ALL
+    match: MatchMode = MatchMode.EXACT
     owner: str | None = None
     rationale: str | None = None
     section: str | None = None
@@ -86,15 +96,19 @@ class FragmentAssertion:
     def __post_init__(self) -> None:
         kind = AssertionKind(self.kind)
         mode = FragmentMode(self.mode)
+        match = MatchMode(self.match)
         fragments = tuple(self.fragments)
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "mode", mode)
+        object.__setattr__(self, "match", match)
         object.__setattr__(self, "fragments", fragments)
 
         if not self.label.strip():
             raise ValueError("Assertion label must be non-empty")
         if not fragments or any(fragment == "" for fragment in fragments):
             raise ValueError("Fragment assertions require at least one non-empty fragment")
+        if match is not MatchMode.EXACT and any(_match_text(fragment, match) == "" for fragment in fragments):
+            raise ValueError("Normalized fragment assertions require at least one non-whitespace character")
         if mode is FragmentMode.COUNT:
             if (self.expected_count is None) == (self.max_count is None):
                 raise ValueError("Count fragment assertions require exactly one of expected_count or max_count")
@@ -130,6 +144,7 @@ def machine_exact(
     owner: str | None = None,
     rationale: str | None = None,
     mode: FragmentMode | str = FragmentMode.ALL,
+    match: MatchMode | str = MatchMode.EXACT,
     section: str | None = None,
     markers: MarkerInput | None = None,
     context: str | None = None,
@@ -141,6 +156,7 @@ def machine_exact(
         label,
         fragments,
         mode=mode,
+        match=match,
         owner=owner,
         rationale=rationale,
         section=section,
@@ -156,6 +172,7 @@ def public_exact(
     owner: str | None = None,
     rationale: str | None = None,
     mode: FragmentMode | str = FragmentMode.ALL,
+    match: MatchMode | str = MatchMode.EXACT,
     section: str | None = None,
     markers: MarkerInput | None = None,
     context: str | None = None,
@@ -167,6 +184,7 @@ def public_exact(
         label,
         fragments,
         mode=mode,
+        match=match,
         owner=owner,
         rationale=rationale,
         section=section,
@@ -180,6 +198,7 @@ def semantic_anchor(
     fragments: FragmentInput,
     *,
     mode: FragmentMode | str = FragmentMode.ALL,
+    match: MatchMode | str = MatchMode.EXACT,
     section: str | None = None,
     markers: MarkerInput | None = None,
     context: str | None = None,
@@ -191,6 +210,7 @@ def semantic_anchor(
         label,
         fragments,
         mode=mode,
+        match=match,
         section=section,
         markers=markers,
         context=context,
@@ -202,6 +222,7 @@ def fragment_count(
     fragments: FragmentInput,
     *,
     expected_count: int,
+    match: MatchMode | str = MatchMode.EXACT,
     section: str | None = None,
     markers: MarkerInput | None = None,
     context: str | None = None,
@@ -213,6 +234,7 @@ def fragment_count(
         label,
         fragments,
         mode=FragmentMode.COUNT,
+        match=match,
         expected_count=expected_count,
         section=section,
         markers=markers,
@@ -225,6 +247,7 @@ def forbidden_duplicate(
     fragment: str,
     *,
     max_count: int = 1,
+    match: MatchMode | str = MatchMode.EXACT,
     section: str | None = None,
     markers: MarkerInput | None = None,
     context: str | None = None,
@@ -236,6 +259,7 @@ def forbidden_duplicate(
         label,
         fragment,
         mode=FragmentMode.COUNT,
+        match=match,
         max_count=max_count,
         section=section,
         markers=markers,
@@ -257,28 +281,35 @@ def assert_fragments(text: str, assertion: FragmentAssertion) -> None:
 
     scoped_text, context = _scope_text(text, assertion)
     mode = assertion.mode
+    match = assertion.match
+    match_detail = _match_detail(assertion)
+    haystack = _match_text(scoped_text, match)
+    fragments = tuple((fragment, _match_text(fragment, match)) for fragment in assertion.fragments)
 
     if mode is FragmentMode.ALL:
-        for fragment in assertion.fragments:
-            if fragment not in scoped_text:
-                _raise_failure(assertion, context, f"missing fragment={fragment!r}", f"mode={mode.value}")
+        for fragment, needle in fragments:
+            if needle not in haystack:
+                _raise_failure(
+                    assertion, context, f"missing fragment={fragment!r}", f"mode={mode.value}", *match_detail
+                )
         return
 
     if mode is FragmentMode.ANY:
-        if not any(fragment in scoped_text for fragment in assertion.fragments):
+        if not any(needle in haystack for _fragment, needle in fragments):
             _raise_failure(
                 assertion,
                 context,
                 "missing any fragment from group=" + repr(assertion.fragments),
                 f"mode={mode.value}",
+                *match_detail,
             )
         return
 
     if mode is FragmentMode.ORDERED:
         offset = 0
         previous_fragment = "<start>"
-        for fragment in assertion.fragments:
-            index = scoped_text.find(fragment, offset)
+        for fragment, needle in fragments:
+            index = haystack.find(needle, offset)
             if index == -1:
                 _raise_failure(
                     assertion,
@@ -286,14 +317,15 @@ def assert_fragments(text: str, assertion: FragmentAssertion) -> None:
                     f"missing fragment={fragment!r}",
                     f"after fragment={previous_fragment!r}",
                     f"mode={mode.value}",
+                    *match_detail,
                 )
-            offset = index + len(fragment)
+            offset = index + len(needle)
             previous_fragment = fragment
         return
 
     if mode is FragmentMode.ABSENT:
-        for fragment in assertion.fragments:
-            count = scoped_text.count(fragment)
+        for fragment, needle in fragments:
+            count = haystack.count(needle)
             if count:
                 _raise_failure(
                     assertion,
@@ -301,12 +333,13 @@ def assert_fragments(text: str, assertion: FragmentAssertion) -> None:
                     f"forbidden fragment={fragment!r}",
                     f"count={count}",
                     f"mode={mode.value}",
+                    *match_detail,
                 )
         return
 
     if mode is FragmentMode.COUNT:
-        for fragment in assertion.fragments:
-            observed = scoped_text.count(fragment)
+        for fragment, needle in fragments:
+            observed = haystack.count(needle)
             if assertion.expected_count is not None and observed != assertion.expected_count:
                 _raise_failure(
                     assertion,
@@ -315,6 +348,7 @@ def assert_fragments(text: str, assertion: FragmentAssertion) -> None:
                     f"observed_count={observed}",
                     f"expected_count={assertion.expected_count}",
                     f"mode={mode.value}",
+                    *match_detail,
                 )
             if assertion.max_count is not None and observed > assertion.max_count:
                 fragment_label = (
@@ -327,6 +361,7 @@ def assert_fragments(text: str, assertion: FragmentAssertion) -> None:
                     f"observed_count={observed}",
                     f"max_count={assertion.max_count}",
                     f"mode={mode.value}",
+                    *match_detail,
                 )
         return
 
@@ -339,6 +374,7 @@ def _fragment_assertion(
     fragments: FragmentInput,
     *,
     mode: FragmentMode | str = FragmentMode.ALL,
+    match: MatchMode | str = MatchMode.EXACT,
     owner: str | None = None,
     rationale: str | None = None,
     section: str | None = None,
@@ -352,6 +388,7 @@ def _fragment_assertion(
         label=label,
         fragments=_normalize_fragments(fragments),
         mode=FragmentMode(mode),
+        match=MatchMode(match),
         owner=owner,
         rationale=rationale,
         section=section,
@@ -392,6 +429,23 @@ def _scope_text(text: str, assertion: FragmentAssertion) -> tuple[str, str]:
         contexts.append(f"markers {assertion.markers.start!r}..{end_marker!r}")
 
     return scoped_text, " / ".join(contexts)
+
+
+def _match_text(text: str, match: MatchMode) -> str:
+    if match is MatchMode.EXACT:
+        return text
+    normalized = " ".join(text.split())
+    if match is MatchMode.NORMALIZED:
+        return normalized
+    if match is MatchMode.CASEFOLD_NORMALIZED:
+        return normalized.casefold()
+    raise AssertionError(f"Unhandled match mode: {match.value}")
+
+
+def _match_detail(assertion: FragmentAssertion) -> tuple[str, ...]:
+    if assertion.match is MatchMode.EXACT:
+        return ()
+    return (f"match={assertion.match.value}",)
 
 
 def _extract_markdown_section(text: str, section: str, assertion: FragmentAssertion) -> str:

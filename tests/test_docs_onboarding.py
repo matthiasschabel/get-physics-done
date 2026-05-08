@@ -77,6 +77,25 @@ def _assert_semantic_anchor(
     assert_fragments(content, semantic_anchor(label, fragments, mode=mode, context=context))
 
 
+def _assert_any_semantic_anchor(
+    docs: dict[str, str],
+    label: str,
+    fragments: tuple[str, ...] | str,
+    *,
+    context: str,
+) -> None:
+    failures: list[str] = []
+    for doc_name, content in docs.items():
+        try:
+            _assert_semantic_anchor(content, label, fragments, context=f"{context}: {doc_name}")
+        except AssertionError as exc:
+            failures.append(f"{doc_name}: {exc}")
+        else:
+            return
+    joined = "\n".join(failures)
+    raise AssertionError(f"expected {label} in at least one document for {context}\n{joined}")
+
+
 def _fenced_command_blocks(section: str, *, info: str) -> tuple[str, ...]:
     return tuple(fence.body.strip() for fence in iter_markdown_fences(section) if fence.info.strip() == info)
 
@@ -265,15 +284,22 @@ def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
         "onboarding hub stable navigation labels",
         (
             "# GPD Onboarding Hub",
-            "Show the full beginner path on one page",
             "## First: terminal vs runtime",
-            "Your **normal terminal**",
-            "Your **runtime**",
-            "Common beginner terms",
             "./macos.md",
             "./windows.md",
             "./linux.md",
             "## After the guides",
+        ),
+        context="docs/README.md",
+    )
+    _assert_semantic_anchor(
+        content,
+        "onboarding hub beginner navigation concepts",
+        (
+            "full beginner path",
+            "normal terminal",
+            "runtime",
+            "beginner terms",
         ),
         context="docs/README.md",
     )
@@ -508,26 +534,55 @@ def test_runtime_config_guide_omits_unsupported_skip_mcp_advice() -> None:
     content = _read("src/gpd/specs/references/tooling/runtime-config-guide.md")
 
     assert "--skip-mcp" not in content
-    assert "free space before installing" in content
+    _assert_semantic_anchor(
+        content,
+        "runtime config low-resource install guidance",
+        ("disk space", "managed environment", "runtime config", "recreated"),
+        context="runtime-config-guide.md",
+    )
 
 
 def test_set_tier_models_workflow_keeps_runtime_model_examples_generic() -> None:
     content = _read("src/gpd/specs/workflows/set-tier-models.md")
 
     assert "adapter catalog" not in content
-    assert "Runtime-native examples are intentionally not hard-coded here." in content
-    assert "runtime/provider's own model documentation" in content
+    _assert_semantic_anchor(
+        content,
+        "runtime-native model example guidance",
+        (
+            "Runtime-native examples",
+            "not hard-coded",
+            "exact string accepted by the active runtime",
+            "runtime/provider",
+            "model documentation",
+        ),
+        context="set-tier-models.md",
+    )
 
 
 def test_runtime_quickstarts_keep_current_provider_specific_setup_notes() -> None:
     docs = {
-        surface.runtime_name: _read(f"docs/{runtime_doc_filename(surface)}")
-        for surface in beginner_runtime_surfaces()
+        surface.runtime_name: _read(f"docs/{runtime_doc_filename(surface)}") for surface in beginner_runtime_surfaces()
     }
 
-    assert any("Pro, Max, Teams, Enterprise, or Console account" in content for content in docs.values())
-    assert any("GOOGLE_CLOUD_PROJECT" in content for content in docs.values())
-    assert any("/connect" in content for content in docs.values())
+    _assert_any_semantic_anchor(
+        docs,
+        "Claude Code account-access setup note",
+        ("Claude Code", "account", "free Claude.ai plan"),
+        context="runtime quickstarts",
+    )
+    _assert_any_semantic_anchor(
+        docs,
+        "Gemini Cloud project setup note",
+        ("GOOGLE_CLOUD_PROJECT", "Gemini Code Assist", "official authentication guide"),
+        context="runtime quickstarts",
+    )
+    _assert_any_semantic_anchor(
+        docs,
+        "OpenCode connect setup note",
+        ("/connect", "provider", "API-key or billing setup"),
+        context="runtime quickstarts",
+    )
 
 
 def test_progress_docs_do_not_reference_nonexistent_list_todos_command() -> None:

@@ -54,6 +54,13 @@ def _detailed_command_headings(content: str) -> list[str]:
     return re.findall(r"(?m)^\*\*`gpd:([a-z0-9-]+)\b", detailed_reference)
 
 
+def _command_index_rows(content: str) -> dict[str, str]:
+    command_index = _help_marker_range(content, "command-index")
+    rows = re.findall(r"(?m)^- `([^`]+)` - (.+)$", command_index)
+    assert len(rows) == len({command for command, _description in rows})
+    return dict(rows)
+
+
 def _assert_anchor(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
     semantic_anchor(label, fragments).check(text)
 
@@ -279,21 +286,40 @@ def test_help_workflow_export_logs_surfaces_passthrough_filters() -> None:
     assert export_detail in help_workflow
     for flag in ("--command <label>", "--phase <phase>", "--category <name>"):
         assert flag in help_workflow
-    assert "Supports passthrough filters" in help_workflow
     assert "empty_export: true" in help_workflow
     assert "Usage: `gpd:export-logs --command execute-phase --phase 3 --category workflow`" in help_workflow
+    _assert_anchor(
+        help_workflow,
+        "export logs passthrough filter semantics",
+        ("gpd:export-logs", "passthrough filters", "--command <label>", "--phase <phase>", "--category <name>"),
+    )
 
 
 def test_help_workflow_labels_observe_trace_side_effects_and_export_commit_opt_in() -> None:
     help_workflow = _read("src/gpd/specs/workflows/help.md")
 
-    assert "`gpd observe execution`, `gpd observe sessions`, `gpd observe show`, and `gpd trace show` inspect only" in (
-        help_workflow
-    )
-    assert "`gpd observe event`, `gpd observe export`, and `gpd trace start|log|stop` write" in help_workflow
     assert "**`gpd:export [--format html|latex|zip|all] [--commit]`**" in help_workflow
-    assert "generated text exports are committed only with explicit `--commit`" in help_workflow
     assert "Usage: `gpd:export --format latex --commit`" in help_workflow
+    _assert_anchor(
+        help_workflow,
+        "observe and trace read/write boundary",
+        (
+            "gpd observe execution",
+            "gpd observe sessions",
+            "gpd observe show",
+            "gpd trace show",
+            "inspect only",
+            "gpd observe event",
+            "gpd observe export",
+            "gpd trace start|log|stop",
+            "write observability",
+        ),
+    )
+    _assert_anchor(
+        help_workflow,
+        "export commit opt in",
+        ("generated text exports", "committed", "explicit `--commit`"),
+    )
 
 
 def test_help_workflow_error_patterns_uses_pattern_library_categories() -> None:
@@ -443,7 +469,7 @@ def test_help_workflow_files_and_structure_and_knowledge_lifecycle_coverages() -
 
 def test_help_workflow_current_workspace_helpers_and_discover_quick_mode_wording() -> None:
     help_workflow = _read("src/gpd/specs/workflows/help.md")
-    command_index = _help_marker_range(help_workflow, "command-index")
+    command_index_rows = _command_index_rows(help_workflow)
     discover_detail = _detailed_command_block(
         help_workflow,
         "**`gpd:discover [phase or topic] [--depth quick|medium|deep]`**",
@@ -470,9 +496,12 @@ def test_help_workflow_current_workspace_helpers_and_discover_quick_mode_wording
         "**`gpd:digest-knowledge",
     )
 
-    assert (
-        "- `gpd:discover [phase or topic]` - Survey methods, literature, and tools before planning; `quick` is verification-only"
-        in command_index
+    discover_index_description = command_index_rows["gpd:discover [phase or topic]"]
+    assert discover_index_description.strip()
+    _assert_anchor(
+        discover_index_description,
+        "discover command-index description semantics",
+        ("Survey", "methods", "literature", "tools", "`quick`", "verification-only"),
     )
     _assert_anchor(
         discover_detail,

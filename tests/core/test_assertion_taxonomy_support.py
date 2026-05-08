@@ -8,6 +8,7 @@ from tests.assertion_taxonomy_support import (
     AssertionKind,
     AssertionTaxonomyError,
     FragmentMode,
+    MatchMode,
     assert_prompt_contracts,
     forbidden_duplicate,
     fragment_count,
@@ -43,6 +44,7 @@ def test_assertion_taxonomy_values_are_stable_contract() -> None:
         "forbidden_duplicate",
     )
     assert tuple(mode.value for mode in FragmentMode) == ("all", "any", "ordered", "absent", "count")
+    assert tuple(match.value for match in MatchMode) == ("exact", "normalized", "casefold_normalized")
 
 
 def test_exact_assertion_constructors_accept_optional_metadata() -> None:
@@ -100,6 +102,74 @@ def test_fragment_modes_cover_all_any_ordered_absent_and_count_with_scopes() -> 
         section="Machine Contract",
         markers=scoped_markers,
     ).check(SAMPLE_TEXT)
+
+
+def test_match_modes_keep_exact_default_and_allow_explicit_normalization() -> None:
+    text = "The lifecycle\n  keeps plan checkpoints."
+
+    with pytest.raises(AssertionTaxonomyError) as exact_exc_info:
+        semantic_anchor("default exact anchor", "lifecycle keeps plan checkpoints").check(text)
+
+    assert "missing fragment='lifecycle keeps plan checkpoints'" in str(exact_exc_info.value)
+    assert "match=normalized" not in str(exact_exc_info.value)
+
+    semantic_anchor(
+        "normalized anchor",
+        "lifecycle keeps plan checkpoints",
+        match=MatchMode.NORMALIZED,
+    ).check(text)
+
+    with pytest.raises(AssertionTaxonomyError) as normalized_exc_info:
+        semantic_anchor(
+            "normalized remains case-sensitive",
+            "the lifecycle keeps plan checkpoints",
+            match=MatchMode.NORMALIZED,
+        ).check(text)
+
+    assert "match=normalized" in str(normalized_exc_info.value)
+
+    semantic_anchor(
+        "casefold normalized anchor",
+        "the lifecycle keeps plan checkpoints",
+        match=MatchMode.CASEFOLD_NORMALIZED,
+    ).check(text)
+
+
+def test_match_modes_apply_to_ordered_absent_and_count_modes() -> None:
+    text = """First
+stage
+
+SECOND   stage
+
+Repeat
+ warning
+repeat warning
+"""
+
+    semantic_anchor(
+        "casefold normalized ordered anchors",
+        ("first stage", "second stage"),
+        mode=FragmentMode.ORDERED,
+        match=MatchMode.CASEFOLD_NORMALIZED,
+    ).check(text)
+    fragment_count(
+        "casefold normalized duplicate count",
+        "repeat warning",
+        expected_count=2,
+        match=MatchMode.CASEFOLD_NORMALIZED,
+    ).check(text)
+
+    with pytest.raises(AssertionTaxonomyError) as exc_info:
+        semantic_anchor(
+            "casefold normalized absence",
+            "second stage",
+            mode=FragmentMode.ABSENT,
+            match="casefold_normalized",
+        ).check(text)
+
+    message = str(exc_info.value)
+    assert "forbidden fragment='second stage'" in message
+    assert "match=casefold_normalized" in message
 
 
 def test_assert_prompt_contracts_uses_fence_aware_section_scopes() -> None:

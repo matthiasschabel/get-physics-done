@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+_HELP_MARKERS = ("quick-start", "command-index", "detailed-command-reference")
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
@@ -16,15 +18,24 @@ def _read_workflow_help() -> str:
     return (_repo_root() / "src/gpd/specs/workflows/help.md").read_text(encoding="utf-8")
 
 
+def _read_command_help() -> str:
+    return (_repo_root() / "src/gpd/commands/help.md").read_text(encoding="utf-8")
+
+
 def _range(content: str, start_marker: str, end_marker: str) -> str:
     start = content.index(start_marker) + len(start_marker)
     end = content.index(end_marker, start)
     return content[start:end]
 
 
-def _help_marker_range(content: str, marker_name: str) -> str:
+def _help_marker_pair(marker_name: str) -> tuple[str, str]:
     start_marker = f"<!-- gpd-help:{marker_name}:start -->"
     end_marker = f"<!-- gpd-help:{marker_name}:end -->"
+    return start_marker, end_marker
+
+
+def _help_marker_range(content: str, marker_name: str) -> str:
+    start_marker, end_marker = _help_marker_pair(marker_name)
     return _range(content, start_marker, end_marker)
 
 
@@ -90,6 +101,41 @@ def _render_command_index(renderer: object) -> str:
             include_quick_start=False,
         )
     return _rendered_markdown(result)
+
+
+def test_help_marker_comments_are_unique_ordered_extraction_anchors() -> None:
+    workflow_help = _read_workflow_help()
+    positions: list[int] = []
+
+    for marker_name in _HELP_MARKERS:
+        start_marker, end_marker = _help_marker_pair(marker_name)
+        assert workflow_help.count(start_marker) == 1
+        assert workflow_help.count(end_marker) == 1
+
+        start_position = workflow_help.index(start_marker)
+        end_position = workflow_help.index(end_marker, start_position)
+        assert start_position < end_position
+        positions.extend([start_position, end_position])
+
+    assert positions == sorted(positions)
+
+
+def test_help_wrapper_extraction_contract_uses_exact_marker_anchors() -> None:
+    help_command = _read_command_help()
+
+    marker_pairs = tuple("`" + start + "` / `" + end + "`" for start, end in map(_help_marker_pair, _HELP_MARKERS))
+    for marker_pair in marker_pairs:
+        assert marker_pair in help_command
+
+    extraction_rules = (
+        "Return marker contents only; never print the HTML marker comments themselves.",
+        "Visible headings inside marker ranges are output labels only.",
+        "Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:quick-start:end -->`.",
+        "Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:command-index:end -->`.",
+        "whose visible heading is `## Detailed Command Reference`.",
+    )
+    for extraction_rule in extraction_rules:
+        assert extraction_rule in help_command
 
 
 def test_help_quick_start_marker_matches_renderer_output() -> None:

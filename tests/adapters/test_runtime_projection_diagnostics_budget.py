@@ -5,36 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.core import prompt_diagnostics
+from tests.adapters.projection_budget_support import (
+    STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
+    STAGED_PROJECTED_COMMAND_CHAR_BUDGET,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NON_NATIVE_RUNTIMES = ("codex", "gemini", "opencode")
-TARGET_RUNTIME_PROJECTION_BUDGETS = {
-    "plan-phase": {
-        "claude-code": 4_196,
-        "codex": 6_597,
-        "gemini": 7_095,
-        "opencode": 6_612,
-    },
-    "execute-phase": {
-        "claude-code": 3_426,
-        "codex": 5_987,
-        "gemini": 6_478,
-        "opencode": 5_902,
-    },
-    "new-project": {
-        "claude-code": 9_740,
-        "codex": 11_588,
-        "gemini": 12_080,
-        "opencode": 11_453,
-    },
-    "write-paper": {
-        "claude-code": 13_076,
-        "codex": 12_251,
-        "gemini": 12_692,
-        "opencode": 15_578,
-    },
-}
-STAGED_COMMAND_CHAR_BUDGET = 20_000
 NORMALIZED_RUNTIME_BRIDGE_MARKER = "<runtime-bridge>"
 KNOWN_PROJECTION_HOTSPOTS = {
     "execute-phase",
@@ -124,10 +101,10 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
     )
 
     items_by_name = {item.name: item for item in report.items if item.kind == "command"}
-    missing = sorted(set(TARGET_RUNTIME_PROJECTION_BUDGETS) - set(items_by_name))
+    missing = sorted(set(STAGED_INIT_COMMAND_PROJECTION_BUDGETS) - set(items_by_name))
     assert missing == []
 
-    for command_name, budget_by_runtime in TARGET_RUNTIME_PROJECTION_BUDGETS.items():
+    for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_BUDGETS.items():
         item = items_by_name[command_name]
         metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
         assert set(runtime_names) <= set(metrics_by_runtime)
@@ -135,7 +112,7 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
         for runtime, budget in budget_by_runtime.items():
             metric = metrics_by_runtime[runtime]
             assert _normalized_runtime_projection_char_count(metric) <= budget
-            assert metric.char_count <= STAGED_COMMAND_CHAR_BUDGET
+            assert metric.char_count <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
             if runtime in NON_NATIVE_RUNTIMES:
                 assert metric.bridge_command_occurrences > 0
                 assert metric.shell_rewrite_count > 0

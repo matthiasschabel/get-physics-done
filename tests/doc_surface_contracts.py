@@ -292,6 +292,40 @@ def parse_markdown_links(section: str) -> tuple[ParsedMarkdownLink, ...]:
     )
 
 
+def _code_label_bullets(section: str, *, context: str) -> dict[str, str]:
+    rows: dict[str, str] = {}
+    for line in section.splitlines():
+        match = re.match(r"^\s*-\s+`([^`\n]+)`:\s*(.+?)\s*$", line)
+        if match is None:
+            continue
+        label, description = match.groups()
+        if label in rows:
+            raise AssertionError(f"duplicate code-labeled bullet in {context}: {label!r}")
+        rows[label] = description
+    if not rows:
+        raise AssertionError(f"missing code-labeled bullets in {context}")
+    return rows
+
+
+def _assert_code_label_bullet_terms(
+    section: str,
+    expected_terms_by_label: dict[str, tuple[str, ...]],
+    *,
+    context: str,
+) -> None:
+    rows = _code_label_bullets(section, context=context)
+    for label, expected_terms in expected_terms_by_label.items():
+        description = rows.get(label)
+        if description is None:
+            raise AssertionError(f"missing code-labeled bullet in {context}: {label!r}; labels={tuple(rows)!r}")
+        missing = tuple(term for term in expected_terms if term not in description)
+        if missing:
+            raise AssertionError(
+                f"code-labeled bullet {label!r} in {context} is missing expected terms: {missing!r}; "
+                f"description={description!r}"
+            )
+
+
 def assert_markdown_link(section: str, label: str, href: str, *, context: str) -> None:
     links = parse_markdown_links(section)
     if any(link.label == label and link.href == href for link in links):
@@ -721,7 +755,15 @@ def assert_execution_observability_surface_contract(content: str) -> None:
         ),
         label="execution progress/waiting wording",
     )
-    assert "possibly stalled" in content
+    _assert_contains_any(
+        content,
+        (
+            "possibly stalled",
+            "stalled execution",
+            "stall",
+        ),
+        label="possible execution-stall wording",
+    )
     _assert_contains_any(
         content,
         (
@@ -733,14 +775,24 @@ def assert_execution_observability_surface_contract(content: str) -> None:
 
 
 def assert_health_command_public_contract(content: str) -> None:
-    assert "Parse JSON output containing:" in content
-    assert "`overall`: top-level `CheckStatus` for the full report" in content
-    assert "`summary`: `HealthSummary` with `ok`, `warn`, `fail`, and `total`" in content
-    assert (
-        "`checks`: Array of `HealthCheck` objects with `status`, `label`, `details`, `issues`, and `warnings`"
-        in content
+    _assert_contains_any(
+        content,
+        (
+            "Parse JSON output",
+            "valid report JSON",
+        ),
+        label="health command JSON parsing guidance",
     )
-    assert "`fixes_applied`: top-level list of auto-applied fix descriptions" in content
+    _assert_code_label_bullet_terms(
+        content,
+        {
+            "overall": ("CheckStatus",),
+            "summary": ("HealthSummary", "ok", "warn", "fail", "total"),
+            "checks": ("HealthCheck", "status", "label", "details", "issues", "warnings"),
+            "fixes_applied": ("auto-applied fix",),
+        },
+        context="health command JSON fields",
+    )
     assert "Array of `{name, status, message, fixed}`" not in content
     assert "Object with `total`, `passed`, `warnings`, `failures`, `fixed`" not in content
 
@@ -1038,13 +1090,20 @@ def assert_tour_command_surface_contract(content: str) -> None:
     ):
         _assert_contains_any(content, options, label=label)
 
-    assert "What comes later after startup" in content
     for label, options in (
         ("tour discuss-phase surface", _runtime_command_fragments("discuss-phase")),
         ("tour write-paper surface", _runtime_command_fragments("write-paper")),
         ("tour tangent surface", _runtime_command_fragments("tangent")),
     ):
         _assert_contains_any(content, options, label=label)
+    _assert_contains_any(
+        content,
+        (
+            "What comes later after startup",
+            "later after startup",
+        ),
+        label="tour later-work section",
+    )
 
     _assert_contains_any(
         content,
@@ -1073,7 +1132,15 @@ def assert_tour_command_surface_contract(content: str) -> None:
         ),
         label="tour settings follow-up boundary",
     )
-    assert "Do not ask the user to pick a branch and do not continue into another workflow." in content
+    _assert_contains_any(
+        content,
+        (
+            "Do not ask the user to pick a branch and do not continue into another workflow.",
+            "not ask the user to pick a branch",
+            "do not continue into another workflow",
+        ),
+        label="tour branch non-routing boundary",
+    )
 
 
 def assert_beginner_startup_routing_contract(content: str) -> None:
@@ -1269,7 +1336,9 @@ def assert_beginner_router_bridge_contract(content: str) -> None:
 
 
 def assert_beginner_hub_preflight_contract(content: str) -> None:
-    assert "## Before you open the guides" in content
+    preflight_heading = "## Before you open the guides"
+    terminal_runtime_heading = "## First: terminal vs runtime"
+    assert preflight_heading in content
     for requirement in beginner_preflight_requirements():
         assert requirement in content
     _assert_contains_any(
@@ -1280,10 +1349,17 @@ def assert_beginner_hub_preflight_contract(content: str) -> None:
         ),
         label="local install learning guidance",
     )
-    assert "What this hub does not do" in content
+    _assert_contains_any(
+        content,
+        (
+            "What this hub does not do",
+            "hub does not do",
+        ),
+        label="beginner hub caveat summary",
+    )
     for caveat in beginner_onboarding_caveats():
         assert caveat in content
-    assert content.index("## Before you open the guides") < content.index("## First: terminal vs runtime")
+    assert content.index(preflight_heading) < content.index(terminal_runtime_heading)
 
 
 def assert_recovery_ladder_contract(

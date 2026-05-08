@@ -75,7 +75,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `autonomy`, `review_cadence`, `research_mode`, `parallelization`, `max_unattended_minutes_per_plan`, `max_unattended_minutes_per_wave`, `checkpoint_after_n_tasks`, `checkpoint_after_first_load_bearing_result`, `checkpoint_before_downstream_dependent_tasks`, `verifier_enabled`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `platform`.
+Use `gpd --raw stage field-access execute-phase --stage phase_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `BOOTSTRAP_INIT`; `BOOTSTRAP_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
 **If `phase_found` is false:** Error -- phase directory not found.
 **If `plan_count` is 0:** Error -- no plans found in phase.
@@ -170,30 +170,11 @@ All subsequent commits go to this branch. User handles merging.
 <step name="classify_phase">
 Classify the phase type to drive agent selection and context budget decisions. Scan the phase goal and plan objectives for indicator keywords.
 
-```bash
-PHASE_CLASSIFICATION_INIT=$(load_execute_phase_stage phase_classification) || { echo "ERROR: phase_classification init failed"; exit 1; }
-PHASE_GOAL=$(gpd --raw roadmap get-phase "${phase_number}" | gpd json get .goal --default "")
-PLAN_OBJECTIVES=""
-for plan in "$phase_dir"/*-PLAN.md; do
-  OBJ=$(gpd frontmatter get "$plan" --field objective 2>/dev/null)
-  PLAN_OBJECTIVES="${PLAN_OBJECTIVES} ${OBJ}"
-done
-PHASE_TEXT="${PHASE_GOAL} ${PLAN_OBJECTIVES}"
-```
+Load `load_execute_phase_stage phase_classification`, then classify from the stage payload, the phase goal, and selected plan objectives.
 
-Classify using keyword matching (a phase may have multiple classes):
+Use `gpd --raw stage field-access execute-phase --stage phase_classification --style instruction` before reading `PHASE_CLASSIFICATION_INIT`; fields outside that helper-selected set are unavailable at this stage.
 
-```bash
-PHASE_CLASSES=()
-echo "$PHASE_TEXT" | grep -qiE "derive|prove|show that|analytical|closed.form|exact result" && PHASE_CLASSES+=("derivation")
-echo "$PHASE_TEXT" | grep -qiE "simulat|compute|discretiz|grid|convergence|benchmark|finite.element|Monte Carlo|numerical" && PHASE_CLASSES+=("numerical")
-echo "$PHASE_TEXT" | grep -qiE "survey|review|compare approaches|what is known|prior work|literature" && PHASE_CLASSES+=("literature")
-echo "$PHASE_TEXT" | grep -qiE "write paper|draft|manuscript|submit|LaTeX" && PHASE_CLASSES+=("paper-writing")
-echo "$PHASE_TEXT" | grep -qiE "define|set up framework|establish conventions|Lagrangian|Hamiltonian|action" && PHASE_CLASSES+=("formalism")
-echo "$PHASE_TEXT" | grep -qiE "analyz|compare|interpret|extract|fit|scaling" && PHASE_CLASSES+=("analysis")
-echo "$PHASE_TEXT" | grep -qiE "verify|cross.check|reproduce|validate|test against" && PHASE_CLASSES+=("validation")
-[ ${#PHASE_CLASSES[@]} -eq 0 ] && PHASE_CLASSES+=("mixed")
-```
+Classify semantically. A phase may have multiple classes: `derivation`, `numerical`, `literature`, `paper-writing`, `formalism`, `analysis`, and `validation`; use `mixed` only when none of those apply.
 
 Log the classification: `"Phase ${phase_number} classified as: ${PHASE_CLASSES[*]}"`
 
@@ -207,82 +188,25 @@ Log the classification: `"Phase ${phase_number} classified as: ${PHASE_CLASSES[*
 <step name="adapt_to_computation_type">
 Translate the phase classification into concrete execution parameters that drive wave-loop behavior. Set these variables before entering `execute_waves`:
 
-```bash
-# Defaults
-CONVENTION_LOCK_REQUIRED=false
-PRE_EXECUTION_SPECIALISTS=()
-INTER_WAVE_CHECKS=("convention" "dimensional")
-EXECUTOR_CONTEXT_HINT="standard"
-WAVE_TIMEOUT_FACTOR=1.0
-FORCE_SEQUENTIAL=false
-YOLO_RESTRICTIONS=()
-```
+Start from this default routing state: `CONVENTION_LOCK_REQUIRED=false`, no pre-execution specialists, `INTER_WAVE_CHECKS=[convention, dimensional]`, `EXECUTOR_CONTEXT_HINT=standard`, `WAVE_TIMEOUT_FACTOR=1.0`, `FORCE_SEQUENTIAL=false`, and no yolo restrictions.
 
-**Per-class overrides:** Apply the case block below cumulatively for multi-class phases. It is the executable source of truth for convention locks, specialist routing, inter-wave checks, executor context hints, timeout factors, sequential forcing, and yolo restrictions.
+**Per-class overrides:** Apply these cumulatively for multi-class phases. This table is the source of truth for convention locks, specialist routing, inter-wave checks, executor context hints, timeout factors, sequential forcing, and yolo restrictions.
 
-**Apply overrides:**
-
-```bash
-for CLASS in "${PHASE_CLASSES[@]}"; do
-  case "$CLASS" in
-    derivation)
-      CONVENTION_LOCK_REQUIRED=true
-      INTER_WAVE_CHECKS+=("identity_scan")
-      EXECUTOR_CONTEXT_HINT="derivation-heavy"
-      WAVE_TIMEOUT_FACTOR=1.5
-      YOLO_RESTRICTIONS+=("no_skip_verification")
-      ;;
-    numerical)
-      INTER_WAVE_CHECKS+=("convergence_spot_check")
-      EXECUTOR_CONTEXT_HINT="code-heavy"
-      PRE_EXECUTION_SPECIALISTS+=("experiment-designer")  # gpd-experiment-designer
-      ;;
-    literature)
-      FORCE_SEQUENTIAL=true
-      EXECUTOR_CONTEXT_HINT="reading-heavy"
-      INTER_WAVE_CHECKS=("convention")
-      ;;
-    paper-writing)
-      PRE_EXECUTION_SPECIALISTS+=("notation-coordinator")
-      INTER_WAVE_CHECKS+=("latex_compile")
-      EXECUTOR_CONTEXT_HINT="prose-heavy"
-      ;;
-    formalism)
-      CONVENTION_LOCK_REQUIRED=true
-      PRE_EXECUTION_SPECIALISTS+=("notation-coordinator")
-      INTER_WAVE_CHECKS+=("identity_scan")
-      ;;
-    analysis)
-      INTER_WAVE_CHECKS+=("plausibility_scan")
-      ;;
-    validation)
-      YOLO_RESTRICTIONS+=("no_skip_verification" "no_skip_inter_wave")
-      INTER_WAVE_CHECKS+=("identity_scan" "convergence_spot_check" "plausibility_scan")
-      ;;
-  esac
-done
-
-echo "Execution adaptation: convention_lock=${CONVENTION_LOCK_REQUIRED}, pre_specialists=[${PRE_EXECUTION_SPECIALISTS[*]}], inter_wave=[${INTER_WAVE_CHECKS[*]}], context_hint=${EXECUTOR_CONTEXT_HINT}, timeout_factor=${WAVE_TIMEOUT_FACTOR}"
-```
+| Class | Overrides |
+|---|---|
+| `derivation` | require convention lock, add identity scan, use `derivation-heavy`, increase timeout factor, disallow skipped verification in yolo |
+| `numerical` | add convergence spot check, use `code-heavy`, route `gpd-experiment-designer` only when the phase or plan requires a standalone design handoff |
+| `literature` | force sequential execution, use `reading-heavy`, keep convention-only inter-wave checks |
+| `paper-writing` | route notation coordination when needed, add LaTeX compile smoke checks, use `prose-heavy` |
+| `formalism` | require convention lock, route notation coordination when needed, add identity scan |
+| `analysis` | add plausibility scan |
+| `validation` | disallow skipped verification and skipped inter-wave checks in yolo, add identity, convergence, and plausibility scans |
 
 **Convention lock enforcement:**
 
 If `CONVENTION_LOCK_REQUIRED=true`:
 
-```bash
-CONV_STATUS=$(gpd --raw convention check)
-if [ "$CONV_STATUS" != "locked" ] && [ "$CONV_STATUS" != "complete" ]; then
-  echo "ERROR: Phase class (${PHASE_CLASSES[*]}) requires locked conventions before execution."
-  echo "Convention status: ${CONV_STATUS}"
-  echo ""
-  echo "Fix with one of:"
-  echo "  gpd convention set"
-  echo "  validate conventions through the runtime workflow"
-  echo ""
-  echo "HALTING — convention errors in derivation/formalism phases compound across every step."
-  exit 1
-fi
-```
+Run the convention lock gate and require a `locked` or `complete` result before execution. If it fails, halt with a concrete `gpd convention set` / `gpd:validate-conventions` repair route; derivation and formalism convention errors compound across every step.
 
 **Hard gate:** when `CONVENTION_LOCK_REQUIRED=true` and conventions are not locked, execution MUST NOT proceed in any autonomy mode. Convention errors invalidate downstream results.
 
@@ -339,7 +263,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `active_reference_context`, `reference_artifacts_content`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
+Use `gpd --raw stage field-access execute-phase --stage wave_planning --style instruction` to confirm the manifest-selected wave-planning fields. Read only those keys from `WAVE_PLANNING_INIT`; `WAVE_PLANNING_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 </step>
 
 <step name="claim_deliverable_alignment_check">
@@ -411,59 +335,15 @@ gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$
 </step>
 
 <step name="discover_and_group_plans">
-Load plan inventory with wave grouping in one call:
-
-```bash
-PLAN_INDEX=$(gpd phase index "${phase_number}")
-```
+Load plan inventory with wave grouping from `gpd phase index {phase_number}`.
 
 Parse JSON for: `phase`, `plans[]` (each with `id`, `wave`, `interactive`, `gap_closure`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves` (map of wave number -> plan IDs), `incomplete`, `has_checkpoints`.
 
 **Filtering:** Skip plans where `has_summary: true`. If `$GAPS_ONLY` is true, also skip non-gap_closure plans. If all filtered: "No matching incomplete plans" -> exit.
 
-**Intra-wave dependency validation:** Verify that no plan's `depends_on` references another plan in the SAME wave (which would be a circular dependency within a wave):
+**Intra-wave dependency validation:** From the phase index, verify that no plan's `depends_on` references another plan in the same wave. If any same-wave dependency exists, stop and report the plan IDs and wave number.
 
-```bash
-INTRA_WAVE_CONFLICT=false
-# For each wave, check that no plan depends on another plan in the same wave
-for WAVE_NUM in $(echo "$PLAN_INDEX" | gpd json keys .waves); do
-  WAVE_PLANS=$(echo "$PLAN_INDEX" | gpd json list ".waves[\"$WAVE_NUM\"]")
-  for PLAN_ID in $WAVE_PLANS; do
-    DEPS=$(gpd frontmatter get \
-      "${phase_dir}/${PLAN_ID}-PLAN.md" --field depends_on 2>/dev/null)
-    for DEP in $(echo "$DEPS" | tr ',' ' '); do
-      if echo "$WAVE_PLANS" | grep -q "^${DEP}$"; then
-        echo "ERROR: Plan ${PLAN_ID} depends on ${DEP}, but both are in wave ${WAVE_NUM}"
-        INTRA_WAVE_CONFLICT=true
-      fi
-    done
-  done
-done
-```
-
-**Parallel file conflict detection:** For waves with 2+ plans, check `files_modified` frontmatter for overlaps:
-
-```bash
-FILE_CONFLICT=false
-# For each wave with 2+ plans, check for file modification overlaps
-for WAVE_NUM in $(echo "$PLAN_INDEX" | gpd json keys .waves); do
-  WAVE_PLANS=($(echo "$PLAN_INDEX" | gpd json list ".waves[\"$WAVE_NUM\"]"))
-  if [ ${#WAVE_PLANS[@]} -gt 1 ]; then
-    ALL_FILES=()
-    for PLAN_ID in "${WAVE_PLANS[@]}"; do
-      FILES=$(gpd frontmatter get \
-        "${phase_dir}/${PLAN_ID}-PLAN.md" --field files_modified 2>/dev/null)
-      for F in $(echo "$FILES" | tr ',' ' '); do
-        if [[ " ${ALL_FILES[*]} " =~ " ${F} " ]]; then
-          echo "WARNING: File '${F}' modified by multiple plans in wave ${WAVE_NUM}"
-          FILE_CONFLICT=true
-        fi
-        ALL_FILES+=("${F}")
-      done
-    done
-  fi
-done
-```
+**Parallel file conflict detection:** For waves with two or more plans, compare the indexed `files_modified` sets. If two plans touch the same path, warn and offer to serialize those plans within the wave.
 
 If `INTRA_WAVE_CONFLICT` is true: STOP — present the dependency issue and do not proceed.
 If `FILE_CONFLICT` is true: WARN — present the overlap and offer to serialize the conflicting plans within the wave.
@@ -486,27 +366,7 @@ Report:
 <step name="resolve_execution_cadence">
 Translate cadence config plus wave risk into concrete execution boundaries before any executor is spawned.
 
-```bash
-REVIEW_CADENCE=$(echo "$INIT" | gpd json get .review_cadence --default dense)
-RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)
-MAX_UNATTENDED_MINUTES_PER_PLAN=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_plan --default 15)
-MAX_UNATTENDED_MINUTES_PER_WAVE=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_wave --default 30)
-CHECKPOINT_AFTER_N_TASKS=$(echo "$INIT" | gpd json get .checkpoint_after_n_tasks --default 1)
-CHECKPOINT_AFTER_FIRST_RESULT=$(echo "$INIT" | gpd json get .checkpoint_after_first_load_bearing_result --default true)
-CHECKPOINT_BEFORE_DOWNSTREAM=$(echo "$INIT" | gpd json get .checkpoint_before_downstream_dependent_tasks --default true)
-STRICT_WAIT=$(gpd --raw config get strict_wait 2>/dev/null || echo false)
-NEVER_INTERRUPT_WORKERS=$(gpd --raw config get never_interrupt_running_workers 2>/dev/null || echo false)
-NEVER_AUTO_CLOSE_CHILDREN=$(gpd --raw config get never_auto_close_child_agents 2>/dev/null || echo false)
-
-# strict_wait disables the unattended-minutes timeouts entirely: workers are
-# allowed to run to natural completion rather than returning early checkpoints
-# at the configured unattended-minute marks. never_interrupt_running_workers is
-# a narrower form of the same guarantee.
-if [ "$STRICT_WAIT" = "true" ] || [ "$NEVER_INTERRUPT_WORKERS" = "true" ]; then
-  MAX_UNATTENDED_MINUTES_PER_PLAN=0
-  MAX_UNATTENDED_MINUTES_PER_WAVE=0
-fi
-```
+Read `review_cadence`, `research_mode`, the unattended-minute limits, checkpoint thresholds, `strict_wait`, `never_interrupt_running_workers`, and `never_auto_close_child_agents` from the current staged payload/config. `strict_wait` disables unattended-minute cutoffs entirely; `never_interrupt_running_workers` is the narrower form of the same guarantee. In either case, set plan and wave unattended-minute limits to zero so workers run to natural completion.
 
 **Core invariant:** `autonomy` decides who gets interrupted. `review_cadence` decides when the system must stop, inspect, or re-question. Even in `yolo`, required first-result and pre-fanout gates still run; the difference is that a clean pass can auto-continue.
 
@@ -557,15 +417,9 @@ When `RESEARCH_MODE=exploit`, suppress optional tangents by default: classify th
 <step name="prepare_pre_execution_specialists">
 Load the specialist-routing stage only when a pre-wave specialist is actually needed.
 
-```bash
-if [ ${#PRE_EXECUTION_SPECIALISTS[@]} -gt 0 ]; then
-  PRE_EXECUTION_INIT=$(load_execute_phase_stage pre_execution_specialists)
-  if [ $? -ne 0 ]; then
-    echo "ERROR: pre-execution-specialists stage refresh failed: $PRE_EXECUTION_INIT"
-    exit 1
-  fi
-fi
-```
+When `PRE_EXECUTION_SPECIALISTS` is non-empty, bind `PRE_EXECUTION_INIT=$(load_execute_phase_stage pre_execution_specialists)` and stop if the staged refresh fails.
+
+Use `gpd --raw stage field-access execute-phase --stage pre_execution_specialists --style instruction` before reading `PRE_EXECUTION_INIT`; this stage is available only for explicit one-shot specialist handoff sites.
 
 Use this stage only at explicit one-shot specialist handoff sites. Do not recreate placeholder `task(...)` examples here, do not wait in place for user approval inside a child run, and do not treat a named specialist route as complete unless its later artifact gate passes.
 </step>
@@ -575,15 +429,9 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 
 Refresh the wave-dispatch stage immediately before spawning executors so plan execution sees only the late-loaded context it actually needs:
 
-```bash
-WAVE_DISPATCH_INIT=$(load_execute_phase_stage wave_dispatch)
-if [ $? -ne 0 ]; then
-  echo "ERROR: wave-dispatch stage refresh failed: $WAVE_DISPATCH_INIT"
-  exit 1
-fi
-```
+Bind `WAVE_DISPATCH_INIT=$(load_execute_phase_stage wave_dispatch)` immediately before spawning executors and stop if the staged refresh fails.
 
-Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `current_execution`, `has_live_execution`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `execution_blocked`, `execution_resumable`, `execution_paused_at`, `current_execution_resume_file`, `handoff_resume_file`, `recorded_handoff_resume_file`, `missing_handoff_resume_file`, `execution_resume_file`, `execution_resume_file_source`, `resume_projection`, `current_hostname`, `current_platform`, `session_hostname`, `session_platform`, `session_last_date`, `session_stopped_at`, `machine_change_detected`, `machine_change_notice`, `state_load_source`, `state_integrity_issues`.
+Use `gpd --raw stage field-access execute-phase --stage wave_dispatch --style instruction` to confirm the manifest-selected wave-dispatch fields. Read only those keys from `WAVE_DISPATCH_INIT`; `WAVE_DISPATCH_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
 **For each wave:**
 
@@ -602,18 +450,14 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`,
 
 2. **Create wave-level checkpoint** before any plan starts. This is the rollback authority gate for the wave. Finish it before scripts, numerical computation, dispatch, subagents, artifacts, or claims. Do not run computation and then checkpoint afterward.
    ```bash
-   PROJECT_ROOT=$(pwd -P); while [ "$PROJECT_ROOT" != "/" ] && [ ! -d "$PROJECT_ROOT/GPD" ]; do PROJECT_ROOT=$(dirname "$PROJECT_ROOT"); done
-   GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
-   [ -d "$PROJECT_ROOT/GPD" ] && [ -n "$GIT_ROOT" ] && [ "$(cd "$GIT_ROOT" && pwd -P)" = "$PROJECT_ROOT" ] || { echo "ERROR: rollback checkpoint needs project-local git root; refusing ambient rollback checkpoint. Next Up: run from project root or initialize fixture-local git/checkpoint support."; exit 1; }
-   WAVE_CHECKPOINT="gpd-checkpoint-phase-${phase_number}-wave-${WAVE_NUM}-$(date +%s)-$$"
-   if git rev-parse --verify "refs/tags/${WAVE_CHECKPOINT}" >/dev/null 2>&1; then WAVE_CHECKPOINT="${WAVE_CHECKPOINT}-retry"; fi
-   if ! git tag "${WAVE_CHECKPOINT}"; then
-     echo "ERROR: failed to create wave checkpoint tag ${WAVE_CHECKPOINT}" >&2
+   WAVE_CHECKPOINT_RESULT=$(gpd --raw phase checkpoint create --phase "${phase_number}" --wave "${WAVE_NUM}" --namespace phase)
+   if [ $? -ne 0 ]; then
+     echo "$WAVE_CHECKPOINT_RESULT"
      exit 1
    fi
    ```
 
-   Store the tag for wave-level recovery.
+   Store the `tag` field from the helper result for wave-level recovery. Route only on `safe_to_execute_wave: true`; if the helper refuses the project/git-root boundary, stop before spawning any work.
 
 3. **Describe what's being done (BEFORE spawning):**
 
@@ -811,16 +655,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 	   - Check for `## Self-Check: FAILED` marker
 	   - Check for `## Validation: FAILED` marker (physics-specific)
 	   - For proof-bearing plans, verify the sibling `{plan_id}-PROOF-REDTEAM.md` artifact exists and has `status: passed`
-	   - Validate and apply the gpd_return envelope through the canonical child-return path:
-
-     ```bash
-     RETURN_APPLY=$(gpd --raw apply-return-updates "${SUMMARY_FILE}")
-     RETURN_PASSED=$(python -c 'import json, sys; print(str(bool(json.loads(sys.argv[1]).get("passed", False))).lower())' "$RETURN_APPLY")
-     if [ "$RETURN_PASSED" != "true" ]; then
-       echo "ERROR: apply-return-updates failed for $(basename "$SUMMARY_FILE")"
-       exit 1
-     fi
-     ```
+	   - Validate and apply the gpd_return envelope through the canonical child-return applicator. Require the applicator result to report `passed: true`; otherwise stop with the summary path and applicator errors.
 
 	   If ANY spot-check fails, including a missing or non-passing proof-redteam artifact for proof-bearing work, or if `apply-return-updates` does not report `passed: true`: report which plan failed, route to `wave_failure_handling` -- do NOT silently continue.
 
@@ -928,27 +763,13 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
 	   **If enabled:**
 
-   First, collect the SUMMARY.md files produced by the just-completed wave:
-
-   ```bash
-   # Collect SUMMARY files from the plans that executed in the current wave
-   wave_summaries=()
-   for PLAN_ID in $(echo "$PLAN_INDEX" | gpd json list ".waves[\"$WAVE_NUM\"]"); do
-     SUMMARY_PATH="${phase_dir}/${PLAN_ID}-SUMMARY.md"
-     [ -f "$SUMMARY_PATH" ] && wave_summaries+=("$SUMMARY_PATH")
-   done
-   ```
+   First, collect the SUMMARY.md files produced by the just-completed wave from the phase index plan IDs. Only include summaries whose matching plan ran in the current wave.
 
    Run lightweight checks on the wave's SUMMARY.md outputs:
 
    a. **Convention consistency** — verify convention lock hasn't drifted:
 
-   ```bash
-   CONV_CHECK=$(gpd --raw convention check)
-   if [ "$CONV_CHECK" = "incomplete" ]; then
-     echo "WARNING: Convention lock has unlocked fields"
-   fi
-   ```
+   Run the convention check and warn if any required convention lock is incomplete.
 
    b. **Dimensional spot-check** — scan the wave's SUMMARY.md files for key results and verify dimensional consistency:
 
@@ -961,19 +782,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
    c. **Unverified identity scan** — check for IDENTITY_CLAIM tags without verification:
 
-   ```bash
-   # Scan wave artifacts for unverified identity claims
-   PHASE_ARTIFACT_DIR="artifacts/phases/${phase_number}-${phase_slug}"
-   for summary in ${wave_summaries[@]}; do
-     grep -rl "IDENTITY_SOURCE: training_data" \
-       "$summary" "${PHASE_ARTIFACT_DIR}" figures/ data/ simulations/ paper/figures/ \
-       2>/dev/null | while read f; do
-       if ! grep -q "IDENTITY_VERIFIED:" "$f" 2>/dev/null; then
-         echo "WARNING: Unverified training_data identity in $f"
-       fi
-     done
-   done
-   ```
+   Inspect the current wave summaries and their surfaced durable artifact paths for `IDENTITY_SOURCE: training_data` claims that lack an `IDENTITY_VERIFIED` marker.
 
    Prefer paths surfaced through SUMMARY `key-files` or contract deliverables. Do not assume durable artifacts live beside the SUMMARY in `GPD/phases/**`.
 
@@ -988,14 +797,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
    - A residual exceeds 1e-3 without explicit justification
    - An iteration count hit a hard limit (suggests non-convergence)
 
-   ```bash
-   for summary in ${wave_summaries[@]}; do
-     # Extract numerical metrics from SUMMARY frontmatter or key_results
-     grep -iE "converge|residual|error.*=.*[0-9]|tolerance" "$summary" 2>/dev/null | while read line; do
-       echo "CONVERGENCE: $line"
-     done
-   done
-   ```
+   Extract convergence, residual, error, tolerance, iteration, and grid-size metrics from current wave summaries and flag worsening or unexplained high residuals.
 
    **If `plausibility_scan` in INTER_WAVE_CHECKS** (analysis/validation phases):
 
@@ -1004,13 +806,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
    - Negative values where positivity is expected (energies of bound states, probabilities, cross-sections)
    - Order-of-magnitude jumps (>10x) between related quantities in successive waves
 
-   ```bash
-   for summary in ${wave_summaries[@]}; do
-     grep -iE "NaN|Inf|= -[0-9]|diverge" "$summary" 2>/dev/null | while read line; do
-       echo "PLAUSIBILITY WARNING: $line"
-     done
-   done
-   ```
+   Inspect current wave summaries for NaN/Inf markers, divergent behavior, sign violations for positive quantities, and order-of-magnitude jumps.
 
    **If `latex_compile` in INTER_WAVE_CHECKS** (paper-writing phases):
 
@@ -1018,32 +814,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
    If a manuscript root has already been resolved for this workflow, bind it as `MANUSCRIPT_ROOT` before compiling from that root. Otherwise, resolve it locally from `paper/`, `manuscript/`, or `draft/` before checking for the manifest.
 
-   ```bash
-   if [ -z "${MANUSCRIPT_ROOT:-}" ]; then
-     for candidate in paper manuscript draft; do
-       if [ -f "${candidate}/ARTIFACT-MANIFEST.json" ]; then
-         MANUSCRIPT_ROOT="${candidate}"
-         break
-       fi
-     done
-   fi
-   if command -v pdflatex &>/dev/null && [ -f "${MANUSCRIPT_ROOT}/ARTIFACT-MANIFEST.json" ]; then
-     MANIFEST_PATH="${MANUSCRIPT_ROOT}/ARTIFACT-MANIFEST.json"
-     MANUSCRIPT_BASENAME="$(MANIFEST_PATH="$MANIFEST_PATH" python - <<'PY'
-import json
-import os
-from pathlib import Path
-manifest = json.loads(Path(os.environ["MANIFEST_PATH"]).read_text(encoding='utf-8'))
-tex_path = next(artifact["path"] for artifact in manifest["artifacts"] if artifact["category"] == "tex")
-print(Path(tex_path).name)
-PY
-)"
-     (
-       cd "${MANUSCRIPT_ROOT}" || exit 1
-       pdflatex -interaction=nonstopmode "${MANUSCRIPT_BASENAME}"
-     ) 2>&1 | grep -E "^!" | head -5
-   fi
-   ```
+   If a compiler is available and the manuscript manifest exists, resolve the manifest-recorded TeX entrypoint with a structured JSON read, compile from the manuscript root, and surface the first LaTeX error lines as warnings.
 
    Flag any LaTeX errors as WARNING — they should be fixed before the next wave adds more content.
 
@@ -1099,25 +870,7 @@ When a plan within a wave fails (spot-check failure, agent crash, or plan-level 
 
 **1. Identify the failure and its downstream impact:**
 
-```bash
-# Collect all plans from waves AFTER the current wave
-LATER_PLANS=()
-for LATER_WAVE in $(echo "$PLAN_INDEX" | gpd json keys .waves | awk -v w="$WAVE_NUM" '$1 > w'); do
-  for P in $(echo "$PLAN_INDEX" | gpd json list ".waves[\"$LATER_WAVE\"]"); do
-    LATER_PLANS+=("$P")
-  done
-done
-
-# Which of those later plans depend on the failed plan?
-DEPENDENT_PLANS=()
-for LATER_PLAN in "${LATER_PLANS[@]}"; do
-  DEPS=$(gpd frontmatter get \
-    "${phase_dir}/${LATER_PLAN}-PLAN.md" --field depends_on 2>/dev/null)
-  if echo "$DEPS" | grep -q "${FAILED_PLAN_ID}"; then
-    DEPENDENT_PLANS+=("${LATER_PLAN}")
-  fi
-done
-```
+Use the phase index dependency graph to list later-wave plans and identify every later plan that depends on `FAILED_PLAN_ID`. Keep the dependency analysis scoped to waves after the failed wave.
 
 **2. Report failure with dependency analysis:**
 
@@ -1166,20 +919,7 @@ Options:
 
 **Rollback wave:**
 
-- Revert to the wave checkpoint:
-
-  ```bash
-  WAVE_CHECKPOINT_COMMIT=$(git rev-list -n 1 "${WAVE_CHECKPOINT}")
-  git revert --no-commit HEAD...${WAVE_CHECKPOINT_COMMIT}
-  git commit -m "$(cat <<EOF
-  revert: rollback wave ${WAVE_NUM} of phase ${phase_number}
-
-  Failed plan: ${FAILED_PLAN_ID}
-  Reason: ${FAILURE_REASON}
-  Checkpoint: ${WAVE_CHECKPOINT}
-  EOF
-  )"
-  ```
+- Revert to the wave checkpoint, then commit the rollback with phase, wave, failed plan, failure reason, and checkpoint tag in the message.
 
 - Ask: "Retry wave {N}?" or "Stop execution?"
 - If retry: re-enter the wave execution loop for wave N
@@ -1194,15 +934,7 @@ Options:
 
 When processing plans in waves N+1, N+2, etc., check each plan against the `SKIPPED_PLANS` list:
 
-```bash
-for DEP in $(echo "$PLAN_DEPS" | tr ',' ' '); do
-  if [[ " ${SKIPPED_PLANS[*]} " =~ " ${DEP} " ]]; then
-    echo "SKIP: Plan ${PLAN_ID} depends on skipped/failed plan ${DEP}"
-    SKIPPED_PLANS+=("${PLAN_ID}:depends_on_${DEP}")
-    continue 2
-  fi
-done
-```
+For each later wave plan, compare its indexed dependencies against `SKIPPED_PLANS`. If any dependency was skipped or failed, skip the current plan, record `depends_on_{dep_id}`, and continue with the next eligible plan.
 
 > **Handoff verification:** Apply the local child artifact gate before success; git commits are partial evidence only.
 </step>
@@ -1213,6 +945,8 @@ Plans with `interactive: true` require user interaction.
 ```bash
 CHECKPOINT_RESUME_INIT=$(load_execute_phase_stage checkpoint_resume) || { echo "ERROR: checkpoint_resume init failed"; exit 1; }
 ```
+
+Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --style instruction` before reading `CHECKPOINT_RESUME_INIT`; do not reuse wave-dispatch fields here.
 
 **Flow:**
 
@@ -1261,12 +995,7 @@ CHECKPOINT_RESUME_INIT=$(load_execute_phase_stage checkpoint_resume) || { echo "
 
 Count the SUMMARY files that will be read and estimate their impact on orchestrator context using the summary-aggregation heuristic in `references/orchestration/context-budget.md`.
 
-```bash
-SUMMARY_COUNT=$(ls "${phase_dir}"/*-SUMMARY.md 2>/dev/null | wc -l)
-ESTIMATED_TOKENS=$(( SUMMARY_COUNT * 3000 ))
-CONTEXT_BUDGET=${CONTEXT_BUDGET:-160000}  # Approximate usable-token budget (about 80% of window)
-BUDGET_PERCENT=$(( ESTIMATED_TOKENS * 100 / CONTEXT_BUDGET ))
-```
+Estimate `SUMMARY_COUNT`, `ESTIMATED_TOKENS`, and `BUDGET_PERCENT` from the phase summaries using the context-budget heuristic.
 
 If `BUDGET_PERCENT` exceeds 15%: warn before proceeding:
 
@@ -1277,19 +1006,17 @@ Consider using summary-extract for one-liners only instead of full SUMMARY reads
 
 If >15%, use `summary-extract` for one-liners instead of reading full SUMMARY files:
 
-```bash
-for summary in "${phase_dir}"/*-SUMMARY.md; do
-  gpd --raw summary-extract "$summary" --field one_liner | gpd json get .one_liner --default ""
-done
-```
+If the budget warning fires, use `gpd summary-extract --field one_liner` for each summary instead of loading full summary bodies.
 </step>
 
 <step name="aggregate_results">
 After all waves:
 
-```bash
-AGGREGATE_VERIFY_INIT=$(load_execute_phase_stage aggregate_and_verify) || { echo "ERROR: aggregate_and_verify init failed"; exit 1; }
-```
+Load `load_execute_phase_stage aggregate_and_verify` and stop if the staged refresh fails.
+
+Use `gpd --raw stage field-access execute-phase --stage aggregate_and_verify --style instruction` before reading `AGGREGATE_VERIFY_INIT`; aggregation and verification fields remain manifest-owned.
+
+`AGGREGATE_VERIFY_INIT` includes `verification_report_skeleton_bridge` and `verification_report_finalizer_bridge`. Keep both bridge payloads visible through the verification handoff. Gap-only conservative reports use the skeleton bridge writer command; passed, human-needed, expert-needed, and typed non-gap outcomes use the finalizer bridge writer command template with `PATCH.json` plus body-only `BODY.md`. Do not hand-author `VERIFICATION.md` YAML in this workflow.
 
 ```markdown
 ## Phase {X}: {Name} Execution Complete
@@ -1323,19 +1050,7 @@ AGGREGATE_VERIFY_INIT=$(load_execute_phase_stage aggregate_and_verify) || { echo
 
 Scan all SUMMARY.md files from this phase for figure-related artifacts:
 
-```bash
-# Find figures referenced in SUMMARY files
-for SUMMARY in "${phase_dir}"/*-SUMMARY.md; do
-  # Extract key-files.created entries that look like figures
-  grep -E '\.(pdf|png|eps|svg|jpg|jpeg|tiff)' "$SUMMARY" 2>/dev/null
-done
-
-# Also scan durable figure roots for generated plot files
-PHASE_ARTIFACT_DIR="artifacts/phases/${phase_number}-${phase_slug}"
-find "${PHASE_ARTIFACT_DIR}" figures/ paper/figures/ -maxdepth 3 \
-  \( -name "*.pdf" -o -name "*.png" -o -name "*.eps" \) 2>/dev/null | \
-  grep -iE "fig|plot|phase_diag|spectrum|convergence|diagram" 2>/dev/null
-```
+Inspect summary `key-files.created` entries and durable figure roots for generated PDF, PNG, EPS, SVG, JPEG, or TIFF artifacts whose names indicate figures, plots, spectra, convergence, or diagrams.
 
 Generated figures and plots should live in stable workspace roots such as `artifacts/phases/${phase_number}-${phase_slug}/`, `figures/`, or `paper/figures/`, not under `GPD/phases/**`.
 
@@ -1347,9 +1062,7 @@ Read the figure tracker template from `{GPD_INSTALL_DIR}/templates/paper/figure-
 
 **If it does not exist:** Create it from the template:
 
-```bash
-mkdir -p paper
-```
+Ensure `paper/` exists before writing the tracker.
 
 Write `paper/FIGURE_TRACKER.md` with:
 
@@ -1362,14 +1075,7 @@ Write `paper/FIGURE_TRACKER.md` with:
 
 Commit:
 
-```bash
-PRE_CHECK=$(gpd pre-commit-check --files paper/FIGURE_TRACKER.md 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit \
-  "docs(phase-${phase_number}): update figure tracker" \
-  --files paper/FIGURE_TRACKER.md
-```
+Run pre-commit checking for `paper/FIGURE_TRACKER.md`, then commit it with a phase-scoped figure-tracker message.
 
 **If no figures found:** Skip silently (not all phases produce visual outputs).
 
@@ -1384,33 +1090,7 @@ This step runs unconditionally -- for fully successful phases it is a brief conf
 
 **1. Collect execution outcomes:**
 
-```bash
-# Collect all plan IDs from the phase plan index
-ALL_PLAN_IDS=($(echo "$PLAN_INDEX" | gpd json pluck .plans id))
-
-# Initialize outcome tracking arrays
-# Note: FAILED_IDS, SKIPPED_IDS, and their reason maps should be maintained
-# by the orchestrator during execute_waves and wave_failure_handling steps.
-# FAILED_IDS+=("plan_id") when a plan fails spot-checks or agent reports failure.
-# SKIPPED_IDS+=("plan_id") when a plan is auto-skipped due to dependency on failed plan.
-declare -A FAILURE_REASONS  # Map plan_id -> failure description
-declare -A SKIP_REASONS     # Map plan_id -> "depends_on_${dep_id}"
-
-PLANS_SUCCEEDED=()    # Plans with SUMMARY.md and passing spot-checks
-PLANS_FAILED=()       # Plans that failed during execution
-PLANS_SKIPPED=()      # Plans skipped due to dependency on failed plans
-PLANS_ROLLED_BACK=()  # Plans whose work was reverted
-
-for PLAN_ID in "${ALL_PLAN_IDS[@]}"; do
-  if [ -f "${phase_dir}/${PLAN_ID}-SUMMARY.md" ]; then
-    PLANS_SUCCEEDED+=("${PLAN_ID}")
-  elif [[ " ${FAILED_IDS[*]} " =~ " ${PLAN_ID} " ]]; then
-    PLANS_FAILED+=("${PLAN_ID}:${FAILURE_REASONS[$PLAN_ID]}")
-  elif [[ " ${SKIPPED_IDS[*]} " =~ " ${PLAN_ID} " ]]; then
-    PLANS_SKIPPED+=("${PLAN_ID}:${SKIP_REASONS[$PLAN_ID]}")
-  fi
-done
-```
+Build recovery outcome lists from the phase index, current summary artifacts, and the orchestrator's maintained failed/skipped records. Track succeeded, failed, skipped, and rolled-back plan IDs with reasons; do not infer success from a previous summary alone when spot-checks failed.
 
 **2. Present recovery report:**
 
@@ -1483,16 +1163,7 @@ checkpoint_tags: [{ list of all remaining gpd-checkpoint tags for this phase }]
 4. Continue to next phase: `gpd:plan-phase {X+1}` (if remaining work is non-critical)
 ```
 
-Commit recovery document:
-
-```bash
-PRE_CHECK=$(gpd pre-commit-check --files "${RECOVERY_FILE}" GPD/STATE.md 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit \
-  "docs(phase-${phase_number}): phase recovery report" \
-  --files "${RECOVERY_FILE}" GPD/STATE.md
-```
+Commit the recovery document after pre-commit checking `${RECOVERY_FILE}` and `GPD/STATE.md`.
 
 **5. Offer actionable next steps based on failure pattern:**
 
@@ -1554,8 +1225,10 @@ Verify Phase {PHASE_NUMBER} against its phase goal and plan contracts.
 
 Load before verdict:
 - {GPD_INSTALL_DIR}/workflows/verify-phase.md
-- {GPD_INSTALL_DIR}/templates/verification-report.md
-- {GPD_INSTALL_DIR}/templates/contract-results-schema.md
+- verification_report_skeleton_bridge from AGGREGATE_VERIFY_INIT
+- verification_report_finalizer_bridge from AGGREGATE_VERIFY_INIT
+- {GPD_INSTALL_DIR}/templates/verification-report.md only if a helper or validator reports a schema issue
+- {GPD_INSTALL_DIR}/templates/contract-results-schema.md only if a helper or validator reports a schema issue
 
 <files_to_read>
 - Phase plans and summaries: {phase_dir}
@@ -1565,7 +1238,7 @@ Load before verdict:
 
 Run `gpd --raw init phase-op {PHASE_NUMBER}` and keep the project contract, reference/protocol context, protocol bundle verifier extensions, and `phase_proof_review_status` visible. Stable knowledge docs surfaced there are background only.
 
-Write to: {phase_dir}/{phase_number}-VERIFICATION.md
+Write to: {phase_dir}/{phase_number}-VERIFICATION.md through the verification-report skeleton/finalizer bridge. Do not hand-author or reflow the verification frontmatter YAML.
 
 <spawn_contract>
 write_scope:
@@ -1577,7 +1250,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Return one typed `gpd_return` envelope with `status`, `files_written`, and canonical `verification_status` (`passed | gaps_found | expert_needed | human_needed`).",
+Return one typed `gpd_return` envelope with `status`, the written report path, and canonical `verification_status` (`passed | gaps_found | expert_needed | human_needed`). The report is acceptable only after the bridge writer/finalizer reports validation success and `gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md` passes.",
   description="Verify Phase {PHASE_NUMBER} goal"
 )
 ```
@@ -1948,35 +1621,26 @@ Mark phase complete in ROADMAP.md (date, status).
 
 ```bash
 CLOSEOUT_INIT=$(load_execute_phase_stage closeout) || { echo "ERROR: closeout init failed"; exit 1; }
+CLOSEOUT_READINESS=$(gpd --raw phase closeout-readiness "${phase_number}" --require-verification)
+if [ $? -ne 0 ]; then
+  echo "$CLOSEOUT_READINESS"
+  exit 1
+fi
+gpd phase complete "${phase_number}"
 ```
 
-Follow `{GPD_INSTALL_DIR}/workflows/transition.md` for PROJECT.md, DECISIONS.md, and parallel phase detection.
+Use `gpd --raw stage field-access execute-phase --stage closeout --style instruction` before reading `CLOSEOUT_INIT`; closeout fields remain scoped to the manifest-selected payload.
 
-```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/ROADMAP.md GPD/STATE.md "${phase_dir}"/*-VERIFICATION.md GPD/REQUIREMENTS.md 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs(phase-${phase_number}): complete phase execution" --files GPD/ROADMAP.md GPD/STATE.md "${phase_dir}"/*-VERIFICATION.md GPD/REQUIREMENTS.md
-```
+Follow `{GPD_INSTALL_DIR}/workflows/transition.md` for PROJECT.md, DECISIONS.md, and parallel phase detection. Pre-check and commit `GPD/ROADMAP.md`, `GPD/STATE.md`, the phase verification artifacts, and `GPD/REQUIREMENTS.md` with a phase-completion message.
 
 </step>
 
 <step name="cleanup_phase_checkpoints">
 **After successful phase completion (all plans passed + verification passed):**
 
-Remove all `gpd-checkpoint-phase-{phase}-*` tags for this phase -- they are no longer needed.
+Ask the helper to remove only helper-owned checkpoint tags for this phase. The helper preserves tags when closeout readiness reports blockers, recovery artifacts, or a preservation policy.
 
-```bash
-PHASE_TAGS=$(git tag -l "gpd-checkpoint-phase-${phase_number}-*")
-
-if [ -n "${PHASE_TAGS}" ]; then
-  echo "Cleaning up ${phase_number} checkpoint tags..."
-  for TAG in ${PHASE_TAGS}; do
-    git tag -d "${TAG}" 2>/dev/null
-  done
-  echo "Checkpoint tags removed for phase ${phase_number}."
-fi
-```
+Run `gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace phase --policy successful-closeout`. If it exits nonzero, print the helper JSON and stop; otherwise surface the helper JSON in the closeout notes.
 
 **If there were ANY failures during the phase** (even if subsequently resolved via re-execution), keep all checkpoint tags. They provide audit trail and enable future rollback if issues surface later.
 

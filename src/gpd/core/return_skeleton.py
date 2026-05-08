@@ -22,11 +22,13 @@ __all__ = [
     "APPLICATOR_OWNED_METADATA_FIELDS",
     "GPD_RETURN_ROLE_PROFILES",
     "KNOWN_RETURN_FIELD_NAMES",
+    "RETURN_ROLE_ALIASES",
     "RETURN_STATUS_ORDER",
     "GpdReturnRoleProfile",
     "GpdReturnSkeleton",
     "build_gpd_return_skeleton",
     "list_gpd_return_profiles",
+    "normalize_return_profile_id",
     "render_gpd_return_markdown",
     "render_gpd_return_yaml",
 ]
@@ -54,6 +56,27 @@ _CHECKPOINT_INTENT_FIELD = "checkpoint_intent"
 _CHECKPOINT_INTENT_UNAVAILABLE = (
     "checkpoint_intent skeletons require canonical return contract support from the checkpoint-intent applicator slice"
 )
+
+RETURN_ROLE_ALIASES: dict[str, str] = {
+    "bibliographer": "researcher",
+    "gpd-bibliographer": "researcher",
+    "consistency_checker": "checker",
+    "gpd-consistency-checker": "checker",
+    "paper_writer": "executor",
+    "gpd-paper-writer": "executor",
+    "proof_redteam": "verifier",
+    "gpd-check-proof": "verifier",
+    "response_writer": "executor",
+    "review_reader": "reviewer",
+    "review_stage_report": "reviewer",
+    "gpd-review-interestingness": "reviewer",
+    "gpd-review-literature": "reviewer",
+    "gpd-review-math": "reviewer",
+    "gpd-review-physics": "reviewer",
+    "gpd-review-reader": "reviewer",
+    "gpd-review-significance": "reviewer",
+}
+"""Accepted aliases for canonical ``gpd_return`` role profile ids."""
 
 
 class GpdReturnRoleProfile(BaseModel):
@@ -226,10 +249,7 @@ def render_gpd_return_markdown(envelope: Mapping[str, object]) -> str:
 def list_gpd_return_profiles(*, role: str | None = None, status: str | None = None) -> dict[str, object]:
     """List role/status rendering metadata for CLI and prompt snippet surfaces."""
 
-    normalized_role = _normalize_identifier(role, field_name="role") if role is not None else None
-    if normalized_role is not None and normalized_role not in GPD_RETURN_ROLE_PROFILES:
-        roles = ", ".join(sorted(GPD_RETURN_ROLE_PROFILES))
-        raise ValueError(f"unknown gpd_return role profile '{role}'. Must be one of: {roles}")
+    normalized_role = normalize_return_profile_id(role) if role is not None else None
 
     normalized_status = _normalize_status(status) if status is not None else None
     selected_statuses = [normalized_status] if normalized_status is not None else list(RETURN_STATUS_ORDER)
@@ -265,12 +285,35 @@ def list_gpd_return_profiles(*, role: str | None = None, status: str | None = No
 
 
 def _profile_for_role(role: str) -> GpdReturnRoleProfile:
-    normalized_role = _normalize_identifier(role, field_name="role")
+    normalized_role = normalize_return_profile_id(role)
     try:
         return GPD_RETURN_ROLE_PROFILES[normalized_role]
     except KeyError as exc:
         roles = ", ".join(sorted(GPD_RETURN_ROLE_PROFILES))
         raise ValueError(f"unknown gpd_return role profile '{role}'. Must be one of: {roles}") from exc
+
+
+def normalize_return_profile_id(value: str | None, *, field_name: str = "role") -> str:
+    """Normalize canonical role/profile ids, agent names, and prompt-local aliases."""
+
+    if value is None:
+        raise ValueError(f"{field_name} must be a non-empty string")
+    normalized = _normalize_identifier(value, field_name=field_name)
+    if normalized in RETURN_ROLE_ALIASES:
+        return RETURN_ROLE_ALIASES[normalized]
+    if normalized in GPD_RETURN_ROLE_PROFILES:
+        return normalized
+
+    matches = [
+        profile.profile_id
+        for profile in GPD_RETURN_ROLE_PROFILES.values()
+        if normalized in {agent_name.lower() for agent_name in profile.agent_names}
+    ]
+    if len(matches) == 1:
+        return matches[0]
+
+    roles = ", ".join(sorted(GPD_RETURN_ROLE_PROFILES))
+    raise ValueError(f"unknown gpd_return role profile '{value}'. Must be one of: {roles}")
 
 
 def _normalize_status(status: str) -> str:

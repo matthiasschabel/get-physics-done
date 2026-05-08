@@ -9,7 +9,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from gpd.core.handoff_artifacts import HandoffFailureClass
-from gpd.core.return_skeleton import GPD_RETURN_ROLE_PROFILES, RETURN_STATUS_ORDER, list_gpd_return_profiles
+from gpd.core.return_skeleton import RETURN_STATUS_ORDER, list_gpd_return_profiles, normalize_return_profile_id
 
 ChildGateSnippetId = Literal[
     "return_profile",
@@ -483,43 +483,7 @@ def _normalize_snippet_id(snippet_id: ChildGateSnippetId | str) -> ChildGateSnip
 
 
 def _profile_id_for_role_or_profile(value: str | None) -> str:
-    if value is None:
-        raise ValueError("return profile role must be a non-empty string")
-    normalized = _normalize_text(value, field_name="role").lower()
-    aliases = {
-        "bibliographer": "researcher",
-        "gpd-bibliographer": "researcher",
-        "consistency_checker": "checker",
-        "gpd-consistency-checker": "checker",
-        "paper_writer": "executor",
-        "gpd-paper-writer": "executor",
-        "proof_redteam": "verifier",
-        "gpd-check-proof": "verifier",
-        "response_writer": "executor",
-        "review_reader": "reviewer",
-        "review_stage_report": "reviewer",
-        "gpd-review-interestingness": "reviewer",
-        "gpd-review-literature": "reviewer",
-        "gpd-review-math": "reviewer",
-        "gpd-review-physics": "reviewer",
-        "gpd-review-reader": "reviewer",
-        "gpd-review-significance": "reviewer",
-    }
-    if normalized in aliases:
-        return aliases[normalized]
-    if normalized in GPD_RETURN_ROLE_PROFILES:
-        return normalized
-
-    matches = [
-        profile.profile_id
-        for profile in GPD_RETURN_ROLE_PROFILES.values()
-        if normalized in {agent_name.lower() for agent_name in profile.agent_names}
-    ]
-    if len(matches) == 1:
-        return matches[0]
-
-    roles = ", ".join(sorted(GPD_RETURN_ROLE_PROFILES))
-    raise ValueError(f"unknown gpd_return role profile '{value}'. Must be one of: {roles}")
+    return normalize_return_profile_id(value)
 
 
 def _normalize_text(value: object, *, field_name: str) -> str:

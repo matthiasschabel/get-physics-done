@@ -1709,7 +1709,7 @@ def test_research_verification_template_surfaces_non_empty_uncertainty_markers()
 def test_write_paper_prompt_discovers_plan_scoped_phase_summaries() -> None:
     source = _read_workflow("write-paper")
 
-    assert "cat GPD/phases/*/*SUMMARY.md" in source
+    assert "GPD/phases/*/*SUMMARY.md" in source
     assert "Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`)" in source
 
 

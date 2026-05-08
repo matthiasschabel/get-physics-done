@@ -92,8 +92,8 @@ def test_summary_driven_workflows_search_canonical_summary_artifacts() -> None:
     assert 'for SUMMARY in "${PHASE_DIR}"/*SUMMARY.md; do' in validate_conventions
     assert 'for SUMMARY in GPD/phases/*/*SUMMARY.md; do' in validate_conventions
     assert "ls GPD/phases/*/*SUMMARY.md 2>/dev/null" in graph
-    assert "cat GPD/phases/*/*SUMMARY.md" in write_paper
-    assert 'cat "$PHASE_DIR"/*SUMMARY.md 2>/dev/null' in write_paper
+    assert "GPD/phases/*/*SUMMARY.md" in write_paper
+    assert "Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`)" in write_paper
     assert 'SUMMARY_FILE=$(ls GPD/phases/*/*SUMMARY.md 2>/dev/null | head -1)' in plan_phase
     assert "inspect the loaded SUMMARY.md artifacts directly for decisive evidence before reusing research" in plan_phase
 
@@ -140,7 +140,7 @@ def test_command_surfaces_list_standalone_and_numbered_phase_artifacts() -> None
     assert "Discovery:" not in show_phase
     assert "find_files: GPD/phases/*/*SUMMARY.md" in audit
     assert "completed summary frontmatter (`SUMMARY.md` and `*-SUMMARY.md`)" in regression_check
-    assert "cat GPD/phases/*/*SUMMARY.md" in write_paper
+    assert "GPD/phases/*/*SUMMARY.md" in write_paper
 
 
 def test_respond_to_referees_prefers_canonical_markdown_report_path() -> None:

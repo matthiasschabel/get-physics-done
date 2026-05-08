@@ -222,7 +222,7 @@ def test_shared_specs_use_canonical_tool_references() -> None:
 
 def test_new_project_notation_delegate_threads_resolved_model_through_the_spawn_call() -> None:
     content = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
-    marker = 'NOTATION_MODEL=$(gpd resolve-model gpd-notation-coordinator)'
+    marker = "Resolve the notation-coordinator model override for the spawn call."
     start = content.index(marker)
     section_end = content.index("**Handle notation-coordinator return with the child artifact gate:**", start)
     notation_block = content[start:section_end]

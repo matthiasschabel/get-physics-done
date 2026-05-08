@@ -1,0 +1,199 @@
+"""Read-only closeout readiness checks for phase lifecycle helpers."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from gpd.cli import app
+from gpd.core.phase_closeout import phase_closeout_readiness
+from gpd.core.state import default_state_dict
+
+
+class _StableCliRunner(CliRunner):
+    def invoke(self, *args, **kwargs):
+        kwargs.setdefault("color", False)
+        return super().invoke(*args, **kwargs)
+
+
+RUNNER = _StableCliRunner()
+
+
+def _write_phase_project(
+    root: Path,
+    *,
+    summaries: int = 2,
+    verification_status: str | None = "passed",
+    malformed_verification: bool = False,
+    proof_bearing: bool = False,
+    recovery: bool = False,
+) -> Path:
+    gpd_dir = root / "GPD"
+    phase_dir = gpd_dir / "phases" / "02-analysis"
+    phase_dir.mkdir(parents=True)
+    (gpd_dir / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    (gpd_dir / "ROADMAP.md").write_text("# Roadmap\n\n## Phase 2: Analysis\n", encoding="utf-8")
+    for index in range(1, 3):
+        proof_flag = "proof_bearing: true\n" if proof_bearing and index == 1 else ""
+        (phase_dir / f"02-{index:02d}-PLAN.md").write_text(
+            f"---\nwave: {index}\n{proof_flag}---\n\n# Plan {index}\n",
+            encoding="utf-8",
+        )
+    for index in range(1, summaries + 1):
+        (phase_dir / f"02-{index:02d}-SUMMARY.md").write_text(f"# Summary {index}\n", encoding="utf-8")
+    if malformed_verification:
+        (phase_dir / "02-VERIFICATION.md").write_text("---\nstatus: [\n---\n\n# Bad\n", encoding="utf-8")
+    elif verification_status is not None:
+        (phase_dir / "02-VERIFICATION.md").write_text(
+            "---\n"
+            f"status: {verification_status}\n"
+            "score: closeout test\n"
+            "---\n\n"
+            "# Verification\n",
+            encoding="utf-8",
+        )
+    if recovery:
+        (phase_dir / "RECOVERY-02.md").write_text("# Recovery\n", encoding="utf-8")
+    return phase_dir
+
+
+def _write_state(root: Path, *, bounded_segment: bool = False) -> None:
+    state = default_state_dict()
+    if bounded_segment:
+        state["continuation"]["bounded_segment"] = {
+            "resume_file": "GPD/phases/02-analysis/.continue-here.md",
+            "phase": "02",
+            "plan": "01",
+            "segment_id": "seg-02-01",
+            "segment_status": "paused",
+            "waiting_for_review": True,
+        }
+    (root / "GPD" / "state.json").write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+
+
+def test_closeout_readiness_all_summaries_and_passed_verification_is_ready(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path)
+    _write_state(tmp_path)
+    before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+    before_state = (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8")
+
+    result = phase_closeout_readiness(tmp_path, "2", require_verification=True)
+
+    assert result.ready is True
+    assert result.mutation_allowed is True
+    assert result.read_only is True
+    assert result.mutated is False
+    assert result.plan_count == 2
+    assert result.summary_count == 2
+    assert result.verification_status == "passed"
+    assert result.closeout_command == "gpd phase complete 02"
+    assert result.next_up["status"] == "ready"
+    assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
+    assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
+
+
+def test_closeout_readiness_missing_summary_blocks_closeout(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, summaries=1)
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is False
+    assert result.mutation_allowed is False
+    assert result.all_plans_complete is False
+    assert "02-02-PLAN.md" in result.incomplete_plans
+    assert any("summaries incomplete" in blocker for blocker in result.blockers)
+
+
+def test_closeout_readiness_missing_verification_blocks_required_closeout(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, verification_status=None)
+    (tmp_path / "GPD" / "CHECKPOINTS.md").write_text("# Generated checkpoint shelf\n", encoding="utf-8")
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is False
+    assert result.verification_routing_status == "missing"
+    assert "canonical verification report missing" in result.blockers
+
+
+@pytest.mark.parametrize("status", ["gaps_found", "human_needed", "expert_needed"])
+def test_closeout_readiness_non_passing_verification_blocks_required_closeout(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    _write_phase_project(tmp_path, verification_status=status)
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is False
+    assert result.verification_status == status
+    assert any("must have top-level frontmatter status 'passed'" in blocker for blocker in result.blockers)
+
+
+def test_closeout_readiness_malformed_verification_blocks_closeout(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, malformed_verification=True)
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is False
+    assert result.verification_routing_status == "unparseable"
+    assert any("canonical verification report blocked" in blocker for blocker in result.blockers)
+
+
+def test_closeout_readiness_active_bounded_segment_blocks_closeout(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path)
+    _write_state(tmp_path, bounded_segment=True)
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is False
+    assert result.active_bounded_segment is True
+    assert any("active bounded segment" in blocker for blocker in result.blockers)
+    assert result.next_up["primary"] == "gpd:resume-work"
+
+
+def test_closeout_readiness_preserves_checkpoint_tags_when_recovery_artifacts_exist(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, recovery=True)
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is True
+    assert result.preserve_checkpoint_tags is True
+    assert result.cleanup_command is None
+    assert result.recovery_artifacts == ["GPD/phases/02-analysis/RECOVERY-02.md"]
+
+
+def test_closeout_readiness_blocks_proof_bearing_work_without_passed_proof_redteam(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, proof_bearing=True)
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is False
+    assert result.proof_redteam_required is True
+    assert result.proof_redteam_ready is False
+    assert "proof-bearing work requires a passed proof-redteam artifact" in result.blockers
+
+
+def test_phase_closeout_readiness_cli_emits_json_and_nonzero_when_blocked(tmp_path: Path) -> None:
+    _write_phase_project(tmp_path, verification_status=None)
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "closeout-readiness",
+            "02",
+            "--require-verification",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["ready"] is False
+    assert payload["read_only"] is True
+    assert payload["mutated"] is False

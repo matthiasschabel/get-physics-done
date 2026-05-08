@@ -35,7 +35,7 @@ These are the only valid `journal` values in `PAPER-CONFIG.json` and `${PAPER_DI
 
 Manual `PaperQualityInput` JSON can use additional scoring-only profiles such as `prd`, `prb`, `prc`, or `nature_physics`, but those are not supported `PAPER-CONFIG.json` builder keys yet.
 
-When `gpd --raw validate paper-quality --from-project .` runs, the journal is resolved only from supported builder keys surfaced by `${PAPER_DIR}/ARTIFACT-MANIFEST.json` or `${PAPER_DIR}/PAPER-CONFIG.json`. Unsupported values fall back to the `generic` scoring profile rather than being inferred.
+When `gpd validate paper-quality --from-project .` runs, the journal is resolved only from supported builder keys surfaced by `${PAPER_DIR}/ARTIFACT-MANIFEST.json` or `${PAPER_DIR}/PAPER-CONFIG.json`. Unsupported values fall back to the `generic` scoring profile rather than being inferred.
 </journal_formats>
 
 <process>
@@ -57,6 +57,10 @@ if [ $? -ne 0 ]; then
   # STOP; surface the error.
 fi
 INIT="$PAPER_BOOTSTRAP_INIT"
+# Confirm the manifest-selected bootstrap fields with:
+# gpd --raw stage field-access write-paper --stage paper_bootstrap --style instruction
+# For scalar shell bindings below, request helper-owned aliases with:
+# gpd --raw stage field-access write-paper --stage paper_bootstrap --style shell --payload-var INIT --alias PROJECT_ROOT=project_root --alias AUTONOMY=autonomy --alias RESEARCH_MODE=research_mode
 PROJECT_ROOT=$(echo "$INIT" | gpd json get .project_root --default "")
 if [ -n "$PROJECT_ROOT" ]; then
   cd "$PROJECT_ROOT" || {
@@ -66,7 +70,7 @@ if [ -n "$PROJECT_ROOT" ]; then
 fi
 ```
 
-Parse bootstrap JSON using the manifest-owned `paper_bootstrap.required_init_fields` in `write-paper-stage-manifest.json`. Keep `project_contract_gate` visible before authoritative-use decisions; do not duplicate the manifest's required-field list in prose. When later steps need publication routing, manuscript artifact paths, protocol bundle fields, active references, or derived manuscript review statuses, read them from the staged payload by their manifest names.
+Parse bootstrap JSON using the manifest-owned `paper_bootstrap.required_init_fields` in `write-paper-stage-manifest.json`; `gpd --raw stage field-access write-paper --stage paper_bootstrap --style instruction` is the helper-owned field inventory. Keep `project_contract_gate` visible before authoritative-use decisions; do not duplicate the manifest's required-field list in prose. When later steps need publication routing, manuscript artifact paths, protocol bundle fields, active references, or derived manuscript review statuses, read them from the staged payload by their manifest names.
 
 **Load mode settings:**
 
@@ -113,15 +117,7 @@ Once material writes, bibliography/artifact state, and the next blocking checkpo
 
 If the normalized write-paper argument payload begins with `--`, pass it to the validators after an end-of-options marker so the validator CLI does not reinterpret intake flags as validator options.
 
-Run centralized context preflight before continuing:
-
-```bash
-CONTEXT=$(gpd --raw validate command-context write-paper -- "$WRITE_PAPER_ARGUMENTS")
-if [ $? -ne 0 ]; then
-  echo "$CONTEXT"
-  exit 1
-fi
-```
+Run centralized command-context preflight for `write-paper` before continuing. If it reports blockers, show them and stop.
 
 Run the centralized review preflight before continuing:
 
@@ -153,6 +149,8 @@ For `external_authoring_intake`, use the strict command preflight's managed subj
 Keep the resolved manuscript-root binding visible when writing shell snippets so the shell-oriented workflow contract stays consistent:
 
 ```bash
+# Confirm this scalar binding with:
+# gpd --raw stage field-access write-paper --stage paper_bootstrap --style shell --payload-var INIT --alias PAPER_DIR=publication_bootstrap_root
 PAPER_DIR="${publication_bootstrap_root}"
 # e.g. PAPER_DIR="paper" or PAPER_DIR="GPD/publication/${subject_slug}/manuscript"
 ```
@@ -171,13 +169,7 @@ For nested-cwd launches, use `project_root`, `publication_bootstrap_root`, and s
 
 **Convention verification** — papers must use consistent conventions throughout:
 
-```bash
-CONV_CHECK=$(gpd --raw convention check 2>/dev/null)
-if [ $? -ne 0 ]; then
-  echo "WARNING: Convention verification failed — review before writing paper"
-  echo "$CONV_CHECK"
-fi
-```
+Run the convention check before writing. If it fails, warn and review the output before drafting; convention mismatches between research phases and the paper are a common source of sign errors and missing factors.
 
 If conventions are locked, all equations in the paper must follow them. Convention mismatches between research phases and the paper are a common source of sign errors and missing factors.
 
@@ -210,31 +202,15 @@ Do **not** scan `GPD/milestones/*`, `GPD/phases/*`, `GPD/state.json`, or arbitra
 
 For the project-backed lane, check for research digests generated during milestone completion. These digests are the primary structured handoff from the research phase and should drive paper organization.
 
-**Step 1 -- Locate digest files:**
+**Step 1 -- Locate digest files:** use the same recursive milestone-digest predicate as review preflight so the workflow and preflight never disagree about whether a digest exists.
 
-```bash
-# Recursive search — mirrors the predicate used by gpd review preflight so the
-# write-paper workflow and preflight never disagree about whether a digest exists.
-find GPD/milestones -type f -name RESEARCH-DIGEST.md 2>/dev/null
-```
-
-**Cross-check against the milestones index** before claiming "no digest":
-
-```bash
-# If MILESTONES.md lists archived digests but find returned nothing, treat it
-# as a consistency issue (not a permission to proceed without the digest).
-grep -E "RESEARCH-DIGEST\.md" GPD/MILESTONES.md 2>/dev/null
-```
+**Cross-check against the milestones index** before claiming "no digest". If `GPD/MILESTONES.md` lists archived digests but recursive discovery returns nothing, treat it as a consistency issue, not permission to proceed without the digest.
 
 If `find` returns paths, use those. If `find` returns nothing but `MILESTONES.md` references a digest path, surface the inconsistency — do not silently downgrade to raw-phase mode.
 
 **If digest(s) found:**
 
-Read all available digests:
-
-```bash
-find GPD/milestones -type f -name RESEARCH-DIGEST.md -exec cat {} +
-```
+Read all available digests using runtime file-read tooling.
 
 **Step 2 -- Map digest sections to paper structure:**
 
@@ -266,11 +242,7 @@ If the digest is incomplete or missing sections, note which paper sections will 
 
 Use raw phase files only for details that are not already surfaced through init.
 
-```bash
-# Fall back to raw sources if digest is insufficient
-cat GPD/phases/*/*SUMMARY.md
-cat GPD/state.json
-```
+When digest coverage is insufficient, fall back to `GPD/phases/*/*SUMMARY.md` and `GPD/state.json` only after using the structured init payload first.
 
 Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`) before raw phase files.
 
@@ -364,10 +336,7 @@ If this run is `external_authoring_intake`, run this bounded manifest audit firs
 
 For the project-backed lane, run checks across contributing phases from the research digest or all completed phases:
 
-```bash
-# Identify contributing phases
-PHASE_DIRS=$(ls -d GPD/phases/*/ 2>/dev/null)
-```
+Identify contributing phase directories from the research digest first, then from completed project phase directories when no digest is available.
 
 ### Check 1: summary-artifact completeness
 
@@ -380,11 +349,7 @@ For each phase directory:
 3. If a contract-backed target depends on a decisive comparison, check for the corresponding `comparison_verdicts` entry and an evidence path the manuscript can surface
 4. Confirm the summary or verification artifacts identify where the substantive evidence lives
 
-```bash
-for PHASE_DIR in $PHASE_DIRS; do
-  cat "$PHASE_DIR"/*SUMMARY.md 2>/dev/null
-done
-```
+For each contributing phase directory, read its summary artifacts with runtime file-read tooling.
 
 **Missing summary artifact** → CRITICAL gap (phase results not summarized).
 **Contract-backed phase missing `contract_results` for a paper-relevant target** → CRITICAL gap.
@@ -418,17 +383,11 @@ For each key result listed in the research digest (or `derived_intermediate_resu
 
 Check whether planned figures have source data and generation scripts:
 
-```bash
-# Check durable figure roots, not internal phase scratch paths
-find artifacts/phases figures "${PAPER_DIR}/figures" -maxdepth 3 \( -type f -o -type d \) 2>/dev/null
-ls "${PAPER_DIR}/FIGURE_TRACKER.md" 2>/dev/null
-```
+Check durable figure roots, not internal phase scratch paths: `artifacts/phases`, `figures`, `${PAPER_DIR}/figures`, and `${PAPER_DIR}/FIGURE_TRACKER.md`.
 
 Current fresh-bootstrap example:
 
-```bash
-find artifacts/phases figures "${PAPER_DIR}/figures" -maxdepth 3
-```
+Use the same durable figure roots for fresh-bootstrap checks.
 
 For each figure referenced in the research digest or artifact catalog:
 
@@ -444,11 +403,7 @@ For each figure referenced in the research digest or artifact catalog:
 
 Check for bibliography infrastructure:
 
-```bash
-ls references/references.bib 2>/dev/null
-ls "${PAPER_DIR}/references.bib" 2>/dev/null
-ls GPD/literature/*-REVIEW.md 2>/dev/null
-```
+Check for `references/references.bib`, `${PAPER_DIR}/references.bib`, and `GPD/literature/*-REVIEW.md`.
 
 1. Does a project bibliography exist (`references/references.bib` or `${PAPER_DIR}/references.bib`)?
 2. Does at least one `GPD/literature/*-REVIEW.md` or phase `RESEARCH.md` exist?
@@ -546,6 +501,8 @@ if [ $? -ne 0 ]; then
 fi
 INIT="$OUTLINE_INIT"
 ```
+
+Use `gpd --raw stage field-access write-paper --stage outline_and_scaffold --style instruction` to confirm the manifest-selected outline/scaffold fields before reading `OUTLINE_INIT`.
 
 Apply `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md` from this staged payload before outline-level mode decisions, including bibliographer search breadth, referee strictness, and paper-writer style by mode.
 
@@ -652,6 +609,8 @@ fi
 INIT="$AUTHORING_INIT"
 ```
 
+Use `gpd --raw stage field-access write-paper --stage figure_and_section_authoring --style instruction` to confirm the manifest-selected authoring fields before reading `AUTHORING_INIT`.
+
 Ensure the paper directory structure exists before writing any files:
 
 ```bash
@@ -676,11 +635,7 @@ Before drafting sections, generate all planned figures:
 </step>
 
 <step name="draft_sections">
-Resolve paper-writer model:
-
-```bash
-WRITER_MODEL=$(gpd resolve-model gpd-paper-writer)
-```
+Resolve the paper-writer model override before spawning section writers.
 
 Spawn gpd-paper-writer agents for section drafting.
 
@@ -709,7 +664,7 @@ pdflatex -interaction=nonstopmode "${MANUSCRIPT_BASENAME}" 2>&1 | tail -20
 ```
 
 **If compilation errors:**
-1. Parse the log for the first error: `grep -A 3 "^!" main.log | head -10`
+1. Parse the log for the first error lines.
 2. Feed the error back to the paper-writer for the affected section
 3. Common LLM LaTeX errors: unmatched braces, undefined commands, incorrect environment nesting
 4. Fix and re-compile before proceeding to the next wave
@@ -856,6 +811,8 @@ fi
 INIT="$CONSISTENCY_INIT"
 ```
 
+Use `gpd --raw stage field-access write-paper --stage consistency_and_references --style instruction` to confirm the manifest-selected consistency/reference fields before reading `CONSISTENCY_INIT`.
+
 Canonical schema for `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`: `{GPD_INSTALL_DIR}/templates/paper/bibliography-audit-schema.md`
 After manuscript, bibliography, citation-command, or citation-source writes, treat the old bibliography audit as stale until `gpd paper-build` refreshes/proves `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` current. Do not enter strict review or report `citation_state: verified` on a pre-edit audit.
 
@@ -878,9 +835,7 @@ After manuscript, bibliography, citation-command, or citation-source writes, tre
 
 Scan all .tex files for `RESULT PENDING` markers left by the paper-writer:
 
-```bash
-grep -rn "RESULT PENDING" "${PAPER_DIR}"/*.tex
-```
+Scan all manuscript `.tex` files for `RESULT PENDING` markers.
 
 For each `% [RESULT PENDING: phase N, task M -- description]`:
 
@@ -890,9 +845,7 @@ For each `% [RESULT PENDING: phase N, task M -- description]`:
 
 **GATE: All RESULT PENDING markers must be resolved before proceeding to verify_references.**
 
-```bash
-PENDING_COUNT=$(grep -rcE "RESULT PENDING|\\\\text\{\\[PENDING\\]\}" "${PAPER_DIR}"/*.tex 2>/dev/null || echo 0)
-```
+Count unresolved `RESULT PENDING` markers and placeholder value tokens before reference verification.
 
 If `PENDING_COUNT > 0`:
 
@@ -901,7 +854,7 @@ ERROR: ${PENDING_COUNT} unresolved RESULT PENDING marker(s) found.
 A paper with placeholder values is not submission-ready.
 
 Unresolved markers:
-$(grep -rn "RESULT PENDING" "${PAPER_DIR}"/*.tex 2>/dev/null)
+{list of pending marker locations}
 
 Options:
   1. Resolve markers from phase SUMMARYs (attempt auto-fill)
@@ -937,9 +890,7 @@ After all sections are drafted, run a systematic notation check:
 
 **Check for notation glossary:**
 
-```bash
-ls GPD/NOTATION_GLOSSARY.md 2>/dev/null
-```
+Check whether `GPD/NOTATION_GLOSSARY.md` exists before glossary cross-reference checks.
 
 If NOTATION_GLOSSARY.md does not exist, skip step 2 below and note in the report that no glossary was available for cross-referencing. The consistency checks (steps 1, 3, 4) still run — they compare the paper against itself.
 
@@ -958,11 +909,7 @@ If NOTATION_GLOSSARY.md does not exist, skip step 2 below and note in the report
 <step name="verify_references">
 Spawn the bibliographer agent to verify all references before final review. This ensures no hallucinated citations reach the manuscript and that all BibTeX entries are accurate and properly formatted for the target journal.
 
-Resolve bibliographer model:
-
-```bash
-BIBLIO_MODEL=$(gpd resolve-model gpd-bibliographer)
-```
+Resolve the bibliographer model override before spawning the bibliography audit.
 Apply the canonical runtime delegation convention already loaded above.
 
 ```
@@ -1067,9 +1014,7 @@ Minimum required inputs:
 
 Validate it before entering strict review:
 
-```bash
-gpd --raw validate reproducibility-manifest "${PAPER_DIR}/reproducibility-manifest.json" --strict
-```
+Run strict reproducibility-manifest validation for `${PAPER_DIR}/reproducibility-manifest.json`.
 
 If validation fails, stop and fix the manifest now. Do not enter `pre_submission_review` with a missing or non-review-ready reproducibility manifest, because strict review preflight will block on it.
 </step>
@@ -1087,6 +1032,8 @@ if [ $? -ne 0 ]; then
 fi
 INIT="$PUBLICATION_REVIEW_INIT"
 ```
+
+Use `gpd --raw stage field-access write-paper --stage publication_review --style instruction` to confirm the manifest-selected publication-review fields before reading `PUBLICATION_REVIEW_INIT`.
 
 **Project-backed lane:** run the same staged peer-review panel used by `gpd:peer-review`. Do not fall back to a single generalist referee pass here, because that is precisely the failure mode this workflow is meant to avoid.
 
@@ -1136,9 +1083,7 @@ Before declaring the draft complete, run only decisive checks unless the user ex
 
 Paper quality scoring is advisory and artifact-driven (see `{GPD_INSTALL_DIR}/references/publication/paper-quality-scoring.md`). For the project-backed lane:
 
-```bash
-QUALITY=$(gpd --raw validate paper-quality --from-project . 2>/dev/null)
-```
+Run paper-quality scoring from project artifacts when it is still decisive for final review.
 
 Run quality scoring at most once after required artifact refresh; skip it if `review_gate` is decisive or finalization budget is at risk. Skipping does not weaken bibliography freshness or peer-review requirements. For `external_authoring_intake`, stay manuscript-root-local, avoid `--from-project` parity claims when unavailable, present bounded readiness, and route to `gpd:peer-review`.
 

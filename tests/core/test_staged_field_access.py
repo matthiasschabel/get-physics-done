@@ -1,15 +1,68 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from gpd.cli import app
+from gpd.core.context import init_execute_phase, init_new_project, init_plan_phase, init_write_paper
 from gpd.core.staged_field_access import build_staged_field_access
+from gpd.core.state import default_state_dict
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 
 runner = CliRunner()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "stage0"
+TARGET_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+
+
+def _setup_manifest_owned_payload_project(project_root: Path) -> None:
+    gpd_dir = project_root / "GPD"
+    phase_dir = gpd_dir / "phases" / "02-analysis"
+    phase_dir.mkdir(parents=True)
+
+    (gpd_dir / "PROJECT.md").write_text("# Test Project\n\nPaper target.\n", encoding="utf-8")
+    (gpd_dir / "ROADMAP.md").write_text(
+        "# Roadmap\n\n## Phase 2: Analysis\n\n**Goal:** Compare the benchmark observable.\n",
+        encoding="utf-8",
+    )
+    (gpd_dir / "REQUIREMENTS.md").write_text("# Requirements\n- Preserve benchmark anchors.\n", encoding="utf-8")
+    (gpd_dir / "STATE.md").write_text("# State\nCurrent phase: 02\n", encoding="utf-8")
+
+    (phase_dir / "02-PLAN.md").write_text("objective: compare benchmark observable\n", encoding="utf-8")
+    (phase_dir / "02-SUMMARY.md").write_text("# Summary\nExisting result.\n", encoding="utf-8")
+    (phase_dir / "02-CONTEXT.md").write_text("# Context\nLocked scope.\n", encoding="utf-8")
+    (phase_dir / "02-RESEARCH.md").write_text("# Research\nMethod comparison.\n", encoding="utf-8")
+    (phase_dir / "02-EXPERIMENT-DESIGN.md").write_text("# Experiment Design\nGrid scan.\n", encoding="utf-8")
+    (phase_dir / "02-VERIFICATION.md").write_text("# Verification\nGap notes.\n", encoding="utf-8")
+    (phase_dir / "02-VALIDATION.md").write_text("# Validation\nChecks.\n", encoding="utf-8")
+
+    state = default_state_dict()
+    state["project_contract"] = json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
+    state["position"]["current_phase"] = "02"
+    state["current_execution"] = {
+        "session_id": "sess-stage-parity",
+        "phase": "02",
+        "plan": "01",
+        "segment_status": "waiting_review",
+        "resume_file": "GPD/phases/02-analysis/.continue-here.md",
+        "pre_fanout_review_pending": True,
+    }
+    (gpd_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def _staged_init_payload(workflow_id: str, project_root: Path, stage_id: str) -> dict[str, object]:
+    builders: dict[str, Callable[[Path, str], dict[str, object]]] = {
+        "plan-phase": lambda root, stage: init_plan_phase(root, "2", stage=stage),
+        "execute-phase": lambda root, stage: init_execute_phase(root, "2", stage=stage),
+        "new-project": lambda root, stage: init_new_project(root, stage=stage),
+        "write-paper": lambda root, stage: init_write_paper(root, stage=stage),
+    }
+    return builders[workflow_id](project_root, stage_id)
 
 
 def test_default_instruction_style_is_shell_free_and_manifest_backed() -> None:
@@ -29,6 +82,78 @@ def test_default_instruction_style_is_shell_free_and_manifest_backed() -> None:
     assert "$(" not in instruction_text
     assert "active_reference_context" in payload["selected_fields"]
     assert "staged_loading" not in payload["selected_fields"]
+
+
+@pytest.mark.parametrize("workflow_id", TARGET_WORKFLOWS)
+def test_instruction_style_matches_manifest_for_all_target_workflow_stages(workflow_id: str) -> None:
+    manifest = load_workflow_stage_manifest(workflow_id)
+
+    for stage_id in manifest.stage_ids():
+        stage = manifest.stage(stage_id)
+        access = build_staged_field_access(workflow_id, stage_id=stage_id)
+        payload = access.to_payload()
+
+        assert payload["workflow_id"] == workflow_id
+        assert payload["stage_id"] == stage_id
+        assert payload["style"] == "instruction"
+        assert payload["selected_fields"] == list(stage.required_init_fields)
+        assert payload["aliases"] == []
+        assert "shell_bindings" not in payload
+
+
+@pytest.mark.parametrize("workflow_id", TARGET_WORKFLOWS)
+def test_staged_payload_fields_remain_manifest_owned(tmp_path: Path, workflow_id: str) -> None:
+    _setup_manifest_owned_payload_project(tmp_path)
+    manifest = load_workflow_stage_manifest(workflow_id)
+
+    for stage_id in manifest.stage_ids():
+        stage = manifest.stage(stage_id)
+        payload = _staged_init_payload(workflow_id, tmp_path, stage_id)
+        access_payload = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+
+        assert tuple(field for field in payload if field != "staged_loading") == stage.required_init_fields
+        assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
+        assert payload["staged_loading"] == manifest.staged_loading_payload(stage_id)
+        assert access_payload["selected_fields"] == list(stage.required_init_fields)
+
+
+def test_target_workflow_prompts_use_field_access_helper_for_staged_reloads() -> None:
+    expected_stage_mentions = {
+        "plan-phase": ("phase_bootstrap", "planner_authoring", "checker_revision"),
+        "execute-phase": (
+            "phase_bootstrap",
+            "phase_classification",
+            "wave_planning",
+            "pre_execution_specialists",
+            "wave_dispatch",
+            "checkpoint_resume",
+            "aggregate_and_verify",
+            "closeout",
+        ),
+        "new-project": ("scope_intake", "scope_approval", "post_scope"),
+        "write-paper": (
+            "paper_bootstrap",
+            "outline_and_scaffold",
+            "figure_and_section_authoring",
+            "consistency_and_references",
+            "publication_review",
+        ),
+    }
+    removed_staged_inventories = (
+        "Parse JSON for: `executor_model`",
+        "Parse JSON for: `selected_protocol_bundle_ids`",
+        "Parse JSON for: `commit_docs`",
+        "Parse JSON for: `researcher_model`",
+    )
+
+    for workflow_id, stage_ids in expected_stage_mentions.items():
+        source = (WORKFLOWS_DIR / f"{workflow_id}.md").read_text(encoding="utf-8")
+
+        assert f"gpd --raw stage field-access {workflow_id}" in source
+        for stage_id in stage_ids:
+            assert f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction" in source
+        for stale_inventory in removed_staged_inventories:
+            assert stale_inventory not in source
 
 
 def test_json_style_exposes_exact_fields_and_requested_aliases() -> None:

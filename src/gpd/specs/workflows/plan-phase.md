@@ -16,7 +16,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse only the fields named by `BOOTSTRAP_INIT.staged_loading.required_init_fields`; this stage-selected payload includes `project_contract_gate` before any authoritative contract use.
+Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Parse only the fields named by `BOOTSTRAP_INIT.staged_loading.required_init_fields`; this stage-selected payload includes `project_contract_gate` before any authoritative contract use.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Present draft plans for user review before approval or execution; do not weaken the contract gate.
@@ -34,23 +34,14 @@ Parse only the fields named by `BOOTSTRAP_INIT.staged_loading.required_init_fiel
 ```bash
 REQUESTED_PHASE="${PHASE}"
 INIT="${BOOTSTRAP_INIT}"
+# For the scalar binding below, request the helper-owned shape with:
+# gpd --raw stage field-access plan-phase --stage phase_bootstrap --style shell --payload-var INIT --alias PHASE=phase_number
 PHASE=$(echo "$INIT" | gpd json get .phase_number --default "${REQUESTED_PHASE}")
 ```
 
 **Dirty worktree safety gate:** before phase directory creation, handoffs, fingerprints, alignment, or write-capable reloads, inspect only the project worktree:
 
-```bash
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  DIRTY_STATUS=$(git status --porcelain --untracked-files=all)
-  if [ -n "$DIRTY_STATUS" ]; then
-    echo "ERROR: dirty project worktree detected before planning:"
-    echo "$DIRTY_STATUS"
-    echo "Choose: git status --short, gpd commit, or explicitly approve a project-local cleanup path."
-    echo "HALTING -- plan-phase never stashes, resets, cleans, overwrites, or hides user work."
-    exit 1
-  fi
-fi
-```
+If the project worktree is dirty, halt before planning. Show the dirty paths and offer `git status --short`, `gpd commit`, or an explicitly approved project-local cleanup path. `plan-phase` never stashes, resets, cleans, overwrites, or hides user work.
 
 **If `planning_exists` is false:** Error -- run `gpd:new-project` first.
 
@@ -105,22 +96,7 @@ This is not the full discuss-phase flow; use `gpd:discuss-phase` separately for 
 
 **If no phase number:** Use the `phase_number` returned by bootstrap; `gpd --raw init plan-phase --stage phase_bootstrap` auto-detects the first roadmap phase whose disk status is `empty`, `no_directory`, `discussed`, or `researched`. If bootstrap cannot infer one, stop and ask for an explicit phase.
 
-**If `phase_found` is false:** Validate phase exists in ROADMAP.md. If valid, resolve directory metadata from the roadmap before continuing:
-
-```bash
-PHASE_INFO=$(gpd --raw roadmap get-phase "${PHASE}")
-if [ "$(echo "$PHASE_INFO" | gpd json get .found --default false)" != "true" ]; then
-  echo "Error: Phase ${PHASE} not found in ROADMAP.md."
-  exit 1
-fi
-
-PHASE_NAME=$(echo "$PHASE_INFO" | gpd json get .phase_name --default "")
-PHASE_SLUG=$(gpd slug "$PHASE_NAME")
-PADDED_PHASE=$(gpd phase normalize "${PHASE}")
-PHASE="${PADDED_PHASE}"
-PHASE_DIR="GPD/phases/${PADDED_PHASE}-${PHASE_SLUG}"
-mkdir -p "${PHASE_DIR}"
-```
+**If `phase_found` is false:** Validate that the phase exists in ROADMAP.md. If valid, resolve `PHASE_NAME`, `PHASE_SLUG`, `PADDED_PHASE`, and `PHASE_DIR` from the roadmap before continuing. If invalid, stop with `Error: Phase {PHASE} not found in ROADMAP.md.`
 
 Use these resolved values for all later references to `PHASE_DIR`, `PHASE_SLUG`, and `PADDED_PHASE`.
 
@@ -128,11 +104,7 @@ Use these resolved values for all later references to `PHASE_DIR`, `PHASE_SLUG`,
 
 ## 3. Validate Phase
 
-```bash
-PHASE_INFO=$(gpd --raw roadmap get-phase "${PHASE}")
-```
-
-**If `found` is false:** Error with available phases. **If `found` is true:** Extract `phase_number`, `phase_name`, `goal` from JSON.
+Use the roadmap phase helper to refresh phase metadata. **If `found` is false:** Error with available phases. **If `found` is true:** Extract `phase_number`, `phase_name`, `goal` from the structured result.
 
 ## 4. Load CONTEXT.md and Hypothesis Context
 
@@ -144,16 +116,7 @@ If `context_content` is not null, display: `Using phase context from: ${PHASE_DI
 
 ### Hypothesis-Aware Planning
 
-Check if STATE.md contains an active hypothesis:
-
-```bash
-HYPOTHESIS_INFO=$(gpd --raw state active-hypothesis)
-if [ "$(echo "$HYPOTHESIS_INFO" | gpd json get .found --default false)" = "true" ]; then
-  HYPOTHESIS_SLUG=$(echo "$HYPOTHESIS_INFO" | gpd json get .branch_slug --default "")
-  HYPOTHESIS_FILE="GPD/hypotheses/${HYPOTHESIS_SLUG}/HYPOTHESIS.md"
-  HYPOTHESIS_CONTENT=$(cat "$HYPOTHESIS_FILE" 2>/dev/null)
-fi
-```
+Check the structured active-hypothesis state. If one exists, bind `HYPOTHESIS_SLUG`, read `GPD/hypotheses/{HYPOTHESIS_SLUG}/HYPOTHESIS.md`, and store its contents as `HYPOTHESIS_CONTENT`.
 
 **If an active hypothesis exists:**
 
@@ -182,16 +145,7 @@ already explores that path.
 
 **Verify conventions before planning** — plans that depend on conventions from prior phases must use the correct ones:
 
-```bash
-CONV_CHECK=$(gpd --raw convention check 2>/dev/null)
-if [ $? -ne 0 ]; then
-  echo "ERROR: Convention verification failed -- resolve before planning"
-  echo "$CONV_CHECK"
-  echo "Next: validate conventions before planning"
-  echo "HALTING -- convention mismatches compound into every planned task."
-  exit 1
-fi
-```
+Run the convention check before planning. If it fails, stop with the check output and route to convention validation; convention mismatches compound into every planned task.
 
 If the check fails, stop before spawning the researcher or planner. Convention mismatches in the plan propagate into every task during execution.
 
@@ -217,6 +171,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
+# Confirm fields with: gpd --raw stage field-access plan-phase --stage planner_authoring --style instruction
 # Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
 ```
 
@@ -350,27 +305,7 @@ Status route: `completed` runs the tuple before step 6; `checkpoint` uses the co
 
 **Verify RESEARCH.md was written (guard against silent researcher failure):**
 
-```bash
-EXPECTED_RESEARCH_FILE="${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md"
-RESEARCH_FILES=$(echo "$RESEARCH_RETURN" | gpd json list .gpd_return.files_written --default "")
-printf '%s\n' "$RESEARCH_RETURN" | gpd validate handoff-artifacts - \
-  --expected "$EXPECTED_RESEARCH_FILE" \
-  --allowed-root "$PHASE_DIR" \
-  --require-files-written \
-  --require-status completed \
-  --fresh-after "$RESEARCH_HANDOFF_STARTED_AT" || exit 1
-if ! printf '%s\n' "$RESEARCH_FILES" | grep -Fxq "$EXPECTED_RESEARCH_FILE"; then
-  echo "ERROR: researcher returned completed without naming ${EXPECTED_RESEARCH_FILE}"
-  exit 1
-fi
-if [ ! -r "$EXPECTED_RESEARCH_FILE" ]; then
-  echo "ERROR: researcher returned completed but ${EXPECTED_RESEARCH_FILE} is missing or unreadable"
-  exit 1
-fi
-
-# Re-read RESEARCH.md from disk; `research_content` from INIT (step 1) is **stale** after the researcher writes the artifact.
-RESEARCH_CONTENT=$(cat "$EXPECTED_RESEARCH_FILE")
-```
+Use the `phase_researcher_context_refresh` child_gate tuple above as the only success gate for the researcher handoff. The expected artifact is `${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md`; it must be readable, inside `${PHASE_DIR}`, named by the typed return's file list, and newer than `RESEARCH_HANDOFF_STARTED_AT`. If the tuple fails, stop or retry the handoff. After it passes, re-read the research file from disk; the earlier init `research_content` is no longer current after the researcher writes.
 
 ## 5.1 Handle Researcher Checkpoint
 
@@ -457,6 +392,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
+# Confirm fields with: gpd --raw stage field-access plan-phase --stage planner_authoring --style instruction
 # Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
 ```
 
@@ -562,53 +498,13 @@ If the user chooses Main-context plan or any manual bounded authoring branch, it
 
 On completed returns, consume `gpd_return.roadmap_updates` before checker review or next-step output. The planner returns proposed roadmap edits; the orchestrator applies them to `GPD/ROADMAP.md` and verifies placeholders/count against fresh `*-PLAN.md` artifacts. If missing, malformed, or unapplied, treat the handoff as incomplete: Retry planner / Apply manually / Abort.
 
-Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch:
+Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch. For a planner handoff, derive that list from the typed `PLANNER_RETURN`; for a main-context authoring branch, build a complete orchestrator-owned return with `gpd return skeleton --role planner --status completed` and one `--file` entry per newly written plan. Then run the planner child_gate tuple once:
 
-```bash
-if [ -z "${FRESH_PLAN_FILES:-}" ]; then
-  FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")
-fi
-if [ -z "$FRESH_PLAN_FILES" ]; then
-  echo "ERROR: no fresh PLAN.md artifacts"
-  exit 1
-fi
-
-HANDOFF_ARTIFACT_ARGS=(
-  --allowed-root "$PHASE_DIR"
-  --expected-glob "${PHASE_DIR}/*-PLAN.md"
-  --required-suffix=-PLAN.md
-  --require-files-written
-)
-if [ -n "$PLANNER_HANDOFF_STARTED_AT" ]; then
-  HANDOFF_ARTIFACT_ARGS+=(--fresh-after "$PLANNER_HANDOFF_STARTED_AT")
-fi
-
-PLAN_RETURN_MARKDOWN="${PLANNER_RETURN:-}"
-if [ -z "$PLAN_RETURN_MARKDOWN" ]; then
-  MAIN_CONTEXT_PLAN_RETURN=$(
-    printf '```yaml\ngpd_return:\n'
-    printf '  status: completed\n  files_written:\n'
-    for plan_file in $FRESH_PLAN_FILES; do printf '    - %s\n' "$plan_file"; done
-    printf '  issues: []\n  next_actions: []\n```\n'
-  )
-  PLAN_RETURN_MARKDOWN="$MAIN_CONTEXT_PLAN_RETURN"
-fi
-printf '%s\n' "$PLAN_RETURN_MARKDOWN" | gpd validate handoff-artifacts - "${HANDOFF_ARTIFACT_ARGS[@]}" || exit 1
-
-for plan_file in $FRESH_PLAN_FILES; do
-  case "$plan_file" in
-    "${PHASE_DIR}"/*-PLAN.md) ;;
-    *) echo "ERROR: unexpected planner artifact path: $plan_file"; exit 1 ;;
-  esac
-  [ -r "$plan_file" ] || { echo "ERROR: planner artifact is missing or unreadable: $plan_file"; exit 1; }
-  gpd validate plan-contract "$plan_file" || exit 1
-  PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "$plan_file") || {
-    echo "ERROR: plan-preflight failed for $plan_file"
-    echo "$PLAN_PREFLIGHT"
-    exit 1
-  }
-done
-```
+- all files are readable `${PHASE_DIR}/*-PLAN.md` paths;
+- every file is named by the return, has suffix `-PLAN.md`, and is fresh after `PLANNER_HANDOFF_STARTED_AT` when a child handoff was used;
+- every file passes `gpd validate plan-contract`;
+- every file passes the structured plan preflight validator;
+- failure at any point is `status: blocked`, not `planned_ready` or a `gpd:execute-phase` route.
 
 ## 9b. Handle Planner Checkpoint
 
@@ -640,15 +536,11 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
+# Confirm fields with: gpd --raw stage field-access plan-phase --stage checker_revision --style instruction
 # Parse only the checker_revision fields listed in INIT.staged_loading.required_init_fields before use.
 ```
 
-```bash
-PLANS_CONTENT=""
-for plan_file in $FRESH_PLAN_FILES; do
-  PLANS_CONTENT="${PLANS_CONTENT}$(cat "$plan_file" 2>/dev/null)"
-done
-```
+Read each fresh plan artifact into `PLANS_CONTENT` only after the planner gate passes. Use runtime file-read tooling and the reconciled `FRESH_PLAN_FILES` list; do not rescan the phase directory or include older plan files that were not part of the fresh return.
 
 Checker prompt:
 
@@ -805,24 +697,7 @@ Track `iteration_count` (starts at 1 after initial plan + check).
 
 Display: `Checker found issues, revising plan (attempt {N}/3)...`
 
-  ```bash
-  # If PARTIAL APPROVAL: only load blocked plans (stored in BLOCKED_PLANS list from step 11)
-  # If ISSUES FOUND: load all plans
-  if [ -n "$BLOCKED_PLANS" ]; then
-    PLANS_CONTENT=""
-    for plan_id in $BLOCKED_PLANS; do
-      for plan_file in $FRESH_PLAN_FILES; do
-        case "$plan_file" in
-          *-"$plan_id"-PLAN.md) PLANS_CONTENT="${PLANS_CONTENT}$(cat "$plan_file" 2>/dev/null)" ;;
-        esac
-      done
-    done
-  else
-    for plan_file in $FRESH_PLAN_FILES; do
-      PLANS_CONTENT="${PLANS_CONTENT}$(cat "$plan_file" 2>/dev/null)"
-    done
-  fi
-  ```
+  Build revision `PLANS_CONTENT` from the reconciled fresh plan set. For partial approval, include only the readable plan files whose IDs are listed in `BLOCKED_PLANS`; for a full rejection, include every readable file in `FRESH_PLAN_FILES`. Do not rescan the phase directory or accept an ambiguous ID match.
 
 Before spawning the revision planner, confirm that every `plan_id` in `BLOCKED_PLANS` maps to exactly one readable `*-PLAN.md` file in `FRESH_PLAN_FILES`. If any blocked ID is missing or ambiguous, stop and report the reconciliation failure rather than inventing a fallback mapping.
 
@@ -942,7 +817,7 @@ gpd:execute-phase {X}
 
 **Also available:**
 
-- cat GPD/phases/{phase-dir}/\*-PLAN.md -- review plans
+- read `GPD/phases/{phase-dir}/*-PLAN.md` -- review plans
 - gpd:plan-phase {X} --research -- re-research first
 
 ---

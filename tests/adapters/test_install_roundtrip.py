@@ -92,6 +92,19 @@ PROTOCOL_BUNDLE_JIT_COMMANDS = (
     "quick",
     "verify-work",
 )
+PHASE7_TARGET_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+PHASE7_INTERNAL_HELPER_LABEL_STEMS = (
+    "stage",
+    "phase",
+    "validate",
+    "return",
+    "child-handoff",
+    "apply-return-updates",
+)
+PHASE7_LOCAL_HELPER_TERM_RE = re.compile(
+    r"\b(?:stage\s+field-access|phase\s+(?:checkpoint|verification-summary|closeout-readiness)|"
+    r"validate\s+child-handoff|return\s+skeleton|apply-return-updates)\b"
+)
 PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS = (
     "Statistical Mechanics Simulation",
     "Numerical Relativity",
@@ -110,6 +123,7 @@ GEMINI_FORBIDDEN_INSTALLED_SHELL_FRAGMENTS = (
     "printf '%s\\n'",
     "mktemp",
     "<<",
+    "if [ $? -ne 0 ]",
 )
 LEADING_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
 RAW_GPD_COMMAND_SUBSTITUTION_RE = re.compile(r"\$\([^)]*\bgpd(?:\s|$)")
@@ -267,6 +281,10 @@ def _stage_manifest_has_protocol_bundle_fields(command_name: str) -> bool:
 def _assert_runtime_command_label_visible(text: str, *, runtime: str, command_name: str) -> None:
     expected_label = get_adapter(runtime).format_command(command_name)
     assert expected_label in text, f"{runtime} {command_name} surface is missing {expected_label!r}"
+
+
+def _runtime_public_helper_labels(runtime: str) -> tuple[str, ...]:
+    return tuple(get_adapter(runtime).format_command(stem) for stem in PHASE7_INTERNAL_HELPER_LABEL_STEMS)
 
 
 def _installed_workflow_text(target: Path, workflow_name: str) -> str:
@@ -971,6 +989,52 @@ def test_installed_command_shell_fences_use_runtime_bridge_or_public_cli(
                         f"raw gpd command substitution {line!r}"
                     )
 
+    assert offenders == []
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+def test_installed_phase7_target_workflow_helper_calls_stay_local_cli_not_runtime_labels(
+    real_installed_repo_factory,
+    runtime: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    bridge_command = _expected_local_bridge_for_runtime(runtime, target)
+    public_helper_labels = _runtime_public_helper_labels(runtime)
+    offenders: list[str] = []
+    helper_reference_count = 0
+
+    for workflow_name in PHASE7_TARGET_WORKFLOWS:
+        workflow_text = _installed_workflow_text(target, workflow_name)
+        helper_reference_count += len(PHASE7_LOCAL_HELPER_TERM_RE.findall(workflow_text))
+
+        for line_number, line in enumerate(workflow_text.splitlines(), start=1):
+            if not PHASE7_LOCAL_HELPER_TERM_RE.search(line):
+                continue
+            for public_label in public_helper_labels:
+                if public_label in line:
+                    offenders.append(
+                        f"{runtime}:{workflow_name}: line {line_number}: "
+                        f"internal helper surfaced as {public_label!r}"
+                    )
+
+        for fence in _shell_fences(workflow_text):
+            for line in _runnable_shell_lines(fence):
+                if not PHASE7_LOCAL_HELPER_TERM_RE.search(line):
+                    continue
+                rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
+                if rewritten != line:
+                    offenders.append(
+                        f"{runtime}:{workflow_name}: lines {fence.start_line}-{fence.end_line}: "
+                        f"helper shell line was not bridged: {line!r}"
+                    )
+                for public_label in public_helper_labels:
+                    if public_label in line:
+                        offenders.append(
+                            f"{runtime}:{workflow_name}: lines {fence.start_line}-{fence.end_line}: "
+                            f"helper shell line used runtime label {public_label!r}"
+                        )
+
+    assert helper_reference_count > 0
     assert offenders == []
 
 

@@ -218,6 +218,12 @@ NEW_MILESTONE_INIT_FIELDS = frozenset(
         "platform",
     }
 )
+EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS = frozenset(
+    {
+        "verification_report_finalizer_bridge",
+        "verification_report_skeleton_bridge",
+    }
+)
 EXECUTE_PHASE_INIT_FIELDS = frozenset(
     {
         "executor_model",
@@ -317,6 +323,7 @@ EXECUTE_PHASE_INIT_FIELDS = frozenset(
         "derived_manuscript_reference_status",
         "derived_manuscript_reference_status_count",
         "derived_manuscript_proof_review_status",
+        *EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
         "platform",
     }
 )
@@ -1847,6 +1854,7 @@ __all__ = [
     "MAP_RESEARCH_INIT_FIELDS",
     "MAP_RESEARCH_STAGE_MANIFEST_PATH",
     "EXECUTE_PHASE_INIT_FIELDS",
+    "EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS",
     "EXECUTE_PHASE_STAGE_MANIFEST_PATH",
     "PLAN_PHASE_BASE_INIT_FIELDS",
     "PLAN_PHASE_CONTRACT_GATE_FIELDS",

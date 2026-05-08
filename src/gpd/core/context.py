@@ -142,6 +142,9 @@ from gpd.core.workflow_staging import (
     load_arxiv_submission_stage_contract,
 )
 from gpd.core.workflow_staging import (
+    EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS as _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
+)
+from gpd.core.workflow_staging import (
     LITERATURE_REVIEW_INIT_FIELDS as _LITERATURE_REVIEW_INIT_FIELDS,
 )
 from gpd.core.workflow_staging import (
@@ -3645,29 +3648,15 @@ def _try_find_phase(cwd: Path, phase: str) -> dict | None:
 
 
 def _verify_work_expected_plan_path(cwd: Path, phase_info: dict | None) -> str | None:
-    if not phase_info:
-        return None
-    phase_dir = phase_info.get("directory")
-    phase_number = phase_info.get("phase_number")
-    if not phase_dir or not phase_number:
-        return None
+    from gpd.core.verification_report_bridges import expected_phase_plan_path
 
-    fallback_plan = f"{phase_number}{PLAN_SUFFIX}"
-    plans = phase_info.get("plans")
-    plan_name = fallback_plan
-    if isinstance(plans, list) and plans:
-        plan_name = fallback_plan if fallback_plan in plans else str(plans[0])
-    return (cwd / str(phase_dir) / plan_name).as_posix()
+    return expected_phase_plan_path(cwd, phase_info)
 
 
 def _verify_work_expected_verification_path(cwd: Path, phase_info: dict | None) -> str | None:
-    if not phase_info:
-        return None
-    phase_dir = phase_info.get("directory")
-    phase_number = phase_info.get("phase_number")
-    if not phase_dir or not phase_number:
-        return None
-    return (cwd / str(phase_dir) / f"{phase_number}{VERIFICATION_SUFFIX}").as_posix()
+    from gpd.core.verification_report_bridges import expected_phase_verification_path
+
+    return expected_phase_verification_path(cwd, phase_info)
 
 
 def _verify_work_existing_verification_path(cwd: Path, phase_info: dict | None) -> Path | None:
@@ -3729,130 +3718,33 @@ def _active_verification_sessions(cwd: Path) -> list[dict[str, object]]:
 
 
 def _verify_work_schema_sources() -> list[dict[str, str]]:
-    package_root = Path(__file__).resolve().parents[1]
-    return [
-        {
-            "name": "verifier_agent",
-            "runtime_ref": "{GPD_AGENTS_DIR}/gpd-verifier.md",
-            "source_path": (package_root / "agents" / "gpd-verifier.md").as_posix(),
-        },
-        {
-            "name": "verification_report_template",
-            "runtime_ref": "{GPD_INSTALL_DIR}/templates/verification-report.md",
-            "source_path": (package_root / "specs" / "templates" / "verification-report.md").as_posix(),
-        },
-        {
-            "name": "contract_results_schema",
-            "runtime_ref": "{GPD_INSTALL_DIR}/templates/contract-results-schema.md",
-            "source_path": (package_root / "specs" / "templates" / "contract-results-schema.md").as_posix(),
-        },
-    ]
+    from gpd.core.verification_report_bridges import verification_report_schema_sources
+
+    return verification_report_schema_sources()
 
 
 def _build_verification_report_skeleton_bridge(cwd: Path, phase_info: dict | None) -> dict[str, object]:
-    from gpd.core.verification_report import VERIFICATION_REPORT_BODY_CONTRACT
+    from gpd.core.verification_report_bridges import build_verification_report_skeleton_bridge
 
-    plan_path = _verify_work_expected_plan_path(cwd, phase_info)
-    verification_path = _verify_work_expected_verification_path(cwd, phase_info)
-    gap_report_status = "gaps_found"
-    skeleton_command = (
-        f"gpd verification-report skeleton {shlex.quote(plan_path)} --format markdown" if plan_path else None
-    )
-    writer_command = (
-        f"gpd verification-report skeleton {shlex.quote(plan_path)} --write "
-        f"--output {shlex.quote(verification_path)} --force --body-file BODY.md --validate contract"
-        if plan_path and verification_path
-        else None
-    )
-    validation_command = (
-        f"gpd validate verification-contract {shlex.quote(verification_path)}" if verification_path else None
-    )
-    return {
-        "command_name": "gpd verification-report skeleton",
-        "supported_statuses": [gap_report_status],
-        "status_policy": (
-            "Bridge-generated skeletons are gap-report-only; stronger statuses require verifier evidence and "
-            "contract validation."
-        ),
-        "skeleton_command": skeleton_command,
-        "writer_command": writer_command,
-        "gap_report_skeleton_command": skeleton_command,
-        "gap_report_writer_command": writer_command,
-        "body_contract": VERIFICATION_REPORT_BODY_CONTRACT,
-        "schema_sources": _verify_work_schema_sources(),
-        "expected_target_plan_path": plan_path,
-        "expected_verification_path": verification_path,
-        "validation_command": validation_command,
-        "fallback_rule": (
-            "Fallback verifier execution must write body-only evidence to BODY.md that satisfies body_contract, "
-            "run writer_command, and accept expected_verification_path only when writer validation passes. "
-            "Use skeleton_command as preview context only; do not hand-author or reflow VERIFICATION.md frontmatter."
-        ),
-    }
+    return build_verification_report_skeleton_bridge(cwd, phase_info)
 
 
 def _verify_work_expected_proof_redteam_path(cwd: Path, phase_info: dict | None) -> str | None:
-    if not phase_info:
-        return None
-    phase_dir = phase_info.get("directory")
-    phase_number = phase_info.get("phase_number")
-    if not phase_dir or not phase_number:
-        return None
-    return (cwd / str(phase_dir) / f"{phase_number}-PROOF-REDTEAM.md").as_posix()
+    from gpd.core.verification_report_bridges import expected_phase_proof_redteam_path
+
+    return expected_phase_proof_redteam_path(cwd, phase_info)
 
 
 def _build_verification_report_finalizer_bridge(cwd: Path, phase_info: dict | None) -> dict[str, object]:
-    plan_path = _verify_work_expected_plan_path(cwd, phase_info)
-    verification_path = _verify_work_expected_verification_path(cwd, phase_info)
-    writer_command_template = (
-        f"gpd verification-report finalize {shlex.quote(plan_path)} --patch PATCH.json "
-        f"--body-file BODY.md --output {shlex.quote(verification_path)} --validate contract --force"
-        if plan_path and verification_path
-        else None
-    )
-    validation_command = (
-        f"gpd validate verification-contract {shlex.quote(verification_path)}" if verification_path else None
-    )
-    return {
-        "command_name": "gpd verification-report finalize",
-        "supported_statuses": ["passed", "gaps_found", "expert_needed", "human_needed"],
-        "writer_command_template": writer_command_template,
-        "patch_contract": (
-            "PATCH.json is a typed verification outcome patch consumed by the finalizer. It carries "
-            "target status, contract results, comparison verdicts, proof-audit linkage, suggested contract "
-            "checks, and status rationale; body evidence stays in BODY.md."
-        ),
-        "body_contract": "BODY.md is body-only Markdown; do not include YAML frontmatter.",
-        "status_policy": (
-            "Use the finalizer for passed, human_needed, expert_needed, and typed non-gap outcomes. "
-            "Do not hand-author VERIFICATION.md YAML; route on finalizer validation output."
-        ),
-        "expected_target_plan_path": plan_path,
-        "expected_verification_path": verification_path,
-        "validation_command": validation_command,
-    }
+    from gpd.core.verification_report_bridges import build_verification_report_finalizer_bridge
+
+    return build_verification_report_finalizer_bridge(cwd, phase_info)
 
 
 def _build_proof_redteam_finalizer_bridge(cwd: Path, phase_info: dict | None) -> dict[str, object]:
-    proof_redteam_path = _verify_work_expected_proof_redteam_path(cwd, phase_info)
-    validation_command = f"gpd validate proof-redteam {shlex.quote(proof_redteam_path)}" if proof_redteam_path else None
-    writer_command_template = (
-        f"gpd proof-redteam finalize {shlex.quote(proof_redteam_path)} --claim-id CLAIM_ID "
-        "--claim-text CLAIM_TEXT --proof-artifact-path PROOF_ARTIFACT_PATH"
-        if proof_redteam_path
-        else None
-    )
-    return {
-        "command_name": "gpd proof-redteam finalize",
-        "supported_statuses": ["passed"],
-        "writer_command_template": writer_command_template,
-        "status_policy": (
-            "Passed proof-redteam frontmatter is finalizer-owned. Non-passing proof audits use "
-            "gpd proof-redteam skeleton; passed audits must run this finalizer before validation."
-        ),
-        "expected_proof_redteam_path": proof_redteam_path,
-        "validation_command": validation_command,
-    }
+    from gpd.core.verification_report_bridges import build_proof_redteam_finalizer_bridge
+
+    return build_proof_redteam_finalizer_bridge(cwd, phase_info)
 
 
 def _infer_next_unplanned_roadmap_phase(cwd: Path) -> str | None:
@@ -4044,6 +3936,22 @@ def init_execute_phase(
 
     if required_fields & _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS:
         staged_source.update(_build_execution_runtime_context(cwd))
+
+    if required_fields & _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS:
+        if phase_info is None:
+            raise ValueError(
+                f"execute-phase stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
+            )
+        if "verification_report_skeleton_bridge" in required_fields:
+            staged_source["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
+                cwd,
+                phase_info,
+            )
+        if "verification_report_finalizer_bridge" in required_fields:
+            staged_source["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
+                cwd,
+                phase_info,
+            )
 
     missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
     if missing_fields:

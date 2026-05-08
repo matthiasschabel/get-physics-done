@@ -1779,6 +1779,79 @@ def contract_alignment_summary_cmd() -> None:
 
 phase_app = typer.Typer(help="Phase lifecycle (add, remove, complete, etc.)")
 app.add_typer(phase_app, name="phase")
+phase_checkpoint_app = typer.Typer(help="Wave rollback checkpoint tag helpers")
+phase_app.add_typer(phase_checkpoint_app, name="checkpoint")
+
+
+@phase_checkpoint_app.command("create")
+def phase_checkpoint_create(
+    phase_num: str = typer.Option(..., "--phase", help="Phase number for the checkpoint tag"),
+    wave_num: str = typer.Option(..., "--wave", help="Wave number for the checkpoint tag"),
+    namespace: str = typer.Option("phase", "--namespace", help="Checkpoint namespace: phase or sweep"),
+) -> None:
+    """Create a helper-owned rollback checkpoint tag before wave execution."""
+    from gpd.core.wave_checkpoints import create_wave_checkpoint
+
+    try:
+        result = create_wave_checkpoint(
+            _project_scoped_cwd(),
+            phase=phase_num,
+            wave=wave_num,
+            namespace=namespace,  # type: ignore[arg-type]
+        )
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+    if not result.safe_to_execute_wave:
+        raise typer.Exit(code=1)
+
+
+@phase_checkpoint_app.command("list")
+def phase_checkpoint_list(
+    phase_num: str = typer.Option(..., "--phase", help="Phase number for checkpoint inventory"),
+    namespace: str = typer.Option("phase", "--namespace", help="Checkpoint namespace: phase or sweep"),
+) -> None:
+    """List helper-owned rollback checkpoint tags for a phase."""
+    from gpd.core.wave_checkpoints import list_wave_checkpoints
+
+    try:
+        result = list_wave_checkpoints(
+            _read_only_project_scoped_cwd(),
+            phase=phase_num,
+            namespace=namespace,  # type: ignore[arg-type]
+        )
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+    if result.errors:
+        raise typer.Exit(code=1)
+
+
+@phase_checkpoint_app.command("cleanup")
+def phase_checkpoint_cleanup(
+    phase_num: str = typer.Option(..., "--phase", help="Phase number for checkpoint cleanup"),
+    namespace: str = typer.Option("phase", "--namespace", help="Checkpoint namespace: phase or sweep"),
+    policy: str = typer.Option(
+        "preserve-on-failure",
+        "--policy",
+        help="Cleanup policy: preserve-on-failure or successful-closeout",
+    ),
+) -> None:
+    """Delete helper-owned rollback checkpoint tags only when policy allows it."""
+    from gpd.core.wave_checkpoints import cleanup_wave_checkpoints
+
+    try:
+        result = cleanup_wave_checkpoints(
+            _project_scoped_cwd(),
+            phase=phase_num,
+            namespace=namespace,  # type: ignore[arg-type]
+            policy=policy,  # type: ignore[arg-type]
+        )
+    except ValueError as exc:
+        _error(str(exc))
+    _output(result)
+    if result.errors:
+        raise typer.Exit(code=1)
 
 
 @phase_app.command("list")
@@ -1838,6 +1911,28 @@ def phase_complete(
     _output(phase_complete(_project_scoped_cwd(), phase_num))
 
 
+@phase_app.command("closeout-readiness")
+def phase_closeout_readiness_cmd(
+    phase_num: str = typer.Argument(..., help="Phase number to check"),
+    require_verification: bool = typer.Option(
+        False,
+        "--require-verification",
+        help="Require canonical verification frontmatter status: passed",
+    ),
+) -> None:
+    """Check whether a phase is ready for closeout without mutating state."""
+    from gpd.core.phase_closeout import phase_closeout_readiness
+
+    result = phase_closeout_readiness(
+        _read_only_project_scoped_cwd(),
+        phase_num,
+        require_verification=require_verification,
+    )
+    _output(result)
+    if not result.ready:
+        raise typer.Exit(code=1)
+
+
 @phase_app.command("index")
 def phase_plan_index(
     phase_num: str = typer.Argument(..., help="Phase number"),
@@ -1846,6 +1941,32 @@ def phase_plan_index(
     from gpd.core.phases import phase_plan_index
 
     _output(phase_plan_index(_read_only_project_scoped_cwd(), phase_num))
+
+
+@phase_app.command("verification-summary")
+def phase_verification_summary(
+    phase_num: str | None = typer.Argument(None, help="Phase number"),
+    phase: str | None = typer.Option(None, "--phase", help="Phase number (option form for prompt helpers)."),
+    wave: str | None = typer.Option(None, "--wave", help="Restrict the summary to one wave number."),
+    all_waves: bool = typer.Option(False, "--all-waves", help="Summarize all waves in the phase."),
+) -> None:
+    """Summarize phase/wave verification evidence without mutating state."""
+    from gpd.core.phase_verification_summary import build_phase_verification_summary
+
+    if phase_num and phase and phase_num != phase:
+        _error("phase verification-summary received conflicting phase values")
+    selected_phase = phase or phase_num
+    if not selected_phase:
+        _error("phase verification-summary requires a phase number")
+    result = build_phase_verification_summary(
+        _read_only_project_scoped_cwd(),
+        selected_phase,
+        wave=wave,
+        all_waves=all_waves,
+    )
+    _output(result)
+    if not result.structural_valid:
+        raise typer.Exit(code=1)
 
 
 @phase_app.command("find")
@@ -12950,6 +13071,21 @@ def _emit_return_skeleton(payload: Mapping[str, object], *, output_format: str) 
     typer.echo(markdown.rstrip() + "\n", nl=False)
 
 
+def _read_return_skeleton_files_from(files_from: str | None) -> list[str]:
+    """Read newline-delimited ``files_written`` seed entries for return skeletons."""
+
+    if files_from is None:
+        return []
+    source = files_from.strip()
+    if not source:
+        raise GPDError("return skeleton --files-from must be a path or '-'")
+    if source == "-":
+        content = sys.stdin.read()
+    else:
+        _, content = _load_text_document_or_error(source)
+    return [line.strip() for line in content.splitlines() if line.strip()]
+
+
 @return_app.command("skeleton")
 def return_skeleton_cmd(
     role: str = typer.Option(..., "--role", help="Return role profile to render."),
@@ -12967,6 +13103,11 @@ def return_skeleton_cmd(
         None,
         "--file",
         help="Seed one gpd_return.files_written entry. Repeatable.",
+    ),
+    files_from: str | None = typer.Option(
+        None,
+        "--files-from",
+        help="Read newline-delimited gpd_return.files_written entries from a path or '-' for stdin.",
     ),
     issues: list[str] | None = typer.Option(
         None,
@@ -13005,10 +13146,11 @@ def return_skeleton_cmd(
 
     project_root = _read_only_project_scoped_cwd(_get_cwd())
     try:
+        seeded_files = [*(files_written or []), *_read_return_skeleton_files_from(files_from)]
         raw_payload = builder(
             role=role,
             status=status,
-            files_written=files_written or [],
+            files_written=seeded_files,
             issues=issues or [],
             next_actions=next_actions or [],
             phase=phase,
@@ -14198,6 +14340,82 @@ def validate_handoff_artifacts_cmd(
         kwargs["include_classification"] = True
 
     result = validate_handoff_artifacts_markdown(project_root, content, **kwargs)
+    _output(result)
+    if not result.passed:
+        raise typer.Exit(code=1)
+
+
+def _load_child_handoff_documents(
+    *,
+    gate_path: str,
+    return_file: str,
+    launch_cwd: Path,
+    project_root: Path,
+) -> tuple[str, str]:
+    """Load child gate and return content, supporting one combined stdin stream."""
+
+    if gate_path == "-" and return_file == "-":
+        content = sys.stdin.read()
+        return content, content
+
+    if gate_path == "-":
+        gate_content = sys.stdin.read()
+    else:
+        resolved_gate = _resolve_return_file_path(gate_path, launch_cwd=launch_cwd, project_root=project_root)
+        _, gate_content = _load_text_document_or_error(str(resolved_gate))
+
+    if return_file == "-":
+        return_content = sys.stdin.read()
+    else:
+        resolved_return = _resolve_return_file_path(return_file, launch_cwd=launch_cwd, project_root=project_root)
+        _, return_content = _load_text_document_or_error(str(resolved_return))
+
+    return gate_content, return_content
+
+
+@validate_app.command("child-handoff")
+def validate_child_handoff_cmd(
+    gate_path: str = typer.Option(
+        ...,
+        "--gate",
+        help="Path to a child_gate YAML block, or '-' for stdin.",
+    ),
+    return_file: str = typer.Option(
+        ...,
+        "--return-file",
+        help="Path to a file containing a gpd_return YAML block, or '-' for stdin.",
+    ),
+    fresh_after: str | None = typer.Option(
+        None,
+        "--fresh-after",
+        help="ISO 8601 timestamp; checked artifacts must be modified at or after this time.",
+    ),
+) -> None:
+    """Validate a child_gate tuple and child return without running applicators."""
+
+    from gpd.core.child_handoff import parse_child_gate_markdown, validate_child_handoff
+    from gpd.core.handoff_artifacts import parse_fresh_after
+
+    launch_cwd = _get_cwd()
+    project_root = _read_only_project_scoped_cwd(launch_cwd)
+    gate_content, return_content = _load_child_handoff_documents(
+        gate_path=gate_path,
+        return_file=return_file,
+        launch_cwd=launch_cwd,
+        project_root=project_root,
+    )
+    try:
+        gate = parse_child_gate_markdown(gate_content)
+        freshness_cutoff = parse_fresh_after(fresh_after)
+        result = validate_child_handoff(
+            project_root,
+            return_content,
+            gate,
+            fresh_after=freshness_cutoff,
+        )
+    except ValueError as exc:
+        _error(str(exc))
+
     _output(result)
     if not result.passed:
         raise typer.Exit(code=1)

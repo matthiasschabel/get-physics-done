@@ -74,16 +74,17 @@ def test_error_propagation_keeps_a_single_phase_report_contract() -> None:
 def test_execute_phase_figure_tracker_scans_durable_figure_roots() -> None:
     workflow_text = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
 
-    assert 'PHASE_ARTIFACT_DIR="artifacts/phases/${phase_number}-${phase_slug}"' in workflow_text
-    assert 'find "${PHASE_ARTIFACT_DIR}" figures/ paper/figures/ -maxdepth 3' in workflow_text
+    assert "artifacts/phases/${phase_number}-${phase_slug}/" in workflow_text
+    assert "`figures/`, or `paper/figures/`" in workflow_text
     assert "Generated figures and plots should live in stable workspace roots" in workflow_text
 
 
 def test_write_paper_uses_durable_figure_and_literature_roots() -> None:
     workflow_text = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
 
-    assert 'find artifacts/phases figures "${PAPER_DIR}/figures" -maxdepth 3' in workflow_text
-    assert "ls GPD/literature/*-REVIEW.md 2>/dev/null" in workflow_text
+    assert "Check durable figure roots, not internal phase scratch paths" in workflow_text
+    assert "`artifacts/phases`, `figures`, `${PAPER_DIR}/figures`" in workflow_text
+    assert "GPD/literature/*-REVIEW.md" in workflow_text
     assert "GPD/phases/*/figures/" not in workflow_text
     assert "GPD/phases/*/LITERATURE-REVIEW.md" not in workflow_text
 

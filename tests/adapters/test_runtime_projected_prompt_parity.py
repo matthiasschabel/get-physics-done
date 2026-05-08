@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import tomllib
 from pathlib import Path
 
@@ -34,6 +35,43 @@ WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+PHASE7_TARGET_COMMANDS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+PHASE7_TARGET_COMMAND_PROJECTION_BUDGETS = {
+    "plan-phase": {
+        "claude-code": 4_196,
+        "codex": 6_597,
+        "gemini": 7_095,
+        "opencode": 6_612,
+    },
+    "execute-phase": {
+        "claude-code": 3_426,
+        "codex": 5_987,
+        "gemini": 6_478,
+        "opencode": 5_902,
+    },
+    "new-project": {
+        "claude-code": 9_740,
+        "codex": 11_588,
+        "gemini": 12_080,
+        "opencode": 11_453,
+    },
+    "write-paper": {
+        "claude-code": 13_076,
+        "codex": 12_251,
+        "gemini": 12_692,
+        "opencode": 15_578,
+    },
+}
+PHASE7_TARGET_FIRST_STAGE_BY_COMMAND = {
+    "plan-phase": "phase_bootstrap",
+    "execute-phase": "phase_bootstrap",
+    "new-project": "scope_intake",
+    "write-paper": "paper_bootstrap",
+}
+RUNTIME_BRIDGE_COMMAND_RE = re.compile(
+    r"(?:[^ \n`]+)\s+-m gpd\.runtime_cli\s+--runtime\s+[a-z-]+"
+    r"\s+--config-dir\s+[^ \n`]+(?:\s+--install-scope\s+local)?"
+)
 VERIFIER_BUDGET_BY_NATIVE_INCLUDE_SUPPORT = {
     True: (500, 35_000),
     False: (500, 35_000),
@@ -468,12 +506,30 @@ def _project_fixture_command(content: str, runtime: str, target_dir: Path) -> st
     )
 
 
+def _project_command_for_runtime(command_name: str, runtime: str, target_dir: Path) -> str:
+    descriptor = get_runtime_descriptor(runtime)
+    return project_markdown_for_runtime(
+        _read(COMMANDS_DIR / f"{command_name}.md"),
+        runtime=runtime,
+        path_prefix=f"./{descriptor.config_dir_name}/",
+        surface_kind="command",
+        install_scope="--local",
+        src_root=REPO_ROOT / "src/gpd",
+        workflow_target_dir=target_dir,
+        command_name=command_name,
+    )
+
+
 def _shell_fence_bodies(text: str) -> tuple[str, ...]:
     return tuple(
         fence.body
         for fence in iter_markdown_fences(text)
         if fence.info.lower() in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES
     )
+
+
+def _normalized_runtime_bridge_text(text: str) -> str:
+    return RUNTIME_BRIDGE_COMMAND_RE.sub("<runtime-bridge>", text)
 
 
 def _raw_include_count(text: str, include_suffix: str) -> int:
@@ -566,6 +622,60 @@ def _assert_fragments_visible(text: str, fragments: tuple[str, ...], *, label: s
 
 def _extract_spawn_contracts(text: str) -> list[dict[str, object]]:
     return list(_parse_spawn_contracts(text, owner_name="runtime-projected"))
+
+
+def _expected_phase7_target_init_command(command_name: str, bridge: str) -> str:
+    if command_name in {"plan-phase", "execute-phase"}:
+        return (
+            f'{bridge} --raw init {command_name} "$ARGUMENTS" '
+            f"--stage {PHASE7_TARGET_FIRST_STAGE_BY_COMMAND[command_name]}"
+        )
+    if command_name == "new-project":
+        return f"{bridge} --raw init new-project --stage scope_intake"
+    if command_name == "write-paper":
+        return f'{bridge} --raw init write-paper --stage paper_bootstrap -- "$ARGUMENTS"'
+    raise AssertionError(f"Unhandled Phase 7 target command: {command_name}")
+
+
+@pytest.mark.parametrize("command_name", PHASE7_TARGET_COMMANDS)
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_phase7_target_command_projection_stays_under_baseline_budget(
+    command_name: str,
+    runtime: str,
+) -> None:
+    projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
+    budget = PHASE7_TARGET_COMMAND_PROJECTION_BUDGETS[command_name][runtime]
+    normalized_projected = _normalized_runtime_bridge_text(projected)
+
+    assert get_adapter(runtime).format_command(command_name) in projected
+    assert len(normalized_projected) <= budget
+    assert len(projected) <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
+
+
+@pytest.mark.parametrize("command_name", PHASE7_TARGET_COMMANDS)
+@pytest.mark.parametrize(
+    "runtime",
+    tuple(
+        descriptor.runtime_name
+        for descriptor in iter_runtime_descriptors()
+        if not descriptor.native_include_support
+    ),
+)
+def test_phase7_target_non_native_command_shims_use_exact_runtime_bridge(
+    command_name: str,
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    bridge = _bridge_for_projection(runtime, target_dir)
+
+    projected = _project_command_for_runtime(command_name, runtime, target_dir)
+
+    assert get_adapter(runtime).format_command(command_name) in projected
+    assert _has_staged_shim_sentinel(projected)
+    assert _expected_phase7_target_init_command(command_name, bridge) in _first_shell_commands(projected)
+    assert f"gpd --raw init {command_name}" not in "\n".join(_shell_fence_bodies(projected))
 
 
 @pytest.mark.parametrize(

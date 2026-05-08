@@ -136,10 +136,18 @@ def test_wave_checkpoint_authority_is_established_before_execution_work() -> Non
     assert checkpoint_idx < describe_idx < spawn_idx
     assert "before scripts, numerical computation, dispatch, subagents, artifacts" in EXECUTE_PHASE
     assert "Do not run computation and then checkpoint afterward." in EXECUTE_PHASE
-    assert "PROJECT_ROOT=$(pwd -P)" in EXECUTE_PHASE
-    assert "GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)" in EXECUTE_PHASE
-    assert "refusing ambient rollback checkpoint" in EXECUTE_PHASE
-    assert "initialize fixture-local git/checkpoint support" in EXECUTE_PHASE
+    assert 'gpd --raw phase checkpoint create --phase "${phase_number}" --wave "${WAVE_NUM}"' in EXECUTE_PHASE
+    assert "safe_to_execute_wave: true" in EXECUTE_PHASE
+    assert "PROJECT_ROOT=$(pwd -P)" not in EXECUTE_PHASE
+    assert "GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)" not in EXECUTE_PHASE
+
+
+def test_execute_phase_closeout_uses_readiness_and_checkpoint_helpers() -> None:
+    assert 'gpd --raw phase closeout-readiness "${phase_number}" --require-verification' in EXECUTE_PHASE
+    assert 'gpd phase complete "${phase_number}"' in EXECUTE_PHASE
+    assert 'gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace phase' in EXECUTE_PHASE
+    assert 'git tag -l "gpd-checkpoint-phase-${phase_number}-*"' not in EXECUTE_PHASE
+    assert 'git tag -d "${TAG}"' not in EXECUTE_PHASE
 
 
 def test_precheck_abort_does_not_spawn_workers() -> None:

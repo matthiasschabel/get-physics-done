@@ -47,7 +47,7 @@ COMMAND_BASELINES = {
     "discuss-phase": (1_074, 41_437, 2),
     "error-patterns": (258, 6_372, 1),
     "error-propagation": (436, 18_556, 1),
-    "execute-phase": (2_143, 107_259, 1),
+    "execute-phase": (1_807, 98_788, 1),
     "explain": (357, 13_532, 1),
     "export": (502, 13_779, 1),
     "export-logs": (248, 9_260, 1),
@@ -67,7 +67,7 @@ COMMAND_BASELINES = {
     "pause-work": (302, 13_207, 1),
     "peer-review": (1_306, 75_422, 1),
     "plan-milestone-gaps": (357, 11_407, 1),
-    "plan-phase": (1_032, 52_171, 1),
+    "plan-phase": (907, 50_454, 1),
     "progress": (612, 20_404, 1),
     "quick": (508, 24_293, 1),
     "reapply-patches": (151, 4_511, 1),
@@ -96,7 +96,7 @@ COMMAND_BASELINES = {
     "update": (269, 7_655, 1),
     "validate-conventions": (269, 10_508, 1),
     "verify-work": (763, 41_872, 1),
-    "write-paper": (1_482, 88_175, 1),
+    "write-paper": (1_427, 89_293, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
     "write-paper": (1_600, 91_000),
@@ -147,7 +147,7 @@ WORKFLOW_BASELINES = {
     "discuss-phase": (633, 25_137, 0),
     "error-patterns": (143, 3_937, 0),
     "error-propagation": (387, 17_136, 0),
-    "execute-phase": (2_102, 106_207, 2),
+    "execute-phase": (1_766, 97_736, 2),
     "execute-plan": (825, 52_486, 0),
     "explain": (270, 10_920, 1),
     "export-logs": (170, 6_195, 0),
@@ -167,7 +167,7 @@ WORKFLOW_BASELINES = {
     "pause-work": (275, 12_667, 0),
     "peer-review": (1_117, 65_433, 2),
     "plan-milestone-gaps": (290, 7_888, 0),
-    "plan-phase": (984, 50_575, 1),
+    "plan-phase": (859, 48_858, 1),
     "progress": (576, 19_421, 0),
     "quick": (422, 21_059, 4),
     "reapply-patches": (114, 3_750, 0),
@@ -197,7 +197,7 @@ WORKFLOW_BASELINES = {
     "validate-conventions": (228, 9_317, 1),
     "verify-phase": (687, 42_370, 0),
     "verify-work": (690, 39_959, 2),
-    "write-paper": (1_334, 82_209, 2),
+    "write-paper": (1_279, 83_327, 2),
 }
 WORST_WORKFLOW_HARD_CAPS = {
     "verify-phase": (720, 44_000),

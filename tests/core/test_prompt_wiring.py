@@ -37,6 +37,7 @@ from tests.doc_surface_contracts import (
     assert_resume_authority_contract,
     assert_runtime_reset_rediscovery_contract,
 )
+from tests.markdown_test_support import extract_markdown_section
 
 
 @pytest.fixture(autouse=True)
@@ -1628,39 +1629,45 @@ def _assert_parse_line_includes_tokens(parse_line: str, fields: tuple[str, ...])
 def test_new_project_wiring_mentions_contract_persistence_and_contract_first_downstream_generation() -> None:
     workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
     command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
-    parse_line = next(line for line in workflow_text.splitlines() if line.startswith("Parse JSON for:"))
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "new-project-stage-manifest.json").read_text(encoding="utf-8")),
         expected_workflow_id="new-project",
     )
+    scope_intake = manifest.stage("scope_intake")
 
     assert "gpd state set-project-contract" in workflow_text
     assert "gpd --raw validate project-contract - --mode approved" in workflow_text
     assert "gpd state set-project-contract -" in workflow_text
     assert "/tmp/gpd-project-contract.json" not in workflow_text
     assert "temporary JSON file if needed" not in workflow_text
-    _assert_parse_line_includes_tokens(
-        parse_line,
-        (
-            "commit_docs",
-            "autonomy",
-            "research_mode",
-            "project_exists",
-            "has_research_map",
-            "planning_exists",
-            "has_research_files",
-            "research_file_samples",
-            "has_project_manifest",
-            "needs_research_map",
-            "has_git",
-            "project_contract",
-            "project_contract_gate",
-            "project_contract_load_info",
-            "project_contract_validation",
-        ),
+    assert "Parse JSON for:" not in extract_markdown_section(
+        workflow_text,
+        "## 1. Setup",
+        context="new-project scope intake",
     )
-    if "research_file_samples" in manifest.stage("scope_intake").required_init_fields:
-        assert "`research_file_samples`" in parse_line
+    assert (
+        "gpd --raw stage field-access new-project --stage scope_intake --style instruction"
+        in workflow_text
+    )
+    assert "SCOPE_INIT.staged_loading.required_init_fields" in workflow_text
+    for field in (
+        "commit_docs",
+        "autonomy",
+        "research_mode",
+        "project_exists",
+        "has_research_map",
+        "planning_exists",
+        "has_research_files",
+        "research_file_samples",
+        "has_project_manifest",
+        "needs_research_map",
+        "has_git",
+        "project_contract",
+        "project_contract_gate",
+        "project_contract_load_info",
+        "project_contract_validation",
+    ):
+        assert field in scope_intake.required_init_fields
     assert "SCOPE_APPROVAL_INIT=$(gpd --raw init new-project --stage scope_approval)" in workflow_text
     assert "POST_SCOPE_INIT=$(gpd --raw init new-project --stage post_scope)" in workflow_text
     assert "roadmapper_model" in workflow_text
@@ -1873,8 +1880,8 @@ def test_discuss_and_plan_workflows_resolve_roadmap_only_phases() -> None:
     assert "Continue to check_existing using the roadmap-derived phase metadata." in discuss_text
     assert 'REQUESTED_PHASE="${PHASE}"' in plan_text
     assert 'PHASE=$(echo "$INIT" | gpd json get .phase_number --default "${REQUESTED_PHASE}")' in plan_text
-    assert 'PHASE_INFO=$(gpd --raw roadmap get-phase "${PHASE}")' in plan_text
-    assert 'PHASE_SLUG=$(gpd slug "$PHASE_NAME")' in plan_text
+    assert "Use the roadmap phase helper to refresh phase metadata." in plan_text
+    assert "Extract `phase_number`, `phase_name`, `goal` from the structured result." in plan_text
     assert (
         "Use these resolved values for all later references to `PHASE_DIR`, `PHASE_SLUG`, and `PADDED_PHASE`."
         in plan_text
@@ -2472,12 +2479,12 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
     )
     assert "PHASES=$(gpd --raw phase list)" in gaps_workflow
     assert (
-        'PHASE_GOAL=$(gpd --raw roadmap get-phase "${phase_number}" | gpd json get .goal --default "")'
+        "Load plan inventory with wave grouping from `gpd phase index {phase_number}`."
         in execute_workflow
     )
+    assert "`objective`" in execute_workflow
     assert (
-        'gpd --raw summary-extract "$summary" --field one_liner | gpd json get .one_liner --default ""'
-        in execute_workflow
+        "summary-extract for one-liners" in execute_workflow
     )
     assert "ROADMAP=$(gpd --raw roadmap analyze)" in milestone_workflow
     assert (
@@ -3186,11 +3193,11 @@ def test_execute_phase_and_execute_plan_use_staged_execution_bootstrap_instead_o
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
 
     assert "BOOTSTRAP_INIT=$(load_execute_phase_stage phase_bootstrap)" in execute_workflow
-    assert "PHASE_CLASSIFICATION_INIT=$(load_execute_phase_stage phase_classification)" in execute_workflow
+    assert "load_execute_phase_stage phase_classification" in execute_workflow
     assert "WAVE_PLANNING_INIT=$(load_execute_phase_stage wave_planning)" in execute_workflow
     assert "CHECKPOINT_RESUME_INIT=$(load_execute_phase_stage checkpoint_resume)" in execute_workflow
-    assert "WAVE_DISPATCH_INIT=$(load_execute_phase_stage wave_dispatch)" in execute_workflow
-    assert "AGGREGATE_VERIFY_INIT=$(load_execute_phase_stage aggregate_and_verify)" in execute_workflow
+    assert "load_execute_phase_stage wave_dispatch" in execute_workflow
+    assert "load_execute_phase_stage aggregate_and_verify" in execute_workflow
     assert "CLOSEOUT_INIT=$(load_execute_phase_stage closeout)" in execute_workflow
     assert 'gpd --raw init execute-phase "${phase}" --include state,config' not in execute_plan
     assert 'gpd --raw init execute-phase "${phase}" --stage phase_bootstrap' in execute_plan
@@ -3550,9 +3557,13 @@ def test_contract_schema_references_stay_wired_into_templates_and_review_docs() 
     assert '"verification_status": "partial"' in bibliography_audit_schema
     assert "Manual JSON is also the only supported path today for scoring-only profiles" in scoring
     assert "${PAPER_DIR}/reproducibility-manifest.json" in write_paper
-    assert (
-        'gpd --raw validate reproducibility-manifest "${PAPER_DIR}/reproducibility-manifest.json" --strict'
-        in write_paper
+    _assert_prompt_contracts(
+        write_paper,
+        semantic_anchor(
+            "write-paper keeps strict reproducibility validation before review",
+            ("Run strict reproducibility-manifest validation", "If validation fails", "Do not enter"),
+            context="write-paper reproducibility gate",
+        ),
     )
     assert "gpd validate summary-contract" in execute_plan
     assert "gpd validate verification-contract" in verify_work
@@ -5077,7 +5088,7 @@ def test_execution_surfaces_use_bounded_review_cadence_and_first_result_gates() 
     )
     assert "Do NOT narrow just because a wave advanced or one proxy passed." in execute_phase
     assert "pre_execution_specialists" in execute_phase
-    assert "PRE_EXECUTION_INIT=$(load_execute_phase_stage pre_execution_specialists)" in execute_phase
+    assert "load_execute_phase_stage pre_execution_specialists" in execute_phase
     assert '# task(subagent_type="gpd-notation-coordinator"' not in execute_phase
     assert '# task(subagent_type="gpd-experiment-designer"' not in execute_phase
     assert "What decisive evidence is still owed before downstream work is trustworthy?" in resume_work
@@ -6282,11 +6293,13 @@ def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verifica
     autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
 
     assert "Dirty worktree safety gate" in plan_phase
-    assert "git status --porcelain --untracked-files=all" in plan_phase
-    assert "plan-phase never stashes, resets, cleans, overwrites, or hides user work" in plan_phase
+    assert "inspect only the project worktree" in plan_phase
+    assert "Show the dirty paths" in plan_phase
+    assert "`plan-phase` never stashes, resets, cleans, overwrites, or hides user work" in plan_phase
     assert "fail_closed_on_state_conflict" in plan_phase
     assert "Canonical conflict-stop labels" in plan_phase
-    assert "ERROR: Convention verification failed -- resolve before planning" in plan_phase
+    assert "Run the convention check before planning." in plan_phase
+    assert "If it fails, stop with the check output and route to convention validation" in plan_phase
 
     assert "stale/missing/non-passing verification blocks audit/paper" in autonomous
     assert "invoke child command `gpd:verify-work` with `{phase: COMPLETE_PHASE}`" in autonomous

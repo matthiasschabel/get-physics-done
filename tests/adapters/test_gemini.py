@@ -1195,7 +1195,7 @@ class TestInstall:
         assert "INIT=$(gpd --raw init new-project)" not in workflow
         assert f"INIT=$({expected_bridge} --raw init new-project)" not in workflow
         assert f"{expected_bridge} --raw init new-project" in workflow
-        assert f"{expected_bridge} commit " in workflow
+        assert "commit them with message" in workflow
         assert ' gpd commit "' not in workflow
         if COMPACT_STAGED_COMMAND_SHIM_SENTINEL in command:
             assert f"{expected_bridge} --raw init new-project --stage scope_intake" in command

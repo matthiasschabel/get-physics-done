@@ -61,30 +61,28 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
     assert source.count("INIT=$(gpd --raw init plan-phase") >= 3
     assert "PLANNER_RETURN=$(\ntask(" in source
     assert source.index("PLANNER_RETURN=$(") < source.index(
-        'FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")'
+        "Before checker/final status, validate only fresh `FRESH_PLAN_FILES`"
     )
-    assert 'if [ -z "${FRESH_PLAN_FILES:-}" ]; then' in source
-    assert 'FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")' in source
-    assert 'PLAN_RETURN_MARKDOWN="${PLANNER_RETURN:-}"' in source
-    assert "MAIN_CONTEXT_PLAN_RETURN=$(" in source
-    assert 'PLAN_RETURN_MARKDOWN="$MAIN_CONTEXT_PLAN_RETURN"' in source
-    assert "printf '  status: completed\\n  files_written:\\n'" in source
-    assert "printf '  issues: []\\n  next_actions: []\\n```\\n'" in source
-    assert "printf '%s\\n' \"$PLAN_RETURN_MARKDOWN\" | gpd validate handoff-artifacts -" in source
+    assert "derive that list from the typed `PLANNER_RETURN`" in source
+    assert "gpd return skeleton --role planner --status completed" in source
+    assert "one `--file` entry per newly written plan" in source
+    assert "Then run the planner child_gate tuple once" in source
+    assert "printf '```yaml\\ngpd_return:\\n'" not in source
+    assert "printf '  status: completed\\n  files_written:\\n'" not in source
+    assert "printf '%s\\n' \"$PLAN_RETURN_MARKDOWN\"" not in source
     assert 'FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c' not in source
     assert 'json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}})' not in source
     assert "gpd validate handoff-artifacts -" in source
-    assert '--allowed-root "$PHASE_DIR"' in source
-    assert '--expected-glob "${PHASE_DIR}/*-PLAN.md"' in source
+    assert "allowed-root" in source
+    assert "expected-glob" in source
     assert "--required-suffix=-PLAN.md" in source
     assert '[ -f "$plan_file" ] || continue' not in source
-    assert "ERROR: planner artifact is missing or unreadable" in source
-    assert "for plan_file in $FRESH_PLAN_FILES;" in source
-    assert 'PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "$plan_file")' in source
-    assert "ERROR: plan-preflight failed for $plan_file" in source
-    assert 'PLANS_CONTENT=""' in source
+    assert "all files are readable `${PHASE_DIR}/*-PLAN.md` paths" in source
+    assert "every file passes `gpd validate plan-contract`" in source
+    assert "every file passes the structured plan preflight validator" in source
+    assert "Read each fresh plan artifact into `PLANS_CONTENT` only after the planner gate passes" in source
     assert (
-        "Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch:"
+        "Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch."
     ) in source
 
 
@@ -93,7 +91,8 @@ def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None
 
     assert "The shared child artifact gate owns the no-synthetic-child-return rule" in source
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in source
-    assert "printf '```yaml\\ngpd_return:\\n'" in source
+    assert "gpd return skeleton --role planner --status completed" in source
+    assert "printf '```yaml\\ngpd_return:\\n'" not in source
     assert '{"gpd_return":{"files_written"' not in source
     assert "${PLANNER_RETURN:-$(" not in source
 
@@ -106,8 +105,8 @@ def test_plan_phase_manual_plan_fallback_cannot_skip_fresh_plan_validators() -> 
     assert "No full planner/checker loop is required for this fallback unless requested" in source
     assert "a failing gate means `status: blocked`, not `planned_ready`/`green`" in source
     assert "and no `gpd:execute-phase` route" in source
-    assert 'gpd validate plan-contract "$plan_file"' in source
-    assert 'gpd --raw validate plan-preflight "$plan_file"' in source
+    assert "gpd validate plan-contract" in source
+    assert "structured plan preflight validator" in source
     assert (
         "The `PHASE PLANNED` offer and `gpd:execute-phase` route require the fresh-plan validator gate above." in source
     )

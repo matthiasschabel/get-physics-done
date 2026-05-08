@@ -26,7 +26,14 @@ FORBIDDEN_GEMINI_SHELL_FRAGMENTS = (
     "printf '%s\\n'",
     "mktemp",
     "<<",
+    "if [ $? -ne 0 ]",
 )
+TARGET_STAGED_COMMAND_INIT_BY_NAME = {
+    "plan-phase": '--raw init plan-phase "$ARGUMENTS" --stage phase_bootstrap',
+    "execute-phase": '--raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap',
+    "new-project": "--raw init new-project --stage scope_intake",
+    "write-paper": '--raw init write-paper --stage paper_bootstrap -- "$ARGUMENTS"',
+}
 LEADING_ASSIGNMENT_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
 SHELL_CONTROL_PREFIXES = ("case ", "elif ", "else", "fi", "for ", "if ", "then", "while ")
 TERMINAL_EXAMPLE_PREFIXES = (
@@ -270,6 +277,25 @@ def _assert_no_unsafe_gemini_shell_shape(text: str, *, label: str) -> None:
                 offenders.append(f"lines {fence.start_line}-{fence.end_line}: leading assignment {line!r}")
 
     assert offenders == [], f"{label} has unsafe Gemini shell projection: {offenders}"
+
+
+@pytest.mark.parametrize("command_name", tuple(TARGET_STAGED_COMMAND_INIT_BY_NAME))
+def test_gemini_target_staged_command_projection_is_single_safe_bridge_bootstrap(
+    command_name: str,
+    tmp_path: Path,
+) -> None:
+    target_dir = tmp_path / ".gemini"
+    bridge = _bridge_for_projection(target_dir)
+    projected = _project_gemini_command(command_name, target_dir)
+    expected_command = f"{bridge} {TARGET_STAGED_COMMAND_INIT_BY_NAME[command_name]}"
+
+    _assert_gemini_shell_fences_are_policy_runnable(projected, bridge=bridge, label=command_name)
+    _assert_no_unsafe_gemini_shell_shape(projected, label=command_name)
+    assert tuple(
+        command
+        for fence in _shell_fences(projected)
+        if (command := _first_runnable_shell_command(fence))
+    ) == (expected_command,)
 
 
 @pytest.mark.parametrize(

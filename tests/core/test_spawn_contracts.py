@@ -359,8 +359,8 @@ def test_plan_phase_reloads_research_from_disk_and_keeps_checker_advisory() -> N
     content = _read(WORKFLOWS_DIR / "plan-phase.md")
 
     assert "Verify RESEARCH.md was written (guard against silent researcher failure):" in content
-    assert "Re-read RESEARCH.md from disk" in content
-    assert "research_content` from INIT (step 1) is **stale**" in content
+    assert "After it passes, re-read the research file from disk" in content
+    assert "the earlier init `research_content` is no longer current" in content
     assert "Proceed without plan verification. Plans are still executable." in content
     assert "Approved plans from partial approval are final" in content
 

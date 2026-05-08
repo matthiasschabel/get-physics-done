@@ -47,9 +47,9 @@ def test_execute_workflow_fallback_defaults_match_project_config_defaults() -> N
 
     assert f".max_unattended_minutes_per_plan --default {defaults.max_unattended_minutes_per_plan})" in execute_plan
     assert f".checkpoint_after_n_tasks --default {defaults.checkpoint_after_n_tasks})" in execute_plan
-    assert f".max_unattended_minutes_per_plan --default {defaults.max_unattended_minutes_per_plan})" in execute_phase
-    assert f".max_unattended_minutes_per_wave --default {defaults.max_unattended_minutes_per_wave})" in execute_phase
-    assert f".checkpoint_after_n_tasks --default {defaults.checkpoint_after_n_tasks})" in execute_phase
+    assert "Read `review_cadence`, `research_mode`, the unattended-minute limits" in execute_phase
+    assert "<max_unattended_minutes_per_plan>{MAX_UNATTENDED_MINUTES_PER_PLAN}</max_unattended_minutes_per_plan>" in execute_phase
+    assert "<max_unattended_minutes_per_wave>{MAX_UNATTENDED_MINUTES_PER_WAVE}</max_unattended_minutes_per_wave>" in execute_phase
 
 
 def test_autonomous_prompt_uses_supported_transition_and_discuss_contracts() -> None:

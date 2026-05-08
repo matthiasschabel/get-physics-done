@@ -476,6 +476,8 @@
         "derived_intermediate_result_count",
         "derived_approximations",
         "derived_approximation_count",
+        "verification_report_skeleton_bridge",
+        "verification_report_finalizer_bridge",
         "state_load_source",
         "state_integrity_issues",
         "platform"

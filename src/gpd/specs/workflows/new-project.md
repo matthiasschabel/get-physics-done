@@ -131,6 +131,8 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
+Use `gpd --raw stage field-access new-project --stage scope_approval --style instruction` before reading `SCOPE_APPROVAL_INIT`; the approval-stage payload fields remain manifest-owned.
+
 Build a canonical scoping contract from the extracted input.
 Before you ask for approval, keep the contract as a literal JSON object for the `project_contract` subsection of `templates/project-contract-schema.md`, and use that schema as the canonical source of truth for the object rules. Do not restate the full contract rules here; keep only the approval-critical reminders below.
 
@@ -355,16 +357,7 @@ Initialize the canonical continuity fields under `GPD/state.json.continuation` s
 
 #### M6. Commit All Artifacts
 
-Create the directory structure and commit everything in a single commit:
-
-```bash
-mkdir -p GPD
-
-PRE_CHECK=$(gpd pre-commit-check --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
-```
+Create the `GPD/` directory structure, pre-check all minimal initialization artifacts, and commit them together with message `docs: initialize research project (minimal)`.
 
 #### M7. Done — Offer Next Step
 
@@ -443,7 +436,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `commit_docs`, `autonomy`, `research_mode`, `project_exists`, `state_exists`, `roadmap_exists`, `recoverable_project_exists`, `partial_project_exists`, `project_recovery_status`, `init_progress_exists`, `init_progress_status`, `init_progress_valid`, `init_progress_corrupt`, `init_progress_step`, `init_progress_description`, `init_progress_path`, `has_research_map`, `planning_exists`, `has_research_files`, `research_file_samples`, `has_project_manifest`, `needs_research_map`, `has_git`, `platform`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+Use `gpd --raw stage field-access new-project --stage scope_intake --style instruction` to confirm the manifest-selected setup fields. Read only those keys from `SCOPE_INIT`; `SCOPE_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Pause for user confirmation after each major step (questioning, scoping contract, research, roadmap). Show summaries and wait for approval before proceeding.
@@ -651,24 +644,9 @@ Record the date and initialization trigger in the template footer.
 
 Do not compress. Capture everything gathered.
 
-**Commit PROJECT.md:**
+**Commit PROJECT.md:** ensure `GPD/` exists, pre-check `GPD/PROJECT.md` and `GPD/state.json`, then commit them with message `docs: initialize research project`.
 
-```bash
-mkdir -p GPD
-
-PRE_CHECK=$(gpd pre-commit-check --files GPD/PROJECT.md GPD/state.json 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: initialize research project" --files GPD/PROJECT.md GPD/state.json
-```
-
-**Checkpoint step 4:**
-
-```bash
-cat > GPD/init-progress.json << CHECKPOINT
-{"step": 4, "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "Approved project contract and PROJECT.md created and committed"}
-CHECKPOINT
-```
+**Checkpoint step 4:** Update `GPD/init-progress.json` to step `4` with the current UTC timestamp and description `Approved project contract and PROJECT.md created and committed`.
 
 ## 5. Workflow Preferences
 
@@ -888,22 +866,9 @@ Interpret the sync payload before continuing:
 - If sync fails because no runtime install could be resolved, explain that the project config was still created successfully and the user can run `gpd permissions sync --runtime <runtime>` later.
 - This sync only updates runtime-owned permission settings; it does not create or validate the base install or workflow-tool readiness.
 
-**Commit config.json:**
+**Commit config.json:** pre-check `GPD/config.json`, then commit it with message `chore: add project config`.
 
-```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/config.json 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "chore: add project config" --files GPD/config.json
-```
-
-**Checkpoint step 5:**
-
-```bash
-cat > GPD/init-progress.json << CHECKPOINT
-{"step": 5, "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "config.json created, runtime permissions synced, and config committed"}
-CHECKPOINT
-```
+**Checkpoint step 5:** Update `GPD/init-progress.json` to step `5` with the current UTC timestamp and description `config.json created, runtime permissions synced, and config committed`.
 
 **Note:** Run `gpd:settings` anytime to update these preferences and re-sync runtime permissions.
 
@@ -919,7 +884,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `researcher_model`, `synthesizer_model`, `roadmapper_model`, `commit_docs`, `autonomy`, `research_mode`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+Use `gpd --raw stage field-access new-project --stage post_scope --style instruction` to confirm the manifest-selected post-scope fields. Read only those keys from `POST_SCOPE_INIT`; `POST_SCOPE_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
 Do not reuse stale bootstrap values for literature survey, roadmapping, or conventions once this post-scope init succeeds.
 Use the staged `research_mode` from `POST_SCOPE_INIT` for all scout handoffs. Do not reread config inside the scouts.
@@ -1298,25 +1263,9 @@ Display research complete banner and key findings:
 Files: `GPD/literature/`
 ```
 
-**Commit research files:**
+**Commit research files:** pre-check the literature survey files, then commit them with message `docs: literature survey complete`.
 
-```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/literature/PRIOR-WORK.md GPD/literature/METHODS.md GPD/literature/COMPUTATIONAL.md GPD/literature/PITFALLS.md GPD/literature/SUMMARY.md 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: literature survey complete" \
-  --files GPD/literature/PRIOR-WORK.md GPD/literature/METHODS.md \
-  GPD/literature/COMPUTATIONAL.md GPD/literature/PITFALLS.md \
-  GPD/literature/SUMMARY.md
-```
-
-**Checkpoint step 6:**
-
-```bash
-cat > GPD/init-progress.json << CHECKPOINT
-{"step": 6, "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "Literature survey completed"}
-CHECKPOINT
-```
+**Checkpoint step 6:** Update `GPD/init-progress.json` to step `6` with the current UTC timestamp and description `Literature survey completed`.
 
 **If "Skip survey":** Continue to Step 7.
 
@@ -1469,22 +1418,9 @@ Does this capture the research program? (yes / adjust)
 
 If "adjust": Return to scoping.
 
-**Commit requirements:**
+**Commit requirements:** pre-check `GPD/REQUIREMENTS.md`, then commit it with message `docs: define research requirements`.
 
-```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/REQUIREMENTS.md 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: define research requirements" --files GPD/REQUIREMENTS.md
-```
-
-**Checkpoint step 7:**
-
-```bash
-cat > GPD/init-progress.json << CHECKPOINT
-{"step": 7, "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "REQUIREMENTS.md created and committed"}
-CHECKPOINT
-```
+**Checkpoint step 7:** Update `GPD/init-progress.json` to step `7` with the current UTC timestamp and description `REQUIREMENTS.md created and committed`.
 
 ## 8. Create Roadmap
 
@@ -1683,24 +1619,11 @@ Apply the canonical runtime delegation convention already loaded above.
 - Present revised roadmap
 - Loop until user approves (**maximum 3 revision iterations** — after 3, commit the current version with user's notes recorded as open questions in ROADMAP.md, and note: "Roadmap committed after 3 revision rounds. Further adjustments via `gpd:add-phase` or `gpd:remove-phase`.")
 
-**If "Review full file":** Display raw `cat GPD/ROADMAP.md`, then re-ask.
+**If "Review full file":** Display the raw `GPD/ROADMAP.md` contents, then re-ask.
 
-**Commit roadmap (after approval or auto mode):**
+**Commit roadmap (after approval or auto mode):** pre-check `GPD/ROADMAP.md`, `GPD/STATE.md`, and `GPD/REQUIREMENTS.md`, then commit them with message `docs: create research roadmap ([N] phases)`.
 
-```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/ROADMAP.md GPD/STATE.md GPD/REQUIREMENTS.md 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: create research roadmap ([N] phases)" --files GPD/ROADMAP.md GPD/STATE.md GPD/REQUIREMENTS.md
-```
-
-**Checkpoint step 8:**
-
-```bash
-cat > GPD/init-progress.json << CHECKPOINT
-{"step": 8, "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "ROADMAP.md created and committed"}
-CHECKPOINT
-```
+**Checkpoint step 8:** Update `GPD/init-progress.json` to step `8` with the current UTC timestamp and description `ROADMAP.md created and committed`.
 
 ## 8.5. Establish Conventions
 
@@ -1725,9 +1648,7 @@ Display stage banner:
 >>> Spawning notation coordinator...
 ```
 
-```bash
-NOTATION_MODEL=$(gpd resolve-model gpd-notation-coordinator)
-```
+Resolve the notation-coordinator model override for the spawn call.
 
 If `NOTATION_MODEL` is empty or null, omit `model=` entirely in the spawn call. Continue without commentary about the missing override; that empty result is the normal "use the runtime default model" path, not a warning. If it has a concrete value, include `model="$NOTATION_MODEL"`.
 
@@ -1847,32 +1768,15 @@ No-write approval boundary: in `interactive` mode before user approval, expected
 
 6. Note that full convention establishment was skipped. The user can run `gpd:validate-conventions`; the fallback lock must match the values written into `GPD/CONVENTIONS.md`.
 
-- **Conventions established:** Display confirmation with convention summary. Commit CONVENTIONS.md:
-
-  ```bash
-  PRE_CHECK=$(gpd pre-commit-check --files GPD/CONVENTIONS.md 2>&1) || true
-  echo "$PRE_CHECK"
-
-  gpd commit "docs: establish notation conventions" --files GPD/CONVENTIONS.md
-  ```
+- **Conventions established:** Display confirmation with convention summary. Pre-check `GPD/CONVENTIONS.md`, then commit it with message `docs: establish notation conventions`.
 
 - **`CONVENTION CONFLICT`:** Display conflicts. Ask user to resolve before proceeding.
 
-**Checkpoint step 8.5:**
-
-```bash
-cat > GPD/init-progress.json << CHECKPOINT
-{"step": 8.5, "completed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "description": "Conventions established and committed"}
-CHECKPOINT
-```
+**Checkpoint step 8.5:** Update `GPD/init-progress.json` to step `8.5` with the current UTC timestamp and description `Conventions established and committed`.
 
 ## 9. Done
 
-**Delete init-progress.json — initialization is complete:**
-
-```bash
-rm -f GPD/init-progress.json
-```
+**Delete init-progress.json — initialization is complete:** remove `GPD/init-progress.json` only after all initialization artifacts and commits have landed.
 
 Present completion with next steps:
 

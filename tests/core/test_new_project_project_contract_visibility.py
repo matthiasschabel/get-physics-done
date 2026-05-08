@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.assertion_taxonomy_support import FragmentMode, forbidden_duplicate, machine_exact, semantic_anchor
 from tests.markdown_test_support import extract_markdown_section
 
@@ -48,7 +49,9 @@ def _extract_contract_rule_block_lines(text: str, start_marker: str) -> tuple[st
 
 def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_contract_grounding() -> None:
     new_project_text = NEW_PROJECT.read_text(encoding="utf-8")
-    parse_line = next(line for line in new_project_text.splitlines() if line.startswith("Parse JSON for:"))
+    manifest = load_workflow_stage_manifest("new-project")
+    scope_intake = manifest.stage("scope_intake")
+    post_scope = manifest.stage("post_scope")
 
     _assert_prompt_contracts(
         new_project_text,
@@ -137,51 +140,49 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
     assert "project_contract_load_info" in new_project_text
     assert "project_contract_validation" in new_project_text
 
-    machine_exact(
-        "scope-intake manifest fields parsed exactly",
-        tuple(
-            f"`{field}`"
-            for field in (
-                "commit_docs",
-                "autonomy",
-                "research_mode",
-                "project_exists",
-                "state_exists",
-                "roadmap_exists",
-                "recoverable_project_exists",
-                "partial_project_exists",
-                "project_recovery_status",
-                "init_progress_status",
-                "has_research_map",
-                "planning_exists",
-                "has_research_files",
-                "research_file_samples",
-                "has_project_manifest",
-                "needs_research_map",
-                "has_git",
-                "platform",
-                "project_contract",
-                "project_contract_gate",
-                "project_contract_load_info",
-                "project_contract_validation",
-            )
-        ),
-        owner=PROJECT_CONTRACT_OWNER,
-        rationale="scope-intake manifest field names are parsed from init JSON",
-        context="new-project Parse JSON line",
-    ).check(parse_line)
-    machine_exact(
-        "scope-intake parse line omits late model selectors",
-        ("`researcher_model`", "`synthesizer_model`"),
-        owner=PROJECT_CONTRACT_OWNER,
-        rationale="post-scope model selectors must not be parsed from scope-intake init JSON",
-        mode=FragmentMode.ABSENT,
-        context="new-project Parse JSON line",
-    ).check(parse_line)
+    assert "gpd --raw stage field-access new-project --stage scope_intake --style instruction" in new_project_text
+    assert "SCOPE_INIT.staged_loading.required_init_fields" in new_project_text
+    assert "Parse JSON for:" not in extract_markdown_section(
+        new_project_text,
+        "## 1. Setup",
+        context="new-project scope intake",
+    )
+    assert tuple(
+        field
+        for field in (
+            "commit_docs",
+            "autonomy",
+            "research_mode",
+            "project_exists",
+            "state_exists",
+            "roadmap_exists",
+            "recoverable_project_exists",
+            "partial_project_exists",
+            "project_recovery_status",
+            "init_progress_status",
+            "has_research_map",
+            "planning_exists",
+            "has_research_files",
+            "research_file_samples",
+            "has_project_manifest",
+            "needs_research_map",
+            "has_git",
+            "platform",
+            "project_contract",
+            "project_contract_gate",
+            "project_contract_load_info",
+            "project_contract_validation",
+        )
+        if field not in scope_intake.required_init_fields
+    ) == ()
+    assert "researcher_model" not in scope_intake.required_init_fields
+    assert "synthesizer_model" not in scope_intake.required_init_fields
+    for field in ("researcher_model", "synthesizer_model", "roadmapper_model"):
+        assert field in post_scope.required_init_fields
     for field in (
-        "`researcher_model`",
-        "`synthesizer_model`",
-        "`roadmapper_model`",
+        "{researcher_model}",
+        "{synthesizer_model}",
+        "{roadmapper_model}",
     ):
         assert field in new_project_text
     machine_exact(

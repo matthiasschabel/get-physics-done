@@ -45,13 +45,13 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
     ("workflow_name", "surface_marker", "expected_token"),
     [
         ("plan-phase.md", "Parse only the fields named by", "project_contract_gate"),
-        ("execute-phase.md", "Parse JSON for:", "project_contract_gate"),
+        ("execute-phase.md", "**If `project_contract_gate.authoritative` is not true", "project_contract_gate"),
         ("execute-plan.md", "Extract from init JSON:", "project_contract_gate"),
         ("quick.md", "Parse JSON for:", "project_contract_gate"),
         ("literature-review.md", "Parse JSON for:", "project_contract_gate"),
         ("compare-experiment.md", "Parse JSON for:", "project_contract_gate"),
         ("compare-results.md", "Parse JSON for:", "project_contract_gate"),
-        ("new-project.md", "Parse JSON for:", "project_contract_gate"),
+        ("new-project.md", "Treat `project_contract` as approved scope only when", "project_contract_gate"),
         ("new-milestone.md", "Parse JSON for:", "project_contract_gate"),
         ("map-research.md", "Extract from init JSON:", "project_contract_gate"),
         ("progress.md", "Extract from init JSON:", "project_contract_gate"),
@@ -116,18 +116,19 @@ def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() ->
     workflow = _workflow_text("plan-phase.md")
 
     assert "**Dirty worktree safety gate:**" in workflow
-    assert "ERROR: dirty project worktree detected before planning:" in workflow
+    assert "If the project worktree is dirty, halt before planning." in workflow
     assert "**If `project_contract_load_info.status` starts with `blocked`" in workflow
     assert 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)' in workflow
 
     dirty_gate = workflow.index("**Dirty worktree safety gate:**")
-    dirty_stop = workflow.index("ERROR: dirty project worktree detected before planning:")
+    dirty_stop = workflow.index("If the project worktree is dirty, halt before planning.")
     contract_stop = workflow.index("**If `project_contract_load_info.status` starts with `blocked`")
     first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
 
-    assert "git status --porcelain --untracked-files=all" in workflow
-    assert "Choose: git status --short, gpd commit, or explicitly approve a project-local cleanup path." in workflow
-    assert "HALTING -- plan-phase never stashes, resets, cleans, overwrites, or hides user work." in workflow
+    assert "inspect only the project worktree" in workflow
+    assert "Show the dirty paths" in workflow
+    assert "`git status --short`, `gpd commit`, or an explicitly approved project-local cleanup path" in workflow
+    assert "`plan-phase` never stashes, resets, cleans, overwrites, or hides user work" in workflow
     assert dirty_gate < dirty_stop < contract_stop < first_authoring_reload
 
 
@@ -169,7 +170,7 @@ def test_execute_phase_latex_compile_guidance_uses_resolved_manuscript_root() ->
     assert "paper/ARTIFACT-MANIFEST.json" not in workflow
     assert "cd paper" not in workflow
     assert "MANUSCRIPT_ROOT" in workflow
-    assert "ARTIFACT-MANIFEST.json" in workflow
+    assert "manifest-recorded TeX entrypoint" in workflow
     assert "latex_compile" in workflow
 
 

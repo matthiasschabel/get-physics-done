@@ -19,6 +19,16 @@ PROMPT_KIND_BUDGETS = {
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 12_500, "chars": 635_000}
 SHELL_PARSING_LINE_BUDGET = 920
+PHASE7_TARGET_WORKFLOWS = frozenset(
+    {
+        ("workflow", "execute-phase"),
+        ("workflow", "plan-phase"),
+        ("workflow", "new-project"),
+        ("workflow", "write-paper"),
+    }
+)
+PHASE7_TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 93
+PHASE7_TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 105
 PHASE5_NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
     "status_handling": 110,
     "files_written_freshness": 26,
@@ -34,6 +44,18 @@ ZERO_SAFETY_TOTAL_FIELDS = (
     "disallowed_return_field_mention_count",
     "forbidden_child_return_synthesis_mention_count",
 )
+PHASE7_FORBIDDEN_PROMPT_SHELL_FRAGMENTS = {
+    "plan-phase.md": (
+        "printf '```yaml\\ngpd_return:\\n'",
+        "printf '  status: completed\\n  files_written:\\n'",
+        "PLAN_RETURN_MARKDOWN=\"$MAIN_CONTEXT_PLAN_RETURN\"",
+    ),
+    "execute-phase.md": (
+        'PROJECT_ROOT=$(pwd -P); while [ "$PROJECT_ROOT" != "/" ]',
+        "MANIFEST_PATH=\"$MANIFEST_PATH\" python - <<'PY'",
+    ),
+    "new-project.md": ("cat > GPD/init-progress.json << CHECKPOINT",),
+}
 
 
 def _aggregate_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:
@@ -160,6 +182,42 @@ def test_phase3_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings(
         "stage_diagnostics first-turn char budget exceeded: "
         f"observed={first_turn_chars} max={STAGE_FIRST_TURN_BUDGET['chars']}"
     )
+
+
+def test_phase7_target_workflow_shell_budgets_stay_under_caps() -> None:
+    payload = _prompt_surface_payload(("workflow",), (), False)
+    items = payload["items"]
+    assert isinstance(items, list)
+
+    target_items = [
+        item
+        for item in items
+        if isinstance(item, dict) and (item.get("kind"), item.get("name")) in PHASE7_TARGET_WORKFLOWS
+    ]
+    assert len(target_items) == len(PHASE7_TARGET_WORKFLOWS)
+
+    shell_fence_count = sum(item["shell_fence_count"] for item in target_items)
+    shell_parsing_line_count = sum(item["shell_parsing_line_count"] for item in target_items)
+    assert isinstance(shell_fence_count, int)
+    assert isinstance(shell_parsing_line_count, int)
+    assert shell_fence_count <= PHASE7_TARGET_WORKFLOW_SHELL_FENCE_BUDGET, (
+        "Phase 7 target workflow shell fence budget exceeded: "
+        f"observed={shell_fence_count} max={PHASE7_TARGET_WORKFLOW_SHELL_FENCE_BUDGET}"
+    )
+    assert shell_parsing_line_count <= PHASE7_TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET, (
+        "Phase 7 target workflow shell parsing budget exceeded: "
+        f"observed={shell_parsing_line_count} max={PHASE7_TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET}; "
+        "keep orchestration logic in helper surfaces instead of prompt-local shell parsers"
+    )
+
+
+def test_phase7_migrated_workflows_do_not_reintroduce_old_shell_fragments() -> None:
+    workflow_root = REPO_ROOT / "src/gpd/specs/workflows"
+
+    for workflow_name, fragments in PHASE7_FORBIDDEN_PROMPT_SHELL_FRAGMENTS.items():
+        text = (workflow_root / workflow_name).read_text(encoding="utf-8")
+        for fragment in fragments:
+            assert fragment not in text, f"{workflow_name} reintroduced old prompt shell fragment: {fragment}"
 
 
 def test_phase5_non_reference_semantic_duplicate_budgets_stay_under_caps() -> None:

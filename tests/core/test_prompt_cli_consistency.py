@@ -192,7 +192,12 @@ def _declared_groups() -> dict[str, set[str]]:
         group_name = getattr(group, "name", None)
         assert group_name, f"Typer group metadata has no name: {group!r}"
         typer_instance = group.typer_instance
-        groups[str(group_name)] = {_typer_command_name(command) for command in typer_instance.registered_commands}
+        subcommands = {_typer_command_name(command) for command in typer_instance.registered_commands}
+        for nested_group in typer_instance.registered_groups:
+            nested_name = getattr(nested_group, "name", None)
+            assert nested_name, f"Nested Typer group metadata has no name: {nested_group!r}"
+            subcommands.add(str(nested_name))
+        groups[str(group_name)] = subcommands
     return groups
 
 

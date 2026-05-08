@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 import yaml
+from typer.testing import CliRunner
 
+from gpd.cli import app
 from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.return_contract import (
     ALLOWED_RETURN_EXTENSION_FIELDS,
@@ -97,6 +99,26 @@ def test_list_gpd_return_profiles_matches_profile_registry_and_filters() -> None
         list_gpd_return_profiles(status="done")
 
 
+@pytest.mark.parametrize(
+    ("alias", "profile_id"),
+    [
+        ("paper_writer", "executor"),
+        ("gpd-paper-writer", "executor"),
+        ("bibliographer", "researcher"),
+        ("proof_redteam", "verifier"),
+        ("consistency_checker", "checker"),
+        ("gpd-review-reader", "reviewer"),
+    ],
+)
+def test_return_profile_aliases_are_shared_with_skeleton_builder(alias: str, profile_id: str) -> None:
+    skeleton = build_gpd_return_skeleton(role=alias, status="completed")
+    profiles = list_gpd_return_profiles(role=alias, status="completed")
+
+    assert skeleton.profile_id == profile_id
+    assert [profile["profile_id"] for profile in profiles["profiles"]] == [profile_id]
+    assert validate_gpd_return_markdown(skeleton.markdown).passed is True
+
+
 def test_new_project_role_profiles_use_conservative_existing_defaults() -> None:
     assert (
         GPD_RETURN_ROLE_PROFILES["reviewer"].default_render_fields_by_status["completed"]
@@ -146,6 +168,36 @@ def test_return_skeleton_renders_yaml_markdown_and_json_payload() -> None:
     assert json.loads(skeleton.model_dump_json())["envelope"] == skeleton.envelope
     assert skeleton.envelope["files_written"] == ["GPD/roadmap.md"]
     assert skeleton.envelope["phase"] == "01"
+
+
+def test_return_skeleton_cli_reads_files_from_stdin(tmp_path: Path) -> None:
+    result = CliRunner().invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "return",
+            "skeleton",
+            "--role",
+            "paper_writer",
+            "--status",
+            "completed",
+            "--files-from",
+            "-",
+        ],
+        input="GPD/phases/01/01-01-PLAN.md\n\nGPD/ROADMAP.md\n",
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["profile_id"] == "executor"
+    assert payload["envelope"]["files_written"] == [
+        "GPD/phases/01/01-01-PLAN.md",
+        "GPD/ROADMAP.md",
+    ]
+    assert validate_gpd_return_markdown(payload["markdown"]).passed is True
 
 
 def test_checker_checkpoint_skeleton_contains_partial_approval_fields() -> None:

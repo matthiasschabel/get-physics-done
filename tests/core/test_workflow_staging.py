@@ -248,6 +248,15 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
         in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
     )
     assert "templates/calculation-log.md" in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
+    assert "verification_report_skeleton_bridge" in execute_phase_manifest.stage(
+        "aggregate_and_verify"
+    ).required_init_fields
+    assert "verification_report_finalizer_bridge" in execute_phase_manifest.stage(
+        "aggregate_and_verify"
+    ).required_init_fields
+    assert "verification_report_skeleton_bridge" not in execute_phase_manifest.stage(
+        "phase_bootstrap"
+    ).required_init_fields
 
 
 def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -> None:
@@ -1297,6 +1306,8 @@ def test_known_init_fields_for_execute_phase_include_bootstrap_and_wave_context(
     assert "protocol_bundle_load_manifest" in known_init_fields
     assert "reference_artifacts_content" in known_init_fields
     assert "current_execution" in known_init_fields
+    assert "verification_report_skeleton_bridge" in known_init_fields
+    assert "verification_report_finalizer_bridge" in known_init_fields
 
 
 def test_validate_workflow_stage_manifest_payload_loads_execute_phase_manifest_shape() -> None:

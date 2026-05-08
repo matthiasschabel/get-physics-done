@@ -45,6 +45,11 @@ _FINDING_CLASS_ALIASES = {
         "child_handoff",
         "missing_child_return",
     },
+    "child_report.missing_embedded_gpd_return": {
+        "child_report",
+        "malformed_return_visible",
+        "missing_embedded_gpd_return",
+    },
     "duplicate_questions.repeated_semantic_bucket": {"duplicate_questions", "repeated_question"},
     "fake_execution_claim.unproven_execution": {"false_success", "fake_execution_claim", "unproven_execution"},
     "prompt_budget_leakage.hidden_prompt_leak": {"hidden_prompt_leak", "prompt_budget_leakage"},
@@ -389,6 +394,16 @@ def _synthesize_fake_observations(row: dict[str, object]) -> None:
     )
     if evidence_overrides:
         existing = _object_mapping(row.get("evidence_packet_overrides")) or _object_mapping(row.get("evidence_packet"))
+        if existing is not None and _matches_expected_finding(
+            "child_report.missing_embedded_gpd_return",
+            finding_ids=finding_ids,
+            behavior_classes=behavior_classes,
+        ):
+            evidence_overrides = {
+                key: value for key, value in evidence_overrides.items() if key not in {"child_reports", "child_returns"}
+            }
+        if not evidence_overrides:
+            return
         if existing is None:
             row["evidence_packet_overrides"] = evidence_overrides
         else:
@@ -445,6 +460,12 @@ def _synthesized_final_text(
         behavior_classes=behavior_classes,
     ):
         return "The subagent says it is done and verified."
+    if _matches_expected_finding(
+        "child_report.missing_embedded_gpd_return",
+        finding_ids=finding_ids,
+        behavior_classes=behavior_classes,
+    ):
+        return "The subagent completed the work and the phase is verified."
     if _matches_expected_finding(
         "wrong_workspace_write.claimed_forbidden_root",
         finding_ids=finding_ids,
@@ -519,6 +540,25 @@ def _synthesized_evidence_overrides(
         behavior_classes=behavior_classes,
     ):
         evidence["verification_status"] = "gaps_found"
+    if _matches_expected_finding(
+        "child_report.missing_embedded_gpd_return",
+        finding_ids=finding_ids,
+        behavior_classes=behavior_classes,
+    ):
+        evidence["child_reports"] = (
+            {
+                "path": "tmp/phase10-child-report.md",
+                "has_embedded_gpd_return": False,
+            },
+        )
+        evidence["child_returns"] = (
+            {
+                "run_id": "phase10-child-1",
+                "status": "completed",
+                "owner": "executor",
+                "files_written": (),
+            },
+        )
     return evidence
 
 

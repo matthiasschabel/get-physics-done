@@ -42,10 +42,7 @@ def _write_phase_project(
     phase_dir.mkdir(parents=True)
     (gpd_dir / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
     (gpd_dir / "ROADMAP.md").write_text(
-        "# Roadmap\n\n"
-        "## Phase 1: Setup\n\n"
-        "## Phase 2: Analysis\n\n"
-        "## Phase 3: Synthesis\n",
+        "# Roadmap\n\n## Phase 1: Setup\n\n## Phase 2: Analysis\n\n## Phase 3: Synthesis\n",
         encoding="utf-8",
     )
     for index in range(1, total_plans + 1):
@@ -81,8 +78,8 @@ def _write_completed_return(summary_path: Path, *, phase: str = "02", plan: str 
         f"  files_written: [{summary_path.as_posix()}]\n"
         "  issues: []\n"
         f"  next_actions: [gpd:verify-work {phase}]\n"
-        f"  phase: \"{phase}\"\n"
-        f"  plan: \"{plan}\"\n"
+        f'  phase: "{phase}"\n'
+        f'  plan: "{plan}"\n'
         "  tasks_completed: 1\n"
         "  tasks_total: 1\n"
         "  duration_seconds: 12\n"
@@ -90,11 +87,11 @@ def _write_completed_return(summary_path: Path, *, phase: str = "02", plan: str 
         "    advance_plan: true\n"
         "    update_progress: true\n"
         "    record_metric:\n"
-        f"      phase: \"{phase}\"\n"
-        f"      plan: \"{plan}\"\n"
-        "      duration: \"12s\"\n"
-        "      tasks: \"1\"\n"
-        "      files: \"1\"\n"
+        f'      phase: "{phase}"\n'
+        f'      plan: "{plan}"\n'
+        '      duration: "12s"\n'
+        '      tasks: "1"\n'
+        '      files: "1"\n'
         "```\n",
         encoding="utf-8",
     )
@@ -117,6 +114,27 @@ def _write_gap_verification(report_path: Path, *, status: str = "gaps_found") ->
         "missing benchmark evidence\n"
         "```\n\n"
         "FAIL: benchmark evidence is absent.\n",
+        encoding="utf-8",
+    )
+
+
+def _write_passed_verification(report_path: Path) -> None:
+    report_path.write_text(
+        "---\n"
+        "phase: 02-analysis\n"
+        'verified: "2026-05-07T00:00:00Z"\n'
+        "status: passed\n"
+        'score: "1/1 contract targets verified"\n'
+        "---\n\n"
+        "# Phase 02 Verification\n\n"
+        "```bash\n"
+        "printf 'all lifecycle contracts verified\\n'\n"
+        "```\n\n"
+        "**Output:**\n\n"
+        "```output\n"
+        "all lifecycle contracts verified\n"
+        "```\n\n"
+        "PASS: lifecycle contract evidence is complete.\n",
         encoding="utf-8",
     )
 
@@ -172,6 +190,57 @@ def test_apply_return_updates_rejects_report_without_gpd_return_without_mutating
     assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
 
 
+def test_apply_return_updates_rejects_multiple_gpd_returns_without_mutating_state(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Ready to execute")
+    report = phase_dir / "AMBIGUOUS-RETURN.md"
+    report.write_text(
+        "# Ambiguous Return\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: completed\n"
+        "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
+        "  issues: []\n"
+        "  next_actions: [gpd:verify-work 02]\n"
+        "  state_updates:\n"
+        "    advance_plan: true\n"
+        "    update_progress: true\n"
+        "```\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: blocked\n"
+        "  files_written: []\n"
+        "  issues: [conflicting return]\n"
+        "  next_actions: [gpd:resume-work]\n"
+        "  blockers:\n"
+        "    - conflicting return\n"
+        "```\n",
+        encoding="utf-8",
+    )
+    state_path = tmp_path / "GPD" / "state.json"
+    before_state = state_path.read_text(encoding="utf-8")
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "apply-return-updates",
+            "GPD/phases/02-analysis/AMBIGUOUS-RETURN.md",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["passed"] is False
+    assert payload["mutated"] is False
+    assert payload["errors"] == ["Multiple gpd_return YAML blocks found: expected exactly one, got 2"]
+    assert payload["primary_failure_class"] == "return_malformed_blocking"
+    assert payload["failure_classes"] == ["return_malformed_blocking"]
+    assert payload["applied_state_operations"] == []
+    assert state_path.read_text(encoding="utf-8") == before_state
+
+
 def test_checkpoint_intent_core_apply_updates_exposes_bounded_segment_resume(tmp_path: Path) -> None:
     phase_dir = _write_phase_project(tmp_path, status="Executing", summaries=1)
     resume_file = phase_dir / ".continue-here.md"
@@ -185,8 +254,8 @@ def test_checkpoint_intent_core_apply_updates_exposes_bounded_segment_resume(tmp
         "  files_written: []\n"
         "  issues: []\n"
         "  next_actions: [gpd:resume-work]\n"
-        "  phase: \"02\"\n"
-        "  plan: \"02\"\n"
+        '  phase: "02"\n'
+        '  plan: "02"\n'
         "  checkpoint_intent:\n"
         "    checkpoint_reason: first_result_gate\n"
         "    awaiting: user_review\n"
@@ -256,6 +325,140 @@ def test_record_verification_maps_non_passing_report_to_blocked_and_keeps_state_
     validation_payload = json.loads(validation.output)
     assert validation_payload["valid"] is True
     assert validation_payload["integrity_status"] == "healthy"
+
+
+@pytest.mark.parametrize("initial_status", ["verifying", "Phase complete \u2014 ready for verification"])
+def test_record_verification_maps_passing_report_to_verified_and_keeps_state_surfaces_in_sync(
+    tmp_path: Path,
+    initial_status: str,
+) -> None:
+    phase_dir = _write_phase_project(tmp_path, status=initial_status)
+    verification_report = phase_dir / "02-VERIFICATION.md"
+    _write_passed_verification(verification_report)
+    before_report = verification_report.read_text(encoding="utf-8")
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "state",
+            "record-verification",
+            "--phase",
+            "02",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["recorded"] is True
+    assert payload["status"] == "Verified"
+    assert payload["previous_status"] == initial_status
+    assert verification_report.read_text(encoding="utf-8") == before_report
+
+    state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
+    markdown = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
+    assert state["position"]["status"] == "Verified"
+    assert "**Status:** Verified" in markdown
+
+    validation = RUNNER.invoke(app, ["--raw", "--cwd", str(tmp_path), "state", "validate"])
+    assert validation.exit_code == 0, validation.output
+    validation_payload = json.loads(validation.output)
+    assert validation_payload["valid"] is True
+    assert validation_payload["integrity_status"] == "healthy"
+
+
+def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Ready to execute")
+    summary = phase_dir / "02-02-SUMMARY.md"
+    _write_completed_return(summary)
+
+    apply_result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "apply-return-updates",
+            "GPD/phases/02-analysis/02-02-SUMMARY.md",
+        ],
+    )
+
+    assert apply_result.exit_code == 0, apply_result.output
+    apply_payload = json.loads(apply_result.output)
+    assert apply_payload["passed"] is True
+    assert "advance_plan:last_plan" in apply_payload["applied_state_operations"]
+    state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
+    assert state["position"]["status"] == "Phase complete \u2014 ready for verification"
+
+    verification_report = phase_dir / "02-VERIFICATION.md"
+    _write_passed_verification(verification_report)
+    record_result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "state",
+            "record-verification",
+            "--phase",
+            "02",
+        ],
+    )
+
+    assert record_result.exit_code == 0, record_result.output
+    record_payload = json.loads(record_result.output)
+    assert record_payload["recorded"] is True
+    assert record_payload["status"] == "Verified"
+
+    readiness_result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "closeout-readiness",
+            "02",
+            "--require-verification",
+        ],
+    )
+
+    assert readiness_result.exit_code == 0, readiness_result.output
+    readiness_payload = json.loads(readiness_result.output)
+    assert readiness_payload["ready"] is True
+    assert readiness_payload["read_only"] is True
+    assert readiness_payload["mutated"] is False
+    assert readiness_payload["mutation_allowed"] is True
+    assert readiness_payload["verification_status"] == "passed"
+    assert readiness_payload["closeout_command"] == "gpd phase complete 02"
+    state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
+    assert state["position"]["status"] == "Verified"
+
+    complete_result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "complete",
+            "02",
+        ],
+    )
+
+    assert complete_result.exit_code == 0, complete_result.output
+    complete_payload = json.loads(complete_result.output)
+    assert complete_payload["completed_phase"] == "02"
+    assert complete_payload["all_plans_complete"] is True
+    assert complete_payload["next_phase"] == "03"
+    assert complete_payload["state_updated"] is True
+    state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
+    markdown = (tmp_path / "GPD" / "STATE.md").read_text(encoding="utf-8")
+    assert state["position"]["current_phase"] == "03"
+    assert state["position"]["status"] == "Ready to plan"
+    assert "**Status:** Ready to plan" in markdown
 
 
 @pytest.mark.parametrize("runtime", _RUNTIME_NAMES)

@@ -197,9 +197,7 @@ class GpdReturnContinuationBoundedSegment(ContinuationBoundedSegment):
             forbidden = sorted({"recorded_by", "updated_at"}.intersection(value))
             if forbidden:
                 fields = ", ".join(forbidden)
-                raise ValueError(
-                    f"{fields} are applicator-owned bounded_segment fields; omit them from child returns"
-                )
+                raise ValueError(f"{fields} are applicator-owned bounded_segment fields; omit them from child returns")
             _reject_non_string_continuation_fields(
                 value,
                 fields=_RETURN_BOUNDED_SEGMENT_TEXT_FIELDS,
@@ -408,12 +406,17 @@ def extract_gpd_return_block(content: str) -> str | None:
 
 def validate_gpd_return_markdown(content: str) -> GpdReturnValidationResult:
     """Parse and validate a markdown file containing a fenced ``gpd_return`` block."""
-    yaml_block = extract_gpd_return_block(content)
-    if yaml_block is None:
+    yaml_blocks = GPD_RETURN_BLOCK_RE.findall(content)
+    if not yaml_blocks:
         return GpdReturnValidationResult(passed=False, errors=["No gpd_return YAML block found"])
+    if len(yaml_blocks) > 1:
+        return GpdReturnValidationResult(
+            passed=False,
+            errors=[f"Multiple gpd_return YAML blocks found: expected exactly one, got {len(yaml_blocks)}"],
+        )
 
     try:
-        parsed = yaml.safe_load(yaml_block)
+        parsed = yaml.safe_load(yaml_blocks[0])
     except yaml.YAMLError as exc:
         return GpdReturnValidationResult(passed=False, errors=[f"gpd_return YAML parse error: {exc}"])
 

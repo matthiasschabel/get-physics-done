@@ -41,8 +41,8 @@ def test_accepts_nested_state_and_continuation_payloads() -> None:
         "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
         "    bounded_segment:\n"
         "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
-        "      phase: \"01\"\n"
-        "      plan: \"01\"\n"
+        '      phase: "01"\n'
+        '      plan: "01"\n'
         "      segment_id: seg-01\n"
         "      segment_status: paused\n"
         "      checkpoint_reason: segment_boundary\n"
@@ -76,10 +76,7 @@ def test_accepts_typed_checker_plan_lists() -> None:
 
 def test_rejects_scalar_where_list_field_is_required() -> None:
     content = _wrap_return_block(
-        "  status: completed\n"
-        "  files_written: src/main.py\n"
-        "  issues: []\n"
-        "  next_actions: [gpd:verify-work]\n"
+        "  status: completed\n  files_written: src/main.py\n  issues: []\n  next_actions: [gpd:verify-work]\n"
     )
 
     result = validate_gpd_return_markdown(content)
@@ -89,12 +86,7 @@ def test_rejects_scalar_where_list_field_is_required() -> None:
 
 
 def test_rejects_uppercase_status_instead_of_propagating_case_drift() -> None:
-    content = _wrap_return_block(
-        "  status: COMPLETED\n"
-        "  files_written: []\n"
-        "  issues: []\n"
-        "  next_actions: []\n"
-    )
+    content = _wrap_return_block("  status: COMPLETED\n  files_written: []\n  issues: []\n  next_actions: []\n")
 
     result = validate_gpd_return_markdown(content)
 
@@ -153,6 +145,63 @@ def test_rejects_unknown_top_level_typo_fields() -> None:
     assert any("Unknown gpd_return top-level field" in error and "file_written" in error for error in result.errors)
 
 
+def test_rejects_multiple_canonical_return_blocks_as_ambiguous() -> None:
+    content = (
+        _wrap_return_block(
+            "  status: completed\n"
+            "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
+            "  issues: []\n"
+            "  next_actions: []\n"
+        )
+        + "\n"
+        + _wrap_return_block(
+            "  status: blocked\n"
+            "  files_written: []\n"
+            "  issues: [conflicting return]\n"
+            "  next_actions: [gpd:resume-work]\n"
+            "  blockers:\n"
+            "    - conflicting return\n"
+        )
+    )
+
+    result = validate_gpd_return_markdown(content)
+
+    assert result.passed is False
+    assert result.envelope is None
+    assert result.fields == {}
+    assert result.errors == ["Multiple gpd_return YAML blocks found: expected exactly one, got 2"]
+
+
+def test_rejects_child_reports_as_callsite_evidence_not_return_field() -> None:
+    content = _wrap_return_block(
+        "  status: completed\n"
+        "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
+        "  issues: []\n"
+        "  next_actions: []\n"
+        "  child_reports:\n"
+        "    - GPD/phases/02-analysis/02-02-SUMMARY.md\n"
+    )
+
+    result = validate_gpd_return_markdown(content)
+
+    assert result.passed is False
+    assert any("Unknown gpd_return top-level field" in error and "child_reports" in error for error in result.errors)
+
+
+def test_accepts_child_reports_omitted_from_applicator_envelope() -> None:
+    content = _wrap_return_block(
+        "  status: completed\n"
+        "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
+        "  issues: []\n"
+        "  next_actions: []\n"
+    )
+
+    result = validate_gpd_return_markdown(content)
+
+    assert result.passed is True
+    assert "child_reports" not in result.fields
+
+
 def test_rejects_peer_review_stage_as_callsite_metadata_not_return_field() -> None:
     content = _wrap_return_block(
         "  status: completed\n"
@@ -166,8 +215,7 @@ def test_rejects_peer_review_stage_as_callsite_metadata_not_return_field() -> No
 
     assert result.passed is False
     assert any(
-        "Unknown gpd_return top-level field" in error and "peer_review_stage" in error
-        for error in result.errors
+        "Unknown gpd_return top-level field" in error and "peer_review_stage" in error for error in result.errors
     )
 
 
@@ -220,7 +268,9 @@ def test_rejects_applicator_owned_handoff_metadata_inside_child_return() -> None
     result = validate_gpd_return_markdown(content)
 
     assert result.passed is False
-    assert any("recorded_at" in error and "recorded_by" in error and "applicator-owned" in error for error in result.errors)
+    assert any(
+        "recorded_at" in error and "recorded_by" in error and "applicator-owned" in error for error in result.errors
+    )
 
 
 def test_rejects_applicator_owned_bounded_segment_metadata_inside_child_return() -> None:
@@ -232,8 +282,8 @@ def test_rejects_applicator_owned_bounded_segment_metadata_inside_child_return()
         "  continuation_update:\n"
         "    bounded_segment:\n"
         "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
-        "      phase: \"01\"\n"
-        "      plan: \"01\"\n"
+        '      phase: "01"\n'
+        '      plan: "01"\n'
         "      segment_id: seg-01\n"
         "      segment_status: paused\n"
         "      updated_at: 2026-04-08T12:00:00Z\n"
@@ -243,7 +293,9 @@ def test_rejects_applicator_owned_bounded_segment_metadata_inside_child_return()
     result = validate_gpd_return_markdown(content)
 
     assert result.passed is False
-    assert any("updated_at" in error and "recorded_by" in error and "applicator-owned" in error for error in result.errors)
+    assert any(
+        "updated_at" in error and "recorded_by" in error and "applicator-owned" in error for error in result.errors
+    )
 
 
 def test_rejects_scalar_where_continuation_update_requires_mapping() -> None:
@@ -265,10 +317,7 @@ def test_rejects_scalar_where_continuation_update_requires_mapping() -> None:
 
 def test_accepts_synthesizer_style_completed_return_with_summary_only_file_list() -> None:
     content = _wrap_return_block(
-        "  status: completed\n"
-        "  files_written: [GPD/literature/SUMMARY.md]\n"
-        "  issues: []\n"
-        "  next_actions: []\n"
+        "  status: completed\n  files_written: [GPD/literature/SUMMARY.md]\n  issues: []\n  next_actions: []\n"
     )
 
     result = validate_gpd_return_markdown(content)

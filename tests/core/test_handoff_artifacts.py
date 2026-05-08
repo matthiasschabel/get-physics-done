@@ -19,15 +19,7 @@ def _return_block(files_written: list[str], *, status: str = "completed") -> str
         if not files_written
         else "  files_written:\n" + "\n".join(f"    - {json.dumps(path)}" for path in files_written) + "\n"
     )
-    return (
-        "```yaml\n"
-        "gpd_return:\n"
-        f"  status: {status}\n"
-        f"{files_written_yaml}"
-        "  issues: []\n"
-        "  next_actions: []\n"
-        "```\n"
-    )
+    return f"```yaml\ngpd_return:\n  status: {status}\n{files_written_yaml}  issues: []\n  next_actions: []\n```\n"
 
 
 def _files_only_return_block(files_written: list[str]) -> str:
@@ -36,7 +28,7 @@ def _files_only_return_block(files_written: list[str]) -> str:
         if not files_written
         else "  files_written:\n" + "\n".join(f"    - {json.dumps(path)}" for path in files_written) + "\n"
     )
-    return "```yaml\n" "gpd_return:\n" f"{files_written_yaml}" "```\n"
+    return f"```yaml\ngpd_return:\n{files_written_yaml}```\n"
 
 
 def _blocked_return_with_state_updates() -> str:
@@ -51,6 +43,35 @@ def _blocked_return_with_state_updates() -> str:
         "    phase: 1\n"
         "```\n"
     )
+
+
+def test_handoff_artifact_validator_rejects_multiple_return_blocks_before_artifact_checks(tmp_path: Path) -> None:
+    plan_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-PLAN.md"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("plan\n", encoding="utf-8")
+    content = (
+        _return_block(["GPD/phases/01-test/01-01-PLAN.md"]) + "\n" + _return_block(["GPD/phases/01-test/01-02-PLAN.md"])
+    )
+
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        content,
+        expected_artifacts=["GPD/phases/01-test/01-01-PLAN.md"],
+        allowed_roots=["GPD/phases/01-test"],
+        required_suffixes=["-PLAN.md"],
+        require_files_written=True,
+    )
+
+    assert result.passed is False
+    assert result.mutated is False
+    assert result.status is None
+    assert result.files_written == []
+    assert result.checked_files == []
+    assert result.primary_failure_class == HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+    assert result.failure_classes == [HandoffFailureClass.RETURN_MALFORMED_BLOCKING]
+    assert result.failures[0].code == "ambiguous_multiple_returns"
+    assert result.failures[0].repairable is False
+    assert result.errors == ["Multiple gpd_return YAML blocks found: expected exactly one, got 2"]
 
 
 def test_handoff_artifact_validator_rejects_raw_files_only_json_envelope(tmp_path: Path) -> None:
@@ -277,9 +298,7 @@ def test_handoff_artifact_validator_rejects_expected_artifact_omitted_from_files
     assert result.failure_classes == [HandoffFailureClass.ARTIFACT_MISSING]
     assert {failure.code for failure in result.failures} == {"files_written_empty", "expected_artifact_omitted"}
     assert "gpd_return.files_written is empty" in result.errors
-    assert (
-        "expected artifact not named in gpd_return.files_written: GPD/phases/01-test/01-01-PLAN.md" in result.errors
-    )
+    assert "expected artifact not named in gpd_return.files_written: GPD/phases/01-test/01-01-PLAN.md" in result.errors
 
 
 def test_handoff_artifact_validator_rejects_stale_artifact(tmp_path: Path) -> None:

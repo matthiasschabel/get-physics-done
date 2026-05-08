@@ -251,7 +251,9 @@ def _normalize_allowed_roots(
     for raw_root in allowed_roots:
         normalized = _normalize_project_local_path(raw_root)
         candidate = Path(normalized).expanduser()
-        resolved = candidate.resolve(strict=False) if candidate.is_absolute() else (root / candidate).resolve(strict=False)
+        resolved = (
+            candidate.resolve(strict=False) if candidate.is_absolute() else (root / candidate).resolve(strict=False)
+        )
         if not resolved.is_relative_to(root):
             message = f"allowed root is outside project root: {raw_root}"
             errors.append(message)
@@ -487,7 +489,11 @@ def _classify_return_validation_errors(errors: list[str]) -> list[HandoffFailure
         code = "malformed_return"
         repairable = True
 
-        if message.startswith("Missing required field:"):
+        if message.startswith("Multiple gpd_return YAML blocks found:"):
+            failure_class = HandoffFailureClass.RETURN_MALFORMED_BLOCKING
+            code = "ambiguous_multiple_returns"
+            repairable = False
+        elif message.startswith("Missing required field:"):
             code = "missing_required_field"
         elif message.startswith("gpd_return YAML parse error:"):
             code = "yaml_parse_error"

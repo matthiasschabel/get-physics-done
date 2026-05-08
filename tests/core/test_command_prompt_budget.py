@@ -103,9 +103,9 @@ WORST_COMMAND_HARD_CAPS = {
     "discuss-phase": (1_100, 43_000),
     "write-paper": (480, 22_000),
     "plan-phase": (1_060, 53_500),
-    "execute-phase": (260, 10_000),
-    "new-project": (320, 14_000),
-    "help": (1_480, 78_000),
+    "execute-phase": (200, 7_500),
+    "new-project": (280, 12_000),
+    "help": (1_475, 77_600),
     "peer-review": (340, 16_000),
     "respond-to-referees": (900, 52_000),
     "verify-work": (800, 43_000),
@@ -204,10 +204,10 @@ WORKFLOW_BASELINES = {
 }
 WORST_WORKFLOW_HARD_CAPS = {
     "verify-phase": (720, 44_000),
-    "write-paper": (80, 4_000),
+    "write-paper": (70, 3_000),
     "respond-to-referees": (800, 46_000),
-    "new-project": (2_020, 94_000),
-    "execute-phase": (80, 4_000),
+    "new-project": (1_960, 91_000),
+    "execute-phase": (50, 2_000),
     "help": (1_420, 74_000),
 }
 EAGER_LOADED_BULKY_REFERENCE_INCLUDE_FILES = (

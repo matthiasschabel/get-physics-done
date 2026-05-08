@@ -11,14 +11,14 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 83_500, "chars": 3_825_000}
+PROMPT_TOTAL_BUDGET = {"lines": 71_000, "chars": 3_150_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 34_900, "chars": 1_515_000},
-    "agent": {"lines": 14_900, "chars": 778_000},
-    "workflow": {"lines": 34_000, "chars": 1_526_000},
+    "command": {"lines": 31_300, "chars": 1_305_000},
+    "agent": {"lines": 10_800, "chars": 575_000},
+    "workflow": {"lines": 29_700, "chars": 1_300_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 12_500, "chars": 635_000}
-SHELL_PARSING_LINE_BUDGET = 920
+STAGE_FIRST_TURN_BUDGET = {"lines": 8_300, "chars": 410_000}
+SHELL_PARSING_LINE_BUDGET = 700
 SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
     {
         ("workflow", "execute-phase"),
@@ -27,8 +27,8 @@ SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
         ("workflow", "write-paper"),
     }
 )
-TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 93
-TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 105
+TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 25
+TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 45
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
     "status_handling": 110,
     "files_written_freshness": 26,
@@ -60,12 +60,12 @@ FORBIDDEN_MIGRATED_PROMPT_SHELL_FRAGMENTS = {
 
 def _aggregate_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:
     if descriptor.native_include_support:
-        return {"lines": 20_000, "chars": 1_035_000}
+        return {"lines": 18_500, "chars": 950_000}
     if not descriptor.agent_prompt_uses_dollar_templates:
-        return {"lines": 36_600, "chars": 1_775_000}
+        return {"lines": 28_500, "chars": 1_385_000}
     if descriptor.public_command_surface_prefix.endswith(":"):
-        return {"lines": 36_800, "chars": 1_810_000}
-    return {"lines": 37_100, "chars": 1_778_000}
+        return {"lines": 28_700, "chars": 1_420_000}
+    return {"lines": 29_000, "chars": 1_390_000}
 
 
 def _command_only_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:

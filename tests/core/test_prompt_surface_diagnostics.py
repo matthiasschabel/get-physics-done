@@ -11,6 +11,9 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_diagnostics.py"
+PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_850
+PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP = 3_200
+PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 1_200
 
 
 def _diagnostics():
@@ -46,6 +49,10 @@ def _relative_report_path(raw_path: str) -> str:
     if path.is_absolute():
         return path.relative_to(REPO_ROOT).as_posix()
     return path.as_posix()
+
+
+def _source_line_count(path: Path) -> int:
+    return len(path.read_text(encoding="utf-8").splitlines())
 
 
 def test_report_includes_registered_command_agent_and_workflow_sources() -> None:
@@ -364,6 +371,29 @@ def test_production_prompt_diagnostics_does_not_import_from_tests() -> None:
 
     assert "from tests" not in source
     assert "import tests" not in source
+
+
+def test_prompt_diagnostics_modules_stay_small_enough_for_phase_6_split() -> None:
+    module_paths = sorted(
+        {
+            *PROMPT_DIAGNOSTICS_PATH.parent.glob("prompt_diagnostics*.py"),
+            *PROMPT_DIAGNOSTICS_PATH.parent.glob("prompt_*_diagnostics.py"),
+        }
+    )
+    loc_by_module = {path.name: _source_line_count(path) for path in module_paths}
+    support_module_loc = {
+        name: line_count for name, line_count in loc_by_module.items() if name != PROMPT_DIAGNOSTICS_PATH.name
+    }
+
+    assert PROMPT_DIAGNOSTICS_PATH.name in loc_by_module
+    assert sum(loc_by_module.values()) <= PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP, loc_by_module
+
+    if support_module_loc:
+        assert loc_by_module[PROMPT_DIAGNOSTICS_PATH.name] <= PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP, loc_by_module
+        assert all(
+            line_count <= PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP
+            for line_count in support_module_loc.values()
+        ), support_module_loc
 
 
 def test_prompt_diagnostics_does_not_define_local_stage_manifest_parser() -> None:

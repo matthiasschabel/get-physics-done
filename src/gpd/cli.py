@@ -4521,7 +4521,7 @@ def _print_prompt_diagnostic_rendered(rendered: object) -> None:
     if rendered is None:
         return
     if isinstance(rendered, str):
-        console.print(rendered, highlight=False)
+        console.out(rendered, highlight=False, end="")
         return
     console.print(rendered)
 

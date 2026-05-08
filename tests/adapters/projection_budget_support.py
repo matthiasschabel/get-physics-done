@@ -43,11 +43,11 @@ STAGED_INIT_TARGET_COMMANDS = tuple(STAGED_INIT_COMMAND_PROJECTION_BUDGETS)
 STAGED_PROJECTED_COMMAND_CHAR_BUDGET = 20_000
 
 TARGET_AGENT_PROJECTION_BUDGETS = {
-    "gpd-planner": {"lines": 750, "chars": 40_000},
-    "gpd-research-synthesizer": {"lines": 1_100, "chars": 58_000},
-    "gpd-roadmapper": {"lines": 1_100, "chars": 50_000},
+    "gpd-planner": {"lines": 650, "chars": 37_000},
+    "gpd-research-synthesizer": {"lines": 1_050, "chars": 53_000},
+    "gpd-roadmapper": {"lines": 1_030, "chars": 45_000},
 }
-TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 148_000
+TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 135_000
 
 SELECTED_AGENT_PROJECTION_BUDGETS = {
     "gpd-executor": {"lines": 840, "chars": 53_000},

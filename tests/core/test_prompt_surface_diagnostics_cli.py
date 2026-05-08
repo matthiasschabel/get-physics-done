@@ -54,11 +54,15 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert 1 <= len(payload["items"]) <= 3
     assert payload["runtime_top_prompts"] == {}
     assert payload["stage_diagnostics"]
+    assert len(payload["stage_diagnostics"]) <= 3
     assert payload["items"][0]["runtime_projection"] == []
     assert isinstance(payload["invalid_gpd_return_examples"], list)
     assert isinstance(payload["invalid_frontmatter_examples"], list)
     assert isinstance(payload["disallowed_return_field_mentions"], list)
+    assert len(payload["duplicate_invariants"]) <= 3
     assert isinstance(payload["semantic_duplicate_invariants"], list)
+    assert len(payload["semantic_duplicate_invariants"]) <= 3
+    assert all(len(group["examples"]) <= 3 for group in payload["semantic_duplicate_invariants"])
 
 
 def test_prompt_surface_diagnostics_include_tests_exactness_summary() -> None:
@@ -77,12 +81,16 @@ def test_prompt_surface_diagnostics_include_tests_exactness_summary() -> None:
     )
 
     assert result.exit_code == 0, result.output
-    exactness = json.loads(result.output)["exact_assertion_diagnostics"]
+    payload = json.loads(result.output)
+    exactness = payload["exact_assertion_diagnostics"]
     assert exactness["schema_version"] == "exact_assertions.v1"
     assert exactness["totals"]["files_scanned"] > 0
     assert exactness["totals"]["exact_assertion_count"] > 0
+    assert len(exactness["files"]) == 1
     assert exactness["taxonomy_helper_usage"]["schema_version"] == "taxonomy_helper_usage.v1"
     assert exactness["taxonomy_helper_usage"]["totals"]["taxonomy_helper_call_count"] > 0
+    assert len(exactness["taxonomy_helper_usage"]["files"]) == 1
+    assert len(payload["exact_prose_assertion_files"]) == 1
 
 
 def test_prompt_surface_diagnostics_runtime_projection_and_renderers() -> None:
@@ -119,6 +127,64 @@ def test_prompt_surface_diagnostics_runtime_projection_and_renderers() -> None:
     assert "runtime top prompts" in table_result.output
     assert "projected_chars" in table_result.output
     assert runtime_name in table_result.output
+
+
+def test_prompt_surface_diagnostics_table_header_line_is_not_wrapped() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "diagnostics",
+            "prompt-surface",
+            "--surface",
+            "command",
+            "--top",
+            "1",
+            "--no-runtime-projections",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    header = result.output.splitlines()[0]
+    for column in (
+        "kind",
+        "name",
+        "expanded_chars",
+        "includes",
+        "schemas",
+        "invalid",
+        "bad_frontmatter",
+        "bad_fields",
+        "hard_gates",
+        "shell_parse",
+        "rigidity",
+    ):
+        assert column in header
+    assert header.endswith("rigidity")
+
+
+def test_prompt_surface_diagnostics_markdown_header_line_is_not_wrapped() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "diagnostics",
+            "prompt-surface",
+            "--surface",
+            "command",
+            "--top",
+            "1",
+            "--no-runtime-projections",
+            "--format",
+            "markdown",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert (
+        "| Rank | Kind | Name | Expanded chars | Raw lines | Includes | Hard gates | "
+        "Shell parse | Schemas | Invalid returns | Invalid frontmatter | Bad fields | Rigidity |"
+    ) in result.output.splitlines()
 
 
 def test_prompt_surface_diagnostics_is_read_only_outside_project(tmp_path: Path, monkeypatch) -> None:

@@ -99,12 +99,12 @@ def _write_completed_return(summary_path: Path, *, phase: str = "02", plan: str 
     )
 
 
-def _write_gap_verification(report_path: Path) -> None:
+def _write_gap_verification(report_path: Path, *, status: str = "gaps_found") -> None:
     report_path.write_text(
         "---\n"
         "phase: 02-analysis\n"
         'verified: "2026-05-07T00:00:00Z"\n'
-        "status: gaps_found\n"
+        f"status: {status}\n"
         'score: "0/1 contract targets verified"\n'
         "---\n\n"
         "# Phase 02 Verification\n\n"
@@ -169,14 +169,16 @@ def test_apply_return_updates_rejects_report_without_gpd_return_without_mutating
     assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
 
 
+@pytest.mark.parametrize("report_status", ["gaps_found", "human_needed", "expert_needed"])
 @pytest.mark.parametrize("initial_status", ["verifying", "Phase complete \u2014 ready for verification"])
-def test_record_verification_maps_gap_report_to_blocked_and_keeps_state_surfaces_in_sync(
+def test_record_verification_maps_non_passing_report_to_blocked_and_keeps_state_surfaces_in_sync(
     tmp_path: Path,
     initial_status: str,
+    report_status: str,
 ) -> None:
     phase_dir = _write_phase_project(tmp_path, status=initial_status)
     verification_report = phase_dir / "02-VERIFICATION.md"
-    _write_gap_verification(verification_report)
+    _write_gap_verification(verification_report, status=report_status)
     before_report = verification_report.read_text(encoding="utf-8")
 
     result = RUNNER.invoke(

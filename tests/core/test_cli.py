@@ -3150,9 +3150,7 @@ def test_proof_redteam_skeleton_raw_uses_builder_payload(
     assert payload["target_status"] == "human_needed"
     assert payload["frontmatter"]["status"] == "human_needed"
     assert "Exact claim / theorem text: For every r_0 > 0" in payload["markdown_draft"]
-    assert payload["validation_commands"] == [
-        "gpd validate proof-redteam GPD/publication/demo/review/PROOF-REDTEAM.md"
-    ]
+    assert payload["validation_commands"] == ["gpd validate proof-redteam GPD/publication/demo/review/PROOF-REDTEAM.md"]
     assert payload["warnings"] == ["Skeleton is non-passing until the audit is completed."]
     assert calls == {
         "claim_id": "CLM-001",
@@ -3317,6 +3315,109 @@ def test_proof_redteam_skeleton_write_can_validate_with_bound_proof_artifact(
     validate_payload = _raw_payload_from_result(validate_result)
     assert validate_payload["valid"] is True
     assert validate_payload["status"] == "gaps_found"
+
+
+def test_proof_redteam_finalize_writes_and_prints_raw_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD" / "review").mkdir(parents=True)
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    proof_path = tmp_path / "paper" / "main.tex"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("\\begin{proof}Done.\\end{proof}\n", encoding="utf-8")
+    draft_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM-DRAFT.md"
+    draft_path.write_text("# Draft\n", encoding="utf-8")
+    target_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM.md"
+    calls: dict[str, object] = {}
+
+    def fake_finalizer(**kwargs):
+        calls.update(kwargs)
+        return {
+            "valid": True,
+            "status": "passed",
+            "markdown": "---\nstatus: passed\n---\n\n# Proof Redteam\n",
+            "proof_audit": {
+                "completeness": "complete",
+                "reviewer": "gpd-check-proof",
+                "proof_artifact_path": "paper/main.tex",
+            },
+        }
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_finalizer", lambda: fake_finalizer)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "finalize",
+            str(draft_path),
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "Every admissible orbit closes.",
+            "--proof-artifact-path",
+            "paper/main.tex",
+            "--reviewed-at",
+            "2026-05-07T12:00:00Z",
+            "--output",
+            str(target_path),
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["target_path"] == str(target_path)
+    assert payload["status"] == "passed"
+    assert payload["proof_audit"]["reviewer"] == "gpd-check-proof"
+    assert payload["validation_commands"][0] == "gpd validate proof-redteam GPD/review/PROOF-REDTEAM.md"
+    assert target_path.read_text(encoding="utf-8").startswith("---\nstatus: passed")
+    assert calls["path"] == draft_path
+    assert calls["claim_statement"] == "Every admissible orbit closes."
+    assert calls["proof_artifact_path"] == "paper/main.tex"
+    assert calls["write"] is False
+
+
+def test_proof_redteam_finalize_rejects_missing_proof_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "GPD" / "review").mkdir(parents=True)
+    (tmp_path / "GPD" / "state.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    draft_path = tmp_path / "GPD" / "review" / "PROOF-REDTEAM-DRAFT.md"
+    draft_path.write_text("# Draft\n", encoding="utf-8")
+
+    def unexpected_finalizer(**kwargs):
+        raise AssertionError(f"proof finalizer should not run for missing proof artifact: {kwargs}")
+
+    monkeypatch.setattr(cli_module, "_load_proof_redteam_finalizer", lambda: unexpected_finalizer)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "proof-redteam",
+            "finalize",
+            str(draft_path),
+            "--claim-id",
+            "CLM-001",
+            "--claim-text",
+            "Every admissible orbit closes.",
+            "--proof-artifact-path",
+            "paper/missing.tex",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "proof-artifact-path" in str(payload["error"])
+    assert "paper/missing.tex" in str(payload["error"])
 
 
 def _colon_rich_verification_body() -> str:
@@ -3560,9 +3661,7 @@ def test_verification_report_output_target_resolves_payload_relative_paths_by_sc
 
     assert builder_target == (phase_dir / "custom-VERIFICATION.md").resolve(strict=False)
     assert explicit_target == (launch_dir / "explicit-VERIFICATION.md").resolve(strict=False)
-    assert project_target == (tmp_path / "GPD" / "phases" / "01-baseline" / "01-VERIFICATION.md").resolve(
-        strict=False
-    )
+    assert project_target == (tmp_path / "GPD" / "phases" / "01-baseline" / "01-VERIFICATION.md").resolve(strict=False)
 
 
 def test_verification_report_skeleton_raw_uses_real_builder(tmp_path: Path) -> None:
@@ -4042,6 +4141,333 @@ def test_verification_report_skeleton_raw_write_reports_validation_and_warnings(
     assert isinstance(payload["warnings"], list) and payload["warnings"]
     assert any("frontmatter" in warning.lower() for warning in payload["warnings"])
     assert any("gpd_return" in warning for warning in payload["warnings"])
+
+
+def test_verification_report_finalize_writes_only_after_validation_passes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    calls: dict[str, object] = {}
+
+    def fake_finalizer(**kwargs):
+        calls.update(kwargs)
+        return {
+            "markdown": "---\nstatus: gaps_found\n---\n\n# Verification\n",
+            "validation": {"mode": "contract", "valid": True, "errors": []},
+            "warnings": ["finalizer-owned frontmatter"],
+        }
+
+    def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
+        assert content.startswith("---\nstatus: gaps_found")
+        assert source_path == target_path
+        assert mode == "contract"
+        assert not target_path.exists()
+        return {
+            "mode": mode,
+            "status": "valid",
+            "valid": True,
+            "missing": [],
+            "present": ["status"],
+            "errors": [],
+            "schema_name": "verification",
+            "oracle_evidence_count": 1,
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: fake_finalizer)
+    monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "finalize",
+            str(plan_path),
+            "--patch",
+            str(patch_path),
+            "--body-file",
+            str(body_path),
+            "--output",
+            str(target_path),
+            "--validate",
+            "contract",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["validation"]["valid"] is True
+    assert payload["warnings"] == ["finalizer-owned frontmatter"]
+    assert target_path.read_text(encoding="utf-8").startswith("---\nstatus: gaps_found")
+    assert calls["outcome_patch"] == {"status": "gaps_found"}
+    assert calls["target_report_ref"] == "GPD/phases/01-baseline/01-VERIFICATION.md"
+
+
+def test_verification_report_finalize_refuses_existing_without_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    target_path.write_text("existing verification\n", encoding="utf-8")
+
+    def unexpected_finalizer(**kwargs):
+        raise AssertionError(f"verification finalizer should not run for existing output: {kwargs}")
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: unexpected_finalizer)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "finalize",
+            str(plan_path),
+            "--patch",
+            str(patch_path),
+            "--body-file",
+            str(body_path),
+            "--output",
+            str(target_path),
+            "--validate",
+            "contract",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is False
+    assert "--force" in payload["validation"]["errors"][0]
+    assert target_path.read_text(encoding="utf-8") == "existing verification\n"
+
+
+def test_verification_report_finalize_rejects_body_file_frontmatter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    body_path = _write_verification_body_file(
+        tmp_path,
+        "---\nstatus: passed\n---\n\n# Verification Body\n",
+    )
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+
+    def unexpected_finalizer(**kwargs):
+        raise AssertionError(f"verification finalizer should not run for body frontmatter: {kwargs}")
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: unexpected_finalizer)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "finalize",
+            str(plan_path),
+            "--patch",
+            str(patch_path),
+            "--body-file",
+            str(body_path),
+            "--output",
+            str(target_path),
+            "--validate",
+            "contract",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert "body-only Markdown" in str(payload["error"])
+    assert not target_path.exists()
+
+
+def test_verification_report_finalize_validation_failure_preserves_existing_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text('{"status": "passed"}\n', encoding="utf-8")
+    body_path = _write_verification_body_file(tmp_path, _body_without_oracle_evidence())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+    target_path.write_text("existing canonical report\n", encoding="utf-8")
+
+    def fake_finalizer(**kwargs):
+        del kwargs
+        return {
+            "markdown": "---\nstatus: passed\n---\n\n# Verification\n",
+            "validation": {"mode": "contract", "valid": True, "errors": []},
+        }
+
+    def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
+        del content, source_path
+        return {
+            "mode": mode,
+            "status": "invalid",
+            "valid": False,
+            "missing": [],
+            "present": ["status"],
+            "errors": ["executed oracle evidence is required"],
+            "schema_name": "verification",
+            "oracle_evidence_count": 0,
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: fake_finalizer)
+    monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "finalize",
+            str(plan_path),
+            "--patch",
+            str(patch_path),
+            "--body-file",
+            str(body_path),
+            "--output",
+            str(target_path),
+            "--validate",
+            "contract",
+            "--force",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 1
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is False
+    assert payload["validation"]["valid"] is False
+    assert payload["validation"]["errors"] == ["executed oracle evidence is required"]
+    assert (
+        payload["recovery"]["safe_next_step"]
+        == "Edit only the typed patch or body file, then rerun the finalizer command."
+    )
+    assert target_path.read_text(encoding="utf-8") == "existing canonical report\n"
+
+
+def test_verification_report_finalize_raw_output_includes_validation_and_commands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+
+    def fake_finalizer(**kwargs):
+        del kwargs
+        return {
+            "markdown": "---\nstatus: gaps_found\n---\n\n# Verification\n",
+            "validation": {"mode": "contract", "valid": True, "errors": []},
+            "frontmatter_yaml": "---\nstatus: gaps_found\n---\n",
+        }
+
+    def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
+        del content, source_path
+        return {
+            "mode": mode,
+            "status": "valid",
+            "valid": True,
+            "missing": [],
+            "present": ["status"],
+            "errors": [],
+            "schema_name": "verification",
+            "oracle_evidence_count": 1,
+        }
+
+    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: fake_finalizer)
+    monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "finalize",
+            str(plan_path),
+            "--patch",
+            str(patch_path),
+            "--body-file",
+            str(body_path),
+            "--output",
+            str(target_path),
+            "--validate",
+            "contract",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["validation"] == {
+        "mode": "contract",
+        "status": "valid",
+        "valid": True,
+        "missing": [],
+        "present": ["status"],
+        "errors": [],
+        "schema_name": "verification",
+        "oracle_evidence_count": 1,
+    }
+    assert payload["validation_commands"] == [
+        "gpd frontmatter validate GPD/phases/01-baseline/01-VERIFICATION.md --schema verification",
+        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
+    ]
+    assert payload["frontmatter_yaml"] == "---\nstatus: gaps_found\n---\n"
+
+
+def test_verification_report_finalize_uses_real_core_finalizer_for_gap_report(tmp_path: Path) -> None:
+    plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
+    target_path = plan_path.with_name("01-VERIFICATION.md")
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "verification-report",
+            "finalize",
+            str(plan_path),
+            "--patch",
+            str(patch_path),
+            "--body-file",
+            str(body_path),
+            "--output",
+            str(target_path),
+            "--validate",
+            "contract",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = _raw_payload_from_result(result)
+    assert payload["written"] is True
+    assert payload["validation"]["valid"] is True
+    content = target_path.read_text(encoding="utf-8")
+    frontmatter, body = extract_frontmatter(content)
+    assert frontmatter["status"] == "gaps_found"
+    assert frontmatter["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert "FAIL: relative error exceeds the benchmark tolerance." in body
 
 
 def _write_benchmark_contract_phase(project_root: Path) -> Path:

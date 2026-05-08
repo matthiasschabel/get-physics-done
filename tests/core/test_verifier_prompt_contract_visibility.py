@@ -294,6 +294,38 @@ def test_verifier_prompt_surfaces_validator_enforced_contract_ledger_rules() -> 
     assert "`suggested_contract_check`" not in verifier
 
 
+def test_verifier_prompt_keeps_passed_verification_frontmatter_helper_owned() -> None:
+    verifier = _read_verifier_prompt()
+    schema_guard = _paragraph_containing(verifier, "Schema guard:")
+    create_report = _markdown_section(verifier, "## Create VERIFICATION.md")
+
+    _assert_contains_all(
+        schema_guard,
+        (
+            "Passed verification frontmatter is helper/validator-owned",
+            "do not hand-author `status: passed` YAML",
+            "Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter",
+        ),
+    )
+    _assert_contains_all(
+        create_report,
+        (
+            "verification-report writer helper",
+            "not by hand-authoring YAML",
+            "let `gpd verification-report skeleton --write --body-file ... --validate contract` serialize the frontmatter",
+        ),
+    )
+    _assert_not_contains_any(
+        verifier,
+        (
+            "Structure gaps in YAML frontmatter",
+            "Gaps structured in YAML frontmatter with severity, category, and computation_evidence",
+            "hand-author passed verification YAML",
+            "hand-authored passed verification YAML",
+        ),
+    )
+
+
 def test_verifier_prompt_keeps_reference_actions_within_the_canonical_enum() -> None:
     verifier = _read_verifier_prompt()
 

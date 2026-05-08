@@ -16,6 +16,7 @@ from typing import Annotated
 from mcp.server.fastmcp import FastMCP
 from pydantic import WithJsonSchema
 
+from gpd.core.command_run_hints import COMMAND_RUN_HINT_EXECUTION, build_command_run_hint
 from gpd.core.config import load_config
 from gpd.core.errors import GPDError
 from gpd.core.health import run_health
@@ -28,6 +29,8 @@ from gpd.core.state import (
     state_advance_plan,
     state_validate,
 )
+from gpd.core.suggest import Recommendation
+from gpd.core.suggest import suggest_next as core_suggest_next
 from gpd.core.utils import is_phase_complete, matching_phase_artifact_count
 from gpd.mcp.servers import (
     ABSOLUTE_PROJECT_DIR_SCHEMA,
@@ -45,6 +48,18 @@ logger = configure_mcp_logging("gpd-state")
 mcp = FastMCP("gpd-state")
 
 AbsoluteProjectDirInput = Annotated[str, WithJsonSchema(ABSOLUTE_PROJECT_DIR_SCHEMA)]
+SuggestLimitInput = Annotated[
+    int,
+    WithJsonSchema(
+        {
+            "type": "integer",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Maximum number of next-action suggestions to return. Values outside 1-10 are clamped.",
+        }
+    ),
+]
 FixModeInput = Annotated[
     bool,
     WithJsonSchema(
@@ -58,6 +73,44 @@ FixModeInput = Annotated[
 
 _PROJECT_MUTATION_TOOL_ANNOTATIONS = mutating_tool_annotations(destructive=False, idempotent=False)
 _PROJECT_FIX_TOOL_ANNOTATIONS = mutating_tool_annotations(destructive=True, idempotent=False)
+_SUGGEST_NEXT_SOURCE = "gpd-state.suggest_next"
+_SUGGEST_NEXT_DEFAULT_LIMIT = 3
+_SUGGEST_NEXT_MAX_LIMIT = 10
+
+
+def _normalize_suggest_next_limit(limit: object) -> tuple[int | None, str | None]:
+    if limit is None:
+        return _SUGGEST_NEXT_DEFAULT_LIMIT, None
+    if isinstance(limit, bool):
+        return None, "limit must be an integer"
+    try:
+        requested = int(limit)
+    except (TypeError, ValueError):
+        return None, "limit must be an integer"
+    if requested < 1:
+        return 1, None
+    if requested > _SUGGEST_NEXT_MAX_LIMIT:
+        return _SUGGEST_NEXT_MAX_LIMIT, None
+    return requested, None
+
+
+def _recommendation_payload(recommendation: Recommendation, *, source: str) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "action": recommendation.action,
+        "priority": recommendation.priority,
+        "reason": recommendation.reason,
+        "command": recommendation.command,
+        "phase": recommendation.phase,
+    }
+    run_hint = build_command_run_hint(
+        command=recommendation.command,
+        source=source,
+        action=recommendation.action,
+        phase=recommendation.phase,
+    )
+    if run_hint is not None:
+        payload["run_hint"] = run_hint
+    return payload
 
 
 def load_state_json(cwd: Path) -> dict | None:
@@ -113,6 +166,71 @@ def get_state(project_dir: AbsoluteProjectDirInput) -> dict:
                     "No project state found. Run the active runtime's new-project command to initialize a GPD project state."
                 )
             return stable_mcp_response(state_obj)
+        except (GPDError, OSError, ValueError, TimeoutError) as exc:
+            return stable_mcp_error(exc)
+        except Exception as exc:  # pragma: no cover - defensive envelope
+            return stable_mcp_error(exc)
+
+
+@mcp.tool(annotations=read_only_tool_annotations())
+def suggest_next(project_dir: AbsoluteProjectDirInput, limit: SuggestLimitInput = _SUGGEST_NEXT_DEFAULT_LIMIT) -> dict:
+    """Get read-only next-action suggestions with non-executing run hints.
+
+    Args:
+        project_dir: Absolute path to the project root directory.
+        limit: Maximum number of suggestions to return. Values outside 1-10 are clamped.
+    """
+
+    cwd = resolve_absolute_project_dir(project_dir)
+    if cwd is None:
+        return stable_mcp_error("project_dir must be an absolute path")
+    normalized_limit, limit_error = _normalize_suggest_next_limit(limit)
+    if limit_error is not None or normalized_limit is None:
+        return stable_mcp_error(limit_error or "limit must be an integer")
+    with gpd_span("mcp.state.suggest_next", phase=""):
+        try:
+            result = core_suggest_next(cwd, limit=normalized_limit)
+            suggestions = [
+                _recommendation_payload(recommendation, source=_SUGGEST_NEXT_SOURCE)
+                for recommendation in result.suggestions
+            ]
+            top_action = (
+                _recommendation_payload(result.top_action, source=_SUGGEST_NEXT_SOURCE)
+                if result.top_action is not None
+                else None
+            )
+            return stable_mcp_response(
+                {
+                    "status": "ok",
+                    "project_dir": str(cwd),
+                    "execution": COMMAND_RUN_HINT_EXECUTION,
+                    "limit": normalized_limit,
+                    "suggestions": suggestions,
+                    "total_suggestions": result.total_suggestions,
+                    "suggestion_count": result.suggestion_count,
+                    "top_action": top_action,
+                    "context": {
+                        "current_phase": result.context.current_phase,
+                        "status": result.context.status,
+                        "progress_percent": result.context.progress_percent,
+                        "paused_at": result.context.paused_at,
+                        "phase_count": result.context.phase_count,
+                        "completed_phases": result.context.completed_phases,
+                        "active_blockers": result.context.active_blockers,
+                        "unverified_results": result.context.unverified_results,
+                        "open_questions": result.context.open_questions,
+                        "active_calculations": result.context.active_calculations,
+                        "pending_todos": result.context.pending_todos,
+                        "missing_conventions": list(result.context.missing_conventions),
+                        "has_paper": result.context.has_paper,
+                        "has_literature_review": result.context.has_literature_review,
+                        "has_referee_report": result.context.has_referee_report,
+                        "autonomy": result.context.autonomy,
+                        "research_mode": result.context.research_mode,
+                        "adaptive_approach_locked": result.context.adaptive_approach_locked,
+                    },
+                }
+            )
         except (GPDError, OSError, ValueError, TimeoutError) as exc:
             return stable_mcp_error(exc)
         except Exception as exc:  # pragma: no cover - defensive envelope

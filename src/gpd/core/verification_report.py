@@ -12,21 +12,37 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gpd.contracts import (
     ComparisonVerdict,
+    ContractEvidenceStatus,
+    ContractForbiddenProxyResult,
+    ContractForbiddenProxyStatus,
+    ContractProofAudit,
     ContractReference,
+    ContractReferenceAction,
+    ContractReferenceActionStatus,
+    ContractReferenceUsage,
+    ContractResultEntry,
     ResearchContract,
     SuggestedContractCheck,
+    VerificationEvidence,
 )
 from gpd.core.contract_skeletons import build_contract_results_skeleton
 
 __all__ = [
     "VERIFICATION_REPORT_BODY_CONTRACT",
+    "VerificationComparisonVerdictPatch",
+    "VerificationForbiddenProxyOutcomePatch",
     "VerificationReportComposition",
+    "VerificationReportOutcomePatch",
     "VerificationReportSkeleton",
+    "VerificationReferenceActionPatch",
+    "VerificationSuggestedCheckPatch",
+    "VerificationTargetOutcomePatch",
     "VerificationReportValidationMode",
     "VerificationReportValidationResult",
     "build_verification_gap_report_frontmatter",
     "build_verification_report_skeleton",
     "compose_verification_report_markdown",
+    "finalize_verification_report",
     "render_verification_report_frontmatter_yaml",
     "render_verification_report_markdown",
     "validate_rendered_verification_report",
@@ -42,6 +58,8 @@ VERIFICATION_REPORT_BODY_CONTRACT = (
 )
 
 VerificationReportValidationMode = Literal["none", "frontmatter", "contract"]
+VerificationReportStatus = Literal["passed", "gaps_found", "expert_needed", "human_needed"]
+VerificationTargetKind = Literal["claim", "deliverable", "acceptance_test"]
 
 
 class VerificationReportSkeleton(BaseModel):
@@ -63,6 +81,103 @@ class VerificationReportSkeleton(BaseModel):
     target_status: Literal["gaps_found"] = "gaps_found"
     target_report_path: str | None = None
     target_report_ref: str | None = None
+
+
+class VerificationTargetOutcomePatch(BaseModel):
+    """Typed patch for one claim, deliverable, or acceptance-test result."""
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+
+    target_kind: VerificationTargetKind
+    target_id: str
+    status: ContractEvidenceStatus
+    summary: str | None = None
+    evidence: list[VerificationEvidence] = Field(default_factory=list)
+    notes: str | None = None
+    linked_ids: list[str] = Field(default_factory=list)
+    path: str | None = None
+    proof_audit: ContractProofAudit | None = None
+
+    def to_contract_result_entry(self) -> ContractResultEntry:
+        """Return the strict contract-results entry represented by this patch."""
+
+        return ContractResultEntry(
+            status=self.status,
+            summary=self.summary,
+            evidence=self.evidence,
+            notes=self.notes,
+            linked_ids=self.linked_ids,
+            path=self.path,
+            proof_audit=self.proof_audit,
+        )
+
+
+class VerificationReferenceActionPatch(BaseModel):
+    """Typed patch for one reference-action ledger entry."""
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+
+    reference_id: str
+    status: ContractReferenceActionStatus
+    completed_actions: list[ContractReferenceAction] = Field(default_factory=list)
+    missing_actions: list[ContractReferenceAction] = Field(default_factory=list)
+    summary: str | None = None
+    evidence: list[VerificationEvidence] = Field(default_factory=list)
+
+    def to_contract_reference_usage(self) -> ContractReferenceUsage:
+        """Return the strict contract reference-usage entry represented by this patch."""
+
+        return ContractReferenceUsage(
+            status=self.status,
+            completed_actions=self.completed_actions,
+            missing_actions=self.missing_actions,
+            summary=self.summary,
+            evidence=self.evidence,
+        )
+
+
+class VerificationForbiddenProxyOutcomePatch(BaseModel):
+    """Typed patch for one forbidden-proxy verification outcome."""
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+
+    forbidden_proxy_id: str
+    status: ContractForbiddenProxyStatus
+    notes: str | None = None
+    evidence: list[VerificationEvidence] = Field(default_factory=list)
+
+    def to_contract_forbidden_proxy_result(self) -> ContractForbiddenProxyResult:
+        """Return the strict forbidden-proxy result represented by this patch."""
+
+        return ContractForbiddenProxyResult(
+            status=self.status,
+            notes=self.notes,
+            evidence=self.evidence,
+        )
+
+
+class VerificationComparisonVerdictPatch(ComparisonVerdict):
+    """Named finalizer patch model that reuses the strict comparison verdict schema."""
+
+
+class VerificationSuggestedCheckPatch(SuggestedContractCheck):
+    """Named finalizer patch model that reuses the strict suggested-check schema."""
+
+
+class VerificationReportOutcomePatch(BaseModel):
+    """Typed patch applied by the verification-report finalizer."""
+
+    model_config = ConfigDict(validate_assignment=True, extra="forbid")
+
+    status: VerificationReportStatus = "gaps_found"
+    verified: str | None = None
+    phase: str | None = None
+    score: str | None = None
+    target_outcomes: list[VerificationTargetOutcomePatch] = Field(default_factory=list)
+    reference_actions: list[VerificationReferenceActionPatch] = Field(default_factory=list)
+    forbidden_proxy_outcomes: list[VerificationForbiddenProxyOutcomePatch] = Field(default_factory=list)
+    comparison_verdicts: list[VerificationComparisonVerdictPatch] | None = None
+    suggested_contract_checks: list[VerificationSuggestedCheckPatch] | None = None
 
 
 class VerificationReportValidationResult(BaseModel):
@@ -195,6 +310,82 @@ def build_verification_report_skeleton(
         target_report_path=target_report_path,
         target_report_ref=target_report_ref,
     )
+
+
+def finalize_verification_report(
+    *,
+    contract: ResearchContract,
+    outcome: VerificationReportOutcomePatch,
+    body_markdown: str,
+    plan_path: str | Path | None = None,
+    plan_contract_ref: str = _DEFAULT_PLAN_CONTRACT_REF,
+    target_report_ref: str | None = None,
+    source_path: str | Path | None = None,
+) -> VerificationReportComposition:
+    """Finalize a verification report from typed patches and body-only evidence.
+
+    The finalizer owns mechanical frontmatter construction only. It still
+    delegates acceptance of ``passed`` and oracle evidence to the existing
+    verification-contract validators.
+    """
+
+    if _body_markdown_starts_with_frontmatter(body_markdown):
+        raise ValueError("verification report body_markdown must be body-only Markdown without YAML frontmatter")
+
+    plan = Path(plan_path) if plan_path is not None else None
+    resolved_plan_contract_ref = plan_contract_ref
+    if plan is not None and plan_contract_ref == _DEFAULT_PLAN_CONTRACT_REF:
+        plan_ref = _project_relative_ref(plan.as_posix()) or plan.as_posix()
+        resolved_plan_contract_ref = f"{plan_ref}#/contract"
+
+    report_source_path = Path(source_path) if source_path is not None else _source_path_from_plan(plan)
+    resolved_target_report_ref = target_report_ref
+    if resolved_target_report_ref is None:
+        resolved_target_report_ref = _target_report_ref_from_plan_or_source(plan, report_source_path)
+
+    frontmatter = build_verification_report_frontmatter_from_patch(
+        contract,
+        outcome,
+        phase=outcome.phase or _phase_from_plan_path(plan),
+        plan_contract_ref=resolved_plan_contract_ref,
+        target_report_ref=resolved_target_report_ref,
+    )
+    return compose_verification_report_markdown(
+        frontmatter,
+        body_markdown,
+        target_report_ref=resolved_target_report_ref,
+        source_path=report_source_path,
+        validation_mode="contract",
+    )
+
+
+def build_verification_report_frontmatter_from_patch(
+    contract: ResearchContract,
+    outcome: VerificationReportOutcomePatch,
+    *,
+    phase: str = "unknown",
+    plan_contract_ref: str = _DEFAULT_PLAN_CONTRACT_REF,
+    target_report_ref: str | None = None,
+) -> dict[str, object]:
+    """Return canonical verification frontmatter from a typed outcome patch."""
+
+    contract_results = _contract_results_from_outcome_patch(contract, outcome)
+    comparison_verdicts = _comparison_verdicts_from_outcome_patch(contract, outcome)
+    suggested_checks = _suggested_checks_from_outcome_patch(
+        contract,
+        outcome,
+        evidence_path=target_report_ref,
+    )
+    return {
+        "phase": phase,
+        "verified": outcome.verified or _DEFAULT_VERIFIED_AT,
+        "status": outcome.status,
+        "score": outcome.score or _score_from_outcome(contract, outcome),
+        "plan_contract_ref": plan_contract_ref,
+        "contract_results": contract_results,
+        "comparison_verdicts": [verdict.model_dump(mode="json", exclude_none=True) for verdict in comparison_verdicts],
+        "suggested_contract_checks": [check.model_dump(mode="json", exclude_none=True) for check in suggested_checks],
+    }
 
 
 def render_verification_report_frontmatter_yaml(
@@ -335,6 +526,19 @@ def _verification_report_path_from_plan(plan_path: Path | None) -> str | None:
     return str(plan_path.with_name("VERIFICATION.md"))
 
 
+def _source_path_from_plan(plan_path: Path | None) -> Path | None:
+    target_path = _verification_report_path_from_plan(plan_path)
+    return Path(target_path) if target_path is not None else None
+
+
+def _target_report_ref_from_plan_or_source(plan_path: Path | None, source_path: Path | None) -> str | None:
+    source_ref = _project_relative_ref(source_path.as_posix()) if source_path is not None else None
+    if source_ref is not None:
+        return source_ref
+    target_path = _verification_report_path_from_plan(plan_path)
+    return _project_relative_ref(target_path)
+
+
 def _project_relative_ref(path_text: str | None) -> str | None:
     if path_text is None:
         return None
@@ -343,6 +547,89 @@ def _project_relative_ref(path_text: str | None) -> str | None:
     if "GPD" in parts:
         return Path(*parts[parts.index("GPD") :]).as_posix()
     return path.as_posix()
+
+
+def _body_markdown_starts_with_frontmatter(body_markdown: str) -> bool:
+    stripped = body_markdown.lstrip("\ufeff \t\r\n")
+    return stripped == "---" or stripped.startswith("---\n") or stripped.startswith("---\r\n")
+
+
+def _contract_results_from_outcome_patch(
+    contract: ResearchContract,
+    outcome: VerificationReportOutcomePatch,
+) -> dict[str, object]:
+    contract_results = build_contract_results_skeleton(contract, target="verification")
+
+    for patch in outcome.target_outcomes:
+        section = _target_outcome_section(patch.target_kind)
+        entries = contract_results.get(section)
+        if not isinstance(entries, dict):
+            entries = {}
+            contract_results[section] = entries
+        entries[patch.target_id] = patch.to_contract_result_entry().model_dump(mode="json", exclude_none=True)
+
+    references = contract_results.get("references")
+    if not isinstance(references, dict):
+        references = {}
+        contract_results["references"] = references
+    for patch in outcome.reference_actions:
+        references[patch.reference_id] = patch.to_contract_reference_usage().model_dump(mode="json", exclude_none=True)
+
+    forbidden_proxies = contract_results.get("forbidden_proxies")
+    if not isinstance(forbidden_proxies, dict):
+        forbidden_proxies = {}
+        contract_results["forbidden_proxies"] = forbidden_proxies
+    for patch in outcome.forbidden_proxy_outcomes:
+        forbidden_proxies[patch.forbidden_proxy_id] = patch.to_contract_forbidden_proxy_result().model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+
+    return contract_results
+
+
+def _comparison_verdicts_from_outcome_patch(
+    contract: ResearchContract,
+    outcome: VerificationReportOutcomePatch,
+) -> list[ComparisonVerdict]:
+    if outcome.comparison_verdicts is not None:
+        return [
+            ComparisonVerdict.model_validate(verdict.model_dump(mode="json")) for verdict in outcome.comparison_verdicts
+        ]
+    if outcome.status == "passed":
+        return []
+    return _comparison_verdicts_for_gap_skeleton(contract)
+
+
+def _suggested_checks_from_outcome_patch(
+    contract: ResearchContract,
+    outcome: VerificationReportOutcomePatch,
+    *,
+    evidence_path: str | None,
+) -> list[SuggestedContractCheck]:
+    if outcome.suggested_contract_checks is not None:
+        return [
+            SuggestedContractCheck.model_validate(check.model_dump(mode="json"))
+            for check in outcome.suggested_contract_checks
+        ]
+    if outcome.status == "passed":
+        return []
+    return _suggested_contract_checks_for_gap_skeleton(contract, evidence_path=evidence_path)
+
+
+def _target_outcome_section(target_kind: VerificationTargetKind) -> str:
+    return {
+        "claim": "claims",
+        "deliverable": "deliverables",
+        "acceptance_test": "acceptance_tests",
+    }[target_kind]
+
+
+def _score_from_outcome(contract: ResearchContract, outcome: VerificationReportOutcomePatch) -> str:
+    target_count = len(contract.claims) + len(contract.deliverables) + len(contract.acceptance_tests)
+    if outcome.status == "passed":
+        return f"{target_count}/{target_count} contract targets passed"
+    return _gap_score(contract)
 
 
 def _validation_commands(target_report_path: str | None) -> list[str]:

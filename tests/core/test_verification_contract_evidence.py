@@ -543,8 +543,7 @@ def test_validate_frontmatter_verification_rejects_triage_labels_as_top_level_st
 
     assert result.valid is False
     assert any(
-        "status: must be one of passed, gaps_found, expert_needed, human_needed" in error
-        for error in result.errors
+        "status: must be one of passed, gaps_found, expert_needed, human_needed" in error for error in result.errors
     )
 
 
@@ -784,6 +783,131 @@ def test_validate_frontmatter_verification_rejects_passed_proof_claim_without_au
 
     assert result.valid is False
     assert any("audit_artifact_sha256" in error for error in result.errors)
+
+
+def test_validate_frontmatter_verification_rejects_passed_proof_claim_without_proof_artifact_hash(
+    tmp_path: Path,
+) -> None:
+    phase_dir, _ = _write_proof_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    verification_path.write_text(
+        _proof_verification_content(
+            proof_audit_block=_proof_audit_block(
+                phase_dir,
+                proof_artifact_sha256="",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_frontmatter(
+        verification_path.read_text(encoding="utf-8"),
+        "verification",
+        source_path=verification_path,
+    )
+
+    assert result.valid is False
+    assert any("proof_artifact_sha256" in error for error in result.errors)
+
+
+def test_validate_frontmatter_verification_rejects_passed_proof_claim_without_claim_statement_hash(
+    tmp_path: Path,
+) -> None:
+    phase_dir, _ = _write_proof_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    verification_path.write_text(
+        _proof_verification_content(
+            proof_audit_block=_proof_audit_block(
+                phase_dir,
+                claim_statement_sha256="",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_frontmatter(
+        verification_path.read_text(encoding="utf-8"),
+        "verification",
+        source_path=verification_path,
+    )
+
+    assert result.valid is False
+    assert any("claim_statement_sha256" in error for error in result.errors)
+
+
+def test_validate_frontmatter_verification_rejects_passed_proof_claim_with_stale_true(
+    tmp_path: Path,
+) -> None:
+    phase_dir, _ = _write_proof_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    verification_path.write_text(
+        _proof_verification_content(
+            proof_audit_block=_proof_audit_block(
+                phase_dir,
+                stale="true",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_frontmatter(
+        verification_path.read_text(encoding="utf-8"),
+        "verification",
+        source_path=verification_path,
+    )
+
+    assert result.valid is False
+    assert any("stale" in error for error in result.errors)
+
+
+def test_validate_frontmatter_verification_rejects_passed_proof_claim_with_stale_proof_artifact_hash(
+    tmp_path: Path,
+) -> None:
+    phase_dir, _ = _write_proof_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    verification_path.write_text(
+        _proof_verification_content(
+            proof_audit_block=_proof_audit_block(
+                phase_dir,
+                proof_artifact_sha256="a" * 64,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_frontmatter(
+        verification_path.read_text(encoding="utf-8"),
+        "verification",
+        source_path=verification_path,
+    )
+
+    assert result.valid is False
+    assert any("proof_audit proof_artifact_sha256 is stale" in error for error in result.errors)
+
+
+def test_validate_frontmatter_verification_rejects_passed_proof_claim_with_stale_audit_artifact_hash(
+    tmp_path: Path,
+) -> None:
+    phase_dir, _ = _write_proof_contract_phase(tmp_path)
+    verification_path = phase_dir / "01-VERIFICATION.md"
+    verification_path.write_text(
+        _proof_verification_content(
+            proof_audit_block=_proof_audit_block(
+                phase_dir,
+                audit_artifact_sha256="b" * 64,
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_frontmatter(
+        verification_path.read_text(encoding="utf-8"),
+        "verification",
+        source_path=verification_path,
+    )
+
+    assert result.valid is False
+    assert any("proof_audit audit_artifact_sha256 is stale" in error for error in result.errors)
 
 
 def test_validate_frontmatter_verification_rejects_passed_proof_claim_with_unreadable_audit_artifact(

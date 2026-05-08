@@ -307,6 +307,7 @@ class TestBuiltinServerDescriptors:
 
         assert descriptor["capabilities"] == [
             "get_state",
+            "suggest_next",
             "get_phase_info",
             "advance_plan",
             "get_progress",

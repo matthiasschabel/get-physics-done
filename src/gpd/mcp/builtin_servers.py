@@ -193,6 +193,7 @@ _PUBLIC_DESCRIPTOR_METADATA: dict[str, dict[str, object]] = {
         ),
         "capabilities": [
             "get_state",
+            "suggest_next",
             "get_phase_info",
             "advance_plan",
             "get_progress",

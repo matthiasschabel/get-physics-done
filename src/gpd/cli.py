@@ -11782,6 +11782,19 @@ def _load_verification_report_skeleton_builder() -> Callable[..., Mapping[str, o
     return build_verification_report_skeleton
 
 
+def _load_verification_report_finalizer() -> Callable[..., object]:
+    """Load the source-of-truth verification-report finalizer."""
+
+    try:
+        from gpd.core.verification_report import finalize_verification_report
+    except ImportError as exc:
+        raise GPDError(
+            "verification-report finalizer is not available; expected "
+            "gpd.core.verification_report.finalize_verification_report"
+        ) from exc
+    return finalize_verification_report
+
+
 def _callable_accepts_kwarg(callable_obj: Callable[..., object], name: str) -> bool:
     try:
         signature = inspect.signature(callable_obj)
@@ -11796,6 +11809,22 @@ def _callable_accepts_kwarg(callable_obj: Callable[..., object], name: str) -> b
         }:
             return True
     return False
+
+
+def _callable_has_explicit_kwarg(callable_obj: Callable[..., object], name: str) -> bool:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == name
+        and parameter.kind
+        in {
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.KEYWORD_ONLY,
+        }
+        for parameter in signature.parameters.values()
+    )
 
 
 def _call_verification_report_skeleton_builder(
@@ -11972,6 +12001,15 @@ def _normalize_verification_report_validate_mode(validate_mode: str | None, *, h
     normalized = validate_mode.strip().lower()
     if normalized not in {"none", "frontmatter", "contract"}:
         raise GPDError("verification-report skeleton --validate must be one of: none, frontmatter, contract")
+    return normalized
+
+
+def _normalize_verification_report_finalize_validate_mode(validate_mode: str | None) -> str:
+    if validate_mode is None:
+        return "contract"
+    normalized = validate_mode.strip().lower()
+    if normalized != "contract":
+        raise GPDError("verification-report finalize --validate must be contract")
     return normalized
 
 
@@ -12154,6 +12192,45 @@ def _verification_report_write_recovery(
     }
 
 
+def _verification_report_finalize_recovery(
+    *,
+    plan_path: Path,
+    patch_path: Path,
+    target_path: Path,
+    body_path: Path,
+    validate_mode: str,
+    force: bool,
+) -> dict[str, object]:
+    from gpd.core.verification_report import VERIFICATION_REPORT_BODY_CONTRACT
+
+    command_parts = [
+        "gpd",
+        "verification-report",
+        "finalize",
+        _format_display_path(plan_path),
+        "--patch",
+        _format_display_path(patch_path),
+        "--body-file",
+        _format_display_path(body_path),
+        "--output",
+        _format_display_path(target_path),
+        "--validate",
+        validate_mode,
+    ]
+    if force:
+        command_parts.append("--force")
+
+    return {
+        "safe_next_step": "Edit only the typed patch or body file, then rerun the finalizer command.",
+        "body_file_contract": [
+            VERIFICATION_REPORT_BODY_CONTRACT,
+            "Do not include YAML frontmatter in the body file.",
+            "The finalizer writes the canonical report only after contract validation passes.",
+        ],
+        "rerun_command": " ".join(shlex.quote(part) for part in command_parts),
+    }
+
+
 def _validate_verification_report_candidate(
     content: str,
     *,
@@ -12233,6 +12310,79 @@ def _write_text_atomically(target_path: Path, content: str) -> None:
                 pass
 
 
+def _jsonable_mapping(raw_payload: object, *, error_label: str) -> dict[str, object]:
+    if hasattr(raw_payload, "model_dump"):
+        payload = raw_payload.model_dump(mode="json", by_alias=True)
+    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
+        payload = dataclasses.asdict(raw_payload)
+    else:
+        payload = raw_payload
+    if not isinstance(payload, Mapping):
+        raise GPDError(f"{error_label} must return a mapping")
+    return dict(payload)
+
+
+def _jsonable_value(value: object) -> object:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json", by_alias=True)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return dataclasses.asdict(value)
+    return value
+
+
+def _coerce_verification_report_outcome_patch(outcome_patch: Mapping[str, object]) -> object:
+    try:
+        from gpd.core.verification_report import VerificationReportOutcomePatch
+    except ImportError:
+        return outcome_patch
+    return VerificationReportOutcomePatch.model_validate(outcome_patch)
+
+
+def _call_verification_report_finalizer(
+    finalizer: Callable[..., object],
+    *,
+    contract: object,
+    outcome_patch: Mapping[str, object],
+    body_markdown: str,
+    plan_path: Path,
+    plan_contract_ref: str,
+    target_report_ref: str,
+    source_path: Path,
+    validation_mode: str,
+) -> object:
+    kwargs: dict[str, object] = {
+        "contract": contract,
+        "body_markdown": body_markdown,
+    }
+    if _callable_has_explicit_kwarg(finalizer, "outcome"):
+        kwargs["outcome"] = _coerce_verification_report_outcome_patch(outcome_patch)
+    elif _callable_has_explicit_kwarg(finalizer, "outcome_patch"):
+        kwargs["outcome_patch"] = _coerce_verification_report_outcome_patch(outcome_patch)
+    elif _callable_has_explicit_kwarg(finalizer, "patch"):
+        kwargs["patch"] = _coerce_verification_report_outcome_patch(outcome_patch)
+    else:
+        kwargs["outcome_patch"] = outcome_patch
+    if _callable_accepts_kwarg(finalizer, "plan_path"):
+        kwargs["plan_path"] = plan_path
+    if _callable_accepts_kwarg(finalizer, "plan_contract_ref"):
+        kwargs["plan_contract_ref"] = plan_contract_ref
+    if _callable_accepts_kwarg(finalizer, "target_report_ref"):
+        kwargs["target_report_ref"] = target_report_ref
+    if _callable_accepts_kwarg(finalizer, "source_path"):
+        kwargs["source_path"] = source_path
+    if _callable_accepts_kwarg(finalizer, "validation_mode"):
+        kwargs["validation_mode"] = validation_mode
+    return finalizer(**kwargs)
+
+
+def _verification_report_finalized_markdown(payload: Mapping[str, object]) -> str:
+    for key in ("markdown", "markdown_draft", "content", "report_markdown"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.rstrip() + "\n"
+    raise GPDError("verification-report finalizer payload is missing markdown")
+
+
 def _load_proof_redteam_validator() -> Callable[..., object]:
     """Load the public proof-redteam artifact validator."""
 
@@ -12240,8 +12390,7 @@ def _load_proof_redteam_validator() -> Callable[..., object]:
         from gpd.core.proof_redteam import validate_proof_redteam_artifact
     except ImportError as exc:
         raise GPDError(
-            "proof-redteam validator is not available; expected "
-            "gpd.core.proof_redteam.validate_proof_redteam_artifact"
+            "proof-redteam validator is not available; expected gpd.core.proof_redteam.validate_proof_redteam_artifact"
         ) from exc
     return validate_proof_redteam_artifact
 
@@ -12257,6 +12406,18 @@ def _load_proof_redteam_skeleton_builder() -> Callable[..., object]:
             "gpd.core.proof_redteam.build_proof_redteam_skeleton"
         ) from exc
     return build_proof_redteam_skeleton
+
+
+def _load_proof_redteam_finalizer() -> Callable[..., object]:
+    """Load the source-of-truth proof-redteam finalizer."""
+
+    try:
+        from gpd.core.proof_redteam import finalize_proof_redteam_artifact
+    except ImportError as exc:
+        raise GPDError(
+            "proof-redteam finalizer is not available; expected gpd.core.proof_redteam.finalize_proof_redteam_artifact"
+        ) from exc
+    return finalize_proof_redteam_artifact
 
 
 def _validation_result_is_valid(result: object) -> bool:
@@ -12313,6 +12474,46 @@ def _normalize_proof_redteam_proof_artifact_paths(proof_artifact_paths: list[str
     return normalized
 
 
+def _normalize_required_proof_redteam_claim_text(claim_text: str) -> str:
+    normalized = claim_text.strip()
+    if not normalized:
+        raise GPDError("proof-redteam finalize --claim-text cannot be empty")
+    return normalized
+
+
+def _normalize_proof_redteam_reviewed_at(reviewed_at: str | None) -> str | None:
+    if reviewed_at is None:
+        return None
+    normalized = reviewed_at.strip()
+    if not normalized:
+        raise GPDError("proof-redteam finalize --reviewed-at cannot be empty")
+    return normalized
+
+
+def _normalize_single_proof_redteam_artifact_path(proof_artifact_path: str) -> str:
+    normalized = proof_artifact_path.strip()
+    if not normalized:
+        raise GPDError("proof-redteam finalize --proof-artifact-path cannot be empty")
+    return normalized
+
+
+def _resolve_proof_redteam_proof_artifact_path(
+    proof_artifact_path: str,
+    *,
+    project_root: Path,
+    artifact_dir: Path,
+) -> Path | None:
+    target = Path(proof_artifact_path).expanduser()
+    if target.is_absolute():
+        candidates = [target.resolve(strict=False)]
+    else:
+        candidates = [
+            (project_root / target).resolve(strict=False),
+            (artifact_dir / target).resolve(strict=False),
+        ]
+    return next((candidate for candidate in candidates if candidate.exists() and candidate.is_file()), None)
+
+
 def _call_proof_redteam_skeleton_builder(
     builder: Callable[..., object],
     *,
@@ -12334,6 +12535,13 @@ def _call_proof_redteam_skeleton_builder(
 
 def _proof_redteam_validation_commands_for_ref(artifact_ref: str) -> list[str]:
     return [f"gpd validate proof-redteam {shlex.quote(artifact_ref)}"]
+
+
+def _proof_redteam_finalize_validation_commands_for_ref(artifact_ref: str) -> list[str]:
+    return [
+        f"gpd validate proof-redteam {shlex.quote(artifact_ref)}",
+        "gpd validate verification-contract VERIFICATION.md",
+    ]
 
 
 def _proof_redteam_artifact_ref_from_payload(payload: Mapping[str, object]) -> str:
@@ -12390,6 +12598,76 @@ def _emit_proof_redteam_skeleton(payload: Mapping[str, object]) -> None:
     typer.echo(markdown_draft.rstrip() + "\n", nl=False)
 
 
+def _proof_redteam_finalize_output_target(input_path: Path, output_path: str | None) -> Path:
+    if output_path is None:
+        return input_path.resolve(strict=False)
+    target = Path(output_path).expanduser()
+    if not target.is_absolute():
+        target = _get_cwd() / target
+    return target.resolve(strict=False)
+
+
+def _proof_redteam_finalize_not_run(
+    error: str,
+    *,
+    input_path: Path,
+    target_path: Path,
+    force: bool,
+) -> dict[str, object]:
+    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    return {
+        "written": False,
+        "input_path": str(input_path),
+        "target_path": str(target_path),
+        "target_ref": target_ref,
+        "replaced": False,
+        "force": force,
+        "valid": False,
+        "errors": [error],
+        "validation_commands": _proof_redteam_finalize_validation_commands_for_ref(target_ref),
+    }
+
+
+def _call_proof_redteam_finalizer(
+    finalizer: Callable[..., object],
+    *,
+    path: Path,
+    project_root: Path,
+    claim_id: str,
+    claim_text: str,
+    proof_artifact_path: str,
+    reviewed_at: str | None,
+    output_path: Path,
+) -> object:
+    kwargs: dict[str, object] = {
+        "path": path,
+        "project_root": project_root,
+        "claim_id": claim_id,
+        "proof_artifact_path": proof_artifact_path,
+    }
+    if _callable_accepts_kwarg(finalizer, "claim_statement"):
+        kwargs["claim_statement"] = claim_text
+    elif _callable_accepts_kwarg(finalizer, "claim_text"):
+        kwargs["claim_text"] = claim_text
+    else:
+        kwargs["claim_statement"] = claim_text
+    if reviewed_at is not None or _callable_accepts_kwarg(finalizer, "reviewed_at"):
+        kwargs["reviewed_at"] = reviewed_at
+    if _callable_accepts_kwarg(finalizer, "output_path"):
+        kwargs["output_path"] = output_path
+    if _callable_accepts_kwarg(finalizer, "write"):
+        kwargs["write"] = False
+    return finalizer(**kwargs)
+
+
+def _proof_redteam_finalized_markdown(payload: Mapping[str, object]) -> str | None:
+    for key in ("markdown", "markdown_draft", "content", "artifact_markdown"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.rstrip() + "\n"
+    return None
+
+
 def _load_return_skeleton_builder() -> Callable[..., object]:
     """Load the source-of-truth gpd_return skeleton builder."""
 
@@ -12397,8 +12675,7 @@ def _load_return_skeleton_builder() -> Callable[..., object]:
         from gpd.core.return_skeleton import build_gpd_return_skeleton
     except ImportError as exc:
         raise GPDError(
-            "return skeleton builder is not available; expected "
-            "gpd.core.return_skeleton.build_gpd_return_skeleton"
+            "return skeleton builder is not available; expected gpd.core.return_skeleton.build_gpd_return_skeleton"
         ) from exc
     return build_gpd_return_skeleton
 
@@ -12672,6 +12949,151 @@ def proof_redteam_skeleton_cmd(
     )
 
 
+@proof_redteam_app.command("finalize")
+def proof_redteam_finalize_cmd(
+    input_path: str = typer.Argument(..., help="Path to the PROOF-REDTEAM.md draft to finalize."),
+    claim_id: str = typer.Option(..., "--claim-id", help="Claim or theorem id under proof-redteam review."),
+    claim_text: str = typer.Option(..., "--claim-text", help="Exact claim statement to hash and bind."),
+    proof_artifact_path: str = typer.Option(
+        ...,
+        "--proof-artifact-path",
+        "--proof-artifact",
+        help="Proof artifact path to hash and bind.",
+    ),
+    reviewed_at: str | None = typer.Option(None, "--reviewed-at", help="Reviewer timestamp to record."),
+    output_path: str | None = typer.Option(
+        None,
+        "--output",
+        help="Target PROOF-REDTEAM.md path. Defaults to finalizing the input path in place.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Allow --output to replace an existing separate target."),
+) -> None:
+    """Finalize a passed proof-redteam artifact through the core finalizer."""
+
+    try:
+        normalized_claim_id = _normalize_proof_redteam_claim_id(claim_id)
+        normalized_claim_text = _normalize_required_proof_redteam_claim_text(claim_text)
+        normalized_proof_artifact_path = _normalize_single_proof_redteam_artifact_path(proof_artifact_path)
+        normalized_reviewed_at = _normalize_proof_redteam_reviewed_at(reviewed_at)
+    except GPDError as exc:
+        _error(str(exc))
+
+    file_path, _ = _load_text_document_or_error(input_path)
+    project_root = resolve_project_root(file_path.parent, require_layout=True) or _require_project_root(
+        _get_cwd(),
+        command_label="gpd proof-redteam finalize",
+    )
+
+    try:
+        target_path = _proof_redteam_finalize_output_target(file_path, output_path)
+    except GPDError as exc:
+        _error(str(exc))
+    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    validation_commands = _proof_redteam_finalize_validation_commands_for_ref(target_ref)
+    input_resolved = file_path.resolve(strict=False)
+    target_is_input = target_path == input_resolved
+    target_exists = target_path.exists()
+
+    resolved_proof_artifact_path = _resolve_proof_redteam_proof_artifact_path(
+        normalized_proof_artifact_path,
+        project_root=project_root,
+        artifact_dir=target_path.parent,
+    )
+    if resolved_proof_artifact_path is None:
+        _error(
+            "proof-redteam finalize --proof-artifact-path does not resolve to a readable file: "
+            f"{normalized_proof_artifact_path}"
+        )
+
+    if target_exists and not target_is_input and not force:
+        _emit_raw_json(
+            _proof_redteam_finalize_not_run(
+                f"target exists; pass --force to overwrite: {_format_display_path(target_path)}",
+                input_path=file_path,
+                target_path=target_path,
+                force=force,
+            )
+        )
+        raise typer.Exit(code=1)
+    if not target_path.parent.exists():
+        _emit_raw_json(
+            _proof_redteam_finalize_not_run(
+                f"target parent directory does not exist: {_format_display_path(target_path.parent)}",
+                input_path=file_path,
+                target_path=target_path,
+                force=force,
+            )
+        )
+        raise typer.Exit(code=1)
+    if not target_path.parent.is_dir():
+        _emit_raw_json(
+            _proof_redteam_finalize_not_run(
+                f"target parent is not a directory: {_format_display_path(target_path.parent)}",
+                input_path=file_path,
+                target_path=target_path,
+                force=force,
+            )
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        finalizer = _load_proof_redteam_finalizer()
+    except GPDError as exc:
+        _error(str(exc))
+    try:
+        raw_payload = _call_proof_redteam_finalizer(
+            finalizer,
+            path=file_path,
+            project_root=project_root,
+            claim_id=normalized_claim_id,
+            claim_text=normalized_claim_text,
+            proof_artifact_path=normalized_proof_artifact_path,
+            reviewed_at=normalized_reviewed_at,
+            output_path=target_path,
+        )
+        payload = _jsonable_mapping(raw_payload, error_label="proof-redteam finalizer")
+    except (ValueError, PydanticValidationError) as exc:
+        _error(str(exc))
+    except GPDError as exc:
+        _error(str(exc))
+
+    payload.setdefault("input_path", str(file_path))
+    payload["target_path"] = str(target_path)
+    payload["target_ref"] = target_ref
+    payload["validation_commands"] = validation_commands
+    payload["force"] = force
+    payload.setdefault("proof_artifact_path", normalized_proof_artifact_path)
+    payload.setdefault("proof_artifact_resolved_path", str(resolved_proof_artifact_path))
+
+    if not _validation_result_is_valid(payload):
+        payload["written"] = False
+        payload.setdefault("replaced", False)
+        _emit_raw_json(payload)
+        raise typer.Exit(code=1)
+
+    markdown = _proof_redteam_finalized_markdown(payload)
+    if markdown is not None:
+        try:
+            _write_text_atomically(target_path, markdown)
+        except OSError as exc:
+            failure = _proof_redteam_finalize_not_run(
+                f"failed to write target atomically: {exc}",
+                input_path=file_path,
+                target_path=target_path,
+                force=force,
+            )
+            failure.update({key: value for key, value in payload.items() if key not in failure})
+            _emit_raw_json(failure)
+            raise typer.Exit(code=1) from exc
+        payload["written"] = True
+        payload["replaced"] = target_exists
+    else:
+        payload["written"] = bool(payload.get("written", target_path.exists()))
+        payload["replaced"] = bool(payload.get("replaced", target_exists and not target_is_input))
+
+    _emit_raw_json(payload)
+
+
 @verification_report_app.command("skeleton")
 def verification_report_skeleton_cmd(
     input_path: str = typer.Argument(..., help="Path to a contract-backed PLAN.md file"),
@@ -12871,6 +13293,163 @@ def verification_report_skeleton_cmd(
         return
 
     _emit_verification_report_skeleton(payload, output_format=normalized_format)
+
+
+@verification_report_app.command("finalize")
+def verification_report_finalize_cmd(
+    input_path: str = typer.Argument(..., help="Path to a contract-backed PLAN.md file."),
+    patch_path: str = typer.Option(..., "--patch", help="Typed outcome patch JSON file."),
+    body_file: str = typer.Option(..., "--body-file", help="Body-only Markdown evidence file."),
+    output_path: str = typer.Option(..., "--output", help="Target VERIFICATION.md path."),
+    validate_mode: str | None = typer.Option(
+        "contract",
+        "--validate",
+        help="Validation mode before write. Phase 4 finalization requires contract.",
+    ),
+    force: bool = typer.Option(False, "--force", help="Allow replacing an existing target."),
+) -> None:
+    """Finalize a VERIFICATION report from a typed outcome patch and body evidence."""
+
+    from gpd.core.frontmatter import (
+        FrontmatterParseError,
+        FrontmatterValidationError,
+        parse_contract_block,
+        validate_frontmatter,
+    )
+
+    try:
+        normalized_validate_mode = _normalize_verification_report_finalize_validate_mode(validate_mode)
+    except GPDError as exc:
+        _error(str(exc))
+
+    file_path, content = _load_text_document_or_error(input_path)
+    body_path, body_markdown = _load_text_document_or_error(body_file)
+    if _body_markdown_starts_with_frontmatter(body_markdown):
+        _error(
+            "verification-report finalize --body-file must be body-only Markdown; "
+            f"remove YAML frontmatter from {_format_display_path(body_path)}"
+        )
+    patch_document = _load_json_document_or_error(patch_path)
+    if not isinstance(patch_document, Mapping):
+        _error("verification-report finalize --patch must contain a JSON object")
+    patch_file_path = _resolve_path_from_effective_cwd(patch_path) if patch_path != "-" else Path("-")
+
+    try:
+        plan_validation = validate_frontmatter(content, "plan", source_path=file_path)
+        if not plan_validation.valid:
+            diagnostics = [*plan_validation.missing, *plan_validation.errors]
+            detail = "; ".join(diagnostics[:3]) if diagnostics else "invalid plan frontmatter"
+            _error(f"verification-report finalize requires a valid PLAN.md: {detail}")
+        contract = parse_contract_block(content, source_path=file_path)
+    except (FrontmatterParseError, FrontmatterValidationError) as exc:
+        _error(str(exc))
+    if contract is None:
+        _error("PLAN frontmatter does not contain a contract block")
+
+    target_path = _verification_report_output_target(output_path, payload={}, plan_path=file_path)
+    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    validation_commands = _verification_report_validation_commands_for_ref(target_ref)
+    warnings: list[str] = []
+    target_exists = target_path.exists()
+    write_payload: dict[str, object] = {
+        "written": False,
+        "target_report_path": str(target_path),
+        "target_report_ref": target_ref,
+        "replaced": False,
+        "force": force,
+        "body_file": str(body_path),
+        "patch_file": str(patch_file_path),
+        "validation": {},
+        "warnings": warnings,
+        "validation_commands": validation_commands,
+    }
+    if target_exists and not force:
+        write_payload["validation"] = _verification_report_validation_not_run(
+            normalized_validate_mode,
+            f"target exists; pass --force to overwrite: {_format_display_path(target_path)}",
+        )
+        _emit_raw_json(write_payload)
+        raise typer.Exit(code=1)
+    if not target_path.parent.exists():
+        write_payload["validation"] = _verification_report_validation_not_run(
+            normalized_validate_mode,
+            f"target parent directory does not exist: {_format_display_path(target_path.parent)}",
+        )
+        _emit_raw_json(write_payload)
+        raise typer.Exit(code=1)
+    if not target_path.parent.is_dir():
+        write_payload["validation"] = _verification_report_validation_not_run(
+            normalized_validate_mode,
+            f"target parent is not a directory: {_format_display_path(target_path.parent)}",
+        )
+        _emit_raw_json(write_payload)
+        raise typer.Exit(code=1)
+
+    plan_contract_ref = _verification_report_plan_contract_ref(file_path)
+    try:
+        finalizer = _load_verification_report_finalizer()
+    except GPDError as exc:
+        _error(str(exc))
+    try:
+        raw_payload = _call_verification_report_finalizer(
+            finalizer,
+            contract=contract,
+            outcome_patch=patch_document,
+            body_markdown=body_markdown,
+            plan_path=file_path,
+            plan_contract_ref=plan_contract_ref,
+            target_report_ref=target_ref,
+            source_path=target_path,
+            validation_mode=normalized_validate_mode,
+        )
+        payload = _jsonable_mapping(raw_payload, error_label="verification-report finalizer")
+        candidate = _verification_report_finalized_markdown(payload)
+    except (ValueError, PydanticValidationError) as exc:
+        _error(str(exc))
+    except GPDError as exc:
+        _error(str(exc))
+
+    core_validation = _jsonable_value(payload.get("validation"))
+    validation = _validate_verification_report_candidate(
+        candidate,
+        source_path=target_path,
+        mode=normalized_validate_mode,
+    )
+    if isinstance(core_validation, Mapping) and not _validation_result_is_valid(core_validation):
+        validation = dict(core_validation)
+    write_payload["validation"] = validation
+    raw_warnings = payload.get("warnings")
+    if isinstance(raw_warnings, list):
+        warnings.extend(str(item) for item in raw_warnings if str(item).strip())
+    write_payload["warnings"] = warnings
+    for key in ("frontmatter_yaml", "target_status", "status", "plan_contract_ref"):
+        if key in payload:
+            write_payload[key] = payload[key]
+
+    if not validation.get("valid"):
+        write_payload["recovery"] = _verification_report_finalize_recovery(
+            plan_path=file_path,
+            patch_path=patch_file_path,
+            target_path=target_path,
+            body_path=body_path,
+            validate_mode=normalized_validate_mode,
+            force=force,
+        )
+        _emit_raw_json(write_payload)
+        raise typer.Exit(code=1)
+
+    try:
+        _write_text_atomically(target_path, candidate)
+    except OSError as exc:
+        write_payload["validation"] = _verification_report_validation_not_run(
+            normalized_validate_mode,
+            f"failed to write target atomically: {exc}",
+        )
+        _emit_raw_json(write_payload)
+        raise typer.Exit(code=1) from exc
+    write_payload["written"] = True
+    write_payload["replaced"] = target_exists
+    _emit_raw_json(write_payload)
 
 
 @validate_app.command("arxiv-package", context_settings={"allow_extra_args": True, "ignore_unknown_options": True})

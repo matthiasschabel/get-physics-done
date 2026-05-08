@@ -28,6 +28,13 @@ from gpd.adapters.runtime_catalog import (
     iter_runtime_descriptors,
     normalize_runtime_name,
 )
+from gpd.core.frontmatter import (
+    UNSUPPORTED_FRONTMATTER_FIELDS,
+    VERIFICATION_REPORT_STATUSES,
+    FrontmatterParseError,
+    extract_frontmatter,
+    validate_frontmatter,
+)
 from gpd.core.return_contract import (
     ALLOWED_RETURN_EXTENSION_FIELDS,
     GpdReturnEnvelope,
@@ -43,7 +50,7 @@ from gpd.core.workflow_staging import (
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
-PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v5"
+PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v6"
 DEFAULT_PATH_PREFIX = "/runtime/"
 DEFAULT_SURFACES: tuple[PromptSurfaceKind, ...] = ("command", "agent", "workflow")
 
@@ -63,6 +70,27 @@ _SCHEMA_BLOCK_MARKERS = (
     "project_contract",
 )
 _SCHEMA_FENCE_LANGUAGES = frozenset({"yaml", "yml", "json", "toml"})
+_MARKDOWN_FRONTMATTER_FENCE_LANGUAGES = frozenset({"markdown", "md", ""})
+_VERIFICATION_FRONTMATTER_KEYS = frozenset(
+    {
+        "phase",
+        "verified",
+        "status",
+        "score",
+        "plan_contract_ref",
+        "contract_results",
+        "comparison_verdicts",
+        "suggested_contract_checks",
+    }
+)
+_VERIFICATION_FRONTMATTER_STRONG_KEYS = frozenset(
+    {
+        "plan_contract_ref",
+        "contract_results",
+        "comparison_verdicts",
+        "suggested_contract_checks",
+    }
+)
 _GPD_RETURN_EXAMPLE_RE = re.compile(r"(?m)(?:^|[\s{,\[\('\"`])['\"]?gpd_return['\"]?\s*:")
 _HARD_GATE_LINE_RE = re.compile(
     r"\b(?:STOP|fail[- ]closed|do not proceed|must|required|never|forbidden|reject|cannot|blocked)\b",
@@ -118,9 +146,7 @@ _SCHEMA_KEY_LITERAL_RE = re.compile(
     r"verified_at):(?:\s|$)",
     re.IGNORECASE,
 )
-_FIELD_PATH_RE = re.compile(
-    r"\b[A-Za-z_][A-Za-z0-9_]*(?:\[\])?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\])?)+\b"
-)
+_FIELD_PATH_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\[\])?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\])?)+\b")
 _STRUCTURED_PROMPT_MARKER_RE = re.compile(
     r"^\s*(?:"
     r"<[A-Za-z][A-Za-z0-9_-]*(?:\s+[^>\n]*)?>|"
@@ -172,9 +198,7 @@ ExactAssertionCategory = Literal["machine_contract", "public_ux", "brittle_prose
 ExactAssertionPolarity = Literal["required", "forbidden", "counted", "indexed"]
 ExactAssertionShape = Literal["assert_contains", "assert_not_contains", "count", "index"]
 ExactAssertionSeverity = Literal["info", "warn", "high"]
-_GPD_RETURN_FIELD_REFERENCE_RE = re.compile(
-    r"(?<![A-Za-z0-9_])\.?gpd_return\.([A-Za-z_][A-Za-z0-9_]*)"
-)
+_GPD_RETURN_FIELD_REFERENCE_RE = re.compile(r"(?<![A-Za-z0-9_])\.?gpd_return\.([A-Za-z_][A-Za-z0-9_]*)")
 _RETURN_FIELD_DECLARATION_RE = re.compile(
     r"\b(?:extended fields?|role-specific field|agent-specific extended field|role fields such as)\b",
     re.IGNORECASE,
@@ -363,9 +387,7 @@ _SEMANTIC_DUPLICATE_CATEGORIES: tuple[_SemanticDuplicateCategory, ...] = (
             "src/gpd/specs/references/verification/verification-status-authority.md",
             "src/gpd/specs/references/verification/core/verification-child-return-contract.md",
         ),
-        suggested_action=(
-            "Keep user-facing labels where useful, but route on structured status and artifact gates."
-        ),
+        suggested_action=("Keep user-facing labels where useful, but route on structured status and artifact gates."),
     ),
     _SemanticDuplicateCategory(
         category="no_synthesized_child_gpd_return",
@@ -379,9 +401,7 @@ _SEMANTIC_DUPLICATE_CATEGORIES: tuple[_SemanticDuplicateCategory, ...] = (
         ),
     ),
 )
-_SEMANTIC_DUPLICATE_CATEGORY_BY_ID = {
-    category.category: category for category in _SEMANTIC_DUPLICATE_CATEGORIES
-}
+_SEMANTIC_DUPLICATE_CATEGORY_BY_ID = {category.category: category for category in _SEMANTIC_DUPLICATE_CATEGORIES}
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,6 +463,17 @@ class InvalidGpdReturnExample:
 
 
 @dataclass(frozen=True, slots=True)
+class InvalidFrontmatterExample:
+    path: str
+    start_line: int
+    end_line: int
+    schema_name: Literal["verification"]
+    fields: tuple[str, ...]
+    errors: tuple[str, ...]
+    preview: str
+
+
+@dataclass(frozen=True, slots=True)
 class PromptReturnFieldMention:
     path: str
     line: int
@@ -486,6 +517,8 @@ class PromptSurfaceItem:
     visible_schema_example_count: int
     invalid_gpd_return_example_count: int
     invalid_gpd_return_examples: tuple[InvalidGpdReturnExample, ...]
+    invalid_frontmatter_example_count: int
+    invalid_frontmatter_examples: tuple[InvalidFrontmatterExample, ...]
     return_field_mention_count: int
     disallowed_return_field_mention_count: int
     disallowed_return_field_mentions: tuple[PromptReturnFieldMention, ...]
@@ -602,6 +635,7 @@ class PromptSurfaceReport:
     items: tuple[PromptSurfaceItem, ...]
     stage_diagnostics: tuple[StageAwareWorkflowPromptMetric, ...]
     invalid_gpd_return_examples: tuple[InvalidGpdReturnExample, ...]
+    invalid_frontmatter_examples: tuple[InvalidFrontmatterExample, ...]
     return_field_mentions: tuple[PromptReturnFieldMention, ...]
     disallowed_return_field_mentions: tuple[PromptReturnFieldMention, ...]
     forbidden_child_return_synthesis_mentions: tuple[ForbiddenChildReturnSynthesisMention, ...]
@@ -618,6 +652,7 @@ __all__ = [
     "AuthorityPromptMetric",
     "DuplicateInvariantGroup",
     "ForbiddenChildReturnSynthesisMention",
+    "InvalidFrontmatterExample",
     "InvalidGpdReturnExample",
     "MustNotEagerLoadViolation",
     "PromptSource",
@@ -684,8 +719,13 @@ def measure_prompt_file(
     raw_text = source.absolute_path.read_text(encoding="utf-8")
     expanded_text = expand_at_includes(raw_text, source.src_root, DEFAULT_PATH_PREFIX)
     raw_include_count = _count_raw_includes(raw_text)
-    visible_schema_example_count, invalid_return_examples = _inspect_visible_schema_examples(raw_text, source.path)
+    (
+        visible_schema_example_count,
+        invalid_return_examples,
+        invalid_frontmatter_examples,
+    ) = _inspect_visible_schema_examples(raw_text, source.path)
     invalid_return_count = len(invalid_return_examples)
+    invalid_frontmatter_count = len(invalid_frontmatter_examples)
     return_field_mentions = _scan_return_field_mentions(raw_text, source.path)
     disallowed_return_field_mentions = _disallowed_return_field_mentions(return_field_mentions)
     hard_gate_line_count, hard_gate_density = _hard_gate_metrics(raw_text)
@@ -703,6 +743,7 @@ def measure_prompt_file(
     rigidity_index = (
         2 * visible_schema_example_count
         + 3 * invalid_return_count
+        + 3 * invalid_frontmatter_count
         + hard_gate_line_count
         + 2 * shell_parsing_line_count
         + 5 * unresolved_include_count
@@ -722,6 +763,8 @@ def measure_prompt_file(
         visible_schema_example_count=visible_schema_example_count,
         invalid_gpd_return_example_count=invalid_return_count,
         invalid_gpd_return_examples=invalid_return_examples,
+        invalid_frontmatter_example_count=invalid_frontmatter_count,
+        invalid_frontmatter_examples=invalid_frontmatter_examples,
         return_field_mention_count=len(return_field_mentions),
         disallowed_return_field_mention_count=len(disallowed_return_field_mentions),
         disallowed_return_field_mentions=disallowed_return_field_mentions,
@@ -766,6 +809,7 @@ def build_prompt_surface_report(
     )
     exact_assertions = _exact_prose_assertion_files_from_diagnostics(exact_assertion_diagnostics)
     invalid_return_examples = tuple(example for item in items for example in item.invalid_gpd_return_examples)
+    invalid_frontmatter_examples = tuple(example for item in items for example in item.invalid_frontmatter_examples)
     return_field_mentions = _scan_return_field_mentions_for_repo(root, include_tests=include_tests)
     disallowed_return_field_mentions = _disallowed_return_field_mentions(return_field_mentions)
     forbidden_child_return_synthesis_mentions = _scan_forbidden_child_return_synthesis_mentions(sources)
@@ -783,6 +827,7 @@ def build_prompt_surface_report(
         items=items,
         stage_diagnostics=stage_diagnostics,
         invalid_gpd_return_examples=invalid_return_examples,
+        invalid_frontmatter_examples=invalid_frontmatter_examples,
         return_field_mentions=return_field_mentions,
         disallowed_return_field_mentions=disallowed_return_field_mentions,
         forbidden_child_return_synthesis_mentions=forbidden_child_return_synthesis_mentions,
@@ -806,6 +851,9 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         "stage_diagnostics": [_stage_diagnostic_to_dict(metric) for metric in report.stage_diagnostics],
         "invalid_gpd_return_examples": [
             _invalid_gpd_return_example_to_dict(example) for example in report.invalid_gpd_return_examples
+        ],
+        "invalid_frontmatter_examples": [
+            _invalid_frontmatter_example_to_dict(example) for example in report.invalid_frontmatter_examples
         ],
         "disallowed_return_field_mentions": [
             _return_field_mention_to_dict(mention) for mention in report.disallowed_return_field_mentions
@@ -867,6 +915,7 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
         f"- Prompt sources: {totals.get('item_count', 0)}",
         f"- Expanded chars: {totals.get('expanded_char_count', 0)}",
         f"- Invalid `gpd_return` examples: {len(report.invalid_gpd_return_examples)}",
+        f"- Invalid verification frontmatter examples: {len(report.invalid_frontmatter_examples)}",
         f"- Disallowed `gpd_return` field mentions: {len(report.disallowed_return_field_mentions)}",
         f"- Forbidden child `gpd_return` synthesis instructions: "
         f"{len(report.forbidden_child_return_synthesis_mentions)}",
@@ -875,14 +924,15 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
         "",
         "## Top Prompt Sources",
         "",
-        "| Rank | Kind | Name | Expanded chars | Raw lines | Includes | Hard gates | Shell parse | Schemas | Invalid returns | Bad fields | Rigidity |",
-        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Rank | Kind | Name | Expanded chars | Raw lines | Includes | Hard gates | Shell parse | Schemas | Invalid returns | Invalid frontmatter | Bad fields | Rigidity |",
+        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for index, item in enumerate(top_items, start=1):
         lines.append(
             f"| {index} | {item.kind} | `{item.name}` | {item.expanded_char_count} | {item.raw_line_count} | "
             f"{item.raw_include_count} | {item.hard_gate_line_count} | {item.shell_parsing_line_count} | "
             f"{item.visible_schema_example_count} | {item.invalid_gpd_return_example_count} | "
+            f"{item.invalid_frontmatter_example_count} | "
             f"{item.disallowed_return_field_mention_count} | "
             f"{item.rigidity_index} |"
         )
@@ -900,6 +950,24 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
         for example in report.invalid_gpd_return_examples:
             lines.append(
                 f"| `{example.path}` | {example.start_line}-{example.end_line} | "
+                f"{_markdown_table_cell('; '.join(example.errors))} | "
+                f"`{_markdown_table_cell(example.preview)}` |"
+            )
+
+    if report.invalid_frontmatter_examples:
+        lines.extend(
+            [
+                "",
+                "## Invalid Verification Frontmatter Examples",
+                "",
+                "| Path | Lines | Schema | Fields | Errors | Preview |",
+                "|---|---:|---|---|---|---|",
+            ]
+        )
+        for example in report.invalid_frontmatter_examples:
+            lines.append(
+                f"| `{example.path}` | {example.start_line}-{example.end_line} | `{example.schema_name}` | "
+                f"{_markdown_table_cell(', '.join(example.fields))} | "
                 f"{_markdown_table_cell('; '.join(example.errors))} | "
                 f"`{_markdown_table_cell(example.preview)}` |"
             )
@@ -1036,9 +1104,7 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 continue
             lines.extend(["", f"### `{group.category}` Examples", ""])
             for example in examples:
-                lines.append(
-                    f"- `{example.path}:{example.line}` - {_markdown_table_cell(example.snippet)}"
-                )
+                lines.append(f"- `{example.path}:{example.line}` - {_markdown_table_cell(example.snippet)}")
 
     exact_files = _exact_assertion_file_rows(report.exact_assertion_diagnostics, top)
     if exact_files:
@@ -1048,8 +1114,7 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 "",
                 "## Prompt-Test Exactness",
                 "",
-                "Thresholds: brittle prose "
-                f"warn > {brittle_threshold['warn']}, fail > {brittle_threshold['fail']}.",
+                f"Thresholds: brittle prose warn > {brittle_threshold['warn']}, fail > {brittle_threshold['fail']}.",
                 "",
                 "| File | Exact | Machine | Public UX | Brittle prose | Brittle % | Severity |",
                 "|---|---:|---:|---:|---:|---:|---|",
@@ -1083,6 +1148,7 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
             str(item.raw_include_count),
             str(item.visible_schema_example_count),
             str(item.invalid_gpd_return_example_count),
+            str(item.invalid_frontmatter_example_count),
             str(item.disallowed_return_field_mention_count),
             str(item.hard_gate_line_count),
             str(item.shell_parsing_line_count),
@@ -1097,6 +1163,7 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         "includes",
         "schemas",
         "invalid",
+        "bad_frontmatter",
         "bad_fields",
         "hard_gates",
         "shell_parse",
@@ -1141,14 +1208,10 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         )
         runtime_widths = [len(header) for header in runtime_headers]
         for row in runtime_rows:
-            runtime_widths = [
-                max(width, len(cell)) for width, cell in zip(runtime_widths, row, strict=True)
-            ]
+            runtime_widths = [max(width, len(cell)) for width, cell in zip(runtime_widths, row, strict=True)]
 
         def render_runtime_row(row: Sequence[str]) -> str:
-            return "  ".join(
-                cell.ljust(width) for cell, width in zip(row, runtime_widths, strict=True)
-            ).rstrip()
+            return "  ".join(cell.ljust(width) for cell, width in zip(row, runtime_widths, strict=True)).rstrip()
 
         lines.extend(
             (
@@ -1211,14 +1274,10 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         exact_headers = ("file", "exact", "machine", "public_ux", "brittle", "brittle_pct", "severity")
         exact_widths = [len(header) for header in exact_headers]
         for row in exact_rows:
-            exact_widths = [
-                max(width, len(cell)) for width, cell in zip(exact_widths, row, strict=True)
-            ]
+            exact_widths = [max(width, len(cell)) for width, cell in zip(exact_widths, row, strict=True)]
 
         def render_exact_row(row: Sequence[str]) -> str:
-            return "  ".join(
-                cell.ljust(width) for cell, width in zip(row, exact_widths, strict=True)
-            ).rstrip()
+            return "  ".join(cell.ljust(width) for cell, width in zip(row, exact_widths, strict=True)).rstrip()
 
         lines.extend(
             (
@@ -1404,18 +1463,30 @@ def _count_shell_fences(text: str) -> int:
     return count
 
 
-def _inspect_visible_schema_examples(text: str, path: str) -> tuple[int, tuple[InvalidGpdReturnExample, ...]]:
+def _inspect_visible_schema_examples(
+    text: str,
+    path: str,
+) -> tuple[int, tuple[InvalidGpdReturnExample, ...], tuple[InvalidFrontmatterExample, ...]]:
     body, line_offset = _body_without_frontmatter_with_line_offset(text)
     visible_count = 0
     invalid_return_examples: list[InvalidGpdReturnExample] = []
+    invalid_frontmatter_examples: list[InvalidFrontmatterExample] = []
 
     for fence in _iter_markdown_fences(body):
         language = fence.info.lower().split(None, 1)[0] if fence.info else ""
+        invalid_frontmatter = _inspect_verification_frontmatter_example(
+            fence,
+            path=path,
+            line_offset=line_offset,
+            language=language,
+        )
         is_schema_block = _is_visible_schema_fence(language, fence.body)
-        if not is_schema_block:
+        if not is_schema_block and invalid_frontmatter is None:
             continue
         visible_count += 1
-        if not _contains_visible_gpd_return_example(fence.body):
+        if invalid_frontmatter is not None:
+            invalid_frontmatter_examples.append(invalid_frontmatter)
+        if invalid_frontmatter is not None or not _contains_visible_gpd_return_example(fence.body):
             continue
         validation = validate_gpd_return_markdown(f"```yaml\n{fence.body}\n```")
         if validation.passed:
@@ -1432,7 +1503,112 @@ def _inspect_visible_schema_examples(text: str, path: str) -> tuple[int, tuple[I
 
     spawn_contract_count = len(_SPAWN_CONTRACT_RE.findall(body))
     visible_count += spawn_contract_count
-    return visible_count, tuple(invalid_return_examples)
+    return visible_count, tuple(invalid_return_examples), tuple(invalid_frontmatter_examples)
+
+
+def _inspect_verification_frontmatter_example(
+    fence: MarkdownFence,
+    *,
+    path: str,
+    line_offset: int,
+    language: str,
+) -> InvalidFrontmatterExample | None:
+    candidate = _verification_frontmatter_candidate_from_fence(fence, language=language)
+    if candidate is None:
+        return None
+    candidate_text, meta = candidate
+    fields = _invalid_verification_frontmatter_fields(meta)
+    if not fields:
+        return None
+    errors = _verification_frontmatter_lint_errors(candidate_text, fields)
+    if not errors:
+        return None
+    return InvalidFrontmatterExample(
+        path=path,
+        start_line=fence.start_line + line_offset,
+        end_line=fence.end_line + line_offset,
+        schema_name="verification",
+        fields=fields,
+        errors=errors,
+        preview=_preview_fence_body(fence.body),
+    )
+
+
+def _verification_frontmatter_candidate_from_fence(
+    fence: MarkdownFence,
+    *,
+    language: str,
+) -> tuple[str, Mapping[str, object]] | None:
+    if language in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES:
+        return None
+    if language in _MARKDOWN_FRONTMATTER_FENCE_LANGUAGES:
+        candidate_text = fence.body.lstrip()
+        if not _starts_with_markdown_frontmatter(candidate_text):
+            return None
+        try:
+            meta, _body = extract_frontmatter(candidate_text)
+        except FrontmatterParseError:
+            return None
+        if not _looks_like_verification_frontmatter(meta):
+            return None
+        return candidate_text, meta
+    if language not in {"yaml", "yml"}:
+        return None
+    try:
+        parsed = yaml.safe_load(fence.body)
+    except yaml.YAMLError:
+        return None
+    if not isinstance(parsed, Mapping):
+        return None
+    meta = {key: value for key, value in parsed.items() if isinstance(key, str)}
+    if not _looks_like_verification_frontmatter(meta):
+        return None
+    return f"---\n{fence.body.rstrip()}\n---\n", meta
+
+
+def _starts_with_markdown_frontmatter(text: str) -> bool:
+    return text.startswith("---\n") or text.startswith("---\r\n")
+
+
+def _looks_like_verification_frontmatter(meta: Mapping[str, object]) -> bool:
+    keys = frozenset(key for key in meta if isinstance(key, str))
+    if not keys:
+        return False
+    unsupported_keys = keys & frozenset(UNSUPPORTED_FRONTMATTER_FIELDS["verification"])
+    verification_key_count = len(keys & _VERIFICATION_FRONTMATTER_KEYS)
+    if keys & _VERIFICATION_FRONTMATTER_STRONG_KEYS:
+        return True
+    if "phase" in keys and keys & {"verified", "status", "score", "plan_contract_ref"}:
+        return True
+    if verification_key_count >= 2:
+        return True
+    return bool(unsupported_keys and keys & {"phase", "status", "verified", "score"})
+
+
+def _invalid_verification_frontmatter_fields(meta: Mapping[str, object]) -> tuple[str, ...]:
+    unsupported = frozenset(UNSUPPORTED_FRONTMATTER_FIELDS["verification"])
+    fields = [field for field in sorted(unsupported) if field in meta]
+    if "status" in meta:
+        raw_status = meta.get("status")
+        if not isinstance(raw_status, str) or raw_status.strip() not in VERIFICATION_REPORT_STATUSES:
+            fields.append("status")
+    return tuple(dict.fromkeys(fields))
+
+
+def _verification_frontmatter_lint_errors(candidate_text: str, fields: Sequence[str]) -> tuple[str, ...]:
+    field_set = frozenset(fields)
+    try:
+        validation = validate_frontmatter(candidate_text, "verification")
+    except FrontmatterParseError:
+        return ()
+    return tuple(error for error in validation.errors if _verification_frontmatter_lint_error_field(error) in field_set)
+
+
+def _verification_frontmatter_lint_error_field(error: str) -> str | None:
+    field, separator, _detail = error.partition(":")
+    if not separator:
+        return None
+    return field.strip()
 
 
 def _scan_return_field_mentions_for_repo(
@@ -1516,9 +1692,7 @@ def _child_return_synthesis_clauses(line: str) -> tuple[str, ...]:
     if not normalized:
         return ()
     return tuple(
-        part.strip(" -")
-        for part in _CHILD_RETURN_SYNTHESIS_CLAUSE_SPLIT_RE.split(normalized)
-        if part.strip(" -")
+        part.strip(" -") for part in _CHILD_RETURN_SYNTHESIS_CLAUSE_SPLIT_RE.split(normalized) if part.strip(" -")
     ) or (normalized,)
 
 
@@ -1540,9 +1714,8 @@ def _is_main_context_fallback_return_clause(clause: str) -> bool:
     if "fallback" not in folded:
         return False
     has_main_context = "main-context" in folded or "main context" in folded
-    has_own_return = (
-        ("own" in folded or "owns" in folded)
-        and ("gpd_return" in folded or "return envelope" in folded or "own return" in folded)
+    has_own_return = ("own" in folded or "owns" in folded) and (
+        "gpd_return" in folded or "return envelope" in folded or "own return" in folded
     )
     return has_main_context and has_own_return
 
@@ -1900,8 +2073,7 @@ def _build_stage_diagnostics(
         metric = _build_stage_diagnostic_for_command(source, command_item, manifest_path)
         if metric is None:
             report_warnings.append(
-                f"could not load stage diagnostics for {source.name}: "
-                f"{_relative_path(manifest_path, source.repo_root)}"
+                f"could not load stage diagnostics for {source.name}: {_relative_path(manifest_path, source.repo_root)}"
             )
             continue
         diagnostics.append(metric)
@@ -1998,8 +2170,7 @@ def _load_local_source_stage_manifest(manifest_path: Path, source: PromptSource)
         raise ValueError("stages must be a non-empty list")
 
     stages = tuple(
-        _load_local_source_stage(stage_raw, index=index, source=source)
-        for index, stage_raw in enumerate(stages_raw)
+        _load_local_source_stage(stage_raw, index=index, source=source) for index, stage_raw in enumerate(stages_raw)
     )
     stage_orders = [stage.order for stage in stages]
     if stage_orders != list(range(1, len(stages) + 1)):
@@ -2056,7 +2227,9 @@ def _load_local_source_stage(raw: object, *, index: int, source: PromptSource) -
         loaded_authorities=loaded_authorities,
         conditional_authorities=conditional_authorities,
         must_not_eager_load=must_not_eager_load,
-        allowed_tools=tuple(_manifest_string_list(raw.get("allowed_tools", []), label=f"stages[{index}].allowed_tools")),
+        allowed_tools=tuple(
+            _manifest_string_list(raw.get("allowed_tools", []), label=f"stages[{index}].allowed_tools")
+        ),
         writes_allowed=tuple(
             _manifest_string_list(raw.get("writes_allowed", []), label=f"stages[{index}].writes_allowed")
         ),
@@ -2368,9 +2541,7 @@ def _stage_diagnostics_totals(stage_diagnostics: Sequence[StageAwareWorkflowProm
         "eager_line_count": sum(stage.eager_line_count for stage in stages),
         "lazy_char_count": sum(stage.lazy_char_count for stage in stages),
         "lazy_line_count": sum(stage.lazy_line_count for stage in stages),
-        "must_not_eager_load_violation_count": sum(
-            len(stage.must_not_eager_load_violations) for stage in stages
-        ),
+        "must_not_eager_load_violation_count": sum(len(stage.must_not_eager_load_violations) for stage in stages),
     }
 
 
@@ -2391,6 +2562,7 @@ def _build_totals(
         "unresolved_include_count",
         "visible_schema_example_count",
         "invalid_gpd_return_example_count",
+        "invalid_frontmatter_example_count",
         "return_field_mention_count",
         "disallowed_return_field_mention_count",
         "hard_gate_line_count",
@@ -2419,9 +2591,7 @@ def _build_totals(
     else:
         totals["negative_return_field_mention_count"] = 0
         totals["allowed_return_field_mention_count"] = 0
-    totals["forbidden_child_return_synthesis_mention_count"] = len(
-        forbidden_child_return_synthesis_mentions
-    )
+    totals["forbidden_child_return_synthesis_mention_count"] = len(forbidden_child_return_synthesis_mentions)
     totals["by_kind"] = by_kind
     totals["runtime_projection"] = _runtime_projection_totals(items)
     totals["stage_diagnostics"] = _stage_diagnostics_totals(stage_diagnostics)
@@ -2687,11 +2857,7 @@ def _semantic_logical_clauses(line: str) -> tuple[str, ...]:
     normalized = re.sub(r"\s+", " ", normalized)
     if not normalized:
         return ()
-    clauses = tuple(
-        part.strip(" -")
-        for part in _SEMANTIC_CLAUSE_SPLIT_RE.split(normalized)
-        if part.strip(" -")
-    )
+    clauses = tuple(part.strip(" -") for part in _SEMANTIC_CLAUSE_SPLIT_RE.split(normalized) if part.strip(" -"))
     return clauses or (normalized,)
 
 
@@ -2893,10 +3059,7 @@ def _scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
         if not assertions:
             continue
         relative_path = _relative_path(path, repo_root)
-        classified = [
-            _exact_assertion_to_dict(assertion, path=relative_path)
-            for assertion in assertions
-        ]
+        classified = [_exact_assertion_to_dict(assertion, path=relative_path) for assertion in assertions]
         machine = [entry for entry in classified if entry["category"] == "machine_contract"]
         public_ux = [entry for entry in classified if entry["category"] == "public_ux"]
         brittle = [entry for entry in classified if entry["category"] == "brittle_prose"]
@@ -2964,9 +3127,7 @@ def _exact_assertion_totals(files_scanned: int, file_rows: Sequence[Mapping[str,
         ),
         "public_ux_exact_assertions": sum(cast(int, row["public_ux_exact_assertions"]) for row in file_rows),
         "brittle_prose_assertions": sum(cast(int, row["brittle_prose_assertions"]) for row in file_rows),
-        "brittle_prose_file_count": sum(
-            1 for row in file_rows if cast(int, row["brittle_prose_assertions"]) > 0
-        ),
+        "brittle_prose_file_count": sum(1 for row in file_rows if cast(int, row["brittle_prose_assertions"]) > 0),
     }
 
 
@@ -3331,21 +3492,18 @@ def _workflow_stage_metric_to_dict(metric: WorkflowStagePromptMetric) -> dict[st
         "order": metric.order,
         "eager_authorities": list(metric.eager_authorities),
         "eager_authority_metrics": [
-            _authority_prompt_metric_to_dict(authority_metric)
-            for authority_metric in metric.eager_authority_metrics
+            _authority_prompt_metric_to_dict(authority_metric) for authority_metric in metric.eager_authority_metrics
         ],
         "eager_line_count": metric.eager_line_count,
         "eager_char_count": metric.eager_char_count,
         "lazy_authorities": list(metric.lazy_authorities),
         "lazy_authority_metrics": [
-            _authority_prompt_metric_to_dict(authority_metric)
-            for authority_metric in metric.lazy_authority_metrics
+            _authority_prompt_metric_to_dict(authority_metric) for authority_metric in metric.lazy_authority_metrics
         ],
         "lazy_line_count": metric.lazy_line_count,
         "lazy_char_count": metric.lazy_char_count,
         "must_not_eager_load_violations": [
-            _must_not_eager_load_violation_to_dict(violation)
-            for violation in metric.must_not_eager_load_violations
+            _must_not_eager_load_violation_to_dict(violation) for violation in metric.must_not_eager_load_violations
         ],
     }
 
@@ -3410,6 +3568,10 @@ def _prompt_item_to_dict(item: PromptSurfaceItem) -> dict[str, object]:
         "invalid_gpd_return_examples": [
             _invalid_gpd_return_example_to_dict(example) for example in item.invalid_gpd_return_examples
         ],
+        "invalid_frontmatter_example_count": item.invalid_frontmatter_example_count,
+        "invalid_frontmatter_examples": [
+            _invalid_frontmatter_example_to_dict(example) for example in item.invalid_frontmatter_examples
+        ],
         "return_field_mention_count": item.return_field_mention_count,
         "disallowed_return_field_mention_count": item.disallowed_return_field_mention_count,
         "disallowed_return_field_mentions": [
@@ -3448,6 +3610,18 @@ def _invalid_gpd_return_example_to_dict(example: InvalidGpdReturnExample) -> dic
         "path": example.path,
         "start_line": example.start_line,
         "end_line": example.end_line,
+        "errors": list(example.errors),
+        "preview": example.preview,
+    }
+
+
+def _invalid_frontmatter_example_to_dict(example: InvalidFrontmatterExample) -> dict[str, object]:
+    return {
+        "path": example.path,
+        "start_line": example.start_line,
+        "end_line": example.end_line,
+        "schema_name": example.schema_name,
+        "fields": list(example.fields),
         "errors": list(example.errors),
         "preview": example.preview,
     }

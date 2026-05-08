@@ -66,6 +66,15 @@ EXPECTED_RETURN_FIELD_MENTION_KEYS = {
     "snippet",
     "suggestion",
 }
+EXPECTED_INVALID_FRONTMATTER_EXAMPLE_KEYS = {
+    "path",
+    "start_line",
+    "end_line",
+    "schema_name",
+    "fields",
+    "errors",
+    "preview",
+}
 EXPECTED_FORBIDDEN_CHILD_RETURN_SYNTHESIS_MENTION_KEYS = {
     "path",
     "line",
@@ -124,7 +133,9 @@ EXPECTED_EXACT_ASSERTION_FILE_KEYS = {
 
 
 def _non_native_runtime_name() -> str:
-    return next(descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support)
+    return next(
+        descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support
+    )
 
 
 def _tree_snapshot(root: Path) -> tuple[tuple[str, bool, bytes], ...]:
@@ -154,6 +165,7 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert payload["schema_version"]
     assert isinstance(payload["repo_root"], str)
     assert isinstance(payload["totals"], dict)
+    assert payload["totals"]["invalid_frontmatter_example_count"] == 0
     assert isinstance(payload["items"], list)
     assert 1 <= len(payload["items"]) <= 3
     assert payload["runtime_top_prompts"] == {}
@@ -164,6 +176,8 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert payload["stage_diagnostics"][0]["stages"]
     assert set(payload["stage_diagnostics"][0]["stages"][0]) == EXPECTED_STAGE_KEYS
     assert isinstance(payload["invalid_gpd_return_examples"], list)
+    assert payload["invalid_frontmatter_examples"] == []
+    assert isinstance(payload["invalid_frontmatter_examples"], list)
     assert isinstance(payload["disallowed_return_field_mentions"], list)
     assert isinstance(payload["forbidden_child_return_synthesis_mentions"], list)
     assert isinstance(payload["duplicate_invariants"], list)
@@ -186,6 +200,8 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
         assert isinstance(item["visible_schema_example_count"], int)
         assert isinstance(item["invalid_gpd_return_example_count"], int)
         assert isinstance(item["invalid_gpd_return_examples"], list)
+        assert isinstance(item["invalid_frontmatter_example_count"], int)
+        assert isinstance(item["invalid_frontmatter_examples"], list)
         assert isinstance(item["return_field_mention_count"], int)
         assert isinstance(item["disallowed_return_field_mention_count"], int)
         assert isinstance(item["disallowed_return_field_mentions"], list)
@@ -202,6 +218,20 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
         assert isinstance(example["start_line"], int)
         assert isinstance(example["end_line"], int)
         assert example["start_line"] <= example["end_line"]
+        assert isinstance(example["errors"], list)
+        assert all(isinstance(error, str) for error in example["errors"])
+        assert isinstance(example["preview"], str)
+
+    for example in payload["invalid_frontmatter_examples"]:
+        assert set(example) == EXPECTED_INVALID_FRONTMATTER_EXAMPLE_KEYS
+        assert isinstance(example["path"], str)
+        assert example["path"].endswith(".md")
+        assert isinstance(example["start_line"], int)
+        assert isinstance(example["end_line"], int)
+        assert example["start_line"] <= example["end_line"]
+        assert example["schema_name"] == "verification"
+        assert isinstance(example["fields"], list)
+        assert all(isinstance(field, str) for field in example["fields"])
         assert isinstance(example["errors"], list)
         assert all(isinstance(error, str) for error in example["errors"])
         assert isinstance(example["preview"], str)
@@ -319,6 +349,7 @@ def test_prompt_surface_diagnostics_markdown_smoke() -> None:
     assert "prompt" in normalized_output
     assert "surface" in normalized_output
     assert "invalid `gpd_return` examples" in normalized_output
+    assert "invalid verification frontmatter examples" in normalized_output
     assert "disallowed `gpd_return` field mentions" in normalized_output
     assert "semantic duplicate invariants" in normalized_output
     assert ".md" in result.output
@@ -337,6 +368,7 @@ def test_prompt_surface_diagnostics_table_runtime_top_prompts_smoke() -> None:
     assert "projected_chars" in result.output
     assert "expanded_chars" in result.output
     assert "bad_fields" in result.output
+    assert "bad_frontmatter" in result.output
     assert "shell_rewrites" in result.output
     assert runtime_name in result.output
 

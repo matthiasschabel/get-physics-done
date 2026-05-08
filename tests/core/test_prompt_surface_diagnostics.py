@@ -20,6 +20,7 @@ EXPECTED_REPORT_KEYS = {
     "runtime_top_prompts",
     "stage_diagnostics",
     "invalid_gpd_return_examples",
+    "invalid_frontmatter_examples",
     "disallowed_return_field_mentions",
     "forbidden_child_return_synthesis_mentions",
     "duplicate_invariants",
@@ -42,6 +43,8 @@ EXPECTED_ITEM_KEYS = {
     "visible_schema_example_count",
     "invalid_gpd_return_example_count",
     "invalid_gpd_return_examples",
+    "invalid_frontmatter_example_count",
+    "invalid_frontmatter_examples",
     "return_field_mention_count",
     "disallowed_return_field_mention_count",
     "disallowed_return_field_mentions",
@@ -117,6 +120,15 @@ EXPECTED_INVALID_RETURN_EXAMPLE_KEYS = {
     "path",
     "start_line",
     "end_line",
+    "errors",
+    "preview",
+}
+EXPECTED_INVALID_FRONTMATTER_EXAMPLE_KEYS = {
+    "path",
+    "start_line",
+    "end_line",
+    "schema_name",
+    "fields",
     "errors",
     "preview",
 }
@@ -220,7 +232,9 @@ def _diagnostics():
 
 
 def _non_native_runtime_name() -> str:
-    return next(descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support)
+    return next(
+        descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support
+    )
 
 
 def _write(root: Path, relative_path: str, content: str) -> Path:
@@ -328,6 +342,8 @@ def test_report_to_dict_has_stable_schema_version_and_json_shape(tmp_path: Path)
     assert payload["stage_diagnostics"] == []
     assert payload["items"][0]["invalid_gpd_return_examples"] == []
     assert payload["invalid_gpd_return_examples"] == []
+    assert payload["items"][0]["invalid_frontmatter_examples"] == []
+    assert payload["invalid_frontmatter_examples"] == []
     assert payload["items"][0]["disallowed_return_field_mentions"] == []
     assert payload["disallowed_return_field_mentions"] == []
     assert payload["forbidden_child_return_synthesis_mentions"] == []
@@ -739,7 +755,7 @@ def test_exact_assertion_diagnostics_split_machine_public_ux_and_brittle_prose(t
     _write(
         tmp_path,
         "tests/core/test_prompt_contracts.py",
-        '''
+        """
         def test_machine_contracts(prompt):
             assert "gpd --raw init new-project --stage post_scope" in prompt
             assert "templates/project-contract-schema.md" in prompt
@@ -748,29 +764,29 @@ def test_exact_assertion_diagnostics_split_machine_public_ux_and_brittle_prose(t
             assert '<step name="load_gap_repair_stage">' in prompt
             assert "schema_version: 1" in prompt
             assert "--mode approved" in prompt
-        ''',
+        """,
     )
     _write(
         tmp_path,
         "tests/core/test_cli.py",
-        '''
+        """
         def test_public_ux(output):
             assert "## Command Index" in output
             assert "Quick Start" in output
             assert "## Choose this runtime if" in output
             assert "[Y/n/e]" in output
             assert "Start a fresh context window, then run `{next command}`." in output
-        ''',
+        """,
     )
     _write(
         tmp_path,
         "tests/core/test_prompt_prose.py",
-        '''
+        """
         def test_brittle_prompt_prose(prompt):
             assert "The planner returns proposed roadmap edits for the next execution segment." in prompt
             prompt.count("Do not approve a scoping contract that strips decisive outputs from the project brief.")
             prompt.index("The worker should preserve the surrounding prose when updating this workflow section.")
-        ''',
+        """,
     )
 
     diagnostics = _diagnostics()
@@ -929,6 +945,91 @@ def test_shell_blocks_that_construct_returns_are_not_schema_examples(tmp_path: P
     assert item.invalid_gpd_return_examples == ()
 
 
+def test_invalid_verification_frontmatter_examples_are_reported(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/agents/verification-frontmatter-probe.md",
+        """
+        ---
+        name: verification-frontmatter-probe
+        description: Verification frontmatter probe
+        ---
+        ```markdown
+        ---
+        phase: 01-baseline
+        verified: 2026-01-02T00:00:00Z
+        status: failed
+        score: stale hash still claims pass
+        artifact_hashes:
+          artifacts/result.json: abc123
+        runtime: codex
+        computational_oracle: true
+        gpd_return:
+          status: completed
+        contract_results: {}
+        ---
+        Body evidence goes here.
+        ```
+        """,
+    )
+
+    report = _report(tmp_path, surfaces=("agent",), runtime_names=())
+    item = report.items[0]
+
+    assert item.visible_schema_example_count == 1
+    assert item.invalid_gpd_return_example_count == 0
+    assert item.invalid_frontmatter_example_count == 1
+    assert report.totals["invalid_frontmatter_example_count"] == 1
+    example = item.invalid_frontmatter_examples[0]
+    assert example == report.invalid_frontmatter_examples[0]
+    assert example.path == "src/gpd/agents/verification-frontmatter-probe.md"
+    assert example.schema_name == "verification"
+    assert set(example.fields) == {
+        "artifact_hashes",
+        "computational_oracle",
+        "gpd_return",
+        "runtime",
+        "status",
+    }
+    assert "status: must be one of passed, gaps_found, expert_needed, human_needed" in example.errors
+    assert any(error.startswith("artifact_hashes:") for error in example.errors)
+    assert any(error.startswith("computational_oracle:") for error in example.errors)
+    assert any(error.startswith("gpd_return:") for error in example.errors)
+    assert any(error.startswith("runtime:") for error in example.errors)
+    assert example.preview.startswith("--- phase: 01-baseline")
+
+
+def test_valid_return_envelope_and_negative_frontmatter_prose_are_not_frontmatter_examples(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/valid-return-not-frontmatter.md",
+        """
+        ---
+        name: valid-return-not-frontmatter
+        ---
+        No `gpd_return`, `computational_oracle`, or runtime fields belong in verification frontmatter.
+
+        ```yaml
+        gpd_return:
+          status: completed
+          files_written: []
+          issues: []
+          next_actions: []
+        ```
+        """,
+    )
+
+    item = _measure(tmp_path, "workflow", "valid-return-not-frontmatter")
+
+    assert item.visible_schema_example_count == 1
+    assert item.invalid_gpd_return_example_count == 0
+    assert item.invalid_gpd_return_examples == ()
+    assert item.invalid_frontmatter_example_count == 0
+    assert item.invalid_frontmatter_examples == ()
+
+
 def test_disallowed_direct_gpd_return_field_mentions_are_reported(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -1068,8 +1169,7 @@ def test_peer_review_stage_prompt_mentions_are_disallowed_return_fields(tmp_path
 
     report = _report(tmp_path, runtime_names=())
     mentions = {
-        (mention.path, mention.field, mention.mention_kind)
-        for mention in report.disallowed_return_field_mentions
+        (mention.path, mention.field, mention.mention_kind) for mention in report.disallowed_return_field_mentions
     }
 
     assert mentions == {
@@ -1210,7 +1310,9 @@ def test_runtime_projections_cover_every_runtime_descriptor(tmp_path: Path) -> N
     assert native_include_runtimes
     assert non_native_include_runtimes
     assert all(projections_by_runtime[runtime].native_include_support is True for runtime in native_include_runtimes)
-    assert all(projections_by_runtime[runtime].native_include_support is False for runtime in non_native_include_runtimes)
+    assert all(
+        projections_by_runtime[runtime].native_include_support is False for runtime in non_native_include_runtimes
+    )
     assert all(projections_by_runtime[runtime].include_count == 1 for runtime in native_include_runtimes)
     assert all(projections_by_runtime[runtime].include_count == 0 for runtime in non_native_include_runtimes)
 
@@ -1341,6 +1443,42 @@ def test_report_to_dict_serializes_invalid_gpd_return_example_shape(tmp_path: Pa
     assert report_example["preview"].startswith("gpd_return:")
 
 
+def test_report_to_dict_serializes_invalid_frontmatter_example_shape(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/agents/frontmatter-shape-probe.md",
+        """
+        ---
+        name: frontmatter-shape-probe
+        description: Frontmatter shape probe
+        ---
+        ```yaml
+        phase: 01-baseline
+        verified: 2026-01-02T00:00:00Z
+        status: success
+        score: bad status
+        runtime: codex
+        ```
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("agent",), runtime_names=())
+    payload = diagnostics.report_to_dict(report)
+    item_example = payload["items"][0]["invalid_frontmatter_examples"][0]
+    report_example = payload["invalid_frontmatter_examples"][0]
+
+    assert item_example == report_example
+    assert set(report_example) == EXPECTED_INVALID_FRONTMATTER_EXAMPLE_KEYS
+    assert report_example["path"] == "src/gpd/agents/frontmatter-shape-probe.md"
+    assert report_example["schema_name"] == "verification"
+    assert report_example["fields"] == ["runtime", "status"]
+    assert report_example["start_line"] == 5
+    assert report_example["end_line"] == 11
+    assert "status: must be one of passed, gaps_found, expert_needed, human_needed" in report_example["errors"]
+    assert report_example["preview"].startswith("phase: 01-baseline")
+
+
 def test_report_to_dict_serializes_disallowed_return_field_mention_shape(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -1418,6 +1556,40 @@ def test_markdown_render_lists_invalid_gpd_return_examples(tmp_path: Path) -> No
     assert "`src/gpd/agents/return-markdown-probe.md`" in markdown
     assert "5-8" in markdown
     assert "Missing required field: files_written" in markdown
+
+
+def test_markdown_and_table_render_list_invalid_frontmatter_examples(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/agents/frontmatter-markdown-probe.md",
+        """
+        ---
+        name: frontmatter-markdown-probe
+        description: Frontmatter markdown probe
+        ---
+        ```yaml
+        phase: 01-baseline
+        verified: 2026-01-02T00:00:00Z
+        status: failed
+        score: bad status
+        computational_oracle: true
+        ```
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = _report(tmp_path, surfaces=("agent",), runtime_names=())
+    markdown = diagnostics.render_prompt_surface_markdown(report)
+    table = diagnostics.render_prompt_surface_table(report)
+
+    assert "Invalid verification frontmatter examples: 1" in markdown
+    assert "## Invalid Verification Frontmatter Examples" in markdown
+    assert "`src/gpd/agents/frontmatter-markdown-probe.md`" in markdown
+    assert "`verification`" in markdown
+    assert "computational_oracle, status" in markdown
+    assert "status: must be one of passed, gaps_found, expert_needed, human_needed" in markdown
+    assert "bad_frontmatter" in table
+    assert "frontmatter-markdown-probe" in table
 
 
 def test_markdown_render_lists_disallowed_return_field_mentions(tmp_path: Path) -> None:

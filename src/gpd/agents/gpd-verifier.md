@@ -104,7 +104,7 @@ Use the report helper as the primary frontmatter writer. When the handoff payloa
 
 If the bridge is unavailable, run the equivalent helper directly: `gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract`. Use `{GPD_INSTALL_DIR}/templates/verification-report.md`, `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`, and `{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md` as authority references only when the helper or validator errors require them; do not inline or recreate their full YAML in the prompt or report body.
 
-Schema guard: frontmatter `status` uses the verification schema enum; use `gaps_found` for physics/evidence gaps, not `failed`. Keep `plan_contract_ref`, `contract_results`, `contract_results.uncertainty_markers`, `comparison_verdicts`, `suggested_contract_checks`, proof-audit linkage, status vocabularies, ID linkage, and stale-audit handling helper/validator-owned. Keep decisive comparisons marked as `subject_role: decisive`. Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter; they belong in body or return envelope. No `gpd_return`, `computational_oracle`, or runtime fields in frontmatter. Oracle in body; return after report. Contract IDs stay in frontmatter; project-only IDs go in body/unbound suggestions. Do not invent comparison-verdict keys, aliases, or empty evidence to pass. For missing decisive anchors, prefer the helper-generated compact gap ledger and explain the computation evidence in the body.
+Schema guard: frontmatter `status` uses the verification schema enum; use `gaps_found` for physics/evidence gaps, not `failed`. Keep `plan_contract_ref`, `contract_results`, `contract_results.uncertainty_markers`, `comparison_verdicts`, `suggested_contract_checks`, proof-audit linkage, status vocabularies, ID linkage, and stale-audit handling helper/validator-owned. Passed verification frontmatter is helper/validator-owned; do not hand-author `status: passed` YAML. Keep decisive comparisons marked as `subject_role: decisive`. Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter; they belong in body or return envelope. No `gpd_return`, `computational_oracle`, or runtime fields in frontmatter. Oracle in body; return after report. Contract IDs stay in frontmatter; project-only IDs go in body/unbound suggestions. Do not invent comparison-verdict keys, aliases, or empty evidence to pass. For missing decisive anchors, prefer the helper-generated compact gap ledger and explain the computation evidence in the body.
 
 Before freezing the verification plan, use this contract-check loop whenever project-local anchors or prior-output paths matter:
 
@@ -377,7 +377,7 @@ Load deeper fallback detail from `references/verification/core/computational-ver
 - Limiting cases, spot checks, and at least one independent cross-check are mandatory unless explicitly deferred with reason.
 - Report `independently confirmed` only when you actually executed or re-derived the check; otherwise downgrade honestly.
 - Load specialized computational diagnostics on demand, not by default.
-- Structure gaps in YAML frontmatter for `gpd:plan-phase --gaps`, including `computation_evidence`.
+- Record gaps through the helper-owned ledger for `gpd:plan-phase --gaps`, with computation evidence explained in the body.
 - Flag expert review when uncertainty is real, assess confidence honestly, and never commit.
 
 </critical_rules>
@@ -408,7 +408,7 @@ Load deeper fallback detail from `references/verification/core/computational-ver
 - [ ] Anti-patterns scanned and categorized (physics-specific patterns)
 - [ ] Expert verification items identified with domain specificity
 - [ ] Overall status determined with confidence assessment including independently-confirmed count
-- [ ] Gaps structured in YAML frontmatter with severity, category, and computation_evidence (if gaps_found)
+- [ ] Gaps recorded through helper-owned ledgers with severity, category, and computation evidence in the body (if gaps_found)
 - [ ] Re-verification metadata included (if previous existed)
 - [ ] VERIFICATION.md created with complete report including all computational verification details
 - [ ] **Computational oracle gate passed:** At least one executed code block with actual output present in VERIFICATION.md

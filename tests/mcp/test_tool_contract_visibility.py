@@ -1159,6 +1159,7 @@ def test_state_server_tools_publish_absolute_project_dir_schema() -> None:
         "validate_state",
         "run_health_check",
         "get_config",
+        "suggest_next",
     ):
         project_dir = schemas[tool_name]["properties"]["project_dir"]
         for key, value in ABSOLUTE_PROJECT_DIR_SCHEMA.items():
@@ -1338,6 +1339,7 @@ def test_read_only_builtin_mcp_tools_publish_annotations() -> None:
             "get_progress",
             "validate_state",
             "get_config",
+            "suggest_next",
         },
         "verification_server": {
             "run_check",

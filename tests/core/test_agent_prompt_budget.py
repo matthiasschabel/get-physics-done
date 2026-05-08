@@ -35,17 +35,17 @@ AGENT_BASELINES = {
     "gpd-paper-writer": (672, 36_231),
     "gpd-phase-researcher": (366, 15_409),
     "gpd-plan-checker": (399, 22_456),
-    "gpd-planner": (1_306, 64_535),
+    "gpd-planner": (594, 33_278),
     "gpd-project-researcher": (987, 61_844),
     "gpd-referee": (569, 36_661),
     "gpd-research-mapper": (743, 37_100),
-    "gpd-research-synthesizer": (1_447, 80_827),
+    "gpd-research-synthesizer": (988, 49_313),
     "gpd-review-literature": (53, 2_591),
     "gpd-review-math": (54, 3_343),
     "gpd-review-physics": (53, 2_604),
     "gpd-review-reader": (52, 3_166),
     "gpd-review-significance": (54, 2_790),
-    "gpd-roadmapper": (1_920, 89_849),
+    "gpd-roadmapper": (968, 41_619),
     "gpd-verifier": (384, 26_135),
 }
 
@@ -69,18 +69,18 @@ MODE_TABLE_ALLOWLIST = {
     "gpd-project-researcher",
 }
 WORST_AGENT_HARD_CAPS = {
-    "gpd-planner": (1_326, 66_000),
+    "gpd-planner": (614, 34_278),
     "gpd-executor": (807, 50_866),
     "gpd-research-mapper": (800, 39_000),
-    "gpd-roadmapper": (2_000, 94_000),
+    "gpd-roadmapper": (988, 42_619),
     "gpd-project-researcher": (1_500, 81_000),
     "gpd-experiment-designer": (850, 47_000),
-    "gpd-research-synthesizer": (1_560, 85_000),
+    "gpd-research-synthesizer": (1_008, 50_313),
     "gpd-plan-checker": (419, 23_456),
     "gpd-verifier": (430, 30_000),
 }
 PHASE6_RAW_AGENT_LINE_CAPS = {
-    "gpd-planner": 799,
+    "gpd-planner": 625,
     "gpd-executor": 799,
     "gpd-plan-checker": 899,
 }

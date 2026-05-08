@@ -31,6 +31,11 @@ def test_planner_role_owns_schema_visibility_and_workflows_use_the_short_role_pr
 
     bootstrap = planner_role.partition("</role>")[0]
 
+    assert "@{GPD_INSTALL_DIR}/templates/phase-prompt.md" not in bootstrap
+    assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in bootstrap
+    assert "use `file_read` to load `{GPD_INSTALL_DIR}/templates/phase-prompt.md`" in bootstrap
+    assert "If the template cannot be loaded" in bootstrap
+    assert "do not reconstruct the schema from memory" in bootstrap
     assert "Keep this agent prompt lean." in planner_role
     assert "use this file for planner role, routing, and plan-shape guidance only." in planner_role
     assert "@{GPD_INSTALL_DIR}/workflows/execute-plan.md" not in bootstrap

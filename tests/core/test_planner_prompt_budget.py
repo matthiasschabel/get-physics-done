@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.prompt_metrics_support import measure_prompt_surface
+from tests.assertion_taxonomy_support import assert_prompt_contracts, forbidden_duplicate, semantic_anchor
+from tests.prompt_metrics_support import expanded_include_markers, expanded_prompt_text, measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLANNER_PATH = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-planner.md"
@@ -63,19 +64,52 @@ def _between(text: str, start: str, end: str) -> str:
     return body
 
 
-def test_planner_bootstrap_does_not_eagerly_load_execution_or_completion_only_materials() -> None:
+def test_planner_bootstrap_uses_mandatory_plan_template_file_read_gate() -> None:
     planner = _read_planner_prompt()
     role = _between(planner, "<role>", "</role>")
 
-    assert "@{GPD_INSTALL_DIR}/templates/phase-prompt.md" in role
-    assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in role
-    assert "@{GPD_INSTALL_DIR}/workflows/execute-plan.md" not in role
-    assert "@{GPD_INSTALL_DIR}/templates/summary.md" not in role
-    assert "@{GPD_INSTALL_DIR}/references/protocols/order-of-limits.md" not in role
-    assert role.index("@{GPD_INSTALL_DIR}/templates/phase-prompt.md") < role.index(
-        "before any `PLAN.md` emission."
+    assert_prompt_contracts(
+        role,
+        forbidden_duplicate(
+            "planner does not eagerly include phase template",
+            "@{GPD_INSTALL_DIR}/templates/phase-prompt.md",
+            max_count=0,
+        ),
+        forbidden_duplicate(
+            "planner does not eagerly include plan contract schema",
+            "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md",
+            max_count=0,
+        ),
+        forbidden_duplicate(
+            "planner does not eagerly include execution workflow",
+            "@{GPD_INSTALL_DIR}/workflows/execute-plan.md",
+            max_count=0,
+        ),
+        forbidden_duplicate(
+            "planner does not eagerly include summary template",
+            "@{GPD_INSTALL_DIR}/templates/summary.md",
+            max_count=0,
+        ),
+        forbidden_duplicate(
+            "planner does not eagerly include order-of-limits reference",
+            "@{GPD_INSTALL_DIR}/references/protocols/order-of-limits.md",
+            max_count=0,
+        ),
+        semantic_anchor(
+            "planner keeps mandatory file-read gate semantics visible",
+            (
+                "Before emitting or revising any `PLAN.md`",
+                "before plan frontmatter",
+                "stop as blocked or checkpointed through the standard return skeleton",
+                "do not reconstruct the schema from memory",
+            ),
+        ),
     )
-    assert "planner contract schema is carried there" in role
+    file_read_phrase = "use `file_read`"
+    phase_template_path = "{GPD_INSTALL_DIR}/templates/phase-prompt.md"
+    schema_template_path = "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md"
+    assert role.index(file_read_phrase) < role.index(phase_template_path)
+    assert role.index(phase_template_path) < role.index(schema_template_path)
 
 
 def test_raw_planner_prompt_stays_under_phase6_cap() -> None:
@@ -91,9 +125,45 @@ def test_expanded_planner_prompt_stays_under_budget() -> None:
         path_prefix=PATH_PREFIX,
     )
 
-    assert metrics.raw_include_count <= 3
-    assert metrics.expanded_char_count < 66_000
-    assert metrics.expanded_line_count < 1_325
+    assert metrics.raw_include_count == 0
+    assert metrics.expanded_char_count < 40_000
+    assert metrics.expanded_line_count < 750
+
+
+def test_removed_planner_includes_are_late_loaded_by_path_not_body() -> None:
+    planner = _read_planner_prompt()
+    expanded = expanded_prompt_text(PLANNER_PATH, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
+    markers = expanded_include_markers(expanded)
+
+    for filename in (
+        "phase-prompt.md",
+        "planner-conventions.md",
+        "planner-approximations.md",
+    ):
+        assert all(filename not in marker for marker in markers)
+
+    assert "{GPD_INSTALL_DIR}/templates/phase-prompt.md" in planner
+    assert "{GPD_INSTALL_DIR}/references/planning/planner-conventions.md" in planner
+    assert "{GPD_INSTALL_DIR}/references/planning/planner-approximations.md" in planner
+    assert "Phase Plan Prompt Template" not in planner
+    assert "Notation and Convention Tracking" not in planner
+    assert "Approximation Schemes and Validity" not in planner
+
+    conventions = _between(planner, "<physics_conventions>", "</physics_conventions>")
+    approximations = _between(planner, "<approximation_tracking>", "</approximation_tracking>")
+
+    assert "@{GPD_INSTALL_DIR}" not in conventions
+    assert "Every plan must establish or inherit conventions before task decomposition." in conventions
+    assert "Load `{GPD_INSTALL_DIR}/references/planning/planner-conventions.md` when conventions are missing" in conventions
+    assert "convention_lock" in conventions
+
+    assert "@{GPD_INSTALL_DIR}" not in approximations
+    assert "identify active approximations, expansion parameters, neglected terms" in approximations
+    assert (
+        "Load `{GPD_INSTALL_DIR}/references/planning/planner-approximations.md` when selecting"
+        in approximations
+    )
+    assert "`name`, `parameter`, `validity`, `breaks_when`, and `check`" in approximations
 
 
 def test_planner_prompt_no_longer_carries_the_removed_high_level_boilerplate() -> None:

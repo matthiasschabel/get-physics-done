@@ -20,14 +20,19 @@ def _between(text: str, start: str, end: str) -> str:
     return body
 
 
-def test_planner_keeps_schema_bootstrap_visible_before_plan_examples() -> None:
+def test_planner_keeps_schema_template_file_read_gate_visible_before_plan_examples() -> None:
     planner = _read_planner_prompt()
     role = _between(planner, "<role>", "</role>")
 
-    phase_prompt_idx = role.index("@{GPD_INSTALL_DIR}/templates/phase-prompt.md")
-    plan_emission_idx = role.index("before any `PLAN.md` emission.")
+    file_read_idx = role.index("use `file_read`")
+    phase_prompt_idx = role.index("{GPD_INSTALL_DIR}/templates/phase-prompt.md")
+    schema_idx = role.index("{GPD_INSTALL_DIR}/templates/plan-contract-schema.md")
+    frontmatter_idx = role.index("before plan frontmatter")
 
-    assert phase_prompt_idx < plan_emission_idx
+    assert file_read_idx < phase_prompt_idx < schema_idx < frontmatter_idx
+    assert "@{GPD_INSTALL_DIR}/templates/phase-prompt.md" not in role
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in role
-    assert "planner contract schema is carried there" in role
+    assert "Before emitting or revising any `PLAN.md`" in role
+    assert "If the template cannot be loaded" in role
+    assert "do not reconstruct the schema from memory" in role
     assert "Return structured results to the orchestrator." in role

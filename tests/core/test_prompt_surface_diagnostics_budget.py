@@ -83,6 +83,10 @@ def _runtime_projection_budgets(*, command_only: bool) -> dict[str, dict[str, in
     return {descriptor.runtime_name: budget_for_descriptor(descriptor) for descriptor in iter_runtime_descriptors()}
 
 
+def _runtime_descriptors_by_name() -> dict[str, RuntimeDescriptor]:
+    return {descriptor.runtime_name: descriptor for descriptor in iter_runtime_descriptors()}
+
+
 @lru_cache
 def _prompt_surface_payload(
     surfaces: tuple[str, ...],
@@ -127,6 +131,18 @@ def _assert_runtime_projection_budget(
     assert observed_chars <= budget["chars"], (
         f"{label} projected char budget exceeded: observed={observed_chars} max={budget['chars']}"
     )
+
+
+def _assert_non_native_projection_has_no_projected_includes(
+    label: str,
+    descriptor: RuntimeDescriptor,
+    metrics: dict[str, object],
+) -> None:
+    include_count = metrics["include_count"]
+    assert isinstance(include_count, int)
+    if descriptor.native_include_support:
+        return
+    assert include_count == 0, f"{label} projected include count must stay zero"
 
 
 def test_prompt_surface_aggregate_budgets_stay_under_ceilings() -> None:
@@ -256,16 +272,24 @@ def test_runtime_projection_aggregate_budgets_stay_under_ceilings() -> None:
     runtime_projection = totals["runtime_projection"]
     assert isinstance(runtime_projection, dict)
     runtime_budgets = _runtime_projection_budgets(command_only=False)
+    runtime_descriptors = _runtime_descriptors_by_name()
 
     unexpected_runtimes = sorted(set(runtime_projection) - set(runtime_budgets))
     missing_runtimes = sorted(set(runtime_budgets) - set(runtime_projection))
     assert unexpected_runtimes == []
     assert missing_runtimes == []
+    assert set(runtime_descriptors) == set(runtime_budgets)
 
     for runtime_name, budget in runtime_budgets.items():
         runtime_metrics = runtime_projection[runtime_name]
         assert isinstance(runtime_metrics, dict)
-        _assert_runtime_projection_budget(f"{runtime_name} command+agent", runtime_metrics, budget)
+        label = f"{runtime_name} command+agent"
+        _assert_runtime_projection_budget(label, runtime_metrics, budget)
+        _assert_non_native_projection_has_no_projected_includes(
+            label,
+            runtime_descriptors[runtime_name],
+            runtime_metrics,
+        )
 
 
 def test_runtime_projection_command_only_budgets_stay_under_ceilings() -> None:
@@ -275,13 +299,21 @@ def test_runtime_projection_command_only_budgets_stay_under_ceilings() -> None:
     runtime_projection = totals["runtime_projection"]
     assert isinstance(runtime_projection, dict)
     runtime_budgets = _runtime_projection_budgets(command_only=True)
+    runtime_descriptors = _runtime_descriptors_by_name()
 
     unexpected_runtimes = sorted(set(runtime_projection) - set(runtime_budgets))
     missing_runtimes = sorted(set(runtime_budgets) - set(runtime_projection))
     assert unexpected_runtimes == []
     assert missing_runtimes == []
+    assert set(runtime_descriptors) == set(runtime_budgets)
 
     for runtime_name, budget in runtime_budgets.items():
         runtime_metrics = runtime_projection[runtime_name]
         assert isinstance(runtime_metrics, dict)
-        _assert_runtime_projection_budget(f"{runtime_name} command-only", runtime_metrics, budget)
+        label = f"{runtime_name} command-only"
+        _assert_runtime_projection_budget(label, runtime_metrics, budget)
+        _assert_non_native_projection_has_no_projected_includes(
+            label,
+            runtime_descriptors[runtime_name],
+            runtime_metrics,
+        )

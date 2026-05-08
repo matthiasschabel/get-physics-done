@@ -27,9 +27,14 @@ from gpd.core.model_visible_text import (
 from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
 from tests.adapters.projection_budget_support import (
+    NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
+    SELECTED_AGENT_PROJECTION_BUDGETS,
+    SELECTED_AGENT_PROJECTION_TARGETS,
     STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
     STAGED_INIT_TARGET_COMMANDS,
     STAGED_PROJECTED_COMMAND_CHAR_BUDGET,
+    TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET,
+    TARGET_AGENT_PROJECTION_BUDGETS,
 )
 from tests.adapters.projection_test_utils import StagedCommandProjectionCase, iter_staged_command_projection_cases
 from tests.prompt_metrics_support import iter_markdown_fences, runtime_command_visibility_note
@@ -105,6 +110,12 @@ UNRESOLVED_INCLUDE_MARKERS = (
     "@ include cycle detected:",
     "@ include read error:",
     "@ include depth limit reached:",
+)
+RUNTIME_NOTE_TAGS = (
+    "codex_runtime_notes",
+    "codex_questioning",
+    "gemini_runtime_notes",
+    "gemini_shell_runtime_notes",
 )
 STAGED_SHIM_CONTRACT_FRAGMENTS = (
     "staged_loading",
@@ -182,6 +193,12 @@ SPAWN_CONTRACT_COMMANDS = _spawn_contract_commands()
 STAGED_COMMAND_PROJECTION_CASES = iter_staged_command_projection_cases(
     commands_dir=COMMANDS_DIR,
     workflows_dir=WORKFLOWS_DIR,
+)
+PROJECTED_RUNTIME_NOTE_SURFACES = tuple(
+    pytest.param(path, "command", id=f"command:{path.stem}") for path in sorted(COMMANDS_DIR.glob("*.md"))
+) + tuple(
+    pytest.param(AGENTS_DIR / f"{agent_name}.md", "agent", id=f"agent:{agent_name}")
+    for agent_name in SELECTED_AGENT_PROJECTION_TARGETS
 )
 PLAN_AGENT_SURFACES = {
     "gpd-planner": (
@@ -528,6 +545,10 @@ def _raw_include_count(text: str, include_suffix: str) -> int:
     )
 
 
+def _standalone_install_dir_include_lines(text: str) -> tuple[str, ...]:
+    return tuple(line for line in text.splitlines() if line.strip().startswith("@{GPD_INSTALL_DIR}/"))
+
+
 def _has_compact_non_native_shim(text: str) -> bool:
     return (
         _has_staged_shim_sentinel(text)
@@ -552,6 +573,14 @@ def _assert_no_unresolved_include_markers(text: str, *, label: str) -> None:
     lowered = text.lower()
     offenders = [marker for marker in UNRESOLVED_INCLUDE_MARKERS if marker in lowered]
     assert offenders == [], f"{label} contains unresolved include marker(s): {', '.join(offenders)}"
+
+
+def _assert_runtime_note_tags_not_repeated(text: str, *, label: str) -> None:
+    for tag in RUNTIME_NOTE_TAGS:
+        opens = text.count(f"<{tag}>")
+        closes = text.count(f"</{tag}>")
+        assert opens == closes, f"{label} has unbalanced {tag}: {opens}/{closes}"
+        assert opens <= 1, f"{label} repeats {tag}: {opens}"
 
 
 def _workflow_authority_for_shimmed_projection(command_name: str, projected: str, runtime: str) -> str:
@@ -630,6 +659,48 @@ def _expected_target_init_command(command_name: str, bridge: str) -> str:
     if command_name == "write-paper":
         return f'{bridge} --raw init write-paper --stage paper_bootstrap -- "$ARGUMENTS"'
     raise AssertionError(f"Unhandled staged init target command: {command_name}")
+
+
+@pytest.mark.parametrize("agent_name", SELECTED_AGENT_PROJECTION_TARGETS)
+@pytest.mark.parametrize("runtime", NON_NATIVE_RUNTIME_PROJECTION_TARGETS)
+def test_non_native_projected_selected_agents_stay_budgeted_without_raw_install_dir_placeholders(
+    agent_name: str,
+    runtime: str,
+) -> None:
+    projected = _project_markdown(AGENTS_DIR / f"{agent_name}.md", runtime, is_agent=True)
+    budget = SELECTED_AGENT_PROJECTION_BUDGETS[agent_name]
+    label = f"{runtime} {agent_name}"
+
+    _assert_no_unresolved_include_markers(projected, label=label)
+    _assert_runtime_note_tags_not_repeated(projected, label=label)
+    assert _standalone_install_dir_include_lines(projected) == ()
+    assert "@{GPD_INSTALL_DIR}" not in projected
+    assert "{GPD_INSTALL_DIR}" not in projected
+    assert len(projected.splitlines()) <= budget["lines"]
+    assert len(projected) <= budget["chars"]
+
+
+def test_target_agent_non_native_projected_chars_stay_under_combined_close_budget() -> None:
+    max_chars_by_agent: dict[str, int] = {}
+    for agent_name in TARGET_AGENT_PROJECTION_BUDGETS:
+        max_chars_by_agent[agent_name] = max(
+            len(_project_markdown(AGENTS_DIR / f"{agent_name}.md", runtime, is_agent=True))
+            for runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS
+        )
+
+    assert sum(max_chars_by_agent.values()) <= TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET
+
+
+@pytest.mark.parametrize("path, surface_kind", PROJECTED_RUNTIME_NOTE_SURFACES)
+@pytest.mark.parametrize("runtime", NON_NATIVE_RUNTIME_PROJECTION_TARGETS)
+def test_projected_runtime_note_blocks_are_not_repeated(
+    runtime: str,
+    path: Path,
+    surface_kind: str,
+) -> None:
+    projected = _project_markdown(path, runtime, is_agent=surface_kind == "agent")
+
+    _assert_runtime_note_tags_not_repeated(projected, label=f"{runtime} {surface_kind} {path.stem}")
 
 
 @pytest.mark.parametrize("command_name", STAGED_INIT_TARGET_COMMANDS)

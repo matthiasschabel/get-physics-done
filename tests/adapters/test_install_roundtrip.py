@@ -42,6 +42,7 @@ from gpd.adapters.runtime_catalog import (
 from gpd.adapters.tool_names import build_canonical_alias_map
 from gpd.core.public_surface_contract import local_cli_bridge_commands
 from gpd.registry import list_commands, load_agents_from_dir
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 from tests.doc_surface_contracts import assert_publication_lane_boundary_contract
 from tests.prompt_metrics_support import MarkdownFence, iter_markdown_fences
 
@@ -1502,8 +1503,17 @@ def test_installed_planner_bootstrap_surface_defers_execution_and_completion_mat
     bootstrap, separator, _ = planner.partition("On-demand references:")
 
     assert separator == "On-demand references:"
-    assert "phase-prompt.md" in bootstrap
-    assert "planner contract schema is carried there" in bootstrap
+    assert_prompt_contracts(
+        bootstrap,
+        semantic_anchor(
+            "installed planner bootstrap names the late-loaded plan template and carried schema",
+            (
+                "phase-prompt.md",
+                "plan-contract-schema.md",
+                "before plan frontmatter",
+            ),
+        ),
+    )
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in bootstrap
     if "# PLAN Contract Schema" in bootstrap:
         assert bootstrap.count("# PLAN Contract Schema") == 1

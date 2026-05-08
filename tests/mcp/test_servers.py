@@ -16,6 +16,8 @@ from unittest.mock import ANY, MagicMock, patch
 import anyio
 import pytest
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
+
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 
 
@@ -2150,8 +2152,23 @@ class TestSkillsServer:
         assert result["allowed_tools_surface"] == "agent.tools"
         assert "staged_loading" not in result
         assert separator == "On-demand references:"
-        assert "Phase Plan Prompt" in bootstrap
-        assert "PLAN Contract Schema" in bootstrap
+        assert_prompt_contracts(
+            bootstrap,
+            semantic_anchor(
+                "planner bootstrap names the late-loaded plan template and carried schema",
+                (
+                    "phase-prompt.md",
+                    "PLAN.md",
+                    "plan-contract-schema.md",
+                    "before plan frontmatter",
+                ),
+            ),
+            semantic_anchor(
+                "planner bootstrap does not inline the plan template headings",
+                ("Phase Plan Prompt", "PLAN Contract Schema"),
+                mode="absent",
+            ),
+        )
         assert "Read config.json for planning behavior settings." not in bootstrap
         assert "## Summary Template" not in bootstrap
         assert "Order-of-Limits Awareness" not in bootstrap

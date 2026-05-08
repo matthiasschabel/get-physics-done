@@ -18,6 +18,7 @@ from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
 from gpd.registry import _parse_frontmatter, _parse_tools
 from tests.assertion_taxonomy_support import (
     FragmentAssertion,
+    assert_prompt_contracts,
     forbidden_duplicate,
     fragment_count,
     machine_exact,
@@ -2512,8 +2513,27 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     assert "Calculation / Simulation" not in roadmap_template
     assert "Validation & Cross-checks" not in roadmap_template
     assert "Paper Writing" not in roadmap_template
-    assert "@{GPD_INSTALL_DIR}/templates/roadmap.md" in roadmapper_agent
-    assert "@{GPD_INSTALL_DIR}/templates/state.md" in roadmapper_agent
+    assert_prompt_contracts(
+        roadmapper_agent,
+        forbidden_duplicate(
+            "roadmapper defers roadmap template body",
+            "@{GPD_INSTALL_DIR}/templates/roadmap.md",
+            max_count=0,
+        ),
+        forbidden_duplicate(
+            "roadmapper defers state template body",
+            "@{GPD_INSTALL_DIR}/templates/state.md",
+            max_count=0,
+        ),
+        semantic_anchor(
+            "roadmapper keeps late-loaded roadmap and state templates visible",
+            (
+                "{GPD_INSTALL_DIR}/templates/roadmap.md",
+                "{GPD_INSTALL_DIR}/templates/state.md",
+                "file_read",
+            ),
+        ),
+    )
     assert "## Step 3: Load Research Context (if exists)" in roadmapper_agent
     assert "Contract coverage" in roadmapper_agent
     assert "Machine-Readable Return Envelope" in roadmapper_agent

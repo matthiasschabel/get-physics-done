@@ -30,3 +30,23 @@ STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
 }
 STAGED_INIT_TARGET_COMMANDS = tuple(STAGED_INIT_COMMAND_PROJECTION_BUDGETS)
 STAGED_PROJECTED_COMMAND_CHAR_BUDGET = 20_000
+
+NON_NATIVE_RUNTIME_PROJECTION_TARGETS = ("codex", "gemini", "opencode")
+
+TARGET_AGENT_PROJECTION_BUDGETS = {
+    "gpd-planner": {"lines": 750, "chars": 40_000},
+    "gpd-research-synthesizer": {"lines": 1_100, "chars": 58_000},
+    "gpd-roadmapper": {"lines": 1_100, "chars": 50_000},
+}
+TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 148_000
+
+SELECTED_AGENT_PROJECTION_BUDGETS = {
+    "gpd-executor": {"lines": 840, "chars": 53_000},
+    "gpd-experiment-designer": {"lines": 870, "chars": 49_000},
+    "gpd-plan-checker": {"lines": 450, "chars": 25_500},
+    **TARGET_AGENT_PROJECTION_BUDGETS,
+    "gpd-project-researcher": {"lines": 1_060, "chars": 65_000},
+    "gpd-research-mapper": {"lines": 800, "chars": 40_000},
+    "gpd-verifier": {"lines": 440, "chars": 30_000},
+}
+SELECTED_AGENT_PROJECTION_TARGETS = tuple(SELECTED_AGENT_PROJECTION_BUDGETS)

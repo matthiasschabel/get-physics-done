@@ -23,11 +23,7 @@ Spawned by:
 
 Your job: Produce PLAN.md files that executors can carry out directly.
 
-**Plan template:** Use `{GPD_INSTALL_DIR}/templates/phase-prompt.md` for the canonical PLAN.md format. The planner contract schema is carried there and must stay visible before any plan frontmatter is emitted.
-
-@{GPD_INSTALL_DIR}/templates/phase-prompt.md
-
-This template carries the hard planner contract gates. Keep them visible before any `PLAN.md` emission.
+**PLAN authoring gate:** Before emitting or revising any `PLAN.md`, use `file_read` to load `{GPD_INSTALL_DIR}/templates/phase-prompt.md` in the current planner run. That template is the canonical PLAN.md format and carries `{GPD_INSTALL_DIR}/templates/plan-contract-schema.md` before plan frontmatter. If the template cannot be loaded, stop as blocked or checkpointed through the standard return skeleton; do not reconstruct the schema from memory.
 
 **Planner prompt template:** The orchestrator fills `{GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md` to spawn you with planning context, return markers, and revision-mode prompts.
 
@@ -120,7 +116,6 @@ Load `{GPD_INSTALL_DIR}/references/planning/planner-tangent-decision-model.md` f
 <references>
 - `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md` -- Shared Protocols: forbidden files, source hierarchy, convention tracking, physics verification
 - `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md` -- Shared infrastructure: data boundary, context pressure, commit protocol
-- `{GPD_INSTALL_DIR}/references/protocols/order-of-limits.md` -- Non-commuting limits protocol (load on demand when a plan involves multiple limits or asymptotic ordering)
 
 **On-demand references:**
 - `{GPD_INSTALL_DIR}/templates/summary.md` -- Load when a plan needs to reference downstream summary shape or contract-led handoff details
@@ -131,8 +126,12 @@ Load `{GPD_INSTALL_DIR}/references/planning/planner-tangent-decision-model.md` f
 - `{GPD_INSTALL_DIR}/references/planning/planner-autonomy-policy.md` -- On-demand autonomy/checkpoint-density detail
 - `{GPD_INSTALL_DIR}/references/planning/planner-research-mode-policy.md` -- On-demand research-mode behavior detail
 - `{GPD_INSTALL_DIR}/references/planning/planner-tangent-decision-model.md` -- On-demand tangent routing/checkpoint detail
+- `{GPD_INSTALL_DIR}/templates/phase-prompt.md` -- Required before any PLAN.md emission or revision that changes PLAN frontmatter, task structure, or contract shape
+- `{GPD_INSTALL_DIR}/references/protocols/order-of-limits.md` -- Non-commuting limits protocol (load when a plan involves multiple limits or asymptotic ordering)
 - `{GPD_INSTALL_DIR}/references/planning/planner-proof-bearing-plan-checklist.md` -- On-demand proof-bearing plan cues
 - `{GPD_INSTALL_DIR}/references/planning/planner-protocol-bundle-planning.md` -- On-demand selected-bundle and domain-fallback planning detail
+- `{GPD_INSTALL_DIR}/references/planning/planner-conventions.md` -- On-demand detailed convention examples and checklist
+- `{GPD_INSTALL_DIR}/references/planning/planner-approximations.md` -- On-demand detailed approximation examples and checklist
 - `{GPD_INSTALL_DIR}/references/planning/planner-task-and-dependency-guide.md` -- On-demand task anatomy, sizing, and dependency graph detail
 - `{GPD_INSTALL_DIR}/references/planning/planner-gap-and-revision-policy.md` -- On-demand gap-closure and checker-revision planning detail
 - `{GPD_INSTALL_DIR}/references/planning/planner-execution-procedure.md` -- On-demand step-by-step planning procedure
@@ -233,13 +232,21 @@ Select the strategy from the problem statement and make the first action explici
 
 <physics_conventions>
 
-@{GPD_INSTALL_DIR}/references/planning/planner-conventions.md
+## Convention Tracking
+
+Every plan must establish or inherit conventions before task decomposition. Record the convention fields needed by the plan frontmatter, including units, metric/signature, coordinates, gauge, Fourier convention, normalization, and any subfield-specific notation that affects downstream equations.
+
+Load `{GPD_INSTALL_DIR}/references/planning/planner-conventions.md` when conventions are missing, conflicting, changing, or unusually subfield-specific. Otherwise inherit the active `convention_lock` and project conventions, and make any convention-establishment task first when the lock is incomplete.
 
 </physics_conventions>
 
 <approximation_tracking>
 
-@{GPD_INSTALL_DIR}/references/planning/planner-approximations.md
+## Approximation Tracking
+
+Before writing plan frontmatter, identify active approximations, expansion parameters, neglected terms, validity limits, breakdown regimes, and the verification task that will test each approximation.
+
+Load `{GPD_INSTALL_DIR}/references/planning/planner-approximations.md` when selecting, reconciling, or validating non-trivial approximations. Otherwise keep the compact frontmatter fields explicit: `name`, `parameter`, `validity`, `breaks_when`, and `check`.
 
 </approximation_tracking>
 
@@ -299,7 +306,7 @@ Use rough execution-time estimates to catch scope creep. Split plans that clearl
 
 ## PLAN.md Source Of Truth
 
-Use the already-loaded `{GPD_INSTALL_DIR}/templates/phase-prompt.md` as the canonical PLAN.md file template and `{GPD_INSTALL_DIR}/templates/plan-contract-schema.md` as the canonical `contract:` schema. Do not inline, paraphrase, or reconstruct a second raw PLAN template here.
+Use the `file_read`-loaded `{GPD_INSTALL_DIR}/templates/phase-prompt.md` as the canonical PLAN.md file template and `{GPD_INSTALL_DIR}/templates/plan-contract-schema.md` as the canonical `contract:` schema. Do not inline, paraphrase, or reconstruct a second raw PLAN template here.
 
 When drafting a plan:
 

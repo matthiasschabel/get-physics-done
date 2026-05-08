@@ -3630,13 +3630,22 @@ def test_executor_skill_defers_completion_only_materials_until_summary_creation(
 
 def test_planner_skill_defers_late_planning_materials_into_on_demand_references() -> None:
     skill = registry.get_skill("gpd-planner")
-    bootstrap, separator, _ = skill.content.partition("On-demand references:")
+    bootstrap, separator, on_demand = skill.content.partition("On-demand references:")
 
     assert skill.name == "gpd-planner"
     assert skill.source_kind == "agent"
     assert separator == "On-demand references:"
-    assert "Phase Plan Prompt" in bootstrap
-    assert "PLAN Contract Schema" in bootstrap
+    assert "{GPD_INSTALL_DIR}/templates/phase-prompt.md" in bootstrap
+    assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in bootstrap
+    assert "use `file_read` to load `{GPD_INSTALL_DIR}/templates/phase-prompt.md`" in bootstrap
+    assert "do not reconstruct the schema from memory" in bootstrap
+    assert "Phase Plan Prompt Template" not in bootstrap
+    assert "PLAN Contract Schema" not in bootstrap
+    assert "Notation and Convention Tracking" not in bootstrap
+    assert "Approximation Schemes and Validity" not in bootstrap
+    assert "{GPD_INSTALL_DIR}/templates/phase-prompt.md" in on_demand
+    assert "{GPD_INSTALL_DIR}/references/planning/planner-conventions.md" in on_demand
+    assert "{GPD_INSTALL_DIR}/references/planning/planner-approximations.md" in on_demand
     assert "Read config.json for planning behavior settings." not in bootstrap
     assert "## Summary Template" not in bootstrap
     assert "Order-of-Limits Awareness" not in bootstrap

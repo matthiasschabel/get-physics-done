@@ -6,8 +6,12 @@ from pathlib import Path
 
 from gpd.core import prompt_diagnostics
 from tests.adapters.projection_budget_support import (
+    NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
+    SELECTED_AGENT_PROJECTION_BUDGETS,
     STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
     STAGED_PROJECTED_COMMAND_CHAR_BUDGET,
+    TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET,
+    TARGET_AGENT_PROJECTION_BUDGETS,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -116,3 +120,40 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
             if runtime in NON_NATIVE_RUNTIMES:
                 assert metric.bridge_command_occurrences > 0
                 assert metric.shell_rewrite_count > 0
+
+
+def test_selected_agent_runtime_projection_diagnostics_stay_under_baseline_budgets() -> None:
+    report = prompt_diagnostics.build_prompt_surface_report(
+        REPO_ROOT,
+        surfaces=("agent",),
+        runtime_names=NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
+        include_tests=False,
+        include_runtime_projections=True,
+    )
+
+    items_by_name = {item.name: item for item in report.items if item.kind == "agent"}
+    missing = sorted(set(SELECTED_AGENT_PROJECTION_BUDGETS) - set(items_by_name))
+    assert missing == []
+
+    target_agent_max_chars: dict[str, int] = {}
+    for agent_name, budget in SELECTED_AGENT_PROJECTION_BUDGETS.items():
+        item = items_by_name[agent_name]
+        metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
+        assert set(NON_NATIVE_RUNTIME_PROJECTION_TARGETS) <= set(metrics_by_runtime)
+
+        max_chars = 0
+        for runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS:
+            metric = metrics_by_runtime[runtime]
+            assert metric.native_include_support is False
+            assert metric.line_count <= budget["lines"]
+            assert metric.char_count <= budget["chars"]
+            assert metric.runtime_note_count == 0
+            max_chars = max(max_chars, metric.char_count)
+
+        if agent_name in TARGET_AGENT_PROJECTION_BUDGETS:
+            target_agent_max_chars[agent_name] = max_chars
+
+    assert (
+        sum(target_agent_max_chars.values())
+        <= TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET
+    )

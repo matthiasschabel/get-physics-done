@@ -8,6 +8,7 @@ from pathlib import Path
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.assertion_taxonomy_support import assert_prompt_contracts, forbidden_duplicate, semantic_anchor
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -109,9 +110,27 @@ def test_planner_workflows_expand_the_shared_planner_template_once_per_route() -
     assert plan_phase_raw.count("templates/planner-subagent-prompt.md") == 2
     assert verify_work_raw.count("templates/planner-subagent-prompt.md") == 2
     assert "templates/planner-subagent-prompt.md" not in quick_raw
-    assert planner_agent_raw.count("@{GPD_INSTALL_DIR}/templates/phase-prompt.md") == 1
-    assert planner_agent_raw.count("@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md") == 0
-    assert "This template carries the hard planner contract gates." in planner_agent_raw
+    assert_prompt_contracts(
+        planner_agent_raw,
+        forbidden_duplicate(
+            "planner defers the plan template instead of eagerly including it",
+            "@{GPD_INSTALL_DIR}/templates/phase-prompt.md",
+            max_count=0,
+        ),
+        forbidden_duplicate(
+            "planner defers the plan schema instead of eagerly including it",
+            "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md",
+            max_count=0,
+        ),
+        semantic_anchor(
+            "planner keeps the late-loaded template and schema visible",
+            (
+                "{GPD_INSTALL_DIR}/templates/phase-prompt.md",
+                "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md",
+                "before plan frontmatter",
+            ),
+        ),
+    )
 
     assert planner_template.count("## Standard Planning Template") == 1
     assert planner_template.count("## Revision Template") == 1

@@ -10,6 +10,31 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PLANNER_PATH = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-planner.md"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+PLANNING_REFERENCES_DIR = SOURCE_ROOT / "specs" / "references" / "planning"
+
+OLD_DOMAIN_CATALOG_HEADINGS = (
+    "QFT Perturbative Calculation",
+    "Condensed Matter (Analytical)",
+    "Condensed Matter (Numerical)",
+    "General Relativity / Cosmology",
+    "AMO / Quantum Optics",
+    "Numerical PDE/ODE",
+    "Effective Field Theory",
+    "### Domain Selection",
+    "### Cross-Domain Projects",
+)
+
+ON_DEMAND_PLANNING_GUIDES = {
+    "qft-perturbative-calculation.md": "QFT Perturbative Calculation",
+    "condensed-matter-analytical.md": "Condensed Matter (Analytical)",
+    "condensed-matter-numerical.md": "Condensed Matter (Numerical)",
+    "statistical-mechanics.md": "Statistical Mechanics Planning Guide",
+    "gr-cosmology.md": "General Relativity / Cosmology",
+    "amo-quantum-optics.md": "AMO / Quantum Optics",
+    "numerical-pde-ode.md": "Numerical PDE/ODE",
+    "effective-field-theory.md": "Effective Field Theory",
+    "cross-domain-convention-bridge.md": "Cross-Domain Projects Planning Guide",
+}
 
 
 def _read_planner_prompt() -> str:
@@ -46,9 +71,9 @@ def test_expanded_planner_prompt_stays_under_budget() -> None:
         path_prefix=PATH_PREFIX,
     )
 
-    assert metrics.raw_include_count <= 9
-    assert metrics.expanded_char_count < 290_000
-    assert metrics.expanded_line_count < 6_000
+    assert metrics.raw_include_count <= 3
+    assert metrics.expanded_char_count < 112_000
+    assert metrics.expanded_line_count < 2_350
 
 
 def test_planner_prompt_no_longer_carries_the_removed_high_level_boilerplate() -> None:
@@ -60,6 +85,26 @@ def test_planner_prompt_no_longer_carries_the_removed_high_level_boilerplate() -
         "Specificity Examples",
     ):
         assert removed_marker not in planner
+
+
+def test_domain_blueprint_catalog_is_on_demand_not_in_base_prompt() -> None:
+    planner = _read_planner_prompt()
+
+    assert "references/planning/domain-strategy-index.md" in planner
+    assert "planning_guides" in planner
+
+    for removed_heading in OLD_DOMAIN_CATALOG_HEADINGS:
+        assert removed_heading not in planner
+
+
+def test_on_demand_domain_planning_guides_are_reachable() -> None:
+    index = (PLANNING_REFERENCES_DIR / "domain-strategy-index.md").read_text(encoding="utf-8")
+
+    for guide_name, expected_heading in ON_DEMAND_PLANNING_GUIDES.items():
+        guide_path = PLANNING_REFERENCES_DIR / guide_name
+        assert guide_path.is_file(), guide_name
+        assert f"references/planning/{guide_name}" in index
+        assert expected_heading in guide_path.read_text(encoding="utf-8")
 
 
 def test_planner_prompt_delegates_raw_plan_template_to_canonical_template() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tomllib
 from pathlib import Path
 
@@ -16,10 +17,12 @@ from gpd.adapters.install_utils import (
     project_markdown_for_runtime,
 )
 from gpd.adapters.runtime_catalog import get_runtime_descriptor, iter_runtime_descriptors
+from gpd.core.context import init_execute_phase, init_plan_phase, init_quick, init_verify_work
 from gpd.core.model_visible_text import (
     agent_visibility_note,
     review_contract_visibility_note,
 )
+from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
 from tests.adapters.projection_test_utils import StagedCommandProjectionCase, iter_staged_command_projection_cases
 from tests.prompt_metrics_support import iter_markdown_fences, runtime_command_visibility_note
@@ -32,8 +35,8 @@ TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 VERIFIER_BUDGET_BY_NATIVE_INCLUDE_SUPPORT = {
-    True: (900, 60_000),
-    False: (6_500, 430_000),
+    True: (500, 35_000),
+    False: (500, 35_000),
 }
 VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/verification-report.md",
@@ -183,6 +186,247 @@ PEER_REVIEW_PUBLICATION_LANE_FRAGMENTS = (
     "Use centralized preflight's selected publication/review roots for GPD-authored review artifacts.",
     "Keep the manuscript and manuscript-local publication manifests rooted at the resolved manuscript directory.",
 )
+PROTOCOL_BUNDLE_JIT_FIELDS = (
+    "selected_protocol_bundle_ids",
+    "protocol_bundle_count",
+    "protocol_bundle_context",
+    "protocol_bundle_verifier_extensions",
+)
+PROTOCOL_BUNDLE_JIT_COMMANDS = (
+    "execute-phase",
+    "literature-review",
+    "map-research",
+    "plan-phase",
+    "quick",
+    "research-phase",
+    "respond-to-referees",
+    "verify-work",
+    "write-paper",
+)
+PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS = (
+    "Statistical Mechanics Simulation",
+    "Numerical Relativity",
+    "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md",
+    "{GPD_INSTALL_DIR}/references/protocols/numerical-relativity.md",
+    "Estimator policies:",
+    "Decisive artifacts:",
+)
+
+
+def _staged_command_has_protocol_bundle_fields(command_name: str) -> bool:
+    if command_name not in PROTOCOL_BUNDLE_JIT_COMMANDS:
+        return False
+    manifest = load_workflow_stage_manifest_from_path(
+        WORKFLOWS_DIR / f"{command_name}-stage-manifest.json",
+        expected_workflow_id=command_name,
+    )
+    return any(
+        any(field in stage.required_init_fields for field in PROTOCOL_BUNDLE_JIT_FIELDS) for stage in manifest.stages
+    )
+
+
+def _write_bundle_projection_project(cwd: Path, *, selected: bool) -> None:
+    from gpd.core.state import default_state_dict
+
+    gpd_dir = cwd / "GPD"
+    phase_dir = gpd_dir / "phases" / "01-setup"
+    phase_dir.mkdir(parents=True, exist_ok=True)
+    (phase_dir / "01-PLAN.md").write_text("# Plan\n", encoding="utf-8")
+    (phase_dir / "01-CONTEXT.md").write_text("# Context\n", encoding="utf-8")
+    (gpd_dir / "config.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "STATE.md").write_text("# State\n", encoding="utf-8")
+    (gpd_dir / "REQUIREMENTS.md").write_text("# Requirements\n", encoding="utf-8")
+    (gpd_dir / "ROADMAP.md").write_text("## Milestone\n\n### Phase 1: Setup\n", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text(
+        (
+            "# Test Project\n\n"
+            "## What This Is\n\n"
+            "Monte Carlo study of a statistical mechanics lattice model near criticality.\n\n"
+            "## Research Context\n\n"
+            "### Theoretical Framework\n\n"
+            "Statistical mechanics\n\n"
+            "### Known Results\n\n"
+            "Binder cumulants, thermalization windows, and finite-size scaling should be benchmarked.\n"
+        )
+        if selected
+        else (
+            "# Test Project\n\n"
+            "## What This Is\n\n"
+            "Quantum-gravity saddle bookkeeping with Page-curve comparisons and entropy arguments.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    state = default_state_dict()
+    state["project_contract"] = _stat_mech_contract_payload() if selected else _generic_benchmark_contract_payload()
+    state["convention_lock"] = {
+        "metric_signature": "(-,+,+,+)",
+        "fourier_convention": "physics",
+        "natural_units": "SI",
+    }
+    state["intermediate_results"] = [
+        {
+            "id": "R-01",
+            "equation": "E = mc^2",
+            "description": "Rest energy",
+            "phase": "01",
+            "depends_on": [],
+            "verified": True,
+        }
+    ]
+    state["approximations"] = [
+        {
+            "name": "weak coupling",
+            "validity_range": "g << 1",
+            "controlling_param": "g",
+            "current_value": "0.1",
+            "status": "valid",
+        }
+    ]
+    state["propagated_uncertainties"] = [
+        {
+            "quantity": "m_eff",
+            "value": "1.2",
+            "uncertainty": "0.1",
+            "phase": "01",
+            "method": "bootstrap",
+        }
+    ]
+    (gpd_dir / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def _stat_mech_contract_payload() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "scope": {
+            "question": "What finite-size scaling collapse and benchmark comparison does the simulation recover?",
+            "in_scope": ["Recover the decisive finite-size scaling benchmark for the simulation regime"],
+        },
+        "claims": [
+            {
+                "id": "claim-critical",
+                "statement": "Recover benchmark finite-size scaling behavior",
+                "deliverables": ["deliv-data", "deliv-figure"],
+                "acceptance_tests": ["test-benchmark"],
+                "references": ["ref-benchmark"],
+            }
+        ],
+        "deliverables": [
+            {
+                "id": "deliv-data",
+                "kind": "dataset",
+                "path": "results/measurements.csv",
+                "description": "Raw Monte Carlo measurements with metadata",
+            },
+            {
+                "id": "deliv-figure",
+                "kind": "figure",
+                "path": "figures/collapse.png",
+                "description": "Finite-size scaling collapse figure",
+            },
+        ],
+        "acceptance_tests": [
+            {
+                "id": "test-benchmark",
+                "subject": "claim-critical",
+                "kind": "benchmark",
+                "procedure": "Compare Binder cumulants and finite-size scaling against literature benchmarks",
+                "pass_condition": "Benchmark agreement is within uncertainty",
+            }
+        ],
+        "references": [
+            {
+                "id": "ref-benchmark",
+                "kind": "paper",
+                "locator": "Benchmark Monte Carlo paper",
+                "role": "benchmark",
+                "why_it_matters": "Decisive comparison for the simulation regime",
+                "applies_to": ["claim-critical"],
+                "must_surface": True,
+                "required_actions": ["read", "compare", "cite"],
+            }
+        ],
+        "context_intake": {
+            "must_read_refs": ["ref-benchmark"],
+        },
+        "forbidden_proxies": [
+            {
+                "id": "fp-proxy",
+                "subject": "claim-critical",
+                "proxy": "Qualitative agreement without scaling analysis",
+                "reason": "Would not validate the decisive benchmarked observable",
+            }
+        ],
+        "uncertainty_markers": {
+            "weakest_anchors": ["Autocorrelation estimate near the critical point"],
+            "disconfirming_observations": ["Finite-size crossings drift away from the benchmark window"],
+        },
+    }
+
+
+def _generic_benchmark_contract_payload() -> dict[str, object]:
+    payload = _stat_mech_contract_payload()
+    payload["scope"] = {
+        "question": "Does the output match a generic benchmark?",
+        "in_scope": ["Compare against the generic benchmark"],
+    }
+    payload["claims"] = [
+        {
+            "id": "claim-critical",
+            "statement": "Recover a generic benchmark value",
+            "deliverables": ["deliv-data", "deliv-figure"],
+            "acceptance_tests": ["test-benchmark"],
+            "references": ["ref-benchmark"],
+        }
+    ]
+    payload["deliverables"] = [
+        {
+            "id": "deliv-data",
+            "kind": "dataset",
+            "path": "results/generic-measurements.csv",
+            "description": "Generic benchmark measurements with metadata",
+        },
+        {
+            "id": "deliv-figure",
+            "kind": "figure",
+            "path": "figures/generic-benchmark.png",
+            "description": "Generic benchmark comparison figure",
+        },
+    ]
+    payload["acceptance_tests"] = [
+        {
+            "id": "test-benchmark",
+            "subject": "claim-critical",
+            "kind": "benchmark",
+            "procedure": "Compare against a benchmark reference",
+            "pass_condition": "Benchmark agreement is within uncertainty",
+        }
+    ]
+    payload["references"] = [
+        {
+            "id": "ref-benchmark",
+            "kind": "paper",
+            "locator": "Generic benchmark paper",
+            "role": "benchmark",
+            "why_it_matters": "Comparison target",
+            "applies_to": ["claim-critical"],
+            "must_surface": True,
+            "required_actions": ["read", "compare"],
+        }
+    ]
+    payload["forbidden_proxies"] = [
+        {
+            "id": "fp-proxy",
+            "subject": "claim-critical",
+            "proxy": "Qualitative trend agreement without the generic benchmark comparison",
+            "reason": "Would not validate the decisive benchmarked observable",
+        }
+    ]
+    payload["uncertainty_markers"] = {
+        "weakest_anchors": ["Generic benchmark tolerance"],
+        "disconfirming_observations": ["Benchmark agreement disappears under direct comparison"],
+    }
+    return payload
 
 
 def _project_markdown(path: Path, runtime: str, *, is_agent: bool) -> str:
@@ -370,6 +614,40 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
     assert len(projected) <= len(expanded_workflow) * 0.85
 
 
+@pytest.mark.parametrize(
+    "case",
+    STAGED_COMMAND_PROJECTION_CASES,
+    ids=lambda case: case.command_name,
+)
+@pytest.mark.parametrize("runtime", RUNTIMES)
+def test_runtime_projected_staged_commands_keep_protocol_bundle_jit_visible_without_catalog_inline(
+    case: StagedCommandProjectionCase,
+    runtime: str,
+) -> None:
+    projected = _project_markdown(COMMANDS_DIR / f"{case.command_name}.md", runtime, is_agent=False)
+    descriptor = get_runtime_descriptor(runtime)
+    has_bundle_fields = _staged_command_has_protocol_bundle_fields(case.command_name)
+
+    if not has_bundle_fields:
+        assert "<protocol_bundle_jit>" not in projected
+        return
+
+    for marker in PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS:
+        assert marker not in projected
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(projected, f"workflows/{case.command_name}.md") == 1
+        assert "<protocol_bundle_jit>" not in projected
+        return
+
+    assert "<protocol_bundle_jit>" in projected
+    assert "use those init payload fields as the selected-bundle loading map" in projected
+    assert "load only selected asset paths named by `protocol_bundle_context`" in projected
+    assert "do not inline protocol bundle catalogs during bootstrap" in projected
+    for field in PROTOCOL_BUNDLE_JIT_FIELDS:
+        assert field in projected
+
+
 @pytest.mark.parametrize("runtime", RUNTIMES)
 def test_runtime_projected_help_uses_native_include_or_compact_help_bridge_shim(runtime: str) -> None:
     projected = _project_markdown(COMMANDS_DIR / "help.md", runtime, is_agent=False)
@@ -393,6 +671,48 @@ def test_runtime_projected_help_uses_native_include_or_compact_help_bridge_shim(
     assert "--raw help --all" in projected
     assert "--raw help --command <name>" in projected
     assert len(projected) < 10_000
+
+
+@pytest.mark.parametrize("selected", (True, False), ids=("selected", "absent"))
+def test_staged_protocol_bundle_payloads_preserve_selected_vs_absent_context(
+    tmp_path: Path,
+    selected: bool,
+) -> None:
+    _write_bundle_projection_project(tmp_path, selected=selected)
+    payloads = (
+        init_plan_phase(tmp_path, "1", stage="planner_authoring"),
+        init_execute_phase(tmp_path, "1", stage="wave_planning"),
+        init_verify_work(tmp_path, "1", stage="inventory_build"),
+        init_quick(tmp_path, "Benchmark lookup", stage="reference_context"),
+    )
+
+    for payload in payloads:
+        assert "selected_protocol_bundles" not in payload
+        assert "protocol_bundle_asset_paths" not in payload
+        if selected:
+            assert payload["selected_protocol_bundle_ids"] == ["stat-mech-simulation"]
+            assert payload["protocol_bundle_count"] == 1
+            assert "Statistical Mechanics Simulation" in payload["protocol_bundle_context"]
+            assert "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md" in payload["protocol_bundle_context"]
+            assert "Estimator policies:" in payload["protocol_bundle_context"]
+            assert "Decisive artifacts:" in payload["protocol_bundle_context"]
+            assert "Numerical Relativity" not in payload["protocol_bundle_context"]
+            assert (
+                "{GPD_INSTALL_DIR}/references/protocols/numerical-relativity.md"
+                not in payload["protocol_bundle_context"]
+            )
+            assert any(
+                extension["bundle_id"] == "stat-mech-simulation"
+                for extension in payload["protocol_bundle_verifier_extensions"]
+            )
+        else:
+            assert payload["selected_protocol_bundle_ids"] == []
+            assert payload["protocol_bundle_count"] == 0
+            assert payload["protocol_bundle_verifier_extensions"] == []
+            assert "None selected from project metadata" in payload["protocol_bundle_context"]
+            assert "Fall back to shared protocols and on-demand routing." in payload["protocol_bundle_context"]
+            for marker in PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS:
+                assert marker not in payload["protocol_bundle_context"]
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)

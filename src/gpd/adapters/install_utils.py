@@ -836,6 +836,7 @@ def compact_staged_command_shim_for_runtime(
         public_label=public_label,
         first_stage_id=first_stage.id,
         bridge_command=bridge_command or "gpd",
+        protocol_bundle_jit_hint=_compact_staged_protocol_bundle_jit_hint(manifest),
     )
     replaced = _replace_workflow_include_with_shim(
         content,
@@ -866,8 +867,10 @@ def _render_compact_staged_command_shim(
     public_label: str,
     first_stage_id: str,
     bridge_command: str,
+    protocol_bundle_jit_hint: str = "",
 ) -> str:
     init_command = _compact_staged_init_command(workflow_id, first_stage_id, bridge_command=bridge_command)
+    bundle_hint = f"\n\n{protocol_bundle_jit_hint}" if protocol_bundle_jit_hint else ""
     return (
         f'{COMPACT_STAGED_COMMAND_SHIM_SENTINEL} command="{public_label}" first_stage="{first_stage_id}">\n'
         "This non-native runtime cannot resolve command workflow includes natively, so this command prompt uses "
@@ -893,8 +896,53 @@ def _render_compact_staged_command_shim(
         "`staged_loading.produced_state`, and `staged_loading.checkpoints`;\n"
         "- reload with the same init command and `--stage <next-stage-id>` before acting on any later stage.\n\n"
         "Do not guess missing payload fields or invent workflow state. If `staged_loading` or required fields "
-        "are missing, stop and report the malformed init payload.\n"
+        "are missing, stop and report the malformed init payload."
+        f"{bundle_hint}\n"
         "</gpd_staged_bootstrap_shim>"
+    )
+
+
+def _compact_staged_protocol_bundle_jit_hint(manifest: object) -> str:
+    """Return compact bundle-loading guidance for staged workflows that expose bundle fields."""
+    jit_workflows = {
+        "execute-phase",
+        "literature-review",
+        "map-research",
+        "plan-phase",
+        "quick",
+        "research-phase",
+        "respond-to-referees",
+        "verify-work",
+        "write-paper",
+    }
+    if getattr(manifest, "workflow_id", "") not in jit_workflows:
+        return ""
+
+    bundle_fields = (
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_count",
+        "protocol_bundle_context",
+        "protocol_bundle_verifier_extensions",
+    )
+    stages_with_bundle_fields: list[str] = []
+    for stage in getattr(manifest, "stages", ()):
+        required_fields = tuple(getattr(stage, "required_init_fields", ()))
+        if any(field in required_fields for field in bundle_fields):
+            stages_with_bundle_fields.append(str(getattr(stage, "id", "")))
+
+    if not stages_with_bundle_fields:
+        return ""
+
+    rendered_stages = ", ".join(f"`{stage_id}`" for stage_id in stages_with_bundle_fields if stage_id)
+    return (
+        "<protocol_bundle_jit>\n"
+        "When an active stage names `selected_protocol_bundle_ids`, `protocol_bundle_count`, "
+        "`protocol_bundle_context`, or `protocol_bundle_verifier_extensions` in "
+        "`staged_loading.required_init_fields`, use those init payload fields as the selected-bundle loading map. "
+        "Keep bundle guidance JIT: load only selected asset paths named by `protocol_bundle_context`, do not inline "
+        "protocol bundle catalogs during bootstrap, and keep unselected bundles absent.\n"
+        f"Bundle-aware stages: {rendered_stages}.\n"
+        "</protocol_bundle_jit>"
     )
 
 

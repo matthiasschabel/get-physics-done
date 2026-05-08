@@ -131,9 +131,12 @@ def test_verifier_prompt_points_to_canonical_verification_schema_sources() -> No
             "body-only Markdown",
         ),
     )
-    assert (
-        "`gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract`"
-        in verifier
+    _assert_contains_all(
+        canonical_authoring,
+        (
+            "`gpd verification-report skeleton ... --write --body-file ... --validate contract`",
+            "`gpd verification-report finalize ... --patch ... --body-file ... --validate contract`",
+        ),
     )
     _assert_contains_all(
         str(agent_frontmatter.get("tools", "")),

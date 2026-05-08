@@ -53,6 +53,18 @@ def _workflow_payload(workflow_id: str) -> dict[str, object]:
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
+def _with_protocol_bundle_load_manifest(fields: list[str]) -> list[str]:
+    if "protocol_bundle_context" not in fields or "protocol_bundle_load_manifest" in fields:
+        return fields
+    expanded = list(fields)
+    for anchor in ("protocol_bundle_count", "selected_protocol_bundle_ids"):
+        if anchor in expanded:
+            expanded.insert(expanded.index(anchor) + 1, "protocol_bundle_load_manifest")
+            return expanded
+    expanded.insert(expanded.index("protocol_bundle_context"), "protocol_bundle_load_manifest")
+    return expanded
+
+
 def _setup_generic_staged_init_project(cwd: Path) -> None:
     gpd_dir = cwd / "GPD"
     phase_dir = gpd_dir / "phases" / "01-test"
@@ -328,6 +340,7 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "contract_intake" in manifest.stages[4].required_init_fields
     assert "effective_reference_intake" in manifest.stages[4].required_init_fields
     assert "selected_protocol_bundle_ids" in manifest.stages[4].required_init_fields
+    assert "protocol_bundle_load_manifest" in manifest.stages[4].required_init_fields
     assert "protocol_bundle_context" in manifest.stages[4].required_init_fields
     assert "protocol_bundle_verifier_extensions" in manifest.stages[4].required_init_fields
     assert manifest.stages[4].loaded_authorities == (
@@ -444,6 +457,44 @@ def test_workflow_stage_manifest_expands_required_init_field_groups() -> None:
     assert "required_init_field_groups" not in manifest.to_payload()["stages"][0]
 
 
+def test_workflow_stage_manifest_adds_protocol_bundle_load_manifest_with_context_fields() -> None:
+    manifest = validate_workflow_stage_manifest_payload(
+        {
+            "schema_version": 1,
+            "workflow_id": "quick",
+            "stages": [
+                {
+                    "id": "reference_context",
+                    "order": 1,
+                    "purpose": "Load reference context.",
+                    "mode_paths": ["workflows/quick.md"],
+                    "required_init_fields": [
+                        "selected_protocol_bundle_ids",
+                        "protocol_bundle_count",
+                        "protocol_bundle_context",
+                    ],
+                    "loaded_authorities": ["workflows/quick.md"],
+                    "conditional_authorities": [],
+                    "must_not_eager_load": [],
+                    "allowed_tools": ["file_read"],
+                    "writes_allowed": [],
+                    "produced_state": [],
+                    "next_stages": [],
+                    "checkpoints": [],
+                },
+            ],
+        },
+        expected_workflow_id="quick",
+    )
+
+    assert manifest.stage("reference_context").required_init_fields == (
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
+        "protocol_bundle_context",
+    )
+
+
 @pytest.mark.parametrize("workflow_id", ["new-project", "quick"])
 def test_workflow_stage_manifest_serialized_payload_round_trips_expanded_fields(workflow_id: str) -> None:
     manifest = validate_workflow_stage_manifest_payload(
@@ -496,7 +547,9 @@ def test_stage_manifests_use_real_required_init_field_groups(workflow_id: str) -
             expanded_fields.extend(groups[group_name])
         expanded_fields.extend(raw_stage.get("required_init_fields", []))
 
-        assert manifest.stage(str(raw_stage["id"])).required_init_fields == tuple(expanded_fields)
+        assert manifest.stage(str(raw_stage["id"])).required_init_fields == tuple(
+            _with_protocol_bundle_load_manifest(expanded_fields)
+        )
 
     assert grouped_stage_count == len(payload["stages"])
 
@@ -557,6 +610,7 @@ def test_known_init_fields_for_verify_work_include_proof_gate_and_artifact_conte
     assert "project_contract_load_info" in known_init_fields
     assert "project_contract_validation" in known_init_fields
     assert "selected_protocol_bundle_ids" in known_init_fields
+    assert "protocol_bundle_load_manifest" in known_init_fields
     assert "protocol_bundle_verifier_extensions" in known_init_fields
     assert "proof_redteam_finalizer_bridge" in known_init_fields
     assert "verification_report_finalizer_bridge" in known_init_fields
@@ -782,6 +836,7 @@ def test_known_init_fields_for_write_paper_cover_bootstrap_and_deferred_publicat
     assert "project_contract_load_info" in known_init_fields
     assert "project_contract_validation" in known_init_fields
     assert "selected_protocol_bundle_ids" in known_init_fields
+    assert "protocol_bundle_load_manifest" in known_init_fields
     assert "protocol_bundle_context" in known_init_fields
     assert "active_reference_context" in known_init_fields
     assert "contract_intake" in known_init_fields
@@ -847,10 +902,32 @@ def test_known_init_fields_for_quick_cover_task_bootstrap_and_reference_context(
     assert "project_contract_gate" in known_init_fields
     assert "contract_intake" in known_init_fields
     assert "reference_artifacts_content" in known_init_fields
+    assert "protocol_bundle_load_manifest" in known_init_fields
     assert "contract_intake" not in manifest.stage("task_authoring").required_init_fields
     assert "reference_artifacts_content" not in manifest.stage("task_authoring").required_init_fields
     assert "contract_intake" in manifest.stage("reference_context").required_init_fields
     assert "reference_artifacts_content" in manifest.stage("reference_context").required_init_fields
+
+
+def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
+    manifest = load_workflow_stage_manifest("quick")
+    quick_text = (WORKFLOW_STAGE_MANIFEST_DIR / "quick.md").read_text(encoding="utf-8")
+
+    bundle_fields = {
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+        "protocol_bundle_context",
+        "protocol_bundle_verifier_extensions",
+    }
+
+    assert bundle_fields.isdisjoint(manifest.stage("task_bootstrap").required_init_fields)
+    assert bundle_fields.isdisjoint(manifest.stage("task_authoring").required_init_fields)
+    assert bundle_fields.issubset(manifest.stage("reference_context").required_init_fields)
+    assert "The bootstrap and default `task_authoring` payloads intentionally do not include" in quick_text
+    assert "If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`" in quick_text
+    assert "<selected_protocol_bundle_ids>" in quick_text
+    assert "<protocol_bundle_load_manifest>" in quick_text
+    assert "<protocol_bundle_verifier_extensions>" in quick_text
 
 
 @pytest.mark.parametrize(
@@ -892,6 +969,7 @@ def test_known_init_fields_for_quick_cover_task_bootstrap_and_reference_context(
                 "reference_artifact_files",
                 "reference_artifacts_content",
                 "selected_protocol_bundle_ids",
+                "protocol_bundle_load_manifest",
                 "protocol_bundle_context",
                 "protocol_bundle_verifier_extensions",
                 "current_execution",
@@ -1002,6 +1080,7 @@ def test_validate_workflow_stage_manifest_payload_loads_research_phase_manifest(
     assert "reference_artifact_files" in manifest.stage("research_handoff").required_init_fields
     assert "reference_artifacts_content" in manifest.stage("research_handoff").required_init_fields
     assert "selected_protocol_bundle_ids" in manifest.stage("research_handoff").required_init_fields
+    assert "protocol_bundle_load_manifest" in manifest.stage("research_handoff").required_init_fields
     assert "protocol_bundle_context" in manifest.stage("research_handoff").required_init_fields
     assert "protocol_bundle_verifier_extensions" in manifest.stage("research_handoff").required_init_fields
     assert "current_execution" in manifest.stage("research_handoff").required_init_fields
@@ -1176,6 +1255,7 @@ def test_known_init_fields_for_execute_phase_include_bootstrap_and_wave_context(
     assert "phase_found" in known_init_fields
     assert "plan_count" in known_init_fields
     assert "selected_protocol_bundle_ids" in known_init_fields
+    assert "protocol_bundle_load_manifest" in known_init_fields
     assert "reference_artifacts_content" in known_init_fields
     assert "current_execution" in known_init_fields
 
@@ -1319,6 +1399,7 @@ def test_validate_workflow_stage_manifest_payload_loads_execute_phase_manifest_s
     assert "templates/contract-results-schema.md" in manifest.stages[0].must_not_eager_load
     assert "references/orchestration/meta-orchestration.md" in manifest.stages[1].loaded_authorities
     assert "selected_protocol_bundle_ids" in manifest.stages[1].required_init_fields
+    assert "protocol_bundle_load_manifest" in manifest.stages[1].required_init_fields
     assert "reference_artifacts_content" in manifest.stages[2].required_init_fields
     assert "references/orchestration/artifact-surfacing.md" in manifest.stages[2].loaded_authorities
     assert manifest.staged_loading_payload("phase_bootstrap")["next_stages"] == ["wave_planning"]

@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+REFERENCES_DIR = SOURCE_ROOT / "specs" / "references" / "publication"
 
 
 def test_gpd_referee_prompt_stays_within_expected_budget() -> None:
@@ -20,12 +21,13 @@ def test_gpd_referee_prompt_stays_within_expected_budget() -> None:
     )
 
     assert metrics.raw_include_count == 0
-    assert metrics.expanded_line_count < 6_000
-    assert metrics.expanded_char_count < 300_000
+    assert metrics.expanded_line_count < 800
+    assert metrics.expanded_char_count < 50_000
 
 
 def test_gpd_referee_prompt_keeps_publication_path_mentions_without_eager_schema_expansion() -> None:
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
+    playbook = (REFERENCES_DIR / "referee-review-playbook.md").read_text(encoding="utf-8")
     expanded = expanded_prompt_text(
         AGENTS_DIR / "gpd-referee.md",
         src_root=SOURCE_ROOT,
@@ -37,6 +39,13 @@ def test_gpd_referee_prompt_keeps_publication_path_mentions_without_eager_schema
     assert "templates/paper/review-ledger-schema.md" in referee
     assert "templates/paper/referee-decision-schema.md" in referee
     assert "templates/paper/referee-report.tex" in referee
+    assert "full Markdown skeleton" in referee
+    assert "Referee Report Template" in playbook
+    assert "Anti-Pattern Examples" in playbook
+    assert "Revision Report Template" in playbook
+    assert "Referee Report Template" not in referee
+    assert "Anti-Pattern Examples" not in referee
+    assert "Revision Report Template" not in referee
     assert "Peer Review Panel Protocol" not in expanded
     assert "Referee Review Playbook" not in expanded
     assert "Review Ledger Schema" not in expanded

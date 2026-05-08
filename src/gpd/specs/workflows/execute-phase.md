@@ -339,7 +339,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `reference_artifacts_content`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
+Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `active_reference_context`, `reference_artifacts_content`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
 </step>
 
 <step name="claim_deliverable_alignment_check">
@@ -583,7 +583,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `current_execution`, `has_live_execution`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `execution_blocked`, `execution_resumable`, `execution_paused_at`, `current_execution_resume_file`, `handoff_resume_file`, `recorded_handoff_resume_file`, `missing_handoff_resume_file`, `execution_resume_file`, `execution_resume_file_source`, `resume_projection`, `current_hostname`, `current_platform`, `session_hostname`, `session_platform`, `session_last_date`, `session_stopped_at`, `machine_change_detected`, `machine_change_notice`, `state_load_source`, `state_integrity_issues`.
+Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `current_execution`, `has_live_execution`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `execution_blocked`, `execution_resumable`, `execution_paused_at`, `current_execution_resume_file`, `handoff_resume_file`, `recorded_handoff_resume_file`, `missing_handoff_resume_file`, `execution_resume_file`, `execution_resume_file_source`, `resume_projection`, `current_hostname`, `current_platform`, `session_hostname`, `session_platform`, `session_last_date`, `session_stopped_at`, `machine_change_detected`, `machine_change_notice`, `state_load_source`, `state_integrity_issues`.
 
 **For each wave:**
 
@@ -634,12 +634,9 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `curr
 
    **If this wave is marked risky fanout:** run `probe_then_fanout` instead of blind full-wave scaleout.
 
-   - First launch each risky plan only to its first-result gate or bounded segment boundary
-   - Collect first-result sanity outcomes, decisive-evidence status, and anchor status
-   - If an executor surfaces an unexpected but non-blocking alternative path, treat it as a tangent proposal, not permission for silent side exploration
-   - Resolve tangent proposals with the four-way decision model (`ignore | defer | branch_later | pursue_now`) before any extra side work, branch work, or follow-on fanout is allowed
-   - Only unlock the remainder of the wave when those gates pass with decisive evidence or the remaining work is explicitly independent of the unresolved comparison
-   - If any plan fails the gate or requires re-questioning, STOP the wave before spawning more downstream work
+   - First launch each risky plan only to its first-result gate or bounded segment boundary.
+   - Collect sanity, decisive-evidence, and anchor status; classify unexpected non-blocking alternatives as tangent proposals, not permission for silent side exploration.
+   - Resolve tangent proposals with `ignore | defer | branch_later | pursue_now`; unlock the remainder only when gates pass or remaining work is independent. If a gate fails or requires re-questioning, STOP before spawning downstream work.
 
 4. **Spawn executor agents:**
 
@@ -647,10 +644,8 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `curr
    This keeps orchestrator context lean; use `references/orchestration/context-budget.md` for numeric budget targets.
 
    Canonical runtime delegation convention for every `task()` block in this workflow:
-
    @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
-
-   The shared note owns runtime-neutral task construction and handoff gates. Later handoff blocks should reference this convention instead of restating those rules.
+   The shared note owns runtime-neutral task construction and handoff gates. Later handoff blocks reference it instead of restating those rules.
 
    ```
    task(
@@ -668,8 +663,10 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `curr
        <context_hint>{EXECUTOR_CONTEXT_HINT}</context_hint>
        <phase_class>{PHASE_CLASSES}</phase_class>
        <research_mode>{RESEARCH_MODE}</research_mode>
-       <protocol_bundles>{selected_protocol_bundle_ids}</protocol_bundles>
+       <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+       <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
        <protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+       <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
        <review_cadence>{REVIEW_CADENCE}</review_cadence>
        <max_unattended_minutes_per_plan>{MAX_UNATTENDED_MINUTES_PER_PLAN}</max_unattended_minutes_per_plan>
        <max_unattended_minutes_per_wave>{MAX_UNATTENDED_MINUTES_PER_WAVE}</max_unattended_minutes_per_wave>
@@ -678,16 +675,13 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `curr
        <checkpoint_before_downstream>{CHECKPOINT_BEFORE_DOWNSTREAM}</checkpoint_before_downstream>
        <bounded_execution>{true}</bounded_execution>
        <proof_redteam_gate>
-       If this plan is proof-bearing, you must leave behind the proof artifact, theorem inventory, and enough supporting context for the orchestrator to spawn `gpd-check-proof`.
-       Do NOT self-certify the sibling `{plan_id}-PROOF-REDTEAM.md` artifact as your own independent proof critic when a fresh `gpd-check-proof` subagent is available.
-       If any named parameter, hypothesis, or quantifier is missing from the proof, surface that gap immediately and do NOT claim the theorem is established.
-       Do not bypass this gate because the algebra looks clean, because the result reduces correctly in one special case, or because verification is disabled elsewhere.
+       If this plan is proof-bearing, leave the proof artifact, theorem inventory, and enough context for `gpd-check-proof`.
+       Do NOT self-certify the sibling `{plan_id}-PROOF-REDTEAM.md` artifact when a fresh `gpd-check-proof` subagent is available.
+       If any named parameter, hypothesis, or quantifier is missing, surface the gap and do NOT claim the theorem is established. Do not bypass this gate because the algebra looks clean, one limit works, or verification is disabled elsewhere.
        </proof_redteam_gate>
        <tangent_control>
-       Proposal-first. If an unexpected but non-blocking alternative path appears, classify it as `ignore`, `defer`, `branch_later`, or `pursue_now`.
-       Do not silently pursue optional tangents.
-       `pursue_now` requires explicit user request or existing approved scope.
-       If `research_mode=exploit`, suppress optional tangents unless tangent exploration was explicitly requested.
+       Proposal-first: classify unexpected non-blocking alternatives as `ignore`, `defer`, `branch_later`, or `pursue_now`; do not silently pursue optional tangents.
+       `pursue_now` requires explicit user request or approved scope. If `research_mode=exploit`, suppress optional tangents unless requested.
        </tangent_control>
 
        <files_to_read>
@@ -702,12 +696,9 @@ Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `curr
        </files_to_read>
 
 	       <success_criteria>
-	       - [ ] All tasks executed with mathematical rigor
-	       - [ ] Each task committed individually
-	       - [ ] Dimensional consistency verified at each step
-	       - [ ] Limiting cases checked where specified in plan
-	       - [ ] Proof-bearing plans leave enough artifact context for the orchestrator to run `gpd-check-proof`
-	       - [ ] Proof-bearing plans receive `{plan_id}-PROOF-REDTEAM.md` with `status: passed` before completion is claimed
+	       - [ ] Tasks executed rigorously and committed individually
+	       - [ ] Dimensional consistency and specified limiting cases checked
+	       - [ ] Proof-bearing plans leave context for `gpd-check-proof` and receive `{plan_id}-PROOF-REDTEAM.md` with `status: passed` before completion is claimed
 	       - [ ] SUMMARY.md created in plan directory
 	       - [ ] State updates returned (NOT written to STATE.md directly)
 	     </success_criteria>
@@ -739,11 +730,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
        Write to: {phase_dir}/{plan_id}-PROOF-REDTEAM.md
 
-       Files to read:
-       - {phase_dir}/{plan_file}
-       - {phase_dir}/{plan_id}-SUMMARY.md
-       - Proof / derivation artifacts produced by the executor
-       - Supporting verification or summary artifacts referenced by the plan
+       Files to read: {phase_dir}/{plan_file}; {phase_dir}/{plan_id}-SUMMARY.md; proof/derivation artifacts; supporting verification or summary artifacts referenced by the plan.
 
        Reconstruct the theorem inventory explicitly before judging the proof.
        Fail closed on missing parameter coverage, missing hypotheses, narrowed quantifiers, or special-case proofs sold as general claims.",
@@ -1211,6 +1198,10 @@ CHECKPOINT_RESUME_INIT=$(load_execute_phase_stage checkpoint_resume) || { echo "
    - `{user_response}`: What user provided
    - `{resume_instructions}`: Based on checkpoint type (see template for type-specific instructions)
    - `{execution_segment}`: The returned bounded-segment state, including checkpoint cause, current cursor, resume preconditions, downstream-lock status, and any skeptical re-questioning fields that must survive into the continuation
+   - `{selected_protocol_bundle_ids}`: From checkpoint_resume init JSON
+   - `{protocol_bundle_load_manifest}`: From checkpoint_resume init JSON when present
+   - `{protocol_bundle_context}`: From checkpoint_resume init JSON
+   - `{protocol_bundle_verifier_extensions}`: From checkpoint_resume init JSON
 7. Continuation agent verifies previous commits, continues from resume point
 8. Repeat until plan completes or user stops
 
@@ -1509,6 +1500,11 @@ Verify Phase {PHASE_NUMBER} against its phase goal and plan contracts.
 
 <phase_class>{PHASE_CLASSES}</phase_class>
 
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+
 Load before verdict:
 - {GPD_INSTALL_DIR}/workflows/verify-phase.md
 - {GPD_INSTALL_DIR}/templates/verification-report.md
@@ -1520,7 +1516,7 @@ Load before verdict:
 - State: GPD/STATE.md and GPD/state.json
 </files_to_read>
 
-Run `gpd --raw init phase-op {PHASE_NUMBER}` and keep the project contract, reference/protocol context, and `phase_proof_review_status` visible. Stable knowledge docs surfaced there are background only.
+Run `gpd --raw init phase-op {PHASE_NUMBER}` and keep the project contract, reference/protocol context, protocol bundle verifier extensions, and `phase_proof_review_status` visible. Stable knowledge docs surfaced there are background only.
 
 Write to: {phase_dir}/{phase_number}-VERIFICATION.md
 
@@ -1631,8 +1627,10 @@ task(
 
   <context_hint>{EXECUTOR_CONTEXT_HINT}</context_hint>
   <phase_class>{PHASE_CLASSES}</phase_class>
-  <protocol_bundles>{selected_protocol_bundle_ids}</protocol_bundles>
+  <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+  <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
   <protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+  <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 
   <files_to_read>
   - Workflow: {GPD_INSTALL_DIR}/workflows/execute-plan.md
@@ -1735,7 +1733,7 @@ Re-verify Phase {PHASE_NUMBER} after gap closure.
 	- Roadmap: GPD/ROADMAP.md
 	</files_to_read>
 
-	Rebuild the structured phase context with `gpd --raw init phase-op {PHASE_NUMBER}` and keep `project_contract`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, and `phase_proof_review_status` visible while re-checking the remaining gaps. Treat any stable knowledge docs surfaced in those fields as reviewed background only: they may inform interpretation, but they do not override the contract, proof audits, or decisive evidence.
+	Rebuild the structured phase context with `gpd --raw init phase-op {PHASE_NUMBER}` and keep `project_contract`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, and `phase_proof_review_status` visible while re-checking the remaining gaps. Treat any stable knowledge docs surfaced in those fields as reviewed background only: they may inform interpretation, but they do not override the contract, proof audits, or decisive evidence.
 
 	Focus on the gaps that were previously marked failed, partial, blocked, or otherwise unresolved in the previous verification. If the prior report carries `session_status: diagnosed`, use the recorded root causes and missing actions as the starting point for re-verification. For proof-bearing work, re-check every required `*-PROOF-REDTEAM.md` artifact and keep the phase blocked until those audits report `status: passed`.
 	Check whether the gap closure plans have resolved each issue.

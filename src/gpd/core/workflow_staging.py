@@ -274,6 +274,7 @@ EXECUTE_PHASE_INIT_FIELDS = frozenset(
         "derived_approximation_count",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "protocol_bundle_verifier_extensions",
         "current_execution",
@@ -358,6 +359,7 @@ PLAN_PHASE_REFERENCE_RUNTIME_FIELDS = frozenset(
         "effective_reference_intake",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "protocol_bundle_verifier_extensions",
         "active_reference_context",
@@ -450,6 +452,7 @@ QUICK_REFERENCE_RUNTIME_FIELDS = frozenset(
         "effective_reference_intake",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "protocol_bundle_verifier_extensions",
         "active_reference_context",
@@ -511,6 +514,7 @@ LITERATURE_REVIEW_INIT_FIELDS = frozenset(
         "derived_citation_source_count",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_verifier_extensions",
         "protocol_bundle_context",
         "active_references",
@@ -588,6 +592,7 @@ RESEARCH_PHASE_INIT_FIELDS = frozenset(
         "derived_approximation_count",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "protocol_bundle_verifier_extensions",
         "current_execution",
@@ -689,6 +694,7 @@ MAP_RESEARCH_INIT_FIELDS = frozenset(
         "derived_manuscript_proof_review_status",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_verifier_extensions",
         "protocol_bundle_context",
         "active_references",
@@ -769,6 +775,7 @@ VERIFY_WORK_REFERENCE_RUNTIME_FIELDS = frozenset(
         "active_reference_count",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_verifier_extensions",
         "protocol_bundle_context",
         "active_reference_context",
@@ -869,6 +876,7 @@ WRITE_PAPER_INIT_FIELDS = frozenset(
         "publication_bootstrap_root",
         "publication_bootstrap_detail",
         "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "active_reference_context",
         "derived_manuscript_reference_status",
@@ -918,6 +926,7 @@ PEER_REVIEW_INIT_FIELDS = frozenset(
         "contract_intake",
         "effective_reference_intake",
         "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "active_reference_context",
         "derived_manuscript_reference_status",
@@ -985,6 +994,7 @@ ARXIV_SUBMISSION_BOOTSTRAP_FIELDS = frozenset(
         "project_contract_load_info",
         "project_contract_validation",
         "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "active_reference_context",
         "derived_manuscript_reference_status",
@@ -1427,6 +1437,14 @@ def _expand_required_init_fields(
             raise ValueError(f"stages[{index}].required_init_fields contains duplicate field: {field_name}")
         seen.add(field_name)
         fields.append(field_name)
+
+    if "protocol_bundle_context" in seen and "protocol_bundle_load_manifest" not in seen:
+        for anchor in ("protocol_bundle_count", "selected_protocol_bundle_ids"):
+            if anchor in fields:
+                fields.insert(fields.index(anchor) + 1, "protocol_bundle_load_manifest")
+                break
+        else:
+            fields.insert(fields.index("protocol_bundle_context"), "protocol_bundle_load_manifest")
     return tuple(fields)
 
 

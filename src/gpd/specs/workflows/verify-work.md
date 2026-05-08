@@ -211,7 +211,7 @@ Treat `effective_reference_intake` as the structured source of carry-forward anc
 </step>
 
 <step name="load_protocol_bundle_context">
-Use `protocol_bundle_context` from init JSON as additive specialized guidance. If `selected_protocol_bundle_ids` is non-empty, use `protocol_bundle_verifier_extensions` from init JSON as the primary source for bundle checklist extensions; call `get_bundle_checklist(selected_protocol_bundle_ids)` only when extensions are missing or need consistency checking. Bundle guidance may add estimator checks, decisive artifact expectations, or domain-specific audits, but it does NOT replace the plan contract or reduce anchor obligations.
+Use `protocol_bundle_load_manifest` and `protocol_bundle_context` from init JSON as additive specialized guidance. If `selected_protocol_bundle_ids` is non-empty, use `protocol_bundle_verifier_extensions` from init JSON as the primary source for bundle checklist extensions; call `get_bundle_checklist(selected_protocol_bundle_ids)` only when extensions are missing or need consistency checking. Bundle guidance may add estimator checks, decisive artifact expectations, or domain-specific audits, but it does NOT replace the plan contract or reduce anchor obligations.
 - If the phase has a PLAN `contract` and project-local anchors or prior-output paths matter, use this contract-check loop before finalizing the inventory:
   1. Call `suggest_contract_checks(contract, project_dir=...)`.
   2. Treat the returned items as the default contract-aware seed unless they are clearly inapplicable.
@@ -224,7 +224,7 @@ Use `protocol_bundle_context` from init JSON as additive specialized guidance. I
 
 Spawn `gpd-verifier` once and let it own the physics policy. Use `subagent_type="gpd-verifier"`, model `{verifier_model}`, and scoped write. It owns contract-backed target extraction, evidence mapping, proof policy, computational checks, decisive comparisons, canonical status, suggested contract checks, and the gap ledger.
 
-Pass the project contract, proof freshness summary, active reference context, and protocol bundle context into the handoff so the verifier can build its own authoritative ledger.
+Pass the project contract, proof freshness summary, active reference context, and protocol bundle handoff fields into the handoff so the verifier can build its own authoritative ledger.
 Point the verifier at `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` for scientific status ownership, target status vocabulary, top-level verification status, and runtime return-status distinction.
 Use `protocol_bundle_verifier_extensions` as primary bundle checklist surface; `protocol_bundle_context` is readable projection. Use `suggest_contract_checks(contract)` for ambiguous decisive anchors or prior-output paths. Required decisive comparisons should stay legible enough that the researcher can recognize in the phase promise which `claim`, acceptance test, or reference is still unresolved. Do not mark the parent claim or acceptance test as passed until that decisive comparison is resolved.
 Human-readable headings in the verifier output are presentation only; route on the canonical verification frontmatter and `gpd_return.status`, not on headings or marker strings.
@@ -237,7 +237,23 @@ Prompt: "First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instruct
 
 Read with `file_read`: `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`, all PLAN/SUMMARY/`*-PROOF-REDTEAM.md` files in `${PHASE_DIR_ABS}/`, `${PROJECT_ROOT}/GPD/STATE.md`, and `${PROJECT_ROOT}/GPD/ROADMAP.md`.
 
-Pass this context: Project contract: {project_contract}; Project contract gate: {project_contract_gate}; Project contract load info: {project_contract_load_info}; Project contract validation: {project_contract_validation}; Contract intake: {contract_intake}; Effective reference intake: {effective_reference_intake}; Active reference context: {active_reference_context}; Selected protocol bundle ids: {selected_protocol_bundle_ids}; Protocol bundle context: {protocol_bundle_context}; Protocol bundle verifier extensions: {protocol_bundle_verifier_extensions}; Proof freshness summary: {phase_proof_review_status}.
+Pass this context: Project contract: {project_contract}; Project contract gate: {project_contract_gate}; Project contract load info: {project_contract_load_info}; Project contract validation: {project_contract_validation}; Contract intake: {contract_intake}; Effective reference intake: {effective_reference_intake}; Active reference context: {active_reference_context}; Proof freshness summary: {phase_proof_review_status}.
+
+<selected_protocol_bundle_ids>
+{selected_protocol_bundle_ids}
+</selected_protocol_bundle_ids>
+
+<protocol_bundle_load_manifest>
+{protocol_bundle_load_manifest}
+</protocol_bundle_load_manifest>
+
+<protocol_bundle_context>
+{protocol_bundle_context}
+</protocol_bundle_context>
+
+<protocol_bundle_verifier_extensions>
+{protocol_bundle_verifier_extensions}
+</protocol_bundle_verifier_extensions>
 
 Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. Use `protocol_bundle_verifier_extensions` as primary bundle-extension surface. Keep decisive comparison gaps legible at the claim / acceptance-test / reference level. If user input is required, return `gpd_return.status: checkpoint` and stop.
 Schema finalization is bounded: validator pass returns; after the second validator failure total, including the initial failure and one repair rerun, return `gpd_return.status: blocked` with latest errors. Stop after two schema-only repair failures.
@@ -431,6 +447,7 @@ Display:
 Spawn `gpd-planner` in `--gaps` mode as a fresh one-shot delegation from the staged gap-repair payload.
 First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
 Use `templates/planner-subagent-prompt.md` to build the gap_closure planner handoff from the staged payload. Keep `tool_requirements`, the checker feedback, and other machine-checkable hard requirements explicit.
+Bind the template's protocol fields from the gap-repair payload: `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}`. Do not collapse verifier extensions into the rendered context block.
 
 > Runtime delegation rule: the planner is single-shot. If it needs user input, it checkpoints and returns. Do not keep the same planner run open across user interaction.
 
@@ -478,6 +495,7 @@ If the checker reports issues, send a fresh planner continuation from the staged
 When the checker returns `checkpoint` or `blocked`, use the structured `approved_plans`, `blocked_plans`, and `issues` fields to decide which plans to revise. Use the structured fields, not the human-readable approval table, as the source of truth. Do not rewrite approved plans during the revision round.
 First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
 Use `templates/planner-subagent-prompt.md` again for checker-driven gap_closure revisions.
+Again bind `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}` from the staged gap-repair payload so revision planners keep verifier-extension obligations visible.
 
 If iteration count reaches 3, stop and offer the user:
 

@@ -100,11 +100,11 @@ Treat the contract as a typed checklist, not a prose hint:
 
 **Canonical verification report authoring (required):**
 
-Use the report helper as the primary frontmatter writer. When the handoff payload provides `verification_report_finalizer_bridge`, use `gpd verification-report finalize` with a typed patch JSON plus body-only evidence for passed, `human_needed`, `expert_needed`, and typed non-gap outcomes. When the payload provides `verification_report_skeleton_bridge`, use it only for conservative gap reports: write body-only evidence to a Markdown body file, then run its `writer_command`. Follow `body_contract` when present: body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict. The helper serializes frontmatter and validates before the report is canonical. Use `skeleton_command` only as read-only preview context. Do not hand-author or reflow `VERIFICATION.md` YAML.
+Use the report helper as the primary frontmatter writer. Prefer `verification_report_finalizer_bridge` / `gpd verification-report finalize` for passed, `human_needed`, `expert_needed`, and typed non-gap outcomes. Use `verification_report_skeleton_bridge` / `writer_command` only for conservative gap reports. Follow `body_contract` when present; keep body-only evidence in body-only Markdown containing decisive evidence and the executed oracle. Gap-report body evidence must include one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and following `PASS`/`FAIL`/`INCONCLUSIVE` verdict. The helper serializes frontmatter and validates before the report is canonical. Use `skeleton_command` only as read-only preview context. Do not hand-author or reflow `VERIFICATION.md` YAML.
 
-If the bridge is unavailable, run the equivalent helper directly: `gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract` for gap reports, or `gpd verification-report finalize PLAN.md --patch PATCH.json --body-file BODY.md --output VERIFICATION.md --validate contract --force` for stronger statuses. Use `{GPD_INSTALL_DIR}/templates/verification-report.md`, `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`, and `{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md` as authority references only when the helper or validator errors require them; do not inline or recreate their full YAML in the prompt or report body.
+If the bridge is unavailable, run the equivalent helper directly: `gpd verification-report skeleton ... --write --body-file ... --validate contract` for gap reports (`gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract`), or `gpd verification-report finalize ... --patch ... --body-file ... --validate contract` for stronger statuses. Use `{GPD_INSTALL_DIR}/templates/verification-report.md`, `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`, and `{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md` as authority references only when helper or validator errors require them; do not inline or recreate their full YAML in the prompt or report body.
 
-Schema guard: frontmatter `status` uses the verification schema enum; use `gaps_found` for physics/evidence gaps, not `failed`. Keep `plan_contract_ref`, `contract_results`, `contract_results.uncertainty_markers`, `comparison_verdicts`, `suggested_contract_checks`, proof-audit linkage, status vocabularies, ID linkage, and stale-audit handling helper/validator-owned. Passed verification frontmatter is helper/validator-owned; do not hand-author `status: passed` YAML. Keep decisive comparisons marked as `subject_role: decisive`. Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter; they belong in body or return envelope. No `gpd_return`, `computational_oracle`, or runtime fields in frontmatter. Oracle in body; return after report. Contract IDs stay in frontmatter; project-only IDs go in body/unbound suggestions. Do not invent comparison-verdict keys, aliases, or empty evidence to pass. For missing decisive anchors, prefer the helper-generated compact gap ledger and explain the computation evidence in the body.
+Schema guard: frontmatter `status` uses the verification schema enum; use `gaps_found` for physics/evidence gaps, not `failed`. Keep `plan_contract_ref`, `contract_results`, `contract_results.uncertainty_markers`, `comparison_verdicts`, `suggested_contract_checks`, proof-audit linkage, status vocabularies, ID linkage, stale-audit handling, and passed-status serialization helper/validator-owned. Passed verification frontmatter is helper/validator-owned; do not hand-author `status: passed` YAML. Keep decisive comparisons marked as `subject_role: decisive`. Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter; they belong in the body or return envelope. Contract IDs stay in frontmatter; project-only IDs go in body/unbound suggestions. Do not invent comparison-verdict keys, aliases, or empty evidence to pass.
 
 Before freezing the verification plan, use this contract-check loop whenever project-local anchors or prior-output paths matter:
 
@@ -169,21 +169,15 @@ For forbidden proxies:
 
 ## Step 4: Verify Artifacts (Four Levels)
 
+Apply the four-level gate to every supporting artifact. Existence is never enough.
+
 ### Level 1: Existence
 
-Does the artifact exist and is it non-trivial?
-
-Use `file_read("$artifact_path")` — this both checks existence (returns error if missing) and lets you verify the content is non-trivial (not just boilerplate or empty).
+Use `file_read("$artifact_path")` to prove the artifact exists, is readable, and is non-trivial.
 
 ### Level 2: Substantive Content
 
-Is the artifact a real derivation / computation / result, not a placeholder?
-
-**Read the artifact and evaluate its content directly.** Do not rely solely on search_files counts of library imports. Instead:
-
-1. **Read the file** and identify the key equations, functions, or results it claims to produce
-2. **Check for stubs:** Look for hardcoded return values, TODO comments, placeholder constants, empty function bodies
-3. **Check for completeness:** Does the derivation reach a final result? Does the code actually compute what it claims?
+Read the artifact and identify the equations, functions, results, or data it claims to produce. Check for stubs, placeholders, TODO-only content, hardcoded return values, and derivations that stop before the claimed result.
 
 <!-- Stub detection patterns extracted to reduce context. Load on demand from `references/verification/examples/verifier-worked-examples.md`. -->
 
@@ -221,16 +215,11 @@ Apply the top-level rules from the loaded `references/verification/verification-
 
 **Confidence assessment:**
 
-| Level      | Criteria                                                                                                     |
-| ---------- | ------------------------------------------------------------------------------------------------------------ |
-| HIGH       | Most checks independently confirmed, agrees with literature, limiting cases re-derived and match             |
-| MEDIUM     | Most checks structurally present, some independently confirmed, plausible but not fully re-derived           |
-| LOW        | Significant checks only structurally present or unable to verify, no independent confirmation of key results |
-| UNRELIABLE | Dimensional inconsistencies found, conservation violations, independently-confirmed checks show errors       |
+HIGH = most decisive checks independently confirmed. MEDIUM = structurally present with some independent checks. LOW = key checks are structural or deferred. UNRELIABLE = dimensional, conservation, or independently confirmed checks show errors.
 
 ## Step 10: Structure Gap Output (If Gaps Found)
 
-Use the verification-report helper to serialize the gap ledger for `gpd:plan-phase --gaps`; do not hand-author gap YAML. A gap report's top-level `status` is `gaps_found`, `expert_needed`, or `human_needed` as applicable, never `failed` for a physics or evidence gap. The body must still make every gap actionable: identify the contract target, expectation, failed/partial check, category, computation evidence, affected artifacts, missing fix, severity, and any decisive check the contract omitted.
+Use the verification-report helper to serialize the gap ledger for `gpd:plan-phase --gaps`; this is a helper-generated compact gap ledger, not hand-authored gap YAML. A gap report's top-level `status` is `gaps_found`, `expert_needed`, or `human_needed` as applicable, never `failed` for a physics or evidence gap. The body must still make every gap actionable: identify the contract target, expectation, failed/partial check, category, computation evidence, affected artifacts, missing fix, severity, and any decisive check the contract omitted.
 
 **Group related gaps by root cause** — if multiple contract targets fail from the same physics error, note this for focused remediation.
 
@@ -240,23 +229,9 @@ Use the verification-report helper to serialize the gap ledger for `gpd:plan-pha
 
 ## Computational Oracle Gate (HARD REQUIREMENT)
 
-**VERIFICATION.md is INCOMPLETE without at least one executed code block with actual output.**
+VERIFICATION.md is incomplete without at least one actually executed computational oracle block: executed `python`/`bash`/CAS code, actual output, and a PASS/FAIL/INCONCLUSIVE verdict based on that output. If the report lacks this evidence, do not return `status: completed`; run a numerical spot-check, limiting-case evaluation, dimensional trace, or convergence test first.
 
-Before finalizing VERIFICATION.md, scan it for computational oracle evidence. The report must contain at least one block matching this pattern:
-
-1. A Python/SymPy/numpy code block that was actually executed
-2. The actual execution output (not "this would produce..." or verbal reasoning)
-3. A verdict (PASS/FAIL/INCONCLUSIVE) based on the output
-
-**If no computational oracle block exists:** Do NOT return status=completed. Instead, go back and execute at least one of:
-- A numerical spot-check on a key expression (Template 3 from computational-verification-templates.md)
-- A limiting case evaluation via SymPy (Template 2)
-- A dimensional analysis check (Template 1)
-- A convergence test (Template 5)
-
-**If code execution is unavailable:** Document this in the static analysis mode section and cap confidence at MEDIUM. But still ATTEMPT execution — many environments have numpy/sympy available even when other dependencies are not.
-
-**Rationale:** The entire verification chain depends on the same LLM that produced the research. Without external computational validation, the verifier can only check self-consistency, not correctness. A single CAS evaluation catches errors that no amount of LLM reasoning can detect.
+If code execution is unavailable, document static-analysis mode, cap confidence at MEDIUM, and leave decisive execution checks deferred rather than independently confirmed. Still attempt execution before declaring it unavailable.
 
 See `{GPD_INSTALL_DIR}/references/verification/core/computational-verification-templates.md` for copy-paste-ready templates.
 
@@ -272,7 +247,7 @@ After the closing frontmatter `---`, add the machine-readable header before the 
 
 ### Body-Only Evidence
 
-Write the report body as body-only Markdown and let `gpd verification-report skeleton --write --body-file ... --validate contract` serialize the frontmatter. The body must contain the decisive evidence: contract coverage narrative, required artifacts, computational verification details (spot-checks, limiting cases, cross-checks, intermediate checks, dimensional trace), physics consistency, forbidden proxy audit, comparison verdict discussion, discrepancies, suggested contract checks, requirements coverage, expert review needs, confidence assessment, and gap summary.
+Write the report body as body-only Markdown and let `gpd verification-report skeleton --write --body-file ... --validate contract` serialize the frontmatter. The body must contain decisive evidence: contract coverage, artifact checks, computational verification details, physics consistency, forbidden proxy audit, comparison verdict discussion, suggested contract checks, expert review needs, confidence, and gap summary.
 
 ### Validation Stop Rule
 
@@ -388,19 +363,12 @@ Load deeper fallback detail from `references/verification/core/computational-ver
 - [ ] If re-verification: contract-backed gaps loaded from previous, focus on failed items
 - [ ] If initial: verification targets established from PLAN `contract` first
 - [ ] All decisive contract targets verified with status and evidence
-- [ ] All artifacts checked at all three levels (exists, substantive, integrated)
-- [ ] **Dimensional analysis** performed by tracing dimensions of each symbol through each equation
-- [ ] **Numerical spot-checks** performed on key expressions or explicitly deferred with reason
-- [ ] **Limiting cases independently re-derived** with every decisive step shown
-- [ ] **Independent cross-checks** performed where feasible (alternative method, series expansion, special case)
-- [ ] **Symmetry, conservation, and mathematical consistency** checked at the level the active phase actually needs
-- [ ] **Numerical convergence / stochastic validation / specialized diagnostics** either executed or explicitly deferred after loading the relevant on-demand computational checks
-- [ ] **Agreement with literature** checked by numerical comparison against benchmark values
+- [ ] All artifacts checked at levels 1-4: existence, substantive content, validation, and integration
+- [ ] Dimensional analysis, numerical spot-checks, limiting cases, independent cross-checks, symmetry/conservation/math consistency, convergence/statistical checks, and literature comparisons executed where decisive or explicitly deferred with reason
 - [ ] Required `comparison_verdicts` recorded for decisive benchmark / prior-work / experiment / cross-method checks, including `inconclusive` / `tension` when that is the honest state
 - [ ] Forbidden proxies explicitly rejected or escalated
 - [ ] Missing decisive checks recorded as structured `suggested_contract_checks`
-- [ ] **Physical plausibility** assessed by evaluating the decisive constraints for the phase
-- [ ] **Subfield-specific checklist** applied with computational checks (not just search_files)
+- [ ] Physical plausibility and subfield-specific checks applied with computation/re-derivation, not just search
 - [ ] **Confidence rating** assigned to every check (independently confirmed / structurally present / unable to verify)
 - [ ] **Approximation validity / measure / cancellation gates** evaluated when they materially affect the active phase
 - [ ] **Conventions verified** against state.json convention_lock

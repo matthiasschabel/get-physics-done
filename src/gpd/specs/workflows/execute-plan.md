@@ -316,9 +316,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Extract from wave_planning init JSON: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `reference_artifacts_content`, `state_load_source`, `state_integrity_issues`, `convention_lock`, `convention_lock_count`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
+Extract from wave_planning init JSON: `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `active_reference_context`, `reference_artifacts_content`, `state_load_source`, `state_integrity_issues`, `convention_lock`, `convention_lock_count`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
 
-If `selected_protocol_bundle_ids` is non-empty, treat `protocol_bundle_context` as the plan-execution specialized-loading guide for this plan. Read any bundle-listed core assets now, not during bootstrap.
+If `selected_protocol_bundle_ids` is non-empty, treat `protocol_bundle_load_manifest` and `protocol_bundle_context` as the plan-execution specialized-loading guide for this plan. Read any bundle-listed core assets now, not during bootstrap. Preserve `protocol_bundle_verifier_extensions` for verifier-ready outputs and downstream summary/verification checks.
 
 Use `reference_artifacts_content` only here, when the segment actually needs to interpret prior outputs, baselines, or unresolved gaps. Stable knowledge docs may be present in that content as reviewed background, but they do not override the contract, conventions, or decisive evidence requirements.
 
@@ -599,7 +599,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Extract from aggregate-and-verify init JSON: `summaries`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `current_execution`, `has_live_execution`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `execution_blocked`, `execution_resumable`, `execution_paused_at`, `current_execution_resume_file`, `handoff_resume_file`, `recorded_handoff_resume_file`, `missing_handoff_resume_file`, `execution_resume_file`, `execution_resume_file_source`, `resume_state`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `state_load_source`, `state_integrity_issues`.
+Extract from aggregate-and-verify init JSON: `summaries`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `current_execution`, `has_live_execution`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `execution_blocked`, `execution_resumable`, `execution_paused_at`, `current_execution_resume_file`, `handoff_resume_file`, `recorded_handoff_resume_file`, `missing_handoff_resume_file`, `execution_resume_file`, `execution_resume_file_source`, `resume_state`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `state_load_source`, `state_integrity_issues`.
+
+Keep `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, and `protocol_bundle_verifier_extensions` visible through summary authoring when the selected bundle added decisive artifact or verifier-extension obligations.
 
 Create `${phase}-${plan}-SUMMARY.md` at `${phase_dir}/`. Use `{GPD_INSTALL_DIR}/templates/summary.md`.
 

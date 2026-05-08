@@ -99,7 +99,12 @@ from gpd.core.proof_review import (
     resolve_manuscript_proof_review_status,
     resolve_phase_proof_review_status,
 )
-from gpd.core.protocol_bundles import render_protocol_bundle_context, select_protocol_bundles
+from gpd.core.protocol_bundles import (
+    ResolvedProtocolBundle,
+    build_protocol_bundle_load_manifest,
+    render_protocol_bundle_context,
+    select_protocol_bundles,
+)
 from gpd.core.publication_runtime import publication_runtime_snapshot_context
 from gpd.core.reference_ingestion import ingest_manuscript_reference_status, ingest_reference_artifacts
 from gpd.core.results import result_list
@@ -480,6 +485,7 @@ _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS = frozenset(
         "contract_intake",
         "effective_reference_intake",
         "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "active_reference_context",
         "derived_manuscript_reference_status",
@@ -570,6 +576,7 @@ _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS = frozenset(
         "contract_intake",
         "effective_reference_intake",
         "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "active_reference_context",
         "derived_manuscript_reference_status",
@@ -716,6 +723,7 @@ _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS = frozenset(
         "derived_manuscript_reference_status_count",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_verifier_extensions",
         "protocol_bundle_context",
         "active_reference_context",
@@ -776,6 +784,7 @@ _STAGED_REFERENCE_SUMMARY_FIELDS = frozenset(
         "effective_reference_intake",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
+        "protocol_bundle_load_manifest",
         "protocol_bundle_verifier_extensions",
         "protocol_bundle_context",
         "active_reference_context",
@@ -1898,6 +1907,22 @@ def _reference_artifact_payload(cwd: Path, *, include_content: bool = True) -> d
     }
 
 
+def _protocol_bundle_verifier_extensions(
+    selected_protocol_bundles: list[ResolvedProtocolBundle],
+) -> list[dict[str, object]]:
+    bundle_verifier_extensions: list[dict[str, object]] = []
+    for bundle in selected_protocol_bundles:
+        for extension in bundle.verifier_extensions:
+            bundle_verifier_extensions.append(
+                {
+                    "bundle_id": bundle.bundle_id,
+                    "bundle_title": bundle.title,
+                    **extension.model_dump(mode="json"),
+                }
+            )
+    return bundle_verifier_extensions
+
+
 def _build_reference_runtime_context(
     cwd: Path,
     *,
@@ -1975,17 +2000,8 @@ def _build_reference_runtime_context(
         surfaced_active_references,
     )
     selected_protocol_bundles = select_protocol_bundles(project_text, authoritative_contract)
-
-    bundle_verifier_extensions: list[dict[str, object]] = []
-    for bundle in selected_protocol_bundles:
-        for extension in bundle.verifier_extensions:
-            bundle_verifier_extensions.append(
-                {
-                    "bundle_id": bundle.bundle_id,
-                    "bundle_title": bundle.title,
-                    **extension.model_dump(mode="json"),
-                }
-            )
+    protocol_bundle_load_manifest = build_protocol_bundle_load_manifest(selected_protocol_bundles)
+    bundle_verifier_extensions = _protocol_bundle_verifier_extensions(selected_protocol_bundles)
 
     return {
         "project_contract": visible_context_contract.model_dump(mode="json")
@@ -2013,6 +2029,7 @@ def _build_reference_runtime_context(
         "active_reference_count": len(surfaced_active_references),
         "selected_protocol_bundle_ids": [bundle.bundle_id for bundle in selected_protocol_bundles],
         "protocol_bundle_count": len(selected_protocol_bundles),
+        "protocol_bundle_load_manifest": protocol_bundle_load_manifest,
         "protocol_bundle_verifier_extensions": bundle_verifier_extensions,
         "protocol_bundle_context": render_protocol_bundle_context(selected_protocol_bundles)
         if include_protocol_context
@@ -2093,16 +2110,8 @@ def _build_contract_reference_runtime_context(cwd: Path) -> dict[str, object]:
     )
     project_text = _safe_read_file(cwd / PLANNING_DIR_NAME / PROJECT_FILENAME)
     selected_protocol_bundles = select_protocol_bundles(project_text, authoritative_contract)
-    bundle_verifier_extensions: list[dict[str, object]] = []
-    for bundle in selected_protocol_bundles:
-        for extension in bundle.verifier_extensions:
-            bundle_verifier_extensions.append(
-                {
-                    "bundle_id": bundle.bundle_id,
-                    "bundle_title": bundle.title,
-                    **extension.model_dump(mode="json"),
-                }
-            )
+    protocol_bundle_load_manifest = build_protocol_bundle_load_manifest(selected_protocol_bundles)
+    bundle_verifier_extensions = _protocol_bundle_verifier_extensions(selected_protocol_bundles)
 
     return {
         "project_contract": visible_context_contract.model_dump(mode="json")
@@ -2117,6 +2126,7 @@ def _build_contract_reference_runtime_context(cwd: Path) -> dict[str, object]:
         "active_reference_count": len(surfaced_active_references),
         "selected_protocol_bundle_ids": [bundle.bundle_id for bundle in selected_protocol_bundles],
         "protocol_bundle_count": len(selected_protocol_bundles),
+        "protocol_bundle_load_manifest": protocol_bundle_load_manifest,
         "protocol_bundle_verifier_extensions": bundle_verifier_extensions,
         "protocol_bundle_context": render_protocol_bundle_context(selected_protocol_bundles),
         "active_reference_context": _render_active_reference_context(
@@ -2276,6 +2286,7 @@ def _build_publication_bootstrap_runtime_context(
     )
     project_text = _safe_read_file(cwd / PLANNING_DIR_NAME / PROJECT_FILENAME)
     selected_protocol_bundles = select_protocol_bundles(project_text, authoritative_contract)
+    protocol_bundle_load_manifest = build_protocol_bundle_load_manifest(selected_protocol_bundles)
     manuscript_reference_status = ingest_manuscript_reference_status(cwd, publication_subject=publication_subject)
     manuscript_proof_review_status = resolve_manuscript_proof_review_status(
         cwd,
@@ -2336,6 +2347,7 @@ def _build_publication_bootstrap_runtime_context(
         "publication_bootstrap_root": publication_bootstrap_payload["bootstrap_root"],
         "publication_bootstrap_detail": publication_bootstrap_payload["detail"],
         "selected_protocol_bundle_ids": [bundle.bundle_id for bundle in selected_protocol_bundles],
+        "protocol_bundle_load_manifest": protocol_bundle_load_manifest,
         "protocol_bundle_context": render_protocol_bundle_context(selected_protocol_bundles),
         "active_reference_context": _render_active_reference_context(
             surfaced_active_references,
@@ -2831,6 +2843,7 @@ def _build_peer_review_runtime_context(
                 "active_reference_count": 0,
                 "selected_protocol_bundle_ids": [],
                 "protocol_bundle_count": 0,
+                "protocol_bundle_load_manifest": build_protocol_bundle_load_manifest([]),
                 "protocol_bundle_verifier_extensions": [],
                 "protocol_bundle_context": None,
                 "active_reference_context": "",

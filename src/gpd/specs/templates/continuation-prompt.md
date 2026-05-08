@@ -57,9 +57,21 @@ Do not assume a `first_result` or `pre_fanout` clear also clears skeptical re-qu
 
 If the execution segment indicates `first_result_gate_pending: true`, do not reinterpret that gate as passed just because the result looks plausible. Continue only after the review outcome has been made explicit in this continuation.
 
-<protocol_bundles>
+<selected_protocol_bundle_ids>
+{selected_protocol_bundle_ids}
+</selected_protocol_bundle_ids>
+
+<protocol_bundle_load_manifest>
+{protocol_bundle_load_manifest}
+</protocol_bundle_load_manifest>
+
+<protocol_bundle_context>
 {protocol_bundle_context}
-</protocol_bundles>
+</protocol_bundle_context>
+
+<protocol_bundle_verifier_extensions>
+{protocol_bundle_verifier_extensions}
+</protocol_bundle_verifier_extensions>
 
 <resume_instructions>
 {resume_instructions}
@@ -124,7 +136,10 @@ Also verify the bounded execution segment still satisfies its resume preconditio
 | `{user_response}`         | User's response to checkpoint       | `approved` or `Select: option-a` or `done`                                |
 | `{resume_instructions}`   | Generated from checkpoint type      | See table below                                                           |
 | `{execution_segment}`     | Runtime handoff payload             | Segment JSON or markdown block whose persisted bounded-segment subset contains exactly the canonical continuation fields listed above |
+| `{selected_protocol_bundle_ids}` | Selected protocol bundle IDs | Structured selected bundle list carried across continuations |
+| `{protocol_bundle_load_manifest}` | Protocol bundle load manifest | Structured bundle asset/load metadata when provided by init |
 | `{protocol_bundle_context}` | Selected protocol bundle summary | Additive specialized-loading guidance carried across continuations |
+| `{protocol_bundle_verifier_extensions}` | Protocol bundle verifier extensions | Additive verifier checklist guidance carried across continuations |
 | `{phase_dir}`             | Phase directory path                | `GPD/phases/03-phase-diagram`                                       |
 | `{plan_file}`             | Plan filename                       | `03-03-PLAN.md`                                                           |
 | `{phase}`                 | Phase prefix                        | `03`                                                                      |

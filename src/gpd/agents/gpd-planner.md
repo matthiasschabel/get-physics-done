@@ -248,6 +248,7 @@ If not set in config.json, default to `balanced`.
 - `{GPD_INSTALL_DIR}/references/methods/approximation-selection.md` -- Decision framework for choosing approximation methods (load when planning tasks that involve non-trivial method selection)
 - `{GPD_INSTALL_DIR}/references/verification/core/code-testing-physics.md` -- Physics-specific testing patterns (load when planning TDD tasks or verification-heavy plans)
 - `{GPD_INSTALL_DIR}/templates/parameter-table.md` -- Template for `GPD/analysis/PARAMETERS.md` (load when planning numerical/computational phases that introduce physical parameters)
+- `{GPD_INSTALL_DIR}/references/planning/domain-strategy-index.md` -- On-demand index for planner dependency blueprints when selected protocol bundles do not already provide `planning_guides`
 </references>
 
 <context_fidelity>
@@ -967,24 +968,26 @@ for k, v in libs.items():
 
 **If a required library is MISSING:**
 
-1. Note it in the plan frontmatter under `environment_requirements`
+1. Note the machine-checkable requirement in plan frontmatter under `tool_requirements`
 2. Add a prerequisite task for installation, OR
 3. Choose an alternative approach that uses available tools
 4. If the prerequisite would require the agent to install something, mark it as permission-gated and require explicit user approval before execution
 5. Do NOT create plans that depend on unavailable libraries without addressing the gap
 
-**Environment frontmatter (add to plans that need specific tools):**
+**Tool requirements frontmatter (add to plans that need specialized tools outside the guaranteed Python scientific baseline):**
 
 ```yaml
-environment_requirements:
-  python: ">=3.11"
-  libraries:
-    - name: "scipy"
-      used_for: "sparse eigenvalue solver (scipy.sparse.linalg.eigsh)"
-      version: ">=1.10"
-    - name: "sympy"
-      used_for: "symbolic integration in derivation verification"
-  external_tools: []  # e.g., ["latex (pdflatex)", "gnuplot"]
+tool_requirements:
+  - id: "scipy-sparse"
+    tool: command
+    command: "python3 -c 'import scipy.sparse.linalg'"
+    required: true
+    purpose: "sparse eigenvalue solver for benchmarked numerical task"
+  - id: "sympy"
+    tool: command
+    command: "python3 -c 'import sympy'"
+    required: true
+    purpose: "symbolic verification for derivation checks"
 ```
 
 Skip this step for purely analytical/derivation phases that need no computational tools.
@@ -1209,220 +1212,38 @@ Record in plan frontmatter `approximations` field.
 </step>
 
 <step name="apply_domain_strategy">
-**Select the domain-aware planning blueprint based on the physics being done.**
+**Choose dependency skeletons from selected guidance, not from an inline domain catalog.**
 
-The calculation structure depends on the physics domain. A QFT amplitude calculation has a fundamentally different dependency graph than a condensed matter phase diagram study. Apply the matching blueprint to guide task decomposition.
+Specialized planning guidance is additive and subordinate to the approved contract. It helps order tasks, choose benchmark gates, and surface pitfalls; it never changes `project_contract`, PLAN `contract`, required anchors, forbidden proxies, user-locked decisions, or proof obligations.
 
-### 1. QFT Perturbative Calculation
+Selection order:
 
-**Typical phases:** 5-7 (setup → diagrams → integrals → renormalization → observables → validation → paper)
+1. If init JSON or child context exposes selected bundle `planning_guides`, load only those guide assets and use them as the dependency skeleton.
+2. If selected bundle context has no planner-specific guides, use its estimator policies, decisive artifact guidance, verifier extensions, and asset notes to identify benchmark-before-production, convergence, proof, convention, or artifact tasks.
+3. If no bundle guidance is selected or it is insufficient, load `{GPD_INSTALL_DIR}/references/planning/domain-strategy-index.md` on demand and then load only the one or two matching guide files from that index.
+4. For cross-domain work, decide which domain supplies the physics and which supplies the method. Load `{GPD_INSTALL_DIR}/references/planning/cross-domain-convention-bridge.md` when results cross convention boundaries.
 
-```
-Convention lock → Lagrangian/Feynman rules → Diagram enumeration (automated if possible)
-→ Loop integral reduction (IBP/Passarino-Veltman) → Master integral evaluation
-→ UV renormalization → IR subtraction → Physical observable → Known limit check
-```
-
-**Key decision points:**
-- Regularization scheme (dim-reg vs cutoff vs lattice) — affects ALL subsequent algebra
-- Renormalization scheme (MS-bar vs on-shell vs MOM) — affects numerical values of intermediate quantities
-- Whether to compute individual diagrams or sum classes (color-ordered, spinor-helicity)
-
-**Key planning insight:** Diagram enumeration MUST precede integration. Missing a diagram at a given order invalidates the Ward identity check. Include a dedicated "enumerate all diagrams" task with cross-check (manual count vs automated tool).
-
-**Common pitfalls:** Missing symmetry factors; sign errors from fermion loops; incomplete set of counterterms; mixing coupling conventions between sources; IR/collinear divergences treated inconsistently between virtual and real corrections.
-
-### 2. Condensed Matter (Analytical)
-
-**Typical phases:** 5-8 (model → symmetries → mean-field → fluctuations → response → phase diagram → comparison → paper)
+Always-visible fallback skeleton:
 
 ```
-Model Hamiltonian → Symmetry analysis → Mean-field decoupling → Self-consistency
-→ Fluctuation corrections (RPA/1-N) → Collective modes → Response functions
-→ Phase diagram → Comparison with numerics/experiment
+contract gate -> convention lock -> approximation/regime declaration
+-> method/blueprint decision -> benchmark or proof setup
+-> derivation/implementation -> validation against dimensions, limits,
+   symmetries, conservation laws, convergence, anchors, and disconfirming cases
+-> decisive artifact and return contract
 ```
 
-**Key decision points:**
-- Which decoupling channel (particle-hole, particle-particle, exchange) — determines which order parameters are accessible
-- Order parameter identification — wrong choice misses the true ground state
-- Whether to include spin-orbit coupling (essential for topological phases)
+When applying any selected guide:
 
-**Key planning insight:** Mean-field determines the STRUCTURE of fluctuation corrections. Plan mean-field as its own plan (Wave 1), fluctuations as dependent (Wave 2). Include a Ginzburg criterion task to determine where fluctuations matter.
-
-**Common pitfalls:** Using mean-field exponents in d < 4; neglecting Goldstone modes; double-counting diagrams in self-consistent methods; treating a crossover as a sharp transition.
-
-### 3. Condensed Matter (Numerical)
-
-**Typical phases:** 4-6 (implementation → benchmark → production → analysis → paper)
-
-```
-Model definition → Benchmark reproduction (known result) → Convergence study
-→ Production sweep → Finite-size scaling → Extrapolation → Error budget
-```
-
-**Key decision points:**
-- Method choice (ED/DMRG/QMC/DMFT) — each has domain of applicability and failure modes
-- System sizes and boundary conditions — periodic vs open affects finite-size scaling
-- Observable selection — which correlations to measure
-
-**Key planning insight:** ALWAYS plan a benchmark reproduction before production. Budget 30% of the phase for convergence/validation.
-
-**Common pitfalls:** Sign problem in fermionic QMC away from half-filling; DMRG bond dimension insufficient for 2D; ED extrapolation from sizes too small; thermalization not achieved in MC.
-
-### 4. Statistical Mechanics
-
-**Typical phases:** 4-6 (partition function → thermodynamics → phase transitions → universality → validation → paper)
-
-```
-Partition function → Free energy → Thermodynamic derivatives → Phase transitions
-→ Critical exponents (if continuous) → Universality class identification
-→ Monte Carlo / transfer matrix validation
-```
-
-**Key decision points:**
-- Ensemble choice (canonical vs grand canonical vs microcanonical) — affects fluctuation formulae
-- Whether transition is first-order or continuous — determines analysis strategy entirely
-- Which scaling variables to use near criticality
-
-**Key planning insight:** Plan analytical and numerical approaches IN PARALLEL (separate plans, same wave) for cross-validation. Discrepancy between them is the most powerful error detector.
-
-**Common pitfalls:** Confusing crossover with phase transition; using wrong scaling variable near tricritical point; missing first-order transition with too-small system sizes; Gibbs factor (1/N!) omission for identical particles.
-
-### 5. General Relativity / Cosmology
-
-**Typical phases:** 5-7 (background → perturbations → evolution → observables → validation → comparison → paper)
-
-```
-Background spacetime → Perturbation equations → Gauge choice → Source terms
-→ Evolution/solution → Observable extraction → Constraint verification
-→ Comparison with Newtonian/PN limit
-```
-
-**Key decision points:**
-- Gauge choice (harmonic, Lorenz, Regge-Wheeler, radiation) — affects ALL perturbation equations
-- Formulation (BSSN vs generalized harmonic vs Z4c) for numerical work
-- Whether to use 3+1 decomposition or covariant perturbation theory
-
-**Key planning insight:** Gauge choice is the FIRST task. Include a constraint monitoring task (Hamiltonian + momentum) that runs after every evolution step.
-
-**Common pitfalls:** Gauge mode contamination in wave extraction; constraint violation growth destabilizing evolution; junk radiation from non-equilibrium initial data; finite extraction radius systematic errors; wrong sign convention for Riemann tensor.
-
-### 6. AMO / Quantum Optics
-
-**Typical phases:** 4-6 (Hamiltonian → dynamics → observables → decoherence → experiment → paper)
-
-```
-System Hamiltonian → Rotating frame → Approximations (RWA, dipole)
-→ Master equation / Schrödinger evolution → Observables (spectra, correlations)
-→ Decoherence effects → Experimental comparison
-```
-
-**Key decision points:**
-- Rotating frame choice and RWA validity (detuning must be << optical frequency)
-- Whether to use master equation (Markovian bath) or quantum trajectories (non-Markovian)
-- Inclusion of counter-rotating terms (breakdown of RWA near ultrastrong coupling)
-
-**Key planning insight:** RWA and dipole approximation have QUANTITATIVE validity bounds. Plan explicit validity check tasks with numerical values, not just "check RWA is valid."
-
-**Common pitfalls:** Applying RWA far from resonance; neglecting atomic recoil for cold atoms; using wrong Clebsch-Gordan phase convention; confusing Rabi frequency conventions (peak vs rms).
-
-### 7. Numerical PDE/ODE
-
-**Typical phases:** 4-5 (discretization → benchmark → convergence → production → analysis)
-
-```
-Discretization choice → Stability analysis → Benchmark (exact solution)
-→ Convergence study (3+ resolutions) → Production run → Post-processing
-→ Richardson extrapolation → Error budget
-```
-
-**Key decision points:**
-- Discretization scheme (finite difference, spectral, finite element, DG) — affects stability and accuracy
-- Time integration (explicit vs implicit vs symplectic) — must match stiffness and conservation requirements
-- Resolution allocation — where to refine (boundary layers, shocks, singularities)
-
-**Key planning insight:** Convergence studies are MANDATORY. They determine production resolution. Budget as a separate plan.
-
-**Common pitfalls:** Non-symplectic integrator for Hamiltonian systems causing energy drift; CFL violation producing instability; insufficient resolution in boundary layers; order of convergence not matching theoretical prediction (signals implementation bug).
-
-### 8. Effective Field Theory
-
-**Typical phases:** 5-7 (scales → power counting → matching → running → predictions → error → paper)
-
-```
-Scale identification → Power counting → Operator basis → Tree-level matching
-→ Loop matching → RG running → Anomalous dimensions → Physical predictions
-→ Truncation error estimate
-```
-
-**Key decision points:**
-- Scale hierarchy identification — which scales are separated and by how much
-- Power counting scheme (naive dimensional analysis, Weinberg counting, KSW counting)
-- Whether to match at tree level only or include loops
-
-**Key planning insight:** Power counting is the first task — getting it wrong means computing irrelevant operators while missing relevant ones.
-
-**Common pitfalls:** Including operators beyond the working order (wastes effort); missing operators at the working order (incorrect result); not estimating truncation uncertainty; confusing power counting across different schemes; neglecting operator mixing under RG.
-
-### Domain Selection
-
-Match the phase description against these keywords to select the blueprint:
-
-| Keywords in phase goal | Blueprint |
-|----------------------|-----------|
-| amplitude, cross section, Feynman, loop, renormalization | QFT Perturbative |
-| Hamiltonian, order parameter, mean-field, phase diagram, band structure | Condensed Matter (Analytical) |
-| DMRG, QMC, exact diag, Monte Carlo, simulation, benchmark | Condensed Matter (Numerical) |
-| partition function, critical exponent, Ising, universality, scaling | Statistical Mechanics |
-| spacetime, metric, perturbation, gravitational wave, cosmological | GR / Cosmology |
-| atom-light, Rabi, detuning, master equation, cavity, trap | AMO / Quantum Optics |
-| discretize, convergence, finite element, spectral, ODE, PDE | Numerical PDE/ODE |
-| effective, matching, Wilson coefficient, power counting, EFT | Effective Field Theory |
-
-### Cross-Domain Projects
-
-Many frontier research problems span multiple physics domains. When keywords match 2+ blueprints, use the cross-domain planning protocol below.
-
-**Principle: One domain is the PHYSICS, the other is the METHOD.**
-
-In every cross-domain project, one domain provides the physical content (what we're computing) and the other provides the methodology (how we're computing it). The physics domain determines the verification criteria; the method domain determines the task structure.
-
-**Common cross-domain combinations:**
-
-| Project Type | Physics Domain | Method Domain | Phase Structure |
-|-------------|---------------|---------------|-----------------|
-| **Holographic condensed matter** (AdS/CMT) | Condensed matter (observables, phase diagram) | GR/cosmology (bulk geometry, Einstein equations) | Phase 1: Bulk geometry setup (GR blueprint). Phase 2: Boundary observables (CM blueprint). Phase 3: Phase diagram mapping (CM). Phase 4: Comparison with non-holographic results (CM). |
-| **Lattice QFT** | QFT (Feynman rules, Ward identities, continuum limit) | Numerical PDE/ODE (discretization, convergence, finite-volume) | Phase 1: Continuum theory + lattice action (QFT). Phase 2: Implementation + benchmark (Numerical). Phase 3: Production + continuum extrapolation (Numerical). Phase 4: Comparison with perturbation theory (QFT). |
-| **Cosmological particle physics** (baryogenesis, dark matter) | QFT/EFT (particle interactions, cross sections) | GR/cosmology (Friedmann equations, Boltzmann equations) | Phase 1: Particle physics model (QFT/EFT). Phase 2: Cosmological evolution (GR). Phase 3: Relic abundance / asymmetry (combined). Phase 4: Experimental constraints (comparison). |
-| **Quantum simulation of many-body systems** | Condensed matter (Hamiltonian, phase transitions) | AMO (trapped atoms, laser coupling, decoherence) | Phase 1: Target Hamiltonian + mapping to AMO system (CM→AMO). Phase 2: Experimental protocol design (AMO). Phase 3: Observable prediction including noise (combined). Phase 4: Comparison with direct numerical simulation (CM). |
-| **Nuclear astrophysics** (neutron stars, nucleosynthesis) | Nuclear physics (equation of state, reaction rates) | GR/astrophysics (stellar structure, TOV equation) | Phase 1: Nuclear EOS (nuclear). Phase 2: Stellar structure (GR). Phase 3: Observable predictions (mass-radius, cooling curves). Phase 4: Comparison with X-ray/GW data. |
-| **Quantum gravity phenomenology** | QFT (scattering amplitudes, effective operators) | GR (classical limit, post-Newtonian) | Phase 1: Quantum corrections to graviton scattering (QFT). Phase 2: Classical limit extraction (GR). Phase 3: Observable predictions (GR + comparison). |
-
-**Convention conflicts in cross-domain work:**
-
-Cross-domain projects are the #1 source of convention errors. Each subfield has its own conventions, and combining them creates silent mismatches.
-
-| Conflict | Domain A | Domain B | Resolution |
-|----------|----------|----------|------------|
-| Metric signature | QFT: (+,−,−,−) typical | GR: (−,+,+,+) typical | Choose ONE at project start. Convert ALL imported expressions. Document in Phase 1 conventions task. |
-| Units | Particle physics: ℏ=c=1, GeV | GR: G=c=1, km | Choose units for EACH phase. Explicit conversion task at every domain boundary. |
-| Fourier convention | Condensed matter: symmetric 1/√N | QFT: asymmetric dk/(2π) | Lock in Phase 1. Every cross-domain quantity transfer must state which convention. |
-| Field normalization | QFT: relativistic ⟨p\|q⟩ = 2E δ³ | AMO: non-relativistic ⟨p\|q⟩ = δ³ | Factor of 2E at every boundary. Plan explicit normalization conversion task. |
-| Temperature | Stat mech: k_B T (energy) | Condensed matter: T (Kelvin) | State whether k_B = 1 or explicit. Conversion factors at every thermal quantity. |
-| Coupling constants | QFT: α = e²/(4π) | AMO: atomic units e = 1 | Document the mapping in CONVENTIONS.md. Cross-check: α ≈ 1/137 in both systems. |
-
-**Planning rule for cross-domain phases:**
-
-1. **Phase 1 MUST establish the convention bridge** — a dedicated task that documents how conventions from each domain map to the project convention. This task produces a conversion table consumed by all subsequent phases.
-2. **Domain-boundary phases get extra verification** — any phase where results from domain A are consumed by domain B must have an explicit "convention translation + spot-check" task.
-3. **Plan validation tasks in BOTH domains** — a holographic result should be checked against both a GR limit (bulk side) and a condensed matter limit (boundary side).
-4. **Assign domain-specific checks to domain-specific phases** — don't check Ward identities in a GR phase or constraint equations in a QFT phase. Each verification matches its domain.
-
-**Apply the matching blueprint (or combined blueprints for cross-domain), then proceed to break_into_tasks.**
+- Preserve user decision fidelity: locked decisions are requirements; deferred ideas remain out of scope.
+- Preserve tangent control: multiple viable main lines require a checkpoint or explicit tangent route, not branch-like plans.
+- Preserve proof-bearing safety: non-`other` proof claims need auditable hypotheses, parameters, conclusions, proof deliverables, and proof-redteam paths.
+- Preserve tool safety: specialized runtime assumptions go in `tool_requirements`, not only in task prose.
+- Preserve return-only ownership: roadmap updates and shared-state changes are returned through `gpd_return`, not silently written unless explicitly delegated.
 </step>
 
 <step name="break_into_tasks">
-Decompose phase into tasks. **Use the domain blueprint from apply_domain_strategy as your dependency skeleton, then fill in specific tasks.**
+Decompose phase into tasks. **Use the selected planning guide or fallback skeleton from apply_domain_strategy as your dependency skeleton, then fill in specific tasks.**
 
 For each task:
 

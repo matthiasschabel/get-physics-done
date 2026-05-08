@@ -1,5 +1,5 @@
 <purpose>
-Execute small, ad-hoc physics tasks with GPD guarantees (atomic commits and durable state updates) while skipping optional agents (literature search, plan-checker, verifier). Quick mode routes through the canonical planner handoff, loads staged quick init at the task-bootstrap and default task-authoring boundaries, selects the separate `reference_context` stage only when a task actually needs project reference artifacts, tracks artifacts in `GPD/quick/`, and records completion through the structured state commands plus the quick-task summary files. Typical quick tasks include: quick derivation, dimensional check, order-of-magnitude estimate, limiting case verification, and targeted bibliography lookup. Quick mode is NOT authorized to close theorem-style or `proof_obligation` work.
+Execute small, ad-hoc physics tasks with GPD guarantees while skipping optional agents. Quick mode routes through the canonical planner handoff, loads staged quick init at the task-bootstrap and default task-authoring boundaries, selects the separate `reference_context` stage only when a task actually needs project reference artifacts, tracks `GPD/quick/`, and records structured completion. Tasks: derivation, dimensional/OOM check, limit, DOI. Quick mode is NOT authorized to close theorem-style or `proof_obligation` work.
 </purpose>
 
 <required_reading>
@@ -149,6 +149,12 @@ If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append 
 **Effective Reference Intake:** {effective_reference_intake}
 **Active References:** {active_reference_context}
 **Reference Artifacts:** {reference_artifacts_content}
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
 
 </planning_context>
 
@@ -231,6 +237,12 @@ Contract intake: {contract_intake}
 Effective reference intake: {effective_reference_intake}
 Active references: {active_reference_context}
 Reference artifacts: {reference_artifacts_content}
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
 
 <constraints>
 - Execute all tasks in the plan

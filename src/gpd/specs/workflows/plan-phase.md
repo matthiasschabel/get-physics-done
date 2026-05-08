@@ -63,6 +63,7 @@ bind_plan_phase_init() {
   effective_reference_intake=$(echo "$init" | gpd json get .effective_reference_intake --default "")
   selected_protocol_bundle_ids=$(echo "$init" | gpd json get .selected_protocol_bundle_ids --default "")
   protocol_bundle_count=$(echo "$init" | gpd json get .protocol_bundle_count --default 0)
+  protocol_bundle_load_manifest=$(echo "$init" | gpd json get .protocol_bundle_load_manifest --default "")
   protocol_bundle_context=$(echo "$init" | gpd json get .protocol_bundle_context --default "")
   protocol_bundle_verifier_extensions=$(echo "$init" | gpd json get .protocol_bundle_verifier_extensions --default "")
   active_reference_context=$(echo "$init" | gpd json get .active_reference_context --default "")
@@ -110,6 +111,7 @@ bind_plan_phase_init() {
   EFFECTIVE_REFERENCE_INTAKE="$effective_reference_intake"
   SELECTED_PROTOCOL_BUNDLE_IDS="$selected_protocol_bundle_ids"
   PROTOCOL_BUNDLE_COUNT="$protocol_bundle_count"
+  PROTOCOL_BUNDLE_LOAD_MANIFEST="$protocol_bundle_load_manifest"
   PROTOCOL_BUNDLE_CONTEXT="$protocol_bundle_context"
   PROTOCOL_BUNDLE_VERIFIER_EXTENSIONS="$protocol_bundle_verifier_extensions"
   ACTIVE_REFERENCE_CONTEXT="$active_reference_context"
@@ -323,58 +325,14 @@ bind_plan_phase_init "$INIT"
 
 **Skip if:** `--gaps` flag, `--skip-research` flag, or `research_enabled` is false (from init) without `--research` override.
 
-### Research Mode Decision Matrix
-
-| Mode | RESEARCH.md exists | RESEARCH.md missing | `--research` flag |
-|------|-------------------|--------------------|--------------------|
-| **explore** | Re-research always (expand scope, compare alternatives, refresh anchors) | Research (comprehensive — multiple methods, broad survey) | Research (comprehensive) |
-| **balanced** (default) | Skip by default, but re-research if inputs look stale or missing for the current contract slice | Research (standard) | Research (standard) |
-| **exploit** | Skip only if the existing research already covers the exact method family, anchor set, and decisive evidence path; otherwise run targeted method research | Research (minimal — method-specific only, no broad survey, no optional tangent surfacing unless explicitly requested) | Research (minimal) |
-| **adaptive** | Reuse existing research only after prior decisive evidence or explicit approach-lock markers show the method is stable; otherwise refresh research in a balanced or explore-style pass while surfacing unresolved alternatives as tangent candidates rather than silent branches | Research (broad enough to choose and lock an approach) | Research (standard) |
+### Research Mode Decision
 
 **If `has_research` is true (from init) AND no `--research` flag:**
 
-Route by research mode:
-
-```bash
-if [ "$RESEARCH_MODE" = "explore" ]; then
-  # Explore: always re-research for broader coverage
-  echo "Research mode: explore — re-researching for comprehensive coverage"
-  # Proceed to spawn researcher below
-elif [ "$RESEARCH_MODE" = "exploit" ]; then
-  # Exploit: reuse only if existing research already covers the exact method family
-  # and contract-critical anchor/comparison path for this phase
-  RESEARCH_FILE=$(ls "${PHASE_DIR}"/*-RESEARCH.md 2>/dev/null | head -1)
-  if [ -n "$RESEARCH_FILE" ]; then
-    echo "Research mode: exploit — existing RESEARCH.md found; compare it directly against the current contract slice before deciding to reuse it"
-    # Skip to step 6 only when the existing research already covers the exact method family,
-    # anchor set, and decisive evidence path for this phase.
-  else
-    echo "Research mode: exploit — no RESEARCH.md found, refreshing targeted method context"
-    # Proceed to spawn researcher below
-  fi
-elif [ "$RESEARCH_MODE" = "adaptive" ]; then
-  # Adaptive: narrow only after prior decisive evidence or an explicit approach lock
-  SUMMARY_FILE=$(ls GPD/phases/*/*SUMMARY.md 2>/dev/null | head -1)
-  if [ -n "$SUMMARY_FILE" ]; then
-    echo "Research mode: adaptive — inspect the loaded SUMMARY.md artifacts directly for decisive evidence before reusing research"
-    # Skip to step 6 only after explicit decisive evidence or an approach-lock marker is confirmed in the summary artifacts.
-  else
-    echo "Research mode: adaptive — approach not yet locked, refreshing research before planning"
-    # Proceed to spawn researcher below
-  fi
-else
-  # Balanced (default): check staleness before skipping
-  RESEARCH_MOD=$(stat -f %m "${PHASE_DIR}"/*-RESEARCH.md 2>/dev/null || stat -c %Y "${PHASE_DIR}"/*-RESEARCH.md 2>/dev/null || echo 0)
-  STATE_MOD=$(stat -f %m GPD/STATE.md 2>/dev/null || stat -c %Y GPD/STATE.md 2>/dev/null || echo 0)
-  DIFF_DAYS=$(( (STATE_MOD - RESEARCH_MOD) / 86400 ))
-
-  if [ "$DIFF_DAYS" -gt 1 ]; then
-    echo "Research may be stale (created ${RESEARCH_MOD}, state updated ${STATE_MOD}). Re-research with --research?"
-    # If user chooses to re-research, proceed to spawn researcher below. Otherwise, use existing and skip to step 6.
-  fi
-fi
-```
+- `explore`: refresh research; broaden method comparisons and anchors.
+- `exploit`: reuse only after directly comparing existing `RESEARCH.md` with the current method family, anchor set, and decisive-evidence path; otherwise refresh targeted method context.
+- `adaptive`: use `SUMMARY_FILE=$(ls GPD/phases/*/*SUMMARY.md 2>/dev/null | head -1)` and inspect the loaded SUMMARY.md artifacts directly for decisive evidence before reusing research; otherwise refresh before planning.
+- `balanced`: skip by default, but refresh when state, contract, references, or roadmap changes make the existing research stale for this phase.
 
 **If RESEARCH.md missing OR `--research` flag OR explore mode with existing research:**
 
@@ -420,6 +378,15 @@ Project contract: {project_contract}
 Active references: {active_reference_context}
 Reference artifacts: {reference_artifacts_content}
 </additional_context>
+
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
+
+Use the protocol bundle handoff as the primary specialized method/domain surface when `selected_protocol_bundle_ids` is non-empty. Read only bundle-listed assets needed for this phase research question. Use generic broad research scanning only as fallback for uncovered areas or when no bundle is selected.
 
 <research_mode>{RESEARCH_MODE}</research_mode>
 
@@ -503,6 +470,13 @@ Read that file before continuing so you inherit the prior research state instead
 **Type:** {checkpoint_type}
 **Response:** {user_response}
 </checkpoint_response>
+
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
 
 <hypothesis_constraint>
 If this phase belongs to a hypothesis branch, include the hypothesis constraint block below verbatim. Otherwise omit this section.
@@ -599,7 +573,10 @@ Render the template's `## Standard Planning Template` into `filled_prompt` with 
 - `{effective_reference_intake}` -> {effective_reference_intake}
 - `{roadmap_content}` -> {roadmap_content}
 - `{requirements_content}` -> {requirements_content}
+- `{selected_protocol_bundle_ids}` -> {selected_protocol_bundle_ids}
+- `{protocol_bundle_load_manifest}` -> {protocol_bundle_load_manifest}
 - `{protocol_bundle_context}` -> {protocol_bundle_context}
+- `{protocol_bundle_verifier_extensions}` -> {protocol_bundle_verifier_extensions}
 - `{active_reference_context}` -> {active_reference_context}
 - `{reference_artifacts_content}` -> {reference_artifacts_content}
 - `{context_content}` -> {context_content}
@@ -748,9 +725,14 @@ Checker prompt:
 **Project Contract Validation:** {project_contract_validation}
 **Contract Intake:** {contract_intake}
 **Effective Reference Intake:** {effective_reference_intake}
-**Protocol Bundles:** {protocol_bundle_context}
 **Active References:** {active_reference_context}
 **Reference Artifacts:** {reference_artifacts_content}
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
 Treat stable knowledge docs in `active_reference_context` and `reference_artifacts_content` as reviewed background synthesis. They may influence assumptions or method choice when consistent with stronger sources, but they do not override `convention_lock`, `project_contract`, the PLAN `contract`, or decisive evidence.
 Check that any downstream-gateable reliance on a reviewed knowledge doc is written as explicit `knowledge_deps`, not only implied by background context.
 
@@ -902,7 +884,10 @@ Render the template's `## Revision Template` into `revision_prompt` with these b
 - `{project_contract_validation}` -> {project_contract_validation}
 - `{contract_intake}` -> {contract_intake}
 - `{effective_reference_intake}` -> {effective_reference_intake}
+- `{selected_protocol_bundle_ids}` -> {selected_protocol_bundle_ids}
+- `{protocol_bundle_load_manifest}` -> {protocol_bundle_load_manifest}
 - `{protocol_bundle_context}` -> {protocol_bundle_context}
+- `{protocol_bundle_verifier_extensions}` -> {protocol_bundle_verifier_extensions}
 - `{active_reference_context}` -> {active_reference_context}
 - `{reference_artifacts_content}` -> {reference_artifacts_content}
 - `{context_content}` -> {context_content}

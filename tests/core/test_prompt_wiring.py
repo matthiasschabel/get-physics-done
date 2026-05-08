@@ -3030,7 +3030,7 @@ def test_verification_prompts_keep_suggested_contract_check_bindings_schema_tigh
     assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in verifier_agent
     assert "do not inline or recreate their full YAML" in verifier_agent
     assert "proof-audit linkage" in verifier_agent
-    assert "helper-generated compact gap ledger" in verifier_agent
+    assert "verification-report helper to serialize the gap ledger" in verifier_agent
     assert "The body must still make every gap actionable" in verifier_agent
     assert "Each gap has: `subject_kind`" not in verifier_agent
     assert "Verification Status:** {passed | gaps_found | expert_needed | human_needed}" in verifier_agent
@@ -4825,8 +4825,11 @@ def test_state_compaction_lifecycle_docs_do_not_claim_progress_mutates_state() -
 
 def test_protocol_bundle_context_surfaces_across_planning_execution_and_verification() -> None:
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
+    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    research_phase = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
     execute_phase = (WORKFLOWS_DIR / "execute-phase.md").read_text(encoding="utf-8")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
+    verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
     verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
     continuation = (TEMPLATES_DIR / "continuation-prompt.md").read_text(encoding="utf-8")
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
@@ -4835,12 +4838,48 @@ def test_protocol_bundle_context_surfaces_across_planning_execution_and_verifica
     verifier_agent = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
     executor_guide = (REFERENCES_DIR / "execution" / "executor-subfield-guide.md").read_text(encoding="utf-8")
 
-    assert "**Protocol Bundles:** {protocol_bundle_context}" in planner_prompt
-    assert "protocol_bundle_context" in execute_phase
-    assert "selected_protocol_bundle_ids" in execute_plan
+    bundle_fragments = (
+        "<selected_protocol_bundle_ids>",
+        "{selected_protocol_bundle_ids}",
+        "<protocol_bundle_load_manifest>",
+        "{protocol_bundle_load_manifest}",
+        "<protocol_bundle_context>",
+        "{protocol_bundle_context}",
+        "<protocol_bundle_verifier_extensions>",
+        "{protocol_bundle_verifier_extensions}",
+    )
+    for text in (planner_prompt, continuation):
+        _assert_contains_fragments(text, *bundle_fragments)
+    assert "<protocol_bundles>" not in continuation
+
+    _assert_contains_fragments(
+        plan_phase,
+        "Use the protocol bundle handoff as the primary specialized method/domain surface",
+        "- `{selected_protocol_bundle_ids}` -> {selected_protocol_bundle_ids}",
+        "- `{protocol_bundle_load_manifest}` -> {protocol_bundle_load_manifest}",
+        "- `{protocol_bundle_verifier_extensions}` -> {protocol_bundle_verifier_extensions}",
+        "<protocol_bundle_load_manifest>",
+    )
+    _assert_contains_fragments(
+        research_phase,
+        "selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`",
+        "When `selected_protocol_bundle_ids` is non-empty, use the bundle context, load manifest",
+        "<protocol_bundle_verifier_extensions>",
+    )
+    _assert_contains_fragments(
+        execute_phase,
+        "<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>",
+        "<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>",
+        "<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>",
+        "`{protocol_bundle_verifier_extensions}`: From checkpoint_resume init JSON",
+        "protocol bundle verifier extensions",
+    )
+    assert "protocol_bundle_load_manifest" in execute_plan
+    assert "protocol_bundle_verifier_extensions" in execute_plan
+    assert "protocol_bundle_verifier_extensions" in verify_phase
     assert "protocol_bundle_verifier_extensions" in verify_work
+    assert "<protocol_bundle_load_manifest>" in verify_work
     assert "primary source for bundle checklist extensions" in verify_work
-    assert "{protocol_bundle_context}" in continuation
     assert "selected protocol bundle context" in planner_agent
     assert "protocol_bundle_coverage" in checker_agent
     assert "additive routing hints" in executor_agent
@@ -4849,6 +4888,54 @@ def test_protocol_bundle_context_surfaces_across_planning_execution_and_verifica
     assert "prefer `protocol_bundle_verifier_extensions` and `protocol_bundle_context` from init JSON" in verifier_agent
     assert "fallback index or a manual cross-check" in executor_guide
     assert "not a default route" in executor_guide
+
+
+def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays_free() -> None:
+    quick = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
+
+    planner_reference_branch = re.search(
+        r"If `TASK_AUTHORING_INIT\.staged_loading\.stage_id` is `reference_context`, append this selected reference payload:(.*?)</planning_context>",
+        quick,
+        flags=re.DOTALL,
+    )
+    assert planner_reference_branch is not None
+    _assert_contains_fragments(
+        planner_reference_branch.group(1),
+        "<selected_protocol_bundle_ids>",
+        "{selected_protocol_bundle_ids}",
+        "<protocol_bundle_load_manifest>",
+        "{protocol_bundle_load_manifest}",
+        "<protocol_bundle_context>",
+        "{protocol_bundle_context}",
+        "<protocol_bundle_verifier_extensions>",
+        "{protocol_bundle_verifier_extensions}",
+    )
+
+    executor_reference_branch = re.search(
+        r"If the selected planner stage was `reference_context`, pass through the selected reference payload:(.*?)<constraints>",
+        quick,
+        flags=re.DOTALL,
+    )
+    assert executor_reference_branch is not None
+    _assert_contains_fragments(
+        executor_reference_branch.group(1),
+        "<selected_protocol_bundle_ids>",
+        "{selected_protocol_bundle_ids}",
+        "<protocol_bundle_load_manifest>",
+        "{protocol_bundle_load_manifest}",
+        "<protocol_bundle_context>",
+        "{protocol_bundle_context}",
+        "<protocol_bundle_verifier_extensions>",
+        "{protocol_bundle_verifier_extensions}",
+    )
+
+    default_prefix = quick.split(
+        "If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append this selected reference payload:",
+        1,
+    )[0]
+    assert "**Default Reference Runtime:** not loaded for `task_authoring`." in default_prefix
+    assert "{selected_protocol_bundle_ids}" not in default_prefix
+    assert "{protocol_bundle_context}" not in default_prefix
 
 
 def test_executor_bundle_fallback_stays_generic_when_no_bundle_fits() -> None:

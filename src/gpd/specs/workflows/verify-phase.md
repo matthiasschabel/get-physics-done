@@ -63,7 +63,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Extract from init JSON: `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `has_plans`, `plan_count`, `project_contract`, `project_contract_validation`, `project_contract_load_info`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `phase_proof_review_status`, `derived_manuscript_proof_review_status`.
+Extract from init JSON: `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `has_plans`, `plan_count`, `project_contract`, `project_contract_validation`, `project_contract_load_info`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `phase_proof_review_status`, `derived_manuscript_proof_review_status`.
 
 **If `phase_found` is false:**
 
@@ -88,7 +88,7 @@ Extract **phase goal** from ROADMAP.md (the research outcome to verify, not task
 **Verification independence:** Load only what the verifier needs to judge results on their own merits. See {GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md.
 
 If `derived_manuscript_proof_review_status` is present, use it as the structured freshness summary for any manuscript-local proof-bearing artifact and keep the corresponding `*-PROOF-REDTEAM.md` artifact authoritative for pass/fail decisions.
-If `project_contract_gate.visible` is true, keep `project_contract`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, and `protocol_bundle_context` in the verifier context even when `project_contract_gate.authoritative` is false. They remain visible carry-forward context, not authoritative scope, until the gate clears. Stable knowledge docs that surface through this context are reviewed background synthesis only: they may guide check selection and interpretation, but they do not override the contract, the gate, or decisive evidence.
+If `project_contract_gate.visible` is true, keep `project_contract`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, and `protocol_bundle_verifier_extensions` in the verifier context even when `project_contract_gate.authoritative` is false. They remain visible carry-forward context, not authoritative scope, until the gate clears. Use `protocol_bundle_verifier_extensions` as the primary bundle-extension surface when selected bundle IDs are present; `protocol_bundle_context` remains the readable projection. Stable knowledge docs that surface through this context are reviewed background synthesis only: they may guide check selection and interpretation, but they do not override the contract, the gate, or decisive evidence.
 
 **INCLUDE in verification context:**
 

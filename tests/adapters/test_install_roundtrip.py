@@ -80,6 +80,26 @@ RUNTIME_NOTE_TAGS = (
     "gemini_runtime_notes",
     "gemini_shell_runtime_notes",
 )
+PROTOCOL_BUNDLE_JIT_FIELDS = (
+    "selected_protocol_bundle_ids",
+    "protocol_bundle_count",
+    "protocol_bundle_context",
+    "protocol_bundle_verifier_extensions",
+)
+PROTOCOL_BUNDLE_JIT_COMMANDS = (
+    "plan-phase",
+    "execute-phase",
+    "quick",
+    "verify-work",
+)
+PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS = (
+    "Statistical Mechanics Simulation",
+    "Numerical Relativity",
+    "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md",
+    "{GPD_INSTALL_DIR}/references/protocols/numerical-relativity.md",
+    "Estimator policies:",
+    "Decisive artifacts:",
+)
 UNRESOLVED_INSTALL_SHAPE_MARKERS = (
     "{GPD_INSTALL_DIR}",
     "{GPD_CONFIG_DIR}",
@@ -216,6 +236,32 @@ def _first_stage_id(command_name: str) -> str:
     stage_id = first_stage.get("id")
     assert isinstance(stage_id, str) and stage_id
     return stage_id
+
+
+def _stage_manifest_has_protocol_bundle_fields(command_name: str) -> bool:
+    manifest_path = REPO_GPD_ROOT / "specs" / "workflows" / f"{command_name}-stage-manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    field_groups = payload.get("required_init_field_groups")
+    assert isinstance(field_groups, dict)
+    stages = payload.get("stages")
+    assert isinstance(stages, list)
+
+    for stage in stages:
+        assert isinstance(stage, dict)
+        stage_fields = set()
+        explicit_fields = stage.get("required_init_fields", [])
+        assert isinstance(explicit_fields, list)
+        stage_fields.update(field for field in explicit_fields if isinstance(field, str))
+        group_names = stage.get("required_init_field_groups", [])
+        assert isinstance(group_names, list)
+        for group_name in group_names:
+            assert isinstance(group_name, str)
+            group_fields = field_groups.get(group_name, [])
+            assert isinstance(group_fields, list)
+            stage_fields.update(field for field in group_fields if isinstance(field, str))
+        if any(field in stage_fields for field in PROTOCOL_BUNDLE_JIT_FIELDS):
+            return True
+    return False
 
 
 def _assert_runtime_command_label_visible(text: str, *, runtime: str, command_name: str) -> None:
@@ -459,9 +505,7 @@ def _shell_fences(text: str) -> tuple[MarkdownFence, ...]:
 
 def _runnable_shell_lines(fence: MarkdownFence) -> tuple[str, ...]:
     return tuple(
-        stripped
-        for line in fence.body.splitlines()
-        if (stripped := line.strip()) and not stripped.startswith("#")
+        stripped for line in fence.body.splitlines() if (stripped := line.strip()) and not stripped.startswith("#")
     )
 
 
@@ -674,8 +718,7 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
 ) -> None:
     target = real_installed_repo_factory(runtime)
     verifier = _read_runtime_agent_prompt(target, runtime, "gpd-verifier")
-    descriptor = get_runtime_descriptor(runtime)
-    line_budget, char_budget = (900, 60_000) if descriptor.native_include_support else (6_500, 430_000)
+    line_budget, char_budget = (500, 35_000)
 
     assert verifier.count("## Agent Requirements") == 1
     assert verifier.index("## Agent Requirements") < verifier.index("## Bootstrap Discipline")
@@ -685,10 +728,8 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
     assert "# Verification Report Template" not in verifier
     assert "# Contract Results Schema" not in verifier
     assert "# Canonical Schema Discipline" not in verifier
-    assert (
-        "gpd verification-report skeleton PLAN.md --write --output VERIFICATION.md --force --body-file BODY.md --validate contract"
-        in verifier
-    )
+    assert "`gpd verification-report skeleton ... --write --body-file ... --validate contract`" in verifier
+    assert "`gpd verification-report finalize ... --patch ... --body-file ... --validate contract`" in verifier
     assert len(verifier.splitlines()) <= line_budget
     assert len(verifier) <= char_budget
 
@@ -803,6 +844,35 @@ def test_installed_execute_phase_surface_uses_native_include_or_compact_stage_sh
     for fragment in STAGED_SHIM_CONTRACT_FRAGMENTS:
         assert fragment in prompt
     assert len(prompt) < 20_000
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+@pytest.mark.parametrize("command_name", PROTOCOL_BUNDLE_JIT_COMMANDS)
+def test_installed_staged_command_surfaces_protocol_bundle_jit_without_catalog_inline(
+    real_installed_repo_factory,
+    runtime: str,
+    command_name: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+    descriptor = get_runtime_descriptor(runtime)
+
+    assert _stage_manifest_has_protocol_bundle_fields(command_name)
+    for marker in PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS:
+        assert marker not in prompt
+
+    if descriptor.native_include_support:
+        assert _raw_include_count(prompt, f"workflows/{command_name}.md") == 1
+        assert "<protocol_bundle_jit>" not in prompt
+        return
+
+    assert _has_staged_shim_sentinel(prompt)
+    assert "<protocol_bundle_jit>" in prompt
+    assert "use those init payload fields as the selected-bundle loading map" in prompt
+    assert "load only selected asset paths named by `protocol_bundle_context`" in prompt
+    assert "do not inline protocol bundle catalogs during bootstrap" in prompt
+    for field in PROTOCOL_BUNDLE_JIT_FIELDS:
+        assert field in prompt
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
@@ -957,14 +1027,10 @@ def test_installed_gemini_toml_policy_and_shell_fence_classification(real_instal
                 )
             for fragment in GEMINI_FORBIDDEN_INSTALLED_SHELL_FRAGMENTS:
                 if fragment in fence.body:
-                    offenders.append(
-                        f"{label}: lines {fence.start_line}-{fence.end_line}: contains {fragment!r}"
-                    )
+                    offenders.append(f"{label}: lines {fence.start_line}-{fence.end_line}: contains {fragment!r}")
             for line in _runnable_shell_lines(fence):
                 if LEADING_SHELL_ASSIGNMENT_RE.match(line):
-                    offenders.append(
-                        f"{label}: lines {fence.start_line}-{fence.end_line}: leading assignment {line!r}"
-                    )
+                    offenders.append(f"{label}: lines {fence.start_line}-{fence.end_line}: leading assignment {line!r}")
 
     assert shell_note_commands > 0
     assert offenders == []

@@ -30,6 +30,7 @@ __all__ = [
     "ProtocolBundle",
     "ResolvedProtocolBundle",
     "ProjectBundleSignals",
+    "build_protocol_bundle_load_manifest",
     "get_protocol_bundle",
     "invalidate_protocol_bundle_cache",
     "list_protocol_bundles",
@@ -41,6 +42,15 @@ __all__ = [
 BUNDLES_DIR = SPECS_DIR / "bundles"
 logger = logging.getLogger(__name__)
 
+BUNDLE_ASSET_ROLES = (
+    "project_types",
+    "subfield_guides",
+    "verification_domains",
+    "protocols_core",
+    "protocols_optional",
+    "planning_guides",
+    "execution_guides",
+)
 _HEADING_RE = re.compile(r"^\s{0,3}(#{2,4})\s+(.+)$", re.MULTILINE)
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 
@@ -82,19 +92,13 @@ class BundleAssets(BaseModel):
     verification_domains: list[BundleAsset] = Field(default_factory=list)
     protocols_core: list[BundleAsset] = Field(default_factory=list)
     protocols_optional: list[BundleAsset] = Field(default_factory=list)
+    planning_guides: list[BundleAsset] = Field(default_factory=list)
     execution_guides: list[BundleAsset] = Field(default_factory=list)
 
     def iter_assets(self) -> list[tuple[str, BundleAsset]]:
         """Return all assets with their role names in stable order."""
         items: list[tuple[str, BundleAsset]] = []
-        for role in (
-            "project_types",
-            "subfield_guides",
-            "verification_domains",
-            "protocols_core",
-            "protocols_optional",
-            "execution_guides",
-        ):
+        for role in BUNDLE_ASSET_ROLES:
             for asset in getattr(self, role):
                 items.append((role, asset))
         return items
@@ -430,6 +434,61 @@ def _render_asset_line(role: str, assets: list[BundleAsset]) -> str | None:
     return f"- {role_label}: {rendered}"
 
 
+def _manifest_asset_payload(asset: BundleAsset) -> dict[str, object]:
+    return {
+        "path": asset.path,
+        "portable_path": f"@{{GPD_INSTALL_DIR}}/{asset.path}",
+        "required": asset.required,
+        "note": asset.note,
+    }
+
+
+def _manifest_assets_payload(assets: BundleAssets) -> dict[str, list[dict[str, object]]]:
+    return {
+        role: [_manifest_asset_payload(asset) for asset in getattr(assets, role)]
+        for role in BUNDLE_ASSET_ROLES
+    }
+
+
+def build_protocol_bundle_load_manifest(
+    selected: list[ResolvedProtocolBundle],
+    *,
+    missing_bundle_ids: list[str] | None = None,
+    selection_source: str = "project_metadata",
+) -> dict[str, object]:
+    """Build a metadata-only manifest for loading selected protocol assets."""
+    return {
+        "schema_version": 1,
+        "selection_source": selection_source,
+        "selected_bundle_ids": [bundle.bundle_id for bundle in selected],
+        "bundle_count": len(selected),
+        "missing_bundle_ids": list(missing_bundle_ids or []),
+        "bundles": [
+            {
+                "bundle_id": bundle.bundle_id,
+                "title": bundle.title,
+                "summary": bundle.summary,
+                "selection_tags": list(bundle.selection_tags),
+                "selection": {
+                    "source": selection_source,
+                    "score": bundle.score,
+                    "matched_tags": list(bundle.matched_tags),
+                    "matched_terms": list(bundle.matched_terms),
+                },
+                "assets": _manifest_assets_payload(bundle.assets),
+                "anchor_prompts": list(bundle.anchor_prompts),
+                "reference_prompts": list(bundle.reference_prompts),
+                "estimator_policies": list(bundle.estimator_policies),
+                "decisive_artifact_guidance": list(bundle.decisive_artifact_guidance),
+                "verifier_extensions": [
+                    extension.model_dump(mode="json") for extension in bundle.verifier_extensions
+                ],
+            }
+            for bundle in selected
+        ],
+    }
+
+
 def render_protocol_bundle_context(selected: list[ResolvedProtocolBundle]) -> str:
     """Render a compact prompt-facing protocol-bundle summary."""
     lines = [
@@ -459,14 +518,7 @@ def render_protocol_bundle_context(selected: list[ResolvedProtocolBundle]) -> st
         if bundle.selection_tags:
             lines.append("- Selection tags: " + _literalize_markdown_list(bundle.selection_tags))
 
-        for role in (
-            "project_types",
-            "subfield_guides",
-            "verification_domains",
-            "protocols_core",
-            "protocols_optional",
-            "execution_guides",
-        ):
+        for role in BUNDLE_ASSET_ROLES:
             asset_line = _render_asset_line(role, getattr(bundle.assets, role))
             if asset_line:
                 lines.append(asset_line)

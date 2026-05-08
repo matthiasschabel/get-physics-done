@@ -27,7 +27,7 @@ AGENT_BASELINES = {
     "gpd-check-proof": (81, 6_231),
     "gpd-consistency-checker": (64, 3_993),
     "gpd-debugger": (246, 9_494),
-    "gpd-executor": (3_017, 202_551),
+    "gpd-executor": (1_125, 70_023),
     "gpd-experiment-designer": (807, 45_334),
     "gpd-explainer": (241, 9_508),
     "gpd-literature-reviewer": (394, 14_734),
@@ -35,9 +35,9 @@ AGENT_BASELINES = {
     "gpd-paper-writer": (672, 36_231),
     "gpd-phase-researcher": (366, 15_409),
     "gpd-plan-checker": (1_387, 61_950),
-    "gpd-planner": (2_410, 119_091),
+    "gpd-planner": (2_237, 107_487),
     "gpd-project-researcher": (987, 61_844),
-    "gpd-referee": (1_108, 53_790),
+    "gpd-referee": (569, 36_661),
     "gpd-research-mapper": (743, 37_100),
     "gpd-research-synthesizer": (1_447, 80_827),
     "gpd-review-literature": (53, 2_591),
@@ -46,7 +46,7 @@ AGENT_BASELINES = {
     "gpd-review-reader": (52, 3_166),
     "gpd-review-significance": (54, 2_790),
     "gpd-roadmapper": (1_920, 89_849),
-    "gpd-verifier": (417, 28_705),
+    "gpd-verifier": (384, 26_135),
 }
 
 PEER_REVIEW_SPECIALIST_AGENTS = (
@@ -69,14 +69,15 @@ MODE_TABLE_ALLOWLIST = {
     "gpd-project-researcher",
 }
 WORST_AGENT_HARD_CAPS = {
-    "gpd-planner": (2_500, 123_000),
-    "gpd-executor": (3_100, 210_000),
+    "gpd-planner": (2_320, 112_000),
+    "gpd-executor": (1_200, 80_000),
     "gpd-research-mapper": (800, 39_000),
     "gpd-roadmapper": (2_000, 94_000),
     "gpd-project-researcher": (1_500, 81_000),
     "gpd-experiment-designer": (850, 47_000),
     "gpd-research-synthesizer": (1_560, 85_000),
     "gpd-plan-checker": (1_450, 65_000),
+    "gpd-verifier": (430, 30_000),
 }
 TOP_AGENT_HARD_CAP_COUNT = 6
 BULKY_REFERENCE_INCLUDE_FILES = (

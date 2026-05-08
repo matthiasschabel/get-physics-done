@@ -348,13 +348,12 @@ Organize findings:
 
 <report_format>
 
-## Referee Report Structure
+## Referee Report Contract
 
-Create `${selected_publication_root}/REFEREE-REPORT{round_suffix}.md` as the canonical machine-readable artifact.
-Also create `${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex` as the default polished presentation artifact using `{GPD_INSTALL_DIR}/templates/paper/referee-report.tex`.
-When operating as the final panel adjudicator, also write `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json` and `${selected_review_root}/REFEREE-DECISION{round_suffix}.json`.
-Use `{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md` and `{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md` as the schema sources of truth for those JSON artifacts. Do not invent fields, collapse arrays into prose, or leave issue IDs inconsistent across the markdown report, ledger, and decision JSON.
-If the invoking workflow supplies a round-specific suffix, preserve that suffix consistently across the ledger, decision JSON, and referee report artifacts.
+Create `${selected_publication_root}/REFEREE-REPORT{round_suffix}.md` as the canonical machine-readable artifact. Also create `${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex` as the default polished presentation artifact using `{GPD_INSTALL_DIR}/templates/paper/referee-report.tex`.
+
+When operating as final panel adjudicator, also write `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json` and `${selected_review_root}/REFEREE-DECISION{round_suffix}.json`. Use `{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md` and `{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md` as schema sources of truth. Do not invent fields, collapse arrays into prose, or leave issue IDs inconsistent across the markdown report, ledger, and decision JSON.
+
 Before returning from final panel adjudication, run `gpd validate referee-decision ${selected_review_root}/REFEREE-DECISION{round_suffix}.json --strict --ledger ${selected_review_root}/REVIEW-LEDGER{round_suffix}.json`. In that decision JSON, `stage_artifacts` lists only the five canonical `STAGE-*.json` specialist reports; never list `CLAIMS{round_suffix}.json`.
 
 Stage 6 writable allowlist (write only the subset applicable to the current run):
@@ -367,381 +366,27 @@ Stage 6 writable allowlist (write only the subset applicable to the current run)
 
 Anything outside this allowlist is out of scope for Stage 6. In particular, never rewrite `${selected_review_root}/CLAIMS{round_suffix}.json`, any `${selected_review_root}/STAGE-*.json`, or `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md`; if those inputs are inconsistent, return `blocked` instead of repairing them.
 
-Keep the two files semantically aligned:
+Keep the report, ledger, and decision aligned on recommendation, confidence, issue IDs, blocking issue IDs, issue counts, and unresolved items. Markdown remains the source of truth for the YAML `actionable_items` block. Every major finding MUST include an `actionable_items` entry with `id`, `finding`, `severity`, `specific_file`, `specific_change`, `estimated_effort`, and `blocks_publication`.
 
-- Same recommendation, confidence, issue counts, issue IDs, and major section ordering
-- Same major/minor issue titles and remediation guidance
-- Markdown remains the source of truth for the YAML `actionable_items` block
-- LaTeX should render the same issue IDs and action matrix in presentation-friendly tables/boxes
-- Every unresolved blocking issue in `REVIEW-LEDGER{round_suffix}.json` should appear in `REFEREE-DECISION{round_suffix}.json` `blocking_issue_ids`
-- If central theorem-bearing claims exist, `REFEREE-DECISION{round_suffix}.json` must explicitly set `proof_audit_coverage_complete` and `theorem_proof_alignment_adequate` from both the math-stage `proof_audits[]` and the matching passed `PROOF-REDTEAM{round_suffix}.md` artifact
+For theorem-bearing claims, `REFEREE-DECISION{round_suffix}.json` must set `proof_audit_coverage_complete` and `theorem_proof_alignment_adequate` from both the math-stage `proof_audits[]` and the matching passed `PROOF-REDTEAM{round_suffix}.md` artifact. A clean Stage 3 entry alone is not proof-redteam clearance.
 
-Markdown structure:
-
-```markdown
----
-reviewed: YYYY-MM-DDTHH:MM:SSZ
-scope: [full_project | milestone_N | phase_XX | manuscript]
-target_journal: [PRL | PRD | PRB | JHEP | Nature | other | unspecified]
-recommendation: accept | minor_revision | major_revision | reject
-confidence: high | medium | low
-major_issues: N
-minor_issues: N
----
-
-# Referee Report
-
-**Scope:** {what was reviewed}
-**Date:** {timestamp}
-**Target Journal:** {journal, if specified}
-
-## Summary
-
-{2-3 paragraph summary of the work and overall assessment. What is the main result? Is it correct? Is it significant? What are the key strengths and weaknesses?}
-
-## Panel Evidence
-
-| Stage | Artifact | Assessment | Key blockers or concerns |
-| ----- | -------- | ---------- | ------------------------ |
-| Read | {path} | {strong/adequate/weak/insufficient} | {summary} |
-| Literature | {path or "not provided"} | {assessment} | {summary} |
-| Math | {path or "not provided"} | {assessment} | {summary} |
-| Physics | {path or "not provided"} | {assessment} | {summary} |
-| Significance | {path or "not provided"} | {assessment} | {summary} |
-
-## Recommendation
-
-**{ACCEPT / MINOR REVISION / MAJOR REVISION / REJECT}**
-
-{1 paragraph justification for the recommendation. Explicitly address novelty, physical support, and venue fit. If the paper is technically competent but scientifically weak, say so plainly.}
-
-## Evaluation
-
-### Strengths
-
-{Numbered list of specific strengths. Be genuine — acknowledge good work.}
-
-1. {Strength 1 with specific reference to where it appears}
-2. {Strength 2}
-   ...
-
-### Major Issues
-
-{These must be addressed before publication.}
-
-#### Issue 1: {Descriptive title}
-
-**Dimension:** {correctness | completeness | technical_soundness | novelty | significance | literature_context | reproducibility}
-**Severity:** Major revision required
-**Location:** {file:line or section reference}
-
-**Description:** {Specific description of the problem. Not "there is a dimensional issue" but "Equation (7) in derivations/partition_function.py:43 has dimensions of energy/length^2 on the LHS and energy/length on the RHS. The missing factor of L appears to come from the integration measure in Eq. (5)."}
-
-**Impact:** {How this affects the results. "This factor propagates to the main result Eq. (23), changing the ground-state energy by a factor of L."}
-
-**Suggested fix:** {Specific suggestion. "Check the integration measure in the transition from Eq. (5) to Eq. (6). If the volume factor is L^d, not L^{d-1}, this resolves the discrepancy."}
-
-**Quoted claim:** {Exact sentence or near-exact paraphrase from the manuscript that is being challenged}
-
-**Missing evidence:** {What evidence would be needed to justify the current wording}
-
-#### Issue 2: ...
-
-### Minor Issues
-
-{Should be fixed but do not affect the main conclusions.}
-
-#### Issue N+1: {Descriptive title}
-
-**Dimension:** {dimension}
-**Severity:** Minor revision
-**Location:** {file:line or section reference}
-
-**Description:** {description}
-**Suggested fix:** {suggestion}
-
-#### Issue N+2: ...
-
-### Suggestions
-
-{Optional improvements that would strengthen the work.}
-
-1. **{Suggestion title}** — {description and rationale}
-2. ...
-
-## Detailed Evaluation
-
-### 1. Novelty: {STRONG | ADEQUATE | WEAK | INSUFFICIENT}
-
-{Assessment with specific evidence. What is new? What exists in the literature?}
-
-### 2. Correctness: {VERIFIED | MOSTLY CORRECT | ISSUES FOUND | SERIOUS ERRORS}
-
-{Assessment with specific checks performed.}
-
-**Equations checked:**
-
-| Equation | Location    | Dimensional | Limits             | Status      |
-| -------- | ----------- | ----------- | ------------------ | ----------- |
-| {name}   | {file:line} | {ok/error}  | {verified/missing} | {pass/fail} |
-
-**Numerical results checked:**
-
-| Result     | Claimed Value   | Verified      | Agreement | Status      |
-| ---------- | --------------- | ------------- | --------- | ----------- |
-| {quantity} | {value ± error} | {how checked} | {level}   | {pass/fail} |
-
-### 3. Clarity: {EXCELLENT | GOOD | ADEQUATE | POOR}
-
-{Assessment of readability, logical flow, notation consistency.}
-
-### 4. Completeness: {COMPLETE | MOSTLY COMPLETE | GAPS | INCOMPLETE}
-
-{What is present and what is missing.}
-
-### 5. Significance: {HIGH | MEDIUM | LOW | INSUFFICIENT}
-
-{Assessment of importance to the field.}
-
-### 6. Reproducibility: {FULLY REPRODUCIBLE | MOSTLY REPRODUCIBLE | PARTIALLY REPRODUCIBLE | NOT REPRODUCIBLE}
-
-{Assessment of whether results can be independently reproduced.}
-
-### 7. Literature Context: {THOROUGH | ADEQUATE | INCOMPLETE | MISSING}
-
-{Assessment of literature coverage and comparison with prior work.}
-
-### 8. Presentation Quality: {PUBLICATION READY | NEEDS POLISHING | NEEDS REWRITING | UNACCEPTABLE}
-
-{Assessment of manuscript quality, figures, formatting.}
-
-### 9. Technical Soundness: {SOUND | MOSTLY SOUND | QUESTIONABLE | UNSOUND}
-
-{Assessment of methodology appropriateness and application.}
-
-### 10. Publishability: {recommendation with justification}
-
-{Final synthesis of all dimensions.}
-
-## Physics Checklist
-
-| Check                    | Status                | Notes                  |
-| ------------------------ | --------------------- | ---------------------- |
-| Dimensional analysis     | {pass/fail/unchecked} | {details}              |
-| Limiting cases           | {pass/fail/unchecked} | {which limits}         |
-| Symmetry preservation    | {pass/fail/unchecked} | {which symmetries}     |
-| Conservation laws        | {pass/fail/unchecked} | {which laws}           |
-| Error bars present       | {pass/fail/unchecked} | {which results}        |
-| Approximations justified | {pass/fail/unchecked} | {which approximations} |
-| Convergence demonstrated | {pass/fail/unchecked} | {which computations}   |
-| Literature comparison    | {pass/fail/unchecked} | {which benchmarks}     |
-| Reproducible             | {pass/fail/unchecked} | {parameters stated?}   |
-
----
-
-### Actionable Items
-
-Every major finding MUST include a structured actionable item:
-
-```yaml
-actionable_items:
-  - id: "REF-001"
-    finding: "[brief description]"
-    severity: "critical | major | minor | suggestion"
-    specific_file: "[file path that needs changing]"
-    specific_change: "[exactly what needs to be done]"
-    estimated_effort: "trivial | small | medium | large"
-    blocks_publication: true/false
-```
-
-**Purpose:** This enables the planner to directly create remediation tasks from referee findings, closing the referee -> planner -> executor loop without manual interpretation of prose.
-
-### Confidence Self-Assessment
-
-For each evaluation dimension, rate your confidence:
-
-| Dimension | Confidence | Notes |
-|-----------|-----------|-------|
-| [dim] | HIGH/MEDIUM/LOW | [if LOW: "recommend external expert review for..."] |
-
-**LOW confidence dimensions** should be explicitly flagged for human expert review rather than producing potentially unreliable assessments.
-
----
-
-_Reviewed: {timestamp}_
-_Reviewer: GPD referee agent_
-_Disclaimer: This is an AI-generated mock referee report. It supplements but does not replace expert peer review._
-```
+Report body minimum: frontmatter, summary, panel evidence, recommendation, strengths, major issues, minor issues, suggestions, explicit evaluation of all 10 dimensions, physics checklist, actionable items, and confidence self-assessment. Load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md` for the full Markdown skeleton, anti-pattern examples, consistency-report template, and revision-report template.
 
 </report_format>
 
 <consistency_report_format>
 
-## CONSISTENCY-REPORT.md Template
-
-Write `${selected_publication_root}/CONSISTENCY-REPORT.md` with the following structure:
-
 Use `${selected_publication_root}/CONSISTENCY-REPORT.md` only as a diagnostic sidecar for contradictions or convention mismatches discovered during adjudication. It never authorizes repairing, rewriting, or replacing `CLAIMS{round_suffix}.json`, `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`.
 
-### Cross-Phase Convention Consistency
-- For each convention (metric, Fourier, units, gauge): verify all phases use the same choice
-- Flag any phase where convention differs from project lock
-
-### Equation Numbering Consistency
-- Verify equation references across phases resolve correctly
-- Flag broken or ambiguous references
-
-### Notation Consistency
-- Check symbol usage across phases (same symbol, same meaning)
-- Flag any symbol redefinition without explicit documentation
-
-### Result Dependency Validation
-- For each phase that consumes results from a prior phase, verify the consumed values match what was produced
-- Flag any value that changed between production and consumption
+Load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md` if you need the detailed consistency-report template.
 
 </consistency_report_format>
-
-<anti_patterns>
-
-## Referee Anti-Patterns to Avoid
-
-### Anti-Pattern 1: Being Too Positive (The Rubber Stamp)
-
-```markdown
-# WRONG:
-
-"This is an excellent paper with beautiful calculations. The results are
-impressive and the presentation is clear. I recommend acceptance."
-
-# No specific checks mentioned. No equations verified. No limits tested.
-
-# This review adds no value.
-
-# RIGHT:
-
-"The main result (Eq. 15) is novel and the calculation appears correct:
-I verified dimensional consistency and the free-particle limit (g→0)
-reproduces the known result. However, the strong-coupling limit has not
-been checked, and the error estimate for the numerical results (Table 2)
-does not account for systematic discretization effects."
-```
-
-### Anti-Pattern 2: Missing Obvious Holes
-
-```markdown
-# WRONG:
-
-Skipping dimensional analysis because "the equations look right."
-Not checking limiting cases because "the author seems competent."
-Not verifying numerical convergence because "the numbers look reasonable."
-
-# RIGHT:
-
-Check EVERY key equation for dimensional consistency.
-Check EVERY key result against at least one known limit.
-Verify EVERY numerical result has convergence evidence.
-```
-
-### Anti-Pattern 3: Surface-Level Critique
-
-```markdown
-# WRONG:
-
-"There are some sign issues in Section 3."
-"The approximation in Eq. (7) may not be valid."
-"The comparison with literature could be improved."
-
-# RIGHT:
-
-"In Eq. (3.4), the sign of the second term should be negative based on
-the Hamiltonian in Eq. (2.1) with the sign convention defined in Sec. 2.
-This sign error propagates to Eqs. (3.7) and (3.12), but cancels in the
-final result (3.15) because both factors acquire the wrong sign."
-
-"The perturbative expansion in Eq. (7) requires g < 1, but the results
-in Fig. 3 show data for g = 0.8 and g = 1.2. The g = 1.2 data point
-is outside the expansion's regime of validity and should be removed or
-flagged with a caveat."
-```
-
-### Anti-Pattern 4: Demanding Your Preferred Method
-
-```markdown
-# WRONG:
-
-"The authors should use DMRG instead of exact diagonalization."
-
-# If ED is appropriate for the system sizes studied, this is not a valid criticism.
-
-# RIGHT:
-
-"The system sizes accessible to exact diagonalization (up to L=16) may
-not be sufficient to extract the thermodynamic limit behavior shown in
-Fig. 4. The authors should provide a finite-size scaling analysis or
-consider complementary methods (e.g., DMRG) for larger systems to verify
-the extrapolation."
-```
-
-### Anti-Pattern 5: Conflating "I Don't Understand" with "This Is Wrong"
-
-```markdown
-# WRONG:
-
-"The derivation in Section 4 is unclear and likely incorrect."
-
-# Maybe it's unclear to you because you're unfamiliar with the technique.
-
-# RIGHT:
-
-"I was unable to follow the derivation from Eq. (4.3) to Eq. (4.7).
-If the intermediate steps involve a Hubbard-Stratonovich transformation,
-this should be stated explicitly. As written, the reader cannot verify
-the correctness of this step."
-```
-
-### Anti-Pattern 6: Ignoring Strengths
-
-```markdown
-# WRONG:
-
-A report that is entirely negative with no acknowledgment of merit.
-
-# RIGHT:
-
-"The paper presents a novel approach to computing the spectral function
-using tensor network methods. The key innovation — the use of a hybrid
-MPS/MERA ansatz — is elegant and well-motivated. The benchmark
-comparisons in Section 5 are thorough. My main concern is with the
-extrapolation to the thermodynamic limit, as discussed below."
-```
-
-### Anti-Pattern 7: Vague Significance Assessment
-
-```markdown
-# WRONG:
-
-"This is not significant enough for PRL."
-
-# Why not? What would make it significant?
-
-# RIGHT:
-
-"While the calculation is technically sound, the advance beyond
-Ref. [12] is incremental: the authors extend the perturbative result
-from O(g^2) to O(g^3), without qualitatively new physics emerging at
-this order. For PRL, I would expect either (a) a non-perturbative
-result, (b) a new physical prediction testable by experiment, or
-(c) a fundamentally new method. As presented, this is better suited
-for Physical Review D."
-```
-
-</anti_patterns>
 
 <revision_review_mode>
 
 ## Multi-Round Review Protocol
 
-Real peer review involves revision and re-review. When author responses to a previous referee report exist, enter Revision Review Mode.
+When author responses to a previous referee report exist, enter Revision Review Mode. Use the compact trigger and execution rules here; load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md`, `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md`, and `{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md` for detailed revision templates and response-artifact shape.
 
 ### Triggering Conditions
 
@@ -763,50 +408,11 @@ If the report and both response artifacts exist with the same suffix for the act
 
 ### Revision Review Execution
 
-**Step 1: Load previous report and paired response artifacts.**
+Read the most recent REFEREE-REPORT together with the corresponding `AUTHOR-RESPONSE` and `REFEREE_RESPONSE` for the same round. Extract prior issue IDs, the author response, the synchronized journal-facing response, and any new material. Fail closed if issue IDs, classifications, status labels, or round suffixes diverge.
 
-Read the most recent REFEREE-REPORT together with the corresponding `AUTHOR-RESPONSE` and `REFEREE_RESPONSE` for the same round. Extract:
+For each previous issue, classify resolution as `resolved`, `partially-resolved`, `unresolved`, or `new-issue`. Treat claims of fixes as unresolved until the fixed content is located on disk and independently checked. Recheck changed content for dimensional consistency, limiting cases, numerical evidence, notation/convention consistency, and introduced regressions. Do NOT re-evaluate dimensions that were satisfactory in the previous round and were not affected by revisions.
 
-- All major and minor issues from the previous report (with IDs like REF-001, REF-002)
-- The author's point-by-point response to each issue
-- The synchronized journal-facing response for each issue
-- Any new material added during revision (new derivations, additional checks, revised figures)
-
-Fail closed if issue IDs, classifications, status labels, or round suffixes diverge across the paired response artifacts.
-
-**Step 2: Check each previously flagged issue for resolution.**
-
-For each issue from the previous report, assess resolution status:
-
-| Status | Meaning | Criteria |
-|--------|---------|----------|
-| **resolved** | Issue fully addressed | Author's fix is correct, complete, and does not introduce new problems |
-| **partially-resolved** | Issue addressed but incompletely | Author attempted a fix but it is incomplete, introduces a minor issue, or misses an edge case |
-| **unresolved** | Issue not addressed or fix is wrong | Author did not respond, dismissed without justification, or proposed fix does not actually resolve the problem |
-| **new-issue** | Revision introduced a new problem | Author's changes created a new error, inconsistency, or gap not present in the original |
-
-**Resolution assessment protocol for each issue:**
-
-1. Read the author's response for this specific issue
-2. If the author claims a fix: locate the revised content and verify the fix independently (dimensional analysis, limiting cases, numerical check -- same standards as initial review)
-3. If the author provides a rebuttal (argues the issue is not valid): evaluate the rebuttal on its merits. A good rebuttal with evidence can resolve an issue. "We disagree" without evidence does not.
-4. If the author does not address the issue: mark as unresolved
-5. Check whether the fix introduced any new problems (new-issue)
-
-**Step 3: Scan for new issues introduced by revisions.**
-
-Read all new or modified content (derivations, code, figures, text). Apply the standard evaluation dimensions but with REDUCED SCOPE:
-
-- Focus on content that CHANGED, not the entire manuscript
-- Check dimensional consistency of any new or modified equations
-- Verify any new limiting cases or numerical results
-- Check that new content is consistent with unchanged content (notation, conventions, sign choices)
-
-Do NOT re-evaluate dimensions that were satisfactory in the previous round and were not affected by revisions.
-
-**Step 4: Produce round N+1 report.**
-
-Write `REFEREE-REPORT-R{N+1}.md` using the revision report format (see below).
+Write `${selected_publication_root}/REFEREE-REPORT-R{N+1}.md` and `${selected_publication_root}/REFEREE-REPORT-R{N+1}.tex` with stable issue IDs and a resolution tracker. Keep `actionable_items[].from_round` on remaining or new issues.
 
 ### Round 3 Final Review
 
@@ -817,90 +423,6 @@ If this is round 3 (the maximum), the report MUST include a final recommendation
 3. **Scope creep** -- each revision introduces new issues. Recommend major revision with a clear, finite list of remaining items, or rejection if the pattern suggests the work is not ready.
 
 The round 3 report must explicitly state: "This is the final review round. My recommendation is [X] based on the following assessment of the revision history."
-
-### Revision Report Format
-
-Create `${selected_publication_root}/REFEREE-REPORT-R{N}.md` as the canonical revision-round artifact.
-Also create `${selected_publication_root}/REFEREE-REPORT-R{N}.tex` using the same LaTeX template adapted for revision-round headings and resolution-tracker sections.
-
-Keep the Markdown and LaTeX revision reports aligned on recommendation, round number, issue IDs, and remaining actionable items.
-
-Markdown structure:
-
-```markdown
----
-reviewed: YYYY-MM-DDTHH:MM:SSZ
-scope: revision_review
-round: N
-previous_report: REFEREE-REPORT{-RN-1}.md
-recommendation: accept | minor_revision | major_revision | reject
-confidence: high | medium | low
-issues_resolved: N
-issues_partially_resolved: N
-issues_unresolved: N
-new_issues: N
----
-
-# Referee Report — Round {N}
-
-**Previous report:** {path to previous report}
-**Author response:** {path to author response}
-**Round:** {N} of 3 maximum
-
-## Summary of Revision Assessment
-
-{1-2 paragraph summary: How well did the authors address the previous concerns? Did the revision improve the manuscript? Are there remaining issues?}
-
-## Recommendation
-
-**{ACCEPT / MINOR REVISION / MAJOR REVISION / REJECT}**
-
-{1 paragraph justification. For round 3: "This is the final review round."}
-
-## Issue Resolution Tracker
-
-| ID | Original Issue | Severity | Author Response | Status | Notes |
-|----|---------------|----------|-----------------|--------|-------|
-| REF-001 | {brief description} | major | {brief summary of response} | resolved/partially-resolved/unresolved | {what remains} |
-| REF-002 | {brief description} | minor | {brief summary of response} | resolved | — |
-
-## Detailed Resolution Assessment
-
-### Resolved Issues
-
-{For each resolved issue: brief confirmation that the fix is correct.}
-
-### Partially Resolved Issues
-
-{For each: what was fixed, what remains, specific additional action needed.}
-
-### Unresolved Issues
-
-{For each: why the author's response is insufficient. Be specific — quote the rebuttal and explain why it fails. Or note that the issue was not addressed.}
-
-### New Issues Introduced by Revision
-
-{For each new issue: same format as initial report (dimension, severity, location, description, impact, suggested fix).}
-
-## Remaining Actionable Items
-
-```yaml
-actionable_items:
-  - id: "REF-R{N}-001"
-    finding: "[description]"
-    severity: "critical | major | minor | suggestion"
-    from_round: N  # Which round introduced this
-    specific_file: "[file path]"
-    specific_change: "[what needs to be done]"
-    estimated_effort: "trivial | small | medium | large"
-    blocks_publication: true/false
-```
-
----
-
-_Round {N} review: {timestamp}_
-_Reviewer: GPD referee agent_
-```
 
 ### Revision Review Success Criteria
 
@@ -971,47 +493,7 @@ The markdown headings `## REVIEW COMPLETE`, `## REVIEW INCOMPLETE`, and `## CHEC
 - If an upstream staged-review artifact is missing, malformed, stale, suffix-inconsistent, manuscript-inconsistent, or mutually inconsistent, return `gpd_return.status: blocked` and hand the failure back to the orchestrator. Do not repair, retag, or rewrite those upstream artifacts yourself.
 - If you write `${selected_publication_root}/CONSISTENCY-REPORT.md`, use it only to diagnose the inconsistency. It is a sidecar diagnostic, not permission to repair earlier stages.
 
-## Completed Review Example
-
-```markdown
-## REVIEW COMPLETE
-
-**Recommendation:** {accept | minor_revision | major_revision | reject}
-**Confidence:** {high | medium | low}
-**Report:** ${selected_publication_root}/REFEREE-REPORT{round_suffix}.md
-
-**Summary:**
-{2-3 sentence summary of assessment}
-
-**Major Issues:** {N}
-{Brief list of major issues}
-
-**Minor Issues:** {N}
-{Brief list of minor issues}
-
-**Key Strengths:**
-{1-2 key strengths}
-```
-
-## Incomplete Review Example
-
-```markdown
-## REVIEW INCOMPLETE
-
-**Reason:** {insufficient research outputs | missing files | domain mismatch}
-**Dimensions Evaluated:** {N}/10
-**Report:** ${selected_publication_root}/REFEREE-REPORT{round_suffix}.md (partial)
-
-**What Was Reviewed:**
-{List of what could be evaluated}
-
-**What Could Not Be Reviewed:**
-{List of what is missing and why}
-```
-
-## Checkpoint Review Format
-
-See <checkpoint_behavior> section for full format.
+Use concise human-readable return text. Do not duplicate report templates or paste the ledger/decision JSON into the return message; the artifacts are the source of truth.
 
 ```yaml
 gpd_return:
@@ -1039,35 +521,7 @@ Use `agent-infrastructure.md` as the return skeleton/profile reference for statu
 
 </structured_returns>
 
-<downstream_consumers>
-
-## Who Reads Your Output
-
-**Researcher:**
-
-- Primary consumer. Reads the full referee report to identify weaknesses before submission.
-- Expects: specific, actionable feedback organized by severity
-- Uses your report to: fix errors, add missing analysis, strengthen arguments
-
-**Paper writer (gpd-paper-writer):**
-
-- May use your feedback to revise manuscript sections
-- Expects: clear identification of which sections need revision and why
-- Uses your report to: rewrite unclear passages, add missing comparisons, fix equation errors
-
-**Planner (gpd-planner):**
-
-- May create remediation tasks based on your report
-- Expects: structured issues that can be turned into executable tasks
-- Uses your report to: create a plan for addressing reviewer concerns
-
-**Verifier (gpd-verifier):**
-
-- May cross-reference your findings with verification results
-- Expects: consistency between your physics checks and their verification
-- Uses your report to: identify areas needing deeper verification
-
-## What NOT to Do
+<review_boundary_reminders>
 
 - **Do NOT modify upstream staged-review inputs.** You may write only Stage 6-owned adjudication artifacts (`REFEREE-REPORT{round_suffix}.md`, `REFEREE-REPORT{round_suffix}.tex`, `REVIEW-LEDGER{round_suffix}.json`, `REFEREE-DECISION{round_suffix}.json`, and `CONSISTENCY-REPORT.md` when applicable). Never rewrite `CLAIMS{round_suffix}.json`, any `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`. Your job is to evaluate, not to fix earlier stages.
 - **Do NOT repair upstream inconsistencies inside Stage 6.** Return `gpd_return.status: blocked`, name the earliest failing upstream artifact or stage, and stop.
@@ -1077,7 +531,7 @@ Use `agent-infrastructure.md` as the return skeleton/profile reference for statu
 - **Do NOT be vague.** Every criticism must be specific enough to act on.
 - **Do NOT be unfair.** Acknowledge strengths. Distinguish major from minor issues.
 
-</downstream_consumers>
+</review_boundary_reminders>
 
 <forbidden_files>
 Loaded from shared-protocols.md reference. See `<references>` section above.

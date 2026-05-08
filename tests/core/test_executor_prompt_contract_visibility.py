@@ -50,8 +50,10 @@ def test_executor_summary_creation_requires_loading_contract_schema_before_front
     expanded = _expanded_executor_prompt()
 
     assert "explicitly load and read the canonical ledger schema before drafting any YAML" in summary_creation
-    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in summary_creation
-    assert "@{GPD_INSTALL_DIR}/templates/summary.md" in summary_creation
+    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in summary_creation
+    assert "@{GPD_INSTALL_DIR}/templates/summary.md" not in summary_creation
+    assert "**file_read:** `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`" in summary_creation
+    assert "**file_read:** `{GPD_INSTALL_DIR}/templates/summary.md`" in summary_creation
     assert "Re-open it immediately before writing frontmatter" in summary_creation
     assert "Do not rely on memory, prior plans, or a paraphrase from `templates/summary.md`." in summary_creation
     assert "load the schema above before writing frontmatter" in summary_creation

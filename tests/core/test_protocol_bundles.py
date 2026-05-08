@@ -14,6 +14,7 @@ from gpd.core.protocol_bundles import (
     BundleAssets,
     BundleVerifierExtension,
     ResolvedProtocolBundle,
+    build_protocol_bundle_load_manifest,
     get_protocol_bundle,
     invalidate_protocol_bundle_cache,
     list_protocol_bundles,
@@ -247,6 +248,7 @@ def test_get_protocol_bundle_returns_verifier_extensions() -> None:
     assert bundle.trigger.min_term_matches == 2
     assert bundle.trigger.min_tag_matches == 1
     assert bundle.assets.subfield_guides[0].path == "references/subfields/stat-mech.md"
+    assert bundle.assets.planning_guides[0].path == "references/planning/statistical-mechanics.md"
     assert bundle.verifier_extensions[0].check_ids == ["5.4", "5.14", "5.16"]
 
 
@@ -335,6 +337,90 @@ def test_select_protocol_bundles_uses_project_metadata_and_contract() -> None:
     assert "acceptance-kind:benchmark" in selected[0].matched_tags
     assert "finite-size scaling" in selected[0].matched_terms
     assert "references/protocols/monte-carlo.md" in selected[0].asset_paths
+    assert "references/planning/statistical-mechanics.md" in selected[0].asset_paths
+
+
+def test_bundle_assets_iterate_planning_guides_in_stable_role_order() -> None:
+    assets = BundleAssets(
+        protocols_optional=[BundleAsset(path="references/protocols/statistical-inference.md")],
+        planning_guides=[BundleAsset(path="references/planning/planner-approximations.md")],
+        execution_guides=[BundleAsset(path="references/execution/executor-subfield-guide.md")],
+    )
+
+    assert [role for role, _asset in assets.iter_assets()] == [
+        "protocols_optional",
+        "planning_guides",
+        "execution_guides",
+    ]
+
+
+def test_planning_guides_use_bundle_asset_path_validation(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    bundles_dir = tmp_path / "bundles"
+    bundles_dir.mkdir()
+    (bundles_dir / "invalid-planning-guide.md").write_text(
+        """---
+bundle_id: invalid-planning-guide
+bundle_version: 1
+title: Invalid Planning Guide
+summary: Planning guide paths must stay within specs.
+trigger:
+  any_terms:
+    - benchmark
+  min_term_matches: 1
+assets:
+  planning_guides:
+    - path: ../outside.md
+---
+
+# Invalid Planning Guide
+""",
+        encoding="utf-8",
+    )
+
+    try:
+        with caplog.at_level(logging.WARNING, logger="gpd.core.protocol_bundles"):
+            bundles = list_protocol_bundles(bundles_dir=bundles_dir)
+    finally:
+        invalidate_protocol_bundle_cache()
+
+    assert bundles == []
+    assert any("invalid-planning-guide.md" in record.message for record in caplog.records)
+
+
+def test_build_protocol_bundle_load_manifest_is_metadata_only_and_role_keyed() -> None:
+    selected = select_protocol_bundles(
+        "Statistical mechanics Monte Carlo with autocorrelation and finite-size scaling benchmarks.",
+        _stat_mech_contract(),
+    )
+
+    manifest = build_protocol_bundle_load_manifest(selected)
+
+    assert manifest["schema_version"] == 1
+    assert manifest["selection_source"] == "project_metadata"
+    assert manifest["selected_bundle_ids"] == ["stat-mech-simulation"]
+    assert manifest["bundle_count"] == 1
+    assert manifest["missing_bundle_ids"] == []
+
+    bundle_payload = manifest["bundles"][0]
+    assert bundle_payload["bundle_id"] == "stat-mech-simulation"
+    assert bundle_payload["selection"]["matched_terms"]
+    assert "asset_paths" not in bundle_payload
+    assert "body" not in bundle_payload
+
+    planning_guides = bundle_payload["assets"]["planning_guides"]
+    assert planning_guides == [
+        {
+            "path": "references/planning/statistical-mechanics.md",
+            "portable_path": "@{GPD_INSTALL_DIR}/references/planning/statistical-mechanics.md",
+            "required": False,
+            "note": (
+                "Use the ensemble, scaling, thermalization, and benchmark-before-production skeleton "
+                "when planning simulation phases."
+            ),
+        }
+    ]
+    serialized = json.dumps(manifest)
+    assert "Use for partition functions" not in serialized
 
 
 def test_render_protocol_bundle_context_is_explicit_when_none_selected() -> None:
@@ -358,7 +444,9 @@ def test_render_protocol_bundle_context_surfaces_guidance() -> None:
     assert "Selection tags:" in rendered
     assert "Estimator policies:" in rendered
     assert "Verifier extensions:" in rendered
+    assert "planning guides:" in rendered
     assert "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md" in rendered
+    assert "{GPD_INSTALL_DIR}/references/planning/statistical-mechanics.md" in rendered
 
 
 def test_render_protocol_bundle_context_includes_asset_notes() -> None:

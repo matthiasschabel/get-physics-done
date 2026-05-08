@@ -18,10 +18,8 @@ RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descript
 
 
 def _projected_budget_for_runtime(runtime: str) -> tuple[int, int]:
-    descriptor = next(descriptor for descriptor in iter_runtime_descriptors() if descriptor.runtime_name == runtime)
-    if descriptor.native_include_support:
-        return (1000, 60000)
-    return (6500, 430000)
+    next(descriptor for descriptor in iter_runtime_descriptors() if descriptor.runtime_name == runtime)
+    return (700, 45000)
 
 
 def _projected_verifier_prompt(runtime: str) -> str:
@@ -44,8 +42,8 @@ def test_gpd_verifier_prompt_surface_stays_within_expected_budget() -> None:
     )
 
     assert metrics.raw_include_count <= 10
-    assert metrics.expanded_line_count <= 6500
-    assert metrics.expanded_char_count <= 430000
+    assert metrics.expanded_line_count <= 500
+    assert metrics.expanded_char_count <= 35000
     source = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
     assert "@{GPD_INSTALL_DIR}/references/verification/domains/" not in source
     assert "@{GPD_INSTALL_DIR}/references/physics-subfields.md" not in source

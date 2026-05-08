@@ -30,9 +30,26 @@ If `{project_contract}` is empty, stale, or too underspecified to identify the p
 **Effective Reference Intake:** {effective_reference_intake}
 **Roadmap:** {roadmap_content}
 **Requirements:** {requirements_content}
-**Protocol Bundles:** {protocol_bundle_context}
 **Active References:** {active_reference_context}
 **Reference Artifacts:** {reference_artifacts_content}
+
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>
+{selected_protocol_bundle_ids}
+</selected_protocol_bundle_ids>
+
+<protocol_bundle_load_manifest>
+{protocol_bundle_load_manifest}
+</protocol_bundle_load_manifest>
+
+<protocol_bundle_context>
+{protocol_bundle_context}
+</protocol_bundle_context>
+
+<protocol_bundle_verifier_extensions>
+{protocol_bundle_verifier_extensions}
+</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
 
 **Phase Context:**
 IMPORTANT: If context exists below, it contains USER DECISIONS from gpd:discuss-phase.
@@ -109,9 +126,25 @@ Output is consumed by gpd:execute-phase. Plans need frontmatter, XML tasks, rigo
 **Project Contract Validation:** {project_contract_validation}
 **Contract Intake:** {contract_intake}
 **Effective Reference Intake:** {effective_reference_intake}
-**Protocol Bundles:** {protocol_bundle_context}
 **Active References:** {active_reference_context}
 **Reference Artifacts:** {reference_artifacts_content}
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>
+{selected_protocol_bundle_ids}
+</selected_protocol_bundle_ids>
+
+<protocol_bundle_load_manifest>
+{protocol_bundle_load_manifest}
+</protocol_bundle_load_manifest>
+
+<protocol_bundle_context>
+{protocol_bundle_context}
+</protocol_bundle_context>
+
+<protocol_bundle_verifier_extensions>
+{protocol_bundle_verifier_extensions}
+</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
 Stable knowledge docs may appear in the shared reference surfaces above. Treat them as reviewed background synthesis only: they can shape assumptions and method choice when consistent with stronger sources, but they do not override `convention_lock`, `project_contract`, the PLAN `contract`, or direct evidence.
 If a plan materially depends on a reviewed knowledge doc and the reliance must be gateable downstream, express that dependency with explicit `knowledge_deps`; otherwise keep the knowledge implicit and advisory.
 
@@ -146,7 +179,10 @@ Return what changed.
 | `{project_contract_validation}` | `project_contract_validation` from init JSON |
 | `{roadmap_content}` | `roadmap_content` from init JSON |
 | `{requirements_content}` | `requirements_content` from init JSON |
+| `{selected_protocol_bundle_ids}` | `selected_protocol_bundle_ids` from init JSON |
+| `{protocol_bundle_load_manifest}` | `protocol_bundle_load_manifest` from init JSON, if present |
 | `{protocol_bundle_context}` | `protocol_bundle_context` from init JSON |
+| `{protocol_bundle_verifier_extensions}` | `protocol_bundle_verifier_extensions` from init JSON |
 | `{active_reference_context}` | `active_reference_context` from init JSON |
 | `{reference_artifacts_content}` | `reference_artifacts_content` from init JSON |
 | `{context_content}` | phase `*-CONTEXT.md`, if present |

@@ -99,7 +99,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use the staged refresh for `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `state_content`, `config_content`, and `roadmap_content` before assembling the child handoff.
+Use the staged refresh for `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `state_content`, `config_content`, and `roadmap_content` before assembling the child handoff.
 
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 
@@ -120,43 +120,23 @@ Prior decisions: {decisions}
 Phase context: {context_md}
 </context>
 
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
+
+When `selected_protocol_bundle_ids` is non-empty, use the bundle context, load manifest, anchor prompts, reference prompts, assets, decisive-artifact guidance, and verifier extensions as the primary specialized research surface. Use the broad physics research directives below only for uncovered areas or when no bundle is selected.
+
 <physics_research_directives>
-Structure your research around these areas:
-
-**1. Mathematical Framework**
-- Governing equations (PDEs, ODEs, integral equations, variational principles)
-- Symmetry groups and conservation laws (Noether's theorem applications)
-- Relevant function spaces, Hilbert spaces, or manifold structures
-- Boundary and initial conditions
-
-**2. Known Solutions and Standard Results**
-- Exact solutions (if any) and their derivations
-- Standard approximation schemes: perturbation theory, WKB, mean-field, saddle-point, renormalization group
-- Regimes of validity for each approximation (dimensionless parameter ranges)
-- Textbook treatments and key review articles
-
-**3. Limiting Cases**
-- All physically meaningful limits that must be recovered
-- Classical limit (hbar -> 0), non-relativistic limit (v/c -> 0), thermodynamic limit (N -> infinity)
-- Weak and strong coupling limits
-- Known asymptotic behaviors and scaling laws
-
-**4. Computational Methods**
-- Numerical approaches: finite element, spectral methods, Monte Carlo, tensor networks, molecular dynamics
-- Existing software packages and libraries (e.g., QuTiP, SciPy, FEniCS, LAMMPS, Quantum ESPRESSO)
-- Convergence properties and error scaling
-- Parallelization and performance considerations
-
-**5. Dimensional Analysis and Natural Scales**
-- Identify all relevant physical scales (energy, length, time, temperature)
-- Construct dimensionless parameters that govern the physics
-- Determine which regime the problem lives in
-
-**6. Potential Pitfalls**
-- Known numerical instabilities or ill-conditioned problems
-- Gauge choices, regularization requirements, renormalization subtleties
-- Sign conventions and notation conflicts across literature
-- Common errors in the literature for this class of problems
+Cover only what is needed for this phase:
+- mathematical framework: governing equations, symmetries, function spaces, boundary/initial data
+- standard results: exact solutions, approximations, validity regimes, key references
+- limiting cases: classical/non-relativistic/thermodynamic, weak/strong coupling, asymptotics
+- computational methods: algorithms, packages, convergence/error scaling, performance constraints
+- dimensional scales: physical scales, dimensionless parameters, regime placement
+- pitfalls: instabilities, gauge/regularization/renormalization, notation conflicts, known errors
 </physics_research_directives>
 
 <output>
@@ -209,6 +189,13 @@ Read that file before continuing so you inherit the prior research state instead
 **Type:** {checkpoint_type}
 **Response:** {user_response}
 </checkpoint_response>
+
+<protocol_bundle_handoff>
+<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
+<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
+<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+</protocol_bundle_handoff>
 
 <spawn_contract>
 write_scope:

@@ -30,14 +30,18 @@ You can work across theoretical, computational, mathematical, and experimental-a
 
 **State machine:** For valid state transitions during execution, see `{GPD_INSTALL_DIR}/templates/state-machine.md`.
 
-Load these shared execution contracts before producing runtime-facing artifacts:
-@{GPD_INSTALL_DIR}/references/tooling/tool-integration.md
-@{GPD_INSTALL_DIR}/references/execution/executor-index.md
-@{GPD_INSTALL_DIR}/templates/state-machine.md
-Load `summary.md` and `calculation-log.md` only when the task reaches completion or a derivation-heavy logging stage.
+Keep these shared execution contracts visible by path and load them only when the task actually needs that detail:
+- Tool integration: `{GPD_INSTALL_DIR}/references/tooling/tool-integration.md`
+- Executor routing index: `{GPD_INSTALL_DIR}/references/execution/executor-index.md`
+- State machine: `{GPD_INSTALL_DIR}/templates/state-machine.md`
+- Shared protocols: `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`
+- LLM physics error taxonomy: `{GPD_INSTALL_DIR}/references/verification/errors/llm-physics-errors.md`
+- Agent infrastructure: `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`
+
+Load `summary.md`, `contract-results-schema.md`, and `calculation-log.md` only when the task reaches completion or a derivation-heavy logging stage.
 Non-canonical frontmatter aliases are forbidden in model-facing output; use only the canonical contract-ledger fields from `contract_results`.
 
-Loaded from agent-infrastructure.md reference.
+Use `agent-infrastructure.md` as the on-demand authority for data boundaries, convention loading details, and typed return skeletons when the inline executor rules are insufficient.
 </role>
 
 <execution_modes>
@@ -118,7 +122,7 @@ The active model profile (from `GPD/config.json`) controls how you execute resea
 
 The autonomy mode (from `GPD/config.json` field `autonomy`) controls how much human interaction occurs during execution. Read it at `load_project_state` alongside the model profile.
 
-**Key principle:** Autonomy affects DECISION AUTHORITY, not CORRECTNESS. Physics guards (self-critique, dimensional analysis, convention checks, mini-checklists, first-result sanity gates, and bounded execution segments) run at every autonomy level. The difference is who decides when physics choices arise and whether a clean gate auto-continues.
+**Key principle:** Autonomy affects DECISION AUTHORITY, not CORRECTNESS. Physics guards (self-critique, dimensional analysis, convention checks, selected guard assets, first-result sanity gates, and bounded execution segments) run at every autonomy level. The difference is who decides when physics choices arise and whether a clean gate auto-continues.
 
 | Mode | When to Use | Decision Authority | Checkpoint Handling |
 |---|---|---|---|
@@ -239,9 +243,10 @@ If no `<context_hint>` is provided, use `standard` allocation.
 
 </context_hint_awareness>
 
-@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md
-@{GPD_INSTALL_DIR}/references/verification/errors/llm-physics-errors.md
-@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md
+On-demand shared safety references:
+- `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md` for convention assertions, source/data boundaries, and shared physics discipline.
+- `{GPD_INSTALL_DIR}/references/verification/errors/llm-physics-errors.md` for the detailed error taxonomy when a guard names an error class.
+- `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md` for typed return skeletons, convention-loading details, and infrastructure boundaries.
 
 <protocol_loading>
 
@@ -258,14 +263,15 @@ Your system prompt is large. To preserve context for actual research work, start
 - verification-domain docs when they clarify what must be checked before calling the result believable
 - core protocols before execution begins
 - optional protocols only when the plan or the work actually enters that method family
+- execution guides and guard assets only when they match the current computation method, domain, or selected bundle
 
 **Step 3:** Carry bundle estimator policies and decisive artifact guidance into the work log and SUMMARY. Bundle guidance is additive: it cannot relax contract-critical anchors, acceptance tests, forbidden proxies, or first-result gates.
 
-**Step 4:** If no bundle is selected, or the bundle is clearly incomplete for the task at hand, fall back to `{GPD_INSTALL_DIR}/references/execution/executor-index.md` and load only the minimum additional protocols needed from there. If no fallback domain clearly fits, stay with the generic execution flow plus contract-backed anchors and checks instead of forcing the work into a topic bucket.
+**Step 4:** If no bundle is selected, or the bundle is clearly incomplete for the task at hand, fall back to `{GPD_INSTALL_DIR}/references/execution/executor-index.md` and `{GPD_INSTALL_DIR}/references/execution/guards/README.md`; load only the minimum additional protocols or guard assets needed from there. If no fallback domain clearly fits, stay with the generic execution flow plus contract-backed anchors and checks instead of forcing the work into a topic bucket.
 
 **Step 5:** If the work changes formulation mid-plan, load additional protocols on demand and record the shift. Do not stay trapped in the original bundle or fallback subfield if the actual computation demands a different method family.
 
-**Always loaded (via @-references above):** Convention tracking, common physics error taxonomy, and agent infrastructure. Load `order-of-limits.md` only when the task actually involves competing limits or asymptotic order questions. Deviation rules, checkpoint protocol, stuck protocol, and context pressure monitoring are inline below.
+**Always visible in this base prompt:** contract precedence, forbidden-proxy and first-result gates, tool preflight, convention-loading minimums, self-critique, deviation summaries, checkpoint semantics, stuck protocol, context pressure monitoring, return envelope requirements, and confidence calibration. Load `order-of-limits.md` only when the task actually involves competing limits or asymptotic order questions.
 
 </protocol_loading>
 
@@ -328,85 +334,23 @@ For perturbative calculations, declare the expansion order:
 
 **On failure:** If missing terms are discovered, apply Deviation Rule 4 (missing component). If the perturbative expansion itself fails to converge, apply Deviation Rule 3 (approximation breakdown) and escalate after 2 attempts per the automatic escalation protocol.
 
-### Computation-Type Mini-Checklist
+### Selected Computation And Domain Guards
 
-After each major step, run the 2-3 line check matching the computation type. Multiple types may apply — run all that match.
+After each major step, run only the guard assets that match the active computation or selected bundle. Do not load the full guard catalog by default.
 
-| # | Computation Type | Error Classes | Post-Step Check |
-|---|---|---|---|
-| 1 | Angular momentum / CG coefficients | #1, #2, #28 | Verify triangle inequality. Check m-values sum. Spot-check one CG against table. |
-| 2 | Grassmann / fermionic | #7, #12, #44 | Count anticommutation signs. Verify Pauli exclusion. Check fermion loop sign (-1)^L. |
-| 3 | Diagrammatic (Feynman, etc.) | #3, #23, #39 | Count vertices and propagators. Verify symmetry factor. Check momentum conservation at each vertex. |
-| 4 | Variational / extremization | #5, #24, #48 | Verify E_var >= E_exact (if known). Check boundary terms from integration by parts. Verify Hellmann-Feynman if forces computed. |
-| 5 | Many-body / stat mech | #8, #29, #31 | Check extensive quantities scale with N. Verify S >= 0, C_V >= 0. Check high-T limit. |
-| 6 | Path integral / instanton | #25, #26, #50 | Verify measure (Jacobian). Check saddle point satisfies EOM. Count zero modes = broken symmetries. Verify fluctuation determinant sign. |
-| 7 | Green's function / response | #3, #17, #21 | Check causality (retarded vs advanced). Verify KK relations. Check spectral weight positivity A(k,w) >= 0. |
-| 8 | Operator algebra / commutators | #14, #27, #35 | Verify Jacobi identity. Check Hermiticity. Verify operator ordering convention matches quantization scheme. |
-| 9 | Numerical computation (general) | #32 | Check convergence at 2+ resolutions. Verify units in code match derivation. Compare with analytical limit. Check condition number. |
-| 10 | Effective potential / RG | #20, #22, #40 | Verify beta function sign. Check decoupling of heavy modes. Verify fixed point stability. Check unitarity bounds on scaling dimensions. |
-| 11 | Perturbative (general) | #16, #36 | Count all terms at declared order. Check for missing cross-terms. Verify perturbative parameter is small. |
-| 12 | Topological / anomaly | #42, #45 | Verify integer-valued invariants are integers. Check anomaly cancellation. Verify gauge invariance. Check 't Hooft anomaly matching UV↔IR. |
-| 13 | Monte Carlo (classical & quantum) | #29, #31 | Check thermalization (ordered vs disordered start agree). Measure autocorrelation time. Verify detailed balance. Check average sign for fermion/frustrated systems. |
-| 14 | Lattice gauge theory | #30, #34, #37 | Verify plaquette action is gauge invariant. Check Wilson loop area law vs perimeter law. Verify continuum limit scaling. Check fermion doubling (staggered/Wilson). |
-| 15 | Exact diagonalization / eigenvalue | #4, #32 | Verify H = H†. Check eigenvalue count matches Hilbert space dimension. Verify ground state below all excited states. Check degeneracies match symmetry group. |
-| 16 | Tensor network / DMRG | #32 | Check truncation error (discarded weight). Verify entanglement entropy scaling (area law for gapped, log for critical). Check energy monotonically decreases with bond dimension. |
-| 17 | DFT / electronic structure | #15, #33 | Verify self-consistency converged (density change < threshold). Check band gap against known values. Verify total energy is variational. Check k-point convergence. |
-| 18 | Molecular dynamics | #43 | Verify energy conservation (symplectic: oscillates, doesn't drift). Check temperature equilibration. Verify forces = -grad(V). Check timestep convergence. |
-| 19 | Scattering / cross-section | #1, #37 | Verify optical theorem: Im(f(0)) = k*sigma_tot/(4pi). Check partial wave unitarity |a_l| <= 1. Verify crossing symmetry. Check s+t+u = sum(m^2). |
-| 20 | Semiclassical / WKB | #5, #46 | Verify connection formulas at turning points. Check Bohr-Sommerfeld quantization reproduces known levels. Verify classical limit is correct. Check adiabatic condition is satisfied. |
-| 21 | Numerical ODE/PDE (FEM, spectral) | #13, #18, #32 | Verify BC count matches equation order. Check convergence order matches method order (Richardson extrapolation). Verify conservation of conserved quantities. Test against known analytical solution. |
-| 22 | Fourier analysis / spectral decomposition | #6, #15 | Verify Parseval's theorem (energy conservation). Check Fourier convention (2pi placement) matches project lock. Verify reality conditions: f real ↔ F(-k) = F*(k). |
-| 23 | Analytic continuation (Matsubara → real) | #9, #17, #21 | Verify iw_n → w + i*eta (retarded). Check spectral function positivity after continuation. Verify KK consistency of continued function. Check Matsubara sum converges. |
-| 24 | Finite-temperature field theory | #9, #29, #31 | Verify KMS periodicity (bosons: periodic, fermions: antiperiodic). Check T→0 reduces to vacuum result. Verify Matsubara frequencies: w_n = 2n*pi*T (bosons), (2n+1)*pi*T (fermions). |
-| 25 | Cosmological perturbation theory | #10, #37, #38 | Verify gauge invariance of observable quantities (Bardeen variables). Check superhorizon limit (k*eta << 1). Verify Newtonian limit for sub-Hubble modes. Check stress-energy conservation nabla_mu T^{mu nu} = 0. |
-| 26 | Numerical relativity / metric | #10, #38 | Verify constraint equations (Hamiltonian + momentum) at each timestep. Check ADM mass conservation. Verify Schwarzschild limit for isolated sources. Monitor constraint violation growth. |
-| 27 | Conformal bootstrap / CFT | #4, #40 | Verify unitarity bounds on scaling dimensions. Check crossing symmetry of 4-point function. Verify OPE convergence. Check central charge c > 0. Verify fusion rules. |
-| 28 | Holographic / AdS-CFT | #10, #37, #38 | Verify bulk-boundary dictionary (GKP-W relation). Check boundary conditions (normalizable vs non-normalizable modes). Verify holographic entanglement entropy (Ryu-Takayanagi). Check Einstein equations in bulk. |
-| 29 | Machine learning for physics | #32 | Verify symmetry equivariance of network architecture. Check training loss converged. Validate on held-out physical test cases with known answers. Verify output satisfies physical constraints (positivity, normalization). |
-| 30 | Non-equilibrium / Boltzmann transport | #17, #46 | Verify H-theorem (entropy increases). Check equilibrium solution is Fermi-Dirac/Bose-Einstein. Verify Onsager reciprocal relations L_ij(B) = L_ji(-B). Check conductivity sum rule. |
-| 31 | Finite element methods (FEM) | #13, #18, #32 | Verify mesh convergence (halve element size, check error decreases at expected order). Check element quality (aspect ratios, Jacobian positivity). Verify boundary conditions applied correctly (Dirichlet: values match, Neumann: flux balance). Test patch test. |
-| 32 | Spectral methods (Fourier, Chebyshev) | #6, #15, #32 | Check aliasing (N/3 dealiasing rule for quadratic nonlinearity). Verify Gibbs phenomenon handled (filtering or avoiding discontinuities). Check resolution: highest retained mode amplitude < 10^{-6} of fundamental. Verify boundary conditions satisfied by basis. |
-| 33 | Quantum circuit simulation | #32, #47 | Verify gate unitarity (U†U = I for each gate). Check decoherence budget (total error < threshold for circuit depth). Verify measurement statistics match Born rule. Check entanglement entropy doesn't exceed log(d) for d-dimensional subsystem. |
-| 34 | Relativistic hydrodynamics | #37, #38 | Verify causality (signal speed <= c in all frames). Check entropy production dS/dt >= 0 (second law). Verify Israel-Stewart viscous corrections are subluminal. Check that Navier-Stokes limit recovers at low frequencies. Verify stress-energy conservation nabla_mu T^{mu nu} = 0. |
-| 35 | N-body gravitational | #32, #43 | Verify energy conservation (drift < 10^{-4} per dynamical time for symplectic integrator). Check softening length << scale of interest. Verify force resolution: test with known 2-body orbit (Kepler). Check momentum and angular momentum conservation. |
-| 36 | Bethe ansatz / integrability | #4, #14 | Verify Bethe equation root count matches expected (N roots for N-particle system). Check string hypothesis validity (deviations from ideal strings bounded). Verify thermodynamic limit (free energy agrees with TBA). Check known exact results (XXX chain: E_0/N = 1/4 - ln(2)). |
-| 37 | Functional integral / measure | #25, #50 | Verify measure is well-defined (Gaussian reference integral gives correct normalization). Check saddle point satisfies classical EOM. Verify fluctuation determinant sign (positive for bosonic, includes (-1) for fermionic). Count and regulate zero modes. Check that functional determinant ratio converges. |
-| 38 | Krylov subspace (Lanczos, Arnoldi) | #4, #32 | Verify orthogonality of Krylov vectors (re-orthogonalize if |q_j^T q_i| > sqrt(eps_machine) for i != j). Check that tridiagonal (Lanczos) or upper Hessenberg (Arnoldi) matrix eigenvalues converge from both ends of the spectrum first. Monitor ghost eigenvalues: duplicates appearing in the Ritz spectrum indicate loss of orthogonality. Verify the residual norm ||Av - theta*v|| < tolerance for each claimed eigenpair. |
-| 39 | Resummation (Pade, Borel, conformal) | #5, #16 | Verify Pade approximant [M/N] reproduces all known series coefficients exactly. Check for spurious poles on the physical axis (Froissart doublets: nearby pole-zero pairs). For Borel resummation: verify the Borel transform integral converges along the positive real axis (no renormalon ambiguities, or quantify them). Compare Pade/Borel result against direct partial sums at the boundary of convergence. Check that different Pade orders [M/N], [M+1/N], [M/N+1] give consistent results within claimed precision. |
-| 40 | Coupled cluster / post-Hartree-Fock | #24, #54 | Verify T1 diagnostic: ||T1||/sqrt(N_elec) < 0.02 for single-reference validity (if > 0.02, multireference methods needed). Check counterpoise correction for interaction energies (BSSE). Verify size consistency: E(A...B at R→inf) = E(A) + E(B). Check basis set convergence: CBS extrapolation from at least cc-pVTZ and cc-pVQZ. Verify CCSD(T) triples correction is small compared to CCSD correlation energy (otherwise perturbative triples unreliable). |
-| 41 | Kinetic theory / Vlasov equation | #56, #77 | Verify Liouville theorem: phase-space density df/dt = 0 along characteristics (for collisionless). Check that the distribution function f(x,v,t) >= 0 everywhere (positivity). Verify conservation: integrate f over velocity to get density n(x,t), verify dn/dt + div(n*u) = 0 (continuity). For linearized Vlasov: check Landau damping rate matches Im(omega) from the dispersion relation. Verify Penrose criterion for instability if equilibrium is non-Maxwellian. |
-| 42 | Stochastic differential equations (Langevin, Fokker-Planck) | #43 | Verify Ito vs Stratonovich convention is consistent throughout (Ito: drift correction of (1/2)g*g' absent; Stratonovich: drift correction present). Check fluctuation-dissipation theorem: noise amplitude sigma^2 = 2*gamma*k_B*T for thermal noise. Verify that the stationary distribution matches the Boltzmann distribution P_eq ~ exp(-V/(k_B*T)) for equilibrium systems. For Fokker-Planck: check normalization integral P(x,t) dx = 1 is preserved by the evolution. Check detailed balance if system should be in equilibrium. |
-| 43 | Quantum Monte Carlo (VMC, DMC, AFQMC) | #24, #29 | VMC: verify E_VMC >= E_exact (variational bound). DMC: check time-step bias (extrapolate tau→0 from 3+ time steps). AFQMC: monitor phaseless constraint validity (check overlap with trial wavefunction remains substantial). For all: verify statistical error bars decrease as 1/sqrt(N_samples). Check population control bias in DMC (total weight should fluctuate near target). Compare with exact results for small test systems (e.g., H2 at equilibrium: E_exact = -1.1745 Hartree). |
-| 44 | Open quantum systems / master equations | #47, #67 | Verify Lindblad form: rho_dot = -i[H,rho] + sum_k (L_k rho L_k^dag - (1/2){L_k^dag L_k, rho}). Check trace preservation: Tr(rho) = 1 at all times (d/dt Tr(rho) = 0). Verify complete positivity: all eigenvalues of rho remain >= 0. Check steady state: if exists, verify L_k|rho_ss> = 0 implies d(rho_ss)/dt = 0. For adiabatic elimination: verify timescale separation Gamma_fast >> g (coupling). Check quantum regression theorem if computing multi-time correlations. |
-| 45 | Symplectic / geometric integration | #43 | Verify symplecticity: the Jacobian matrix M of the map satisfies M^T J M = J where J is the standard symplectic matrix. Check energy error is bounded (oscillates, does not grow secularly) over long integrations. Verify time-reversal symmetry: applying one step forward then one step backward returns to the initial condition to machine precision. For splitting methods (Verlet, Forest-Ruth): verify each sub-step is individually symplectic. Check order of the integrator: error should scale as dt^{p+1} for a p-th order method. |
-| 46 | Electromagnetic / Maxwell solvers (FDTD, MoM) | #65, #73 | Verify CFL condition: dt <= dx/(c*sqrt(d)) for d-dimensional FDTD on a cubic grid. Check numerical dispersion: compute the numerical phase velocity at the highest resolved frequency and verify it differs from c by < 1%. Verify divergence conditions: div(E) = rho/eps0 and div(B) = 0 are preserved (for Yee scheme, these hold exactly by construction — verify they are not violated by source terms). Check PML/absorbing BC: verify reflections < -40 dB at the computational boundary. For MoM: verify reciprocity Z_ij = Z_ji for the impedance matrix. |
-| 47 | Random matrix theory | #4, #19 | Verify symmetry class: GOE (time-reversal invariant, integer spin), GUE (broken time-reversal), GSE (time-reversal, half-integer spin). Check level spacing distribution matches the correct Wigner surmise: P(s) ~ s^beta * exp(-c*s^2) with beta = 1 (GOE), 2 (GUE), 4 (GSE). Verify eigenvalue density matches Wigner semicircle for large N. Check that number variance Sigma^2(L) matches the correct universality class. For application to physical systems: verify unfolding procedure (mean level spacing = 1 after unfolding). |
-| 48 | Numerical renormalization group (NRG, fRG) | #20, #40 | NRG (Wilson): verify logarithmic discretization parameter Lambda gives converged results (compare Lambda=2, 3, 4). Check even/odd iteration convergence separately. Verify Kondo temperature T_K matches the analytical estimate T_K ~ D*exp(-1/(J*rho)). fRG: verify flow equations satisfy Ward identities at each scale. Check that the flow is regular (no divergences before reaching k→0 except at phase transitions). Verify that the initial condition at UV cutoff reproduces the bare action. |
-| 49 | Constrained dynamics (Dirac brackets, SHAKE/RATTLE) | #19, #43 | Verify constraint count: for N_c holonomic constraints, the system has 3N - N_c effective DOF. Check Dirac brackets satisfy Jacobi identity. For numerical SHAKE: verify constraint violation |sigma(q) - sigma_0| < tolerance after each step. For RATTLE: verify both position constraints AND velocity constraints (v dot grad(sigma) = 0) are satisfied. Check that constrained dynamics conserves the correct (Dirac) Hamiltonian, not the unconstrained one. |
-| 50 | Bifurcation / dynamical systems stability | #5 | Identify fixed points: verify f(x*) = 0 to numerical precision. Classify stability via eigenvalues of the Jacobian Df(x*): all Re(lambda_i) < 0 → stable node/focus; any Re(lambda_i) > 0 → unstable. For bifurcations: verify the bifurcation type by checking normal form coefficients (saddle-node: one zero eigenvalue; Hopf: pure imaginary pair; pitchfork: Z2 symmetry). Check structural stability: does the bifurcation diagram survive small perturbations to parameters? Verify basin of attraction boundaries numerically. |
-| 51 | Inverse problems / parameter estimation | #32 | Check well-posedness: is the forward problem differentiable? Compute condition number of the Jacobian J^T J — if > 10^6, regularization is mandatory. For Bayesian inference: verify prior is proper (integrates to 1) and posterior is normalizable. Check that MCMC chains have converged: Gelman-Rubin R-hat < 1.01 for all parameters. For maximum likelihood: verify the Fisher information matrix is positive definite (parameters are identifiable). Compare estimated uncertainties with bootstrapped confidence intervals. |
-| 52 | Lattice Boltzmann method | #57, #73 | Verify the Chapman-Enskog expansion recovers the target macroscopic equations (Navier-Stokes with correct viscosity nu = c_s^2*(tau - 0.5)*dt). Check that relaxation parameter tau > 0.5 (tau = 0.5 gives zero viscosity and instability). Verify mass and momentum conservation: sum_i f_i = rho and sum_i f_i*c_i = rho*u at every node. Check Mach number Ma = u/c_s < 0.1 for incompressible flow assumption. For thermal LBM: verify energy conservation and correct Prandtl number. |
+Loading order:
+1. Prefer selected bundle `execution_guides` from `<protocol_bundle_context>`.
+2. If the selected bundle is missing a needed method check, load `{GPD_INSTALL_DIR}/references/execution/guards/README.md` and then the one matching guard file.
+3. For generic or mixed-method work, load `{GPD_INSTALL_DIR}/references/execution/guards/core-computation-guards.md`.
+4. For domain-level quick checks not covered by the selected bundle, load `{GPD_INSTALL_DIR}/references/execution/guards/domain-post-step-guards.md`.
 
-**On mini-checklist failure:** If a check fails, apply the self-critique checkpoint (re-derive the step). If the error persists after re-derivation, apply Deviation Rule 3 and document.
+Minimum checks that remain inline even if the guard file is unavailable:
+- Numerical work: check convergence at more than one resolution or tolerance, units in code versus derivation, a condition number or stability proxy, and one analytic or benchmark limit.
+- Perturbative/asymptotic work: count terms at the declared order, check the small parameter, state the truncation error, and verify at least one known limit.
+- Proof or theorem work: state hypotheses, verify no hidden regularity or compactness assumption entered, and test the conclusion on a simple example or counterexample family.
+- Simulation work: record seed/version metadata, conservation or invariant checks, burn-in or equilibration evidence, and a reproducibility command.
 
-### Domain Post-Step Guards
-
-In addition to computation-type mini-checklists, run these after each major step based on the project domain (from config.json `domain` field or STATE.md). Multiple domains may apply — run all matching. These catch domain-level errors that no single computation-type checklist covers.
-
-| Domain | Trigger (config/state contains) | Post-Step Quick Check (run after EACH major result) |
-|--------|--------------------------------|-----------------------------------------------------|
-| **QFT** | `qft`, `field_theory`, `gauge` | Ward identity: replacing any external photon ε^μ → k^μ gives zero. Gauge parameter ξ must cancel from physical observables. S-matrix unitarity: SS† = 1 (check optical theorem at each loop order). |
-| **Condensed matter** | `condensed_matter`, `solid_state`, `band` | Kramers-Kronig: Re χ(ω) and Im χ(ω) must satisfy KK for any new response function. Spectral positivity: A(k,ω) ≥ 0. f-sum rule: ∫₀^∞ ω·Im χ(ω) dω = π·n/2m for charge response. |
-| **Statistical mechanics** | `stat_mech`, `thermodynamics`, `phase_transition` | Detailed balance: W(i→j)/W(j→i) = exp(-β(Eⱼ-Eᵢ)) for any new transition rate. Partition function Z > 0. Gibbs-Duhem: SdT - VdP + Σμᵢ dNᵢ = 0 for new thermodynamic relations. Free energy F must be concave in T: ∂²F/∂T² ≤ 0. |
-| **Numerical** | `numerical`, `simulation`, `computational` | Condition number of any new matrix: warn if κ > 10⁶. Catastrophic cancellation: flag if computing a-b where \|a-b\|/\|a\| < 10⁻⁶. Conservation: verify conserved quantities preserved to machine precision after each time step. |
-| **General relativity** | `gr`, `gravity`, `cosmology`, `black_hole` | Contracted Bianchi: ∇_μ G^μν = 0 for any new metric. Metric signature preserved after coordinate transforms. Connection compatibility: ∇_ρ g_μν = 0 (Levi-Civita). Geodesic equation consistent with Euler-Lagrange of the action. |
-| **Nuclear / particle** | `nuclear`, `particle`, `hadron`, `collider` | Cross-section positivity: dσ/dΩ ≥ 0 everywhere. Isospin conservation: ΔI = 0 for strong processes. CPT invariance: check mass equality for particle-antiparticle. Partial wave unitarity: \|a_ℓ\| ≤ 1. |
-| **Quantum information** | `quantum_info`, `quantum_computing`, `entanglement` | Trace preservation: Tr(ρ) = 1 after any quantum channel. Complete positivity: eigenvalues of ρ ≥ 0. Entanglement entropy S ≤ log(d) for d-dimensional subsystem. Fidelity bounds: 0 ≤ F ≤ 1. |
-| **Astrophysics** | `astrophysics`, `stellar`, `galaxy` | Eddington luminosity: L ≤ L_Edd = 4πGMc/κ for steady accretion. Virial theorem: 2K + W = 0 for equilibrium systems. Jeans criterion: check mass/length consistency with instability threshold. |
-| **Soft matter / biophysics** | `soft_matter`, `polymer`, `biological` | Fluctuation-dissipation: D = k_BT/γ (Einstein relation). Osmotic pressure positivity: Π ≥ 0 for dilute solutions. Entropic elasticity: stress-strain consistent with Gaussian chain at small deformations. |
-| **Mathematical physics** | `math_phys`, `integrable`, `topological` | Integer-valued invariants must be integers (Chern, winding, etc.). Anomaly cancellation: check 't Hooft matching UV ↔ IR. Modular invariance for any new partition function on a torus. |
-
-**On domain guard failure:** Same protocol as mini-checklist failure — self-critique checkpoint, then Deviation Rule 3 if persistent.
+**On selected guard failure:** Apply the self-critique checkpoint and re-derive or rerun the step. If the error persists after one bounded correction, apply Deviation Rule 3 and document the failed guard, the attempted fix, and the downstream result that is no longer trustworthy.
 
 </post_step_physics_guards>
 
@@ -583,8 +527,8 @@ For each task:
      - Tag any mathematical identities with IDENTITY_CLAIM + verify if from training data
      - Declare BOUNDARY_CONDITIONS when solving ODEs/PDEs, verify BC count vs order
      - Declare EXPANSION_ORDER for perturbative calculations
-     - Run computation-type mini-checklist (2-3 line sanity check matching the task type)
-     - Run domain post-step guards (domain-level sanity check based on project domain)
+     - Load and run only the selected bundle execution guide or on-demand guard asset matching the task method/domain
+     - If no selected guard fits, run the inline minimum checks rather than forcing the task into a broad topic bucket
    - Apply deviation rules as needed
    - Handle computational environment errors as environment gates
    - Run verification, confirm done criteria
@@ -931,15 +875,17 @@ After all tasks complete, load the completion reference when preparing SUMMARY.m
 
 For contract-backed SUMMARY frontmatter, explicitly load and read the canonical ledger schema before drafting any YAML:
 
-@{GPD_INSTALL_DIR}/templates/contract-results-schema.md
-@{GPD_INSTALL_DIR}/templates/summary.md
+**file_read:** `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`
+**file_read:** `{GPD_INSTALL_DIR}/templates/summary.md`
 
 This schema is authoritative for `plan_contract_ref`, `contract_results`, and `comparison_verdicts`. Re-open it immediately before writing frontmatter so the exact validator-consumed fields and closed-schema rules are visible in context.
+These ledgers are user-visible evidence. They describe what was established, what artifact exists, and what decisive comparisons passed or failed.
 
 Key requirements (always in memory — sufficient if the file_read above fails):
 - SUMMARY.md location: `GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md`
 - For contract-backed plans, load the schema above before writing frontmatter, then re-open it immediately before finalizing YAML and follow it literally. Do not rely on memory, prior plans, or a paraphrase from `templates/summary.md`.
 - Contract-backed examples in `executor-completion.md` and `executor-worked-example.md` keep `uncertainty_markers` explicit and non-empty; do not copy an older empty-list pattern.
+- Validate contract-backed output with `gpd validate summary-contract GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md`.
 - One-liner must be substantive and physics-specific (not "calculation completed")
 - Use template: `{GPD_INSTALL_DIR}/templates/summary.md`
 - Include conventions table, key results with confidence tags, deviation documentation
@@ -991,24 +937,16 @@ grep -l "metric" derivations/*.tex | xargs grep -h "metric" | sort -u
 # Should show ONE convention, not multiple
 ```
 
-**7. Domain-specific final verification (auto-select based on plan `type` tag or computation content):**
+**7. Domain-specific final verification:**
 
-| Domain | Trigger (plan type contains) | Final Verification Checks |
-|--------|------------------------------|--------------------------|
-| **QFT** | `qft`, `field_theory`, `scattering`, `feynman`, `renormalization` | (a) Ward/Slavnov-Taylor identities hold for all amplitudes (b) Gauge-invariant quantities are independent of gauge parameter ξ (c) Optical theorem: Im(forward amplitude) = σ_total × flux (d) Crossing symmetry: s↔t↔u channel relations consistent |
-| **Condensed matter** | `condensed`, `lattice`, `band`, `phonon`, `superconductor` | (a) f-sum rule satisfied for response functions (b) Kramers-Kronig relations hold between Re/Im parts (c) Fluctuation-dissipation theorem: response ↔ correlation consistent (d) Extensive quantities scale linearly with system size N |
-| **Statistical mechanics** | `stat_mech`, `thermo`, `partition`, `ising`, `phase_transition` | (a) Partition function Z > 0 for all physical temperatures (b) Free energy convexity: ∂²F/∂T² ≤ 0 (stability) (c) Maxwell relations: cross-derivatives of thermodynamic potentials match (d) High-T and low-T limits recover known asymptotic behavior |
-| **Numerical** | `numerical`, `simulation`, `monte_carlo`, `finite_element` | (a) Convergence rate matches theoretical order (b) Condition number checked — no ill-conditioning artifacts (c) No catastrophic cancellation in subtractions of nearly-equal quantities (d) Results stable under change from float64 to float128 (or equivalent precision test) |
-| **General relativity** | `gr`, `gravity`, `cosmology`, `black_hole`, `geodesic` | (a) Bianchi identity: ∇_μ G^μν = 0 verified (b) Energy conditions (weak/strong/dominant) stated and checked (c) Geodesic equation recovered from action principle (d) Newtonian limit: g_00 ≈ -(1+2Φ/c²) recovered at weak field |
-| **AMO** | `amo`, `atomic`, `molecular`, `optical`, `laser` | (a) Selection rules consistent with symmetry group of Hamiltonian (b) Thomas-Reiche-Kuhn sum rule: Σ_n f_n = N_electrons (c) Gauge independence: length vs velocity gauge give same observables |
-| **Fluid / plasma** | `fluid`, `plasma`, `hydrodynamic`, `magnetohydrodynamic`, `turbulence` | (a) Global conservation: mass, momentum, energy, magnetic helicity integrals preserved (b) Reynolds/Lundquist number regime consistent with assumed approximations (laminar vs turbulent, ideal vs resistive) (c) CFL condition uses fast magnetosonic speed c_f = sqrt(c_s^2 + v_A^2), not just flow speed (d) div(B) = 0 maintained: max(\|div B\| * dx / \|B\|) monitored and reported |
-| **Nuclear / particle** | `nuclear`, `particle`, `hadron`, `collider`, `qcd` | (a) Cross-section positivity: dσ/dΩ ≥ 0 everywhere (b) Partial wave unitarity: \|a_ℓ\| ≤ 1 for all partial waves (c) CPT invariance: mass and lifetime equality for particle-antiparticle verified (d) Isospin/flavor symmetry: ΔI selection rules correct for interaction type (strong: ΔI=0, EM: ΔI=0,1, weak: ΔI=1/2 rule) |
-| **Quantum information** | `quantum_info`, `quantum_computing`, `entanglement`, `qubit` | (a) Trace preservation: Tr(ρ) = 1 after every quantum channel (b) Complete positivity: eigenvalues of ρ ≥ 0 after every operation (c) Entanglement entropy S ≤ log(d) for d-dimensional subsystem (d) No-cloning: fidelity of any cloning attempt bounded by F ≤ (1+1/d)/(1+d) |
-| **Astrophysics** | `astrophysics`, `stellar`, `galaxy`, `accretion` | (a) Eddington luminosity: L ≤ L_Edd for steady spherical accretion (b) Virial theorem: 2K + W = 0 for systems in equilibrium (c) Jeans mass/length: gravitational collapse threshold consistent with thermal support (d) Schwarzschild radius check: no unphysical compactness ratios |
-| **Soft matter / biophysics** | `soft_matter`, `polymer`, `biological`, `colloid` | (a) Fluctuation-dissipation: D = k_BT/γ (Einstein relation) verified (b) Osmotic pressure: Π ≥ 0 for stable solutions (c) Entropic elasticity: stress-strain consistent with Gaussian chain model at small deformations (d) Scaling laws: verify polymer exponents (ν, γ) consistent with universality class |
-| **Mathematical physics** | `math_phys`, `integrable`, `topological`, `representation` | (a) Topological invariants are integers (Chern number, winding number, Euler characteristic) (b) Anomaly cancellation: 't Hooft matching between UV and IR descriptions (c) Modular invariance for partition functions on torus (d) Index theorems: analytical index = topological index verified |
+Before declaring success, load the selected bundle verification-domain docs, `protocol_bundle_verifier_extensions`, and matching `execution_guides` from `<protocol_bundle_context>`. If no selected bundle covers the final result domain, load `{GPD_INSTALL_DIR}/references/execution/guards/final-verification-guards.md` on demand and apply only the matching rows.
 
-If the plan type does not match any domain, skip this check. If multiple domains match, apply all matching rows.
+Minimum final checks that remain inline:
+- Contract-backed anchors and first-result gates outrank every bundle or guard asset.
+- Analytical results need dimension, convention, sign/factor, limiting-case, and symmetry checks.
+- Numerical results need convergence, benchmark or known-answer comparison, uncertainty/error bars, and reproducibility commands.
+- Claims that use a proxy must explicitly state why the proxy is forbidden, inadequate, decisive, or still unresolved under the contract.
+- If no domain or selected guard matches, skip topic-specific rows and rely on generic execution flow plus contract-backed anchors and checks.
 
 **8. Append result to SUMMARY.md:** `## Self-Check: PASSED` or `## Self-Check: FAILED` with missing items listed.
 
@@ -1155,7 +1093,7 @@ Plan execution complete when:
 - [ ] Post-step physics guards applied: IDENTITY_CLAIM tags on all non-trivial identities, training_data identities verified at 3+ test points
 - [ ] Boundary conditions declared (BOUNDARY_CONDITIONS) for all ODE/PDE solutions, BC count verified vs equation order
 - [ ] Expansion order declared (EXPANSION_ORDER) for perturbative calculations, all terms at declared order verified present
-- [ ] Computation-type mini-checklist applied after each major step, failures mapped to deviation rules
+- [ ] Selected or on-demand guard assets applied after each major step, failures mapped to deviation rules
 - [ ] Domain post-step guards applied after each major step (matching project domain from config/STATE.md)
       </success_criteria>
 

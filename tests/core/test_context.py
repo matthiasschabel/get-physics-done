@@ -234,6 +234,7 @@ _PLAN_PHASE_STAGE_AUTHORING_FIELDS = _PLAN_PHASE_STAGE_BOOTSTRAP_FIELDS + [
     "effective_reference_intake",
     "selected_protocol_bundle_ids",
     "protocol_bundle_count",
+    "protocol_bundle_load_manifest",
     "protocol_bundle_context",
     "protocol_bundle_verifier_extensions",
     "active_reference_context",
@@ -281,6 +282,7 @@ _PLAN_PHASE_STAGE_CHECKER_AUDIT_FIELDS = [
     "effective_reference_intake",
     "selected_protocol_bundle_ids",
     "protocol_bundle_count",
+    "protocol_bundle_load_manifest",
     "protocol_bundle_context",
     "protocol_bundle_verifier_extensions",
     "active_reference_context",
@@ -326,6 +328,7 @@ _PLAN_PHASE_STAGE_PLANNER_REVISION_FIELDS = [
     "effective_reference_intake",
     "selected_protocol_bundle_ids",
     "protocol_bundle_count",
+    "protocol_bundle_load_manifest",
     "protocol_bundle_context",
     "protocol_bundle_verifier_extensions",
     "active_reference_context",
@@ -1621,6 +1624,13 @@ class TestInitExecutePhase:
         assert "monte-carlo.md" in ctx["protocol_bundle_context"]
         assert "selected_protocol_bundles" not in ctx
         assert "protocol_bundle_asset_paths" not in ctx
+        manifest = ctx["protocol_bundle_load_manifest"]
+        assert manifest["selected_bundle_ids"] == ctx["selected_protocol_bundle_ids"]
+        assert manifest["bundle_count"] == ctx["protocol_bundle_count"]
+        assert manifest["bundles"][0]["assets"]["planning_guides"][0]["path"] == (
+            "references/planning/statistical-mechanics.md"
+        )
+        assert "asset_paths" not in manifest["bundles"][0]
         assert any(
             extension["bundle_id"] == "stat-mech-simulation" for extension in ctx["protocol_bundle_verifier_extensions"]
         )
@@ -2225,6 +2235,8 @@ class TestInitPlanPhase:
         assert ctx["project_contract_gate"]["visible"] is True
         assert ctx["contract_intake"]["must_read_refs"] == ["ref-benchmark"]
         assert ctx["selected_protocol_bundle_ids"] == []
+        assert ctx["protocol_bundle_load_manifest"]["selected_bundle_ids"] == []
+        assert ctx["protocol_bundle_load_manifest"]["bundle_count"] == 0
         assert ctx["active_reference_count"] == 0
         assert ctx["effective_reference_intake"] == {
             "must_read_refs": [],
@@ -2809,6 +2821,7 @@ class TestInitNewProject:
             "reference_artifact_files",
             "reference_artifacts_content",
             "selected_protocol_bundle_ids",
+            "protocol_bundle_load_manifest",
             "protocol_bundle_context",
         ):
             assert key not in ctx
@@ -3439,6 +3452,7 @@ class TestInitNewProject:
             }
             assert ctx["active_reference_context"] == ""
             assert ctx["selected_protocol_bundle_ids"] == []
+            assert ctx["protocol_bundle_load_manifest"]["selected_bundle_ids"] == []
             assert ctx["protocol_bundle_context"] is None
             assert ctx.get("publication_bootstrap") is None
             assert ctx.get("publication_bootstrap_mode") is None
@@ -3907,6 +3921,7 @@ class TestInitQuick:
                 "effective_reference_intake": {"must_read_refs": ["ref-benchmark"]},
                 "selected_protocol_bundle_ids": ["core"],
                 "protocol_bundle_count": 1,
+                "protocol_bundle_load_manifest": {"selected_bundle_ids": ["core"], "bundle_count": 1},
                 "protocol_bundle_context": "protocol context",
                 "protocol_bundle_verifier_extensions": "verifier extensions",
                 "active_reference_context": "active reference context",
@@ -5851,6 +5866,10 @@ class TestInitProgress:
 
         assert "stat-mech-simulation" in ctx["selected_protocol_bundle_ids"]
         assert ctx["protocol_bundle_count"] >= 1
+        assert ctx["protocol_bundle_load_manifest"]["selected_bundle_ids"] == ctx["selected_protocol_bundle_ids"]
+        assert "Every physics calculation involves approximations" not in json.dumps(
+            ctx["protocol_bundle_load_manifest"]
+        )
         assert ctx["protocol_bundle_context"] is None
 
         ctx_with_protocols = init_progress(tmp_path, includes={"protocols"})
@@ -6420,6 +6439,7 @@ class TestInitPhaseOp:
                     "reference_artifact_files",
                     "reference_artifacts_content",
                     "selected_protocol_bundle_ids",
+                    "protocol_bundle_load_manifest",
                     "protocol_bundle_context",
                     "protocol_bundle_verifier_extensions",
                     "current_execution",
@@ -6451,6 +6471,7 @@ class TestInitPhaseOp:
             "reference_artifact_files",
             "reference_artifacts_content",
             "selected_protocol_bundle_ids",
+            "protocol_bundle_load_manifest",
             "protocol_bundle_context",
             "protocol_bundle_verifier_extensions",
             "current_execution",

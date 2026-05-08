@@ -31,6 +31,23 @@ def _workflow_data() -> dict[str, object]:
     return load_repo_github_actions_workflow(REPO_ROOT, "test.yml")
 
 
+_PR_CI_TRIGGER_NAMES = {"pull_request", "push", "workflow_run"}
+_LIVE_PROVIDER_PR_CI_MARKERS = (
+    "phase8-live-providers",
+    "phase8_live_provider_matrix.py",
+    "provider_set",
+    "phase8-provider-smoke",
+    "GEMINI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+)
+_PHASE0_BASELINE_HELPER_MARKERS = (
+    "scripts/phase0_baseline_report.py",
+    "phase0_baseline_report.py",
+    "phase0-baseline-report",
+)
+
+
 def test_all_github_workflows_parse_with_github_actions_shape() -> None:
     workflow_paths = _workflow_paths()
 
@@ -141,6 +158,30 @@ def test_default_ci_workflow_has_no_live_provider_credentials_or_phase8_launch_p
     run_commands = "\n".join(str(step.get("run", "")) for _, step in iter_workflow_steps(workflow))
     assert "provider_set" not in run_commands
     assert "phase8-provider-smoke" not in run_commands
+
+
+def test_pr_triggered_workflows_do_not_define_live_provider_or_phase0_provider_lanes() -> None:
+    offenders: list[str] = []
+    phase0_provider_offenders: list[str] = []
+
+    for path in _workflow_paths():
+        workflow = load_github_actions_workflow(path)
+        triggers = set(workflow["on"])
+        if not triggers & _PR_CI_TRIGGER_NAMES:
+            continue
+
+        workflow_text = path.read_text(encoding="utf-8")
+        for marker in _LIVE_PROVIDER_PR_CI_MARKERS:
+            if marker in workflow_text:
+                offenders.append(f"{path.name}: {marker}")
+
+        if any(marker in workflow_text for marker in _PHASE0_BASELINE_HELPER_MARKERS):
+            for marker in _LIVE_PROVIDER_PR_CI_MARKERS:
+                if marker in workflow_text:
+                    phase0_provider_offenders.append(f"{path.name}: {marker}")
+
+    assert offenders == []
+    assert phase0_provider_offenders == []
 
 
 def test_ci_workflow_runs_human_author_check_on_pull_requests_and_main_pushes() -> None:

@@ -1022,6 +1022,39 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     assert condition_index < dispatched_index < else_index < skipped_index < fi_index
 
 
+def test_phase0_keeps_release_smoke_tightening_structurally_separate_from_publish_flow() -> None:
+    """Phase 12 owns stricter release-smoke head/attempt/mutation budgets."""
+
+    repo_root = _repo_root()
+    workflow = load_repo_github_actions_workflow(repo_root, "publish-release.yml")
+    validate_step = workflow_step_by_name(
+        workflow,
+        "build-release",
+        "Validate sanitized Phase 8 smoke report if required",
+    )
+
+    assert validate_step["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "REQUIRE_PHASE8_SMOKE": "${{ inputs.require_phase8_smoke }}",
+        "PHASE8_SMOKE_RUN_ID": "${{ inputs.phase8_smoke_run_id }}",
+        "PHASE8_SMOKE_ARTIFACT_NAME": "${{ inputs.phase8_smoke_artifact_name }}",
+    }
+
+    run_command = validate_step["run"]
+    expected_validation_command = (
+        'uv run python scripts/validate_phase8_provider_report.py --input "$REPORT_PATH" --require-smoke'
+    )
+    assert expected_validation_command in run_command
+    for phase12_release_smoke_flag in (
+        "--expected-repo-head",
+        "--expected-head",
+        "--max-provider-attempts",
+        "--max-attempts",
+        "--max-mutating-rows",
+    ):
+        assert phase12_release_smoke_flag not in run_command
+
+
 def test_release_workflow_uv_build_steps_use_isolated_uv_environment() -> None:
     repo_root = _repo_root()
 

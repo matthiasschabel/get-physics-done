@@ -49,6 +49,24 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _assert_contains_all(haystack: str, needles: tuple[str, ...]) -> None:
+    for needle in needles:
+        assert needle in haystack, needle
+
+
+def _assert_contains_none(haystack: str, needles: tuple[str, ...]) -> None:
+    for needle in needles:
+        assert needle not in haystack, needle
+
+
+def _assert_contains_in_order(haystack: str, needles: tuple[str, ...]) -> None:
+    last_index = -1
+    for needle in needles:
+        current_index = haystack.index(needle)
+        assert current_index > last_index, needle
+        last_index = current_index
+
+
 _SHARED_INSTALL = get_shared_install_metadata()
 _GENERATED_BOOTSTRAP_METADATA_ASSET = "src/gpd/bootstrap/installer_metadata.json"
 _RAW_BOOTSTRAP_JSON_ASSETS = (
@@ -474,7 +492,10 @@ def test_contributor_docs_describe_gemini_completion_at_cli_boundary() -> None:
     normalized = re.sub(r"\s+", " ", contributing)
 
     assert "Gemini installs are expected to be complete on disk after `GeminiAdapter.install()`" not in contributing
-    assert "Gemini public installs are expected to be complete on disk after the CLI-level install path succeeds" in normalized
+    assert (
+        "Gemini public installs are expected to be complete on disk after the CLI-level install path succeeds"
+        in normalized
+    )
     assert "`gpd install gemini" in normalized
     assert "`npx -y get-physics-done --gemini" in normalized
     assert "Raw `GeminiAdapter.install()` prepares deferred settings" in normalized
@@ -487,13 +508,24 @@ def test_contributor_docs_describe_gemini_completion_at_cli_boundary() -> None:
 def test_contributor_docs_keep_phase8_live_provider_smoke_out_of_pr_ci() -> None:
     repo_root = _repo_root()
     contributing = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    normalized = re.sub(r"\s+", " ", contributing)
 
     assert "Phase 8 live-provider smoke is not part of local pytest or PR CI" in contributing
     assert ".github/workflows/phase8-live-provider-matrix.yml" in contributing
     assert "`phase8-live-providers` environment" in contributing
-    assert "The publish workflow can require and validate the sanitized report artifact" in contributing
-    assert "must not launch providers" in contributing
-    assert "do not add provider credentials, provider launches, or raw logs to release workflows" in contributing
+    _assert_contains_all(
+        normalized,
+        (
+            "do not treat dry-run intake as accepted smoke",
+            "`source_ref` set to the reviewed release commit",
+            "require_phase8_smoke=true",
+            "phase8_smoke_run_id=<Phase 8 live provider matrix run id>",
+            "phase8_smoke_artifact_name=phase8-sanitized-provider-report",
+            "The publish workflow can require and validate the sanitized report artifact",
+            "must not launch providers",
+            "do not add provider credentials, provider launches, raw logs, or dry-run intake as release smoke",
+        ),
+    )
 
 
 def test_public_release_surfaces_share_agentic_system_positioning() -> None:
@@ -728,8 +760,17 @@ def test_prepare_release_workflow_creates_release_pr_without_publishing() -> Non
     assert "git add CHANGELOG.md CITATION.cff README.md package.json pyproject.toml uv.lock" in workflow
     assert "Publish release" in workflow
     assert "Phase 8 live provider matrix" in workflow
-    assert "sanitized report run id" in workflow
-    assert "publishing validates the report only and never launches providers" in workflow
+    _assert_contains_all(
+        workflow,
+        (
+            "`source_ref` set to the reviewed release commit",
+            "require_phase8_smoke=true",
+            "phase8_smoke_run_id=<Phase 8 live provider matrix run id>",
+            "phase8_smoke_artifact_name=phase8-sanitized-provider-report",
+            "`Publish release` validates the sanitized report only and never launches providers",
+            "dry-run Phase 8 intake is not accepted as smoke",
+        ),
+    )
     assert "pypa/gh-action-pypi-publish@release/v1" not in workflow
     assert "npm publish" not in workflow
     assert "gh release create" not in workflow
@@ -880,6 +921,8 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     assert "require_phase8_smoke:" in workflow
     assert "phase8_smoke_run_id:" in workflow
     assert "phase8_smoke_artifact_name:" in workflow
+    assert "phase8_smoke_max_provider_attempts:" in workflow
+    assert "phase8_smoke_max_mutating_rows:" in workflow
     assert "default: phase8-sanitized-provider-report" in workflow
     assert "ref: ${{ inputs.release_sha || github.sha }}" in workflow
     assert "git merge-base --is-ancestor HEAD" in workflow
@@ -895,11 +938,27 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     assert "Tag v${VERSION} already points at release commit ${RELEASE_SHA}; continuing publish recovery." in workflow
     assert "Tag v${VERSION} already exists at ${TAG_SHA}, not release commit ${RELEASE_SHA}." in workflow
     assert "Validate sanitized Phase 8 smoke report if required" in workflow
-    assert "REQUIRE_PHASE8_SMOKE: ${{ inputs.require_phase8_smoke }}" in workflow
-    assert "PHASE8_SMOKE_RUN_ID: ${{ inputs.phase8_smoke_run_id }}" in workflow
-    assert "gh run download \"$PHASE8_SMOKE_RUN_ID\"" in workflow
+    _assert_contains_all(
+        workflow,
+        (
+            "RELEASE_SHA: ${{ steps.release_sha.outputs.sha }}",
+            "REQUIRE_PHASE8_SMOKE: ${{ inputs.require_phase8_smoke }}",
+            "PHASE8_SMOKE_RUN_ID: ${{ inputs.phase8_smoke_run_id }}",
+            "PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS: ${{ inputs.phase8_smoke_max_provider_attempts }}",
+            "PHASE8_SMOKE_MAX_MUTATING_ROWS: ${{ inputs.phase8_smoke_max_mutating_rows }}",
+        ),
+    )
+    assert 'gh run download "$PHASE8_SMOKE_RUN_ID"' in workflow
     assert "scripts/validate_phase8_provider_report.py is required for Phase 8 smoke validation" in workflow
-    assert 'uv run python scripts/validate_phase8_provider_report.py --input "$REPORT_PATH" --require-smoke' in workflow
+    assert "uv run python scripts/validate_phase8_provider_report.py \\" in workflow
+    _assert_contains_all(
+        workflow,
+        (
+            '--expected-repo-head "$RELEASE_SHA"',
+            '--max-provider-attempts "$PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS"',
+            '--max-mutating-rows "$PHASE8_SMOKE_MAX_MUTATING_ROWS"',
+        ),
+    )
     assert "status=not-required" in workflow
     assert "status=validated" in workflow
     assert workflow.index("Validate sanitized Phase 8 smoke report if required") < workflow.index(
@@ -1026,11 +1085,19 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
     assert condition_index < dispatched_index < else_index < skipped_index < fi_index
 
 
-def test_phase0_keeps_release_smoke_tightening_structurally_separate_from_publish_flow() -> None:
-    """Phase 12 owns stricter release-smoke head/attempt/mutation budgets."""
-
+def test_publish_release_workflow_enforces_strict_phase8_smoke_artifact_gate() -> None:
     repo_root = _repo_root()
     workflow = load_repo_github_actions_workflow(repo_root, "publish-release.yml")
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+
+    max_provider_attempts = dispatch_inputs["phase8_smoke_max_provider_attempts"]
+    max_mutating_rows = dispatch_inputs["phase8_smoke_max_mutating_rows"]
+    assert max_provider_attempts["type"] == "number"
+    assert isinstance(max_provider_attempts["default"], int)
+    assert max_provider_attempts["default"] > 0
+    assert max_mutating_rows["type"] == "number"
+    assert max_mutating_rows["default"] == 0
+
     validate_step = workflow_step_by_name(
         workflow,
         "build-release",
@@ -1039,24 +1106,43 @@ def test_phase0_keeps_release_smoke_tightening_structurally_separate_from_publis
 
     assert validate_step["env"] == {
         "GH_TOKEN": "${{ github.token }}",
+        "RELEASE_SHA": "${{ steps.release_sha.outputs.sha }}",
         "REQUIRE_PHASE8_SMOKE": "${{ inputs.require_phase8_smoke }}",
         "PHASE8_SMOKE_RUN_ID": "${{ inputs.phase8_smoke_run_id }}",
         "PHASE8_SMOKE_ARTIFACT_NAME": "${{ inputs.phase8_smoke_artifact_name }}",
+        "PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS": "${{ inputs.phase8_smoke_max_provider_attempts }}",
+        "PHASE8_SMOKE_MAX_MUTATING_ROWS": "${{ inputs.phase8_smoke_max_mutating_rows }}",
     }
 
     run_command = validate_step["run"]
-    expected_validation_command = (
-        'uv run python scripts/validate_phase8_provider_report.py --input "$REPORT_PATH" --require-smoke'
+
+    _assert_contains_all(
+        run_command,
+        (
+            'gh run download "$PHASE8_SMOKE_RUN_ID"',
+            '--name "$PHASE8_SMOKE_ARTIFACT_NAME"',
+            '--dir "$REPORT_DIR"',
+            "find \"$REPORT_DIR\" -type f -name 'phase8-provider-smoke-report.json' | sort",
+            "Downloaded Phase 8 smoke artifact did not contain phase8-provider-smoke-report.json.",
+            "Downloaded Phase 8 smoke artifact contained multiple phase8-provider-smoke-report.json files.",
+        ),
     )
-    assert expected_validation_command in run_command
-    for phase12_release_smoke_flag in (
-        "--expected-repo-head",
-        "--expected-head",
-        "--max-provider-attempts",
-        "--max-attempts",
-        "--max-mutating-rows",
-    ):
-        assert phase12_release_smoke_flag not in run_command
+    _assert_contains_none(run_command, ("-name '*.json'", "head -n 1"))
+
+    _assert_contains_in_order(
+        run_command,
+        (
+            "uv run python scripts/validate_phase8_provider_report.py",
+            '--input "$REPORT_PATH"',
+            "--require-smoke",
+            '--expected-repo-head "$RELEASE_SHA"',
+            '--max-provider-attempts "$PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS"',
+            '--max-mutating-rows "$PHASE8_SMOKE_MAX_MUTATING_ROWS"',
+        ),
+    )
+
+    assert "scripts/phase8_live_provider_matrix.py" not in run_command
+    _assert_contains_none(run_command, ("GEMINI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"))
 
 
 def test_release_workflow_uv_build_steps_use_isolated_uv_environment() -> None:

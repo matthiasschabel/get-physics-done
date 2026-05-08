@@ -15,6 +15,37 @@ from tests.helpers.live_audit_harness.reporting import (
 )
 
 
+def _phase12_clean_smoke_report(*, decision: str | None = None) -> dict[str, object]:
+    kwargs: dict[str, object] = {}
+    if decision is not None:
+        kwargs["decision"] = decision
+    return render_provider_attempt_report(
+        [
+            {
+                "row_id": "row-phase12-smoke",
+                "scenario_id": "HELP-BEGINNER",
+                "persona_id": "P00_zero_coder",
+                "provider_runtime": "codex",
+                "launch_policy": "manual_live",
+                "attempt_status": "completed",
+                "result_class": "green",
+                "command_bucket": "start",
+                "prompt_budget": {"max_prompt_tokens": 500, "prompt_tokens_estimate": 200},
+                "retention_refs": ["provider-attempt-json"],
+            }
+        ],
+        attempt_id="attempt-phase12-smoke",
+        batch_id="batch-phase12-smoke",
+        scenario_set_id="phase12-release-smoke",
+        row_set_sha256="phase12-smoke",
+        budget_id="budget-phase12-smoke",
+        repo_head="abc123",
+        provider_set=["codex"],
+        runtime_capabilities=[{"runtime": "codex", "live_runner_status": "ready"}],
+        **kwargs,
+    )
+
+
 def test_provider_attempt_report_renders_aggregates_prompt_budget_and_markdown() -> None:
     rows = [
         {
@@ -285,11 +316,133 @@ def test_phase8_provider_report_release_validator_accepts_clean_smoke(tmp_path) 
         runtime_capabilities=[{"runtime": "codex", "live_runner_status": "ready"}],
     )
 
-    validate_report(report, require_smoke=True, expected_repo_head="abc123", max_provider_attempts=1, max_mutating_rows=0)
+    validate_report(
+        report, require_smoke=True, expected_repo_head="abc123", max_provider_attempts=1, max_mutating_rows=0
+    )
 
     report_path = tmp_path / "report.json"
     report_path.write_text(json.dumps(report), encoding="utf-8")
-    assert validate_phase8_report_main(["--input", str(report_path), "--require-smoke", "--expected-repo-head", "abc123"]) == 0
+    assert (
+        validate_phase8_report_main(["--input", str(report_path), "--require-smoke", "--expected-repo-head", "abc123"])
+        == 0
+    )
+
+
+def test_phase12_release_validator_rejects_wrong_repo_head() -> None:
+    report = _phase12_clean_smoke_report()
+
+    with pytest.raises(ValueError, match="repo_head"):
+        validate_report(report, require_smoke=True, expected_repo_head="def456")
+
+
+@pytest.mark.parametrize("decision", ["needs_repair", "blocked", "pending"])
+def test_phase12_release_validator_rejects_non_accept_decision_when_smoke_required(decision: str) -> None:
+    report = _phase12_clean_smoke_report(decision=decision)
+
+    with pytest.raises(ValueError, match="decision='accept'"):
+        validate_report(report, require_smoke=True, expected_repo_head="abc123")
+
+
+def test_phase12_release_validator_rejects_provider_attempts_above_cap() -> None:
+    report = _phase12_clean_smoke_report()
+
+    with pytest.raises(ValueError, match="provider_attempt_count .* exceeds --max-provider-attempts"):
+        validate_report(report, require_smoke=True, expected_repo_head="abc123", max_provider_attempts=0)
+
+
+def test_phase12_release_validator_rejects_mutating_rows_above_cap() -> None:
+    report = _phase12_clean_smoke_report()
+    budget = dict(report["budget_consumption"])
+    budget["mutating_rows"] = 1
+    report["budget_consumption"] = budget
+
+    with pytest.raises(ValueError, match=r"budget_consumption\.mutating_rows .* exceeds --max-mutating-rows"):
+        validate_report(report, require_smoke=True, expected_repo_head="abc123", max_mutating_rows=0)
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        pytest.param(lambda report: report.pop("provider_attempt_count"), id="missing-provider-attempt-count"),
+        pytest.param(
+            lambda report: report.__setitem__("provider_attempt_count", "many"), id="malformed-provider-attempt-count"
+        ),
+    ],
+)
+def test_phase12_release_validator_fails_closed_on_missing_or_malformed_provider_attempt_count(
+    mutator,
+) -> None:
+    report = _phase12_clean_smoke_report()
+    mutator(report)
+
+    with pytest.raises(ValueError, match="provider_attempt_count|provider attempts"):
+        validate_report(report, require_smoke=True, expected_repo_head="abc123", max_provider_attempts=1)
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        pytest.param(lambda report: report.__setitem__("budget_consumption", "malformed"), id="malformed-budget"),
+        pytest.param(
+            lambda report: report.__setitem__(
+                "budget_consumption",
+                {
+                    "attempted_subprocesses": 1,
+                    "timeouts": 0,
+                },
+            ),
+            id="missing-mutating-rows",
+        ),
+        pytest.param(
+            lambda report: report.__setitem__(
+                "budget_consumption",
+                {
+                    "attempted_subprocesses": 1,
+                    "timeouts": 0,
+                    "mutating_rows": "many",
+                },
+            ),
+            id="malformed-mutating-rows",
+        ),
+    ],
+)
+def test_phase12_release_validator_fails_closed_on_missing_or_malformed_mutating_rows(mutator) -> None:
+    report = _phase12_clean_smoke_report()
+    mutator(report)
+
+    with pytest.raises(ValueError, match="budget_consumption|mutating_rows|mutating rows"):
+        validate_report(report, require_smoke=True, expected_repo_head="abc123", max_mutating_rows=0)
+
+
+@pytest.mark.parametrize(
+    ("finding_key", "finding_class", "severity"),
+    [
+        ("product_findings", "product_behavior", "S0"),
+        ("product_findings", "product_behavior", "S1"),
+        ("harness_readiness_findings", "harness_contract", "S0"),
+        ("harness_readiness_findings", "harness_contract", "S1"),
+        ("provider_environment_findings", "provider_environment", "S0"),
+        ("provider_environment_findings", "provider_environment", "S1"),
+    ],
+)
+def test_phase12_release_validator_rejects_s0_s1_product_harness_and_provider_environment_findings(
+    finding_key: str,
+    finding_class: str,
+    severity: str,
+) -> None:
+    report = _phase12_clean_smoke_report()
+    report[finding_key] = [
+        {
+            "finding_id": f"phase12.{finding_class}.{severity.lower()}",
+            "finding_class": finding_class,
+            "severity": severity,
+            "row_ids": ["row-phase12-smoke"],
+            "summary": "Open hard finding must block release smoke.",
+        }
+    ]
+
+    with pytest.raises(ValueError, match=f"{finding_key}: severity {severity}"):
+        validate_report(report, require_smoke=True, expected_repo_head="abc123")
 
 
 def test_phase8_provider_report_release_validator_rejects_sanitized_intake_as_required_smoke() -> None:
@@ -312,4 +465,10 @@ def test_phase8_provider_report_release_validator_rejects_sanitized_intake_as_re
 
     validate_report(intake, expected_repo_head="abc123")
     with pytest.raises(ValueError, match="not an accepted Phase 8 provider-attempt smoke report"):
-        validate_report(intake, require_smoke=True, expected_repo_head="abc123")
+        validate_report(
+            intake,
+            require_smoke=True,
+            expected_repo_head="abc123",
+            max_provider_attempts=0,
+            max_mutating_rows=0,
+        )

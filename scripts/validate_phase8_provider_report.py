@@ -35,6 +35,11 @@ def validate_report(
     validate_provider_report_safety(report)
     schema = report.get("schema")
     if schema == PROVIDER_ATTEMPT_REPORT_SCHEMA:
+        _validate_provider_attempt_budget_shape(
+            report,
+            max_provider_attempts=max_provider_attempts,
+            max_mutating_rows=max_mutating_rows,
+        )
         validate_provider_attempt_report(report)
         _validate_provider_attempt_release_gate(
             report,
@@ -49,9 +54,7 @@ def validate_report(
         _validate_sanitized_intake(report, require_smoke=require_smoke, expected_repo_head=expected_repo_head)
         return
 
-    raise ValueError(
-        f"unsupported Phase 8 report schema {schema!r}; expected {PROVIDER_ATTEMPT_REPORT_SCHEMA!r}"
-    )
+    raise ValueError(f"unsupported Phase 8 report schema {schema!r}; expected {PROVIDER_ATTEMPT_REPORT_SCHEMA!r}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -91,24 +94,78 @@ def _validate_provider_attempt_release_gate(
     max_mutating_rows: int | None,
 ) -> None:
     if require_smoke and report.get("decision") != "accept":
-        raise ValueError("required Phase 8 smoke report must have decision='accept'")
+        raise ValueError(f"required Phase 8 smoke report must have decision='accept'; got {report.get('decision')!r}")
 
     if expected_repo_head and report.get("repo_head") != expected_repo_head:
-        raise ValueError("Phase 8 smoke report repo_head does not match the expected release SHA")
+        raise ValueError(
+            "Phase 8 smoke report repo_head "
+            f"{report.get('repo_head')!r} does not match expected release SHA {expected_repo_head!r}"
+        )
 
-    if max_provider_attempts is not None and _as_int(report.get("provider_attempt_count")) > max_provider_attempts:
-        raise ValueError("Phase 8 smoke report exceeds max provider attempts")
+    if max_provider_attempts is not None:
+        provider_attempt_count = _required_int(
+            report.get("provider_attempt_count"),
+            "provider_attempt_count",
+            flag="--max-provider-attempts",
+        )
+        if provider_attempt_count > max_provider_attempts:
+            raise ValueError(
+                "Phase 8 smoke report provider_attempt_count "
+                f"{provider_attempt_count} exceeds --max-provider-attempts {max_provider_attempts}"
+            )
 
-    budget = report.get("budget_consumption")
-    if isinstance(budget, Mapping):
-        mutating_rows = _as_int(budget.get("mutating_rows"))
-        if max_mutating_rows is not None and mutating_rows > max_mutating_rows:
-            raise ValueError("Phase 8 smoke report exceeds max mutating rows")
+    if max_mutating_rows is not None:
+        budget = _required_mapping(
+            report.get("budget_consumption"),
+            "budget_consumption",
+            flag="--max-mutating-rows",
+        )
+        mutating_rows = _required_int(
+            budget.get("mutating_rows"),
+            "budget_consumption.mutating_rows",
+            flag="--max-mutating-rows",
+        )
+        if mutating_rows > max_mutating_rows:
+            raise ValueError(
+                "Phase 8 smoke report budget_consumption.mutating_rows "
+                f"{mutating_rows} exceeds --max-mutating-rows {max_mutating_rows}"
+            )
 
     for key in ("product_findings", "harness_readiness_findings", "provider_environment_findings"):
         for finding in _mapping_items(report.get(key)):
-            if str(finding.get("severity", "")).upper() in {"S0", "S1"}:
-                raise ValueError(f"Phase 8 smoke report contains open {key} severity {finding.get('severity')}")
+            severity = str(finding.get("severity", "")).upper()
+            if severity in {"S0", "S1"}:
+                finding_id = finding.get("finding_id", "unknown")
+                raise ValueError(
+                    "Phase 8 smoke report contains blocking S0/S1 finding in "
+                    f"{key}: severity {severity}, finding_id {finding_id!r}"
+                )
+
+
+def _validate_provider_attempt_budget_shape(
+    report: Mapping[str, object],
+    *,
+    max_provider_attempts: int | None,
+    max_mutating_rows: int | None,
+) -> None:
+    if max_provider_attempts is not None:
+        _required_int(
+            report.get("provider_attempt_count"),
+            "provider_attempt_count",
+            flag="--max-provider-attempts",
+        )
+
+    if max_mutating_rows is not None:
+        budget = _required_mapping(
+            report.get("budget_consumption"),
+            "budget_consumption",
+            flag="--max-mutating-rows",
+        )
+        _required_int(
+            budget.get("mutating_rows"),
+            "budget_consumption.mutating_rows",
+            flag="--max-mutating-rows",
+        )
 
 
 def _validate_sanitized_intake(
@@ -133,16 +190,16 @@ def _mapping_items(value: object) -> tuple[Mapping[str, object], ...]:
     return tuple(item for item in value if isinstance(item, Mapping))
 
 
-def _as_int(value: object) -> int:
-    if isinstance(value, bool) or value is None:
-        return 0
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    if isinstance(value, str) and value.isdecimal():
-        return int(value)
-    return 0
+def _required_mapping(value: object, field: str, *, flag: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field} must be present as a JSON object when {flag} is set")
+    return value
+
+
+def _required_int(value: object, field: str, *, flag: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field} must be present as an integer when {flag} is set")
+    return value
 
 
 if __name__ == "__main__":

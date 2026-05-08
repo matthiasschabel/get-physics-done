@@ -48,10 +48,66 @@ _PHASE0_BASELINE_HELPER_MARKERS = (
     "phase0-baseline-report",
 )
 _DEFAULT_PROVIDER_FREE_WORKFLOWS = ("test.yml", "release.yml", "publish-release.yml")
+_PROVIDER_SECRET_MARKERS = frozenset(
+    {
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_API_KEY",
+        "CODEX_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "OPENAI_API_KEY",
+        "OPENCODE_API_KEY",
+    }
+)
+_PACKAGE_PUBLISH_TOKEN_MARKERS = frozenset(
+    {
+        "NODE_AUTH_TOKEN",
+        "NPM_TOKEN",
+        "PYPI_API_TOKEN",
+        "PYPI_TOKEN",
+        "TWINE_PASSWORD",
+        "TWINE_USERNAME",
+    }
+)
+_ALLOWED_WORKFLOW_SECRET_REFS = {
+    "phase8-live-provider-matrix.yml": frozenset(),
+    "publish-release.yml": frozenset({"GITHUB_TOKEN", "GPD_WEB_DISPATCH_TOKEN"}),
+    "release.yml": frozenset({"GITHUB_TOKEN"}),
+    "staging-rebuild.yml": frozenset({"GPD_WEB_DISPATCH_TOKEN"}),
+    "test.yml": frozenset(),
+}
+_SECRET_REF_RE = re.compile(r"\${{\s*secrets\.([A-Za-z_][A-Za-z0-9_]*)\s*}}")
+_RAW_PROVIDER_ARTIFACT_MARKERS = ("raw", "stdout", "stderr", "transcript")
 
 
 def _workflow_run_scripts(workflow: dict[str, object]) -> str:
     return "\n".join(str(step.get("run", "")) for _, step in iter_workflow_steps(workflow))
+
+
+def _workflow_string_values(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        strings: list[str] = []
+        for key, item in value.items():
+            if isinstance(key, str):
+                strings.append(key)
+            strings.extend(_workflow_string_values(item))
+        return strings
+    if isinstance(value, list):
+        strings = []
+        for item in value:
+            strings.extend(_workflow_string_values(item))
+        return strings
+    return []
+
+
+def _workflow_string_surface(workflow: dict[str, object]) -> str:
+    return "\n".join(_workflow_string_values(workflow))
+
+
+def _workflow_secret_refs(workflow: dict[str, object]) -> set[str]:
+    return set(_SECRET_REF_RE.findall(_workflow_string_surface(workflow)))
 
 
 def _provider_launch_command_re() -> re.Pattern[str]:
@@ -186,6 +242,130 @@ def test_default_ci_and_release_workflows_do_not_launch_provider_clis() -> None:
             offenders.append(f"{workflow_name}: provider launch command {match.group(0).strip()!r}")
 
     assert offenders == []
+
+
+def test_workflow_secret_references_are_explicitly_allowlisted() -> None:
+    offenders: list[str] = []
+
+    for path in _workflow_paths():
+        workflow = load_github_actions_workflow(path)
+        secret_refs = _workflow_secret_refs(workflow)
+        allowed_refs = set(_ALLOWED_WORKFLOW_SECRET_REFS[path.name])
+        unexpected_refs = secret_refs - allowed_refs
+        missing_refs = allowed_refs - secret_refs
+
+        if unexpected_refs:
+            offenders.append(f"{path.name}: unexpected secrets {sorted(unexpected_refs)}")
+        if missing_refs:
+            offenders.append(f"{path.name}: missing expected secrets {sorted(missing_refs)}")
+        forbidden_refs = secret_refs & (_PROVIDER_SECRET_MARKERS | _PACKAGE_PUBLISH_TOKEN_MARKERS)
+        if forbidden_refs:
+            offenders.append(f"{path.name}: forbidden provider/package token refs {sorted(forbidden_refs)}")
+
+    assert offenders == []
+
+
+def test_release_and_publish_workflows_do_not_reference_provider_secrets_or_launch_provider_clis() -> None:
+    provider_command_re = _provider_launch_command_re()
+    offenders: list[str] = []
+
+    for workflow_name in ("release.yml", "publish-release.yml"):
+        workflow = load_repo_github_actions_workflow(REPO_ROOT, workflow_name)
+        string_surface = _workflow_string_surface(workflow)
+        run_scripts = _workflow_run_scripts(workflow)
+
+        for marker in sorted(_PROVIDER_SECRET_MARKERS | _PACKAGE_PUBLISH_TOKEN_MARKERS):
+            if marker in string_surface:
+                offenders.append(f"{workflow_name}: forbidden secret/token marker {marker}")
+
+        match = provider_command_re.search(run_scripts)
+        if match is not None:
+            offenders.append(f"{workflow_name}: provider launch command {match.group(0).strip()!r}")
+
+        for launch_path in ("scripts/phase8_live_provider_matrix.py", "phase8_live_provider_matrix.py"):
+            if launch_path in run_scripts:
+                offenders.append(f"{workflow_name}: Phase 8 launch path {launch_path}")
+
+        if "phase8-live-providers" in string_surface:
+            offenders.append(f"{workflow_name}: references live-provider environment")
+
+    assert offenders == []
+
+
+def test_publish_release_phase8_smoke_gate_consumes_sanitized_artifact_only() -> None:
+    workflow = load_repo_github_actions_workflow(REPO_ROOT, "publish-release.yml")
+    validate_step = workflow_step_by_name(
+        workflow,
+        "build-release",
+        "Validate sanitized Phase 8 smoke report if required",
+    )
+
+    assert validate_step["env"] == {
+        "GH_TOKEN": "${{ github.token }}",
+        "RELEASE_SHA": "${{ steps.release_sha.outputs.sha }}",
+        "REQUIRE_PHASE8_SMOKE": "${{ inputs.require_phase8_smoke }}",
+        "PHASE8_SMOKE_RUN_ID": "${{ inputs.phase8_smoke_run_id }}",
+        "PHASE8_SMOKE_ARTIFACT_NAME": "${{ inputs.phase8_smoke_artifact_name }}",
+        "PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS": "${{ inputs.phase8_smoke_max_provider_attempts }}",
+        "PHASE8_SMOKE_MAX_MUTATING_ROWS": "${{ inputs.phase8_smoke_max_mutating_rows }}",
+    }
+
+    run_command = validate_step["run"]
+    assert 'REPORT_DIR="$(mktemp -d)"' in run_command
+    assert 'gh run download "$PHASE8_SMOKE_RUN_ID"' in run_command
+    assert '--name "$PHASE8_SMOKE_ARTIFACT_NAME"' in run_command
+    assert '--dir "$REPORT_DIR"' in run_command
+    assert "find \"$REPORT_DIR\" -type f -name 'phase8-provider-smoke-report.json' | sort" in run_command
+    assert "-name '*.json'" not in run_command
+    assert "Downloaded Phase 8 smoke artifact did not contain phase8-provider-smoke-report.json." in run_command
+    assert (
+        "Downloaded Phase 8 smoke artifact contained multiple phase8-provider-smoke-report.json files." in run_command
+    )
+    assert "uv run python scripts/validate_phase8_provider_report.py \\" in run_command
+    assert '--input "$REPORT_PATH"' in run_command
+    assert "--require-smoke" in run_command
+    assert '--expected-repo-head "$RELEASE_SHA"' in run_command
+    assert '--max-provider-attempts "$PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS"' in run_command
+    assert '--max-mutating-rows "$PHASE8_SMOKE_MAX_MUTATING_ROWS"' in run_command
+    assert "scripts/phase8_live_provider_matrix.py" not in run_command
+    assert _provider_launch_command_re().search(run_command) is None
+    assert all(marker not in run_command.lower() for marker in _RAW_PROVIDER_ARTIFACT_MARKERS)
+
+    build_steps = workflow_job_steps(workflow, "build-release")
+    step_names = [str(step.get("name", "")) for step in build_steps]
+    assert step_names.index("Validate sanitized Phase 8 smoke report if required") < step_names.index(
+        "Run release validation suite"
+    )
+    assert step_names.index("Validate sanitized Phase 8 smoke report if required") < step_names.index(
+        "Build Python distributions"
+    )
+
+
+def test_publish_pypi_job_publishes_downloaded_distribution_artifacts_only() -> None:
+    workflow = load_repo_github_actions_workflow(REPO_ROOT, "publish-release.yml")
+    publish_job = workflow_job(workflow, "publish-pypi")
+
+    assert publish_job["needs"] == "build-release"
+    assert publish_job["environment"] == {
+        "name": "PyPI",
+        "url": "https://pypi.org/p/get-physics-done",
+    }
+    assert publish_job["permissions"] == {"contents": "read", "id-token": "write"}
+
+    download_step = workflow_step_by_name(workflow, "publish-pypi", "Download Python distributions")
+    assert download_step["uses"] == "actions/download-artifact@v8"
+    assert download_step["with"] == {"name": "python-dists", "path": "dist"}
+
+    publish_step = workflow_step_by_name(workflow, "publish-pypi", "Publish package distributions to PyPI")
+    assert publish_step["uses"] == "pypa/gh-action-pypi-publish@release/v1"
+    assert publish_step["with"] == {"packages-dir": "dist", "skip-existing": True}
+
+    publish_run_scripts = "\n".join(str(step.get("run", "")) for step in workflow_job_steps(workflow, "publish-pypi"))
+    for forbidden in ("uv build", "npm publish", "npm pack", "twine upload"):
+        assert forbidden not in publish_run_scripts
+    for marker in sorted(_PROVIDER_SECRET_MARKERS | _PACKAGE_PUBLISH_TOKEN_MARKERS):
+        assert marker not in _workflow_string_surface(publish_job)
+    assert _provider_launch_command_re().search(publish_run_scripts) is None
 
 
 def test_pr_triggered_workflows_do_not_define_live_provider_or_phase0_provider_lanes() -> None:

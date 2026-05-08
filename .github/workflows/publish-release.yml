@@ -35,6 +35,16 @@ on:
         required: false
         type: string
         default: phase8-sanitized-provider-report
+      phase8_smoke_max_provider_attempts:
+        description: "Maximum provider attempts allowed in the sanitized Phase 8 smoke report."
+        required: false
+        type: number
+        default: 3
+      phase8_smoke_max_mutating_rows:
+        description: "Maximum mutating rows allowed in the sanitized Phase 8 smoke report."
+        required: false
+        type: number
+        default: 0
 
 permissions:
   actions: read
@@ -146,9 +156,12 @@ jobs:
         id: phase8_smoke
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.release_sha.outputs.sha }}
           REQUIRE_PHASE8_SMOKE: ${{ inputs.require_phase8_smoke }}
           PHASE8_SMOKE_RUN_ID: ${{ inputs.phase8_smoke_run_id }}
           PHASE8_SMOKE_ARTIFACT_NAME: ${{ inputs.phase8_smoke_artifact_name }}
+          PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS: ${{ inputs.phase8_smoke_max_provider_attempts }}
+          PHASE8_SMOKE_MAX_MUTATING_ROWS: ${{ inputs.phase8_smoke_max_mutating_rows }}
         run: |
           if [ "$REQUIRE_PHASE8_SMOKE" != "true" ]; then
             echo "status=not-required" >> "$GITHUB_OUTPUT"
@@ -157,6 +170,10 @@ jobs:
 
           if [ -z "$PHASE8_SMOKE_RUN_ID" ]; then
             echo "::error::require_phase8_smoke is true, but phase8_smoke_run_id is empty."
+            exit 1
+          fi
+          if [ -z "$PHASE8_SMOKE_ARTIFACT_NAME" ]; then
+            echo "::error::require_phase8_smoke is true, but phase8_smoke_artifact_name is empty."
             exit 1
           fi
           if [ ! -f scripts/validate_phase8_provider_report.py ]; then
@@ -168,13 +185,23 @@ jobs:
           gh run download "$PHASE8_SMOKE_RUN_ID" \
             --name "$PHASE8_SMOKE_ARTIFACT_NAME" \
             --dir "$REPORT_DIR"
-          REPORT_PATH="$(find "$REPORT_DIR" -type f -name '*.json' | sort | head -n 1)"
-          if [ -z "$REPORT_PATH" ]; then
-            echo "::error::Downloaded Phase 8 smoke artifact did not contain a sanitized JSON report."
+          mapfile -t REPORT_PATHS < <(find "$REPORT_DIR" -type f -name 'phase8-provider-smoke-report.json' | sort)
+          if [ "${#REPORT_PATHS[@]}" -eq 0 ]; then
+            echo "::error::Downloaded Phase 8 smoke artifact did not contain phase8-provider-smoke-report.json."
             exit 1
           fi
+          if [ "${#REPORT_PATHS[@]}" -gt 1 ]; then
+            echo "::error::Downloaded Phase 8 smoke artifact contained multiple phase8-provider-smoke-report.json files."
+            exit 1
+          fi
+          REPORT_PATH="${REPORT_PATHS[0]}"
 
-          uv run python scripts/validate_phase8_provider_report.py --input "$REPORT_PATH" --require-smoke
+          uv run python scripts/validate_phase8_provider_report.py \
+            --input "$REPORT_PATH" \
+            --require-smoke \
+            --expected-repo-head "$RELEASE_SHA" \
+            --max-provider-attempts "$PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS" \
+            --max-mutating-rows "$PHASE8_SMOKE_MAX_MUTATING_ROWS"
           echo "status=validated" >> "$GITHUB_OUTPUT"
 
       - name: Run release validation suite

@@ -5336,6 +5336,50 @@ def cost(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# stage — Read-only staged workflow metadata
+# ═══════════════════════════════════════════════════════════════════════════
+
+stage_app = typer.Typer(help="Read-only staged workflow metadata")
+app.add_typer(stage_app, name="stage")
+
+
+@stage_app.command("field-access")
+def stage_field_access(
+    workflow_id: str = typer.Argument(..., help="Workflow id, for example plan-phase"),
+    stage: str = typer.Option(..., "--stage", help="Stage id from the workflow stage manifest"),
+    style: str = typer.Option(
+        "instruction",
+        "--style",
+        help="Output style: instruction, json, or shell",
+    ),
+    alias: list[str] | None = typer.Option(
+        None,
+        "--alias",
+        help="Alias binding to expose, as ALIAS=field or field. Repeatable.",
+    ),
+    payload_var: str = typer.Option(
+        "INIT",
+        "--payload-var",
+        help="Shell payload variable name used only with --style shell",
+    ),
+) -> None:
+    """Expose manifest-selected staged-init field access metadata."""
+    from gpd.core.staged_field_access import build_staged_field_access
+
+    try:
+        access = build_staged_field_access(
+            workflow_id,
+            stage_id=stage,
+            style=style,
+            alias_specs=alias,
+            payload_variable=payload_var,
+        )
+    except ValueError as exc:
+        _error(str(exc))
+    _output(access.to_payload())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # init — Workflow context assembly
 # ═══════════════════════════════════════════════════════════════════════════
 

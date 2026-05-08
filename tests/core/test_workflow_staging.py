@@ -698,6 +698,25 @@ def test_validate_workflow_stage_manifest_payload_loads_quick_manifest() -> None
     authoring = manifest.stage("task_authoring")
     reference_context = manifest.stage("reference_context")
 
+    expected_init_spec_ids = {
+        "task_bootstrap": "quick.task_bootstrap.v1",
+        "task_authoring": "quick.task_authoring.v1",
+        "reference_context": "quick.reference_context.v1",
+    }
+    for stage_id, init_spec_id in expected_init_spec_ids.items():
+        stage = manifest.stage(stage_id)
+        assert stage.init_spec_id == init_spec_id
+        assert stage.to_payload()["init_spec_id"] == init_spec_id
+        assert manifest.staged_loading_payload(stage_id)["init_spec_id"] == init_spec_id
+
+    round_trip = validate_workflow_stage_manifest_payload(
+        manifest.to_payload(),
+        expected_workflow_id="quick",
+    )
+    assert {
+        stage_id: round_trip.stage(stage_id).init_spec_id for stage_id in expected_init_spec_ids
+    } == expected_init_spec_ids
+
     assert bootstrap.loaded_authorities == (
         "workflows/quick.md",
         "references/quick/quick-mode-boundary.md",
@@ -726,6 +745,26 @@ def test_validate_workflow_stage_manifest_payload_loads_quick_manifest() -> None
     assert "reference_artifacts_content" in reference_context.required_init_fields
     assert "derived_manuscript_proof_review_status" in reference_context.required_init_fields
     assert reference_context.writes_allowed == ("GPD/quick/NNN-slug/NNN-PLAN.md",)
+
+
+@pytest.mark.parametrize(
+    "workflow_id",
+    [
+        manifest_path.name[: -len(WORKFLOW_STAGE_MANIFEST_SUFFIX)]
+        for manifest_path in sorted(WORKFLOW_STAGE_MANIFEST_DIR.glob(f"*{WORKFLOW_STAGE_MANIFEST_SUFFIX}"))
+        if manifest_path.name != f"quick{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+    ],
+)
+def test_non_quick_manifests_do_not_emit_init_spec_id(workflow_id: str) -> None:
+    raw_payload = _workflow_payload(workflow_id)
+    assert all("init_spec_id" not in stage for stage in raw_payload["stages"])
+
+    manifest = load_workflow_stage_manifest(workflow_id)
+    for stage_id in manifest.stage_ids():
+        stage = manifest.stage(stage_id)
+        assert stage.init_spec_id is None
+        assert "init_spec_id" not in stage.to_payload()
+        assert "init_spec_id" not in manifest.staged_loading_payload(stage_id)
 
 
 def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -> None:
@@ -1506,6 +1545,10 @@ def test_known_init_fields_for_arxiv_submission_include_publication_routing() ->
         (
             lambda payload: payload["stages"][1].__setitem__("writes_allowed", ["../escape.txt"]),
             "normalized relative POSIX path",
+        ),
+        (
+            lambda payload: payload["stages"][0].__setitem__("init_spec_id", " "),
+            "init_spec_id must be a non-empty string",
         ),
     ],
 )

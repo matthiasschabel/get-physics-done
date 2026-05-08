@@ -48,11 +48,17 @@ def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_su
 def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> None:
     source = PLAN_PHASE.read_text(encoding="utf-8")
 
-    assert "bind_plan_phase_init() {" in source
-    assert 'bind_plan_phase_init "$INIT"' in source
+    assert "bind_plan_phase_init" not in source
+    assert "staged_loading.required_init_fields" in source
+    assert "staged field-access helper" in source
+    assert "gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction" in source
+    assert "--alias ALIAS=field" in source
+    assert "shell variables parsed from an older stage" in source
+    assert 'BOOTSTRAP_INIT=$(gpd --raw init plan-phase "$PHASE" --stage phase_bootstrap)' in source
     assert 'gpd --raw init plan-phase "$PHASE" --stage research_routing' in source
     assert 'gpd --raw init plan-phase "$PHASE" --stage planner_authoring' in source
     assert 'gpd --raw init plan-phase "$PHASE" --stage checker_revision' in source
+    assert source.count("INIT=$(gpd --raw init plan-phase") >= 3
     assert "PLANNER_RETURN=$(\ntask(" in source
     assert source.index("PLANNER_RETURN=$(") < source.index(
         'FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")'
@@ -61,10 +67,10 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
     assert 'FRESH_PLAN_FILES=$(echo "$PLANNER_RETURN" | gpd json list .gpd_return.files_written --default "")' in source
     assert 'PLAN_RETURN_MARKDOWN="${PLANNER_RETURN:-}"' in source
     assert "MAIN_CONTEXT_PLAN_RETURN=$(" in source
-    assert "PLAN_RETURN_MARKDOWN=\"$MAIN_CONTEXT_PLAN_RETURN\"" in source
-    assert 'printf \'  status: completed\\n  files_written:\\n\'' in source
-    assert 'printf \'  issues: []\\n  next_actions: []\\n```\\n\'' in source
-    assert 'printf \'%s\\n\' "$PLAN_RETURN_MARKDOWN" | gpd validate handoff-artifacts -' in source
+    assert 'PLAN_RETURN_MARKDOWN="$MAIN_CONTEXT_PLAN_RETURN"' in source
+    assert "printf '  status: completed\\n  files_written:\\n'" in source
+    assert "printf '  issues: []\\n  next_actions: []\\n```\\n'" in source
+    assert "printf '%s\\n' \"$PLAN_RETURN_MARKDOWN\" | gpd validate handoff-artifacts -" in source
     assert 'FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c' not in source
     assert 'json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}})' not in source
     assert "gpd validate handoff-artifacts -" in source
@@ -87,7 +93,7 @@ def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None
 
     assert "The child artifact gate owns the no-synthetic-child-return rule" in source
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in source
-    assert 'printf \'```yaml\\ngpd_return:\\n\'' in source
+    assert "printf '```yaml\\ngpd_return:\\n'" in source
     assert '{"gpd_return":{"files_written"' not in source
     assert "${PLANNER_RETURN:-$(" not in source
 

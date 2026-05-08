@@ -44,7 +44,7 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
 @pytest.mark.parametrize(
     ("workflow_name", "surface_marker", "expected_token"),
     [
-        ("plan-phase.md", "Parse JSON for:", "project_contract_gate"),
+        ("plan-phase.md", "Parse only the fields named by", "project_contract_gate"),
         ("execute-phase.md", "Parse JSON for:", "project_contract_gate"),
         ("execute-plan.md", "Extract from init JSON:", "project_contract_gate"),
         ("quick.md", "Parse JSON for:", "project_contract_gate"),

@@ -2338,12 +2338,21 @@ review_summary:
         ]
         assert payload["staged_loading"]["next_stages"] == []
 
-    def test_quick_init_stage_task_authoring_filters_payload(self, gpd_project: Path) -> None:
+    def test_quick_init_stage_task_authoring_filters_payload(
+        self,
+        gpd_project: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from gpd.core.workflow_staging import load_workflow_stage_manifest
 
+        monkeypatch.setenv("GPD_ACTIVE_RUNTIME", "codex")
         state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
         state["project_contract"] = json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
         (gpd_project / "GPD" / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+        config_path = gpd_project / "GPD" / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["model_overrides"] = {"codex": {"tier-1": "gpt-5", "tier-2": "gpt-5-mini"}}
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         (gpd_project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
 
         manifest = load_workflow_stage_manifest("quick")
@@ -2367,12 +2376,21 @@ review_summary:
         assert "reference_artifacts_content" not in payload
         assert "derived_manuscript_proof_review_status" not in payload
 
-    def test_quick_init_stage_reference_context_loads_reference_payload(self, gpd_project: Path) -> None:
+    def test_quick_init_stage_reference_context_loads_reference_payload(
+        self,
+        gpd_project: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         from gpd.core.workflow_staging import load_workflow_stage_manifest
 
+        monkeypatch.setenv("GPD_ACTIVE_RUNTIME", "codex")
         state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
         state["project_contract"] = json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
         (gpd_project / "GPD" / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+        config_path = gpd_project / "GPD" / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["model_overrides"] = {"codex": {"tier-1": "gpt-5", "tier-2": "gpt-5-mini"}}
+        config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
         (gpd_project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
 
         manifest = load_workflow_stage_manifest("quick")

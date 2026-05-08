@@ -4760,6 +4760,17 @@ def init_quick(cwd: Path, description: str | None = None, stage: str | None = No
         raise ValueError(f"quick stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
 
     staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
+    init_spec_id = getattr(stage_def, "init_spec_id", None)
+    if init_spec_id:
+        from gpd.core.workflow_init_specs import validate_staged_init_payload
+
+        try:
+            validate_staged_init_payload("quick", stage_def.id, init_spec_id, staged_payload)
+        except (ValueError, PydanticValidationError) as exc:
+            raise ValueError(
+                "quick staged init payload validation failed "
+                f"(workflow=quick, stage={stage_def.id}, init_spec_id={init_spec_id}): {exc}"
+            ) from exc
     staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
     return staged_payload
 

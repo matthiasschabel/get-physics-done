@@ -67,7 +67,7 @@ COMMAND_BASELINES = {
     "pause-work": (302, 13_207, 1),
     "peer-review": (1_233, 72_486, 1),
     "plan-milestone-gaps": (357, 11_407, 1),
-    "plan-phase": (1_066, 55_978, 1),
+    "plan-phase": (950, 49_418, 1),
     "progress": (612, 20_404, 1),
     "quick": (508, 24_293, 1),
     "reapply-patches": (151, 4_511, 1),
@@ -100,7 +100,7 @@ COMMAND_BASELINES = {
 }
 WORST_COMMAND_HARD_CAPS = {
     "write-paper": (1_600, 91_000),
-    "plan-phase": (1_110, 56_000),
+    "plan-phase": (990, 51_000),
     "execute-phase": (2_050, 106_000),
     "new-project": (320, 14_000),
     "help": (1_480, 78_000),
@@ -167,7 +167,7 @@ WORKFLOW_BASELINES = {
     "pause-work": (275, 12_667, 0),
     "peer-review": (1_044, 62_497, 2),
     "plan-milestone-gaps": (290, 7_888, 0),
-    "plan-phase": (1_018, 54_382, 1),
+    "plan-phase": (902, 47_822, 1),
     "progress": (576, 19_421, 0),
     "quick": (422, 21_059, 4),
     "reapply-patches": (114, 3_750, 0),

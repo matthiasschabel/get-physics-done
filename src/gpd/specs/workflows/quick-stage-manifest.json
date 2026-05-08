@@ -46,6 +46,7 @@
       "id": "task_bootstrap",
       "order": 1,
       "purpose": "quick task intake, workspace bootstrap, and contract-gate preflight",
+      "init_spec_id": "quick.task_bootstrap.v1",
       "mode_paths": [
         "workflows/quick.md"
       ],
@@ -100,6 +101,7 @@
       "id": "task_authoring",
       "order": 2,
       "purpose": "quick planner prompt assembly and task-plan authoring",
+      "init_spec_id": "quick.task_authoring.v1",
       "mode_paths": [
         "workflows/quick.md"
       ],
@@ -151,6 +153,7 @@
       "id": "reference_context",
       "order": 3,
       "purpose": "reference-aware quick planner prompt assembly for tasks that explicitly need project anchors or lookup context",
+      "init_spec_id": "quick.reference_context.v1",
       "mode_paths": [
         "workflows/quick.md"
       ],

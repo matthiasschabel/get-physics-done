@@ -17,12 +17,15 @@ PROMPT_KIND_BUDGETS = {
     "agent": {"lines": 14_900, "chars": 778_000},
     "workflow": {"lines": 33_330, "chars": 1_526_000},
 }
+STAGE_FIRST_TURN_BUDGET = {"lines": 11_700, "chars": 620_000}
+SHELL_PARSING_LINE_BUDGET = 920
 ZERO_SAFETY_TOTAL_FIELDS = (
     "unresolved_include_count",
     "invalid_gpd_return_example_count",
     "invalid_frontmatter_example_count",
     "forbidden_child_return_synthesis_mention_count",
 )
+
 
 def _aggregate_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:
     if descriptor.native_include_support:
@@ -121,6 +124,33 @@ def test_prompt_surface_safety_floors_remain_zero() -> None:
     stage_diagnostics = totals["stage_diagnostics"]
     assert isinstance(stage_diagnostics, dict)
     assert stage_diagnostics["must_not_eager_load_violation_count"] == 0
+
+
+def test_phase3_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    totals = payload["totals"]
+    shell_parsing_line_count = totals["shell_parsing_line_count"]
+    assert isinstance(shell_parsing_line_count, int)
+    assert shell_parsing_line_count <= SHELL_PARSING_LINE_BUDGET, (
+        "prompt shell parsing budget exceeded: "
+        f"observed={shell_parsing_line_count} max={SHELL_PARSING_LINE_BUDGET}; "
+        "prefer manifest-backed staged field access over prompt-local shell parsers"
+    )
+
+    stage_diagnostics = totals["stage_diagnostics"]
+    assert isinstance(stage_diagnostics, dict)
+    first_turn_lines = stage_diagnostics["first_turn_line_count"]
+    first_turn_chars = stage_diagnostics["first_turn_char_count"]
+    assert isinstance(first_turn_lines, int)
+    assert isinstance(first_turn_chars, int)
+    assert first_turn_lines <= STAGE_FIRST_TURN_BUDGET["lines"], (
+        "stage_diagnostics first-turn line budget exceeded: "
+        f"observed={first_turn_lines} max={STAGE_FIRST_TURN_BUDGET['lines']}"
+    )
+    assert first_turn_chars <= STAGE_FIRST_TURN_BUDGET["chars"], (
+        "stage_diagnostics first-turn char budget exceeded: "
+        f"observed={first_turn_chars} max={STAGE_FIRST_TURN_BUDGET['chars']}"
+    )
 
 
 def test_runtime_projection_aggregate_budgets_stay_under_phase1_ceilings() -> None:

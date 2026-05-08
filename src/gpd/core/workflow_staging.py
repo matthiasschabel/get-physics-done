@@ -1082,6 +1082,7 @@ _ALLOWED_STAGE_KEYS = frozenset(
         "id",
         "order",
         "purpose",
+        "init_spec_id",
         "mode_paths",
         "required_init_field_groups",
         "required_init_fields",
@@ -1095,7 +1096,7 @@ _ALLOWED_STAGE_KEYS = frozenset(
         "checkpoints",
     }
 )
-_OPTIONAL_STAGE_KEYS = frozenset({"required_init_field_groups", "required_init_fields"})
+_OPTIONAL_STAGE_KEYS = frozenset({"init_spec_id", "required_init_field_groups", "required_init_fields"})
 _REQUIRED_STAGE_KEYS = _ALLOWED_STAGE_KEYS - _OPTIONAL_STAGE_KEYS
 _ALLOWED_CONDITIONAL_KEYS = frozenset({"when", "authorities"})
 _AUTHORITY_ROOTS = ("workflows/", "references/", "templates/")
@@ -1152,6 +1153,7 @@ class WorkflowStage:
     produced_state: tuple[str, ...]
     next_stages: tuple[str, ...]
     checkpoints: tuple[str, ...]
+    init_spec_id: str | None = None
 
     def eager_authorities(self, *, selected_conditions: Iterable[str] = ()) -> tuple[str, ...]:
         selected = {condition for condition in selected_conditions if condition}
@@ -1184,21 +1186,26 @@ class WorkflowStage:
         return payload
 
     def to_payload(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "id": self.id,
             "order": self.order,
             "purpose": self.purpose,
-            **self._sequence_payload_fields(_STAGE_MANIFEST_PAYLOAD_FIELDS),
         }
+        if self.init_spec_id is not None:
+            payload["init_spec_id"] = self.init_spec_id
+        payload.update(self._sequence_payload_fields(_STAGE_MANIFEST_PAYLOAD_FIELDS))
+        return payload
 
     def to_staged_loading_payload(self, workflow_id: str) -> dict[str, object]:
-        payload = {
+        payload: dict[str, object] = {
             "workflow_id": workflow_id,
             "stage_id": self.id,
             "order": self.order,
             **self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[:3]),
             "eager_authorities": list(self.eager_authorities()),
         }
+        if self.init_spec_id is not None:
+            payload["init_spec_id"] = self.init_spec_id
         payload.update(self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[3:]))
         return payload
 
@@ -1473,6 +1480,9 @@ def _validate_stage(
     stage_id = _require_string(raw["id"], label=f"stages[{index}].id")
     order = _require_int(raw["order"], label=f"stages[{index}].order")
     purpose = _require_string(raw["purpose"], label=f"stages[{index}].purpose")
+    init_spec_id = None
+    if "init_spec_id" in raw:
+        init_spec_id = _require_string(raw["init_spec_id"], label=f"stages[{index}].init_spec_id")
     mode_paths = tuple(
         _normalize_manifest_doc_path(mode_path, label=f"stages[{index}].mode_paths[{mode_index}]")
         for mode_index, mode_path in enumerate(
@@ -1563,6 +1573,7 @@ def _validate_stage(
         produced_state=produced_state,
         next_stages=next_stages,
         checkpoints=checkpoints,
+        init_spec_id=init_spec_id,
     )
 
 

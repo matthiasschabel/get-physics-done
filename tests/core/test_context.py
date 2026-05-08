@@ -3885,6 +3885,10 @@ class TestInitQuick:
         (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
         _write_project_contract_state(tmp_path)
         monkeypatch.setattr(
+            "gpd.core.context._resolve_model",
+            lambda cwd, agent_type, config=None, runtime=None: f"{agent_type}-model",
+        )
+        monkeypatch.setattr(
             "gpd.core.context._build_reference_runtime_context",
             _fail_if_context_builder_runs("_build_reference_runtime_context"),
         )
@@ -3896,9 +3900,17 @@ class TestInitQuick:
         assert ctx["staged_loading"]["stage_id"] == "task_authoring"
         assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
         assert "project_contract_gate" in ctx
-        assert "reference_artifacts_content" not in ctx
-        assert "active_reference_context" not in ctx
-        assert "derived_manuscript_proof_review_status" not in ctx
+        for reference_heavy_field in (
+            "active_reference_context",
+            "contract_intake",
+            "derived_manuscript_proof_review_status",
+            "effective_reference_intake",
+            "protocol_bundle_context",
+            "protocol_bundle_load_manifest",
+            "reference_artifact_files",
+            "reference_artifacts_content",
+        ):
+            assert reference_heavy_field not in ctx
 
     def test_stage_reference_context_loads_reference_runtime_when_selected(
         self,
@@ -3908,6 +3920,10 @@ class TestInitQuick:
         _setup_project(tmp_path)
         (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
         _write_project_contract_state(tmp_path)
+        monkeypatch.setattr(
+            "gpd.core.context._resolve_model",
+            lambda cwd, agent_type, config=None, runtime=None: f"{agent_type}-model",
+        )
         calls: list[Path] = []
 
         def reference_runtime_context(cwd: Path) -> dict[str, object]:
@@ -3923,7 +3939,7 @@ class TestInitQuick:
                 "protocol_bundle_count": 1,
                 "protocol_bundle_load_manifest": {"selected_bundle_ids": ["core"], "bundle_count": 1},
                 "protocol_bundle_context": "protocol context",
-                "protocol_bundle_verifier_extensions": "verifier extensions",
+                "protocol_bundle_verifier_extensions": ["verifier extensions"],
                 "active_reference_context": "active reference context",
                 "reference_artifact_files": ["GPD/research-map/REFERENCES.md"],
                 "reference_artifacts_content": "reference artifacts",
@@ -3931,7 +3947,7 @@ class TestInitQuick:
                 "literature_review_count": 1,
                 "research_map_reference_files": ["GPD/research-map/REFERENCES.md"],
                 "research_map_reference_count": 1,
-                "derived_manuscript_proof_review_status": "not applicable",
+                "derived_manuscript_proof_review_status": {"status": "not applicable"},
             }
 
         monkeypatch.setattr("gpd.core.context._build_reference_runtime_context", reference_runtime_context)
@@ -3944,8 +3960,79 @@ class TestInitQuick:
         assert ctx["staged_loading"]["stage_id"] == "reference_context"
         assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
         assert ctx["contract_intake"] == {"must_read_refs": ["ref-benchmark"]}
+        assert ctx["effective_reference_intake"] == {"must_read_refs": ["ref-benchmark"]}
+        assert ctx["selected_protocol_bundle_ids"] == ["core"]
+        assert ctx["protocol_bundle_count"] == 1
+        assert ctx["protocol_bundle_load_manifest"] == {"selected_bundle_ids": ["core"], "bundle_count": 1}
+        assert ctx["protocol_bundle_context"] == "protocol context"
+        assert ctx["protocol_bundle_verifier_extensions"] == ["verifier extensions"]
         assert ctx["active_reference_context"] == "active reference context"
         assert ctx["reference_artifacts_content"] == "reference artifacts"
+
+    def test_stage_validation_failure_names_workflow_stage_and_spec(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        import sys
+        import types
+
+        _setup_project(tmp_path)
+        (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        calls: list[tuple[str, str, str, dict[str, object]]] = []
+
+        class Stage:
+            id = "task_authoring"
+            required_init_fields = ("description",)
+            init_spec_id = "quick.task_authoring.v1"
+
+        class Manifest:
+            def stage_by_id(self, stage_id: str) -> Stage:
+                assert stage_id == "task_authoring"
+                return Stage()
+
+            def stage_ids(self) -> tuple[str, ...]:
+                return ("task_authoring",)
+
+            def staged_loading_payload(self, stage_id: str) -> dict[str, object]:
+                assert stage_id == "task_authoring"
+                return {"workflow_id": "quick", "stage_id": stage_id, "init_spec_id": Stage.init_spec_id}
+
+        def fake_load_workflow_stage_manifest(
+            workflow_id: str,
+            allowed_tools: set[str] | None = None,
+            known_init_fields: set[str] | None = None,
+        ) -> Manifest:
+            assert workflow_id == "quick"
+            return Manifest()
+
+        def validate_staged_init_payload(
+            workflow_id: str,
+            stage_id: str,
+            init_spec_id: str,
+            payload: dict[str, object],
+        ) -> None:
+            calls.append((workflow_id, stage_id, init_spec_id, payload))
+            assert set(payload) == {"description"}
+            assert "staged_loading" not in payload
+            raise ValueError("description has wrong type")
+
+        validator_module = types.ModuleType("gpd.core.workflow_init_specs")
+        validator_module.validate_staged_init_payload = validate_staged_init_payload
+        monkeypatch.setitem(sys.modules, "gpd.core.workflow_init_specs", validator_module)
+        monkeypatch.setattr("gpd.core.workflow_staging.load_workflow_stage_manifest", fake_load_workflow_stage_manifest)
+
+        with pytest.raises(ValueError) as exc_info:
+            init_quick(tmp_path, "Bad staged payload", stage="task_authoring")
+
+        message = str(exc_info.value)
+        assert "workflow=quick" in message
+        assert "stage=task_authoring" in message
+        assert "init_spec_id=quick.task_authoring.v1" in message
+        assert "description has wrong type" in message
+        assert calls == [
+            ("quick", "task_authoring", "quick.task_authoring.v1", {"description": "Bad staged payload"})
+        ]
 
     def test_staged_quick_init_blocks_without_initialized_project(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)

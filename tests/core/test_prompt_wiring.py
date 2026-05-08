@@ -501,6 +501,23 @@ def test_plan_phase_applies_planner_roadmap_updates_in_orchestrator() -> None:
     assert "verifies placeholders/count against fresh `*-PLAN.md` artifacts" in plan_phase
 
 
+def test_plan_phase_uses_manifest_owned_staged_init_access() -> None:
+    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+
+    _assert_workflow_calls_staged_init_for_manifest_stages("plan-phase", plan_phase)
+    assert "bind_plan_phase_init" not in plan_phase
+    assert "BOOTSTRAP_INIT.staged_loading.required_init_fields" in plan_phase
+    assert "INIT.staged_loading.required_init_fields" in plan_phase
+    assert "staged field-access helper" in plan_phase
+    assert "gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction" in plan_phase
+    assert "--alias ALIAS=field" in plan_phase
+    assert "source of truth for which fields are available" in plan_phase
+    assert 'gpd --raw init plan-phase "$PHASE" --stage planner_authoring' in plan_phase
+    assert 'gpd --raw init plan-phase "$PHASE" --stage checker_revision' in plan_phase
+    assert "# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields" in plan_phase
+    assert "# Parse only the checker_revision fields listed in INIT.staged_loading.required_init_fields" in plan_phase
+
+
 def test_executor_completion_examples_use_command_based_next_actions() -> None:
     completion = (REFERENCES_DIR / "execution" / "executor-completion.md").read_text(encoding="utf-8")
 

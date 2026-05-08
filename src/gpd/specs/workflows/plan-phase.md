@@ -16,7 +16,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse JSON for: `researcher_model`, `planner_model`, `checker_model`, `research_enabled`, `plan_checker_enabled`, `commit_docs`, `autonomy`, `research_mode`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `padded_phase`, `has_research`, `has_context`, `has_plans`, `plan_count`, `planning_exists`, `roadmap_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `platform`.
+Parse only the fields named by `BOOTSTRAP_INIT.staged_loading.required_init_fields`; this stage-selected payload includes `project_contract_gate` before any authoritative contract use.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Present draft plans for user review before approval or execution; do not weaken the contract gate.
@@ -29,113 +29,12 @@ Parse JSON for: `researcher_model`, `planner_model`, `checker_model`, `research_
 - Tangent policy: when multiple viable approaches or optional side questions appear, do NOT silently branch or widen the plan. Use the canonical tangent decision model below instead of assuming extra plans or branches. `git.branching_strategy` does not override this rule.
 - All modes still require contract completeness, decisive outputs, required anchors, forbidden-proxy handling, and disconfirming paths before execution starts.
 
-**Bind the current INIT snapshot into shell variables, then re-run this binding after every staged reload before routing on any later step:**
+**Staged init access rule:** after every `gpd --raw init plan-phase ... --stage <stage_id>` reload, treat the new `INIT.staged_loading.required_init_fields` as the source of truth for which fields are available. Derive only the stage-local values needed for the next branch from that current payload; do not reuse shell variables parsed from an older stage. The staged field-access helper can confirm the manifest-selected fields with `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction`; for shell snippets that truly need aliases, request explicit `--alias ALIAS=field` bindings instead of a cross-stage inventory.
 
 ```bash
-bind_plan_phase_init() {
-  local init="$1"
-
-  researcher_model=$(echo "$init" | gpd json get .researcher_model --default "")
-  planner_model=$(echo "$init" | gpd json get .planner_model --default "")
-  checker_model=$(echo "$init" | gpd json get .checker_model --default "")
-  research_enabled=$(echo "$init" | gpd json get .research_enabled --default false)
-  plan_checker_enabled=$(echo "$init" | gpd json get .plan_checker_enabled --default false)
-  commit_docs=$(echo "$init" | gpd json get .commit_docs --default false)
-  autonomy=$(echo "$init" | gpd json get .autonomy --default supervised)
-  research_mode=$(echo "$init" | gpd json get .research_mode --default balanced)
-  phase_found=$(echo "$init" | gpd json get .phase_found --default false)
-  phase_dir=$(echo "$init" | gpd json get .phase_dir --default "")
-  phase_number=$(echo "$init" | gpd json get .phase_number --default "")
-  phase_name=$(echo "$init" | gpd json get .phase_name --default "")
-  phase_slug=$(echo "$init" | gpd json get .phase_slug --default "")
-  padded_phase=$(echo "$init" | gpd json get .padded_phase --default "")
-  has_research=$(echo "$init" | gpd json get .has_research --default false)
-  has_context=$(echo "$init" | gpd json get .has_context --default false)
-  has_plans=$(echo "$init" | gpd json get .has_plans --default false)
-  plan_count=$(echo "$init" | gpd json get .plan_count --default 0)
-  planning_exists=$(echo "$init" | gpd json get .planning_exists --default false)
-  roadmap_exists=$(echo "$init" | gpd json get .roadmap_exists --default false)
-  project_contract=$(echo "$init" | gpd json get .project_contract --default "")
-  project_contract_gate=$(echo "$init" | gpd json get .project_contract_gate --default "")
-  project_contract_load_info=$(echo "$init" | gpd json get .project_contract_load_info --default "")
-  project_contract_validation=$(echo "$init" | gpd json get .project_contract_validation --default "")
-  contract_intake=$(echo "$init" | gpd json get .contract_intake --default "")
-  effective_reference_intake=$(echo "$init" | gpd json get .effective_reference_intake --default "")
-  selected_protocol_bundle_ids=$(echo "$init" | gpd json get .selected_protocol_bundle_ids --default "")
-  protocol_bundle_count=$(echo "$init" | gpd json get .protocol_bundle_count --default 0)
-  protocol_bundle_load_manifest=$(echo "$init" | gpd json get .protocol_bundle_load_manifest --default "")
-  protocol_bundle_context=$(echo "$init" | gpd json get .protocol_bundle_context --default "")
-  protocol_bundle_verifier_extensions=$(echo "$init" | gpd json get .protocol_bundle_verifier_extensions --default "")
-  active_reference_context=$(echo "$init" | gpd json get .active_reference_context --default "")
-  reference_artifact_files=$(echo "$init" | gpd json get .reference_artifact_files --default "")
-  reference_artifacts_content=$(echo "$init" | gpd json get .reference_artifacts_content --default "")
-  literature_review_files=$(echo "$init" | gpd json get .literature_review_files --default "")
-  literature_review_count=$(echo "$init" | gpd json get .literature_review_count --default 0)
-  research_map_reference_files=$(echo "$init" | gpd json get .research_map_reference_files --default "")
-  research_map_reference_count=$(echo "$init" | gpd json get .research_map_reference_count --default 0)
-  derived_manuscript_proof_review_status=$(echo "$init" | gpd json get .derived_manuscript_proof_review_status --default "")
-  state_content=$(echo "$init" | gpd json get .state_content --default "")
-  roadmap_content=$(echo "$init" | gpd json get .roadmap_content --default "")
-  requirements_content=$(echo "$init" | gpd json get .requirements_content --default "")
-  context_content=$(echo "$init" | gpd json get .context_content --default "")
-  research_content=$(echo "$init" | gpd json get .research_content --default "")
-  experiment_design_content=$(echo "$init" | gpd json get .experiment_design_content --default "")
-  verification_content=$(echo "$init" | gpd json get .verification_content --default "")
-  validation_content=$(echo "$init" | gpd json get .validation_content --default "")
-
-  RESEARCHER_MODEL="$researcher_model"
-  PLANNER_MODEL="$planner_model"
-  CHECKER_MODEL="$checker_model"
-  RESEARCH_ENABLED="$research_enabled"
-  PLAN_CHECKER_ENABLED="$plan_checker_enabled"
-  COMMIT_DOCS="$commit_docs"
-  AUTONOMY="$autonomy"
-  RESEARCH_MODE="$research_mode"
-  PHASE_FOUND="$phase_found"
-  PHASE_DIR="$phase_dir"
-  PHASE_NUMBER="$phase_number"
-  PHASE_NAME="$phase_name"
-  PHASE_SLUG="$phase_slug"
-  PADDED_PHASE="$padded_phase"
-  HAS_RESEARCH="$has_research"
-  HAS_CONTEXT="$has_context"
-  HAS_PLANS="$has_plans"
-  PLAN_COUNT="$plan_count"
-  PLANNING_EXISTS="$planning_exists"
-  ROADMAP_EXISTS="$roadmap_exists"
-  PROJECT_CONTRACT="$project_contract"
-  PROJECT_CONTRACT_GATE="$project_contract_gate"
-  PROJECT_CONTRACT_LOAD_INFO="$project_contract_load_info"
-  PROJECT_CONTRACT_VALIDATION="$project_contract_validation"
-  CONTRACT_INTAKE="$contract_intake"
-  EFFECTIVE_REFERENCE_INTAKE="$effective_reference_intake"
-  SELECTED_PROTOCOL_BUNDLE_IDS="$selected_protocol_bundle_ids"
-  PROTOCOL_BUNDLE_COUNT="$protocol_bundle_count"
-  PROTOCOL_BUNDLE_LOAD_MANIFEST="$protocol_bundle_load_manifest"
-  PROTOCOL_BUNDLE_CONTEXT="$protocol_bundle_context"
-  PROTOCOL_BUNDLE_VERIFIER_EXTENSIONS="$protocol_bundle_verifier_extensions"
-  ACTIVE_REFERENCE_CONTEXT="$active_reference_context"
-  REFERENCE_ARTIFACT_FILES="$reference_artifact_files"
-  REFERENCE_ARTIFACTS_CONTENT="$reference_artifacts_content"
-  LITERATURE_REVIEW_FILES="$literature_review_files"
-  LITERATURE_REVIEW_COUNT="$literature_review_count"
-  RESEARCH_MAP_REFERENCE_FILES="$research_map_reference_files"
-  RESEARCH_MAP_REFERENCE_COUNT="$research_map_reference_count"
-  DERIVED_MANUSCRIPT_PROOF_REVIEW_STATUS="$derived_manuscript_proof_review_status"
-  STATE_CONTENT="$state_content"
-  ROADMAP_CONTENT="$roadmap_content"
-  REQUIREMENTS_CONTENT="$requirements_content"
-  CONTEXT_CONTENT="$context_content"
-  RESEARCH_CONTENT="$research_content"
-  EXPERIMENT_DESIGN_CONTENT="$experiment_design_content"
-  VERIFICATION_CONTENT="$verification_content"
-  VALIDATION_CONTENT="$validation_content"
-}
-
 REQUESTED_PHASE="${PHASE}"
 INIT="${BOOTSTRAP_INIT}"
 PHASE=$(echo "$INIT" | gpd json get .phase_number --default "${REQUESTED_PHASE}")
-bind_plan_phase_init "$INIT"
 ```
 
 **Dirty worktree safety gate:** before phase directory creation, handoffs, fingerprints, alignment, or write-capable reloads, inspect only the project worktree:
@@ -318,7 +217,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-bind_plan_phase_init "$INIT"
+# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
 ```
 
 ## 5. Handle Research
@@ -529,7 +428,7 @@ ls "${PHASE_DIR}"/*-PLAN.md 2>/dev/null
 
 ## 7. Use Context Files from INIT
 
-Refresh the stage-local planning payload now that research routing is complete and immediately rebind the live shell variables:
+Refresh the stage-local planning payload now that research routing is complete:
 
 ```bash
 INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)
@@ -537,7 +436,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-bind_plan_phase_init "$INIT"
+# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
 ```
 
 ## 8. Spawn gpd-planner Agent
@@ -700,7 +599,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-bind_plan_phase_init "$INIT"
+# Parse only the checker_revision fields listed in INIT.staged_loading.required_init_fields before use.
 ```
 
 ```bash

@@ -885,7 +885,7 @@ def _render_compact_staged_command_shim(
         "Parse JSON and use the returned top-level keys as only the active-stage payload. Treat only "
         "`payload.staged_loading` as the authority map:\n\n"
         "Expected keys on `payload.staged_loading`: `workflow_id`, `stage_id`, `order`, "
-        "`required_init_fields`, `mode_paths`, `loaded_authorities`, `eager_authorities`, "
+        "optional `init_spec_id`, `required_init_fields`, `mode_paths`, `loaded_authorities`, `eager_authorities`, "
         "`conditional_authorities`, `must_not_eager_load`, `allowed_tools`, `writes_allowed`, "
         "`produced_state`, `next_stages`, `checkpoints`.\n\n"
         "- parse the fields named by `staged_loading.required_init_fields`;\n"

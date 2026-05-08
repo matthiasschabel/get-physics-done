@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import ast
 import importlib
+import json
+import re
 import textwrap
 from pathlib import Path
 
 from gpd import registry
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from tests.prompt_metrics_support import iter_markdown_fences
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_diagnostics.py"
+CONVERTED_STAGED_PROMPT_MARKERS = (
+    "staged_loading.required_init_fields",
+    ".required_init_fields",
+    "manifest-owned",
+    "field-access",
+)
+SHELL_FENCE_LANGUAGES = {"bash", "sh", "shell", "zsh"}
+SHELL_FIELD_EXTRACTION_RE = re.compile(r"\b(?:gpd\s+json\s+get|jq\b|sed\b|awk\b|grep\b)")
+LONG_FIELD_INVENTORY_THRESHOLD = 6
 EXPECTED_REPORT_KEYS = {
     "schema_version",
     "repo_root",
@@ -322,6 +334,33 @@ def _relative_report_path(raw_path: str) -> str:
     return path.as_posix()
 
 
+def _required_init_fields_by_stage(manifest: dict[str, object]) -> dict[str, tuple[str, ...]]:
+    stages = manifest.get("stages")
+    if not isinstance(stages, list):
+        return {}
+
+    fields_by_stage: dict[str, tuple[str, ...]] = {}
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        stage_id = stage.get("id")
+        required_init_fields = stage.get("required_init_fields")
+        if not isinstance(stage_id, str) or not isinstance(required_init_fields, list):
+            continue
+        fields = tuple(field for field in required_init_fields if isinstance(field, str))
+        if fields:
+            fields_by_stage[stage_id] = fields
+    return fields_by_stage
+
+
+def _field_mentions(line: str, fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        field
+        for field in fields
+        if re.search(rf"(?<![A-Za-z0-9_]){re.escape(field)}(?![A-Za-z0-9_])", line)
+    )
+
+
 def test_report_includes_every_command_agent_and_workflow_source() -> None:
     report = _report(REPO_ROOT, runtime_names=())
 
@@ -513,6 +552,66 @@ def test_checked_in_stage_manifests_have_no_must_not_eager_load_violations() -> 
 
     assert stage_totals["must_not_eager_load_violation_count"] == 0, violations
     assert violations == []
+
+
+def test_checked_in_stage_diagnostics_first_turn_totals_match_workflow_rows() -> None:
+    diagnostics = _diagnostics()
+    report = _report(REPO_ROOT, runtime_names=(), include_runtime_projections=False)
+    payload = diagnostics.report_to_dict(report)
+    stage_totals = payload["totals"]["stage_diagnostics"]
+    stage_diagnostics = payload["stage_diagnostics"]
+
+    assert isinstance(stage_totals, dict)
+    assert isinstance(stage_diagnostics, list)
+    assert stage_diagnostics
+    assert stage_totals["first_turn_char_count"] == sum(
+        workflow["first_turn_char_count"] for workflow in stage_diagnostics
+    )
+    assert stage_totals["first_turn_line_count"] == sum(
+        workflow["first_turn_line_count"] for workflow in stage_diagnostics
+    )
+    assert all(workflow["first_turn_char_count"] > 0 for workflow in stage_diagnostics)
+
+
+def test_converted_staged_workflows_do_not_recreate_long_shell_field_inventories() -> None:
+    workflow_dir = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+    converted_workflows: list[str] = []
+    offenders: list[str] = []
+
+    for manifest_path in sorted(workflow_dir.glob("*-stage-manifest.json")):
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            continue
+        workflow_id = manifest.get("workflow_id")
+        if not isinstance(workflow_id, str):
+            continue
+        workflow_path = workflow_dir / f"{workflow_id}.md"
+        if not workflow_path.is_file():
+            continue
+        workflow_text = workflow_path.read_text(encoding="utf-8")
+        if not any(marker in workflow_text for marker in CONVERTED_STAGED_PROMPT_MARKERS):
+            continue
+
+        converted_workflows.append(workflow_id)
+        fields_by_stage = _required_init_fields_by_stage(manifest)
+        for fence in iter_markdown_fences(workflow_text):
+            language = fence.info.lower().split(None, 1)[0] if fence.info else ""
+            if language not in SHELL_FENCE_LANGUAGES:
+                continue
+            for stage_id, fields in fields_by_stage.items():
+                extracted_fields: set[str] = set()
+                for line in fence.body.splitlines():
+                    if SHELL_FIELD_EXTRACTION_RE.search(line):
+                        extracted_fields.update(_field_mentions(line, fields))
+                if len(extracted_fields) >= LONG_FIELD_INVENTORY_THRESHOLD:
+                    sample = ", ".join(sorted(extracted_fields)[:8])
+                    offenders.append(
+                        f"{workflow_id}:{stage_id}:{fence.start_line}-{fence.end_line} "
+                        f"shell-parses {len(extracted_fields)} manifest init fields ({sample})"
+                    )
+
+    assert converted_workflows, "expected at least one staged workflow with manifest-owned field access guidance"
+    assert offenders == []
 
 
 def test_include_counting_ignores_fenced_code_and_uses_installer_expansion(tmp_path: Path) -> None:

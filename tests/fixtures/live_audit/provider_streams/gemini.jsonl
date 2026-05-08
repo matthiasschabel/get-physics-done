@@ -1,4 +1,0 @@
-{"event":"start"}
-{"event":"tool_call","name":"run_shell_command","args":{"command":"uv run pytest tests/adapters/test_live_audit_events.py"}}
-{"event":"tool_result","name":"run_shell_command","args":{"command":"uv run pytest tests/adapters/test_live_audit_events.py"},"status":"completed","exit_code":0,"output":"ok"}
-{"event":"final","candidates":[{"content":{"parts":[{"text":"Gemini final response."}]}}]}

@@ -1,4 +1,4 @@
-"""Phase 1 exact prompt-assertion budget contracts."""
+"""Exact prompt-assertion budget contracts."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def _exactness_files_by_path() -> dict[str, dict[str, object]]:
     return {str(row["path"]): row for row in rows if isinstance(row, dict)}
 
 
-def test_phase1_exactness_totals_do_not_grow_past_baseline() -> None:
+def test_exactness_totals_do_not_grow_past_baseline() -> None:
     exactness = _exactness_payload()
     totals = exactness["totals"]
     assert isinstance(totals, dict)
@@ -57,7 +57,7 @@ def test_phase1_exactness_totals_do_not_grow_past_baseline() -> None:
         assert observed <= budget, f"{field} budget exceeded: observed={observed} max={budget}"
 
 
-def test_phase1_exactness_has_no_new_high_severity_files() -> None:
+def test_exactness_has_no_new_high_severity_files() -> None:
     rows_by_path = _exactness_files_by_path()
     high_paths = {
         path
@@ -69,7 +69,7 @@ def test_phase1_exactness_has_no_new_high_severity_files() -> None:
     assert unexpected_high_paths == []
 
 
-def test_phase1_existing_high_severity_files_do_not_gain_exact_or_brittle_assertions() -> None:
+def test_existing_high_severity_files_do_not_gain_exact_or_brittle_assertions() -> None:
     rows_by_path = _exactness_files_by_path()
 
     for path, baseline in HIGH_SEVERITY_BASELINES.items():

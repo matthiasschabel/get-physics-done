@@ -8,7 +8,7 @@ from gpd.core import prompt_diagnostics
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NON_NATIVE_RUNTIMES = ("codex", "gemini", "opencode")
-PHASE7_RUNTIME_PROJECTION_BUDGETS = {
+TARGET_RUNTIME_PROJECTION_BUDGETS = {
     "plan-phase": {
         "claude-code": 4_196,
         "codex": 6_597,
@@ -113,7 +113,7 @@ def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None
     assert saw_shell_rewrite_pressure, "runtime_top_prompts should expose nonzero shell rewrite pressure"
 
 
-def test_phase7_target_command_runtime_projection_diagnostics_stay_under_baseline_budgets() -> None:
+def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budgets() -> None:
     runtime_names = ("claude-code", *NON_NATIVE_RUNTIMES)
     report = prompt_diagnostics.build_prompt_surface_report(
         REPO_ROOT,
@@ -124,10 +124,10 @@ def test_phase7_target_command_runtime_projection_diagnostics_stay_under_baselin
     )
 
     items_by_name = {item.name: item for item in report.items if item.kind == "command"}
-    missing = sorted(set(PHASE7_RUNTIME_PROJECTION_BUDGETS) - set(items_by_name))
+    missing = sorted(set(TARGET_RUNTIME_PROJECTION_BUDGETS) - set(items_by_name))
     assert missing == []
 
-    for command_name, budget_by_runtime in PHASE7_RUNTIME_PROJECTION_BUDGETS.items():
+    for command_name, budget_by_runtime in TARGET_RUNTIME_PROJECTION_BUDGETS.items():
         item = items_by_name[command_name]
         metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
         assert set(runtime_names) <= set(metrics_by_runtime)

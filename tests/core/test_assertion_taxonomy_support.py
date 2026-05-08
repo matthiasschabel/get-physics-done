@@ -1,4 +1,4 @@
-"""Tests for Phase 0 assertion taxonomy support helpers."""
+"""Tests for assertion taxonomy support helpers."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ second public phrase
 """
 
 
-def test_assertion_taxonomy_values_are_phase0_contract() -> None:
+def test_assertion_taxonomy_values_are_stable_contract() -> None:
     assert tuple(kind.value for kind in AssertionKind) == (
         "machine_exact",
         "public_exact",

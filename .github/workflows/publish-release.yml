@@ -7,8 +7,6 @@
 # - If the actual publish day differs from the already-merged release PR, this
 #   workflow stamps the real publish date locally for the release artifacts and
 #   opens a tiny follow-up PR to persist `CITATION.cff` / `README.md`.
-# - When required, this workflow validates a sanitized Phase 8 smoke report
-#   before publish. It never launches live providers.
 # - Ordinary PR merges to `main` must never invoke this flow automatically.
 name: publish release
 
@@ -20,34 +18,8 @@ on:
         required: false
         type: string
         default: ""
-      require_phase8_smoke:
-        description: "Require validation of a sanitized Phase 8 smoke report before publishing."
-        required: false
-        type: boolean
-        default: false
-      phase8_smoke_run_id:
-        description: "GitHub Actions run id that uploaded the sanitized Phase 8 smoke report artifact."
-        required: false
-        type: string
-        default: ""
-      phase8_smoke_artifact_name:
-        description: "Sanitized Phase 8 smoke report artifact name."
-        required: false
-        type: string
-        default: phase8-sanitized-provider-report
-      phase8_smoke_max_provider_attempts:
-        description: "Maximum provider attempts allowed in the sanitized Phase 8 smoke report."
-        required: false
-        type: number
-        default: 3
-      phase8_smoke_max_mutating_rows:
-        description: "Maximum mutating rows allowed in the sanitized Phase 8 smoke report."
-        required: false
-        type: number
-        default: 0
 
 permissions:
-  actions: read
   contents: read
 
 concurrency:
@@ -63,7 +35,6 @@ jobs:
       release_sha: ${{ steps.release_sha.outputs.sha }}
       release_date: ${{ steps.publish_date.outputs.release_date }}
       metadata_changed: ${{ steps.publish_date.outputs.metadata_changed }}
-      phase8_smoke_status: ${{ steps.phase8_smoke.outputs.status }}
 
     steps:
       - name: Ensure workflow runs from default branch
@@ -151,58 +122,6 @@ jobs:
             fi
             echo "::notice::Tag v${VERSION} already points at release commit ${RELEASE_SHA}; continuing publish recovery."
           fi
-
-      - name: Validate sanitized Phase 8 smoke report if required
-        id: phase8_smoke
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ steps.release_sha.outputs.sha }}
-          REQUIRE_PHASE8_SMOKE: ${{ inputs.require_phase8_smoke }}
-          PHASE8_SMOKE_RUN_ID: ${{ inputs.phase8_smoke_run_id }}
-          PHASE8_SMOKE_ARTIFACT_NAME: ${{ inputs.phase8_smoke_artifact_name }}
-          PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS: ${{ inputs.phase8_smoke_max_provider_attempts }}
-          PHASE8_SMOKE_MAX_MUTATING_ROWS: ${{ inputs.phase8_smoke_max_mutating_rows }}
-        run: |
-          if [ "$REQUIRE_PHASE8_SMOKE" != "true" ]; then
-            echo "status=not-required" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ -z "$PHASE8_SMOKE_RUN_ID" ]; then
-            echo "::error::require_phase8_smoke is true, but phase8_smoke_run_id is empty."
-            exit 1
-          fi
-          if [ -z "$PHASE8_SMOKE_ARTIFACT_NAME" ]; then
-            echo "::error::require_phase8_smoke is true, but phase8_smoke_artifact_name is empty."
-            exit 1
-          fi
-          if [ ! -f scripts/validate_phase8_provider_report.py ]; then
-            echo "::error::scripts/validate_phase8_provider_report.py is required for Phase 8 smoke validation."
-            exit 1
-          fi
-
-          REPORT_DIR="$(mktemp -d)"
-          gh run download "$PHASE8_SMOKE_RUN_ID" \
-            --name "$PHASE8_SMOKE_ARTIFACT_NAME" \
-            --dir "$REPORT_DIR"
-          mapfile -t REPORT_PATHS < <(find "$REPORT_DIR" -type f -name 'phase8-provider-smoke-report.json' | sort)
-          if [ "${#REPORT_PATHS[@]}" -eq 0 ]; then
-            echo "::error::Downloaded Phase 8 smoke artifact did not contain phase8-provider-smoke-report.json."
-            exit 1
-          fi
-          if [ "${#REPORT_PATHS[@]}" -gt 1 ]; then
-            echo "::error::Downloaded Phase 8 smoke artifact contained multiple phase8-provider-smoke-report.json files."
-            exit 1
-          fi
-          REPORT_PATH="${REPORT_PATHS[0]}"
-
-          uv run python scripts/validate_phase8_provider_report.py \
-            --input "$REPORT_PATH" \
-            --require-smoke \
-            --expected-repo-head "$RELEASE_SHA" \
-            --max-provider-attempts "$PHASE8_SMOKE_MAX_PROVIDER_ATTEMPTS" \
-            --max-mutating-rows "$PHASE8_SMOKE_MAX_MUTATING_ROWS"
-          echo "status=validated" >> "$GITHUB_OUTPUT"
 
       - name: Run release validation suite
         run: |
@@ -533,7 +452,6 @@ jobs:
           NPM_PUBLISH_STATUS: ${{ steps.npm_publish.outputs.status }}
           METADATA_PR_URL: ${{ steps.metadata_pr.outputs.pr_url }}
           GPD_WEB_REBUILD_STATUS: ${{ steps.gpd_web_rebuild.outputs.status }}
-          PHASE8_SMOKE_STATUS: ${{ needs.build-release.outputs.phase8_smoke_status }}
         run: |
           VERSION="${{ needs.build-release.outputs.version }}"
           RELEASE_SHA="${{ needs.build-release.outputs.release_sha }}"
@@ -556,11 +474,6 @@ jobs:
               echo "- npm: already published; skipped trusted-publishing rerun"
             else
               echo "- npm: published via trusted publishing from environment \`npm\`"
-            fi
-            if [ "${PHASE8_SMOKE_STATUS}" = "validated" ]; then
-              echo "- Phase 8 smoke report: sanitized report validated before publish"
-            else
-              echo "- Phase 8 smoke report: not required for this publish"
             fi
             echo "- GitHub release: ${RELEASE_URL}"
             if [ "${METADATA_CHANGED}" = "true" ]; then

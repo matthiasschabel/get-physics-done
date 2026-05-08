@@ -76,7 +76,6 @@ Cross-runtime release checks:
   prepares deferred settings; adapter-level tests or direct callers must call `finalize_install()`
   before asserting complete Gemini artifacts.
 - OpenCode installs are expected to leave `opencode.json` complete on disk with GPD-managed `permission.read` / `permission.external_directory` entries and built-in MCP servers under the `mcp` key.
-- Phase 8 live-provider smoke is not part of local pytest or PR CI. Run `.github/workflows/phase8-live-provider-matrix.yml` only by manual dispatch or nightly schedule behind the `phase8-live-providers` environment. Leave `dry_run` enabled unless the live runner and budget approval are explicitly ready, but do not treat dry-run intake as accepted smoke. When smoke is required for a release, run `Phase 8 live provider matrix` with `source_ref` set to the reviewed release commit, then dispatch `Publish release` with `require_phase8_smoke=true`, `phase8_smoke_run_id=<Phase 8 live provider matrix run id>`, and `phase8_smoke_artifact_name=phase8-sanitized-provider-report`. The publish workflow can require and validate the sanitized report artifact, but it must not launch providers.
 
 ## Sharing Published Research
 
@@ -108,7 +107,6 @@ You don't need to share your full manuscript or data — even a brief write-up w
 - `main` is protected: direct pushes are blocked, and pull requests must pass the required `tests` workflow before merge.
 - Feature and fix PRs must not bump package versions or publish releases.
 - Add public release notes under `## vNEXT` in `CHANGELOG.md` so the release workflows can prepare the next tagged release from reviewed notes.
-- If a release requires Phase 8 provider smoke, run `Phase 8 live provider matrix` with `source_ref` set to the reviewed release commit, then dispatch `Publish release` with `require_phase8_smoke=true`, `phase8_smoke_run_id=<Phase 8 live provider matrix run id>`, and `phase8_smoke_artifact_name=phase8-sanitized-provider-report`; do not add provider credentials, provider launches, raw logs, or dry-run intake as release smoke.
 - Add or update tests when behavior changes.
 - Update public docs when install flow, commands, or release messaging changes.
 - Keep commit messages concise and descriptive.

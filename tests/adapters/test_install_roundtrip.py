@@ -92,8 +92,8 @@ PROTOCOL_BUNDLE_JIT_COMMANDS = (
     "quick",
     "verify-work",
 )
-PHASE7_TARGET_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
-PHASE7_INTERNAL_HELPER_LABEL_STEMS = (
+STAGED_HELPER_TARGET_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+INTERNAL_HELPER_LABEL_STEMS = (
     "stage",
     "phase",
     "validate",
@@ -101,7 +101,7 @@ PHASE7_INTERNAL_HELPER_LABEL_STEMS = (
     "child-handoff",
     "apply-return-updates",
 )
-PHASE7_LOCAL_HELPER_TERM_RE = re.compile(
+LOCAL_HELPER_TERM_RE = re.compile(
     r"\b(?:stage\s+field-access|phase\s+(?:checkpoint|verification-summary|closeout-readiness)|"
     r"validate\s+child-handoff|return\s+skeleton|apply-return-updates)\b"
 )
@@ -284,7 +284,7 @@ def _assert_runtime_command_label_visible(text: str, *, runtime: str, command_na
 
 
 def _runtime_public_helper_labels(runtime: str) -> tuple[str, ...]:
-    return tuple(get_adapter(runtime).format_command(stem) for stem in PHASE7_INTERNAL_HELPER_LABEL_STEMS)
+    return tuple(get_adapter(runtime).format_command(stem) for stem in INTERNAL_HELPER_LABEL_STEMS)
 
 
 def _installed_workflow_text(target: Path, workflow_name: str) -> str:
@@ -993,7 +993,7 @@ def test_installed_command_shell_fences_use_runtime_bridge_or_public_cli(
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
-def test_installed_phase7_target_workflow_helper_calls_stay_local_cli_not_runtime_labels(
+def test_installed_target_workflow_helper_calls_stay_local_cli_not_runtime_labels(
     real_installed_repo_factory,
     runtime: str,
 ) -> None:
@@ -1003,12 +1003,12 @@ def test_installed_phase7_target_workflow_helper_calls_stay_local_cli_not_runtim
     offenders: list[str] = []
     helper_reference_count = 0
 
-    for workflow_name in PHASE7_TARGET_WORKFLOWS:
+    for workflow_name in STAGED_HELPER_TARGET_WORKFLOWS:
         workflow_text = _installed_workflow_text(target, workflow_name)
-        helper_reference_count += len(PHASE7_LOCAL_HELPER_TERM_RE.findall(workflow_text))
+        helper_reference_count += len(LOCAL_HELPER_TERM_RE.findall(workflow_text))
 
         for line_number, line in enumerate(workflow_text.splitlines(), start=1):
-            if not PHASE7_LOCAL_HELPER_TERM_RE.search(line):
+            if not LOCAL_HELPER_TERM_RE.search(line):
                 continue
             for public_label in public_helper_labels:
                 if public_label in line:
@@ -1019,7 +1019,7 @@ def test_installed_phase7_target_workflow_helper_calls_stay_local_cli_not_runtim
 
         for fence in _shell_fences(workflow_text):
             for line in _runnable_shell_lines(fence):
-                if not PHASE7_LOCAL_HELPER_TERM_RE.search(line):
+                if not LOCAL_HELPER_TERM_RE.search(line):
                     continue
                 rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
                 if rewritten != line:

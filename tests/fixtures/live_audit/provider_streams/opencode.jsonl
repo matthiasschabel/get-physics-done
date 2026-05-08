@@ -1,5 +1,0 @@
-{"type":"session.start","id":"opencode-session"}
-{"type":"message.start"}
-{"type":"tool.call","name":"shell","input":{"command":"uv run pytest tests/adapters/test_live_audit_events.py"}}
-{"type":"tool.result","name":"shell","input":{"command":"uv run pytest tests/adapters/test_live_audit_events.py"},"status":"completed","exit_code":0,"content":"ok"}
-{"type":"response.completed","response":"OpenCode final response."}

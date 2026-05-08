@@ -258,11 +258,6 @@ def assert_tests_readme_documents_ci_shard_policy(tests_readme: str) -> None:
     assert "Shard target resolution collects only the requested category" in tests_readme
     assert "In-process repeated resolutions reuse the same immutable collection result" in tests_readme
     assert "CI matrix jobs stay isolated and do not share collection state across jobs" in tests_readme
-    assert "Phase 8 live-provider smoke belongs only in `.github/workflows/phase8-live-provider-matrix.yml`" in tests_readme
-    assert "uses the protected `phase8-live-providers` environment" in tests_readme
-    assert "does not launch pytest" in tests_readme
-    assert "uploads only the sanitized Phase 8 report artifact" in tests_readme
-    assert "Release publishing may validate that sanitized report when explicitly required" in tests_readme
     assert (
         "uv run pytest -n 0 tests/test_runtime_abstraction_boundaries.py "
         "tests/core/test_contract_schema_prompt_parity.py"

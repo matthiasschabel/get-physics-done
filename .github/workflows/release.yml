@@ -193,10 +193,7 @@ jobs:
               "## Release notes\n\n"
               f"{metadata['release_notes']}\n\n"
               "## After merge\n"
-              "- Run the `Publish release` workflow from `main`.\n"
-              "- If this release requires Phase 8 provider smoke, first run `Phase 8 live provider matrix` with `source_ref` set to the reviewed release commit.\n"
-              "- Then run `Publish release` from `main` with `require_phase8_smoke=true`, `phase8_smoke_run_id=<Phase 8 live provider matrix run id>`, and `phase8_smoke_artifact_name=phase8-sanitized-provider-report`.\n"
-              "- `Publish release` validates the sanitized report only and never launches providers; dry-run Phase 8 intake is not accepted as smoke.\n",
+              "- Run the `Publish release` workflow from `main`.\n",
               encoding="utf-8",
           )
           PY
@@ -231,9 +228,6 @@ jobs:
               "- Updated versioned files: `CHANGELOG.md`, `CITATION.cff`, `README.md`, `package.json`, `pyproject.toml`, `uv.lock`\n"
               "- Publish-date fields are stamped later by `Publish release`, so the final release date comes from the actual publish day.\n"
               "- Next step: merge the release PR, then run `Publish release` from `main`\n\n"
-              "- Phase 8 provider smoke, when required, must be run by `Phase 8 live provider matrix` with `source_ref` set to the reviewed release commit.\n"
-              "- Dispatch `Publish release` with `require_phase8_smoke=true`, `phase8_smoke_run_id=<Phase 8 live provider matrix run id>`, and `phase8_smoke_artifact_name=phase8-sanitized-provider-report`; it validates the sanitized report artifact only and never launches providers.\n"
-              "- Dry-run Phase 8 intake is not accepted as smoke.\n\n"
               "## Release notes\n\n"
               f"{metadata['release_notes']}\n",
               encoding="utf-8",

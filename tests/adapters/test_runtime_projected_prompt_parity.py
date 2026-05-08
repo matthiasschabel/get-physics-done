@@ -36,8 +36,8 @@ WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 
 RUNTIMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
-PHASE7_TARGET_COMMANDS = ("plan-phase", "execute-phase", "new-project", "write-paper")
-PHASE8_COMPACT_WORKFLOW_COMMANDS = (
+STAGED_INIT_TARGET_COMMANDS = ("plan-phase", "execute-phase", "new-project", "write-paper")
+COMPACT_WORKFLOW_COMMANDS = (
     "parameter-sweep",
     "sensitivity-analysis",
     "numerical-convergence",
@@ -49,7 +49,7 @@ PHASE8_COMPACT_WORKFLOW_COMMANDS = (
     "audit-milestone",
     "debug",
 )
-PHASE7_TARGET_COMMAND_PROJECTION_BUDGETS = {
+STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
     "plan-phase": {
         "claude-code": 4_196,
         "codex": 6_597,
@@ -75,7 +75,7 @@ PHASE7_TARGET_COMMAND_PROJECTION_BUDGETS = {
         "opencode": 15_578,
     },
 }
-PHASE7_TARGET_FIRST_STAGE_BY_COMMAND = {
+TARGET_FIRST_STAGE_BY_COMMAND = {
     "plan-phase": "phase_bootstrap",
     "execute-phase": "phase_bootstrap",
     "new-project": "scope_intake",
@@ -645,27 +645,27 @@ def _extract_spawn_contracts(text: str) -> list[dict[str, object]]:
     return list(_parse_spawn_contracts(text, owner_name="runtime-projected"))
 
 
-def _expected_phase7_target_init_command(command_name: str, bridge: str) -> str:
+def _expected_target_init_command(command_name: str, bridge: str) -> str:
     if command_name in {"plan-phase", "execute-phase"}:
         return (
             f'{bridge} --raw init {command_name} "$ARGUMENTS" '
-            f"--stage {PHASE7_TARGET_FIRST_STAGE_BY_COMMAND[command_name]}"
+            f"--stage {TARGET_FIRST_STAGE_BY_COMMAND[command_name]}"
         )
     if command_name == "new-project":
         return f"{bridge} --raw init new-project --stage scope_intake"
     if command_name == "write-paper":
         return f'{bridge} --raw init write-paper --stage paper_bootstrap -- "$ARGUMENTS"'
-    raise AssertionError(f"Unhandled Phase 7 target command: {command_name}")
+    raise AssertionError(f"Unhandled staged init target command: {command_name}")
 
 
-@pytest.mark.parametrize("command_name", PHASE7_TARGET_COMMANDS)
+@pytest.mark.parametrize("command_name", STAGED_INIT_TARGET_COMMANDS)
 @pytest.mark.parametrize("runtime", RUNTIMES)
-def test_phase7_target_command_projection_stays_under_baseline_budget(
+def test_staged_init_target_command_projection_stays_under_baseline_budget(
     command_name: str,
     runtime: str,
 ) -> None:
     projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
-    budget = PHASE7_TARGET_COMMAND_PROJECTION_BUDGETS[command_name][runtime]
+    budget = STAGED_INIT_COMMAND_PROJECTION_BUDGETS[command_name][runtime]
     normalized_projected = _normalized_runtime_bridge_text(projected)
 
     assert get_adapter(runtime).format_command(command_name) in projected
@@ -673,7 +673,7 @@ def test_phase7_target_command_projection_stays_under_baseline_budget(
     assert len(projected) <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
 
 
-@pytest.mark.parametrize("command_name", PHASE7_TARGET_COMMANDS)
+@pytest.mark.parametrize("command_name", STAGED_INIT_TARGET_COMMANDS)
 @pytest.mark.parametrize(
     "runtime",
     tuple(
@@ -682,7 +682,7 @@ def test_phase7_target_command_projection_stays_under_baseline_budget(
         if not descriptor.native_include_support
     ),
 )
-def test_phase7_target_non_native_command_shims_use_exact_runtime_bridge(
+def test_staged_init_target_non_native_command_shims_use_exact_runtime_bridge(
     command_name: str,
     runtime: str,
     tmp_path: Path,
@@ -695,7 +695,7 @@ def test_phase7_target_non_native_command_shims_use_exact_runtime_bridge(
 
     assert get_adapter(runtime).format_command(command_name) in projected
     assert _has_staged_shim_sentinel(projected)
-    assert _expected_phase7_target_init_command(command_name, bridge) in _first_shell_commands(projected)
+    assert _expected_target_init_command(command_name, bridge) in _first_shell_commands(projected)
     assert f"gpd --raw init {command_name}" not in "\n".join(_shell_fence_bodies(projected))
 
 
@@ -745,9 +745,9 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
     assert len(projected) <= len(expanded_workflow) * 0.85
 
 
-@pytest.mark.parametrize("command_name", PHASE8_COMPACT_WORKFLOW_COMMANDS)
+@pytest.mark.parametrize("command_name", COMPACT_WORKFLOW_COMMANDS)
 @pytest.mark.parametrize("runtime", RUNTIMES)
-def test_phase8_hotspot_commands_use_native_include_or_compact_workflow_reference_shim(
+def test_hotspot_commands_use_native_include_or_compact_workflow_reference_shim(
     command_name: str,
     runtime: str,
 ) -> None:

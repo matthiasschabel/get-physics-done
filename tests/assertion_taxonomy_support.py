@@ -38,7 +38,7 @@ __all__ = [
 
 
 class AssertionKind(StrEnum):
-    """Phase 0 assertion classes used by test authors."""
+    """Assertion classes used by test authors."""
 
     MACHINE_EXACT = "machine_exact"
     PUBLIC_EXACT = "public_exact"
@@ -77,7 +77,7 @@ class MarkerScope:
 
 @dataclass(frozen=True, slots=True)
 class FragmentAssertion:
-    """One scoped text assertion with Phase 0 taxonomy metadata."""
+    """One scoped text assertion with taxonomy metadata."""
 
     kind: AssertionKind
     label: str

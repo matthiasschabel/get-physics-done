@@ -32,7 +32,7 @@ from gpd.core.return_skeleton import (
 from gpd.core.state import default_state_dict, generate_state_markdown
 
 
-def test_return_profiles_cover_phase3_roles() -> None:
+def test_return_profiles_cover_core_roles() -> None:
     assert set(GPD_RETURN_ROLE_PROFILES) == {
         "executor",
         "planner",

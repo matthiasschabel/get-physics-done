@@ -6,10 +6,6 @@ The repository graph below is checked in because graph guardrail tests read it d
 
 Default `uv run pytest` runs the full checked-in suite, and `uv run pytest -q` does the same with quieter output. Both inherit `-n auto --dist=worksteal` from `pyproject.toml`. For local full-suite runs, `tests/conftest.py` raises xdist auto-worker selection toward the current CI shard fanout without changing collection. For serial debugging, override that default explicitly with `uv run pytest -n 0`.
 
-Live-audit harness coverage in default pytest is provider-free: tests collect under `tests/adapters`, shared helpers live under `tests/helpers/live_audit_harness`, and tiny synthetic fixtures live under `tests/fixtures/live_audit`. PR CI should not add a live-audit pytest category, provider marker, environment gate, or real provider launch path for this harness.
-
-Phase 8 live-provider smoke belongs only in `.github/workflows/phase8-live-provider-matrix.yml`. That workflow is manual/nightly, uses the protected `phase8-live-providers` environment, defaults to dry run, does not launch pytest, and uploads only the sanitized Phase 8 report artifact. Release publishing may validate that sanitized report when explicitly required, but it must not launch providers.
-
 The 180 second full-suite shard budget is enforced per CI pytest shard; the 10 minute job timeout remains the outer failure boundary. Shard target resolution has its own 3 minute timeout and logs elapsed seconds before pytest starts, git inventory calls have a 30 second timeout, and each collect-only subprocess has a 150 second timeout. Shard target resolution collects only the requested category. In-process repeated resolutions reuse the same immutable collection result, while CI matrix jobs stay isolated and do not share collection state across jobs. For a focused smoke pass, run `uv run pytest -n 0 tests/test_runtime_abstraction_boundaries.py tests/core/test_contract_schema_prompt_parity.py tests/core/test_review_contract_prompt_visibility.py tests/mcp/test_tool_contract_visibility.py tests/core/test_verifier_prompt_contract_visibility.py tests/core/test_verification_surface_alignment_regressions.py -q`.
 
 The GitHub Actions workflow runs that same full suite as category-named runtime-informed shards: `root 1/9` through `root 9/9`, `adapters 1/2` through `adapters 2/2`, `hooks 1/2` through `hooks 2/2`, `mcp 1/2` through `mcp 2/2`, and `core 1/5` through `core 5/5`. `tests/ci_sharding.py` weights files by collected test counts, boosts root modules that have been slow on GitHub Actions, splits known hotspot modules such as `tests/test_runtime_cli.py`, `tests/test_registry.py`, `tests/test_update_workflow.py`, `tests/hooks/test_runtime_detect.py`, and `tests/mcp/test_verification_contract_server_regressions.py`, and greedily rebalances those work units inside each category while pytest keeps the default work-stealing parallelism policy.
@@ -40,8 +36,8 @@ It covers:
 - `src/gpd/agents/*.md`: `24`
 - `src/gpd/specs/workflows/*.md`: `72`
 - `src/gpd/specs/templates/**/*.md`: `81`
-- `src/gpd/specs/references/**/*.md`: `230`
-- `src/gpd/adapters/*.py`: `11`
+- `src/gpd/specs/references/**/*.md`: `183`
+- `src/gpd/adapters/*.py`: `9`
 - `src/gpd/hooks/*.py`: `11`
 - `src/gpd/mcp/*.py`: `5`
 - `src/gpd/mcp/integrations/*.py`: `2`

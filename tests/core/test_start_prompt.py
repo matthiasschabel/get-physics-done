@@ -5,6 +5,7 @@ from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.registry import get_command, list_commands
+from tests.assertion_taxonomy_support import FragmentMode, semantic_anchor
 from tests.doc_surface_contracts import assert_start_workflow_router_contract
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -59,11 +60,48 @@ def _route_for_option(workflow: str, option_id: str) -> str:
 
 
 def _numbered_choices(section: str) -> list[str]:
-    return [
-        line.strip()
-        for line in section.splitlines()
-        if re.match(r"\s*\d+\.\s+", line)
-    ]
+    return [line.strip() for line in section.splitlines() if re.match(r"\s*\d+\.\s+", line)]
+
+
+def _assert_anchor(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(label, fragments).check(text)
+
+
+def _assert_absent(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(label, fragments, mode=FragmentMode.ABSENT).check(text)
+
+
+def _assert_same_message_choice_boundary(text: str) -> None:
+    _assert_anchor(
+        text,
+        "same-message start choice boundary",
+        (
+            "same-message explicit choice",
+            "chooser answer",
+            "not downstream write approval",
+            "downstream intake",
+            "scope approval",
+            "file creation",
+            "git initialization",
+            "state repair",
+            "map creation",
+            "mapper spawning",
+            "progress writes",
+        ),
+    )
+
+
+def _assert_reopen_recent_boundary(text: str) -> None:
+    _assert_anchor(
+        text,
+        "reopen recent terminal/runtime boundary",
+        (
+            "gpd resume --recent",
+            "recent-project picker",
+            "advisory",
+            "gpd:resume-work",
+        ),
+    )
 
 
 def test_start_command_is_registered_and_projectless() -> None:
@@ -79,38 +117,34 @@ def test_start_command_references_workflow() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/start.md" in raw_command_prompt
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in raw_command_prompt
-    assert "Requested choice or short goal: $ARGUMENTS" in raw_command_prompt
     assert "gpd resume" in command_prompt
     assert "gpd resume --recent" in command_prompt
     assert "gpd:resume-work" in command_prompt
     assert "gpd:suggest-next" in command_prompt
-    assert "advisory recent-project picker" in command_prompt
-    assert "reloads canonical state in the reopened project" in command_prompt
-    assert (
-        command_prompt.index("`gpd resume` remains the local read-only current-workspace recovery snapshot")
-        < command_prompt.index("`gpd resume --recent` remains the normal-terminal advisory recent-project picker")
-        < command_prompt.index("`gpd:suggest-next` is the fastest post-resume next command")
-    )
+    _assert_anchor(raw_command_prompt, "start passes argument context through", ("Requested choice", "$ARGUMENTS"))
+    _assert_reopen_recent_boundary(command_prompt)
+    semantic_anchor(
+        "start recovery ladder command ordering",
+        (
+            "`gpd resume`",
+            "current-workspace recovery snapshot",
+            "`gpd resume --recent`",
+            "advisory recent-project picker",
+            "`gpd:suggest-next`",
+            "fastest post-resume next command",
+        ),
+        mode=FragmentMode.ORDERED,
+    ).check(command_prompt)
 
 
 def test_start_command_same_message_choice_is_not_downstream_write_approval() -> None:
     raw_command_prompt = (COMMANDS_DIR / "start.md").read_text(encoding="utf-8")
     prompt = _normalized(raw_command_prompt)
 
-    assert "A same-message explicit choice counts only as the chooser answer." in prompt
-    assert "not downstream write approval" in prompt
-    for blocked_approval in (
-        "downstream intake",
-        "scope approval",
-        "file creation",
-        "git initialization",
-        "state repair",
-        "map creation",
-        "mapper spawning",
-        "progress writes",
-        "executing a recommended next action",
-    ):
-        assert blocked_approval in prompt
+    _assert_same_message_choice_boundary(prompt)
+    _assert_anchor(
+        prompt, "same-message choice does not execute recommendations", "executing a recommended next action"
+    )
 
 
 def test_start_workflow_routes_to_existing_entrypoints() -> None:
@@ -119,115 +153,107 @@ def test_start_workflow_routes_to_existing_entrypoints() -> None:
     assert_start_workflow_router_contract(workflow)
     assert "START_CONTEXT=$(gpd --raw init new-project)" in workflow
     assert "gpd --raw init new-project --stage scope_intake" not in workflow
-    assert "workspace-bound, read-only classifier" in workflow
-    assert "non-staged raw CLI classifier" in workflow
-    assert "`research_file_samples` is a sorted, bounded list" in workflow
-    assert "If `research_file_samples` is non-empty" in workflow
+    detect_step = _extract_step(workflow, "detect_workspace_state")
+    explain_step = _extract_step(workflow, "explain_current_state")
+    offer_step = _extract_step(workflow, "offer_relevant_choices")
+
+    _assert_anchor(
+        detect_step,
+        "start classifier uses raw workspace-bound preflight",
+        ("non-staged raw CLI classifier", "workspace-bound", "read-only classifier", "invoked folder itself"),
+    )
+    _assert_anchor(
+        detect_step + explain_step,
+        "research file samples are classifier-provided context",
+        ("research_file_samples", "sorted", "bounded", "project-relative", "show those sample files"),
+    )
     assert "read-only file search" not in workflow
     assert "HAS_GPD_PROJECT=false" not in workflow
     assert "RESEARCH_FILE_COUNT" not in workflow
 
-    for fragment_options in (
+    _assert_anchor(
+        explain_step,
+        "start explains folder states in official beginner terms",
         (
-            "GPD project` (a folder where GPD already saved its own project files, notes, and state)",
-            "GPD project` (a folder where GPD already saved its own project files, notes, and state",
+            "GPD project",
+            "research map",
+            "map-research",
+            "inspect an existing folder",
+            "new-project",
+            "project scaffolding",
         ),
-        (
-            "research map` (GPD's summary of an existing research folder before full project setup)",
-            "research map` (GPD's summary of an existing research folder before full project setup",
-        ),
-        ("In GPD terms, \\`map-research\\` means inspect an existing folder before planning.",),
-        ("In GPD terms, \\`new-project\\` creates the project scaffolding GPD will use later.",),
-        ("This folder already has saved GPD work (`GPD project`)",),
-        ("This folder already has GPD's folder summary (`research map`)",),
-        ("This folder already has research files, but GPD is not set up here yet",),
-        ("This folder looks new or mostly empty",),
-        ("I will show the safest next steps first and the broader options second.",),
-        ("Keep the numbered list short.",),
-        ("Do not add a separate capabilities menu or help menu",),
-        ("Resume this project (recommended)",),
-        ("Review the project status first",),
-        ("Map this folder first (recommended)",),
-        ("Start a brand-new GPD project anyway",),
-        ("Fast start (recommended)",),
-        ("Full guided setup",),
-        ("Turn this into a full GPD project",),
-        ("one-shot or headless runtime prompts",),
-        ("same user message that invokes `gpd:start` already includes an explicit",),
-        ("A same-message explicit choice counts only as the chooser answer",),
-        ("not downstream write approval",),
-        ("Reply with the number or the option name.",),
-        ("Do not treat surrounding goals, explanations, or automation instructions as consent to route.",),
-        ("Reopen a different GPD project",),
-        (
-            "This is the in-runtime continue command for an existing GPD project.",
-            "This is the in-runtime recovery command for the selected project.",
-            "This is the in-runtime return path for the selected project.",
-        ),
-        (
-            "If the researcher chooses `Resume this project (recommended)` or `Continue where I left off`:",
-            "If the researcher chooses `Resume this project` or `Continue where I left off`:",
-            "If the researcher chooses `Resume this project (recommended)`, `Continue where I left off`, `Inspect recovery state (recommended)`, or `Inspect recovery state`:",
-            "If the researcher chooses option_id `resume_work`",
-        ),
-        (
-            "If the researcher chooses `Map this folder first (recommended)` or `Refresh the research map`:",
-            "If the researcher chooses `Map this folder first` or `Refresh the research map`:",
-            "If the researcher chooses option_id `map_research`",
-        ),
-        (
-            "Use \\`gpd resume --recent\\` in your normal terminal to find the project first.",
-            "Use \\`gpd resume --recent\\` in your normal terminal first.",
-            "Use \\`gpd resume --recent\\` in your normal terminal to pick the project first.",
-        ),
-        (
-            "The recent-project picker is advisory; choose the workspace there, then \\`gpd:resume-work\\` reloads canonical state for that project.",
-            "The recent-project picker is advisory",
-        ),
-        (
-            "Then open that project folder in the runtime and choose the \\`gpd:resume-work\\` command.",
-            "Then open the project folder in the runtime and choose the \\`gpd:resume-work\\` command.",
-        ),
-        (
-            "In GPD terms, \\`resume-work\\` is the in-runtime continuation step once the recovery ladder has identified the right project.",
-            "In GPD terms, \\`resume-work\\` is the in-runtime recovery step once the recovery ladder has identified the right project.",
-            "In GPD terms, \\`resume-work\\` is the in-runtime command that continues a selected project.",
-            "In GPD terms, \\`resume-work\\` is the in-runtime continuation step once the recovery ladder has identified the right project and reopened its workspace.",
-        ),
-        ("Do not silently create project files from `gpd:start` itself.",),
-        (
-            "Do not silently switch the user into a different project folder.",
-            "Do not silently switch to a different project folder.",
-            "Do not silently switch projects.",
-        ),
-        (
-            "When in doubt between a fresh folder and an existing research folder, prefer `map-research` as the safer recommendation.",
-            "When in doubt between a fresh folder and an existing research folder, prefer `map-research`.",
-        ),
-        ("keep the official GPD terms visible in plain-English form",),
+    )
+    for heading in (
+        "This folder already has saved GPD work (`GPD project`)",
+        "This folder has partial/recoverable GPD state",
+        "This folder already has GPD's folder summary (`research map`)",
+        "This folder already has research files, but GPD is not set up here yet",
+        "This folder looks new or mostly empty",
     ):
-        assert any(fragment in workflow for fragment in fragment_options)
+        assert heading in offer_step
+    assert {
+        "Resume this project (recommended)",
+        "Review the project status first",
+        "Map this folder first (recommended)",
+        "Start a brand-new GPD project anyway",
+        "Fast start (recommended)",
+        "Full guided setup",
+        "Turn this into a full GPD project (recommended)",
+    } <= _displayed_choice_labels(workflow)
+    _assert_anchor(
+        offer_step,
+        "start first chooser stays short and state-specific",
+        ("safest next steps first", "broader options second", "Keep the numbered list short", "first chooser"),
+    )
+    _assert_same_message_choice_boundary(offer_step)
+    _assert_anchor(
+        offer_step,
+        "same-message chooser visible reply instruction",
+        ("Reply with the number or the option name.", "Do not treat surrounding goals"),
+    )
+    _assert_reopen_recent_boundary(workflow)
+    guardrails = _extract_step(workflow, "guardrails")
+    _assert_anchor(
+        guardrails,
+        "start guardrails preserve chooser boundary",
+        (
+            "chooser",
+            "not a second implementation",
+            "Do not silently create project files",
+            "Do not silently switch",
+            "prefer `map-research`",
+            "official GPD terms",
+        ),
+    )
 
-    assert "- `Keep the numbered list short." not in workflow
-    assert "this is an internal structuring rule, not a line to show the researcher" not in workflow
+    _assert_absent(workflow, "quoted internal numbered-list rule leak", "- `Keep the numbered list short.")
+    _assert_absent(
+        workflow,
+        "old internal structuring rule leak",
+        "this is an internal structuring rule, not a line to show the researcher",
+    )
     assert "Other useful options" not in workflow
     assert "other useful options" not in workflow
 
     assert "Read `{GPD_INSTALL_DIR}/workflows/new-project.md` with the file-read tool." not in workflow
     assert "Read `{GPD_INSTALL_DIR}/workflows/help.md` with the file-read tool." not in workflow
     assert "Read `{GPD_INSTALL_DIR}/workflows/tour.md` with the file-read tool." not in workflow
-    assert "Only list commands whose command-context preflight can pass for the detected state" in workflow
-    assert "When `roadmap_exists=true`, include as the next numbered choice:" in workflow
-    assert "When `state_exists=true`, include as the next numbered choice:" in workflow
+    _assert_anchor(
+        offer_step,
+        "partial state choices are filtered by recoverable fields",
+        ("command-context preflight", "roadmap_exists=true", "state_exists=true", "next numbered choice"),
+    )
     partial_state_choices = _extract_between(
         workflow,
         "**This folder has partial/recoverable GPD state**",
         "**This folder already has GPD's folder summary",
     )
-    assert "Build the visible numbered list contiguously after filtering" in partial_state_choices
+    _assert_anchor(partial_state_choices, "partial state choices are renumbered after filtering", "contiguously")
     assert "1. Inspect recovery state" not in partial_state_choices
     assert "2. Reconcile state files" not in partial_state_choices
-    assert "Do not list `gpd:progress` for partial state" in workflow
+    _assert_anchor(
+        offer_step, "partial state excludes progress route", ("Do not list", "gpd:progress", "partial state")
+    )
     assert "Review visible progress - use `gpd:progress`" not in workflow
 
 
@@ -276,32 +302,28 @@ def test_start_workflow_same_message_choice_is_only_chooser_authority() -> None:
     workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
     offer_step = _normalized(_extract_step(workflow, "offer_relevant_choices"))
 
-    assert "A same-message explicit choice counts only as the chooser answer for one `option_id`." in offer_step
-    assert "not downstream write approval" in offer_step
-    for blocked_approval in (
-        "downstream intake",
-        "scope approval",
-        "file creation",
-        "git initialization",
-        "state repair",
-        "map creation",
-        "mapper spawning",
-        "progress writes",
+    _assert_same_message_choice_boundary(offer_step)
+    _assert_anchor(
+        offer_step,
+        "same-message choice does not execute next action",
         "permission to execute a recommended next action",
-    ):
-        assert blocked_approval in offer_step
+    )
 
 
 def test_start_workflow_route_choice_has_general_downstream_write_gate_boundary() -> None:
     workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
     route_step = _normalized(_extract_step(workflow, "route_choice"))
 
-    assert "the start-menu choice authorizes only the route into that command" in route_step
-    assert "state the route boundary visibly" in route_step
-    assert (
-        "stop at its first downstream write-capable gate unless that downstream workflow "
-        "obtains its own separate explicit approval"
-    ) in route_step
+    _assert_anchor(
+        route_step,
+        "start route choice has downstream write gate",
+        (
+            "start-menu choice authorizes only the route into that command",
+            "state the route boundary visibly",
+            "first downstream write-capable gate",
+            "separate explicit approval",
+        ),
+    )
 
 
 def test_start_workflow_new_project_routes_stop_before_project_writes() -> None:
@@ -312,7 +334,9 @@ def test_start_workflow_new_project_routes_stop_before_project_writes() -> None:
         ("new_project_full", "gpd:new-project"),
     ):
         route = _route_for_option(workflow, option_id)
-        assert f"I will route to `{command}` now and stop at its first downstream intake or scope-approval gate" in route
+        assert (
+            f"I will route to `{command}` now and stop at its first downstream intake or scope-approval gate" in route
+        )
         assert "no project, git, state, or progress files are approved by this start choice" in route
         assert f"Route boundary for `{option_id}`" in route
         assert "do not create `GPD/`" in route

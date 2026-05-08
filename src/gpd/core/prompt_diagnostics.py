@@ -193,6 +193,23 @@ _EXACT_ASSERTION_THRESHOLDS: dict[str, dict[str, int]] = {
     "machine_contract_exact_assertions": {"warn": 6000, "fail": 6200},
     "exact_assertion_count": {"warn": 7700, "fail": 7900},
 }
+_TAXONOMY_HELPER_USAGE_SCHEMA_VERSION = "taxonomy_helper_usage.v1"
+_TAXONOMY_HELPER_NAMES: tuple[str, ...] = (
+    "assert_fragments",
+    "assert_prompt_baseline_budget",
+    "assert_prompt_budget",
+    "assert_prompt_contracts",
+    "assert_prompt_metric_budget",
+    "forbidden_duplicate",
+    "fragment_count",
+    "machine_exact",
+    "prompt_budget",
+    "public_exact",
+    "semantic_anchor",
+)
+_TAXONOMY_HELPER_ALIASES = {
+    "_assert_prompt_contracts": "assert_prompt_contracts",
+}
 
 ExactAssertionCategory = Literal["machine_contract", "public_ux", "brittle_prose"]
 ExactAssertionPolarity = Literal["required", "forbidden", "counted", "indexed"]
@@ -3046,6 +3063,7 @@ def _scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
         return _empty_exact_assertion_diagnostics()
 
     file_rows: list[dict[str, object]] = []
+    taxonomy_usage_rows: list[dict[str, object]] = []
     files_scanned = 0
     for path in sorted(tests_root.rglob("*.py")):
         if path.is_symlink() or not path.is_file():
@@ -3055,10 +3073,13 @@ def _scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
         except (SyntaxError, OSError, UnicodeDecodeError):
             continue
         files_scanned += 1
+        relative_path = _relative_path(path, repo_root)
+        taxonomy_usage = _taxonomy_helper_usage_for_tree(tree, path=relative_path)
+        if taxonomy_usage:
+            taxonomy_usage_rows.append(taxonomy_usage)
         assertions = _prompt_exact_assertions(tree)
         if not assertions:
             continue
-        relative_path = _relative_path(path, repo_root)
         classified = [_exact_assertion_to_dict(assertion, path=relative_path) for assertion in assertions]
         machine = [entry for entry in classified if entry["category"] == "machine_contract"]
         public_ux = [entry for entry in classified if entry["category"] == "public_ux"]
@@ -3097,6 +3118,7 @@ def _scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
         "totals": totals,
         "thresholds": _EXACT_ASSERTION_THRESHOLDS,
         "files": file_rows,
+        "taxonomy_helper_usage": _taxonomy_helper_usage_diagnostics(files_scanned, taxonomy_usage_rows),
     }
 
 
@@ -3114,6 +3136,7 @@ def _empty_exact_assertion_diagnostics() -> dict[str, object]:
         },
         "thresholds": _EXACT_ASSERTION_THRESHOLDS,
         "files": [],
+        "taxonomy_helper_usage": _taxonomy_helper_usage_diagnostics(0, ()),
     }
 
 
@@ -3128,6 +3151,69 @@ def _exact_assertion_totals(files_scanned: int, file_rows: Sequence[Mapping[str,
         "public_ux_exact_assertions": sum(cast(int, row["public_ux_exact_assertions"]) for row in file_rows),
         "brittle_prose_assertions": sum(cast(int, row["brittle_prose_assertions"]) for row in file_rows),
         "brittle_prose_file_count": sum(1 for row in file_rows if cast(int, row["brittle_prose_assertions"]) > 0),
+    }
+
+
+def _taxonomy_helper_usage_for_tree(tree: ast.AST, *, path: str) -> dict[str, object] | None:
+    helper_counts: dict[str, int] = dict.fromkeys(_TAXONOMY_HELPER_NAMES, 0)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        helper_name = _taxonomy_helper_name(node.func)
+        if helper_name is None:
+            continue
+        helper_counts[helper_name] += 1
+
+    used_helpers = {helper_name: count for helper_name, count in helper_counts.items() if count}
+    if not used_helpers:
+        return None
+    return {
+        "path": path,
+        "helper_call_count": sum(used_helpers.values()),
+        "helpers": used_helpers,
+    }
+
+
+def _taxonomy_helper_name(node: ast.AST) -> str | None:
+    raw_name: str | None = None
+    if isinstance(node, ast.Name):
+        raw_name = node.id
+    elif isinstance(node, ast.Attribute):
+        raw_name = node.attr
+    if raw_name is None:
+        return None
+    helper_name = _TAXONOMY_HELPER_ALIASES.get(raw_name, raw_name)
+    if helper_name not in _TAXONOMY_HELPER_NAMES:
+        return None
+    return helper_name
+
+
+def _taxonomy_helper_usage_diagnostics(
+    files_scanned: int,
+    file_rows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    sorted_rows = tuple(
+        sorted(
+            file_rows,
+            key=lambda row: (
+                -cast(int, row["helper_call_count"]),
+                cast(str, row["path"]),
+            ),
+        )
+    )
+    totals: dict[str, int] = {
+        "files_scanned": files_scanned,
+        "taxonomy_helper_file_count": len(sorted_rows),
+        "taxonomy_helper_call_count": sum(cast(int, row["helper_call_count"]) for row in sorted_rows),
+    }
+    for helper_name in _TAXONOMY_HELPER_NAMES:
+        totals[helper_name] = sum(
+            cast(int, cast(Mapping[str, object], row.get("helpers", {})).get(helper_name, 0)) for row in sorted_rows
+        )
+    return {
+        "schema_version": _TAXONOMY_HELPER_USAGE_SCHEMA_VERSION,
+        "totals": totals,
+        "files": [dict(row) for row in sorted_rows],
     }
 
 

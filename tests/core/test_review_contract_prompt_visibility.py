@@ -37,12 +37,20 @@ from gpd.core.review_contract_prompt import (
     render_review_contract_prompt,
     review_contract_payload,
 )
+from tests.assertion_taxonomy_support import FragmentMode, fragment_count, machine_exact, semantic_anchor
+from tests.markdown_test_support import extract_markdown_section, parse_yaml_fences, require_mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
+REVIEW_CONTRACT_OWNER = "review-contract visibility"
+
+
+def _assert_prompt_contracts(text: str, *assertions) -> None:
+    for assertion in assertions:
+        assertion.check(text)
 
 
 def _manual_model_visible_yaml_section(*, heading: str, note: str, payload: dict[str, object]) -> str:
@@ -56,6 +64,20 @@ def _read_command(name: str) -> str:
 
 def _read_workflow(name: str) -> str:
     return (WORKFLOWS_DIR / f"{name}.md").read_text(encoding="utf-8")
+
+
+def _single_yaml_mapping(text: str, *, context: str) -> dict[object, object]:
+    fences = parse_yaml_fences(text, context=context)
+    assert len(fences) == 1
+    return dict(require_mapping(fences[0].data, context=context))
+
+
+def _model_visible_wrapper_payload(text: str, heading: str, wrapper_key: str, *, context: str) -> dict[object, object]:
+    section = extract_markdown_section(text, f"## {heading}", context=context)
+    mapping = _single_yaml_mapping(section, context=f"{context} {heading} YAML")
+
+    assert set(mapping) == {wrapper_key}
+    return dict(require_mapping(mapping[wrapper_key], context=f"{context} {wrapper_key} payload"))
 
 
 def test_review_grade_commands_surface_registry_contract_requirements_in_source() -> None:
@@ -104,14 +126,30 @@ def test_review_contract_registry_uses_the_shared_frontmatter_key_constants() ->
 
 def test_peer_review_workflow_keeps_contract_gate_prose_concise() -> None:
     workflow = _read_workflow("peer-review")
-    assert "project_contract_gate.authoritative" in workflow
-    assert "effective_reference_intake" in workflow
-    assert "Bundle guidance" in workflow
-    assert "additive only" in workflow
-    assert "Reader-visible claims" in workflow
-    assert "surfaced evidence" in workflow
-    assert "first-class" in workflow
-    assert "Apply the gate rule above." not in workflow
+    _assert_prompt_contracts(
+        workflow,
+        machine_exact(
+            "authoritative project-contract gate keys stay exact",
+            ("project_contract_gate.authoritative", "effective_reference_intake"),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="workflow routing reads these state/context keys literally",
+        ),
+        semantic_anchor(
+            "bundle guidance cannot override visible evidence",
+            (
+                "Bundle guidance",
+                "additive only",
+                "Reader-visible claims",
+                "surfaced evidence",
+                "first-class",
+            ),
+        ),
+        semantic_anchor(
+            "stale gate shorthand stays absent",
+            "Apply the gate rule above.",
+            mode=FragmentMode.ABSENT,
+        ),
+    )
 
 
 def test_review_grade_commands_prepend_model_visible_review_contract_to_registry_content() -> None:
@@ -121,34 +159,44 @@ def test_review_grade_commands_prepend_model_visible_review_contract_to_registry
 
         assert contract is not None
         expected_section = render_review_contract_prompt(contract)
+        expected_payload = _model_visible_wrapper_payload(
+            expected_section,
+            "Review Contract",
+            REVIEW_CONTRACT_PROMPT_WRAPPER_KEY,
+            context=f"{command_name} rendered review contract",
+        )
+        actual_payload = _model_visible_wrapper_payload(
+            command.content,
+            "Review Contract",
+            REVIEW_CONTRACT_PROMPT_WRAPPER_KEY,
+            context=f"{command_name} command content",
+        )
         assert command.content.startswith("## Command Requirements\n")
         assert "## Command Requirements" in command.content
         assert command_visibility_note() in command.content
         if command.requires:
             assert "requires:" in command.content
         assert "## Review Contract" in command.content
-        assert expected_section in command.content
-        assert f"{REVIEW_CONTRACT_PROMPT_WRAPPER_KEY}:" in command.content
-        assert "wrapper key" in expected_section
-        assert "schema_version" in expected_section
-        assert "required_state" in expected_section
-        assert "conditional_requirements" in expected_section
-        assert review_contract_visibility_note() in expected_section
-        assert f"review_mode: {contract.review_mode}" in expected_section
-        for output in contract.required_outputs:
-            assert output in expected_section
-        for artifact in contract.stage_artifacts:
-            assert artifact in expected_section
-        for conditional in contract.conditional_requirements:
-            assert conditional.when in expected_section
-            for output in conditional.required_outputs:
-                assert output in expected_section
-            for evidence in conditional.required_evidence:
-                assert evidence in expected_section
-            for blocker in conditional.blocking_conditions:
-                assert blocker in expected_section
-            for artifact in conditional.stage_artifacts:
-                assert artifact in expected_section
+        assert actual_payload == expected_payload
+        assert actual_payload["schema_version"] == 1
+        assert actual_payload["review_mode"] == contract.review_mode
+        if contract.required_state:
+            assert actual_payload["required_state"] == contract.required_state
+        assert tuple(actual_payload.get("required_outputs", ())) == tuple(contract.required_outputs)
+        assert tuple(actual_payload.get("stage_artifacts", ())) == tuple(contract.stage_artifacts)
+        fragment_count(
+            "review-contract visibility note appears once",
+            review_contract_visibility_note(),
+            expected_count=1,
+            section="## Review Contract",
+        ).check(command.content)
+        machine_exact(
+            "review-contract wrapper key is exact in command content",
+            f"{REVIEW_CONTRACT_PROMPT_WRAPPER_KEY}:",
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="model-visible review contracts are wrapped under this exact key",
+            section="## Review Contract",
+        ).check(command.content)
         if command.requires:
             for require_key, require_value in command.requires.items():
                 assert str(require_key) in command.content
@@ -249,28 +297,55 @@ def test_model_visible_wrapper_notes_surface_their_closed_schema_rules() -> None
         " or ".join(f"`{value}`" for value in AGENT_SHARED_STATE_AUTHORITIES),
     )
 
-    assert MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE in agent_note
-    assert MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE in command_note
-    assert MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE in note
-    assert agent_note.count(MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE) == 1
-    assert command_note.count(MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE) == 1
-    assert note.count(MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE) == 1
-    assert "Omit empty optional fields." in note
-    assert "strict booleans" in command_note.lower()
-    assert f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}` is the typed additive command-policy wrapper" in command_note
-    assert "integer `schema_version: 1`" in command_note
-    assert "list fields are string lists" in command_note
-    assert "`allowed_tools` is a tool-name list." in command_note
-    assert "`requires` supports only `files`, as a string or string list." in command_note
-    assert "omit empty optional fields" in command_note.lower()
-    assert (
-        "typed command policy controls intake, supporting-context routing, and managed outputs"
-        in command_note
-    )
-    assert "Typed command policy is runtime-authoritative" not in command_note
-    assert (
-        "suffix lists use dotted suffixes"
-        in command_note
+    fragment_count(
+        "agent closed-schema phrase appears once",
+        MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE,
+        expected_count=1,
+    ).check(agent_note)
+    fragment_count(
+        "command closed-schema phrase appears once",
+        MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE,
+        expected_count=1,
+    ).check(command_note)
+    fragment_count(
+        "review-contract closed-schema phrase appears once",
+        MODEL_VISIBLE_CLOSED_SCHEMA_PHRASE,
+        expected_count=1,
+    ).check(note)
+    _assert_prompt_contracts(
+        command_note,
+        machine_exact(
+            "command-policy wrapper key and field paths stay exact",
+            (
+                f"`{COMMAND_POLICY_PROMPT_WRAPPER_KEY}`",
+                "`schema_version: 1`",
+                "`allowed_tools`",
+                "`requires`",
+                "`files`",
+                "context_mode",
+                "project_reentry_capable",
+                "`context_mode: project-required`",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="command-policy wrapper keys and field paths are machine contracts",
+        ),
+        semantic_anchor(
+            "command-policy note describes strict typed YAML semantics",
+            (
+                "Strict booleans",
+                "list fields are string lists",
+                "omit empty optional fields",
+                "typed command policy controls intake",
+                "supporting-context routing",
+                "managed outputs",
+                "suffix lists use dotted suffixes",
+            ),
+        ),
+        semantic_anchor(
+            "stale command-policy authority wording stays absent",
+            "Typed command policy is runtime-authoritative",
+            mode=FragmentMode.ABSENT,
+        ),
     )
     for value in VALID_CONTEXT_MODES:
         assert value in command_note
@@ -278,34 +353,54 @@ def test_model_visible_wrapper_notes_surface_their_closed_schema_rules() -> None
         assert value not in command_note
     for disjunction in agent_disjunctions:
         assert disjunction not in agent_note
-    assert "closed agent-authority vocabularies" in agent_note
-    assert "active YAML values below are authoritative for this agent" in agent_note
-    assert "`schema_version` must be the integer `1`" in note
-    assert "context_mode" in command_note
-    assert "project_reentry_capable" in command_note
-    assert "may be true only with `context_mode: project-required`" in command_note
+    semantic_anchor(
+        "agent note has closed vocabulary and active-YAML authority",
+        ("closed agent-authority vocabularies", "active YAML values below are authoritative for this agent"),
+    ).check(agent_note)
 
-    assert "wrapper key" in note
-    assert "closed review-contract vocabularies" in note
-    assert "active YAML values below are authoritative" in note
+    _assert_prompt_contracts(
+        note,
+        semantic_anchor(
+            "review-contract note keeps closed-schema YAML authority",
+            (
+                "Omit empty optional fields.",
+                "wrapper key",
+                "closed review-contract vocabularies",
+                "active YAML values below are authoritative",
+            ),
+        ),
+        machine_exact(
+            "review-contract note field paths stay exact",
+            (
+                "`schema_version` must be the integer `1`",
+                "`conditional_requirements[].preflight_checks`",
+                "`conditional_requirements[].blocking_preflight_checks`",
+                "`scope_variants[].scope`",
+                "`.activation`",
+                "`scope_variants[].relaxed_preflight_checks`",
+                "`.optional_preflight_checks`",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="review-contract wrapper field paths are consumed as closed schema guidance",
+        ),
+        semantic_anchor(
+            "review-contract conditionals and scope variants stay semantically constrained",
+            (
+                "valid preflight-check values",
+                "Each `conditional_requirements[].when` value may appear at most once.",
+                "List fields reject blank entries and duplicates.",
+                "Each conditional requirement needs one non-empty field.",
+                "make named checks non-blocking",
+                "make missing inputs advisory",
+                "Non-empty scope override lists replace matching top-level lists.",
+                "Each `scope_variants[].scope` may appear at most once.",
+                "Each scope variant needs one non-empty override or preflight field.",
+                "Runtime applies active scope variants additively",
+            ),
+        ),
+    )
     for compacted_phrase in (review_modes, required_states, conditional_whens, preflight_checks):
         assert compacted_phrase not in note
-    assert (
-        "`conditional_requirements[].preflight_checks` and `conditional_requirements[].blocking_preflight_checks`"
-        in note
-    )
-    assert "are lists of valid preflight-check values when present." in note
-    assert "Each `conditional_requirements[].when` value may appear at most once." in note
-    assert "List fields reject blank entries and duplicates." in note
-    assert "Each conditional requirement needs one non-empty field." in note
-    assert "`scope_variants[].scope`/`.activation` must be non-empty strings." in note
-    assert "`scope_variants[].relaxed_preflight_checks`/`.optional_preflight_checks`" in note
-    assert "`relaxed_preflight_checks` make named checks non-blocking for that scope" in note
-    assert "`optional_preflight_checks` make missing inputs advisory" in note
-    assert "Non-empty scope override lists replace matching top-level lists." in note
-    assert "Each `scope_variants[].scope` may appear at most once." in note
-    assert "Each scope variant needs one non-empty override or preflight field." in note
-    assert "Runtime applies active scope variants additively" in note
 
 
 @pytest.mark.parametrize(
@@ -453,27 +548,44 @@ def test_review_contract_visibility_note_surfaces_the_hard_constraints() -> None
     conditional_whens = " or ".join(f"`{value}`" for value in REVIEW_CONTRACT_CONDITIONAL_WHENS)
     preflight_checks = " or ".join(f"`{value}`" for value in REVIEW_CONTRACT_PREFLIGHT_CHECKS)
 
-    assert "Closed schema; no extra keys." in note
-    assert "`schema_version` must be the integer `1`;" in note
-    assert "closed review-contract vocabularies" in note
-    assert "active YAML values below are authoritative" in note
+    _assert_prompt_contracts(
+        note,
+        semantic_anchor(
+            "review-contract note states closed-schema authoritative YAML semantics",
+            (
+                "Closed schema",
+                "no extra keys",
+                "closed review-contract vocabularies",
+                "active YAML values below are authoritative",
+            ),
+        ),
+        machine_exact(
+            "review-contract note schema and list fields stay exact",
+            (
+                "`schema_version` must be the integer `1`;",
+                "`required_outputs`",
+                "`required_evidence`",
+                "`blocking_conditions`",
+                "`preflight_checks`",
+                "`stage_artifacts`",
+                "`scope_variants`",
+                "`conditional_requirements[].preflight_checks`",
+                "`conditional_requirements[].blocking_preflight_checks`",
+                "`required_outputs_override`",
+                "`required_evidence_override`",
+                "`blocking_conditions_override`",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="review-contract field paths and integer schema version are machine-facing",
+        ),
+        semantic_anchor(
+            "conditional preflight fields remain valid-check lists",
+            "lists of valid preflight-check values when present",
+        ),
+    )
     assert review_modes not in note
     assert conditional_whens not in note
     assert preflight_checks not in note
-    assert (
-        "List fields when present: `required_outputs`, `required_evidence`, `blocking_conditions`, "
-        "`preflight_checks`, `stage_artifacts`, `scope_variants`;"
-    ) in note
-    assert (
-        "`conditional_requirements[].preflight_checks` and `conditional_requirements[].blocking_preflight_checks`"
-        in note
-    )
-    assert (
-        "Scope override fields `required_outputs_override`, `required_evidence_override`, "
-        "`blocking_conditions_override` are lists when present."
-        in note
-    )
-    assert "are lists of valid preflight-check values when present." in note
 
 
 @pytest.mark.parametrize(
@@ -610,8 +722,7 @@ def test_review_contract_normalizers_reject_duplicate_list_entries(
                     "GPD/review/STAGE-legacy{round_suffix}.json",
                 ],
             },
-            "stage_artifacts must be covered by required_outputs: "
-            "GPD/review/STAGE-legacy{round_suffix}.json",
+            "stage_artifacts must be covered by required_outputs: GPD/review/STAGE-legacy{round_suffix}.json",
         ),
         (
             normalize_review_contract_frontmatter_payload,
@@ -670,9 +781,7 @@ def test_review_contract_prompt_and_registry_reject_stage_artifact_output_drift_
         "required_outputs": ["GPD/review/STAGE-reader{round_suffix}.json"],
         "stage_artifacts": ["GPD/review/STAGE-legacy{round_suffix}.json"],
     }
-    error_fragment = (
-        "stage_artifacts must be covered by required_outputs: GPD/review/STAGE-legacy{round_suffix}.json"
-    )
+    error_fragment = "stage_artifacts must be covered by required_outputs: GPD/review/STAGE-legacy{round_suffix}.json"
 
     with pytest.raises(ValueError, match=re.escape(error_fragment)):
         normalize_review_contract_payload(payload)
@@ -1301,7 +1410,7 @@ def test_peer_review_contract_surfaces_typed_conditional_proof_requirements() ->
             when="theorem-bearing claims are present",
             required_outputs=["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
             stage_artifacts=["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-        )
+        ),
     ]
     source = _read_command("peer-review")
     assert "conditional_requirements:" in source
@@ -1348,7 +1457,7 @@ def test_respond_to_referees_review_contract_uses_round_suffixed_output_paths() 
                 "missing referee report source",
                 "degraded review integrity",
             ],
-        )
+        ),
     ]
     respond_command = _read_command("respond-to-referees")
     respond_workflow = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
@@ -1442,65 +1551,133 @@ def test_referee_response_template_reuses_canonical_issue_fields_in_worked_secti
 def test_write_paper_review_contract_surfaces_manuscript_root_review_dependencies() -> None:
     source = _read_command("write-paper")
 
-    assert "${PAPER_DIR}/ARTIFACT-MANIFEST.json" in source
-    assert "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json" in source
-    assert "${PAPER_DIR}/reproducibility-manifest.json" in source
-    assert "stage review artifacts" not in source
+    _assert_prompt_contracts(
+        source,
+        machine_exact(
+            "write-paper review artifact paths stay exact",
+            (
+                "${PAPER_DIR}/ARTIFACT-MANIFEST.json",
+                "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json",
+                "${PAPER_DIR}/reproducibility-manifest.json",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="review-contract preflight artifact paths are machine-visible shell/path contracts",
+        ),
+        semantic_anchor(
+            "stale stage-review prose stays absent",
+            "stage review artifacts",
+            mode=FragmentMode.ABSENT,
+        ),
+    )
 
 
 def test_summary_template_surfaces_plan_contract_ref_rule_for_contract_ledgers() -> None:
     summary_template = (TEMPLATES_DIR / "summary.md").read_text(encoding="utf-8")
     contract_results_schema = (TEMPLATES_DIR / "contract-results-schema.md").read_text(encoding="utf-8")
 
-    assert "single detailed rule source" in summary_template
-    assert "plan_contract_ref" in summary_template
-    assert "contract_results" in summary_template
-    assert "comparison_verdicts" in summary_template
-    assert "uncertainty_markers" in summary_template
-    assert "suggested_contract_checks" in summary_template
-    assert "The canonical schema defines the exact list-trimming semantics" in summary_template
-    assert "Blank-after-trim entries are invalid" in contract_results_schema
-    assert "duplicate-after-trim entries are invalid" in contract_results_schema
+    _assert_prompt_contracts(
+        summary_template,
+        semantic_anchor(
+            "summary template points to one canonical contract-ledger rule source",
+            ("single detailed rule source", "canonical schema", "exact list-trimming semantics"),
+        ),
+        machine_exact(
+            "summary contract-ledger keys stay exact",
+            ("plan_contract_ref", "contract_results", "comparison_verdicts", "uncertainty_markers"),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="summary frontmatter contract-ledger keys are parsed machine fields",
+        ),
+        machine_exact(
+            "summary suggested checks key stays exact",
+            "suggested_contract_checks",
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="verification suggested-check records use this exact key",
+        ),
+    )
+    semantic_anchor(
+        "contract-results schema keeps trimmed-list validity semantics",
+        ("Blank-after-trim entries are invalid", "duplicate-after-trim entries are invalid"),
+    ).check(contract_results_schema)
 
 
 def test_verification_template_forbids_placeholder_uncertainty_fillers() -> None:
     verification_template = (TEMPLATES_DIR / "verification-report.md").read_text(encoding="utf-8")
 
-    assert "decisive readout of the same contract-backed ledger" in verification_template
-    assert "Keep `uncertainty_markers` explicit" in verification_template
-    assert "structured `suggested_contract_checks`" in verification_template
-    assert "filler placeholders" not in verification_template
+    _assert_prompt_contracts(
+        verification_template,
+        semantic_anchor(
+            "verification report preserves explicit uncertainty and suggested checks",
+            (
+                "decisive readout",
+                "contract-backed ledger",
+                "Keep `uncertainty_markers` explicit",
+                "structured `suggested_contract_checks`",
+            ),
+        ),
+        semantic_anchor(
+            "placeholder uncertainty filler stays forbidden",
+            "filler placeholders",
+            mode=FragmentMode.ABSENT,
+        ),
+    )
 
 
 def test_verification_template_surfaces_strict_passed_and_blocked_semantics() -> None:
     verification_template = (TEMPLATES_DIR / "verification-report.md").read_text(encoding="utf-8")
 
-    assert "status: passed` is strict" in verification_template
-    assert "every required decisive comparison is decisive" in verification_template
-    assert "If decisive work remains open, use `gaps_found`, `expert_needed`, or `human_needed`" in verification_template
-    assert "Nested `contract_results` entries still use the canonical contract-result status vocabulary" in verification_template
-    assert (
-        "Reload `{GPD_INSTALL_DIR}/templates/contract-results-schema.md` immediately before writing and apply it literally."
-        in verification_template
+    _assert_prompt_contracts(
+        verification_template,
+        machine_exact(
+            "verification template status and schema keys stay exact",
+            (
+                "status: passed`",
+                "`gaps_found`",
+                "`expert_needed`",
+                "`human_needed`",
+                "`contract_results`",
+                "`{GPD_INSTALL_DIR}/templates/contract-results-schema.md`",
+                "`suggested_contract_checks`",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="contract-result statuses, keys, and schema path are machine/public contracts",
+        ),
+        semantic_anchor(
+            "verification template keeps decisive and proof-audit semantics",
+            (
+                "strict",
+                "every required decisive comparison is decisive",
+                "canonical contract-result status vocabulary",
+                "apply it literally",
+                "instead of padding prose",
+                "Proof-backed claims",
+                "proof-audit rules",
+                "canonical schema",
+            ),
+        ),
     )
-    assert "record structured `suggested_contract_checks` instead of padding prose" in verification_template
-    assert "Proof-backed claims follow the proof-audit rules in the canonical schema" in verification_template
 
 
 def test_research_verification_template_surfaces_non_empty_uncertainty_markers() -> None:
     research_verification = (TEMPLATES_DIR / "research-verification.md").read_text(encoding="utf-8")
 
-    assert (
-        "Use `{GPD_INSTALL_DIR}/templates/verification-report.md` for the canonical verification frontmatter contract."
-        in research_verification
+    _assert_prompt_contracts(
+        research_verification,
+        machine_exact(
+            "research verification template schema path and enum examples stay exact",
+            (
+                "`{GPD_INSTALL_DIR}/templates/verification-report.md`",
+                "comparison_kind: benchmark",
+                "Allowed body enum values:",
+                "`comparison_kind`: benchmark|prior_work|experiment|cross_method|baseline|other",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="verification schema path and enum examples are machine-visible contract guidance",
+        ),
+        semantic_anchor(
+            "research verification suggested checks stay on canonical schema surface",
+            ("canonical verification frontmatter contract", "`suggested_contract_checks`", "canonical schema surface"),
+        ),
     )
-    assert (
-        "verification-side `suggested_contract_checks` entries are part of the same canonical schema surface"
-        in research_verification
-    )
-    assert "comparison_kind: benchmark" in research_verification
-    assert "Allowed body enum values:" in research_verification
-    assert "`comparison_kind`: benchmark|prior_work|experiment|cross_method|baseline|other" in research_verification
     assert (
         "comparison_kind: [benchmark | prior_work | experiment | cross_method | baseline | other]"
         not in research_verification
@@ -1514,13 +1691,19 @@ def test_research_verification_template_surfaces_non_empty_uncertainty_markers()
         'comparison_kind: "benchmark | prior_work | experiment | cross_method | baseline | other"'
         not in research_verification
     )
-    assert (
-        "omit both `comparison_kind` and `comparison_reference_id` instead of leaving blank placeholders"
-        in research_verification
+    _assert_prompt_contracts(
+        research_verification,
+        semantic_anchor(
+            "blank comparison placeholders are omitted",
+            ("omit both `comparison_kind` and `comparison_reference_id`", "blank placeholders"),
+        ),
+        machine_exact(
+            "uncertainty marker example keys stay exact",
+            ("uncertainty_markers:", "weakest_anchors: [anchor-1]", "disconfirming_observations: [observation-1]"),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="frontmatter uncertainty marker keys and examples are parsed schema guidance",
+        ),
     )
-    assert "uncertainty_markers:" in research_verification
-    assert "weakest_anchors: [anchor-1]" in research_verification
-    assert "disconfirming_observations: [observation-1]" in research_verification
 
 
 def test_write_paper_prompt_discovers_plan_scoped_phase_summaries() -> None:
@@ -1615,24 +1798,50 @@ def test_contract_ledgers_surface_decisive_only_verdict_rules_and_strict_suggest
     contract_results = (TEMPLATES_DIR / "contract-results-schema.md").read_text(encoding="utf-8")
     verification_template = (TEMPLATES_DIR / "verification-report.md").read_text(encoding="utf-8")
 
-    assert "Do not invent `artifact` or `other` subject kinds" in contract_results
-    assert "Only `subject_role: decisive` satisfies a required decisive comparison" in contract_results
-    assert "`subject_role` must be explicit on every verdict" in contract_results
-    assert "canonical project-root-relative `GPD/phases/XX-name/XX-YY-PLAN.md#/contract` path" in contract_results
-    assert "If a decisive external anchor was used, include `reference_id`" in contract_results
-    assert "reference-backed decisive comparison is required" in contract_results
-    assert "acceptance test with `kind: benchmark` or `kind: cross_method`" in contract_results
-    assert "`contract_results` and every nested entry use a closed schema" in contract_results
-    assert "uncertainty_markers:" in contract_results
-    assert "weakest_anchors: [anchor-1]" in contract_results
-    assert "disconfirming_observations: [observation-1]" in contract_results
-    assert "Invented keys such as `check_id` fail validation." in contract_results
-    assert (
-        "Copy the `check_key` returned by `suggest_contract_checks(contract)` into the frontmatter `check` field"
-        in contract_results
+    _assert_prompt_contracts(
+        contract_results,
+        machine_exact(
+            "contract-results verdict keys and path shape stay exact",
+            (
+                "`artifact`",
+                "`other`",
+                "`subject_role: decisive`",
+                "`subject_role`",
+                "`GPD/phases/XX-name/XX-YY-PLAN.md#/contract`",
+                "`reference_id`",
+                "`kind: benchmark`",
+                "`kind: cross_method`",
+                "`contract_results`",
+                "uncertainty_markers:",
+                "weakest_anchors: [anchor-1]",
+                "disconfirming_observations: [observation-1]",
+                "`check_id`",
+                "`check_key`",
+                "`suggest_contract_checks(contract)`",
+                "`check`",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="contract-results frontmatter keys, path template, and enum examples are parsed contracts",
+        ),
+        semantic_anchor(
+            "contract results require decisive verdicts and strict suggested-check keys",
+            (
+                "Do not invent",
+                "required decisive comparison",
+                "explicit on every verdict",
+                "decisive external anchor",
+                "reference-backed decisive comparison is required",
+                "closed schema",
+                "fail validation",
+            ),
+        ),
     )
-    assert "comparison_verdicts" in verification_template
-    assert "suggested_contract_checks" in verification_template
+    machine_exact(
+        "verification template contract-ledger keys stay exact",
+        ("comparison_verdicts", "suggested_contract_checks"),
+        owner=REVIEW_CONTRACT_OWNER,
+        rationale="verification frontmatter uses these exact contract-ledger keys",
+    ).check(verification_template)
 
 
 def test_contract_ledgers_surface_forbidden_proxy_bindings_and_action_vocabulary() -> None:
@@ -1642,19 +1851,44 @@ def test_contract_ledgers_surface_forbidden_proxy_bindings_and_action_vocabulary
     project_contract_schema = (TEMPLATES_DIR / "project-contract-schema.md").read_text(encoding="utf-8")
     grounding_linkage = (TEMPLATES_DIR / "project-contract-grounding-linkage.md").read_text(encoding="utf-8")
 
-    assert "single detailed rule source" in summary_template
-    assert "contract_results" in summary_template
-    assert "comparison_verdicts" in summary_template
-    assert "non-canonical frontmatter aliases" in summary_template.lower()
-    assert "forbidden_proxy_id" in contract_results
-    assert "closed action vocabulary: `read`, `use`, `compare`, `cite`, `avoid`" in contract_results
-    assert "Blank-after-trim entries are invalid" in contract_results
-    assert "duplicate-after-trim entries are invalid" in contract_results
-    assert "weakest_anchors: [anchor-1]" in contract_results
-    assert "disconfirming_observations: [observation-1]" in contract_results
-    assert "@{GPD_INSTALL_DIR}/templates/project-contract-schema.md" in state_schema
-    assert "uncertainty_markers.weakest_anchors" in project_contract_schema
-    assert "uncertainty_markers.disconfirming_observations" in project_contract_schema
+    semantic_anchor(
+        "summary template has one detailed contract-ledger source",
+        ("single detailed rule source", "non-canonical frontmatter aliases"),
+    ).check(summary_template.lower())
+    machine_exact(
+        "summary contract-ledger keys stay exact",
+        ("contract_results", "comparison_verdicts"),
+        owner=REVIEW_CONTRACT_OWNER,
+        rationale="summary frontmatter uses these exact contract-ledger keys",
+    ).check(summary_template)
+    _assert_prompt_contracts(
+        contract_results,
+        machine_exact(
+            "contract-results proxy/action/uncertainty keys stay exact",
+            (
+                "forbidden_proxy_id",
+                "closed action vocabulary: `read`, `use`, `compare`, `cite`, `avoid`",
+                "weakest_anchors: [anchor-1]",
+                "disconfirming_observations: [observation-1]",
+            ),
+            owner=REVIEW_CONTRACT_OWNER,
+            rationale="contract-results schema keys, action enum, and examples are machine-facing",
+        ),
+        semantic_anchor(
+            "contract-results schema keeps trimmed-list validity semantics",
+            ("Blank-after-trim entries are invalid", "duplicate-after-trim entries are invalid"),
+        ),
+    )
+    machine_exact(
+        "project-contract schema authority path and uncertainty fields stay exact",
+        (
+            "@{GPD_INSTALL_DIR}/templates/project-contract-schema.md",
+            "uncertainty_markers.weakest_anchors",
+            "uncertainty_markers.disconfirming_observations",
+        ),
+        owner=REVIEW_CONTRACT_OWNER,
+        rationale="state/project-contract templates surface these exact schema paths and fields",
+    ).check(state_schema + "\n" + project_contract_schema)
     assert (
         "`must_include_prior_outputs[]` entries should be explicit project-artifact paths or filenames that already exist inside the current project root."
         in grounding_linkage
@@ -1677,12 +1911,28 @@ def test_prompt_visible_contracts_surface_literal_boolean_requirements() -> None
     review_reader = (AGENTS_DIR / "gpd-review-reader.md").read_text(encoding="utf-8")
     panel = (REFERENCES_DIR / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
 
-    assert "`required_in_proof` must be a literal JSON boolean (`true` or `false`)" in plan_schema
-    assert 'not a quoted string or synonym such as `"yes"` / `"no"`' in plan_schema
-    assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in review_reader
-    assert "shared source of truth for the full `ClaimIndex` and `StageReviewReport` contracts" in review_reader
-    assert "`blocking` in each finding must be a literal JSON boolean (`true` or `false`)" in panel
-    assert 'not a quoted string or synonym such as `"yes"` / `"no"`' in panel
+    machine_exact(
+        "plan contract proof boolean literals stay exact",
+        ("`required_in_proof`", "`true`", "`false`", '"yes"', '"no"'),
+        owner=REVIEW_CONTRACT_OWNER,
+        rationale="plan-contract proof boolean guidance must reject string synonyms",
+    ).check(plan_schema)
+    machine_exact(
+        "review reader panel path stays exact",
+        "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md",
+        owner=REVIEW_CONTRACT_OWNER,
+        rationale="review reader loads this exact publication panel reference",
+    ).check(review_reader)
+    semantic_anchor(
+        "review reader identifies the canonical review contract source",
+        ("shared source of truth", "`ClaimIndex`", "`StageReviewReport` contracts"),
+    ).check(review_reader)
+    machine_exact(
+        "panel finding blocking boolean literal stays exact",
+        ("`blocking`", "`true`", "`false`", '"yes"', '"no"'),
+        owner=REVIEW_CONTRACT_OWNER,
+        rationale="stage-review findings must use literal JSON booleans, not string synonyms",
+    ).check(panel)
 
 
 def test_referee_schema_and_panel_surface_strict_stage_artifact_naming_and_round_suffix_rules() -> None:

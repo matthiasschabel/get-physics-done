@@ -13,19 +13,36 @@ from gpd.core.strict_yaml import load_strict_yaml
 from tests.prompt_metrics_support import iter_markdown_fences
 
 __all__ = [
+    "MarkdownSection",
     "ParsedYamlFence",
     "assert_forbidden_fragments",
     "assert_ordered_fragments",
     "assert_required_fragments",
+    "extract_marker_range",
     "extract_markdown_section",
+    "iter_markdown_sections",
+    "markdown_section",
+    "markdown_sections",
     "normalize_text",
     "parse_frontmatter_mapping",
     "parse_yaml_fences",
     "require_mapping",
 ]
 
-_HEADING_RE = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
 _YAML_FENCE_LANGUAGES = {"yaml", "yml"}
+
+
+@dataclass(frozen=True, slots=True)
+class MarkdownSection:
+    """One ATX markdown section with source line metadata."""
+
+    heading: str
+    level: int
+    body: str
+    start_line: int
+    end_line: int
+    atx_heading: str
+    text: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,53 +141,193 @@ def assert_ordered_fragments(
         raise AssertionError(f"missing ordered fragment in {context}: {fragment!r} after {previous_fragment!r}")
 
 
-def _heading_level(line: str) -> int | None:
-    match = _HEADING_RE.match(line.strip())
+def _parse_atx_heading(line: str) -> tuple[int, str, str] | None:
+    stripped = line.strip()
+    match = re.match(r"^(#{1,6})[ \t]+(.+?)[ \t]*$", stripped)
     if match is None:
         return None
-    return len(match.group(1))
+    title = match.group(2).rstrip()
+    closing = re.search(r"[ \t]+#+[ \t]*$", title)
+    if closing is not None:
+        title = title[: closing.start()].rstrip()
+    if not title:
+        return None
+    return len(match.group(1)), title, stripped
 
 
-def _fenced_line_numbers(text: str) -> set[int]:
-    fenced_lines: set[int] = set()
-    for fence in iter_markdown_fences(text):
-        fenced_lines.update(range(fence.start_line, fence.end_line + 1))
-    return fenced_lines
+def _parse_heading_query(heading: str, *, level: int | None) -> tuple[str, int | None]:
+    target = heading.strip()
+    if not target:
+        raise ValueError("heading must be non-empty")
+    parsed = _parse_atx_heading(target)
+    if parsed is not None:
+        inferred_level, title, _atx_heading = parsed
+        return title, _validate_level(level) if level is not None else inferred_level
+    return target, _validate_level(level) if level is not None else None
 
 
-def extract_markdown_section(text: str, heading: str, *, context: str = "markdown") -> str:
-    """Return the body under an exact ATX heading, ignoring headings inside fences."""
+def _validate_level(level: int) -> int:
+    if level < 1 or level > 6:
+        raise ValueError(f"markdown heading level must be between 1 and 6, got {level}")
+    return level
 
-    target_heading = heading.strip()
-    target_level = _heading_level(target_heading)
-    if target_level is None:
-        raise ValueError(f"heading must be an ATX markdown heading, got {heading!r}")
 
-    lines = text.splitlines()
-    fenced_lines = _fenced_line_numbers(text)
-    start_index: int | None = None
+def _markdown_fence_marker(stripped_line: str) -> str | None:
+    if stripped_line.startswith("```"):
+        return "```"
+    if stripped_line.startswith("~~~"):
+        return "~~~"
+    return None
+
+
+def iter_markdown_sections(text: str, *, context: str = "markdown") -> tuple[MarkdownSection, ...]:
+    """Return ATX markdown sections, ignoring headings inside fenced code blocks."""
+
+    lines = text.splitlines(keepends=True)
+    headings: list[tuple[int, int, str, str]] = []
+    active_fence_marker: str | None = None
+
     for index, line in enumerate(lines):
-        line_number = index + 1
-        if line_number in fenced_lines:
+        stripped = line.strip()
+        fence_marker = _markdown_fence_marker(stripped)
+        if fence_marker is not None:
+            if active_fence_marker is None:
+                active_fence_marker = fence_marker
+            elif fence_marker == active_fence_marker:
+                active_fence_marker = None
             continue
-        if line.strip() == target_heading:
-            start_index = index + 1
-            break
-
-    if start_index is None:
-        raise AssertionError(f"missing markdown section in {context}: {target_heading!r}")
-
-    end_index = len(lines)
-    for index in range(start_index, len(lines)):
-        line_number = index + 1
-        if line_number in fenced_lines:
+        if active_fence_marker is not None:
             continue
-        heading_level = _heading_level(lines[index])
-        if heading_level is not None and heading_level <= target_level:
-            end_index = index
-            break
 
-    return "\n".join(lines[start_index:end_index]).strip("\n")
+        parsed_heading = _parse_atx_heading(line)
+        if parsed_heading is None:
+            continue
+        heading_level, heading, atx_heading = parsed_heading
+        headings.append((index, heading_level, heading, atx_heading))
+
+    sections: list[MarkdownSection] = []
+    for heading_index, (line_index, level, heading, atx_heading) in enumerate(headings):
+        end_index = len(lines)
+        for next_line_index, next_level, _next_heading, _next_atx_heading in headings[heading_index + 1 :]:
+            if next_level <= level:
+                end_index = next_line_index
+                break
+        body = "".join(lines[line_index + 1 : end_index])
+        section_text = "".join(lines[line_index:end_index])
+        sections.append(
+            MarkdownSection(
+                heading=heading,
+                level=level,
+                body=body,
+                start_line=line_index + 1,
+                end_line=end_index,
+                atx_heading=atx_heading,
+                text=section_text,
+            )
+        )
+
+    return tuple(sections)
+
+
+def markdown_sections(
+    text: str,
+    heading: str | None = None,
+    *,
+    level: int | None = None,
+    context: str = "markdown",
+) -> tuple[MarkdownSection, ...]:
+    """Return markdown sections, optionally filtered by heading and/or level."""
+
+    if heading is None:
+        target_heading = None
+        target_level = _validate_level(level) if level is not None else None
+    else:
+        target_heading, target_level = _parse_heading_query(heading, level=level)
+
+    matches: list[MarkdownSection] = []
+    for section in iter_markdown_sections(text, context=context):
+        if target_heading is not None and section.heading != target_heading:
+            continue
+        if target_level is not None and section.level != target_level:
+            continue
+        matches.append(section)
+    return tuple(matches)
+
+
+def markdown_section(
+    text: str,
+    heading: str,
+    *,
+    level: int | None = None,
+    context: str = "markdown",
+) -> MarkdownSection:
+    """Return exactly one matching markdown section."""
+
+    matches = markdown_sections(text, heading, level=level, context=context)
+    if not matches:
+        raise AssertionError(f"missing markdown section in {context}: {heading.strip()!r}")
+    if len(matches) > 1:
+        match_lines = ", ".join(str(section.start_line) for section in matches)
+        raise AssertionError(
+            f"multiple markdown sections in {context}: {heading.strip()!r} matched lines {match_lines}"
+        )
+    return matches[0]
+
+
+def extract_markdown_section(
+    text: str,
+    heading: str,
+    *,
+    context: str = "markdown",
+    include_heading: bool = False,
+    level: int | None = None,
+) -> str:
+    """Return a markdown section body, ignoring headings inside fences."""
+
+    section = markdown_section(text, heading, level=level, context=context)
+    if include_heading:
+        return section.text.strip("\n")
+    return section.body.strip("\n")
+
+
+def extract_marker_range(
+    text: str,
+    start_marker: str,
+    end_marker: str | None = None,
+    *,
+    context: str = "text",
+    include_markers: bool = False,
+) -> str:
+    """Return text scoped by unique start/end markers."""
+
+    if start_marker == "":
+        raise ValueError("start_marker must be non-empty")
+    if end_marker == "":
+        raise ValueError("end_marker must be non-empty when provided")
+
+    start_count = text.count(start_marker)
+    if start_count == 0:
+        raise AssertionError(f"missing marker range in {context}: start marker {start_marker!r}")
+    if start_count > 1:
+        raise AssertionError(
+            f"multiple marker ranges in {context}: start marker {start_marker!r} found {start_count} times"
+        )
+
+    start_index = text.find(start_marker)
+    content_start = start_index + len(start_marker)
+    if end_marker is None:
+        return text[start_index:] if include_markers else text[content_start:]
+
+    end_count = text.count(end_marker, content_start)
+    if end_count == 0:
+        raise AssertionError(f"missing marker range in {context}: end marker {end_marker!r}")
+    if end_count > 1:
+        raise AssertionError(f"multiple marker ranges in {context}: end marker {end_marker!r} found {end_count} times")
+
+    end_index = text.find(end_marker, content_start)
+    if include_markers:
+        return text[start_index : end_index + len(end_marker)]
+    return text[content_start:end_index]
 
 
 def parse_frontmatter_mapping(text: str, *, context: str = "markdown") -> dict[str, object]:

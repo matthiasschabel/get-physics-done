@@ -2,18 +2,35 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
 
 from gpd.adapters.runtime_catalog import get_runtime_descriptor, get_shared_install_metadata, iter_runtime_descriptors
 from gpd.core.onboarding_surfaces import beginner_runtime_surfaces
-from tests.doc_surface_contracts import assert_beginner_hub_preflight_contract, assert_beginner_startup_routing_contract
+from tests.assertion_taxonomy_support import FragmentMode, assert_fragments, public_exact, semantic_anchor
+from tests.doc_surface_contracts import (
+    assert_beginner_hub_preflight_contract,
+    assert_beginner_startup_routing_contract,
+    assert_docs_release_source_policy_contract,
+    assert_local_heading_links_resolve,
+    assert_markdown_link,
+    assert_os_install_matrix_contract,
+    assert_os_next_steps_table_contract,
+    assert_supported_runtimes_table_contract,
+)
+from tests.markdown_test_support import (
+    assert_forbidden_fragments,
+    assert_ordered_fragments,
+    extract_markdown_section,
+)
+from tests.prompt_metrics_support import iter_markdown_fences
 from tests.runtime_test_support import runtime_onboarding_doc_filename
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _SHARED_INSTALL = get_shared_install_metadata()
+_DOCS_PUBLIC_OWNER = "docs onboarding contract"
+_DOCS_PUBLIC_RATIONALE = "public docs navigation labels, links, and command surfaces must stay stable"
 _RUNTIME_DOCS_WITH_UNATTENDED_READINESS_LOOP = tuple(
     descriptor.runtime_name
     for descriptor in iter_runtime_descriptors()
@@ -25,58 +42,46 @@ def _read(relative_path: str) -> str:
     return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def _markdown_heading_ids(content: str) -> set[str]:
-    counts: dict[str, int] = {}
-    heading_ids: set[str] = set()
-    for match in re.finditer(r"^#{1,6}\s+(.+?)\s*$", content, re.M):
-        heading = re.sub(r"<[^>]+>", "", match.group(1))
-        heading = re.sub(r"`([^`]+)`", r"\1", heading)
-        slug = re.sub(r"[^\w\s-]", "", heading.strip().lower())
-        slug = re.sub(r"\s+", "-", slug).strip("-")
-        duplicate_count = counts.get(slug, 0)
-        counts[slug] = duplicate_count + 1
-        heading_ids.add(slug if duplicate_count == 0 else f"{slug}-{duplicate_count}")
-    return heading_ids
+def _assert_public_exact(
+    content: str,
+    label: str,
+    fragments: tuple[str, ...] | str,
+    *,
+    mode: FragmentMode = FragmentMode.ALL,
+    context: str,
+) -> None:
+    assert_fragments(
+        content,
+        public_exact(
+            label,
+            fragments,
+            owner=_DOCS_PUBLIC_OWNER,
+            rationale=_DOCS_PUBLIC_RATIONALE,
+            mode=mode,
+            context=context,
+        ),
+    )
 
 
-def _assert_fragments(content: str, fragments: tuple[str, ...]) -> None:
-    for fragment in fragments:
-        assert fragment in content
+def _assert_semantic_anchor(
+    content: str,
+    label: str,
+    fragments: tuple[str, ...] | str,
+    *,
+    mode: FragmentMode = FragmentMode.ALL,
+    context: str,
+) -> None:
+    assert_fragments(content, semantic_anchor(label, fragments, mode=mode, context=context))
 
 
-def _assert_in_order(content: str, fragments: tuple[str, ...]) -> None:
-    positions = [content.index(fragment) for fragment in fragments]
-    assert positions == sorted(positions)
-
-
-def _assert_fragments_in_order(content: str, fragments: tuple[str, ...]) -> None:
-    offset = 0
-    for fragment in fragments:
-        position = content.find(fragment, offset)
-        assert position != -1, fragment
-        offset = position + len(fragment)
-
-
-def _normalize_markdown_table(content: str) -> str:
-    return content.replace("`", "")
-
-
-def _markdown_section(content: str, heading: str) -> str:
-    marker = f"{heading}\n"
-    start = content.index(marker)
-    next_heading = content.find("\n## ", start + len(marker))
-    if next_heading == -1:
-        return content[start:]
-    return content[start:next_heading]
-
-
-def _expected_install_row(surface) -> str:
-    return f"| {surface.display_name} | `npx -y get-physics-done {surface.install_flag} --local` |"
+def _fenced_command_blocks(section: str, *, info: str) -> tuple[str, ...]:
+    return tuple(fence.body.strip() for fence in iter_markdown_fences(section) if fence.info.strip() == info)
 
 
 @pytest.mark.parametrize("surface", beginner_runtime_surfaces(), ids=lambda surface: surface.runtime_name)
 def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
-    content = _read(f"docs/{runtime_onboarding_doc_filename(surface.runtime_name)}")
+    doc_path = f"docs/{runtime_onboarding_doc_filename(surface.runtime_name)}"
+    content = _read(doc_path)
     fragments = (
         surface.help_command,
         surface.start_command,
@@ -86,41 +91,68 @@ def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
         surface.resume_work_command,
         surface.settings_command,
     )
-    _assert_fragments(content, fragments)
-    _assert_in_order(content, fragments[:3])
-    assert "Back to the onboarding hub: [GPD Onboarding Hub](./README.md)." in content
-    assert "## Choose this runtime if" in content
-    assert "## What must already be true" in content
-    assert "## Return to work" in content
+    _assert_public_exact(content, "runtime guide command labels", fragments, context=doc_path)
+    assert_ordered_fragments(content, fragments[:3], context=f"{doc_path} first-launch order", normalize=False)
+    assert_markdown_link(content, "GPD Onboarding Hub", "./README.md", context=doc_path)
+    _assert_public_exact(
+        content,
+        "runtime guide stable headings",
+        ("## Choose this runtime if", "## What must already be true", "## Return to work"),
+        context=doc_path,
+    )
 
 
 @pytest.mark.parametrize("runtime_name", _RUNTIME_DOCS_WITH_UNATTENDED_READINESS_LOOP)
 def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -> None:
     descriptor = get_runtime_descriptor(runtime_name)
-    content = _read(f"docs/{runtime_onboarding_doc_filename(runtime_name)}")
-    readiness = _markdown_section(content, "## Readiness before unattended runs")
-    normalized_readiness = re.sub(r"\s+", " ", readiness)
+    doc_path = f"docs/{runtime_onboarding_doc_filename(runtime_name)}"
+    content = _read(doc_path)
+    readiness = extract_markdown_section(content, "## Readiness before unattended runs", context=doc_path)
     readiness_command = f"gpd validate unattended-readiness --runtime {runtime_name} --autonomy supervised"
     permissions_sync_command = f"gpd permissions sync --runtime {runtime_name} --autonomy supervised"
 
-    _assert_fragments(
-        normalized_readiness,
+    _assert_public_exact(
+        readiness,
+        "runtime unattended readiness commands and verdicts",
         (
-            "from your normal terminal",
             readiness_command,
             permissions_sync_command,
-            "Use the autonomy mode you selected if it is not `supervised`",
             "`not-ready`",
             "`relaunch-required`",
-            "before treating unattended use as ready",
         ),
+        context=f"{doc_path} readiness section",
     )
-    _assert_fragments_in_order(readiness, (readiness_command, permissions_sync_command, readiness_command))
+    _assert_semantic_anchor(
+        readiness,
+        "runtime unattended readiness loop semantics",
+        (
+            "from your normal terminal",
+            "Use the autonomy mode you selected if it is not `supervised`",
+            "unattended use as ready",
+        ),
+        context=f"{doc_path} readiness section",
+    )
+    assert_ordered_fragments(
+        readiness,
+        (readiness_command, permissions_sync_command, readiness_command),
+        context=f"{doc_path} readiness loop",
+        normalize=False,
+    )
 
     if descriptor.capabilities.permissions_surface == "launch-wrapper":
-        assert "GPD-managed launcher wrapper" in readiness
+        _assert_semantic_anchor(
+            readiness,
+            "runtime launcher-wrapper readiness guidance",
+            "GPD-managed launcher wrapper",
+            context=f"{doc_path} readiness section",
+        )
     else:
-        assert f"relaunch `{descriptor.launch_command}`" in readiness
+        _assert_public_exact(
+            readiness,
+            "runtime relaunch command label",
+            f"relaunch `{descriptor.launch_command}`",
+            context=f"{doc_path} readiness section",
+        )
 
 
 @pytest.mark.parametrize(
@@ -129,10 +161,14 @@ def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -
 )
 def test_os_quickstarts_install_matrix_matches_runtime_catalog(doc_name: str) -> None:
     content = _read(f"docs/{doc_name}")
-    install_section = _markdown_section(content, "## Install GPD")
+    install_section = extract_markdown_section(content, "## Install GPD", context=f"docs/{doc_name}")
 
-    for surface in beginner_runtime_surfaces():
-        assert _expected_install_row(surface) in install_section
+    assert_os_install_matrix_contract(
+        install_section,
+        beginner_runtime_surfaces(),
+        bootstrap_command=_SHARED_INSTALL.bootstrap_command,
+        context=f"docs/{doc_name} install matrix",
+    )
 
 
 @pytest.mark.parametrize(
@@ -149,34 +185,53 @@ def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str)
         )
     )
 
-    _assert_fragments(
+    _assert_public_exact(
         content,
+        "OS guide post-install command labels",
         (
             "Confirm success",
             "gpd --help",
-            "Not sure which path fits this folder",
-            "Want a guided overview",
-            "Start a new project",
-            "Map an existing folder",
-            "Rediscover the workspace in your normal terminal",
-            "Continue in the reopened runtime",
             "gpd resume",
             "gpd resume --recent",
             "resume-work",
             *runtime_commands,
         ),
+        context=f"docs/{doc_name}",
     )
-    assert "Back to the onboarding hub: [GPD Onboarding Hub](./README.md)." in content
+    where_next = extract_markdown_section(content, "## Where to go next", context=f"docs/{doc_name}")
+    assert_os_next_steps_table_contract(
+        where_next,
+        beginner_runtime_surfaces(),
+        context=f"docs/{doc_name} where-to-go-next table",
+    )
+    _assert_semantic_anchor(
+        where_next,
+        "OS guide recovery bridge",
+        (
+            "normal terminal first",
+            "different recent workspace",
+            "right workspace",
+            "resume-work",
+        ),
+        context=f"docs/{doc_name} where-to-go-next section",
+    )
+    assert_markdown_link(content, "GPD Onboarding Hub", "./README.md", context=f"docs/{doc_name}")
     for surface in beginner_runtime_surfaces():
-        assert f"./{runtime_onboarding_doc_filename(surface.runtime_name)}" in content
+        assert_markdown_link(
+            content,
+            f"{surface.display_name} quickstart",
+            f"./{runtime_onboarding_doc_filename(surface.runtime_name)}",
+            context=f"docs/{doc_name}",
+        )
 
 
 def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
     content = _read("docs/README.md")
     assert_beginner_hub_preflight_contract(content)
 
-    _assert_fragments(
+    _assert_public_exact(
         content,
+        "onboarding hub stable navigation labels",
         (
             "# GPD Onboarding Hub",
             "Show the full beginner path on one page",
@@ -189,13 +244,19 @@ def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
             "./linux.md",
             "## After the guides",
         ),
+        context="docs/README.md",
     )
     assert_beginner_startup_routing_contract(content)
     for surface in beginner_runtime_surfaces():
         guide = runtime_onboarding_doc_filename(surface.runtime_name)
-        assert f"./{guide}" in content
-        assert f"{_SHARED_INSTALL.bootstrap_command} {surface.install_flag} --local" in content
-    _assert_in_order(
+        assert_markdown_link(content, f"{surface.display_name} quickstart", f"./{guide}", context="docs/README.md")
+        _assert_public_exact(
+            content,
+            f"{surface.display_name} install command",
+            f"{_SHARED_INSTALL.bootstrap_command} {surface.install_flag} --local",
+            context="docs/README.md",
+        )
+    assert_ordered_fragments(
         content,
         (
             "## Before you open the guides",
@@ -204,146 +265,197 @@ def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
             "## Choose your runtime",
             "## After the guides",
         ),
+        context="docs/README.md heading order",
+        normalize=False,
     )
 
 
 def test_docs_onboarding_hub_surfaces_release_source_policy() -> None:
     content = _read("docs/README.md")
 
-    _assert_in_order(
-        content,
-        (
-            "PyPI pinned release",
-            "tagged GitHub release sources",
-            "`--upgrade`",
-            "latest unreleased GitHub `main` source",
-        ),
-    )
-    assert (
-        "review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides"
-        in content
-    )
-    assert "safest model-cost starting point is `review` plus runtime defaults" in content
-    assert "Graduate to Balanced" not in content
+    assert_docs_release_source_policy_contract(content, context="docs/README.md")
+    assert_forbidden_fragments(content, "Graduate to Balanced", context="docs/README.md")
 
 
 def test_root_readme_settings_short_wording_matches_model_profile_contract() -> None:
     content = _read("README.md")
-    quick_start = _markdown_section(content, "## Quick Start")
+    quick_start = extract_markdown_section(content, "## Quick Start", context="README.md")
 
-    assert (
-        "review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides"
-        in quick_start
+    _assert_semantic_anchor(
+        quick_start,
+        "root README settings model-cost posture",
+        (
+            "workflow defaults",
+            "model-cost posture",
+            "runtime permission sync",
+            "preset/tier overrides",
+            "review",
+            "runtime defaults",
+        ),
+        context="README.md Quick Start",
     )
-    assert "Safest model-cost start: `review` plus runtime defaults." in quick_start
-    assert "graduate to Balanced (`balanced`)" not in quick_start
+    assert_forbidden_fragments(quick_start, "graduate to Balanced (`balanced`)", context="README.md Quick Start")
 
 
 def test_root_readme_start_here_links_to_docs_onboarding_hub() -> None:
     content = _read("README.md")
-    start_here = _markdown_section(content, "## Start Here")
+    start_here = extract_markdown_section(content, "## Start Here", context="README.md")
 
-    _assert_fragments(
+    assert_markdown_link(
         start_here,
-        (
-            "[Beginner Onboarding Hub](https://github.com/psi-oss/get-physics-done/blob/main/docs/README.md)",
-            "If you are new to terminals, start with the [Beginner Onboarding Hub](https://github.com/psi-oss/get-physics-done/blob/main/docs/README.md).",
-            "Use the hub as the single beginner path",
-            "There are two places you type commands:",
-            "In your normal system terminal:",
-            "Inside your AI runtime:",
-        ),
+        "Beginner Onboarding Hub",
+        "https://github.com/psi-oss/get-physics-done/blob/main/docs/README.md",
+        context="README.md Start Here",
+    )
+    _assert_semantic_anchor(
+        start_here,
+        "root README beginner terminal/runtime bridge",
+        ("single beginner path", "two places", "normal system terminal", "AI runtime"),
+        context="README.md Start Here",
     )
 
 
 def test_root_readme_local_heading_anchors_resolve() -> None:
     content = _read("README.md")
-    linked_heading_ids = set(re.findall(r"\[[^\]]+\]\(#([^)]+)\)", content))
 
-    assert linked_heading_ids
-    assert linked_heading_ids <= _markdown_heading_ids(content)
+    assert_local_heading_links_resolve(content, context="README.md")
 
 
 def test_root_readme_install_source_policy_and_peer_review_target_are_current() -> None:
     content = _read("README.md")
-    quick_start = _markdown_section(content, "## Quick Start")
+    quick_start = extract_markdown_section(content, "## Quick Start", context="README.md")
     install_options_start = quick_start.index("<summary><strong>Install options</strong></summary>")
     install_options = quick_start[install_options_start : quick_start.index("</details>", install_options_start)]
-    command_context = _markdown_section(content, "## Key GPD Paths")
+    command_context = extract_markdown_section(content, "## Key GPD Paths", context="README.md")
 
-    _assert_in_order(
+    _assert_public_exact(
         install_options,
+        "root README install source policy labels",
         (
             "PyPI pinned release first",
             "tagged GitHub release sources",
             "`--upgrade`",
             "latest unreleased GitHub `main` source",
         ),
+        mode=FragmentMode.ORDERED,
+        context="README.md install options",
     )
-    assert "matching tagged GitHub source" not in install_options
-    assert "one explicit manuscript/artifact path or paper directory target" in command_context
-    assert "`.tex`, `.md`, `.txt`, `.pdf`" not in command_context
+    assert_forbidden_fragments(install_options, "matching tagged GitHub source", context="README.md install options")
+    _assert_semantic_anchor(
+        command_context,
+        "peer-review explicit target semantics",
+        ("one explicit manuscript", "artifact path", "paper directory target"),
+        context="README.md Key GPD Paths",
+    )
+    assert_forbidden_fragments(command_context, "`.tex`, `.md`, `.txt`, `.pdf`", context="README.md Key GPD Paths")
 
 
 def test_root_readme_runtime_workflow_examples_are_prefixless_and_uninstall_link_is_current() -> None:
     content = _read("README.md")
-    quick_start = _markdown_section(content, "## Quick Start")
-    worked_example = _markdown_section(content, "## Worked Example")
-    uninstall = _markdown_section(content, "## Uninstall")
+    quick_start = extract_markdown_section(content, "## Quick Start", context="README.md")
+    worked_example = extract_markdown_section(content, "## Worked Example", context="README.md")
+    uninstall = extract_markdown_section(content, "## Uninstall", context="README.md")
 
-    assert "Typical new-project workflow, shown as command names without runtime prefixes:" in quick_start
-    assert "`new-project -> discuss-phase 1 -> plan-phase 1 -> execute-phase 1 -> verify-work 1`" in quick_start
-    assert "The example below uses canonical command names without runtime prefixes." in worked_example
-    assert "Claude Code / Gemini CLI syntax" not in worked_example
-    assert "```text\nnew-project\n" in worked_example
-    assert "```text\nplan-phase 1\nexecute-phase 1\nverify-work 1\n```" in worked_example
-    assert "```text\nwrite-paper\npeer-review\nrespond-to-referees\narxiv-submission\n```" in worked_example
-    assert "```text\ngpd:new-project\n" not in worked_example
-    assert "`gpd:plan-phase N`" not in worked_example
-    assert (
-        "Typical research loop: `new-project -> discuss-phase 1 -> plan-phase 1 -> execute-phase 1 -> verify-work -> repeat -> complete-milestone`"
-        in content
+    _assert_semantic_anchor(
+        quick_start,
+        "prefixless new-project workflow framing",
+        ("new-project workflow", "command names without runtime prefixes"),
+        context="README.md Quick Start",
     )
-    assert (
-        "Typical publication loop: `write-paper -> peer-review -> respond-to-referees -> arxiv-submission`" in content
+    _assert_public_exact(
+        quick_start,
+        "root README quick-start workflow sequence",
+        "`new-project -> discuss-phase 1 -> plan-phase 1 -> execute-phase 1 -> verify-work 1`",
+        context="README.md Quick Start",
     )
-    assert "gpd:new-project ->" not in content
-    assert "gpd:write-paper ->" not in content
-    assert "matching uninstall command from [Start Here]" not in uninstall
-    assert "npx -y get-physics-done --uninstall" in uninstall
+    _assert_semantic_anchor(
+        worked_example,
+        "prefixless worked-example framing",
+        ("canonical command names", "without runtime prefixes"),
+        context="README.md Worked Example",
+    )
+    assert_forbidden_fragments(
+        worked_example,
+        ("Claude Code / Gemini CLI syntax", "```text\ngpd:new-project\n", "`gpd:plan-phase N`"),
+        context="README.md Worked Example",
+        normalize=False,
+    )
+    text_blocks = _fenced_command_blocks(worked_example, info="text")
+    assert any(block.startswith("new-project\n") for block in text_blocks)
+    assert "plan-phase 1\nexecute-phase 1\nverify-work 1" in text_blocks
+    assert "write-paper\npeer-review\nrespond-to-referees\narxiv-submission" in text_blocks
+    _assert_public_exact(
+        content,
+        "root README research and publication loop labels",
+        (
+            "Typical research loop:",
+            "`new-project -> discuss-phase 1 -> plan-phase 1 -> execute-phase 1 -> verify-work -> repeat -> complete-milestone`",
+            "Typical publication loop:",
+            "`write-paper -> peer-review -> respond-to-referees -> arxiv-submission`",
+        ),
+        context="README.md",
+    )
+    assert_forbidden_fragments(content, ("gpd:new-project ->", "gpd:write-paper ->"), context="README.md")
+    assert_forbidden_fragments(
+        uninstall,
+        "matching uninstall command from [Start Here]",
+        context="README.md Uninstall",
+    )
+    _assert_public_exact(
+        uninstall,
+        "root README uninstall command",
+        "npx -y get-physics-done --uninstall",
+        context="README.md Uninstall",
+    )
 
 
 def test_root_readme_project_contract_validation_placeholder_is_current() -> None:
     content = _read("README.md")
-    validation_commands = _markdown_section(content, "## Advanced CLI Utilities")
+    validation_commands = extract_markdown_section(content, "## Advanced CLI Utilities", context="README.md")
 
-    assert "`gpd validate project-contract <file.json|-> [--mode approved|draft]`" in validation_commands
-    assert "`gpd validate project-contract <file.json or -> [--mode approved|draft]`" not in validation_commands
+    _assert_public_exact(
+        validation_commands,
+        "project-contract CLI placeholder",
+        "`gpd validate project-contract <file.json|-> [--mode approved|draft]`",
+        context="README.md Advanced CLI Utilities",
+    )
+    assert_forbidden_fragments(
+        validation_commands,
+        "`gpd validate project-contract <file.json or -> [--mode approved|draft]`",
+        context="README.md Advanced CLI Utilities",
+    )
 
 
 def test_root_readme_supported_runtimes_table_matches_beginner_runtime_surfaces() -> None:
     content = _read("README.md")
-    supported_runtimes = _markdown_section(content, "## Supported Runtimes")
-    normalized_supported_runtimes = _normalize_markdown_table(supported_runtimes)
+    supported_runtimes = extract_markdown_section(content, "## Supported Runtimes", context="README.md")
 
-    for surface in beginner_runtime_surfaces():
-        expected_row = (
-            f"| {surface.display_name} | {surface.install_flag} | {surface.help_command} | "
-            f"{surface.start_command} | {surface.tour_command} | {surface.new_project_minimal_command} | "
-            f"{surface.map_research_command} | {surface.resume_work_command} |"
-        )
-        assert expected_row in normalized_supported_runtimes
+    assert_supported_runtimes_table_contract(
+        supported_runtimes,
+        beginner_runtime_surfaces(),
+        context="README.md supported runtimes table",
+    )
 
-    assert "Config path overrides" not in content
-    assert "CLAUDE_CONFIG_DIR" not in content
-    assert "CODEX_SKILLS_DIR" not in content
-    assert "GEMINI_CONFIG_DIR" not in content
-    assert "OPENCODE_CONFIG_DIR" not in content
+    assert_forbidden_fragments(
+        content,
+        (
+            "Config path overrides",
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_SKILLS_DIR",
+            "GEMINI_CONFIG_DIR",
+            "OPENCODE_CONFIG_DIR",
+        ),
+        context="README.md",
+    )
 
 
 def test_root_readme_model_overrides_example_covers_catalog_runtimes() -> None:
     content = _read("README.md")
-    config_example = _markdown_section(content, "## Optional: Model Profiles And Tier Overrides")
+    config_example = extract_markdown_section(
+        content,
+        "## Optional: Model Profiles And Tier Overrides",
+        context="README.md",
+    )
 
     for surface in beginner_runtime_surfaces():
         assert f'"{surface.runtime_name}"' in config_example

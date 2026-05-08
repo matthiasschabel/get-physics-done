@@ -225,6 +225,32 @@ EXPECTED_EXACT_ASSERTION_EXAMPLE_KEYS = {
     "category",
     "reason",
 }
+EXPECTED_TAXONOMY_HELPER_USAGE_KEYS = {
+    "schema_version",
+    "totals",
+    "files",
+}
+EXPECTED_TAXONOMY_HELPER_USAGE_TOTAL_KEYS = {
+    "files_scanned",
+    "taxonomy_helper_file_count",
+    "taxonomy_helper_call_count",
+    "assert_fragments",
+    "assert_prompt_baseline_budget",
+    "assert_prompt_budget",
+    "assert_prompt_contracts",
+    "assert_prompt_metric_budget",
+    "forbidden_duplicate",
+    "fragment_count",
+    "machine_exact",
+    "prompt_budget",
+    "public_exact",
+    "semantic_anchor",
+}
+EXPECTED_TAXONOMY_HELPER_USAGE_FILE_KEYS = {
+    "path",
+    "helper_call_count",
+    "helpers",
+}
 
 
 def _diagnostics():
@@ -890,6 +916,94 @@ def test_exact_assertion_diagnostics_split_machine_public_ux_and_brittle_prose(t
     assert "prompt-test exactness" in table
     assert "public_ux" in table
     assert "brittle_pct" in table
+
+
+def test_exact_assertion_diagnostics_report_additive_taxonomy_helper_usage(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe
+        ---
+        Probe body.
+        """,
+    )
+    _write(
+        tmp_path,
+        "tests/core/test_taxonomy_usage_probe.py",
+        """
+        def test_taxonomy_usage(prompt, metrics):
+            _assert_prompt_contracts(
+                prompt,
+                machine_exact("schema", "gpd_return:", owner="schema", rationale="parsed"),
+                public_exact("label", "Quick Start", owner="help", rationale="documented"),
+                semantic_anchor("meaning", "the workflow keeps its evidence path"),
+                fragment_count("single marker", "BEGIN MARKER", expected_count=1),
+                forbidden_duplicate("single warning", "repeat warning"),
+            )
+            assert_prompt_metric_budget(metrics, label="metric", max_lines=2)
+            assert_prompt_baseline_budget(
+                metrics,
+                label="baseline",
+                baseline_lines=10,
+                baseline_chars=100,
+                min_line_margin=1,
+                min_char_margin=1,
+            )
+            prompt_budget("path budget", path, src_root=root, path_prefix="/runtime/", max_lines=4)
+            assert_prompt_budget(path, label="direct budget", src_root=root, path_prefix="/runtime/", max_chars=80)
+            assert_fragments(prompt, semantic_anchor("direct fragment", "stable anchor"))
+        """,
+    )
+
+    diagnostics = _diagnostics()
+    report = diagnostics.build_prompt_surface_report(
+        tmp_path,
+        surfaces=("command",),
+        runtime_names=(),
+        include_tests=True,
+        include_runtime_projections=False,
+    )
+    payload = diagnostics.report_to_dict(report)
+    usage = payload["exact_assertion_diagnostics"]["taxonomy_helper_usage"]
+
+    assert set(usage) == EXPECTED_TAXONOMY_HELPER_USAGE_KEYS
+    assert usage["schema_version"] == "taxonomy_helper_usage.v1"
+    assert set(usage["totals"]) == EXPECTED_TAXONOMY_HELPER_USAGE_TOTAL_KEYS
+    assert usage["totals"]["files_scanned"] == 1
+    assert usage["totals"]["taxonomy_helper_file_count"] == 1
+    assert usage["totals"]["taxonomy_helper_call_count"] == 12
+    assert usage["totals"]["assert_prompt_contracts"] == 1
+    assert usage["totals"]["machine_exact"] == 1
+    assert usage["totals"]["public_exact"] == 1
+    assert usage["totals"]["semantic_anchor"] == 2
+    assert usage["totals"]["fragment_count"] == 1
+    assert usage["totals"]["forbidden_duplicate"] == 1
+    assert usage["totals"]["assert_prompt_metric_budget"] == 1
+    assert usage["totals"]["assert_prompt_baseline_budget"] == 1
+    assert usage["totals"]["prompt_budget"] == 1
+    assert usage["totals"]["assert_prompt_budget"] == 1
+    assert usage["totals"]["assert_fragments"] == 1
+    assert len(usage["files"]) == 1
+    file_usage = usage["files"][0]
+    assert set(file_usage) == EXPECTED_TAXONOMY_HELPER_USAGE_FILE_KEYS
+    assert file_usage["path"] == "tests/core/test_taxonomy_usage_probe.py"
+    assert file_usage["helper_call_count"] == 12
+    assert file_usage["helpers"] == {
+        "assert_fragments": 1,
+        "assert_prompt_baseline_budget": 1,
+        "assert_prompt_budget": 1,
+        "assert_prompt_contracts": 1,
+        "assert_prompt_metric_budget": 1,
+        "forbidden_duplicate": 1,
+        "fragment_count": 1,
+        "machine_exact": 1,
+        "prompt_budget": 1,
+        "public_exact": 1,
+        "semantic_anchor": 2,
+    }
 
 
 def test_invalid_partial_gpd_return_examples_are_reported(tmp_path: Path) -> None:

@@ -5,10 +5,15 @@ from __future__ import annotations
 import pytest
 
 from tests.markdown_test_support import (
+    MarkdownSection,
     assert_forbidden_fragments,
     assert_ordered_fragments,
     assert_required_fragments,
     extract_markdown_section,
+    extract_marker_range,
+    iter_markdown_sections,
+    markdown_section,
+    markdown_sections,
     normalize_text,
     parse_frontmatter_mapping,
     parse_yaml_fences,
@@ -50,9 +55,81 @@ Outside.
     assert "inside fence" not in section
 
 
+def test_markdown_sections_expose_metadata_and_heading_inclusion() -> None:
+    markdown = """# Prompt
+
+Intro.
+
+## Contract
+
+Required claim.
+
+### Nested
+
+Nested detail.
+
+## Next
+
+Outside.
+"""
+
+    sections = iter_markdown_sections(markdown, context="prompt")
+    contract = markdown_section(markdown, "Contract", context="prompt")
+
+    assert isinstance(contract, MarkdownSection)
+    assert contract in sections
+    assert contract.heading == "Contract"
+    assert contract.level == 2
+    assert contract.atx_heading == "## Contract"
+    assert contract.start_line == 5
+    assert contract.end_line == 12
+    assert contract.text.startswith("## Contract\n")
+    assert contract.body.startswith("\nRequired claim.")
+    assert extract_markdown_section(markdown, "## Contract", context="prompt") == contract.body.strip("\n")
+    assert extract_markdown_section(
+        markdown, "Contract", context="prompt", include_heading=True
+    ) == contract.text.strip("\n")
+
+
+def test_markdown_section_infers_atx_level_and_reports_ambiguous_plain_headings() -> None:
+    markdown = """# Prompt
+
+## Contract
+Level two.
+
+### Contract
+Level three.
+"""
+
+    with pytest.raises(AssertionError, match=r"multiple markdown sections in prompt: 'Contract' matched lines 3, 6"):
+        markdown_section(markdown, "Contract", context="prompt")
+
+    level_two = markdown_section(markdown, "## Contract", context="prompt")
+    assert level_two.body.strip().startswith("Level two.")
+    assert "### Contract" in level_two.body
+    assert markdown_section(markdown, "## Contract", level=3, context="prompt").body.strip() == "Level three."
+    assert markdown_sections(markdown, "Contract", level=2, context="prompt")[0].heading == "Contract"
+
+
 def test_extract_markdown_section_missing_heading_has_contextual_failure() -> None:
     with pytest.raises(AssertionError, match=r"missing markdown section in prompt: '## Missing'"):
         extract_markdown_section("# Prompt\n\nBody.\n", "## Missing", context="prompt")
+
+
+def test_extract_marker_range_scopes_unique_markers_and_can_include_them() -> None:
+    text = "before\nBEGIN\ninside\nEND\nafter\n"
+
+    assert extract_marker_range(text, "BEGIN", "END", context="prompt") == "\ninside\n"
+    assert extract_marker_range(text, "BEGIN", "END", context="prompt", include_markers=True) == "BEGIN\ninside\nEND"
+    assert extract_marker_range(text, "END", context="prompt") == "\nafter\n"
+
+
+def test_extract_marker_range_reports_missing_and_duplicate_markers() -> None:
+    with pytest.raises(AssertionError, match=r"missing marker range in prompt: start marker 'BEGIN'"):
+        extract_marker_range("body", "BEGIN", context="prompt")
+
+    with pytest.raises(AssertionError, match=r"multiple marker ranges in prompt: start marker 'BEGIN' found 2 times"):
+        extract_marker_range("BEGIN one BEGIN two", "BEGIN", context="prompt")
 
 
 def test_required_and_forbidden_fragments_accept_normalized_prose() -> None:

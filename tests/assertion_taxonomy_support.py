@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 
-from tests.prompt_metrics_support import PromptSurfaceMetrics, measure_prompt_surface
+from tests.markdown_test_support import (
+    extract_markdown_section as extract_markdown_section_text,
+)
+from tests.markdown_test_support import (
+    extract_marker_range as extract_marker_range_text,
+)
+from tests.prompt_metrics_support import PromptSurfaceMetrics, budget_from_baseline, measure_prompt_surface
 
 __all__ = [
     "AssertionKind",
@@ -19,6 +24,9 @@ __all__ = [
     "PromptBudgetAssertion",
     "assert_fragments",
     "assert_prompt_budget",
+    "assert_prompt_baseline_budget",
+    "assert_prompt_contracts",
+    "assert_prompt_metric_budget",
     "fragment_count",
     "machine_exact",
     "marker_range",
@@ -127,6 +135,7 @@ class PromptBudgetAssertion:
     path_prefix: str
     max_lines: int | None = None
     max_chars: int | None = None
+    max_raw_includes: int | None = None
     runtime: str | None = None
     context: str | None = None
 
@@ -135,12 +144,14 @@ class PromptBudgetAssertion:
     def __post_init__(self) -> None:
         if not self.label.strip():
             raise ValueError("Budget assertion label must be non-empty")
-        if self.max_lines is None and self.max_chars is None:
-            raise ValueError("Budget assertions require max_lines, max_chars, or both")
+        if self.max_lines is None and self.max_chars is None and self.max_raw_includes is None:
+            raise ValueError("Budget assertions require max_lines, max_chars, max_raw_includes, or a combination")
         if self.max_lines is not None and self.max_lines < 0:
             raise ValueError("max_lines must be non-negative")
         if self.max_chars is not None and self.max_chars < 0:
             raise ValueError("max_chars must be non-negative")
+        if self.max_raw_includes is not None and self.max_raw_includes < 0:
+            raise ValueError("max_raw_includes must be non-negative")
 
     def check(self) -> PromptSurfaceMetrics:
         """Measure and assert this budget, returning the measured metrics."""
@@ -152,6 +163,7 @@ class PromptBudgetAssertion:
             path_prefix=self.path_prefix,
             max_lines=self.max_lines,
             max_chars=self.max_chars,
+            max_raw_includes=self.max_raw_includes,
             runtime=self.runtime,
             context=self.context,
         )
@@ -295,6 +307,7 @@ def prompt_budget(
     path_prefix: str,
     max_lines: int | None = None,
     max_chars: int | None = None,
+    max_raw_includes: int | None = None,
     runtime: str | None = None,
     context: str | None = None,
 ) -> PromptBudgetAssertion:
@@ -307,9 +320,19 @@ def prompt_budget(
         path_prefix=path_prefix,
         max_lines=max_lines,
         max_chars=max_chars,
+        max_raw_includes=max_raw_includes,
         runtime=runtime,
         context=context,
     )
+
+
+def assert_prompt_contracts(text: str, *assertions: FragmentAssertion) -> None:
+    """Assert prompt fragment contracts against text."""
+
+    for assertion in assertions:
+        if not isinstance(assertion, FragmentAssertion):
+            raise TypeError(f"assert_prompt_contracts expected FragmentAssertion, got {type(assertion).__name__}")
+        assertion.check(text)
 
 
 def assert_fragments(text: str, assertion: FragmentAssertion) -> None:
@@ -401,29 +424,116 @@ def assert_prompt_budget(
     path_prefix: str,
     max_lines: int | None = None,
     max_chars: int | None = None,
+    max_raw_includes: int | None = None,
     runtime: str | None = None,
     context: str | None = None,
 ) -> PromptSurfaceMetrics:
     """Measure ``path`` with the existing prompt metric helper and assert a budget."""
 
-    assertion = PromptBudgetAssertion(
+    PromptBudgetAssertion(
         label=label,
         path=path,
         src_root=src_root,
         path_prefix=path_prefix,
         max_lines=max_lines,
         max_chars=max_chars,
+        max_raw_includes=max_raw_includes,
         runtime=runtime,
         context=context,
     )
     metrics = measure_prompt_surface(path, src_root=src_root, path_prefix=path_prefix, runtime=runtime)
+    return assert_prompt_metric_budget(
+        metrics,
+        label=label,
+        max_lines=max_lines,
+        max_chars=max_chars,
+        max_raw_includes=max_raw_includes,
+        context=context,
+    )
+
+
+def assert_prompt_metric_budget(
+    metrics: PromptSurfaceMetrics,
+    *,
+    label: str,
+    max_lines: int | None = None,
+    max_chars: int | None = None,
+    max_raw_includes: int | None = None,
+    context: str | None = None,
+) -> PromptSurfaceMetrics:
+    """Assert a hard budget against pre-measured prompt metrics."""
+
     failures: list[str] = []
+    _validate_budget_label(label)
+    if max_lines is None and max_chars is None and max_raw_includes is None:
+        raise ValueError("Budget assertions require max_lines, max_chars, max_raw_includes, or a combination")
+    if max_lines is not None and max_lines < 0:
+        raise ValueError("max_lines must be non-negative")
+    if max_chars is not None and max_chars < 0:
+        raise ValueError("max_chars must be non-negative")
+    if max_raw_includes is not None and max_raw_includes < 0:
+        raise ValueError("max_raw_includes must be non-negative")
+
     if max_lines is not None and metrics.expanded_line_count > max_lines:
         failures.append(f"line budget exceeded: observed={metrics.expanded_line_count} max={max_lines}")
     if max_chars is not None and metrics.expanded_char_count > max_chars:
         failures.append(f"char budget exceeded: observed={metrics.expanded_char_count} max={max_chars}")
+    if max_raw_includes is not None and metrics.raw_include_count > max_raw_includes:
+        failures.append(f"raw include budget exceeded: observed={metrics.raw_include_count} max={max_raw_includes}")
     if failures:
-        _raise_budget_failure(assertion, metrics, failures)
+        _raise_budget_failure(label, metrics, failures, context=context)
+    return metrics
+
+
+def assert_prompt_baseline_budget(
+    metrics: PromptSurfaceMetrics,
+    *,
+    label: str,
+    baseline_lines: int,
+    baseline_chars: int,
+    min_line_margin: int,
+    min_char_margin: int,
+    max_raw_includes: int | None = None,
+    context: str | None = None,
+) -> PromptSurfaceMetrics:
+    """Assert two-sided baseline ratchet budgets against measured prompt metrics."""
+
+    _validate_budget_label(label)
+    for field_name, value in (
+        ("baseline_lines", baseline_lines),
+        ("baseline_chars", baseline_chars),
+        ("min_line_margin", min_line_margin),
+        ("min_char_margin", min_char_margin),
+    ):
+        if value < 0:
+            raise ValueError(f"{field_name} must be non-negative")
+    if max_raw_includes is not None and max_raw_includes < 0:
+        raise ValueError("max_raw_includes must be non-negative")
+
+    max_lines = budget_from_baseline(baseline_lines, minimum_margin=min_line_margin)
+    max_chars = budget_from_baseline(baseline_chars, minimum_margin=min_char_margin)
+    max_baseline_lines = budget_from_baseline(metrics.expanded_line_count, minimum_margin=min_line_margin)
+    max_baseline_chars = budget_from_baseline(metrics.expanded_char_count, minimum_margin=min_char_margin)
+
+    failures: list[str] = []
+    if metrics.expanded_line_count > max_lines:
+        failures.append(f"line budget exceeded: observed={metrics.expanded_line_count} max={max_lines}")
+    if metrics.expanded_char_count > max_chars:
+        failures.append(f"char budget exceeded: observed={metrics.expanded_char_count} max={max_chars}")
+    if baseline_lines > max_baseline_lines:
+        failures.append(
+            "line baseline stale: "
+            f"observed={metrics.expanded_line_count} max_baseline={max_baseline_lines} baseline={baseline_lines}"
+        )
+    if baseline_chars > max_baseline_chars:
+        failures.append(
+            "char baseline stale: "
+            f"observed={metrics.expanded_char_count} max_baseline={max_baseline_chars} baseline={baseline_chars}"
+        )
+    if max_raw_includes is not None and metrics.raw_include_count > max_raw_includes:
+        failures.append(f"raw include budget exceeded: observed={metrics.raw_include_count} max={max_raw_includes}")
+    if failures:
+        _raise_budget_failure(label, metrics, failures, context=context)
     return metrics
 
 
@@ -476,6 +586,11 @@ def _non_empty(value: str | None) -> bool:
     return value is not None and bool(value.strip())
 
 
+def _validate_budget_label(label: str) -> None:
+    if not label.strip():
+        raise ValueError("Budget assertion label must be non-empty")
+
+
 def _scope_text(text: str, assertion: FragmentAssertion) -> tuple[str, str]:
     scoped_text = text
     contexts = [assertion.context or "full text"]
@@ -492,37 +607,12 @@ def _scope_text(text: str, assertion: FragmentAssertion) -> tuple[str, str]:
     return scoped_text, " / ".join(contexts)
 
 
-_HEADING_RE = re.compile(r"^(?P<hashes>#{1,6})\s+(?P<title>.+?)\s*#*\s*$")
-
-
 def _extract_markdown_section(text: str, section: str, assertion: FragmentAssertion) -> str:
-    target = section.strip()
-    lines = text.splitlines(keepends=True)
-    start_index: int | None = None
-    start_level: int | None = None
-
-    for index, line in enumerate(lines):
-        stripped = line.strip()
-        match = _HEADING_RE.match(stripped)
-        if stripped == target:
-            start_index = index
-            start_level = len(match.group("hashes")) if match else 6
-            break
-        if match and match.group("title").strip() == target:
-            start_index = index
-            start_level = len(match.group("hashes"))
-            break
-
-    if start_index is None or start_level is None:
-        _raise_failure(assertion, "full text", f"missing section={section!r}")
-
-    end_index = len(lines)
-    for index in range(start_index + 1, len(lines)):
-        match = _HEADING_RE.match(lines[index].strip())
-        if match and len(match.group("hashes")) <= start_level:
-            end_index = index
-            break
-    return "".join(lines[start_index:end_index])
+    context = assertion.context or "full text"
+    try:
+        return extract_markdown_section_text(text, section, context=context, include_heading=True)
+    except AssertionError as exc:
+        _raise_failure(assertion, context, f"section scope failed: {exc}")
 
 
 def _extract_marker_range(
@@ -531,18 +621,10 @@ def _extract_marker_range(
     assertion: FragmentAssertion,
     context: str,
 ) -> str:
-    start_index = text.find(markers.start)
-    if start_index == -1:
-        _raise_failure(assertion, context, f"missing start marker={markers.start!r}")
-
-    content_start = start_index + len(markers.start)
-    if markers.end is None:
-        return text[content_start:]
-
-    end_index = text.find(markers.end, content_start)
-    if end_index == -1:
-        _raise_failure(assertion, context, f"missing end marker={markers.end!r}")
-    return text[content_start:end_index]
+    try:
+        return extract_marker_range_text(text, markers.start, markers.end, context=context)
+    except AssertionError as exc:
+        _raise_failure(assertion, context, f"marker scope failed: {exc}")
 
 
 def _raise_failure(assertion: FragmentAssertion, context: str, *details: str) -> None:
@@ -561,16 +643,18 @@ def _raise_failure(assertion: FragmentAssertion, context: str, *details: str) ->
 
 
 def _raise_budget_failure(
-    assertion: PromptBudgetAssertion,
+    label: str,
     metrics: PromptSurfaceMetrics,
     failures: Sequence[str],
+    *,
+    context: str | None = None,
 ) -> None:
-    context = assertion.context or metrics.source_path.as_posix()
+    failure_context = context or metrics.source_path.as_posix()
     lines = [
         "Assertion taxonomy failure:",
-        f"kind={assertion.kind.value}",
-        f"label={assertion.label}",
-        f"context={context}",
+        f"kind={AssertionKind.BUDGET.value}",
+        f"label={label}",
+        f"context={failure_context}",
         *failures,
     ]
     raise AssertionTaxonomyError("\n".join(lines))

@@ -8,7 +8,10 @@ from tests.assertion_taxonomy_support import (
     AssertionKind,
     AssertionTaxonomyError,
     FragmentMode,
+    assert_prompt_baseline_budget,
     assert_prompt_budget,
+    assert_prompt_contracts,
+    assert_prompt_metric_budget,
     forbidden_duplicate,
     fragment_count,
     machine_exact,
@@ -17,6 +20,7 @@ from tests.assertion_taxonomy_support import (
     public_exact,
     semantic_anchor,
 )
+from tests.prompt_metrics_support import PromptSurfaceMetrics
 
 SAMPLE_TEXT = """# Surface
 outside-only legacy phrase
@@ -105,6 +109,27 @@ def test_fragment_modes_cover_all_any_ordered_absent_and_count_with_scopes() -> 
     ).check(SAMPLE_TEXT)
 
 
+def test_assert_prompt_contracts_uses_fence_aware_section_scopes() -> None:
+    text = """# Surface
+
+```markdown
+## Machine Contract
+fenced-only phrase
+```
+
+## Machine Contract
+real phrase
+"""
+
+    assert_prompt_contracts(
+        text,
+        semantic_anchor("real section", "real phrase", section="Machine Contract"),
+        semantic_anchor(
+            "fenced section excluded", "fenced-only phrase", mode=FragmentMode.ABSENT, section="## Machine Contract"
+        ),
+    )
+
+
 def test_missing_fragment_failure_names_kind_label_context_and_fragment() -> None:
     assertion = semantic_anchor("required public anchor", "missing phrase", section="## Public Contract")
 
@@ -168,3 +193,81 @@ def test_prompt_budget_helper_wraps_existing_measurement(tmp_path) -> None:
     assert "label=tiny prompt hard cap" in message
     assert "line budget exceeded: observed=2 max=1" in message
     assert "char budget exceeded: observed=23 max=8" in message
+
+
+def test_prompt_metric_budget_checks_premeasured_metrics(tmp_path) -> None:
+    metrics = PromptSurfaceMetrics(
+        source_path=tmp_path / "prompt.md",
+        raw_include_count=2,
+        expanded_line_count=10,
+        expanded_char_count=100,
+    )
+
+    assert (
+        assert_prompt_metric_budget(
+            metrics,
+            label="premeasured prompt",
+            max_lines=10,
+            max_chars=100,
+            max_raw_includes=2,
+        )
+        is metrics
+    )
+
+    with pytest.raises(AssertionTaxonomyError) as exc_info:
+        assert_prompt_metric_budget(
+            metrics,
+            label="premeasured prompt hard cap",
+            max_lines=9,
+            max_chars=99,
+            max_raw_includes=1,
+            context="aggregate prompt budget",
+        )
+
+    message = str(exc_info.value)
+    assert "kind=budget" in message
+    assert "label=premeasured prompt hard cap" in message
+    assert "context=aggregate prompt budget" in message
+    assert "line budget exceeded: observed=10 max=9" in message
+    assert "char budget exceeded: observed=100 max=99" in message
+    assert "raw include budget exceeded: observed=2 max=1" in message
+
+
+def test_prompt_baseline_budget_preserves_two_sided_ratchet(tmp_path) -> None:
+    metrics = PromptSurfaceMetrics(
+        source_path=tmp_path / "prompt.md",
+        raw_include_count=1,
+        expanded_line_count=100,
+        expanded_char_count=1_000,
+    )
+
+    assert (
+        assert_prompt_baseline_budget(
+            metrics,
+            label="baseline prompt",
+            baseline_lines=100,
+            baseline_chars=1_000,
+            min_line_margin=5,
+            min_char_margin=50,
+            max_raw_includes=1,
+        )
+        is metrics
+    )
+
+    with pytest.raises(AssertionTaxonomyError) as exc_info:
+        assert_prompt_baseline_budget(
+            metrics,
+            label="stale baseline prompt",
+            baseline_lines=120,
+            baseline_chars=1_200,
+            min_line_margin=5,
+            min_char_margin=50,
+            max_raw_includes=0,
+        )
+
+    message = str(exc_info.value)
+    assert "kind=budget" in message
+    assert "label=stale baseline prompt" in message
+    assert "line baseline stale: observed=100" in message
+    assert "char baseline stale: observed=1000" in message
+    assert "raw include budget exceeded: observed=1 max=0" in message

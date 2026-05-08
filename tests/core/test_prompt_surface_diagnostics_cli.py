@@ -130,6 +130,22 @@ EXPECTED_EXACT_ASSERTION_FILE_KEYS = {
     "severity",
     "examples",
 }
+EXPECTED_TAXONOMY_HELPER_USAGE_TOTAL_KEYS = {
+    "files_scanned",
+    "taxonomy_helper_file_count",
+    "taxonomy_helper_call_count",
+    "assert_fragments",
+    "assert_prompt_baseline_budget",
+    "assert_prompt_budget",
+    "assert_prompt_contracts",
+    "assert_prompt_metric_budget",
+    "forbidden_duplicate",
+    "fragment_count",
+    "machine_exact",
+    "prompt_budget",
+    "public_exact",
+    "semantic_anchor",
+}
 
 
 def _non_native_runtime_name() -> str:
@@ -293,6 +309,12 @@ def test_prompt_surface_diagnostics_include_tests_exact_assertion_shape() -> Non
     assert totals["brittle_prose_assertions"] > 0
     assert exact["files"]
     assert set(exact["files"][0]) == EXPECTED_EXACT_ASSERTION_FILE_KEYS
+    usage = exact["taxonomy_helper_usage"]
+    assert usage["schema_version"] == "taxonomy_helper_usage.v1"
+    assert set(usage["totals"]) == EXPECTED_TAXONOMY_HELPER_USAGE_TOTAL_KEYS
+    assert usage["totals"]["files_scanned"] == totals["files_scanned"]
+    assert usage["totals"]["taxonomy_helper_call_count"] > 0
+    assert usage["files"]
     assert isinstance(payload["exact_prose_assertion_files"], list)
     assert payload["exact_prose_assertion_files"]
 

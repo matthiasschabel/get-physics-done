@@ -3,7 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.core.onboarding_surfaces import beginner_startup_ladder_text
 from gpd.registry import get_command, list_commands
+from tests.assertion_taxonomy_support import FragmentMode, forbidden_duplicate, fragment_count, semantic_anchor
 from tests.doc_surface_contracts import assert_tour_command_surface_contract
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +13,45 @@ COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+
+
+def _extract_between(content: str, start_marker: str, end_marker: str) -> str:
+    start = content.index(start_marker) + len(start_marker)
+    end = content.index(end_marker, start)
+    return content[start:end]
+
+
+def _extract_step(workflow: str, step_name: str) -> str:
+    start = workflow.index(f'<step name="{step_name}">')
+    end = workflow.index("</step>", start)
+    return workflow[start:end]
+
+
+def _assert_anchor(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(label, fragments).check(text)
+
+
+def _assert_absent(text: str, label: str, fragments: tuple[str, ...] | str) -> None:
+    semantic_anchor(label, fragments, mode=FragmentMode.ABSENT).check(text)
+
+
+def _tour_required_entries(workflow: str) -> set[str]:
+    table_block = _extract_between(workflow, "Include these entries:", "Keep this table runtime-facing only.")
+    return {line.strip()[3:-1] for line in table_block.splitlines() if line.strip().startswith("- `")}
+
+
+def _assert_tour_read_only_boundary(text: str) -> None:
+    _assert_anchor(
+        text,
+        "tour read-only boundary",
+        (
+            "read-only tour",
+            "does not create files",
+            "change project",
+            "state",
+            "route into another workflow",
+        ),
+    )
 
 
 def test_tour_command_is_registered_and_projectless() -> None:
@@ -30,54 +71,97 @@ def test_tour_command_references_workflow() -> None:
     assert "gpd:set-tier-models" in command_prompt
     assert "gpd:settings" in command_prompt
     assert "This is a read-only tour of the main GPD commands. It will not change your files." in command_prompt
-    assert "Use the runtime-native command labels shown by this command surface" in command_prompt
+    _assert_anchor(command_prompt, "tour uses runtime-native command labels", ("runtime-native command labels", "gpd:"))
 
 
 def test_tour_workflow_introduces_a_safe_beginner_walkthrough() -> None:
     workflow = (WORKFLOWS_DIR / "tour.md").read_text(encoding="utf-8")
     expanded_workflow = expand_at_includes(workflow, SOURCE_ROOT, PATH_PREFIX)
     assert_tour_command_surface_contract(workflow)
-    table_entries = workflow[
-        workflow.index("Include these entries:") : workflow.index("Keep this table runtime-facing only.")
-    ]
-    assert "- `gpd resume`" not in table_entries
-    assert "Keep this table runtime-facing only." in workflow
-
-    assert (
-        "A common first pass is `help -> start -> tour -> new-project / map-research -> resume-work`, "
-        "but the folder state still decides the actual path." in expanded_workflow
+    table_entries = _extract_between(workflow, "Include these entries:", "Keep this table runtime-facing only.")
+    assert _tour_required_entries(workflow) == {
+        "gpd:start",
+        "gpd:new-project --minimal",
+        "gpd:new-project",
+        "gpd:map-research",
+        "gpd:resume-work",
+        "gpd:progress",
+        "gpd:suggest-next",
+        "gpd:explain <topic>",
+        "gpd:quick",
+        "gpd:set-tier-models",
+        "gpd:settings",
+        "gpd:help",
+    }
+    _assert_absent(table_entries, "normal terminal resume is absent from runtime table", "- `gpd resume`")
+    _assert_anchor(
+        workflow,
+        "tour table stays runtime-facing",
+        ("runtime-facing only", "gpd resume", "terminal/runtime distinction"),
+    )
+    _assert_tour_read_only_boundary(workflow)
+    _assert_anchor(
+        expanded_workflow,
+        "tour startup ladder comes from public surface contract",
+        (beginner_startup_ladder_text(), "folder state", "actual path"),
     )
 
-    for fragment in (
+    for public_label in (
         "Use a compact table with four columns:",
         "Use this when",
         "Do not use this when",
         "Example",
-        "gpd:plan-phase",
-        "gpd:execute-phase",
-        "gpd:verify-work",
-        "gpd:peer-review",
-        "gpd:respond-to-referees",
-        "gpd:arxiv-submission",
-        "gpd:branch-hypothesis",
-        "gpd:set-profile",
-        "gpd:set-tier-models",
-        "Use `gpd:start` when you are still deciding, not `gpd:new-project`",
-        "Use `gpd:resume-work` only when the project already has GPD state",
-        "Use `gpd:help` when you want the command reference, not a setup wizard",
         "A few terms in plain English",
-        "`GPD project` - a folder where GPD already saved its own project files and state",
-        "`research map` - GPD's summary of an existing research folder before full project setup",
-        "`phase` - one chunk of the project plan that GPD will organize later",
         '"If you are still unsure, run `gpd:start`."',
-        "`gpd:settings` is the guided runtime command for changing autonomy",
-        "`gpd:set-tier-models` is the direct runtime command for pinning concrete",
-        "settings/model commands from the startup table",
     ):
-        assert fragment in workflow
+        assert public_label in workflow
 
-    assert workflow.count("gpd:set-tier-models") == 2
-    assert workflow.count("gpd:settings") == 2
-    assert workflow.count("set-tier-models") <= 3
-    assert workflow.count("settings") <= 5
-    assert workflow.count("tier-1") == 1
+    _assert_anchor(
+        _extract_step(workflow, "show_broader_capabilities"),
+        "tour surfaces later capability groups",
+        (
+            "gpd:plan-phase",
+            "gpd:execute-phase",
+            "gpd:verify-work",
+            "gpd:peer-review",
+            "gpd:respond-to-referees",
+            "gpd:arxiv-submission",
+            "gpd:branch-hypothesis",
+            "gpd:set-profile",
+            "settings/model commands from the startup table",
+        ),
+    )
+    _assert_anchor(
+        _extract_step(workflow, "distinguish_terminal_and_runtime"),
+        "tour distinguishes normal terminal from runtime",
+        (
+            "gpd --help",
+            "gpd doctor",
+            "gpd resume",
+            "gpd:resume-work",
+            "gpd:settings",
+            "gpd:set-tier-models",
+            "gpd:tour",
+            "does not run",
+        ),
+    )
+    _assert_anchor(
+        _extract_step(workflow, "highlight_common_mistakes"),
+        "tour highlights common command boundaries",
+        (
+            "Use `gpd:start` when you are still deciding, not `gpd:new-project`",
+            "Use `gpd:resume-work` only when the project already has GPD state",
+            "Use `gpd:help` when you want the command reference, not a setup wizard",
+        ),
+    )
+    _assert_anchor(
+        _extract_step(workflow, "explain_advanced_terms"),
+        "tour defines beginner terms without routing",
+        ("GPD project", "research map", "phase", "read-only", "without making changes"),
+    )
+
+    fragment_count("tour set-tier-models exact mention count", "gpd:set-tier-models", expected_count=2).check(workflow)
+    fragment_count("tour settings exact mention count", "gpd:settings", expected_count=2).check(workflow)
+    forbidden_duplicate("tour set-tier-models bounded duplicates", "set-tier-models", max_count=3).check(workflow)
+    forbidden_duplicate("tour settings bounded duplicates", "settings", max_count=5).check(workflow)
+    fragment_count("tour tier-1 model tier appears once", "tier-1", expected_count=1).check(workflow)

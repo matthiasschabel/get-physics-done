@@ -1,0 +1,59 @@
+{
+  "surface": "planning",
+  "rows": [
+    {
+      "schema_version": "phase4.persona_lifecycle_matrix.v1",
+      "row_id": "P4-PLAN-01",
+      "surface": "planning",
+      "scenario": "planning_contract_gate_blocks_without_authority",
+      "fixture_family": "contract_gate_class",
+      "runtime_scope": ["provider_free"],
+      "source_owners": ["src/gpd/specs/workflows/plan-phase/phase-bootstrap.md"],
+      "test_owners": ["tests/core/test_plan_phase_checker_routing.py", "tests/core/test_phase4_persona_matrix_contract.py"],
+      "expected_finding": "project_contract_missing",
+      "expected_result_class": "blocked_no_mutation",
+      "provider_launch_allowed": false,
+      "network_allowed": false,
+      "raw_artifacts_allowed": false,
+      "expected_state_status_class": "unchanged",
+      "expected_next_action_class": "repair_project_contract",
+      "mutation_allowed": false
+    },
+    {
+      "schema_version": "phase4.persona_lifecycle_matrix.v1",
+      "row_id": "P4-PLAN-02",
+      "surface": "planning",
+      "scenario": "planner_checkpoint_not_checker_success",
+      "fixture_family": "planner_checkpoint_class",
+      "runtime_scope": ["provider_free"],
+      "source_owners": ["src/gpd/specs/workflows/plan-phase/planner-authoring.md", "src/gpd/specs/workflows/plan-phase/checker-revision.md"],
+      "test_owners": ["tests/core/test_plan_phase_checker_routing.py", "tests/core/test_phase4_persona_matrix_contract.py"],
+      "expected_finding": "checkpoint_requires_fresh_continuation",
+      "expected_result_class": "blocked_no_mutation",
+      "provider_launch_allowed": false,
+      "network_allowed": false,
+      "raw_artifacts_allowed": false,
+      "expected_state_status_class": "unchanged",
+      "expected_next_action_class": "resume_planner_checkpoint",
+      "mutation_allowed": false
+    },
+    {
+      "schema_version": "phase4.persona_lifecycle_matrix.v1",
+      "row_id": "P4-PLAN-03",
+      "surface": "planning",
+      "scenario": "proof_bearing_plan_requires_checker",
+      "fixture_family": "proof_plan_checker_gate_class",
+      "runtime_scope": ["provider_free"],
+      "source_owners": ["src/gpd/specs/workflows/plan-phase/checker-revision.md"],
+      "test_owners": ["tests/core/test_plan_phase_checker_routing.py", "tests/core/test_phase4_persona_matrix_contract.py"],
+      "expected_finding": "checker_required",
+      "expected_result_class": "blocked_no_mutation",
+      "provider_launch_allowed": false,
+      "network_allowed": false,
+      "raw_artifacts_allowed": false,
+      "expected_state_status_class": "unchanged",
+      "expected_next_action_class": "run_checker",
+      "mutation_allowed": false
+    }
+  ]
+}

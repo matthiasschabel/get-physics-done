@@ -15,7 +15,6 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
-import re
 import subprocess
 import sys
 import tarfile
@@ -24,7 +23,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from typer.testing import CliRunner
 
 import gpd.cli as cli_module
 import gpd.registry as registry_module
@@ -37,6 +35,8 @@ from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.state import StateUpdateResult, default_state_dict, generate_state_markdown
 from gpd.registry import _parse_command_file
+from tests.helpers.cli import StableCliRunner
+from tests.helpers.cli import normalize_cli_output as _normalize_cli_output
 from tests.manuscript_test_support import (
     CANONICAL_MANUSCRIPT_STEM,
     write_proof_review_package,
@@ -51,19 +51,7 @@ from tests.manuscript_test_support import (
     manuscript_relpath as canonical_manuscript_relpath,
 )
 
-
-class _StableCliRunner(CliRunner):
-    def invoke(self, *args, **kwargs):
-        kwargs.setdefault("color", False)
-        return super().invoke(*args, **kwargs)
-
-
-runner = _StableCliRunner()
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-
-
-def _normalize_cli_output(text: str) -> str:
-    return " ".join(_ANSI_ESCAPE_RE.sub("", text).split())
+runner = StableCliRunner()
 
 
 def test_runtime_command_surface_pattern_does_not_truncate_markdown_filenames() -> None:
@@ -1373,11 +1361,6 @@ class TestConventionCommands:
 
 
 class TestStateCommands:
-    def test_validate(self) -> None:
-        # May exit 1 if issues found, but must not crash
-        result = runner.invoke(app, ["state", "validate"], catch_exceptions=False)
-        assert result.exit_code in (0, 1)
-
     def test_set_project_contract(self, gpd_project: Path) -> None:
         contract_path = gpd_project / "contract.json"
         contract_path.write_text(
@@ -1608,16 +1591,6 @@ class TestContractCommands:
             combined_output = result.output + getattr(result, "stderr", "")
             assert result.exit_code == 1, combined_output
             assert "project_contract_gate.authoritative is not true" in combined_output
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Regression check commands
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestRegressionCheckCommands:
-    def test_default_scope(self, gpd_project: Path) -> None:
-        _invoke("regression-check")
 
 
 class TestInitCommands:
@@ -3669,80 +3642,49 @@ class TestReviewValidationCommands:
         assert checks["project_reentry"]["passed"] is False
         assert "multiple recoverable recent GPD projects" in payload["guidance"]
 
-    def test_command_context_projectless_passes_without_project(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dollar_command_prefix: str
+    @pytest.mark.parametrize(
+        ("command_name", "context_mode", "expects_project_context_check", "expects_runtime_dispatch_note"),
+        [
+            ("help", "global", True, False),
+            ("new-project", "projectless", True, False),
+            ("map-research", "projectless", False, True),
+            ("start", "projectless", True, True),
+            ("tour", "projectless", True, True),
+            ("health", "projectless", False, False),
+            ("suggest-next", "projectless", False, False),
+        ],
+    )
+    def test_command_context_projectless_and_global_commands_pass_without_project(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        dollar_command_prefix: str,
+        command_name: str,
+        context_mode: str,
+        expects_project_context_check: bool,
+        expects_runtime_dispatch_note: bool,
     ) -> None:
-        monkeypatch.chdir(tmp_path)
+        empty_dir = tmp_path / "empty-context"
+        empty_dir.mkdir()
+        monkeypatch.chdir(empty_dir)
 
         result = runner.invoke(
             app,
-            ["--raw", "validate", "command-context", "map-research"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        assert payload["command"] == "gpd:map-research"
-        assert payload["context_mode"] == "projectless"
-        assert payload["passed"] is True
-        assert payload["public_runtime_command_prefix"] == dollar_command_prefix
-        assert f"public command surface rooted at `{dollar_command_prefix}`" in payload["dispatch_note"]
-
-    def test_command_context_start_passes_without_project(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dollar_command_prefix: str
-    ) -> None:
-        monkeypatch.chdir(tmp_path)
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "command-context", "start"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        assert payload["command"] == "gpd:start"
-        assert payload["context_mode"] == "projectless"
-        assert payload["passed"] is True
-        assert payload["public_runtime_command_prefix"] == dollar_command_prefix
-        assert f"public command surface rooted at `{dollar_command_prefix}`" in payload["dispatch_note"]
-
-    def test_command_context_tour_passes_without_project(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dollar_command_prefix: str
-    ) -> None:
-        monkeypatch.chdir(tmp_path)
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "command-context", "tour"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        assert payload["command"] == "gpd:tour"
-        assert payload["context_mode"] == "projectless"
-        assert payload["passed"] is True
-        assert payload["public_runtime_command_prefix"] == dollar_command_prefix
-        assert f"public command surface rooted at `{dollar_command_prefix}`" in payload["dispatch_note"]
-
-    @pytest.mark.parametrize("command_name", ["health", "suggest-next"])
-    def test_command_context_projectless_recovery_commands_pass_without_project(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command_name: str
-    ) -> None:
-        monkeypatch.chdir(tmp_path)
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "command-context", command_name],
+            ["--raw", "--cwd", str(empty_dir), "validate", "command-context", command_name],
             catch_exceptions=False,
         )
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["command"] == f"gpd:{command_name}"
-        assert payload["context_mode"] == "projectless"
+        assert payload["context_mode"] == context_mode
         assert payload["passed"] is True
+        if expects_project_context_check:
+            checks = {check["name"]: check for check in payload["checks"]}
+            assert checks["project_context"]["passed"] is True
+        if expects_runtime_dispatch_note:
+            assert payload["public_runtime_command_prefix"] == dollar_command_prefix
+            assert f"public command surface rooted at `{dollar_command_prefix}`" in payload["dispatch_note"]
 
     @pytest.mark.parametrize("command_name", ["gpd:settings", "gpd:set-tier-models"])
     def test_command_context_surfaces_runtime_command_dispatch_note(
@@ -3786,11 +3728,19 @@ class TestReviewValidationCommands:
         assert f"public command surface rooted at `{slash_command_prefix}`" in payload["dispatch_note"]
         assert "same-name local `gpd` subcommand" in payload["dispatch_note"]
 
+    @pytest.mark.parametrize("failure_mode", ["missing-runtime", "runtime-error"])
     @pytest.mark.parametrize("command_name", ["gpd:settings", "gpd:set-tier-models"])
     def test_command_context_falls_back_when_runtime_resolution_fails(
-        self, monkeypatch: pytest.MonkeyPatch, command_name: str
+        self, monkeypatch: pytest.MonkeyPatch, command_name: str, failure_mode: str
     ) -> None:
-        monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
+        if failure_mode == "runtime-error":
+
+            def _raise_runtime_error(cwd=None) -> str:
+                raise RuntimeError("runtime resolution failed")
+
+            monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", _raise_runtime_error)
+        else:
+            monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
 
         result = runner.invoke(
             app,
@@ -5780,28 +5730,6 @@ class TestReviewValidationCommands:
         assert "bibliography_audit" not in checks
         assert "reproducibility_manifest" not in checks
 
-    def test_command_context_global_command_passes_without_project(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        empty_dir = tmp_path / "empty-context"
-        empty_dir.mkdir()
-        monkeypatch.chdir(empty_dir)
-        result = runner.invoke(
-            app,
-            ["--raw", "--cwd", str(empty_dir), "validate", "command-context", "help"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert payload["command"] == "gpd:help"
-        assert payload["context_mode"] == "global"
-        assert payload["passed"] is True
-        assert checks["project_context"]["passed"] is True
-
     def test_raw_help_bridge_default_and_all_are_machine_readable(self, tmp_path: Path) -> None:
         result = runner.invoke(
             app,
@@ -5909,72 +5837,6 @@ class TestReviewValidationCommands:
         assert payload["ok"] is False
         assert payload["error"] == "unknown_command"
         assert payload["canonical_command"] == "gpd:does-not-exist"
-
-    def test_command_context_projectless_command_passes_without_project(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        empty_dir = tmp_path / "empty-context"
-        empty_dir.mkdir()
-        monkeypatch.chdir(empty_dir)
-        result = runner.invoke(
-            app,
-            ["--raw", "--cwd", str(empty_dir), "validate", "command-context", "new-project"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert payload["command"] == "gpd:new-project"
-        assert payload["context_mode"] == "projectless"
-        assert payload["passed"] is True
-        assert checks["project_context"]["passed"] is True
-
-    def test_command_context_start_command_passes_without_project(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        empty_dir = tmp_path / "empty-context"
-        empty_dir.mkdir()
-        monkeypatch.chdir(empty_dir)
-        result = runner.invoke(
-            app,
-            ["--raw", "--cwd", str(empty_dir), "validate", "command-context", "start"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert payload["command"] == "gpd:start"
-        assert payload["context_mode"] == "projectless"
-        assert payload["passed"] is True
-        assert checks["project_context"]["passed"] is True
-
-    def test_command_context_tour_command_passes_without_project(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        empty_dir = tmp_path / "empty-context"
-        empty_dir.mkdir()
-        monkeypatch.chdir(empty_dir)
-        result = runner.invoke(
-            app,
-            ["--raw", "--cwd", str(empty_dir), "validate", "command-context", "tour"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert payload["command"] == "gpd:tour"
-        assert payload["context_mode"] == "projectless"
-        assert payload["passed"] is True
-        assert checks["project_context"]["passed"] is True
 
     def test_command_context_project_aware_command_accepts_explicit_inputs(
         self,
@@ -10347,81 +10209,6 @@ class TestReviewValidationCommands:
             for error in payload["errors"]
         )
 
-    def test_validate_plan_preflight_command_blocks_missing_required_wolfram(
-        self, gpd_project: Path, monkeypatch
-    ) -> None:
-        phase_dir = gpd_project / "GPD" / "phases" / "01-benchmark"
-        phase_dir.mkdir(parents=True, exist_ok=True)
-        plan_path = phase_dir / "01-01-PLAN.md"
-        plan_path.write_text(
-            (FIXTURES_DIR / "plan_with_contract.md")
-            .read_text(encoding="utf-8")
-            .replace(
-                "interactive: false\n",
-                "interactive: false\n"
-                "tool_requirements:\n"
-                "  - id: wolfram-cas\n"
-                "    tool: wolfram\n"
-                "    purpose: Symbolic tensor reduction\n",
-                1,
-            ),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr("gpd.core.tool_preflight.shutil.which", lambda binary: None)
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "plan-preflight", str(plan_path)],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
-        assert payload["validation_passed"] is True
-        assert payload["passed"] is False
-        assert payload["requirements"][0]["tool"] == "wolfram"
-        assert payload["requirements"][0]["blocking"] is True
-
-    def test_validate_plan_preflight_command_allows_missing_optional_wolfram_with_fallback(
-        self,
-        gpd_project: Path,
-        monkeypatch,
-    ) -> None:
-        phase_dir = gpd_project / "GPD" / "phases" / "01-benchmark"
-        phase_dir.mkdir(parents=True, exist_ok=True)
-        plan_path = phase_dir / "01-01-PLAN.md"
-        plan_path.write_text(
-            (FIXTURES_DIR / "plan_with_contract.md")
-            .read_text(encoding="utf-8")
-            .replace(
-                "interactive: false\n",
-                "interactive: false\n"
-                "tool_requirements:\n"
-                "  - id: wolfram-cas\n"
-                "    tool: mathematica\n"
-                "    purpose: Symbolic tensor reduction\n"
-                "    required: false\n"
-                "    fallback: Use SymPy instead\n",
-                1,
-            ),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr("gpd.core.tool_preflight.shutil.which", lambda binary: None)
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "plan-preflight", str(plan_path)],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
-        assert payload["validation_passed"] is True
-        assert payload["passed"] is True
-        assert payload["requirements"][0]["tool"] == "wolfram"
-        assert payload["requirements"][0]["blocking"] is False
-        assert "license state are not proven" in payload["warnings"][0]
-
     @pytest.mark.parametrize(("command_args"), [("integrations", "status", "wolfram")])
     def test_integrations_surface_smoke(self, command_args: tuple[str, ...]) -> None:
         _invoke(*command_args)
@@ -11016,53 +10803,17 @@ def test_resolve_model_keeps_blank_stdout_by_default_when_no_override(
     assert result.output == ""
 
 
-def test_init_new_project_help_surfaces_stage_option() -> None:
-    result = runner.invoke(app, ["init", "new-project", "--help"])
+@pytest.mark.parametrize(
+    "command_name",
+    ["new-project", "verify-work", "plan-phase", "quick", "execute-phase"],
+)
+def test_init_help_surfaces_stage_option(command_name: str) -> None:
+    result = runner.invoke(app, ["init", command_name, "--help"])
     output = _normalize_cli_output(result.output)
 
     assert result.exit_code == 0
     assert "--stage" in output
-    assert "Load the staged new-project context for a specific" in output
-    assert "stage id." in output
-
-
-def test_init_verify_work_help_surfaces_stage_option() -> None:
-    result = runner.invoke(app, ["init", "verify-work", "--help"])
-    output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
-    assert "--stage" in output
-    assert "Load the staged verify-work context for a specific" in output
-    assert "stage id." in output
-
-
-def test_init_plan_phase_help_surfaces_stage_option() -> None:
-    result = runner.invoke(app, ["init", "plan-phase", "--help"])
-    output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
-    assert "--stage" in output
-    assert "Load the staged plan-phase context for a specific" in output
-    assert "stage id." in output
-
-
-def test_init_quick_help_surfaces_stage_option() -> None:
-    result = runner.invoke(app, ["init", "quick", "--help"])
-    output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
-    assert "--stage" in output
-    assert "Load the staged quick context for a specific" in output
-    assert "stage id." in output
-
-
-def test_init_execute_phase_help_surfaces_stage_option() -> None:
-    result = runner.invoke(app, ["init", "execute-phase", "--help"])
-    output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
-    assert "--stage" in output
-    assert "Load the staged execute-phase context for a specific" in output
+    assert f"Load the staged {command_name} context for a specific" in output
     assert "stage id." in output
 
 

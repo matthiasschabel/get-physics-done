@@ -7,15 +7,19 @@ import pytest
 from tests.markdown_test_support import (
     MarkdownSection,
     assert_forbidden_fragments,
+    assert_markdown_link,
     assert_ordered_fragments,
     assert_required_fragments,
     extract_markdown_section,
     extract_marker_range,
     iter_markdown_sections,
+    markdown_fence_bodies,
     markdown_section,
     markdown_sections,
     normalize_text,
     parse_frontmatter_mapping,
+    parse_markdown_links,
+    parse_markdown_table,
     parse_yaml_fences,
     require_mapping,
 )
@@ -130,6 +134,57 @@ def test_extract_marker_range_reports_missing_and_duplicate_markers() -> None:
 
     with pytest.raises(AssertionError, match=r"multiple marker ranges in prompt: start marker 'BEGIN' found 2 times"):
         extract_marker_range("BEGIN one BEGIN two", "BEGIN", context="prompt")
+
+
+def test_parse_markdown_table_normalizes_code_spans_and_reports_malformed_rows() -> None:
+    markdown = """Intro.
+
+| Label | Command |
+| --- | --- |
+| Alpha | `gpd:start` |
+| Beta | plain text |
+"""
+
+    table = parse_markdown_table(markdown, context="example matrix")
+
+    assert table.headers == ("Label", "Command")
+    assert table.rows == (
+        {"Label": "Alpha", "Command": "gpd:start"},
+        {"Label": "Beta", "Command": "plain text"},
+    )
+
+    malformed = "| Label | Command |\n| --- | --- |\n| Alpha |\n"
+    with pytest.raises(
+        AssertionError,
+        match=r"malformed markdown table in example matrix: row has 1 cells, expected 2",
+    ):
+        parse_markdown_table(malformed, context="example matrix")
+
+
+def test_parse_markdown_links_and_assert_link_ignore_images() -> None:
+    markdown = "Use [Docs](./docs.md), not ![Logo](./logo.png)."
+
+    links = parse_markdown_links(markdown)
+
+    assert links[0].label == "Docs"
+    assert links[0].href == "./docs.md"
+    assert_markdown_link(markdown, "Docs", "./docs.md", context="README")
+    with pytest.raises(AssertionError, match=r"missing markdown link in README"):
+        assert_markdown_link(markdown, "Logo", "./logo.png", context="README")
+
+
+def test_markdown_fence_bodies_filters_by_exact_info() -> None:
+    markdown = """```text
+new-project
+```
+
+```bash
+gpd --help
+```
+"""
+
+    assert markdown_fence_bodies(markdown, info="text") == ("new-project",)
+    assert markdown_fence_bodies(markdown) == ("new-project", "gpd --help")
 
 
 def test_required_and_forbidden_fragments_accept_normalized_prose() -> None:

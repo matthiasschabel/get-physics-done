@@ -14,22 +14,30 @@ from tests.prompt_metrics_support import iter_markdown_fences
 
 __all__ = [
     "MarkdownSection",
+    "ParsedMarkdownLink",
+    "ParsedMarkdownTable",
     "ParsedYamlFence",
+    "assert_markdown_link",
     "assert_forbidden_fragments",
     "assert_ordered_fragments",
     "assert_required_fragments",
     "extract_marker_range",
     "extract_markdown_section",
     "iter_markdown_sections",
+    "markdown_fence_bodies",
     "markdown_section",
     "markdown_sections",
     "normalize_text",
     "parse_frontmatter_mapping",
+    "parse_markdown_links",
+    "parse_markdown_table",
     "parse_yaml_fences",
     "require_mapping",
 ]
 
 _YAML_FENCE_LANGUAGES = {"yaml", "yml"}
+_TABLE_SEPARATOR_RE = re.compile(r":?-{3,}:?")
+_INLINE_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)]\(([^)\n]+)\)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +63,102 @@ class ParsedYamlFence:
     end_line: int
 
 
+@dataclass(frozen=True, slots=True)
+class ParsedMarkdownTable:
+    """A simple parsed markdown table with normalized cell values."""
+
+    headers: tuple[str, ...]
+    rows: tuple[dict[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedMarkdownLink:
+    """A markdown inline link split into public label and target."""
+
+    label: str
+    href: str
+
+
 def normalize_text(text: str) -> str:
     """Return text with incidental whitespace collapsed."""
 
     return " ".join(text.split())
+
+
+def _strip_wrapping_code_span(value: str) -> str:
+    stripped = value.strip()
+    if stripped.startswith("`") and stripped.endswith("`") and stripped.count("`") == 2:
+        return stripped[1:-1]
+    return stripped
+
+
+def _split_markdown_table_row(line: str) -> tuple[str, ...]:
+    stripped = line.strip()
+    if not stripped.startswith("|") or not stripped.endswith("|"):
+        raise AssertionError(f"expected markdown table row with edge pipes: {line!r}")
+    return tuple(_strip_wrapping_code_span(cell) for cell in stripped.strip("|").split("|"))
+
+
+def _is_markdown_table_separator(line: str) -> bool:
+    if "|" not in line:
+        return False
+    cells = tuple(cell.strip().replace(" ", "") for cell in line.strip().strip("|").split("|"))
+    return bool(cells) and all(_TABLE_SEPARATOR_RE.fullmatch(cell) for cell in cells)
+
+
+def parse_markdown_table(section: str, *, context: str = "markdown section") -> ParsedMarkdownTable:
+    """Parse the first pipe table in a markdown section."""
+
+    lines = section.splitlines()
+    for index, line in enumerate(lines[:-1]):
+        if not line.strip().startswith("|") or not _is_markdown_table_separator(lines[index + 1]):
+            continue
+
+        headers = _split_markdown_table_row(line)
+        rows: list[dict[str, str]] = []
+        row_index = index + 2
+        while row_index < len(lines) and lines[row_index].strip().startswith("|"):
+            if _is_markdown_table_separator(lines[row_index]):
+                row_index += 1
+                continue
+            values = _split_markdown_table_row(lines[row_index])
+            if len(values) != len(headers):
+                raise AssertionError(
+                    f"malformed markdown table in {context}: row has {len(values)} cells, expected {len(headers)}"
+                )
+            rows.append(dict(zip(headers, values, strict=True)))
+            row_index += 1
+
+        if not rows:
+            raise AssertionError(f"markdown table in {context} has no body rows")
+        return ParsedMarkdownTable(headers=headers, rows=tuple(rows))
+
+    raise AssertionError(f"missing markdown table in {context}")
+
+
+def parse_markdown_links(section: str) -> tuple[ParsedMarkdownLink, ...]:
+    """Return inline markdown links with label and href kept separate."""
+
+    return tuple(
+        ParsedMarkdownLink(label=match.group(1), href=match.group(2)) for match in _INLINE_LINK_RE.finditer(section)
+    )
+
+
+def assert_markdown_link(section: str, label: str, href: str, *, context: str) -> None:
+    links = parse_markdown_links(section)
+    if any(link.label == label and link.href == href for link in links):
+        return
+    raise AssertionError(f"missing markdown link in {context}: label={label!r} href={href!r}; links={links!r}")
+
+
+def markdown_fence_bodies(text: str, *, info: str | None = None) -> tuple[str, ...]:
+    """Return stripped fenced-code bodies, optionally filtered by exact info string."""
+
+    return tuple(
+        fence.body.strip()
+        for fence in iter_markdown_fences(text)
+        if info is None or fence.info.strip() == info
+    )
 
 
 def _coerce_fragments(fragments: Iterable[str] | str) -> tuple[str, ...]:

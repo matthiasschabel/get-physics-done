@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from gpd.core.onboarding_surfaces import BeginnerRuntimeSurface
 from gpd.core.public_surface_renderer import (
     public_surface_block_ids,
     public_surface_context,
@@ -31,14 +32,24 @@ from scripts.render_public_surface import (
     replace_generated_regions,
     update_generated_files,
 )
+from tests.markdown_test_support import parse_markdown_table
 
 
-def _table_row(*cells: str) -> str:
-    return "| " + " | ".join(cells) + " |"
-
-
-def _runtime_doc_slug(display_name: str) -> str:
-    return "-".join(display_name.casefold().split())
+def _synthetic_runtime_surface(display_name: str) -> BeginnerRuntimeSurface:
+    return BeginnerRuntimeSurface(
+        runtime_name="synthetic-runtime",
+        display_name=display_name,
+        install_flag="--synthetic",
+        launch_command="synthetic",
+        help_command="synthetic help",
+        start_command="synthetic start",
+        tour_command="synthetic tour",
+        new_project_command="synthetic new-project",
+        new_project_minimal_command="synthetic new-project --minimal",
+        map_research_command="synthetic map-research",
+        resume_work_command="synthetic resume-work",
+        settings_command="synthetic settings",
+    )
 
 
 def test_basic_contract_renderers_emit_canonical_public_surface() -> None:
@@ -78,8 +89,8 @@ def test_terminal_and_local_cli_bridge_text_derive_from_runtime_and_contract_dat
 def test_supported_runtime_and_install_tables_follow_public_runtime_surfaces() -> None:
     context = public_surface_context()
 
-    supported_table = render_supported_runtime_table(context)
-    assert supported_table.splitlines()[0] == _table_row(
+    supported_table = parse_markdown_table(render_supported_runtime_table(context), context="supported runtimes")
+    assert supported_table.headers == (
         "Runtime",
         "`npx` flag",
         "Help",
@@ -89,26 +100,25 @@ def test_supported_runtime_and_install_tables_follow_public_runtime_surfaces() -
         "Existing work",
         "Return later",
     )
+    supported_rows = {row["Runtime"]: row for row in supported_table.rows}
     for surface in context.runtime_surfaces:
-        assert (
-            _table_row(
-                surface.display_name,
-                f"`{surface.install_flag}`",
-                f"`{surface.help_command}`",
-                f"`{surface.start_command}`",
-                f"`{surface.tour_command}`",
-                f"`{surface.new_project_minimal_command}`",
-                f"`{surface.map_research_command}`",
-                f"`{surface.resume_work_command}`",
-            )
-            in supported_table.splitlines()
-        )
+        assert supported_rows[surface.display_name] == {
+            "Runtime": surface.display_name,
+            "`npx` flag": surface.install_flag,
+            "Help": surface.help_command,
+            "Start": surface.start_command,
+            "Tour": surface.tour_command,
+            "New work": surface.new_project_minimal_command,
+            "Existing work": surface.map_research_command,
+            "Return later": surface.resume_work_command,
+        }
 
-    install_table = render_os_install_matrix(context)
-    assert install_table.splitlines()[0] == _table_row("Runtime", "Install command")
+    install_table = parse_markdown_table(render_os_install_matrix(context), context="OS install matrix")
+    assert install_table.headers == ("Runtime", "Install command")
+    install_rows = {row["Runtime"]: row for row in install_table.rows}
     for surface in context.runtime_surfaces:
         install_command = f"{context.bootstrap_command} {surface.install_flag} --local"
-        assert _table_row(surface.display_name, f"`{install_command}`") in install_table.splitlines()
+        assert install_rows[surface.display_name]["Install command"] == install_command
 
 
 def test_os_next_step_table_collapses_matching_runtime_command_columns() -> None:
@@ -141,12 +151,17 @@ def test_os_next_step_table_collapses_matching_runtime_command_columns() -> None
         ("Continue in the reopened runtime", 5),
     )
 
-    table_lines = render_os_next_step_table(context).splitlines()
-    assert table_lines[0] == _table_row(*expected_headers)
+    table = parse_markdown_table(render_os_next_step_table(context), context="OS next-step table")
+    assert table.headers == tuple(expected_headers)
+    rows = {row["What you want to do"]: row for row in table.rows}
     for label, command_index in expected_rows:
-        assert (
-            _table_row(label, *(f"`{commands[command_index]}`" for _names, commands in command_groups)) in table_lines
-        )
+        assert rows[label] == {
+            "What you want to do": label,
+            **{
+                header: commands[command_index]
+                for header, (_names, commands) in zip(expected_headers[1:], command_groups, strict=True)
+            },
+        }
 
 
 def test_runtime_doc_links_and_quickstart_snippets_are_runtime_derived() -> None:
@@ -154,7 +169,6 @@ def test_runtime_doc_links_and_quickstart_snippets_are_runtime_derived() -> None
     doc_links = render_runtime_doc_links(context)
 
     for surface in context.runtime_surfaces:
-        assert runtime_doc_filename(surface) == f"{_runtime_doc_slug(surface.display_name)}.md"
         assert f"- [{surface.display_name} quickstart](./{runtime_doc_filename(surface)})" in doc_links
 
         snippet = render_runtime_quickstart_snippet(surface.runtime_name, context)
@@ -174,6 +188,10 @@ def test_runtime_doc_links_and_quickstart_snippets_are_runtime_derived() -> None
         ):
             assert command in snippet
         assert context.contract.post_start_settings.default_sentence in snippet
+
+
+def test_runtime_doc_filename_slugifies_display_names() -> None:
+    assert runtime_doc_filename(_synthetic_runtime_surface("Alpha Runtime++")) == "alpha-runtime.md"
 
 
 def test_public_surface_block_registry_includes_runtime_quickstarts() -> None:

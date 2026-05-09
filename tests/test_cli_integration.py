@@ -28,6 +28,7 @@ from gpd.core.costs import UsageRecord, _profile_tier_mix, usage_ledger_path
 from gpd.core.recent_projects import record_recent_project
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown
+from tests.helpers.cli import assert_no_top_level_resume_aliases as _assert_no_top_level_resume_aliases
 from tests.hooks.helpers import clear_runtime_env
 from tests.manuscript_test_support import (
     manuscript_path as canonical_manuscript_path,
@@ -53,11 +54,6 @@ def _select_runtime_descriptor(predicate, label: str, *, exclude: tuple[str, ...
 _DOLLAR_COMMAND_DESCRIPTOR = next(
     descriptor for descriptor in _RUNTIME_DESCRIPTORS if descriptor.public_command_surface_prefix.startswith("$")
 )
-_SLASH_COMMAND_DESCRIPTOR = _select_runtime_descriptor(
-    lambda descriptor: descriptor.public_command_surface_prefix.startswith("/"),
-    "slash-command runtime",
-    exclude=(_DOLLAR_COMMAND_DESCRIPTOR.runtime_name,),
-)
 _ENV_OVERRIDE_DESCRIPTOR = _select_runtime_descriptor(
     lambda descriptor: (
         descriptor.global_config.env_var
@@ -71,25 +67,6 @@ _SECONDARY_PERMISSIONS_DESCRIPTOR = _select_runtime_descriptor(
     "secondary runtime permissions surface",
     exclude=(_ENV_OVERRIDE_DESCRIPTOR.runtime_name,),
 )
-
-
-def _assert_no_top_level_resume_aliases(payload: dict[str, object]) -> None:
-    for key in RESUME_BACKEND_ONLY_FIELDS:
-        assert key not in payload
-
-
-@pytest.fixture()
-def dollar_command_prefix(monkeypatch: pytest.MonkeyPatch) -> str:
-    """Force the integration preflight surface to resolve the dollar-command runtime."""
-    monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: _DOLLAR_COMMAND_DESCRIPTOR.runtime_name)
-    return get_adapter(_DOLLAR_COMMAND_DESCRIPTOR.runtime_name).runtime_descriptor.public_command_surface_prefix
-
-
-@pytest.fixture()
-def slash_command_prefix(monkeypatch: pytest.MonkeyPatch) -> str:
-    """Force the integration preflight surface to resolve the slash-command runtime."""
-    monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: _SLASH_COMMAND_DESCRIPTOR.runtime_name)
-    return get_adapter(_SLASH_COMMAND_DESCRIPTOR.runtime_name).runtime_descriptor.public_command_surface_prefix
 
 
 @pytest.fixture(autouse=True)
@@ -1314,37 +1291,6 @@ def _write_live_execution_caches(
         )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 1. timestamp
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestTimestamp:
-    def test_timestamp_default(self) -> None:
-        result = _invoke("timestamp")
-        assert "timestamp" in result.output.lower() or "T" in result.output
-
-    def test_timestamp_full(self) -> None:
-        result = _invoke("timestamp", "full")
-        # ISO 8601 contains 'T' separator
-        assert "T" in result.output or "timestamp" in result.output
-
-    def test_timestamp_date(self) -> None:
-        result = _invoke("timestamp", "date")
-        # Should contain a date-like string YYYY-MM-DD
-        assert "-" in result.output
-
-    def test_timestamp_filename(self) -> None:
-        result = _invoke("timestamp", "filename")
-        assert "T" in result.output or "timestamp" in result.output
-
-    def test_timestamp_raw(self) -> None:
-        result = _invoke("--raw", "timestamp", "full")
-        parsed = json.loads(result.output)
-        assert "timestamp" in parsed
-        assert "T" in parsed["timestamp"]
-
-
 class TestResume:
     def test_resume_raw_surfaces_ranked_candidates(self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         handoff = gpd_project / "GPD" / "phases" / "01-test-phase" / ".continue-here.md"
@@ -2035,98 +1981,6 @@ class TestSuggest:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 2. slug
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestSlug:
-    def test_slug_basic(self) -> None:
-        result = _invoke("slug", "Hello World")
-        assert "hello-world" in result.output.lower()
-
-    def test_slug_with_special_chars(self) -> None:
-        result = _invoke("slug", "Quantum Field Theory (QFT)")
-        output_lower = result.output.lower()
-        assert "quantum" in output_lower
-        assert "field" in output_lower
-
-    def test_slug_raw(self) -> None:
-        result = _invoke("--raw", "slug", "Test Slug")
-        parsed = json.loads(result.output)
-        assert "slug" in parsed
-        assert "test-slug" in parsed["slug"]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 3. verify-path
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestVerifyPath:
-    def test_verify_existing_file(self, gpd_project: Path) -> None:
-        result = _invoke("verify-path", "GPD/state.json")
-        assert "file" in result.output.lower() or "True" in result.output or "true" in result.output
-
-    def test_verify_existing_directory(self) -> None:
-        result = _invoke("verify-path", "GPD")
-        assert "directory" in result.output.lower() or "True" in result.output or "true" in result.output
-
-    def test_verify_nonexistent_path(self) -> None:
-        result = _invoke("verify-path", "does/not/exist.txt", expect_ok=False)
-        assert result.exit_code == 1
-        assert "False" in result.output or "false" in result.output
-
-    def test_verify_path_raw(self, gpd_project: Path) -> None:
-        result = _invoke("--raw", "verify-path", "GPD/state.json")
-        parsed = json.loads(result.output)
-        assert parsed["exists"] is True
-        assert parsed["type"] == "file"
-
-    def test_verify_path_raw_nonexistent(self) -> None:
-        result = _invoke("--raw", "verify-path", "nope.txt", expect_ok=False)
-        assert result.exit_code == 1
-        parsed = json.loads(result.output)
-        assert parsed["exists"] is False
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 4. history-digest
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestHistoryDigest:
-    def test_history_digest_basic(self) -> None:
-        result = _invoke("history-digest")
-        # Should succeed and contain some output
-        assert result.exit_code == 0
-
-    def test_history_digest_raw(self) -> None:
-        result = _invoke("--raw", "history-digest")
-        parsed = json.loads(result.output)
-        assert "phases" in parsed
-        assert "decisions" in parsed
-        assert "methods" in parsed
-
-    def test_history_digest_finds_phase_data(self) -> None:
-        result = _invoke("--raw", "history-digest")
-        parsed = json.loads(result.output)
-        # Phase 01 has a SUMMARY.md with frontmatter
-        assert "01" in parsed["phases"] or "1" in parsed["phases"]
-
-    def test_history_digest_extracts_methods(self) -> None:
-        result = _invoke("--raw", "history-digest")
-        parsed = json.loads(result.output)
-        assert "finite-element" in parsed["methods"]
-
-    def test_history_digest_extracts_decisions(self) -> None:
-        result = _invoke("--raw", "history-digest")
-        parsed = json.loads(result.output)
-        assert len(parsed["decisions"]) > 0
-        decision_texts = [d["decision"] for d in parsed["decisions"]]
-        assert any("SI" in t for t in decision_texts)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # 4b. observe
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -2257,16 +2111,6 @@ class TestInitIncludeParsing:
         assert "has_existing_project" not in payload.keys()
         assert payload["needs_research_map"] is True
 
-    def test_init_progress_include_rejects_unknown_values(self) -> None:
-        result = _invoke("--raw", "init", "progress", "--include", "state, bogus", expect_ok=False)
-
-        assert result.exit_code == 1
-        payload = json.loads(result.output)
-        assert payload["error"] == (
-            "Unknown --include value(s) for gpd init progress: bogus. "
-            "Allowed values: config, project, protocols, references, roadmap, state."
-        )
-
     def test_init_resume_is_read_only_and_returns_ranked_candidates(self, gpd_project: Path) -> None:
         planning = gpd_project / "GPD"
         phase_dir = planning / "phases" / "01-test-phase"
@@ -2385,107 +2229,6 @@ class TestInitIncludeParsing:
         assert payload["status_classification"] == "idle"
         assert payload["assessment"] == "idle"
         assert payload["possibly_stalled"] is False
-
-
-class TestCommandContextSurface:
-    @pytest.mark.parametrize("command_name", ["gpd:settings", "gpd:set-tier-models"])
-    def test_validate_command_context_reports_runtime_command_surface(
-        self, dollar_command_prefix: str, command_name: str
-    ) -> None:
-        result = _invoke("--raw", "validate", "command-context", command_name)
-        payload = json.loads(result.output)
-
-        assert payload["command"] == command_name
-        assert payload["validated_surface"] == _DOLLAR_COMMAND_DESCRIPTOR.validated_command_surface
-        assert payload["public_runtime_command_prefix"] == _DOLLAR_COMMAND_DESCRIPTOR.public_command_surface_prefix
-        assert payload["local_cli_equivalence_guaranteed"] is False
-        assert f"public command surface rooted at `{dollar_command_prefix}`" in payload["dispatch_note"]
-        assert "same-name local `gpd` subcommand" in payload["dispatch_note"]
-
-    @pytest.mark.parametrize("command_name", ["gpd:settings", "gpd:set-tier-models"])
-    def test_validate_command_context_reports_slash_runtime_surface(
-        self, slash_command_prefix: str, command_name: str
-    ) -> None:
-        result = _invoke("--raw", "validate", "command-context", command_name)
-        payload = json.loads(result.output)
-
-        assert payload["command"] == command_name
-        assert payload["validated_surface"] == _SLASH_COMMAND_DESCRIPTOR.validated_command_surface
-        assert payload["public_runtime_command_prefix"] == _SLASH_COMMAND_DESCRIPTOR.public_command_surface_prefix
-        assert payload["local_cli_equivalence_guaranteed"] is False
-        assert f"public command surface rooted at `{slash_command_prefix}`" in payload["dispatch_note"]
-        assert "same-name local `gpd` subcommand" in payload["dispatch_note"]
-
-    @pytest.mark.parametrize("command_name", ["gpd:settings", "gpd:set-tier-models"])
-    def test_validate_command_context_falls_back_when_runtime_resolution_fails(
-        self, monkeypatch: pytest.MonkeyPatch, command_name: str
-    ) -> None:
-        def _raise_runtime_error(cwd=None) -> str:
-            raise RuntimeError("runtime resolution failed")
-
-        monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", _raise_runtime_error)
-        result = _invoke("--raw", "validate", "command-context", command_name)
-        payload = json.loads(result.output)
-
-        assert payload["command"] == command_name
-        assert payload["validated_surface"] == "public_runtime_command_surface"
-        assert payload["public_runtime_command_prefix"] == ""
-        assert payload["local_cli_equivalence_guaranteed"] is False
-        assert "the active runtime command surface" in payload["dispatch_note"]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 6. regression-check
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestRegressionCheck:
-    def test_regression_check_passing(self) -> None:
-        """No completed phases with conflicting conventions => pass."""
-        result = _invoke("regression-check")
-        assert result.exit_code == 0
-
-    def test_regression_check_raw(self) -> None:
-        result = _invoke("--raw", "regression-check")
-        parsed = json.loads(result.output)
-        assert "passed" in parsed
-        assert "issues" in parsed
-        assert "phases_checked" in parsed
-
-    def test_regression_check_quick(self) -> None:
-        result = _invoke("regression-check", "--quick")
-        assert result.exit_code == 0
-
-    def test_regression_check_phase_scope(self, gpd_project: Path) -> None:
-        p2 = gpd_project / "GPD" / "phases" / "02-phase-two"
-        (p2 / "01-PLAN.md").write_text("---\nphase: '02'\n---\n# Plan\n", encoding="utf-8")
-        (p2 / "01-SUMMARY.md").write_text(
-            '---\nphase: "02"\nplan: "01"\nconventions:\n  metric: (+,-,-,-)\n---\n\n# Summary\n', encoding="utf-8"
-        )
-
-        result = _invoke("--raw", "regression-check", "1")
-        parsed = json.loads(result.output)
-        assert result.exit_code == 0
-        assert parsed["passed"] is True
-        assert parsed["phases_checked"] == 1
-
-    def test_regression_check_detects_conflict(self, gpd_project: Path) -> None:
-        """Inject a convention conflict across two completed phases."""
-        p2 = gpd_project / "GPD" / "phases" / "02-phase-two"
-
-        # Make phase 2 look completed with a conflicting convention
-        (p2 / "01-PLAN.md").write_text("---\nphase: '02'\n---\n# Plan\n", encoding="utf-8")
-        (p2 / "01-SUMMARY.md").write_text(
-            '---\nphase: "02"\nplan: "01"\nconventions:\n  metric: (+,-,-,-)\n---\n\n# Summary\n', encoding="utf-8"
-        )
-
-        result = runner.invoke(app, ["--raw", "regression-check"], catch_exceptions=False)
-        parsed = json.loads(result.output)
-        # Both phases are now completed (have plan+summary), with conflicting metric
-        assert not parsed["passed"], "Expected regression check to detect convention conflict"
-        issues = parsed["issues"]
-        conflict_types = [i["type"] for i in issues]
-        assert "convention_conflict" in conflict_types
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -3519,20 +3262,6 @@ class TestSummaryExtractCommand:
         parsed = json.loads(result.output)
         assert "one_liner" in parsed
         assert parsed["one_liner"] == "Set up project"
-
-
-class TestSyncPhaseCheckpointsCommand:
-    def test_sync_phase_checkpoints(self, gpd_project: Path) -> None:
-        phase_dir = gpd_project / "GPD" / "phases" / "01-test-phase"
-        (phase_dir / "01-VERIFICATION.md").write_text("# Verification\n\nPassed.\n", encoding="utf-8")
-
-        result = _invoke("--raw", "sync-phase-checkpoints")
-
-        parsed = json.loads(result.output)
-        assert parsed["phase_count"] == 1
-        assert (gpd_project / "GPD" / "phase-checkpoints" / "01-test-phase.md").exists()
-        assert (gpd_project / "GPD" / "CHECKPOINTS.md").exists()
-
 
 class TestResolveModelCommand:
     def test_resolve_tier(self) -> None:

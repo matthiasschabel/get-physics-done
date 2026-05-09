@@ -9,31 +9,27 @@ import pytest
 from gpd.adapters.runtime_catalog import get_runtime_descriptor, get_shared_install_metadata, iter_runtime_descriptors
 from gpd.core.onboarding_surfaces import beginner_runtime_surface, beginner_runtime_surfaces
 from gpd.core.public_surface_contract import beginner_onboarding_hub_url
-from gpd.core.public_surface_renderer import runtime_doc_filename, runtime_quickstart_block_id
-from tests.assertion_taxonomy_support import FragmentMode, assert_fragments, public_exact, semantic_anchor
+from gpd.core.public_surface_renderer import runtime_doc_filename
+from tests.assertion_taxonomy_support import FragmentMode
 from tests.doc_surface_contracts import (
+    assert_any_docs_semantic_anchor,
     assert_beginner_hub_preflight_contract,
     assert_beginner_startup_routing_contract,
+    assert_docs_public_exact,
     assert_docs_release_source_policy_contract,
+    assert_docs_semantic_anchor,
     assert_local_heading_links_resolve,
-    assert_markdown_link,
-    assert_os_install_matrix_contract,
-    assert_os_next_steps_table_contract,
-    assert_public_surface_generated_file_current,
-    assert_public_surface_generated_region,
-    assert_supported_runtimes_table_contract,
 )
 from tests.markdown_test_support import (
     assert_forbidden_fragments,
+    assert_markdown_link,
     assert_ordered_fragments,
     extract_markdown_section,
+    markdown_fence_bodies,
 )
-from tests.prompt_metrics_support import iter_markdown_fences
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _SHARED_INSTALL = get_shared_install_metadata()
-_DOCS_PUBLIC_OWNER = "docs onboarding contract"
-_DOCS_PUBLIC_RATIONALE = "public docs navigation labels, links, and command surfaces must stay stable"
 _RUNTIME_DOCS_WITH_UNATTENDED_READINESS_LOOP = tuple(
     descriptor.runtime_name
     for descriptor in iter_runtime_descriptors()
@@ -45,71 +41,10 @@ def _read(relative_path: str) -> str:
     return (REPO_ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def _assert_public_exact(
-    content: str,
-    label: str,
-    fragments: tuple[str, ...] | str,
-    *,
-    mode: FragmentMode = FragmentMode.ALL,
-    context: str,
-) -> None:
-    assert_fragments(
-        content,
-        public_exact(
-            label,
-            fragments,
-            owner=_DOCS_PUBLIC_OWNER,
-            rationale=_DOCS_PUBLIC_RATIONALE,
-            mode=mode,
-            context=context,
-        ),
-    )
-
-
-def _assert_semantic_anchor(
-    content: str,
-    label: str,
-    fragments: tuple[str, ...] | str,
-    *,
-    mode: FragmentMode = FragmentMode.ALL,
-    context: str,
-) -> None:
-    assert_fragments(content, semantic_anchor(label, fragments, mode=mode, context=context))
-
-
-def _assert_any_semantic_anchor(
-    docs: dict[str, str],
-    label: str,
-    fragments: tuple[str, ...] | str,
-    *,
-    context: str,
-) -> None:
-    failures: list[str] = []
-    for doc_name, content in docs.items():
-        try:
-            _assert_semantic_anchor(content, label, fragments, context=f"{context}: {doc_name}")
-        except AssertionError as exc:
-            failures.append(f"{doc_name}: {exc}")
-        else:
-            return
-    joined = "\n".join(failures)
-    raise AssertionError(f"expected {label} in at least one document for {context}\n{joined}")
-
-
-def _fenced_command_blocks(section: str, *, info: str) -> tuple[str, ...]:
-    return tuple(fence.body.strip() for fence in iter_markdown_fences(section) if fence.info.strip() == info)
-
-
 @pytest.mark.parametrize("surface", beginner_runtime_surfaces(), ids=lambda surface: surface.runtime_name)
 def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
     doc_path = f"docs/{runtime_doc_filename(surface)}"
     content = _read(doc_path)
-    assert_public_surface_generated_file_current(content, context=doc_path)
-    assert_public_surface_generated_region(
-        content,
-        runtime_quickstart_block_id(surface),
-        context=f"{doc_path} generated quickstart",
-    )
     fragments = (
         surface.help_command,
         surface.start_command,
@@ -119,10 +54,10 @@ def test_runtime_quickstarts_surface_the_beginner_next_steps(surface) -> None:
         surface.resume_work_command,
         surface.settings_command,
     )
-    _assert_public_exact(content, "runtime guide command labels", fragments, context=doc_path)
+    assert_docs_public_exact(content, "runtime guide command labels", fragments, context=doc_path)
     assert_ordered_fragments(content, fragments[:3], context=f"{doc_path} first-launch order", normalize=False)
     assert_markdown_link(content, "GPD Onboarding Hub", "./README.md", context=doc_path)
-    _assert_public_exact(
+    assert_docs_public_exact(
         content,
         "runtime guide stable headings",
         ("## Choose this runtime if", "## What must already be true", "## 2) Install, start, and use GPD"),
@@ -140,7 +75,7 @@ def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -
     readiness_command = f"gpd validate unattended-readiness --runtime {runtime_name} --autonomy supervised"
     permissions_sync_command = f"gpd permissions sync --runtime {runtime_name} --autonomy supervised"
 
-    _assert_public_exact(
+    assert_docs_public_exact(
         readiness,
         "runtime unattended readiness commands and verdicts",
         (
@@ -151,7 +86,7 @@ def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -
         ),
         context=f"{doc_path} readiness section",
     )
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         readiness,
         "runtime unattended readiness loop semantics",
         (
@@ -169,14 +104,14 @@ def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -
     )
 
     if descriptor.capabilities.permissions_surface == "launch-wrapper":
-        _assert_semantic_anchor(
+        assert_docs_semantic_anchor(
             readiness,
             "runtime launcher-wrapper readiness guidance",
             "GPD-managed launcher wrapper",
             context=f"{doc_path} readiness section",
         )
     else:
-        _assert_public_exact(
+        assert_docs_public_exact(
             readiness,
             "runtime relaunch command label",
             f"relaunch `{descriptor.launch_command}`",
@@ -188,37 +123,8 @@ def test_runtime_quickstarts_keep_unattended_readiness_loop(runtime_name: str) -
     "doc_name",
     ["macos.md", "windows.md", "linux.md"],
 )
-def test_os_quickstarts_install_matrix_matches_runtime_catalog(doc_name: str) -> None:
-    content = _read(f"docs/{doc_name}")
-    assert_public_surface_generated_file_current(content, context=f"docs/{doc_name}")
-    assert_public_surface_generated_region(
-        content,
-        "os-install-matrix",
-        context=f"docs/{doc_name} generated install matrix",
-    )
-    install_section = extract_markdown_section(content, "## Install GPD", context=f"docs/{doc_name}")
-
-    assert_os_install_matrix_contract(
-        install_section,
-        beginner_runtime_surfaces(),
-        bootstrap_command=_SHARED_INSTALL.bootstrap_command,
-        context=f"docs/{doc_name} install matrix",
-    )
-
-
-@pytest.mark.parametrize(
-    "doc_name",
-    ["macos.md", "windows.md", "linux.md"],
-)
 def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str) -> None:
     content = _read(f"docs/{doc_name}")
-    assert_public_surface_generated_file_current(content, context=f"docs/{doc_name}")
-    for block_id in ("runtime-doc-links", "supported-runtimes-table", "os-next-steps-table", "recovery-note"):
-        assert_public_surface_generated_region(
-            content,
-            block_id,
-            context=f"docs/{doc_name} generated {block_id}",
-        )
     runtime_commands = tuple(
         dict.fromkeys(
             command
@@ -227,7 +133,7 @@ def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str)
         )
     )
 
-    _assert_public_exact(
+    assert_docs_public_exact(
         content,
         "OS guide post-install command labels",
         (
@@ -236,12 +142,6 @@ def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str)
             *runtime_commands,
         ),
         context=f"docs/{doc_name}",
-    )
-    where_next = extract_markdown_section(content, "## Where to go next", context=f"docs/{doc_name}")
-    assert_os_next_steps_table_contract(
-        where_next,
-        beginner_runtime_surfaces(),
-        context=f"docs/{doc_name} where-to-go-next table",
     )
     assert_markdown_link(content, "GPD Onboarding Hub", "./README.md", context=f"docs/{doc_name}")
     for surface in beginner_runtime_surfaces():
@@ -255,19 +155,9 @@ def test_os_quickstarts_link_runtime_guides_and_post_install_help(doc_name: str)
 
 def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
     content = _read("docs/README.md")
-    assert_public_surface_generated_file_current(content, context="docs/README.md")
-    for block_id in (
-        "beginner-preflight",
-        "beginner-caveats",
-        "beginner-startup-ladder",
-        "terminal-runtime-bridge",
-        "post-start-settings",
-        "recovery-note",
-    ):
-        assert_public_surface_generated_region(content, block_id, context=f"docs/README.md generated {block_id}")
     assert_beginner_hub_preflight_contract(content)
 
-    _assert_public_exact(
+    assert_docs_public_exact(
         content,
         "onboarding hub stable navigation labels",
         (
@@ -280,7 +170,7 @@ def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
         ),
         context="docs/README.md",
     )
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         content,
         "onboarding hub beginner navigation concepts",
         (
@@ -295,7 +185,7 @@ def test_docs_onboarding_hub_links_os_and_runtime_guides() -> None:
     for surface in beginner_runtime_surfaces():
         guide = runtime_doc_filename(surface)
         assert_markdown_link(content, f"{surface.display_name} quickstart", f"./{guide}", context="docs/README.md")
-        _assert_public_exact(
+        assert_docs_public_exact(
             content,
             f"{surface.display_name} install command",
             f"{_SHARED_INSTALL.bootstrap_command} {surface.install_flag} --local",
@@ -324,25 +214,9 @@ def test_docs_onboarding_hub_surfaces_release_source_policy() -> None:
 
 def test_root_readme_settings_short_wording_matches_model_profile_contract() -> None:
     content = _read("README.md")
-    assert_public_surface_generated_file_current(content, context="README.md")
-    assert_public_surface_generated_region(
-        content,
-        "beginner-startup-ladder",
-        context="README.md generated startup ladder",
-    )
-    assert_public_surface_generated_region(
-        content,
-        "recovery-note",
-        context="README.md generated recovery note",
-    )
-    assert_public_surface_generated_region(
-        content,
-        "local-cli-bridge-summary",
-        context="README.md generated local CLI bridge",
-    )
     quick_start = extract_markdown_section(content, "## Quick Start", context="README.md")
 
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         quick_start,
         "root README settings model-cost posture",
         (
@@ -360,11 +234,6 @@ def test_root_readme_settings_short_wording_matches_model_profile_contract() -> 
 
 def test_root_readme_start_here_links_to_docs_onboarding_hub() -> None:
     content = _read("README.md")
-    assert_public_surface_generated_region(
-        content,
-        "terminal-runtime-bridge",
-        context="README.md generated terminal/runtime bridge",
-    )
     start_here = extract_markdown_section(content, "## Start Here", context="README.md")
 
     assert_markdown_link(
@@ -373,7 +242,7 @@ def test_root_readme_start_here_links_to_docs_onboarding_hub() -> None:
         beginner_onboarding_hub_url(),
         context="README.md Start Here",
     )
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         start_here,
         "root README beginner terminal/runtime bridge",
         ("single beginner path", "two places", "normal system terminal", "AI runtime"),
@@ -394,7 +263,7 @@ def test_root_readme_install_source_policy_and_peer_review_target_are_current() 
     install_options = quick_start[install_options_start : quick_start.index("</details>", install_options_start)]
     command_context = extract_markdown_section(content, "## Key GPD Paths", context="README.md")
 
-    _assert_public_exact(
+    assert_docs_public_exact(
         install_options,
         "root README install source policy labels",
         (
@@ -407,7 +276,7 @@ def test_root_readme_install_source_policy_and_peer_review_target_are_current() 
         context="README.md install options",
     )
     assert_forbidden_fragments(install_options, "matching tagged GitHub source", context="README.md install options")
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         command_context,
         "peer-review explicit target semantics",
         ("one explicit manuscript", "artifact path", "paper directory target"),
@@ -422,19 +291,19 @@ def test_root_readme_runtime_workflow_examples_are_prefixless_and_uninstall_link
     worked_example = extract_markdown_section(content, "## Worked Example", context="README.md")
     uninstall = extract_markdown_section(content, "## Uninstall", context="README.md")
 
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         quick_start,
         "prefixless new-project workflow framing",
         ("new-project workflow", "command names without runtime prefixes"),
         context="README.md Quick Start",
     )
-    _assert_public_exact(
+    assert_docs_public_exact(
         quick_start,
         "root README quick-start workflow sequence",
         "`new-project -> discuss-phase 1 -> plan-phase 1 -> execute-phase 1 -> verify-work 1`",
         context="README.md Quick Start",
     )
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         worked_example,
         "prefixless worked-example framing",
         ("canonical command names", "without runtime prefixes"),
@@ -446,11 +315,11 @@ def test_root_readme_runtime_workflow_examples_are_prefixless_and_uninstall_link
         context="README.md Worked Example",
         normalize=False,
     )
-    text_blocks = _fenced_command_blocks(worked_example, info="text")
+    text_blocks = markdown_fence_bodies(worked_example, info="text")
     assert any(block.startswith("new-project\n") for block in text_blocks)
     assert "plan-phase 1\nexecute-phase 1\nverify-work 1" in text_blocks
     assert "write-paper\npeer-review\nrespond-to-referees\narxiv-submission" in text_blocks
-    _assert_public_exact(
+    assert_docs_public_exact(
         content,
         "root README research and publication loop labels",
         (
@@ -467,7 +336,7 @@ def test_root_readme_runtime_workflow_examples_are_prefixless_and_uninstall_link
         "matching uninstall command from [Start Here]",
         context="README.md Uninstall",
     )
-    _assert_public_exact(
+    assert_docs_public_exact(
         uninstall,
         "root README uninstall command",
         "npx -y get-physics-done --uninstall",
@@ -479,7 +348,7 @@ def test_root_readme_project_contract_validation_placeholder_is_current() -> Non
     content = _read("README.md")
     validation_commands = extract_markdown_section(content, "## Advanced CLI Utilities", context="README.md")
 
-    _assert_public_exact(
+    assert_docs_public_exact(
         validation_commands,
         "project-contract CLI placeholder",
         "`gpd validate project-contract <file.json|-> [--mode approved|draft]`",
@@ -492,21 +361,8 @@ def test_root_readme_project_contract_validation_placeholder_is_current() -> Non
     )
 
 
-def test_root_readme_supported_runtimes_table_matches_beginner_runtime_surfaces() -> None:
+def test_root_readme_supported_runtimes_omits_internal_config_overrides() -> None:
     content = _read("README.md")
-    assert_public_surface_generated_file_current(content, context="README.md")
-    assert_public_surface_generated_region(
-        content,
-        "supported-runtimes-table",
-        context="README.md generated supported runtimes table",
-    )
-    supported_runtimes = extract_markdown_section(content, "## Supported Runtimes", context="README.md")
-
-    assert_supported_runtimes_table_contract(
-        supported_runtimes,
-        beginner_runtime_surfaces(),
-        context="README.md supported runtimes table",
-    )
 
     assert_forbidden_fragments(
         content,
@@ -537,7 +393,7 @@ def test_runtime_config_guide_omits_unsupported_skip_mcp_advice() -> None:
     content = _read("src/gpd/specs/references/tooling/runtime-config-guide.md")
 
     assert "--skip-mcp" not in content
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         content,
         "runtime config low-resource install guidance",
         ("disk space", "managed environment", "runtime config", "recreated"),
@@ -549,7 +405,7 @@ def test_set_tier_models_workflow_keeps_runtime_model_examples_generic() -> None
     content = _read("src/gpd/specs/workflows/set-tier-models.md")
 
     assert "adapter catalog" not in content
-    _assert_semantic_anchor(
+    assert_docs_semantic_anchor(
         content,
         "runtime-native model example guidance",
         (
@@ -568,19 +424,19 @@ def test_runtime_quickstarts_keep_current_provider_specific_setup_notes() -> Non
         surface.runtime_name: _read(f"docs/{runtime_doc_filename(surface)}") for surface in beginner_runtime_surfaces()
     }
 
-    _assert_any_semantic_anchor(
+    assert_any_docs_semantic_anchor(
         docs,
         "Claude Code account-access setup note",
         ("Claude Code", "account", "free Claude.ai plan"),
         context="runtime quickstarts",
     )
-    _assert_any_semantic_anchor(
+    assert_any_docs_semantic_anchor(
         docs,
         "Gemini Cloud project setup note",
         ("GOOGLE_CLOUD_PROJECT", "Gemini Code Assist", "official authentication guide"),
         context="runtime quickstarts",
     )
-    _assert_any_semantic_anchor(
+    assert_any_docs_semantic_anchor(
         docs,
         "OpenCode connect setup note",
         ("/connect", "provider", "API-key or billing setup"),

@@ -18,6 +18,8 @@ from gpd.core.workflow_staging import load_workflow_stage_manifest, validate_wor
 from gpd.registry import _parse_frontmatter, _parse_tools
 from tests.assertion_taxonomy_support import (
     FragmentAssertion,
+    FragmentMode,
+    MatchMode,
     assert_prompt_contracts,
     forbidden_duplicate,
     fragment_count,
@@ -96,7 +98,54 @@ def _assert_public_fragments(text: str, *fragments: str, context: str) -> None:
 
 
 def _assert_semantic_fragments(text: str, *fragments: str, context: str) -> None:
-    _assert_prompt_contracts(text, semantic_anchor(context, fragments, context=context))
+    _assert_prompt_contracts(text, semantic_anchor(context, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=context))
+
+
+def _assert_semantic_concepts(
+    text: str,
+    concepts: dict[str, tuple[str, ...]],
+    *,
+    context: str,
+) -> None:
+    _assert_prompt_contracts(
+        text,
+        *(
+            semantic_anchor(concept, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=context)
+            for concept, fragments in concepts.items()
+        ),
+    )
+
+
+def _assert_init_placeholders_visible(text: str, fields: tuple[str, ...], *, context: str) -> None:
+    _assert_machine_fragments(text, *(f"{{{field}}}" for field in fields), context=context)
+
+
+def _assert_command_delegates_to_workflow(
+    command_text: str,
+    workflow_id: str,
+    *,
+    semantic_fragments: tuple[str, ...] = (),
+    stale_fragments: tuple[str, ...] = (),
+    context: str | None = None,
+) -> None:
+    context = context or f"{workflow_id} command workflow delegation"
+    include_fragments = [
+        f"@{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md",
+        f"{{GPD_INSTALL_DIR}}/workflows/{workflow_id}.md",
+    ]
+    manifest_path = WORKFLOWS_DIR / f"{workflow_id}-stage-manifest.json"
+    if manifest_path.is_file():
+        manifest = load_workflow_stage_manifest(workflow_id)
+        include_fragments.extend(f"@{{GPD_INSTALL_DIR}}/{path}" for stage in manifest.stages for path in stage.mode_paths)
+
+    _assert_prompt_contracts(
+        command_text,
+        machine_exact(f"{workflow_id} workflow include", tuple(include_fragments), mode=FragmentMode.ANY, context=context),
+    )
+    if semantic_fragments:
+        _assert_semantic_fragments(command_text, *semantic_fragments, context=context)
+    if stale_fragments:
+        _assert_forbidden_fragments(command_text, *stale_fragments, context=context)
 
 
 def _assert_forbidden_fragments(text: str, *fragments: str, context: str) -> None:
@@ -400,7 +449,6 @@ AGENT_REFERENCE_TOKENS = {
     ],
 }
 
-
 def _assert_contains_tokens(path: Path, tokens: list[str]) -> None:
     if path.parent == WORKFLOWS_DIR and path.stem in STAGED_WORKFLOW_AUTHORITY_NAMES:
         content = _workflow_authority_text(path.stem)
@@ -434,13 +482,7 @@ def _assert_prompt_concepts(
     *,
     context: str,
 ) -> None:
-    normalized = _normalized_prompt_text(text)
-    missing: list[str] = []
-    for concept, fragments in concepts.items():
-        absent = [fragment for fragment in fragments if _normalized_prompt_text(fragment) not in normalized]
-        if absent:
-            missing.append(f"{concept}: {absent}")
-    assert not missing, f"{context} missing prompt concepts:\n" + "\n".join(missing)
+    _assert_semantic_concepts(text, concepts, context=context)
 
 
 def _assert_ordered_prompt_fragments(text: str, fragments: tuple[str, ...], *, context: str) -> None:
@@ -674,16 +716,21 @@ def test_executor_prompt_defaults_to_return_only_shared_state_updates() -> None:
     executor = (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
     executor_completion = (REFERENCES_DIR / "execution" / "executor-completion.md").read_text(encoding="utf-8")
 
-    assert "return shared-state updates to the orchestrator instead of writing `STATE.md` directly" in executor
+    _assert_semantic_fragments(
+        executor,
+        "return shared-state updates to the orchestrator",
+        "instead of writing `STATE.md` directly",
+        context="executor return-only shared state updates",
+    )
     assert (
         "Your job: Execute the research plan completely, checkpoint each step, create SUMMARY.md, update STATE.md."
         not in executor
     )
-    assert "state_updates" in executor
-    assert "contract_updates" in executor
-    assert "decisions" in executor
-    assert "blockers" in executor
-    assert "continuation_update" in executor
+    _assert_machine_fragments(
+        executor,
+        "state_updates", "contract_updates", "decisions", "blockers", "continuation_update",
+        context="executor return fields",
+    )
     _assert_semantic_fragments(
         executor,
         "omit `recorded_at`",
@@ -693,11 +740,11 @@ def test_executor_prompt_defaults_to_return_only_shared_state_updates() -> None:
     )
     assert 'recorded_at: "{timestamp}"' not in executor
     assert 'recorded_by: "gpd-executor"' not in executor
-    assert "state_updates:" in executor_completion
-    assert "contract_updates:" in executor_completion
-    assert "decisions:" in executor_completion
-    assert "blockers:" in executor_completion
-    assert "continuation_update:" in executor_completion
+    _assert_machine_fragments(
+        executor_completion,
+        "state_updates:", "contract_updates:", "decisions:", "blockers:", "continuation_update:",
+        context="executor completion return fields",
+    )
     _assert_semantic_fragments(
         executor_completion,
         "omit `recorded_at`",
@@ -1263,20 +1310,14 @@ def test_slides_workflow_references_templates_and_existing_output_policy() -> No
     workflow = (WORKFLOWS_DIR / "slides.md").read_text(encoding="utf-8")
 
     _assert_slides_public_label_local_preflight_guidance(workflow, shared_source=True)
-    assert "{GPD_INSTALL_DIR}/templates/slides/presentation-brief.md" in workflow
-    assert "{GPD_INSTALL_DIR}/templates/slides/outline.md" in workflow
-    assert "{GPD_INSTALL_DIR}/templates/slides/slides.md" in workflow
-    assert "{GPD_INSTALL_DIR}/templates/slides/speaker-notes.md" in workflow
-    assert "{GPD_INSTALL_DIR}/templates/slides/main.tex" in workflow
-    assert "1. Refresh" in workflow
-    assert "2. Update" in workflow
-    assert "3. Skip" in workflow
-    assert "`slides/` is the only durable write root for this workflow" in workflow
-    assert "must not satisfy publication, peer-review, response, arXiv-package, or export gates" in workflow
-    assert "If the workspace is not a git checkout" in workflow
-    assert "runtime-native deletion for exact known aux files under `slides/`" in workflow
-    assert "main.nav" in workflow
-    assert "main.snm" in workflow
+    _assert_machine_fragments(
+        workflow,
+        "{GPD_INSTALL_DIR}/templates/slides/presentation-brief.md", "{GPD_INSTALL_DIR}/templates/slides/outline.md",
+        "{GPD_INSTALL_DIR}/templates/slides/slides.md", "{GPD_INSTALL_DIR}/templates/slides/speaker-notes.md",
+        "{GPD_INSTALL_DIR}/templates/slides/main.tex", "1. Refresh", "2. Update", "3. Skip",
+        "main.nav", "main.snm",
+        context="slides template and cleanup machine tokens",
+    )
     assert "source-bound skeleton" in workflow
     assert "selected_publication_root" not in workflow
     assert "selected_review_root" not in workflow
@@ -1714,18 +1755,13 @@ def test_proof_contract_prompts_surface_explicit_theorem_fields_and_review_bindi
     peer_review = _workflow_authority_text("peer-review")
     check_proof = (AGENTS_DIR / "gpd-check-proof.md").read_text(encoding="utf-8")
 
-    assert "claim_kind" in plan_schema
-    assert "parameters[]" in plan_schema
-    assert "hypotheses[]" in plan_schema
-    assert "quantifiers[]" in plan_schema
-    assert "conclusion_clauses[]" in plan_schema
-    assert "proof_deliverables[]" in plan_schema
-    assert "proof_hypothesis_coverage" in plan_schema
-    assert "proof_parameter_coverage" in plan_schema
-    assert "proof_quantifier_domain" in plan_schema
-    assert "claim_to_proof_alignment" in plan_schema
-    assert "lemma_dependency_closure" in plan_schema
-    assert "counterexample_search" in plan_schema
+    _assert_machine_fragments(
+        plan_schema,
+        "claim_kind", "parameters[]", "hypotheses[]", "quantifiers[]", "conclusion_clauses[]", "proof_deliverables[]",
+        "proof_hypothesis_coverage", "proof_parameter_coverage", "proof_quantifier_domain",
+        "claim_to_proof_alignment", "lemma_dependency_closure", "counterexample_search",
+        context="plan contract proof theorem fields",
+    )
     _assert_forbidden_fragments(
         plan_schema,
         "schema lacks dedicated theorem fields",
@@ -1826,13 +1862,24 @@ def test_write_paper_and_arxiv_submission_keep_the_build_boundary_explicit() -> 
         "`${PAPER_DIR}/ARTIFACT-MANIFEST.json`",
         context="write-paper paper-build boundary",
     )
-    assert "local compilation smoke checks are skipped" in write_paper
-    assert "`.tex` generation still proceeds" in write_paper
-    assert "`gpd paper-build` remains the canonical manuscript scaffold contract" in write_paper
+    _assert_semantic_fragments(
+        write_paper,
+        "local compilation smoke checks are skipped",
+        "`.tex` generation still proceeds",
+        "`gpd paper-build`",
+        "canonical manuscript scaffold contract",
+        context="write-paper paper-build nonblocking compile",
+    )
     assert 'gpd paper-build "${PAPER_DIR}/PAPER-CONFIG.json" --output-dir "${PAPER_DIR}"' in arxiv
-    assert "If `pdflatex` is available, run a local smoke check after the refreshed manuscript is in place." in arxiv
-    assert "`pdflatex` is not available, report that the smoke check was skipped" in arxiv
-    assert "Do not package stale audit artifacts." in arxiv
+    _assert_semantic_fragments(
+        arxiv,
+        "`pdflatex` is available",
+        "local smoke check",
+        "`pdflatex` is not available",
+        "smoke check was skipped",
+        "Do not package stale audit artifacts",
+        context="arxiv paper-build compile and stale audit policy",
+    )
 
 
 def test_write_paper_source_distinguishes_overclaim_pressure_from_bounded_resume_narrowing() -> None:
@@ -1911,9 +1958,16 @@ def test_new_project_surfaces_supervised_default_and_core_research_preset_previe
         "`autonomy=supervised`, `research_mode=balanced`, `parallelization=true`, "
         "`planning.commit_docs=true`, `execution.review_cadence=dense`"
     ) in workflow_text
-    assert (
-        "Config: Supervised autonomy | Dense review cadence | Balanced research mode | Parallel | All agents | Review profile"
-        in workflow_text
+    _assert_semantic_fragments(
+        workflow_text,
+        "Config:",
+        "Supervised autonomy",
+        "Dense review cadence",
+        "Balanced research mode",
+        "Parallel",
+        "All agents",
+        "Review profile",
+        context="new-project core-research preset preview",
     )
 
     assert "Recommended defaults use YOLO autonomy" not in workflow_text
@@ -1935,18 +1989,26 @@ def test_settings_and_new_project_surface_runtime_permission_sync_for_yolo() -> 
     assert permissions_sync.search(settings)
     assert 'gpd --raw permissions sync --autonomy "$SELECTED_AUTONOMY"' not in new_project
     assert 'gpd --raw permissions sync --autonomy "$SELECTED_AUTONOMY"' not in settings
-    assert "model_overrides.<SELECTED_RUNTIME>" in new_project
-    assert "model_overrides.<SELECTED_RUNTIME>" in settings
-    assert "sync the active runtime to its most autonomous permission mode when supported" in new_project
-    assert "syncs the runtime to its most autonomous permission mode when supported" in settings
-    assert "runtime-owned permission settings" in new_project
-    assert "base install" in new_project
-    assert "workflow-tool readiness" in new_project
-    assert "runtime-owned permission settings" in settings
-    assert "install health" in settings
-    assert "workflow/tool readiness" in settings
-    assert "| Runtime Permissions  | {aligned / changed / manual follow-up required} |" in settings
-    assert "If `requires_relaunch` is `true`, show `next_step` verbatim" in new_project
+    _assert_machine_fragments(
+        new_project,
+        "model_overrides.<SELECTED_RUNTIME>", "runtime-owned permission settings", "base install",
+        "workflow-tool readiness", "If `requires_relaunch` is `true`, show `next_step` verbatim",
+        context="new-project runtime permission sync fields",
+    )
+    _assert_semantic_fragments(
+        new_project,
+        "sync the active runtime", "most autonomous permission mode", context="new-project runtime permission sync",
+    )
+    _assert_machine_fragments(
+        settings,
+        "model_overrides.<SELECTED_RUNTIME>", "runtime-owned permission settings", "install health",
+        "workflow/tool readiness", "| Runtime Permissions  | {aligned / changed / manual follow-up required} |",
+        context="settings runtime permission sync fields",
+    )
+    _assert_semantic_fragments(
+        settings,
+        "syncs the runtime", "most autonomous permission mode", context="settings runtime permission sync",
+    )
 
 
 def test_new_project_requires_scoping_contract_across_setup_modes() -> None:
@@ -2194,16 +2256,17 @@ def test_project_and_context_templates_surface_contract_and_skeptical_review() -
     requirements_text = (TEMPLATES_DIR / "requirements.md").read_text(encoding="utf-8")
     state_schema_text = _expand_prompt_surface(TEMPLATES_DIR / "state-json-schema.md")
 
-    assert "## Scoping Contract Summary" in project_text
-    assert "### Contract Coverage" in project_text
-    assert "### Active Anchor Registry" in project_text
-    assert "### User Guidance To Preserve" in project_text
-    assert "### Skeptical Review" in project_text
-    assert "## Contract Coverage" in context_text
-    assert "## Active Anchor Registry" in context_text
-    assert "## User Guidance To Preserve" in context_text
-    assert "## Skeptical Review" in context_text
-    assert "## Contract Coverage" in requirements_text
+    _assert_machine_fragments(
+        project_text,
+        "## Scoping Contract Summary", "### Contract Coverage", "### Active Anchor Registry",
+        "### User Guidance To Preserve", "### Skeptical Review", context="project template contract sections",
+    )
+    _assert_machine_fragments(
+        context_text,
+        "## Contract Coverage", "## Active Anchor Registry", "## User Guidance To Preserve", "## Skeptical Review",
+        context="context template contract sections",
+    )
+    _assert_machine_fragments(requirements_text, "## Contract Coverage", context="requirements template contract sections")
     assert "disconfirming_observations" in state_schema_text
 
 
@@ -2281,12 +2344,18 @@ def test_planning_and_phase_templates_surface_active_reference_context() -> None
     _assert_semantic_fragments(
         planner_prompt,
         "approved `project_contract`",
-        "**Project Contract:** {project_contract}",
-        "**Project Contract Gate:** {project_contract_gate}",
-        "**Project Contract Load Info:** {project_contract_load_info}",
-        "**Project Contract Validation:** {project_contract_validation}",
-        "**Active References:** {active_reference_context}",
         context="planner prompt active reference context",
+    )
+    _assert_init_placeholders_visible(
+        planner_prompt,
+        (
+            "project_contract",
+            "project_contract_gate",
+            "project_contract_load_info",
+            "project_contract_validation",
+            "active_reference_context",
+        ),
+        context="planner prompt active reference placeholders",
     )
     assert "@path/to/reference-or-benchmark-anchor.md" in phase_prompt
     assert "Planning requires an approved scoping contract in `GPD/state.json`" in workflow_text
@@ -2298,11 +2367,14 @@ def test_planning_and_phase_templates_surface_active_reference_context() -> None
         "project_contract_gate.authoritative",
         "visible-but-blocked contract",
         "not an approved planning contract",
-        "**Project Contract:** {project_contract}",
-        "**Active References:** {active_reference_context}",
         "**Anchor coverage:**",
         "Required references",
         context="plan-phase active reference context",
+    )
+    _assert_init_placeholders_visible(
+        workflow_text,
+        ("project_contract", "active_reference_context"),
+        context="plan-phase active reference placeholders",
     )
 
 
@@ -2310,20 +2382,20 @@ def test_progress_workflow_surfaces_contract_load_and_validation_state() -> None
     workflow_text = (WORKFLOWS_DIR / "progress.md").read_text(encoding="utf-8")
     command_text = (COMMANDS_DIR / "progress.md").read_text(encoding="utf-8")
 
-    assert "project_contract_validation" in workflow_text
-    assert "project_contract_load_info" in workflow_text
-    assert "knowledge_doc_count" in workflow_text
-    assert "stable_knowledge_doc_count" in workflow_text
-    assert "knowledge_doc_status_counts" in workflow_text
-    assert "derived_knowledge_doc_count" in workflow_text
-    assert "knowledge_doc_warnings" in workflow_text
-    assert "authoritative only when `project_contract_gate.authoritative` is true" in workflow_text
+    _assert_machine_fragments(
+        workflow_text,
+        "project_contract_validation", "project_contract_load_info", "knowledge_doc_count",
+        "stable_knowledge_doc_count", "knowledge_doc_status_counts", "derived_knowledge_doc_count",
+        "knowledge_doc_warnings", context="progress workflow contract and knowledge fields",
+    )
     _assert_semantic_fragments(
         workflow_text,
         "structured load status",
         "warnings",
         "blockers",
         "contract",
+        "authoritative",
+        "`project_contract_gate.authoritative`",
         context="progress workflow contract load state",
     )
     status_scan = 'grep -l -E "^(status: (gaps_found|human_needed|expert_needed)|session_status: diagnosed)$"'
@@ -2340,13 +2412,14 @@ def test_progress_workflow_surfaces_contract_load_and_validation_state() -> None
     assert 'CONTEXT=$(gpd --raw validate command-context progress "$ARGUMENTS")' not in command_text
     assert "status: (gaps_found|diagnosed|human_needed|expert_needed)" not in workflow_text
     assert "status: (gaps_found|diagnosed|human_needed|expert_needed)" not in command_text
-    assert "`session_status: diagnosed`" in workflow_text
+    _assert_machine_fragments(
+        workflow_text,
+        "`session_status: diagnosed`", "HEALTH.summary.warn > 0", "HEALTH.summary.fail > 0",
+        "## Knowledge Status", "GPD/phases/[current-phase-dir]/*-VERIFICATION.md",
+        context="progress workflow status and health fields",
+    )
     assert "`session_status: diagnosed`" not in command_text
-    assert "HEALTH.summary.warn > 0" in workflow_text
-    assert "HEALTH.summary.fail > 0" in workflow_text
     assert "non-empty `issues` array" not in workflow_text
-    assert "## Knowledge Status" in workflow_text
-    assert "GPD/phases/[current-phase-dir]/*-VERIFICATION.md" in workflow_text
     assert "GPD/phases/[current-phase-dir]/*-VERIFICATION.md" not in command_text
 
 
@@ -2518,21 +2591,25 @@ def test_plan_checker_requires_contract_gate_and_reference_artifacts() -> None:
             context="plan-checker contract gate",
         ),
     )
-    assert "contract_decisive_output" in checker_agent
-    assert "contract_anchor_coverage" in checker_agent
-    assert "proxy_only_success_path" in checker_agent
-    assert "**Project Contract Gate:** {project_contract_gate}" in workflow_text
-    assert "**Project Contract Load Info:** {project_contract_load_info}" in workflow_text
-    assert "**Project Contract Validation:** {project_contract_validation}" in workflow_text
-    assert "**Contract Intake:** {contract_intake}" in workflow_text
-    assert "**Effective Reference Intake:** {effective_reference_intake}" in workflow_text
-    assert "**Reference Artifacts:** {reference_artifacts_content}" in workflow_text
-    assert "**Decisive outputs:** The plan set covers decisive claims and deliverables" in workflow_text
-    assert (
-        "**Acceptance tests:** Every decisive claim or deliverable has at least one executable or reviewable test"
-        in workflow_text
+    _assert_machine_fragments(
+        checker_agent,
+        "contract_decisive_output", "contract_anchor_coverage", "proxy_only_success_path",
+        context="plan checker contract dimensions",
     )
-    assert "**Forbidden proxies:** Proxy-only success conditions are rejected explicitly" in workflow_text
+    _assert_init_placeholders_visible(
+        workflow_text,
+        (
+            "project_contract_gate", "project_contract_load_info", "project_contract_validation", "contract_intake",
+            "effective_reference_intake", "reference_artifacts_content",
+        ),
+        context="plan-phase contract gate placeholders",
+    )
+    _assert_semantic_fragments(workflow_text, "Decisive outputs", "decisive claims and deliverables", context="plan-phase decisive output checks")
+    _assert_semantic_fragments(
+        workflow_text,
+        "Acceptance tests", "executable or reviewable test", "Forbidden proxies", "Proxy-only success conditions",
+        context="plan-phase decisive acceptance and proxy checks",
+    )
 
 
 def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> None:
@@ -2573,18 +2650,25 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
             ),
         ),
     )
-    assert "## Step 3: Load Research Context (if exists)" in roadmapper_agent
-    assert "Contract coverage" in roadmapper_agent
-    assert "Machine-Readable Return Envelope" in roadmapper_agent
-    assert "gpd_return:" in roadmapper_agent
-    assert "status: completed" in roadmapper_agent
-    assert "files_written:\n    - GPD/ROADMAP.md\n    - GPD/STATE.md\n    - GPD/REQUIREMENTS.md" in roadmapper_agent
-    assert "phases_created: 4" in roadmapper_agent
-    assert "gpd_return.files_written" in new_project_roadmapper
-    assert "GPD/REQUIREMENTS.md" in new_project_roadmapper
-    assert "do not rely on runtime completion text alone." in new_project_roadmapper
-    assert "expected_artifacts:" in new_milestone
-    assert 'freshness_marker: "after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT"' in new_milestone
+    _assert_machine_fragments(
+        roadmapper_agent,
+        "## Step 3: Load Research Context (if exists)", "Contract coverage", "Machine-Readable Return Envelope",
+        "gpd_return:", "status: completed", "files_written:", "GPD/ROADMAP.md", "GPD/STATE.md", "GPD/REQUIREMENTS.md",
+        "phases_created: 4", context="roadmapper return and coverage fields",
+    )
+    _assert_machine_fragments(
+        new_project_roadmapper,
+        "gpd_return.files_written", "GPD/REQUIREMENTS.md", context="new-project roadmapper artifact gate",
+    )
+    _assert_semantic_fragments(
+        new_project_roadmapper,
+        "do not rely on runtime completion text alone", context="new-project roadmapper artifact gate",
+    )
+    _assert_machine_fragments(
+        new_milestone,
+        "expected_artifacts:", 'freshness_marker: "after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT"',
+        context="new-milestone roadmapper artifact gate",
+    )
     assert "Intermediate Results" in state_template
     assert "stop with `gpd_return.status: blocked`" in roadmapper_agent
     assert (
@@ -2594,10 +2678,15 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     ) in roadmapper_agent
     # new-project uses shallow mode by default — Phase 1 only carries full coverage.
     # new-milestone keeps full-detail roadmap for scoped continuations.
-    assert "For Phase 1, include explicit contract coverage in ROADMAP.md" in new_project
-    assert "For each phase, include explicit contract coverage in ROADMAP.md" in new_milestone
-    assert "Do NOT skip the initial scoping-contract approval gate." in new_project
-    assert "Do NOT skip the requirement to show contract coverage in the roadmap." in new_project
+    _assert_semantic_fragments(
+        new_project,
+        "For Phase 1", "explicit contract coverage", "ROADMAP.md", "Do NOT skip", "scoping-contract approval gate",
+        "requirement to show contract coverage", context="new-project roadmap contract coverage",
+    )
+    _assert_semantic_fragments(
+        new_milestone,
+        "For each phase", "explicit contract coverage", "ROADMAP.md", context="new-milestone roadmap coverage",
+    )
 
 
 def test_research_prompt_surfaces_use_canonical_literature_outputs() -> None:
@@ -2693,23 +2782,33 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
         },
         context="literature-review workflow anchor propagation",
     )
-    assert "load_scoped_reference_artifacts" in literature_workflow
-    assert "include `bibtex_key` only when it is already known and verified" in literature_workflow
+    _assert_semantic_fragments(
+        literature_workflow,
+        "load_scoped_reference_artifacts", "include `bibtex_key`", "known and verified",
+        context="literature-review scoped citation artifacts",
+    )
     assert "reference_artifact_files" not in literature_bootstrap_fields
     assert "reference_artifacts_content" not in literature_bootstrap_fields
-    assert "Follow the included literature-review workflow exactly." in literature_command
-    assert (
-        "The workflow owns staged loading, scope fixing, artifact gating, and citation verification."
-        in literature_command
+    _assert_command_delegates_to_workflow(
+        literature_command,
+        "literature-review",
+        semantic_fragments=("workflow owns", "staged loading", "scope fixing", "artifact gating", "citation verification"),
+        stale_fragments=(
+            "First, read {GPD_AGENTS_DIR}/gpd-literature-reviewer.md for your role and instructions",
+            "Write to: GPD/literature/{slug}-REVIEW.md",
+        ),
     )
     assert "Active Anchor Registry" not in literature_command
-    assert "active_anchors" in literature_agent
-    assert "GPD/literature/{slug}-CITATION-SOURCES.json" in literature_agent
-    assert "compatible with the `CitationSource` shape" in literature_agent
-    assert "gpd paper-build --citation-sources" in literature_agent
-    assert "reference_id" in literature_agent
-    assert "include `bibtex_key` as an optional preferred key" in literature_agent
-    assert "Keep `bibtex_key` stable across reruns when present" in literature_agent
+    _assert_machine_fragments(
+        literature_agent,
+        "active_anchors", "GPD/literature/{slug}-CITATION-SOURCES.json", "gpd paper-build --citation-sources",
+        "reference_id", context="literature reviewer citation sidecar fields",
+    )
+    _assert_semantic_fragments(
+        literature_agent,
+        "compatible with the `CitationSource` shape", "`bibtex_key` as an optional preferred key",
+        "Keep `bibtex_key` stable", context="literature reviewer bibtex key stability",
+    )
     _assert_prompt_concepts(
         bibliographer_agent,
         {
@@ -2718,9 +2817,11 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
         },
         context="bibliographer anchor propagation",
     )
-    assert "project_contract_load_info" in compare_workflow
-    assert "project_contract_validation" in compare_workflow
-    assert "active_reference_context" in compare_workflow
+    _assert_machine_fragments(
+        compare_workflow,
+        "project_contract_load_info", "project_contract_validation", "active_reference_context",
+        context="compare-results reference fields",
+    )
     _assert_prompt_concepts(
         compare_workflow,
         {
@@ -2733,11 +2834,11 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
         },
         context="compare-results workflow anchor propagation",
     )
-    assert "active_reference_context" in map_workflow
-    assert "effective_reference_intake" in map_workflow
-    assert "project_contract_load_info" in map_workflow
-    assert "project_contract_validation" in map_workflow
-    assert "reference_artifacts_content" in map_workflow
+    _assert_machine_fragments(
+        map_workflow,
+        "active_reference_context", "effective_reference_intake", "project_contract_load_info",
+        "project_contract_validation", "reference_artifacts_content", context="map-research reference fields",
+    )
     _assert_prompt_concepts(
         map_workflow,
         {
@@ -2745,9 +2846,12 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
         },
         context="map-research workflow anchor propagation",
     )
-    assert "Follow the included map-research workflow." in map_command
-    assert "project_contract_load_info" not in map_command
-    assert "reference_artifacts_content" not in map_command
+    _assert_command_delegates_to_workflow(
+        map_command,
+        "map-research",
+        semantic_fragments=("workflow", "staged init", "mapper fanout", "return routing"),
+        stale_fragments=("project_contract_load_info", "reference_artifacts_content"),
+    )
     assert "REFERENCES.md is an anchor registry" in mapper_agent
 
 
@@ -2779,12 +2883,18 @@ def test_file_producing_command_surfaces_use_canonical_spawn_contract() -> None:
         assert file_token in content
         assert "before continuing" in content
         assert f"@{file_token}" not in content
-        assert "Fresh 200k context" not in content
+    assert "Fresh 200k context" not in content
 
     assert "gpd --raw validate command-context literature-review" in literature
-    assert "Follow the included literature-review workflow exactly." in literature
-    assert "First, read {GPD_AGENTS_DIR}/gpd-literature-reviewer.md for your role and instructions" not in literature
-    assert "Write to: GPD/literature/{slug}-REVIEW.md" not in literature
+    _assert_command_delegates_to_workflow(
+        literature,
+        "literature-review",
+        semantic_fragments=("workflow", "staged loading", "artifact gating", "citation verification"),
+        stale_fragments=(
+            "First, read {GPD_AGENTS_DIR}/gpd-literature-reviewer.md for your role and instructions",
+            "Write to: GPD/literature/{slug}-REVIEW.md",
+        ),
+    )
 
     assert "Fresh 200k context" not in respond
 
@@ -2793,17 +2903,25 @@ def test_research_phase_command_delegates_file_path_and_return_routing_to_the_wo
     command = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
     workflow = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
-    assert "Follow the included research-phase workflow." in command
-    assert "gpd --raw init phase-op --include state,config" not in command
-    assert "Research depth follows the workflow-owned `research_mode`." in command
-    assert "gpd_return.status: completed" not in command
-    assert "gpd_return.files_written" not in command
-    assert 'BOOTSTRAP_INIT=$(load_research_phase_stage phase_bootstrap "${PHASE}")' in workflow
-    assert 'HANDOFF_INIT=$(load_research_phase_stage research_handoff "${phase_number}")' in workflow
-    assert 'gpd --raw init research-phase "${phase_arg}" --stage "${stage_name}"' in workflow
-    assert "Write to: {phase_dir}/{phase_number}-RESEARCH.md" in workflow
-    assert "gpd_return.files_written" in workflow
-    assert 'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)' in workflow
+    _assert_command_delegates_to_workflow(
+        command,
+        "research-phase",
+        semantic_fragments=("workflow-owned staged init", "typed-return routing", "artifact gating", "research_mode"),
+        stale_fragments=(
+            "gpd --raw init phase-op --include state,config",
+            "gpd_return.status: completed",
+            "gpd_return.files_written",
+        ),
+    )
+    _assert_machine_fragments(
+        workflow,
+        'BOOTSTRAP_INIT=$(load_research_phase_stage phase_bootstrap "${PHASE}")',
+        'HANDOFF_INIT=$(load_research_phase_stage research_handoff "${phase_number}")',
+        'gpd --raw init research-phase "${phase_arg}" --stage "${stage_name}"',
+        "Write to: {phase_dir}/{phase_number}-RESEARCH.md", "gpd_return.files_written",
+        'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)',
+        context="research-phase workflow staged routing",
+    )
 
 
 def test_revision_and_audit_workflows_verify_artifacts_before_trusting_success_text() -> None:
@@ -2811,26 +2929,35 @@ def test_revision_and_audit_workflows_verify_artifacts_before_trusting_success_t
     audit = (WORKFLOWS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
     stage_gate = (REPO_ROOT / "src/gpd/specs/references/publication/stage-recovery-gate.md").read_text(encoding="utf-8")
 
-    assert "templates/paper/author-response.md" in respond
-    assert "needs-calculation" in respond
-    assert "Use `**Evidence:**` blocks for rebuttals" in respond
-    assert "verify the promised artifacts before trusting the handoff text" in respond
-    assert "stage-recovery-gate.md" in respond
-    assert "Do not accept stale preexisting files as proof of current-run completion." in stage_gate
-    assert "Re-open `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`" in respond
-
-    assert "Verify the promised referee artifacts before trusting the handoff text" in audit
-    assert "Confirm `GPD/v{milestone_version}-MILESTONE-REFEREE-REPORT.md` exists" in audit
-    assert "If the agent reported success but either artifact is missing, treat peer review as failed" in audit
+    _assert_machine_fragments(
+        respond,
+        "templates/paper/author-response.md", "needs-calculation", "stage-recovery-gate.md",
+        "`${RESPONSE_AUTHOR_PATH}`", "`${RESPONSE_REFEREE_PATH}`", context="respond artifact gate fields",
+    )
+    _assert_semantic_fragments(
+        respond,
+        "Evidence", "verify the promised artifacts", "before trusting the handoff text",
+        context="respond artifact gate semantics",
+    )
+    _assert_semantic_fragments(
+        stage_gate, "Do not accept stale preexisting files", "current-run completion", context="stage recovery gate freshness",
+    )
+    _assert_semantic_fragments(
+        audit,
+        "Verify the promised referee artifacts", "Confirm `GPD/v{milestone_version}-MILESTONE-REFEREE-REPORT.md`",
+        "agent reported success", "artifact is missing", "peer review as failed", context="audit milestone artifact gate",
+    )
 
 
 def test_audit_milestone_surfaces_contract_gate_and_milestone_review_namespace() -> None:
     audit = (WORKFLOWS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
 
-    assert "project_contract_load_info" in audit
-    assert "project_contract_validation" in audit
-    assert "active_reference_context" in audit
-    assert "Apply the shared contract authority gate" in audit
+    _assert_machine_fragments(
+        audit,
+        "project_contract_load_info", "project_contract_validation", "active_reference_context",
+        context="audit milestone contract gate fields",
+    )
+    _assert_semantic_fragments(audit, "Apply the shared contract authority gate", context="audit milestone gate semantics")
     assert (
         "project_contract` is approved milestone scope only when `project_contract_gate.authoritative` is true" in audit
     )
@@ -3049,9 +3176,15 @@ def test_research_phase_uses_resolved_phase_dir_for_artifact_paths_and_context_l
     research_command = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
     assert "Write to: {phase_dir}/{phase_number}-RESEARCH.md" in research_workflow
-    assert "Follow the included research-phase workflow." in research_command
-    assert "Write to: {phase_dir}/{phase_number}-RESEARCH.md" not in research_command
-    assert "Research file path: {phase_dir}/{phase_number}-RESEARCH.md" not in research_command
+    _assert_command_delegates_to_workflow(
+        research_command,
+        "research-phase",
+        semantic_fragments=("workflow", "staged init", "return routing"),
+        stale_fragments=(
+            "Write to: {phase_dir}/{phase_number}-RESEARCH.md",
+            "Research file path: {phase_dir}/{phase_number}-RESEARCH.md",
+        ),
+    )
     assert "GPD/phases/${PHASE}-{slug}/${PHASE}-RESEARCH.md" not in research_workflow
     assert "GPD/phases/${PHASE}-{slug}/${PHASE}-RESEARCH.md" not in research_command
 
@@ -3152,17 +3285,24 @@ def test_phase_researcher_prompt_keeps_the_one_shot_handoff_and_return_contract_
     research_workflow = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
     research_command = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
-    assert "## RESEARCH COMPLETE" in phase_researcher
-    assert "## RESEARCH BLOCKED" in phase_researcher
-    assert "gpd_return:" in phase_researcher
-    assert "status: completed" in phase_researcher
-    assert "files_written:\n    - GPD/phases/03-spectral-form-factor/03-RESEARCH.md" in phase_researcher
-    assert "references/orchestration/continuation-boundary.md" in research_workflow
-    assert "fresh continuation handoff" in research_workflow
-    assert "expected_artifacts" in research_workflow
-    assert "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in research_workflow
-    assert "gpd_return.files_written" in research_workflow
-    assert "Follow the included research-phase workflow." in research_command
+    _assert_machine_fragments(
+        phase_researcher,
+        "## RESEARCH COMPLETE", "## RESEARCH BLOCKED", "gpd_return:", "status: completed",
+        "GPD/phases/03-spectral-form-factor/03-RESEARCH.md", context="phase researcher return envelope",
+    )
+    _assert_machine_fragments(
+        research_workflow,
+        "references/orchestration/continuation-boundary.md", "expected_artifacts", "child-artifact-gate.md",
+        "gpd_return.files_written", context="research workflow handoff artifact gate",
+    )
+    _assert_semantic_fragments(
+        research_workflow, "fresh continuation handoff", context="research workflow continuation handoff",
+    )
+    _assert_command_delegates_to_workflow(
+        research_command,
+        "research-phase",
+        semantic_fragments=("workflow", "staged init", "return routing"),
+    )
     assert 'gpd --raw init research-phase "${phase_arg}" --stage "${stage_name}"' in research_workflow
 
 
@@ -3174,37 +3314,51 @@ def test_workflows_surface_structured_proof_review_statuses() -> None:
     respond_to_referees = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
     arxiv_submission = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
 
-    assert "phase_proof_review_status" in verify_workflow
-    assert "proof-review freshness summary" in verify_workflow
-    assert "derived_manuscript_proof_review_status" in verify_phase
-    assert "manuscript-local proof-bearing artifact" in verify_phase
-    assert "derived_manuscript_proof_review_status" in write_paper
-    assert "proof-review freshness for theorem-bearing results" in write_paper
-    assert "derived_manuscript_proof_review_status" in peer_review
-    assert "theorem/proof freshness" in peer_review
-    assert "derived_manuscript_proof_review_status" in respond_to_referees
-    assert "proof-review freshness for theorem-bearing revisions" in respond_to_referees
-    assert "derived_manuscript_proof_review_status" in arxiv_submission
-    assert "theorem-proof freshness for the resolved manuscript" in arxiv_submission
+    _assert_machine_fragments(
+        verify_workflow, "phase_proof_review_status", "proof-review freshness summary",
+        context="verify-work proof review status",
+    )
+    for text, context in (
+        (verify_phase, "verify-phase proof review status"),
+        (write_paper, "write-paper proof review status"),
+        (peer_review, "peer-review proof review status"),
+        (respond_to_referees, "respond proof review status"),
+        (arxiv_submission, "arxiv proof review status"),
+    ):
+        _assert_machine_fragments(text, "derived_manuscript_proof_review_status", context=context)
+    _assert_semantic_fragments(
+        verify_phase, "manuscript-local proof-bearing artifact", context="verify-phase proof review semantics",
+    )
+    _assert_semantic_fragments(
+        write_paper, "proof-review freshness", "theorem-bearing results", context="write-paper proof review semantics",
+    )
+    _assert_semantic_fragments(peer_review, "theorem/proof freshness", context="peer-review proof review semantics")
+    _assert_semantic_fragments(
+        respond_to_referees,
+        "proof-review freshness", "theorem-bearing revisions", context="respond proof review semantics",
+    )
+    _assert_semantic_fragments(
+        arxiv_submission,
+        "theorem-proof freshness", "resolved manuscript", context="arxiv proof review semantics",
+    )
 
 
 def test_verify_phase_and_gap_reverify_prompts_surface_contract_context_before_contract_checks() -> None:
     verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
     execute_phase = _workflow_authority_text("execute-phase")
 
-    assert "project_contract_gate" in verify_phase
-    assert "contract_intake" in verify_phase
-    assert "effective_reference_intake" in verify_phase
-    assert "active_reference_context" in verify_phase
-    assert "reference_artifacts_content" in verify_phase
-    assert "protocol_bundle_context" in verify_phase
+    _assert_machine_fragments(
+        verify_phase,
+        "project_contract_gate", "contract_intake", "effective_reference_intake", "active_reference_context",
+        "reference_artifacts_content", "protocol_bundle_context", context="verify-phase contract context fields",
+    )
     assert verify_phase.index("project_contract_gate") < verify_phase.index("suggest_contract_checks(contract)")
-    assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in execute_phase
-    assert "{GPD_INSTALL_DIR}/templates/verification-report.md" in execute_phase
-    assert "{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in execute_phase
-    assert "gpd --raw init phase-op {PHASE_NUMBER}" in execute_phase
-    assert "active_reference_context" in execute_phase
-    assert "protocol_bundle_context" in execute_phase
+    _assert_machine_fragments(
+        execute_phase,
+        "{GPD_INSTALL_DIR}/workflows/verify-phase.md", "{GPD_INSTALL_DIR}/templates/verification-report.md",
+        "{GPD_INSTALL_DIR}/templates/contract-results-schema.md", "gpd --raw init phase-op {PHASE_NUMBER}",
+        "active_reference_context", "protocol_bundle_context", context="execute-phase verify-phase wiring",
+    )
 
 
 def test_templates_and_workflows_surface_contract_results_and_verdict_ledgers() -> None:
@@ -4033,13 +4187,15 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "For deeper focused analysis",
         context="verify-work command wrapper schema bodies",
     )
-    _assert_machine_fragments(verify_command, "Follow the included workflow file exactly.", context="verify-work command wrapper")
-    _assert_semantic_fragments(
+    _assert_command_delegates_to_workflow(
         verify_command,
-        "workflow file owns",
-        "detailed check taxonomy",
-        "bootstraps the canonical verification surfaces",
-        "delegates the physics checks",
+        "verify-work",
+        semantic_fragments=(
+            "workflow file owns",
+            "detailed check taxonomy",
+            "bootstraps the canonical verification surfaces",
+            "delegates the physics checks",
+        ),
         context="verify-work command wrapper",
     )
     _assert_semantic_fragments(
@@ -5247,12 +5403,12 @@ def test_execution_surfaces_use_bounded_review_cadence_and_first_result_gates() 
         "| `validating`   | Verification in progress; wait or re-run verify-phase",
         context="execute-phase bounded review stale branches",
     )
-    _assert_machine_fragments(
+    _assert_semantic_fragments(
         resume_work,
         "What decisive evidence is still owed before downstream work is trustworthy?",
-        "Canonical continuation fields define the public resume vocabulary",
         context="resume-work continuation vocabulary",
     )
+    _assert_resume_canonical_note(resume_work)
     _assert_forbidden_fragments(
         resume_work,
         "public top-level resume vocabulary",
@@ -5319,8 +5475,12 @@ def test_debug_command_and_workflow_wire_directly_to_gpd_debugger() -> None:
 
     assert "gpd-debugger" in debug_command
     assert "DEBUGGER_MODEL=$(gpd resolve-model gpd-debugger)" in debug_command
-    assert "The workflow owns workspace bootstrap, active-session handling, symptom gathering" in debug_command
-    assert "Use ask_user for each." not in debug_command
+    _assert_command_delegates_to_workflow(
+        debug_command,
+        "debug",
+        semantic_fragments=("workflow owns", "workspace bootstrap", "active-session handling", "symptom gathering"),
+        stale_fragments=("Use ask_user for each.",),
+    )
     assert "Interactive mode (direct user invocation): do not parse `VERIFICATION.md`." in debug_workflow
     assert "Interactive symptom fields:" in debug_workflow
     assert "offer: Fix now, Plan fix, Manual fix" in debug_workflow
@@ -5336,44 +5496,73 @@ def test_resume_workflow_surfaces_contract_load_and_validation_state() -> None:
 
     assert "{GPD_INSTALL_DIR}/templates/state-json-schema.md" in raw_resume_work
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw_resume_work
-    assert "project_contract_validation" in resume_work
-    assert "project_contract_load_info" in resume_work
-    assert "workspace_state_exists" in resume_work
-    assert "workspace_roadmap_exists" in resume_work
-    assert "workspace_project_exists" in resume_work
-    assert "workspace_planning_exists" in resume_work
+    _assert_machine_fragments(
+        resume_work,
+        "project_contract_validation",
+        "project_contract_load_info",
+        "workspace_state_exists",
+        "workspace_roadmap_exists",
+        "workspace_project_exists",
+        "workspace_planning_exists",
+        context="resume core workspace fields",
+    )
     assert_resume_authority_contract(
         resume_vocabulary,
         allow_explicit_alias_examples=False,
         require_canonical_note=False,
     )
-    assert "Canonical continuation and recovery authority:" in resume_work
-    assert "Canonical continuation fields define the public resume vocabulary" in resume_work
+    _assert_semantic_fragments(
+        resume_work,
+        "canonical continuation",
+        "recovery authority",
+        context="resume-work continuation authority",
+    )
     _assert_resume_canonical_note(resume_work)
     assert "public top-level resume vocabulary" not in resume_work
-    assert "continuity_handoff_file" in resume_work
-    assert "recorded_continuity_handoff_file" in resume_work
-    assert "missing_continuity_handoff_file" in resume_work
-    assert "machine_change_detected" in resume_work
-    assert "Use `workspace_*` to judge the user-requested workspace before auto-selection" in resume_work
-    assert "machine_change_notice" in resume_work
-    assert "current_hostname" in resume_work
-    assert "current_platform" in resume_work
-    assert "session_hostname" in resume_work
-    assert "session_platform" in resume_work
-    assert "The recent-project list is advisory and machine-local" in resume_work
-    assert "reloads that project's canonical state" in resume_work
-    assert "only when `project_contract_gate.authoritative` is true" in resume_work
-    assert "remain visible gate inputs and diagnostics" in resume_work
-    assert (
-        "If `project_contract_gate.authoritative` is false, present that contract as visible-but-blocked" in resume_work
+    _assert_machine_fragments(
+        resume_work,
+        "continuity_handoff_file",
+        "recorded_continuity_handoff_file",
+        "missing_continuity_handoff_file",
+        "machine_change_detected",
+        "machine_change_notice",
+        "current_hostname",
+        "current_platform",
+        "session_hostname",
+        "session_platform",
+        context="resume continuity and machine fields",
     )
-    assert "Contract repair required:" in resume_work
-    assert "Repair the blocked contract or state-integrity issue before planning or execution" in resume_work
+    _assert_semantic_fragments(
+        resume_work,
+        "workspace_*",
+        "user-requested workspace",
+        "recent-project list is advisory",
+        "machine-local",
+        "reloads",
+        "canonical state",
+        "`project_contract_gate.authoritative` is true",
+        "visible gate inputs and diagnostics",
+        "`project_contract_gate.authoritative` is false",
+        "visible-but-blocked",
+        context="resume workspace and contract authority",
+    )
+    _assert_semantic_fragments(
+        resume_work,
+        "Contract repair required",
+        "blocked contract",
+        "state-integrity issue",
+        "before planning or execution",
+        context="resume contract repair gate",
+    )
 
 
 def _assert_resume_canonical_note(text: str) -> None:
-    assert "Canonical continuation fields define the public resume vocabulary" in text
+    _assert_semantic_fragments(
+        text,
+        "Canonical continuation fields",
+        "public resume vocabulary",
+        context="resume canonical public vocabulary",
+    )
 
 
 def test_resume_command_keeps_internal_resume_backend_details_out_of_public_prompt_surface() -> None:
@@ -5383,7 +5572,6 @@ def test_resume_command_keeps_internal_resume_backend_details_out_of_public_prom
         "/runtime/",
     )
 
-    assert "Canonical continuation fields define the public resume vocabulary" in resume_command
     _assert_resume_canonical_note(resume_command)
     assert "`resume_surface`" not in resume_command
     assert "gpd init resume" not in resume_command
@@ -5403,16 +5591,26 @@ def test_execution_observability_and_resume_workflow_surfaces_stay_conservative_
         "/runtime/",
     )
 
-    assert "Display GPD help by delegating to the workflow-owned help surface." in help_command
-    assert "@{GPD_INSTALL_DIR}/workflows/help.md" in help_command
+    _assert_command_delegates_to_workflow(
+        help_command,
+        "help",
+        semantic_fragments=("GPD help", "delegating", "workflow-owned help surface"),
+    )
     assert_execution_observability_surface_contract(help_workflow)
     assert_cost_surface_discoverability(help_workflow)
-    assert "Use the workflow-owned stable markers as the extraction boundaries" in help_command
+    _assert_semantic_fragments(
+        help_command,
+        "workflow-owned stable markers",
+        "extraction boundaries",
+        context="help command extraction boundary",
+    )
     assert "When STATE.md appears out of sync with disk reality" in progress
     assert "advisory context only" in resume_work
-    assert (
-        'it is not a ranked bounded-segment resume candidate and does not justify `active_resume_kind="bounded_segment"`.'
-        in resume_work
+    _assert_semantic_fragments(
+        resume_work,
+        "not a ranked bounded-segment resume candidate",
+        'does not justify `active_resume_kind="bounded_segment"`',
+        context="resume stall advisory boundary",
     )
 
 
@@ -5433,26 +5631,48 @@ def test_pause_resume_and_help_wiring_keep_runtime_handoff_and_local_snapshot_bo
     assert "gpd resume" in resume_work
     assert "gpd resume --recent" in resume_work
     assert "gpd init resume" not in resume_work
-    assert "guided runtime path" in resume_work
-    assert "public local read-only summary" in resume_work
-    assert "cross-project discovery surface" in resume_work
-    assert "advisory and machine-local" in resume_work
-    assert "reloads that project's canonical state" in resume_work
-    assert "Canonical continuation fields define the public resume vocabulary" in resume_work
+    _assert_semantic_fragments(
+        resume_work,
+        "guided runtime path",
+        "public local read-only summary",
+        "cross-project discovery surface",
+        "advisory and machine-local",
+        "reloads",
+        "canonical state",
+        context="resume public local snapshot boundary",
+    )
+    _assert_resume_canonical_note(resume_work)
     assert "resume_candidates" in resume_work
     assert "`resume_surface`" not in resume_work
-    assert "Canonical continuation fields define the public resume vocabulary" in help_workflow
-    assert (
-        "Do NOT invent additional candidates from plan files without summaries, auto-checkpoints, or other ad hoc checkpoints."
-        in resume_work
+    _assert_resume_canonical_note(help_workflow)
+    _assert_semantic_fragments(
+        resume_work,
+        "Do NOT invent additional candidates",
+        "plan files without summaries",
+        "auto-checkpoints",
+        "ad hoc checkpoints",
+        context="resume candidate source boundary",
     )
     assert "gpd:resume-work" in pause_work
     assert "gpd resume" in pause_work
     assert "gpd resume --recent" in pause_work
-    assert "This is the canonical recorded handoff artifact for the current phase." in pause_work
-    assert "continuation handoff artifact" in pause_work or "session continuity" in pause_work
+    _assert_semantic_fragments(
+        pause_work,
+        "canonical recorded handoff artifact",
+        "current phase",
+        context="pause-work canonical handoff artifact",
+    )
+    _assert_prompt_contracts(
+        pause_work,
+        semantic_anchor(
+            "pause-work continuity wording",
+            ("continuation handoff artifact", "session continuity"),
+            mode=FragmentMode.ANY,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            context="pause-work continuity wording",
+        ),
+    )
     assert "session.resume_file" not in pause_work
-    assert "Canonical continuation fields define the public resume vocabulary" in help_workflow
     _assert_resume_canonical_note(help_workflow)
     assert_recovery_ladder_contract(
         help_workflow,
@@ -5474,7 +5694,6 @@ def test_state_portability_reference_keeps_resume_public_vocabulary_note_compact
         "/runtime/",
     )
 
-    assert "Canonical continuation fields define the public resume vocabulary" in state_portability
     _assert_resume_canonical_note(state_portability)
     assert "public top-level resume vocabulary" not in state_portability
     assert "gpd observe execution" in help_workflow
@@ -5531,55 +5750,93 @@ def test_protocol_bundle_context_surfaces_across_planning_execution_and_verifica
     executor_guide = (REFERENCES_DIR / "execution" / "executor-subfield-guide.md").read_text(encoding="utf-8")
 
     bundle_fragments = (
-        "<selected_protocol_bundle_ids>",
-        "{selected_protocol_bundle_ids}",
-        "<protocol_bundle_load_manifest>",
-        "{protocol_bundle_load_manifest}",
-        "<protocol_bundle_context>",
-        "{protocol_bundle_context}",
-        "<protocol_bundle_verifier_extensions>",
-        "{protocol_bundle_verifier_extensions}",
+        "<selected_protocol_bundle_ids>", "{selected_protocol_bundle_ids}",
+        "<protocol_bundle_load_manifest>", "{protocol_bundle_load_manifest}",
+        "<protocol_bundle_context>", "{protocol_bundle_context}",
+        "<protocol_bundle_verifier_extensions>", "{protocol_bundle_verifier_extensions}",
     )
     for text in (planner_prompt, continuation):
-        _assert_contains_fragments(text, *bundle_fragments)
+        _assert_machine_fragments(text, *bundle_fragments, context="protocol bundle prompt placeholders")
     assert "<protocol_bundles>" not in continuation
 
-    _assert_contains_fragments(
+    _assert_semantic_fragments(
         plan_phase,
         "Use the protocol bundle handoff as the primary specialized method/domain surface",
+        context="plan-phase protocol bundle handoff semantics",
+    )
+    _assert_machine_fragments(
+        plan_phase,
         "- `{selected_protocol_bundle_ids}` -> {selected_protocol_bundle_ids}",
         "- `{protocol_bundle_load_manifest}` -> {protocol_bundle_load_manifest}",
         "- `{protocol_bundle_verifier_extensions}` -> {protocol_bundle_verifier_extensions}",
         "<protocol_bundle_load_manifest>",
+        context="plan-phase protocol bundle fields",
     )
-    _assert_contains_fragments(
+    _assert_machine_fragments(
         research_phase,
         "selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`",
-        "When `selected_protocol_bundle_ids` is non-empty, use the bundle context, load manifest",
         "<protocol_bundle_verifier_extensions>",
+        context="research-phase protocol bundle fields",
     )
-    _assert_contains_fragments(
+    _assert_semantic_fragments(
+        research_phase,
+        "selected_protocol_bundle_ids` is non-empty",
+        "bundle context",
+        "load manifest",
+        context="research-phase protocol bundle semantics",
+    )
+    _assert_machine_fragments(
         execute_phase,
         "<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>",
         "<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>",
         "<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>",
         "`{protocol_bundle_verifier_extensions}`: From checkpoint_resume init JSON",
-        "protocol bundle verifier extensions",
+        context="execute-phase protocol bundle fields",
     )
-    assert "protocol_bundle_load_manifest" in execute_plan
-    assert "protocol_bundle_verifier_extensions" in execute_plan
-    assert "protocol_bundle_verifier_extensions" in verify_phase
-    assert "protocol_bundle_verifier_extensions" in verify_work
-    assert "<protocol_bundle_load_manifest>" in verify_work
-    assert "primary source for bundle checklist extensions" in verify_work
-    assert "selected protocol bundle context" in planner_agent
-    assert "protocol_bundle_coverage" in checker_agent
-    assert "additive routing hints" in executor_agent
-    assert "first additive specialization pass" in executor_agent
-    assert "bundle checklist extensions" in verifier_agent
-    assert "prefer `protocol_bundle_verifier_extensions` and `protocol_bundle_context` from init JSON" in verifier_agent
-    assert "fallback index or a manual cross-check" in executor_guide
-    assert "not a default route" in executor_guide
+    _assert_semantic_fragments(
+        execute_phase,
+        "protocol bundle verifier extensions",
+        context="execute-phase protocol bundle semantics",
+    )
+    _assert_machine_fragments(
+        execute_plan, "protocol_bundle_load_manifest", "protocol_bundle_verifier_extensions",
+        context="execute-plan protocol bundle fields",
+    )
+    _assert_machine_fragments(
+        verify_phase, "protocol_bundle_verifier_extensions", context="verify-phase protocol bundle fields",
+    )
+    _assert_machine_fragments(
+        verify_work, "protocol_bundle_verifier_extensions", "<protocol_bundle_load_manifest>",
+        context="verify-work protocol bundle fields",
+    )
+    _assert_semantic_fragments(
+        verify_work,
+        "primary source",
+        "bundle checklist extensions",
+        context="verify-work protocol bundle checklist source",
+    )
+    _assert_semantic_fragments(planner_agent, "selected protocol bundle context", context="planner protocol bundle context")
+    _assert_machine_fragments(checker_agent, "protocol_bundle_coverage", context="plan checker protocol bundle field")
+    _assert_semantic_fragments(
+        executor_agent,
+        "additive routing hints",
+        "first additive specialization pass",
+        context="executor protocol bundle routing",
+    )
+    _assert_semantic_fragments(
+        verifier_agent,
+        "bundle checklist extensions",
+        "prefer `protocol_bundle_verifier_extensions`",
+        "`protocol_bundle_context` from init JSON",
+        context="verifier protocol bundle checklist",
+    )
+    _assert_semantic_fragments(
+        executor_guide,
+        "fallback index",
+        "manual cross-check",
+        "not a default route",
+        context="executor subfield guide protocol bundle fallback",
+    )
 
 
 def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays_free() -> None:
@@ -5591,7 +5848,7 @@ def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays
         flags=re.DOTALL,
     )
     assert planner_reference_branch is not None
-    _assert_contains_fragments(
+    _assert_machine_fragments(
         planner_reference_branch.group(1),
         "<selected_protocol_bundle_ids>",
         "{selected_protocol_bundle_ids}",
@@ -5601,6 +5858,7 @@ def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays
         "{protocol_bundle_context}",
         "<protocol_bundle_verifier_extensions>",
         "{protocol_bundle_verifier_extensions}",
+        context="quick planner reference protocol bundle placeholders",
     )
 
     executor_reference_branch = re.search(
@@ -5609,7 +5867,7 @@ def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays
         flags=re.DOTALL,
     )
     assert executor_reference_branch is not None
-    _assert_contains_fragments(
+    _assert_machine_fragments(
         executor_reference_branch.group(1),
         "<selected_protocol_bundle_ids>",
         "{selected_protocol_bundle_ids}",
@@ -5619,6 +5877,7 @@ def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays
         "{protocol_bundle_context}",
         "<protocol_bundle_verifier_extensions>",
         "{protocol_bundle_verifier_extensions}",
+        context="quick executor reference protocol bundle placeholders",
     )
 
     default_prefix = quick.split(
@@ -5634,13 +5893,23 @@ def test_executor_bundle_fallback_stays_generic_when_no_bundle_fits() -> None:
     executor_agent = (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
     executor_guide = (REFERENCES_DIR / "execution" / "executor-subfield-guide.md").read_text(encoding="utf-8")
 
-    assert "If no bundle is selected" in executor_agent
-    assert "stay with the generic execution flow plus contract-backed anchors and checks" in executor_agent
-    assert "instead of forcing the work into a topic bucket" in executor_agent
-    assert "Do not stay trapped in the original bundle or fallback subfield" in executor_agent
-    assert (
-        "If no row cleanly fits, stay with generic execution guidance plus core verification expectations instead of guessing."
-        in executor_guide
+    _assert_semantic_fragments(
+        executor_agent,
+        "If no bundle is selected",
+        "generic execution flow",
+        "contract-backed anchors and checks",
+        "instead of forcing the work into a topic bucket",
+        "Do not stay trapped",
+        "fallback subfield",
+        context="executor generic fallback when no bundle fits",
+    )
+    _assert_semantic_fragments(
+        executor_guide,
+        "If no row cleanly fits",
+        "generic execution guidance",
+        "core verification expectations",
+        "instead of guessing",
+        context="executor guide generic fallback when no bundle fits",
     )
 
 
@@ -5658,13 +5927,17 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
         "directly in workflows",
         context="model profile resolution",
     )
-    assert "gpd resolve-tier" in model_resolution
-    assert "gpd resolve-model" in model_resolution
-    assert "Delegation Contract" in agent_delegation
-    assert "Return-envelope parity" in agent_delegation
-    assert "control decision authority throughout execution" in execute_plan
-    assert "Handoff verification" in execute_plan
-    assert "Handoff verification" in execute_phase
+    _assert_machine_fragments(
+        model_resolution, "gpd resolve-tier", "gpd resolve-model", context="model profile resolution commands",
+    )
+    _assert_semantic_fragments(
+        agent_delegation, "Delegation Contract", "Return-envelope parity", context="agent delegation parity",
+    )
+    _assert_semantic_fragments(
+        execute_plan,
+        "control decision authority throughout execution", "Handoff verification", context="execute-plan handoff authority",
+    )
+    _assert_semantic_fragments(execute_phase, "Handoff verification", context="execute-phase handoff authority")
     _assert_semantic_fragments(
         execute_phase,
         "false failure",
@@ -5673,8 +5946,12 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
         "artifacts",
         context="execute-phase false failure guard",
     )
-    assert "Handoff verification" in quick
-    assert "First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions." in quick
+    _assert_machine_fragments(
+        quick,
+        "First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.",
+        context="quick planner delegation",
+    )
+    _assert_semantic_fragments(quick, "Handoff verification", context="quick handoff verification")
     _assert_semantic_fragments(
         quick,
         "staged quick init",
@@ -5684,13 +5961,14 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
         "actually needs project reference artifacts",
         context="quick staged loading",
     )
-    assert 'gpd --raw init quick "$DESCRIPTION" --stage task_bootstrap' in quick
-    assert 'gpd --raw init quick "$DESCRIPTION" --stage task_authoring' in quick
-    assert 'gpd --raw init quick "$DESCRIPTION" --stage reference_context' in quick
-    assert "project_contract_load_info.status" in quick
-    assert "project_contract_validation.valid" in quick
-    assert "project_contract_validation" in quick
-    assert "project_contract_load_info" in quick
+    _assert_machine_fragments(
+        quick,
+        'gpd --raw init quick "$DESCRIPTION" --stage task_bootstrap',
+        'gpd --raw init quick "$DESCRIPTION" --stage task_authoring',
+        'gpd --raw init quick "$DESCRIPTION" --stage reference_context',
+        "project_contract_load_info.status", "project_contract_validation.valid",
+        "project_contract_validation", "project_contract_load_info", context="quick staged init commands and fields",
+    )
     _assert_semantic_fragments(
         quick,
         "Quick mode",
@@ -5707,12 +5985,16 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
         "full active reference ledger",
         context="quick reference context",
     )
-    assert "**Project Contract Gate:** {project_contract_gate}" in quick
-    assert "**Project Contract Load Info:** {project_contract_load_info}" in quick
-    assert "**Project Contract Validation:** {project_contract_validation}" in quick
-    assert "**Contract Intake:** {contract_intake}" in quick
-    assert "Contract intake: {contract_intake}" in quick
-    assert "Project contract gate: {project_contract_gate}" in quick
+    _assert_init_placeholders_visible(
+        quick,
+        (
+            "project_contract_gate",
+            "project_contract_load_info",
+            "project_contract_validation",
+            "contract_intake",
+        ),
+        context="quick contract gate placeholders",
+    )
     assert "gpd validate plan-preflight" in quick
     assert "references/orchestration/continuation-boundary.md" in quick
     assert "classifyHandoffIfNeeded" not in execute_phase
@@ -5725,11 +6007,17 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
 def test_verify_work_gap_closure_delegation_surfaces_contract_gate_inputs() -> None:
     verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
 
-    assert "**Project Contract Gate:** {project_contract_gate}" in verify_work
-    assert "**Project Contract Load Info:** {project_contract_load_info}" in verify_work
-    assert "**Project Contract Validation:** {project_contract_validation}" in verify_work
-    assert "**Contract Intake:** {contract_intake}" in verify_work
-    assert "**Effective Reference Intake:** {effective_reference_intake}" in verify_work
+    _assert_init_placeholders_visible(
+        verify_work,
+        (
+            "project_contract_gate",
+            "project_contract_load_info",
+            "project_contract_validation",
+            "contract_intake",
+            "effective_reference_intake",
+        ),
+        context="verify-work contract gate placeholders",
+    )
     assert "tool_requirements" in verify_work
     assert "machine-checkable hard requirements" in verify_work
     assert "The shared planner template owns the canonical planning policy and contract gate." not in verify_work
@@ -5746,6 +6034,8 @@ def test_decisive_comparisons_paper_quality_artifacts_and_profile_invariants_are
     scoring = (REFERENCES_DIR / "publication" / "paper-quality-scoring.md").read_text(encoding="utf-8")
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
     profiles = (REFERENCES_DIR / "orchestration" / "model-profiles.md").read_text(encoding="utf-8")
+    artifact_surfacing = (REFERENCES_DIR / "orchestration" / "artifact-surfacing.md").read_text(encoding="utf-8")
+    hypothesis_protocol = (REFERENCES_DIR / "protocols" / "hypothesis-driven-research.md").read_text(encoding="utf-8")
     quick_reference = (REFERENCES_DIR / "verification" / "core" / "verification-quick-reference.md").read_text(
         encoding="utf-8"
     )
@@ -5756,45 +6046,43 @@ def test_decisive_comparisons_paper_quality_artifacts_and_profile_invariants_are
     executor = (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
     verifier_agent = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
 
-    assert "emit decisive verdicts" in compare_command
-    assert "GPD/comparisons/[slug]-COMPARISON.md" in compare_workflow
+    _assert_semantic_fragments(compare_command, "emit decisive verdicts", context="compare-results command verdicts")
+    _assert_machine_fragments(
+        compare_workflow, "GPD/comparisons/[slug]-COMPARISON.md", context="compare-results workflow artifact path",
+    )
     assert "GPD/analysis/comparison-{slug}.md" not in compare_workflow
-    assert "comparison_verdicts" in internal_template
-    assert "figure_registry" in figure_tracker
-    assert "role: smoking_gun|benchmark|comparison|sanity_check|publication_polish|other" in figure_tracker
-    assert "canonical schema source of truth" in figure_tracker
-    assert "`${PAPER_DIR}/FIGURE_TRACKER.md`" in figure_tracker
-    assert "validate paper-quality --from-project ." in write_paper
-    assert "Before reading or updating `${PAPER_DIR}/FIGURE_TRACKER.md`, load" in write_paper
-    assert '"review_cadence": "dense"' in new_project
-    assert "Dense review cadence" in new_project
-    assert (
-        "prior decisive `contract_results`, decisive `comparison_verdicts`, or an explicit approach lock"
-        in execute_phase
+    _assert_machine_fragments(internal_template, "comparison_verdicts", context="internal comparison verdict field")
+    _assert_machine_fragments(
+        figure_tracker,
+        "figure_registry", "role: smoking_gun|benchmark|comparison|sanity_check|publication_polish|other",
+        "`${PAPER_DIR}/FIGURE_TRACKER.md`", context="figure tracker schema fields",
     )
-    assert "paper/FIGURE_TRACKER.md" in execute_phase
+    _assert_semantic_fragments(figure_tracker, "canonical schema source of truth", context="figure tracker schema authority")
+    _assert_machine_fragments(
+        write_paper,
+        "validate paper-quality --from-project .", "`${PAPER_DIR}/FIGURE_TRACKER.md`",
+        context="write-paper paper-quality figure tracker",
+    )
+    _assert_machine_fragments(new_project, '"review_cadence": "dense"', "Dense review cadence", context="dense review default")
+    _assert_semantic_fragments(
+        execute_phase,
+        "prior decisive `contract_results`", "decisive `comparison_verdicts`", "explicit approach lock",
+        context="execute-phase decisive prior evidence",
+    )
+    _assert_machine_fragments(execute_phase, "paper/FIGURE_TRACKER.md", context="execute-phase figure tracker path")
     assert "GPD/paper/FIGURE_TRACKER.md" not in execute_phase
-    assert "figure_registry" in scoring
-    assert "manuscript-root `FIGURE_TRACKER.md`" in scoring
-    assert "paper/<topic_stem>.tex" in (REFERENCES_DIR / "orchestration" / "artifact-surfacing.md").read_text(
-        encoding="utf-8"
+    _assert_machine_fragments(scoring, "figure_registry", "manuscript-root `FIGURE_TRACKER.md`", context="scoring figure fields")
+    _assert_machine_fragments(artifact_surfacing, "paper/<topic_stem>.tex", "paper/<topic_stem>.pdf", context="artifact surfacing paper outputs")
+    _assert_machine_fragments(hypothesis_protocol, "ARTIFACT-MANIFEST.json", "MANUSCRIPT_TEX", context="hypothesis protocol manifest fields")
+    assert "main.tex" not in hypothesis_protocol
+    _assert_machine_fragments(settings, "Review (Recommended)", context="settings review profile")
+    _assert_semantic_fragments(profiles, "all required contract-aware checks", context="model profile yolo gates")
+    _assert_machine_fragments(quick_reference, "current registry: 5.1-5.19", context="verification quick reference registry")
+    _assert_semantic_fragments(
+        verifier_profiles,
+        "still run every contract-aware check required by the plan",
+        context="verifier profile yolo contract-aware checks",
     )
-    assert "paper/<topic_stem>.pdf" in (REFERENCES_DIR / "orchestration" / "artifact-surfacing.md").read_text(
-        encoding="utf-8"
-    )
-    assert "ARTIFACT-MANIFEST.json" in (REFERENCES_DIR / "protocols" / "hypothesis-driven-research.md").read_text(
-        encoding="utf-8"
-    )
-    assert "MANUSCRIPT_TEX" in (REFERENCES_DIR / "protocols" / "hypothesis-driven-research.md").read_text(
-        encoding="utf-8"
-    )
-    assert "main.tex" not in (REFERENCES_DIR / "protocols" / "hypothesis-driven-research.md").read_text(
-        encoding="utf-8"
-    )
-    assert "Review (Recommended)" in settings
-    assert "all required contract-aware checks" in profiles
-    assert "current registry: 5.1-5.19" in quick_reference
-    assert "still run every contract-aware check required by the plan" in verifier_profiles
     _assert_prompt_concepts(
         planner,
         {
@@ -5802,9 +6090,11 @@ def test_decisive_comparisons_paper_quality_artifacts_and_profile_invariants_are
         },
         context="planner autonomy gates",
     )
-    assert "Do NOT change conventions mid-project without an explicit checkpoint" in planner
-    assert "Required first-result, anchor, and pre-fanout gates still apply even in yolo mode" in executor
-    assert "suggested_contract_checks" in verifier_agent
+    _assert_semantic_fragments(planner, "Do NOT change conventions mid-project", "explicit checkpoint", context="planner convention lock")
+    _assert_semantic_fragments(
+        executor, "Required first-result, anchor, and pre-fanout gates", "yolo mode", context="executor yolo gates",
+    )
+    _assert_machine_fragments(verifier_agent, "suggested_contract_checks", context="verifier suggested contract checks")
 
 
 def test_publication_workflows_refresh_bibliography_audit_after_bibliography_changes() -> None:
@@ -6908,15 +7198,31 @@ def test_undo_backtrack_hook_collects_complete_backtrack_row_fields() -> None:
     assert "--phase=<NN-slug>" in record_parse_step
     assert "Dedupe by exact normalized matching of finalized" in record_dedupe_step
     assert "`phase` + `trigger` + `why_wrong`" in record_dedupe_step
-    assert (
-        "structured arguments `{reverted_commit: TARGET_HASH, trigger: TARGET_MSG, phase: INFERRED_PHASE_OR_NULL}`"
-    ) in undo_backtrack_step
-    assert "not a shell-shaped string" in undo_backtrack_step
-    assert "do not interpolate it into shell-shaped args" in undo_backtrack_step
-    assert (
-        "remaining required row fields (`stage`, `produced`, `why_wrong`, "
-        "`counter_action`, `category`, `confidence`, and `promote`)"
-    ) in undo_backtrack_step
+    _assert_machine_fragments(
+        undo_backtrack_step,
+        "reverted_commit",
+        "TARGET_HASH",
+        "trigger",
+        "TARGET_MSG",
+        "phase",
+        "INFERRED_PHASE_OR_NULL",
+        "`stage`",
+        "`produced`",
+        "`why_wrong`",
+        "`counter_action`",
+        "`category`",
+        "`confidence`",
+        "`promote`",
+        context="undo backtrack structured row fields",
+    )
+    _assert_semantic_fragments(
+        undo_backtrack_step,
+        "structured arguments",
+        "not a shell-shaped string",
+        "do not interpolate it into shell-shaped args",
+        "remaining required row fields",
+        context="undo backtrack shell-safe structured args",
+    )
     assert "prompts the user only for `why_wrong`" not in undo_backtrack_step
 
 

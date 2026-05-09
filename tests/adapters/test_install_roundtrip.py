@@ -22,10 +22,6 @@ from gpd.adapters.claude_code import ClaudeCodeAdapter
 from gpd.adapters.codex import CodexAdapter
 from gpd.adapters.gemini import GeminiAdapter
 from gpd.adapters.install_utils import (
-    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
-    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    build_runtime_cli_bridge_command,
     convert_tool_references_in_body,
     expand_at_includes,
     rewrite_gpd_shell_line_to_runtime_bridge,
@@ -42,56 +38,50 @@ from gpd.adapters.runtime_catalog import (
 from gpd.adapters.tool_names import build_canonical_alias_map
 from gpd.core.public_surface_contract import local_cli_bridge_commands
 from gpd.registry import list_commands, load_agents_from_dir
+from tests.adapters.projection_test_utils import (
+    RUNTIME_NOTE_TAGS,
+    StagedCommandProjectionCase,
+    assert_compact_staged_command_shim,
+    assert_no_unresolved_include_markers,
+    assert_protocol_bundle_jit_shape,
+    first_runnable_shell_command,
+    has_compact_non_native_shim,
+    has_help_bridge_shim_sentinel,
+    has_staged_shim_sentinel,
+    has_workflow_reference_shim_sentinel,
+    iter_staged_command_projection_cases,
+    raw_include_count,
+    runnable_shell_lines,
+    runtime_bridge_command,
+    shell_fences,
+    single_runtime_note_block,
+    staged_command_has_protocol_bundle_fields,
+    tag_count,
+)
 from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 from tests.doc_surface_contracts import assert_publication_lane_boundary_contract
-from tests.prompt_metrics_support import MarkdownFence, iter_markdown_fences
+from tests.prompt_metrics_support import MarkdownFence
 
 REPO_GPD_ROOT = Path(__file__).resolve().parents[2] / "src" / "gpd"
+COMMANDS_DIR = REPO_GPD_ROOT / "commands"
+WORKFLOWS_DIR = REPO_GPD_ROOT / "specs" / "workflows"
 RUNTIME_ALIAS_MAP = build_canonical_alias_map(adapter.tool_name_map for adapter in iter_adapters())
 FULL_RUNTIME_MATRIX = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 _SHARED_INSTALL = get_shared_install_metadata()
 _INSTALL_CACHE: dict[tuple[str, tuple[str, ...]], Path] = {}
+STAGED_COMMAND_PROJECTION_CASES = iter_staged_command_projection_cases(
+    commands_dir=COMMANDS_DIR,
+    workflows_dir=WORKFLOWS_DIR,
+)
+STAGED_CASE_BY_COMMAND = {case.command_name: case for case in STAGED_COMMAND_PROJECTION_CASES}
+INSTALLED_PROJECTION_SMOKE_COMMANDS = ("help", "execute-phase", "new-project", "write-paper", "peer-review", "verify-work")
+INSTALLED_STAGED_SMOKE_COMMANDS = ("execute-phase", "new-project", "write-paper", "verify-work")
+INSTALLED_SHELL_SMOKE_COMMANDS = ("health",)
+INSTALLED_PROTOCOL_BUNDLE_SMOKE_COMMANDS = ("execute-phase",)
 VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/verification-report.md",
     "templates/contract-results-schema.md",
     "references/shared/canonical-schema-discipline.md",
-)
-STAGED_SHIM_SENTINELS = ("<gpd_staged_bootstrap_shim", "## Compact Staged Command Shim")
-HELP_BRIDGE_SHIM_SENTINELS = ("<gpd_help_bridge_shim", "CLI-owned compact help surface")
-WORKFLOW_REFERENCE_SHIM_SENTINELS = (COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,)
-UNRESOLVED_INCLUDE_MARKERS = (
-    "@ include not resolved:",
-    "@ include cycle detected:",
-    "@ include read error:",
-    "@ include depth limit reached:",
-)
-STAGED_SHIM_CONTRACT_FRAGMENTS = (
-    "staged_loading",
-    "required_init_fields",
-    "eager_authorities",
-    "must_not_eager_load",
-    "next_stages",
-    "allowed_tools",
-    "writes_allowed",
-    "produced_state",
-    "checkpoints",
-)
-RUNTIME_NOTE_TAGS = (
-    "codex_runtime_notes",
-    "gemini_runtime_notes",
-    "gemini_shell_runtime_notes",
-)
-PROTOCOL_BUNDLE_JIT_FIELDS = (
-    "selected_protocol_bundle_ids",
-    "protocol_bundle_count",
-    "protocol_bundle_context",
-    "protocol_bundle_verifier_extensions",
-)
-PROTOCOL_BUNDLE_JIT_COMMANDS = (
-    "plan-phase",
-    "execute-phase",
-    "quick",
-    "verify-work",
 )
 STAGED_HELPER_TARGET_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
 INTERNAL_HELPER_LABEL_STEMS = (
@@ -105,14 +95,6 @@ INTERNAL_HELPER_LABEL_STEMS = (
 LOCAL_HELPER_TERM_RE = re.compile(
     r"\b(?:stage\s+field-access|phase\s+(?:checkpoint|closeout-readiness)|"
     r"validate\s+child-handoff|return\s+skeleton|apply-return-updates)\b"
-)
-PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS = (
-    "Statistical Mechanics Simulation",
-    "Numerical Relativity",
-    "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md",
-    "{GPD_INSTALL_DIR}/references/protocols/numerical-relativity.md",
-    "Estimator policies:",
-    "Decisive artifacts:",
 )
 UNRESOLVED_INSTALL_SHAPE_MARKERS = (
     "{GPD_INSTALL_DIR}",
@@ -145,16 +127,6 @@ def _opencode_hyphenated_public_command_re() -> re.Pattern[str]:
 def _opencode_canonical_public_command_re() -> re.Pattern[str]:
     stems = "|".join(re.escape(stem) for stem in _opencode_rewritten_command_stems())
     return re.compile(rf"(?<![A-Za-z0-9_./$-])/?gpd:(?P<stem>{stems})(?![A-Za-z0-9_-])")
-
-
-def expected_opencode_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
-    return build_runtime_cli_bridge_command(
-        "opencode",
-        target_dir=target,
-        config_dir_name=".opencode",
-        is_global=is_global,
-        explicit_target=explicit_target,
-    )
 
 
 def _make_checkout_stub(tmp_path: Path) -> tuple[Path, Path]:
@@ -191,119 +163,27 @@ def _collect_textual_artifacts(root: Path) -> str:
     return "\n".join(chunks)
 
 
-def _raw_include_count(text: str, include_suffix: str) -> int:
-    return sum(
-        1 for line in text.splitlines() if line.strip().startswith("@") and line.strip().endswith(include_suffix)
-    )
-
-
-def _has_compact_staged_command_shim(text: str) -> bool:
-    return COMPACT_STAGED_COMMAND_SHIM_SENTINEL in text
-
-
-def _assert_compact_staged_command_shim(text: str, *, command_name: str, first_stage: str) -> None:
-    assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in text
-    assert f'command="gpd:{command_name}"' in text
-    assert f'first_stage="{first_stage}"' in text
-    assert f"<!-- [included: {command_name}.md] -->" not in text
-    assert f"@{{GPD_INSTALL_DIR}}/workflows/{command_name}.md" not in text
-    assert f"gpd --raw init {command_name}" in text
-    assert f"--stage {first_stage}" in text
-    assert "staged_loading.required_init_fields" in text
-    assert "staged_loading.eager_authorities" in text
-    assert "staged_loading.must_not_eager_load" in text
-    assert "staged_loading.next_stages" in text
-
-
-def _has_compact_non_native_shim(text: str) -> bool:
-    return (
-        _has_staged_shim_sentinel(text)
-        or _has_help_bridge_shim_sentinel(text)
-        or _has_workflow_reference_shim_sentinel(text)
-    )
-
-
-def _has_staged_shim_sentinel(text: str) -> bool:
-    return any(sentinel in text for sentinel in STAGED_SHIM_SENTINELS)
-
-
-def _has_help_bridge_shim_sentinel(text: str) -> bool:
-    return any(sentinel in text for sentinel in HELP_BRIDGE_SHIM_SENTINELS)
-
-
-def _has_workflow_reference_shim_sentinel(text: str) -> bool:
-    return any(sentinel in text for sentinel in WORKFLOW_REFERENCE_SHIM_SENTINELS)
-
-
-def _assert_no_unresolved_include_markers(text: str, *, label: str) -> None:
-    lowered = text.lower()
-    offenders = [marker for marker in UNRESOLVED_INCLUDE_MARKERS if marker in lowered]
-    assert offenders == [], f"{label} contains unresolved include marker(s): {', '.join(offenders)}"
-
-
-def _first_stage_id(command_name: str) -> str:
-    manifest_path = REPO_GPD_ROOT / "specs" / "workflows" / f"{command_name}-stage-manifest.json"
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    stages = payload.get("stages")
-    assert isinstance(stages, list) and stages, f"{manifest_path.name} has no stages"
-    first_stage = stages[0]
-    assert isinstance(first_stage, dict)
-    stage_id = first_stage.get("id")
-    assert isinstance(stage_id, str) and stage_id
-    return stage_id
+def _staged_projection_case(command_name: str) -> StagedCommandProjectionCase:
+    case = STAGED_CASE_BY_COMMAND.get(command_name)
+    assert case is not None, f"{command_name} has no staged projection case"
+    return case
 
 
 def _first_stage_authority_suffix(command_name: str) -> str:
-    manifest_path = REPO_GPD_ROOT / "specs" / "workflows" / f"{command_name}-stage-manifest.json"
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    stages = payload.get("stages")
-    assert isinstance(stages, list) and stages, f"{manifest_path.name} has no stages"
-    first_stage = stages[0]
-    assert isinstance(first_stage, dict)
-    mode_paths = first_stage.get("mode_paths")
-    assert isinstance(mode_paths, list) and mode_paths
-    authority = mode_paths[0]
-    assert isinstance(authority, str) and authority.startswith("workflows/")
-    return authority
+    native_include_paths = _staged_projection_case(command_name).native_include_paths
+    assert native_include_paths, f"{command_name} staged projection case has no native include paths"
+    return native_include_paths[0]
 
 
 def _has_native_staged_command_include(text: str, command_name: str) -> bool:
-    return _raw_include_count(text, _first_stage_authority_suffix(command_name)) == 1
+    return raw_include_count(text, _first_stage_authority_suffix(command_name)) == 1
 
 
 def _assert_native_staged_command_include(text: str, *, command_name: str) -> None:
     assert _has_native_staged_command_include(text, command_name)
     root_suffix = f"workflows/{command_name}.md"
     if _first_stage_authority_suffix(command_name) != root_suffix:
-        assert _raw_include_count(text, root_suffix) == 0
-    assert "staged_loading.eager_authorities" in text
-    assert "staged_loading.must_not_eager_load" in text
-
-
-def _stage_manifest_has_protocol_bundle_fields(command_name: str) -> bool:
-    manifest_path = REPO_GPD_ROOT / "specs" / "workflows" / f"{command_name}-stage-manifest.json"
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    field_groups = payload.get("required_init_field_groups")
-    assert isinstance(field_groups, dict)
-    stages = payload.get("stages")
-    assert isinstance(stages, list)
-
-    for stage in stages:
-        assert isinstance(stage, dict)
-        stage_fields = set()
-        explicit_fields = stage.get("required_init_fields", [])
-        assert isinstance(explicit_fields, list)
-        stage_fields.update(field for field in explicit_fields if isinstance(field, str))
-        group_names = stage.get("required_init_field_groups", [])
-        assert isinstance(group_names, list)
-        for group_name in group_names:
-            assert isinstance(group_name, str)
-            group_fields = field_groups.get(group_name, [])
-            assert isinstance(group_fields, list)
-            stage_fields.update(field for field in group_fields if isinstance(field, str))
-        if any(field in stage_fields for field in PROTOCOL_BUNDLE_JIT_FIELDS):
-            return True
-    return False
+        assert raw_include_count(text, root_suffix) == 0
 
 
 def _assert_runtime_command_label_visible(text: str, *, runtime: str, command_name: str) -> None:
@@ -322,7 +202,7 @@ def _installed_workflow_text(target: Path, workflow_name: str) -> str:
 
 
 def _command_or_workflow_authority_text(target: Path, command_prompt: str, runtime: str, workflow_name: str) -> str:
-    if _has_compact_non_native_shim(command_prompt):
+    if has_compact_non_native_shim(command_prompt):
         command_text = _canonicalize_runtime_markdown(command_prompt, runtime=runtime)
         workflow_text = _canonicalize_runtime_markdown(_installed_workflow_text(target, workflow_name), runtime=runtime)
         return command_text + "\n" + workflow_text
@@ -403,14 +283,7 @@ def real_installed_repo_factory(tmp_path_factory: pytest.TempPathFactory):
 
 
 def _expected_local_bridge_for_runtime(runtime: str, target: Path) -> str:
-    adapter = get_adapter(runtime)
-    return build_runtime_cli_bridge_command(
-        runtime,
-        target_dir=target,
-        config_dir_name=adapter.config_dir_name,
-        is_global=False,
-        explicit_target=False,
-    )
+    return runtime_bridge_command(runtime, target)
 
 
 def _canonicalize_runtime_markdown(content: str, *, runtime: str) -> str:
@@ -529,44 +402,13 @@ def _iter_installed_command_prompts(
     )
 
 
-def _tag_count(text: str, tag: str) -> tuple[int, int]:
-    return text.count(f"<{tag}>"), text.count(f"</{tag}>")
-
-
-def _single_tag_block(text: str, tag: str, *, label: str) -> str:
-    blocks = re.findall(rf"<{re.escape(tag)}>\n(.*?)</{re.escape(tag)}>", text, flags=re.DOTALL)
-    assert len(blocks) == 1, f"{label} should have one <{tag}> block"
-    return blocks[0]
-
-
-def _shell_fences(text: str) -> tuple[MarkdownFence, ...]:
-    shell_fences: list[MarkdownFence] = []
-    for fence in iter_markdown_fences(text):
-        info = fence.info.strip()
-        language = info.split(None, 1)[0].lower() if info else ""
-        if language in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES:
-            shell_fences.append(fence)
-    return tuple(shell_fences)
-
-
-def _runnable_shell_lines(fence: MarkdownFence) -> tuple[str, ...]:
-    return tuple(
-        stripped for line in fence.body.splitlines() if (stripped := line.strip()) and not stripped.startswith("#")
-    )
-
-
-def _first_runnable_shell_command(fence: MarkdownFence) -> str | None:
-    lines = _runnable_shell_lines(fence)
-    return lines[0] if lines else None
-
-
 def _classify_installed_gemini_shell_fence(
     fence: MarkdownFence,
     *,
     bridge_command: str,
     policy_prefixes: tuple[str, ...],
 ) -> str:
-    command = _first_runnable_shell_command(fence)
+    command = first_runnable_shell_command(fence)
     if command is None:
         return "non-runnable"
     if command.startswith(bridge_command):
@@ -599,141 +441,6 @@ def _read_runtime_agent_prompt(target: Path, runtime: str, agent_name: str) -> s
     if runtime in {"claude-code", "codex", "gemini", "opencode"}:
         return (target / "agents" / f"{agent_name}.md").read_text(encoding="utf-8")
     raise AssertionError(f"Unsupported runtime {runtime}")
-
-
-def _assert_installed_contract_visibility(
-    verifier: str,
-    executor: str,
-    new_project: str,
-    plan_phase: str,
-    write_paper: str,
-    plan_schema: str,
-    execute_phase: str,
-    verify_work: str,
-    *,
-    runtime: str,
-) -> None:
-    verifier = _canonicalize_runtime_markdown(verifier, runtime=runtime)
-    executor = _canonicalize_runtime_markdown(executor, runtime=runtime)
-    new_project = _canonicalize_runtime_markdown(new_project, runtime=runtime)
-    plan_phase = _canonicalize_runtime_markdown(plan_phase, runtime=runtime)
-    write_paper = _canonicalize_runtime_markdown(write_paper, runtime=runtime)
-    plan_schema = _canonicalize_runtime_markdown(plan_schema, runtime=runtime)
-    execute_phase = _canonicalize_runtime_markdown(execute_phase, runtime=runtime)
-    verify_work = _canonicalize_runtime_markdown(verify_work, runtime=runtime)
-
-    if _has_compact_staged_command_shim(execute_phase):
-        _assert_compact_staged_command_shim(
-            execute_phase,
-            command_name="execute-phase",
-            first_stage="phase_bootstrap",
-        )
-    elif _has_native_staged_command_include(execute_phase, "execute-phase"):
-        _assert_native_staged_command_include(execute_phase, command_name="execute-phase")
-    else:
-        assert "Read the included bootstrap authority first" in execute_phase
-        assert "staged_loading.eager_authorities" in execute_phase
-        assert "<inline_guidance>" not in execute_phase
-
-    assert "templates/contract-results-schema.md" in verifier
-    assert "plan_contract_ref" in verifier
-    assert "contract_results" in verifier
-    assert "comparison_verdicts" in verifier
-    assert "suggested_contract_checks" in verifier
-    assert "contract_results.uncertainty_markers" in verifier
-
-    assert "templates/contract-results-schema.md" in executor
-    assert "plan_contract_ref" in executor
-    assert "contract_results" in executor
-    assert "comparison_verdicts" in executor
-    assert "These ledgers are user-visible evidence." in executor
-
-    if _has_compact_staged_command_shim(new_project):
-        _assert_compact_staged_command_shim(
-            new_project,
-            command_name="new-project",
-            first_stage="scope_intake",
-        )
-    elif "scope_intake" in new_project and "staged_loading.eager_authorities" in new_project:
-        assert "scope_intake" in new_project
-        assert "staged_loading.eager_authorities" in new_project
-        assert "Load `workflows/new-project.md` only after `scope_approval` hands off to `post_scope`." in new_project
-        assert "templates/project-contract-schema.md" in new_project
-        assert "project_contract_load_info" in new_project
-        assert "project_contract_validation" in new_project
-    else:
-        assert "templates/project-contract-schema.md" in new_project
-        assert "project_contract_load_info" in new_project
-        assert "project_contract_validation" in new_project
-        assert "`schema_version` must be the integer `1`" in new_project
-        assert "`references[].must_surface` must stay a boolean `true` or `false`" in new_project
-        assert "`context_intake`" in new_project
-        assert "`approach_policy`" in new_project
-        assert "`uncertainty_markers`" in new_project
-        assert (
-            "`context_intake`, `approach_policy`, and `uncertainty_markers` must each stay as objects, not strings "
-            "or lists."
-        ) in new_project
-
-    if _has_compact_staged_command_shim(write_paper):
-        _assert_compact_staged_command_shim(
-            write_paper,
-            command_name="write-paper",
-            first_stage="paper_bootstrap",
-        )
-    elif _has_native_staged_command_include(write_paper, "write-paper"):
-        _assert_native_staged_command_include(write_paper, command_name="write-paper")
-    else:
-        assert "Follow the included first-stage authority exactly" in write_paper
-        assert "staged_loading.eager_authorities" in write_paper
-        assert "review_mode: publication" in write_paper
-
-    if _has_compact_staged_command_shim(plan_phase):
-        _assert_compact_staged_command_shim(
-            plan_phase,
-            command_name="plan-phase",
-            first_stage="phase_bootstrap",
-        )
-    else:
-        assert "Canonical contract schema and hard validation rules" in plan_phase
-        assert (
-            "every proof-bearing plan must surface the theorem statement, named parameters, hypotheses, "
-            "quantifier/domain obligations, and intended conclusion clauses visibly enough that a later audit can "
-            "detect missing coverage"
-        ) in plan_phase
-
-    assert "`contract.context_intake` is required and must be a non-empty object" in plan_schema
-    assert "`must_surface` is a boolean scalar. Use the YAML literals `true` and `false`" in plan_schema
-    assert "If `must_surface: true`, `required_actions` must not be empty." in plan_schema
-    assert "If `must_surface: true`, `applies_to[]` must not be empty." in plan_schema
-    assert "`carry_forward_to[]` is optional free-text workflow scope" in plan_schema
-    assert "`uncertainty_markers` must be a YAML object, not a string or list." in plan_schema
-
-    if not (
-        _has_compact_staged_command_shim(execute_phase)
-        or _has_native_staged_command_include(execute_phase, "execute-phase")
-        or "staged_loading.eager_authorities" in execute_phase
-    ):
-        assert "workflow.verifier=false" in execute_phase
-        assert "skip verification" in execute_phase
-        assert "proof red-teaming" in execute_phase
-        assert "{plan_id}-PROOF-REDTEAM.md" in execute_phase
-
-    if _has_compact_staged_command_shim(verify_work):
-        _assert_compact_staged_command_shim(
-            verify_work,
-            command_name="verify-work",
-            first_stage="session_router",
-        )
-    else:
-        assert "Targeted flags narrow the optional check mix only." in verify_work
-        assert "Every spawned agent is a one-shot delegation" in verify_work
-        assert (
-            "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; "
-            "if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once"
-        ) in verify_work
-
-
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
     real_installed_repo_factory,
@@ -743,11 +450,13 @@ def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
     peer_review = _read_runtime_command_prompt(target.parent, target, runtime, "peer-review")
     peer_review = _command_or_workflow_authority_text(target, peer_review, runtime, "peer-review")
 
-    if _has_compact_staged_command_shim(peer_review):
-        _assert_compact_staged_command_shim(
+    if has_staged_shim_sentinel(peer_review):
+        case = _staged_projection_case("peer-review")
+        assert_compact_staged_command_shim(
             peer_review,
-            command_name="peer-review",
-            first_stage=_first_stage_id("peer-review"),
+            command_name=case.command_name,
+            first_stage=case.first_stage_id,
+            staged_loading_keys=case.staged_loading_keys,
         )
         return
 
@@ -774,12 +483,14 @@ def test_installed_verifier_prompt_surface_keeps_one_wrapper_and_stays_within_bu
     assert verifier.index("## Agent Requirements") < verifier.index("## Bootstrap Discipline")
     for include_suffix in VERIFIER_SCHEMA_INCLUDE_SUFFIXES:
         assert include_suffix in verifier
-        assert _raw_include_count(verifier, include_suffix) == 0
+        assert raw_include_count(verifier, include_suffix) == 0
     assert "# Verification Report Template" not in verifier
     assert "# Contract Results Schema" not in verifier
     assert "# Canonical Schema Discipline" not in verifier
     assert "`gpd verification-report skeleton ... --write --body-file ... --validate contract`" in verifier
     assert "`gpd verification-report finalize ... --patch ... --body-file ... --validate contract`" in verifier
+    assert "## Physics Stub Detection Patterns" not in verifier
+    assert "Load on demand from `references/verification/examples/verifier-worked-examples.md`." in verifier
     assert len(verifier.splitlines()) <= line_budget
     assert len(verifier) <= char_budget
 
@@ -866,40 +577,8 @@ def test_installed_referee_latex_template_exists_and_matches_source(
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
-def test_installed_execute_phase_surface_uses_native_include_or_compact_stage_shim(
-    real_installed_repo_factory,
-    runtime: str,
-) -> None:
-    target = real_installed_repo_factory(runtime)
-    prompt = _read_runtime_command_prompt(target.parent, target, runtime, "execute-phase")
-    descriptor = get_runtime_descriptor(runtime)
-    first_stage = _first_stage_id("execute-phase")
-
-    assert (_installed_workflow_text(target, "execute-phase")).strip()
-    _assert_no_unresolved_include_markers(prompt, label=f"{runtime} execute-phase")
-    _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name="execute-phase")
-
-    if descriptor.native_include_support:
-        assert _raw_include_count(prompt, _first_stage_authority_suffix("execute-phase")) == 1
-        assert _raw_include_count(prompt, "workflows/execute-phase.md") == 0
-        assert "<!-- [included: execute-phase.md] -->" not in prompt
-        assert not _has_staged_shim_sentinel(prompt)
-        return
-
-    assert _raw_include_count(prompt, "workflows/execute-phase.md") == 0
-    assert "<!-- [included: execute-phase.md] -->" not in prompt
-    assert _has_staged_shim_sentinel(prompt)
-    assert not _has_help_bridge_shim_sentinel(prompt)
-    assert "--raw init execute-phase" in prompt
-    assert f"--stage {first_stage}" in prompt
-    for fragment in STAGED_SHIM_CONTRACT_FRAGMENTS:
-        assert fragment in prompt
-    assert len(prompt) < 20_000
-
-
-@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
-@pytest.mark.parametrize("command_name", PROTOCOL_BUNDLE_JIT_COMMANDS)
-def test_installed_staged_command_surfaces_protocol_bundle_jit_without_catalog_inline(
+@pytest.mark.parametrize("command_name", INSTALLED_STAGED_SMOKE_COMMANDS)
+def test_installed_smoke_staged_command_surface_uses_native_include_or_compact_stage_shim(
     real_installed_repo_factory,
     runtime: str,
     command_name: str,
@@ -907,27 +586,48 @@ def test_installed_staged_command_surfaces_protocol_bundle_jit_without_catalog_i
     target = real_installed_repo_factory(runtime)
     prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
     descriptor = get_runtime_descriptor(runtime)
+    case = _staged_projection_case(command_name)
 
-    assert _stage_manifest_has_protocol_bundle_fields(command_name)
-    for marker in PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS:
-        assert marker not in prompt
+    assert (_installed_workflow_text(target, command_name)).strip()
+    assert_no_unresolved_include_markers(prompt, label=f"{runtime} {command_name}")
+    _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name=command_name)
 
     if descriptor.native_include_support:
-        first_stage_suffix = _first_stage_authority_suffix(command_name)
-        assert _raw_include_count(prompt, first_stage_suffix) == 1
-        root_suffix = f"workflows/{command_name}.md"
-        if first_stage_suffix != root_suffix:
-            assert _raw_include_count(prompt, root_suffix) == 0
-        assert "<protocol_bundle_jit>" not in prompt
+        _assert_native_staged_command_include(prompt, command_name=command_name)
+        assert f"<!-- [included: {command_name}.md] -->" not in prompt
+        assert not has_staged_shim_sentinel(prompt)
         return
 
-    assert _has_staged_shim_sentinel(prompt)
-    assert "<protocol_bundle_jit>" in prompt
-    assert "use those init payload fields as the selected-bundle loading map" in prompt
-    assert "load only selected asset paths named by `protocol_bundle_context`" in prompt
-    assert "do not inline protocol bundle catalogs during bootstrap" in prompt
-    for field in PROTOCOL_BUNDLE_JIT_FIELDS:
-        assert field in prompt
+    assert raw_include_count(prompt, f"workflows/{command_name}.md") == 0
+    assert f"<!-- [included: {command_name}.md] -->" not in prompt
+    assert_compact_staged_command_shim(
+        prompt,
+        command_name=case.command_name,
+        first_stage=case.first_stage_id,
+        staged_loading_keys=case.staged_loading_keys,
+        command_label=get_adapter(runtime).format_command(case.command_name),
+    )
+    assert not has_help_bridge_shim_sentinel(prompt)
+    assert len(prompt) < 20_000
+
+
+@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
+@pytest.mark.parametrize("command_name", INSTALLED_PROTOCOL_BUNDLE_SMOKE_COMMANDS)
+def test_installed_smoke_staged_command_surfaces_protocol_bundle_jit_without_catalog_inline(
+    real_installed_repo_factory,
+    runtime: str,
+    command_name: str,
+) -> None:
+    target = real_installed_repo_factory(runtime)
+    prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+    case = _staged_projection_case(command_name)
+
+    assert_protocol_bundle_jit_shape(
+        prompt,
+        case=case,
+        runtime=runtime,
+        has_bundle_fields=staged_command_has_protocol_bundle_fields(WORKFLOWS_DIR, command_name),
+    )
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
@@ -940,19 +640,19 @@ def test_installed_help_surface_uses_native_include_or_compact_help_bridge_shim(
     descriptor = get_runtime_descriptor(runtime)
 
     assert (_installed_workflow_text(target, "help")).strip()
-    _assert_no_unresolved_include_markers(prompt, label=f"{runtime} help")
+    assert_no_unresolved_include_markers(prompt, label=f"{runtime} help")
     _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name="help")
 
     if descriptor.native_include_support:
-        assert _raw_include_count(prompt, "workflows/help.md") == 1
+        assert raw_include_count(prompt, "workflows/help.md") == 1
         assert "<!-- [included: help.md] -->" not in prompt
-        assert not _has_help_bridge_shim_sentinel(prompt)
+        assert not has_help_bridge_shim_sentinel(prompt)
         return
 
-    assert _raw_include_count(prompt, "workflows/help.md") == 0
+    assert raw_include_count(prompt, "workflows/help.md") == 0
     assert "<!-- [included: help.md] -->" not in prompt
-    assert _has_help_bridge_shim_sentinel(prompt)
-    assert not _has_staged_shim_sentinel(prompt)
+    assert has_help_bridge_shim_sentinel(prompt)
+    assert not has_staged_shim_sentinel(prompt)
     assert "<current-help-command>" not in prompt
     assert "--raw help" in prompt
     assert "--raw help --all" in prompt
@@ -961,30 +661,32 @@ def test_installed_help_surface_uses_native_include_or_compact_help_bridge_shim(
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
-def test_installed_command_runtime_note_tags_match_runtime_container(
+def test_installed_smoke_command_runtime_note_tags_match_runtime_container(
     real_installed_repo_factory,
     runtime: str,
 ) -> None:
     target = real_installed_repo_factory(runtime)
+    kind = _installed_command_kind(runtime)
 
-    for command_name, prompt, kind in _iter_installed_command_prompts(target, runtime):
+    for command_name in INSTALLED_PROJECTION_SMOKE_COMMANDS:
+        prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
         label = f"{runtime}:{command_name}:{kind}"
 
         if runtime == "codex":
-            assert _tag_count(prompt, "codex_runtime_notes") == (1, 1), label
-            assert _tag_count(prompt, "gemini_runtime_notes") == (0, 0), label
-            assert _tag_count(prompt, "gemini_shell_runtime_notes") == (0, 0), label
+            assert tag_count(prompt, "codex_runtime_notes") == (1, 1), label
+            assert tag_count(prompt, "gemini_runtime_notes") == (0, 0), label
+            assert tag_count(prompt, "gemini_shell_runtime_notes") == (0, 0), label
             continue
 
         if runtime == "gemini":
-            assert _tag_count(prompt, "codex_runtime_notes") == (0, 0), label
-            assert _tag_count(prompt, "gemini_runtime_notes") == (1, 1), label
-            expected_shell_note_count = (1, 1) if _shell_fences(prompt) else (0, 0)
-            assert _tag_count(prompt, "gemini_shell_runtime_notes") == expected_shell_note_count, label
+            assert tag_count(prompt, "codex_runtime_notes") == (0, 0), label
+            assert tag_count(prompt, "gemini_runtime_notes") == (1, 1), label
+            expected_shell_note_count = (1, 1) if shell_fences(prompt) else (0, 0)
+            assert tag_count(prompt, "gemini_shell_runtime_notes") == expected_shell_note_count, label
             continue
 
         for tag in RUNTIME_NOTE_TAGS:
-            assert _tag_count(prompt, tag) == (0, 0), label
+            assert tag_count(prompt, tag) == (0, 0), label
         if runtime == "opencode":
             assert prompt.count("<!-- Managed by Get Physics Done (GPD). -->") == 1, label
 
@@ -998,23 +700,26 @@ def test_installed_command_surfaces_have_no_unresolved_install_shape(
 
     for command_name, prompt, kind in _iter_installed_command_prompts(target, runtime):
         label = f"{runtime}:{command_name}:{kind}"
-        _assert_no_unresolved_include_markers(prompt, label=label)
+        assert_no_unresolved_include_markers(prompt, label=label)
         offenders = [marker for marker in UNRESOLVED_INSTALL_SHAPE_MARKERS if marker in prompt]
         assert offenders == [], f"{label} contains unresolved install shape markers: {offenders}"
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
-def test_installed_command_shell_fences_use_runtime_bridge_or_public_cli(
+def test_installed_smoke_command_shell_fences_use_runtime_bridge_or_public_cli(
     real_installed_repo_factory,
     runtime: str,
 ) -> None:
     target = real_installed_repo_factory(runtime)
     bridge_command = _expected_local_bridge_for_runtime(runtime, target)
+    kind = _installed_command_kind(runtime)
     offenders: list[str] = []
 
-    for command_name, prompt, kind in _iter_installed_command_prompts(target, runtime):
-        for fence in _shell_fences(prompt):
-            for line in _runnable_shell_lines(fence):
+    for command_name in INSTALLED_SHELL_SMOKE_COMMANDS:
+        prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
+        assert shell_fences(prompt), f"{runtime}:{command_name}:{kind} should expose a shell fence"
+        for fence in shell_fences(prompt):
+            for line in runnable_shell_lines(fence):
                 rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
                 if rewritten != line:
                     offenders.append(
@@ -1054,8 +759,8 @@ def test_installed_target_workflow_helper_calls_stay_local_cli_not_runtime_label
                         f"internal helper surfaced as {public_label!r}"
                     )
 
-        for fence in _shell_fences(workflow_text):
-            for line in _runnable_shell_lines(fence):
+        for fence in shell_fences(workflow_text):
+            for line in runnable_shell_lines(fence):
                 if not LOCAL_HELPER_TERM_RE.search(line):
                     continue
                 rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
@@ -1096,14 +801,15 @@ def test_installed_gemini_toml_policy_and_shell_fence_classification(real_instal
 
     offenders: list[str] = []
     shell_note_commands = 0
-    for command_name, prompt, kind in _iter_installed_command_prompts(target, "gemini"):
+    kind = _installed_command_kind("gemini")
+    for command_name in INSTALLED_SHELL_SMOKE_COMMANDS:
+        prompt = _read_runtime_command_prompt(target.parent, target, "gemini", command_name)
         label = f"gemini:{command_name}:{kind}"
-        fences = _shell_fences(prompt)
-        if not fences:
-            continue
+        fences = shell_fences(prompt)
+        assert fences, f"{label} should expose a shell fence"
 
         shell_note_commands += 1
-        shell_note = _single_tag_block(prompt, "gemini_shell_runtime_notes", label=label)
+        shell_note = single_runtime_note_block(prompt, "gemini_shell_runtime_notes", label=label)
         for prefix in policy_prefixes:
             assert f"`{prefix}`" in shell_note, f"{label} shell notes omit policy prefix {prefix!r}"
 
@@ -1113,7 +819,7 @@ def test_installed_gemini_toml_policy_and_shell_fence_classification(real_instal
                 bridge_command=bridge_command,
                 policy_prefixes=policy_prefixes,
             )
-            first_command = _first_runnable_shell_command(fence)
+            first_command = first_runnable_shell_command(fence)
             if classification not in {"runnable-bridge", "policy-static"}:
                 offenders.append(
                     f"{label}: lines {fence.start_line}-{fence.end_line}: "
@@ -1129,7 +835,7 @@ def test_installed_gemini_toml_policy_and_shell_fence_classification(real_instal
             for fragment in GEMINI_FORBIDDEN_INSTALLED_SHELL_FRAGMENTS:
                 if fragment in fence.body:
                     offenders.append(f"{label}: lines {fence.start_line}-{fence.end_line}: contains {fragment!r}")
-            for line in _runnable_shell_lines(fence):
+            for line in runnable_shell_lines(fence):
                 if LEADING_SHELL_ASSIGNMENT_RE.match(line):
                     offenders.append(f"{label}: lines {fence.start_line}-{fence.end_line}: leading assignment {line!r}")
 
@@ -1252,7 +958,7 @@ class TestCodexRoundtrip:
             line_count = len(content.splitlines())
             char_count = len(content)
 
-            if _has_compact_staged_command_shim(content):
+            if has_staged_shim_sentinel(content):
                 assert line_count <= 300, f"{skill_md.parent.name} staged shim has {line_count} lines"
                 assert char_count <= 20_000, f"{skill_md.parent.name} staged shim has {char_count} chars"
             assert line_count <= 2_700, f"{skill_md.parent.name} has {line_count} lines"
@@ -1418,11 +1124,11 @@ def test_help_like_skills_keep_canonical_local_cli_language(tmp_path: Path) -> N
     tour_skill = (skills / "gpd-tour" / "SKILL.md").read_text(encoding="utf-8")
     settings_skill = (skills / "gpd-settings" / "SKILL.md").read_text(encoding="utf-8")
     help_reference = (
-        _installed_workflow_text(target, "help") if _has_help_bridge_shim_sentinel(help_skill) else help_skill
+        _installed_workflow_text(target, "help") if has_help_bridge_shim_sentinel(help_skill) else help_skill
     )
     settings_reference = (
         _installed_workflow_text(target, "settings")
-        if _has_workflow_reference_shim_sentinel(settings_skill)
+        if has_workflow_reference_shim_sentinel(settings_skill)
         else settings_skill
     )
 
@@ -1475,41 +1181,6 @@ def test_real_installed_help_prompt_surfaces_bounded_write_paper_external_author
 
     assert_publication_lane_boundary_contract(help_prompt)
     assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_prompt
-
-
-@pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
-def test_installed_prompt_contract_visibility_survives_adapter_projection(
-    real_installed_repo_factory,
-    runtime: str,
-) -> None:
-    target = real_installed_repo_factory(runtime)
-    verifier = _read_runtime_agent_prompt(target, runtime, "gpd-verifier")
-    executor = _read_runtime_agent_prompt(target, runtime, "gpd-executor")
-    raw_new_project = _read_runtime_command_prompt(target.parent, target, runtime, "new-project")
-    raw_plan_phase = _read_runtime_command_prompt(target.parent, target, runtime, "plan-phase")
-    raw_write_paper = _read_runtime_command_prompt(target.parent, target, runtime, "write-paper")
-    plan_schema = (target / "get-physics-done" / "templates" / "plan-contract-schema.md").read_text(encoding="utf-8")
-    raw_execute_phase = _read_runtime_command_prompt(target.parent, target, runtime, "execute-phase")
-    raw_verify_work = _read_runtime_command_prompt(target.parent, target, runtime, "verify-work")
-    new_project = _command_or_workflow_authority_text(target, raw_new_project, runtime, "new-project")
-    plan_phase = _command_or_workflow_authority_text(target, raw_plan_phase, runtime, "plan-phase")
-    write_paper = _command_or_workflow_authority_text(target, raw_write_paper, runtime, "write-paper")
-    execute_phase = _command_or_workflow_authority_text(target, raw_execute_phase, runtime, "execute-phase")
-    verify_work = _command_or_workflow_authority_text(target, raw_verify_work, runtime, "verify-work")
-
-    _assert_installed_contract_visibility(
-        verifier,
-        executor,
-        new_project,
-        plan_phase,
-        write_paper,
-        plan_schema,
-        execute_phase,
-        verify_work,
-        runtime=runtime,
-    )
-    assert "## Physics Stub Detection Patterns" not in verifier
-    assert "Load on demand from `references/verification/examples/verifier-worked-examples.md`." in verifier
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)

@@ -32,10 +32,10 @@ from gpd.adapters.gemini_shell_patches import GEMINI_SHELL_WORKFLOW_PATCHES
 from gpd.adapters.install_utils import (
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
-    build_runtime_cli_bridge_command,
     hook_python_interpreter,
 )
 from gpd.hooks.install_metadata import assess_install_target
+from tests.adapters.projection_test_utils import runtime_bridge_command
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -43,13 +43,7 @@ from tests.adapters.review_contract_test_utils import (
 
 
 def expected_gemini_bridge(target: Path) -> str:
-    return build_runtime_cli_bridge_command(
-        "gemini",
-        target_dir=target,
-        config_dir_name=".gemini",
-        is_global=False,
-        explicit_target=False,
-    )
+    return runtime_bridge_command("gemini", target)
 
 
 def _make_managed_home_python(tmp_path: Path) -> Path:

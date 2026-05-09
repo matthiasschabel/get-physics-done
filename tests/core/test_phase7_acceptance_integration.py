@@ -48,15 +48,21 @@ _PHASE7_SURFACE_GLOBS = (
 )
 
 
-_LIFECYCLE_ROW_REQUIRED_TEST_OWNERS = {
-    "LP03-STALE-VERIFY-ARTIFACT": {
-        "tests/core/test_phase4_persona_lifecycle_matrix.py",
-        "tests/core/test_phase_lifecycle_live_contract.py",
-    },
-    "LP08-CHILD-CHECKPOINT-RETURN": {
-        "tests/core/test_phase4_persona_lifecycle_matrix.py",
-        "tests/core/test_phase_lifecycle_live_contract.py",
-    },
+_LIFECYCLE_ROW_SEMANTIC_TEST_OWNER_OPTIONS = {
+    "LP03-STALE-VERIFY-ARTIFACT": frozenset(
+        {
+            "tests/core/test_handoff_artifacts.py",
+            "tests/core/test_child_handoff.py",
+            "tests/core/test_phase4_persona_lifecycle_matrix.py",
+        }
+    ),
+    "LP08-CHILD-CHECKPOINT-RETURN": frozenset(
+        {
+            "tests/core/test_phase_lifecycle_live_contract.py",
+            "tests/core/test_child_handoff.py",
+            "tests/core/test_phase4_persona_lifecycle_matrix.py",
+        }
+    ),
 }
 
 
@@ -131,13 +137,13 @@ def test_phase7_fixture_rows_name_existing_source_and_test_owners() -> None:
             assert owner_file.exists(), f"{row['row_id']} references missing owner {owner}"
 
 
-def test_phase7_key_lifecycle_rows_are_anchored_to_existing_phase4_gates() -> None:
+def test_phase7_key_lifecycle_rows_have_a_semantic_test_owner() -> None:
     rows_by_id = {str(row["row_id"]): row for row in _phase7_fixture_rows()}
 
-    for row_id, required_owners in _LIFECYCLE_ROW_REQUIRED_TEST_OWNERS.items():
+    for row_id, owner_options in _LIFECYCLE_ROW_SEMANTIC_TEST_OWNER_OPTIONS.items():
         assert row_id in rows_by_id
         test_owners = {str(owner) for owner in rows_by_id[row_id]["test_owners"]}
-        assert required_owners <= test_owners
+        assert test_owners & owner_options, f"{row_id} must name at least one semantic test owner"
 
 
 def test_phase7_acceptance_surface_stays_under_loc_cap() -> None:

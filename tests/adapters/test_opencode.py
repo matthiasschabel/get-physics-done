@@ -13,7 +13,6 @@ from gpd.adapters.install_utils import (
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
     MANIFEST_NAME,
-    build_runtime_cli_bridge_command,
     hook_python_interpreter,
 )
 from gpd.adapters.opencode import (
@@ -25,6 +24,7 @@ from gpd.adapters.opencode import (
     copy_flattened_commands,
     write_manifest,
 )
+from tests.adapters.projection_test_utils import runtime_bridge_command
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -37,13 +37,7 @@ def adapter() -> OpenCodeAdapter:
 
 
 def expected_opencode_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
-    return build_runtime_cli_bridge_command(
-        "opencode",
-        target_dir=target,
-        config_dir_name=".opencode",
-        is_global=is_global,
-        explicit_target=explicit_target,
-    )
+    return runtime_bridge_command("opencode", target, is_global=is_global, explicit_target=explicit_target)
 
 
 def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:

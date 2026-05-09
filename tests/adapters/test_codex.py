@@ -26,12 +26,12 @@ from gpd.adapters.install_utils import (
     COMPACT_HELP_BRIDGE_SHIM_SENTINEL,
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
-    build_runtime_cli_bridge_command,
     compile_markdown_for_runtime,
     file_hash,
     hook_python_interpreter,
 )
 from gpd.registry import load_agents_from_dir
+from tests.adapters.projection_test_utils import runtime_bridge_command, single_runtime_note_block
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -50,13 +50,7 @@ def adapter() -> CodexAdapter:
 
 
 def expected_codex_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
-    return build_runtime_cli_bridge_command(
-        "codex",
-        target_dir=target,
-        config_dir_name=".codex",
-        is_global=is_global,
-        explicit_target=explicit_target,
-    )
+    return runtime_bridge_command("codex", target, is_global=is_global, explicit_target=explicit_target)
 
 
 def _assert_no_manifestless_gpd_artifacts(target: Path, skills_dir: Path) -> None:
@@ -76,21 +70,13 @@ def _assert_no_new_codex_install_artifacts(target: Path, skills_dir: Path) -> No
     assert not any(skills_dir.glob("gpd-*"))
 
 
-def _single_tag_block(text: str, tag: str) -> str:
-    assert text.count(f"<{tag}>") == 1
-    assert text.count(f"</{tag}>") == 1
-    match = re.search(rf"<{tag}>\n(?P<body>.*?)</{tag}>", text, flags=re.DOTALL)
-    assert match is not None
-    return match.group("body")
-
-
 def _has_line_with_terms(text: str, *terms: str) -> bool:
     folded_terms = tuple(term.casefold() for term in terms)
     return any(all(term in line.casefold() for term in folded_terms) for line in text.splitlines())
 
 
 def _assert_codex_runtime_note_guidance(text: str, launcher: str) -> None:
-    block = _single_tag_block(text, "codex_runtime_notes")
+    block = single_runtime_note_block(text, "codex_runtime_notes")
     assert "runtime-command-snippets.md#runtime-shell-bridge" in block
     assert launcher in block
     assert _has_line_with_terms(block, "bridge")
@@ -121,7 +107,7 @@ def _assert_codex_questioning_snippet(text: str) -> None:
 
 
 def _assert_codex_questioning_block(text: str) -> None:
-    block = _single_tag_block(text, "codex_questioning")
+    block = single_runtime_note_block(text, "codex_questioning")
     assert "runtime-command-snippets.md#runtime-questioning" in block
     assert _has_line_with_terms(block, "ask", "once")
     assert _has_line_with_terms(block, "prompt") or _has_line_with_terms(block, "options")
@@ -1860,7 +1846,7 @@ description: Nested command include expansion regression
             assert _has_line_with_terms(normalized, "follow-up", "plain text")
         else:
             raise AssertionError(f"Unhandled Codex questioning mode: {expected_mode}")
-        assert "Ask each user-facing question exactly once" not in _single_tag_block(normalized, "codex_questioning")
+        assert "Ask each user-facing question exactly once" not in single_runtime_note_block(normalized, "codex_questioning")
 
     def test_new_project_workflow_normalizes_codex_questioning(
         self,
@@ -1878,7 +1864,7 @@ description: Nested command include expansion regression
         workflow = (target / "get-physics-done" / "workflows" / "new-project.md").read_text(encoding="utf-8")
         _assert_no_legacy_codex_questioning(workflow)
         _assert_inline_freeform_question_guidance(workflow)
-        assert "Ask each user-facing question exactly once" not in _single_tag_block(workflow, "codex_questioning")
+        assert "Ask each user-facing question exactly once" not in single_runtime_note_block(workflow, "codex_questioning")
 
     def test_install_agents_inline_gpd_agents_dir_in_agent_surfaces_only(
         self,

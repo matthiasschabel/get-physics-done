@@ -11,9 +11,10 @@ from pathlib import Path
 import pytest
 
 from gpd.adapters.claude_code import ClaudeCodeAdapter
-from gpd.adapters.install_utils import build_runtime_cli_bridge_command, hook_python_interpreter
+from gpd.adapters.install_utils import hook_python_interpreter
 from gpd.hooks.install_metadata import assess_install_target
 from gpd.version import __version__, version_for_gpd_root
+from tests.adapters.projection_test_utils import runtime_bridge_command
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -30,13 +31,7 @@ def adapter() -> ClaudeCodeAdapter:
 
 
 def expected_claude_bridge(target: Path) -> str:
-    return build_runtime_cli_bridge_command(
-        "claude-code",
-        target_dir=target,
-        config_dir_name=".claude",
-        is_global=False,
-        explicit_target=False,
-    )
+    return runtime_bridge_command("claude-code", target)
 
 
 def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:

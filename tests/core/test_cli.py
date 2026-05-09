@@ -11,13 +11,11 @@ import builtins
 import json
 import logging
 import os
-import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
-from typer.testing import CliRunner
 
 import gpd.cli as cli_module
 import gpd.runtime_cli as runtime_cli
@@ -58,6 +56,13 @@ from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown, save_state_json, save_state_markdown
+from tests.helpers.cli import (
+    StableCliRunner,
+)
+from tests.helpers.cli import (
+    assert_no_top_level_resume_aliases as _assert_no_top_level_resume_aliases,
+)
+from tests.helpers.cli import normalize_cli_output as _normalize_cli_output
 from tests.latex_test_support import latex_capability_payload as _latex_capability_payload
 from tests.latex_test_support import toolchain_capability as _toolchain_capability
 from tests.runtime_test_support import (
@@ -70,20 +75,7 @@ from tests.runtime_test_support import (
     runtime_with_permissions_surface,
 )
 
-
-class _StableCliRunner(CliRunner):
-    def invoke(self, *args, **kwargs):
-        kwargs.setdefault("color", False)
-        return super().invoke(*args, **kwargs)
-
-
-runner = _StableCliRunner()
-
-_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
-
-
-def _normalize_cli_output(text: str) -> str:
-    return " ".join(_ANSI_ESCAPE_RE.sub("", text).split())
+runner = StableCliRunner()
 
 
 def _has_warning_with_fragments(warnings: list[str], *fragments: str) -> bool:
@@ -96,11 +88,6 @@ _CONFIG_FILE_RUNTIME = runtime_with_permissions_surface("config-file")
 _CONFIG_FILE_PROMPT_FREE_MODE = runtime_prompt_free_mode_value(_CONFIG_FILE_RUNTIME)
 _LAUNCH_WRAPPER_RUNTIME = runtime_with_permissions_surface("launch-wrapper")
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
-
-
-def _assert_no_top_level_resume_aliases(payload: dict[str, object]) -> None:
-    for key in RESUME_BACKEND_ONLY_FIELDS:
-        assert key not in payload
 
 
 def _make_checkout(tmp_path: Path, version: str = "9.9.9") -> Path:

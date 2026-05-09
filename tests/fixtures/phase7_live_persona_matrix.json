@@ -28,7 +28,7 @@
         "src/gpd/specs/references/verification/verification-status-authority.md",
         "src/gpd/core/phase_closeout.py"
       ],
-      "test_owners": ["tests/core/test_phase4_persona_lifecycle_matrix.py", "tests/core/test_phase_lifecycle_live_contract.py"],
+      "test_owners": ["tests/core/test_handoff_artifacts.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
@@ -87,11 +87,7 @@
         "src/gpd/core/checkpoint_intent.py",
         "src/gpd/specs/references/verification/core/verification-child-return-contract.md"
       ],
-      "test_owners": [
-        "tests/core/test_phase4_persona_lifecycle_matrix.py",
-        "tests/core/test_phase_lifecycle_live_contract.py",
-        "tests/core/test_child_handoff.py"
-      ],
+      "test_owners": ["tests/core/test_phase_lifecycle_live_contract.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },

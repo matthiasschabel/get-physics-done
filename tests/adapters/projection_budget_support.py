@@ -11,8 +11,6 @@ NON_NATIVE_RUNTIME_PROJECTION_TARGETS = tuple(
     descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS if not descriptor.native_include_support
 )
 
-NORMALIZED_RUNTIME_BRIDGE_MARKER = "<runtime-bridge>"
-
 STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
     "plan-phase": {
         "claude-code": 4_196,

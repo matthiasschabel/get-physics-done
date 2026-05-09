@@ -8,7 +8,6 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core import prompt_diagnostics
 from tests.adapters.projection_budget_support import (
     NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
-    NORMALIZED_RUNTIME_BRIDGE_MARKER,
     RUNTIME_PROJECTION_TARGETS,
     SELECTED_AGENT_PROJECTION_BUDGETS,
     STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
@@ -16,6 +15,7 @@ from tests.adapters.projection_budget_support import (
     TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET,
     TARGET_AGENT_PROJECTION_BUDGETS,
 )
+from tests.adapters.projection_test_utils import normalized_runtime_projection_char_count
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 KNOWN_PROJECTION_HOTSPOTS = {
@@ -33,14 +33,6 @@ def _non_negative_int(row: dict[str, object], key: str) -> int:
     assert isinstance(value, int), f"{key} should be an int in {row!r}"
     assert value >= 0, f"{key} should be non-negative in {row!r}"
     return value
-
-
-def _normalized_runtime_projection_char_count(metric: prompt_diagnostics.RuntimeProjectionMetric) -> int:
-    bridge_occurrences = metric.bridge_command_occurrences
-    if bridge_occurrences == 0:
-        return metric.char_count
-    bridge_command = prompt_diagnostics._projection_bridge_command(metric.runtime)
-    return metric.char_count - (len(bridge_command) - len(NORMALIZED_RUNTIME_BRIDGE_MARKER)) * bridge_occurrences
 
 
 def test_projection_budget_fixture_tracks_runtime_catalog() -> None:
@@ -126,7 +118,7 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
 
         for runtime, budget in budget_by_runtime.items():
             metric = metrics_by_runtime[runtime]
-            assert _normalized_runtime_projection_char_count(metric) <= budget
+            assert normalized_runtime_projection_char_count(metric) <= budget
             assert metric.char_count <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
             if runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS:
                 assert metric.bridge_command_occurrences > 0

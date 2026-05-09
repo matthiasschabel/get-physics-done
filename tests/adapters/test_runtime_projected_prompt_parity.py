@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 import tomllib
 from pathlib import Path
 
@@ -12,9 +11,6 @@ import pytest
 import gpd.adapters.gemini as gemini_module
 from gpd.adapters import get_adapter
 from gpd.adapters.install_utils import (
-    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
-    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
-    build_runtime_cli_bridge_command,
     expand_at_includes,
     project_markdown_for_runtime,
 )
@@ -24,12 +20,10 @@ from gpd.core.model_visible_text import (
     agent_visibility_note,
     review_contract_visibility_note,
 )
-from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
 from tests.adapters.projection_budget_support import (
     NATIVE_AGENT_PROJECTION_BUDGETS,
     NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
-    NORMALIZED_RUNTIME_BRIDGE_MARKER,
     RUNTIME_PROJECTION_TARGETS,
     SELECTED_AGENT_PROJECTION_BUDGETS,
     SELECTED_AGENT_PROJECTION_TARGETS,
@@ -39,8 +33,29 @@ from tests.adapters.projection_budget_support import (
     TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET,
     TARGET_AGENT_PROJECTION_BUDGETS,
 )
-from tests.adapters.projection_test_utils import StagedCommandProjectionCase, iter_staged_command_projection_cases
-from tests.prompt_metrics_support import iter_markdown_fences, runtime_command_visibility_note
+from tests.adapters.projection_test_utils import (
+    PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS,
+    STAGED_SHIM_CONTRACT_FRAGMENTS,
+    StagedCommandProjectionCase,
+    assert_no_unresolved_include_markers,
+    assert_protocol_bundle_jit_shape,
+    assert_runtime_note_tag_count,
+    assert_runtime_note_tags_not_repeated,
+    first_runnable_shell_command,
+    first_runnable_shell_commands,
+    has_compact_non_native_shim,
+    has_help_bridge_shim_sentinel,
+    has_staged_shim_sentinel,
+    has_workflow_reference_shim_sentinel,
+    iter_staged_command_projection_cases,
+    normalized_runtime_bridge_text,
+    raw_include_count,
+    runtime_bridge_command,
+    shell_fence_bodies,
+    single_runtime_note_block,
+    staged_command_has_protocol_bundle_fields,
+)
+from tests.prompt_metrics_support import runtime_command_visibility_note
 from tests.workflow_authority_support import expanded_workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -68,10 +83,6 @@ TARGET_FIRST_STAGE_BY_COMMAND = {
     "new-project": "scope_intake",
     "write-paper": "paper_bootstrap",
 }
-RUNTIME_BRIDGE_COMMAND_RE = re.compile(
-    r"(?:[^ \n`]+)\s+-m gpd\.runtime_cli\s+--runtime\s+[a-z-]+"
-    r"\s+--config-dir\s+[^ \n`]+(?:\s+--install-scope\s+local)?"
-)
 VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
     "templates/verification-report.md",
     "templates/contract-results-schema.md",
@@ -102,37 +113,6 @@ VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES = (
     "/gpd:verify-work",
     "/gpd-verify-work",
     "gpd-verify-work",
-)
-STAGED_SHIM_SENTINELS = ("<gpd_staged_bootstrap_shim", "## Compact Staged Command Shim")
-HELP_BRIDGE_SHIM_SENTINELS = ("<gpd_help_bridge_shim", "CLI-owned compact help surface")
-UNRESOLVED_INCLUDE_MARKERS = (
-    "@ include not resolved:",
-    "@ include cycle detected:",
-    "@ include read error:",
-    "@ include depth limit reached:",
-)
-RUNTIME_NOTE_TAGS = (
-    "codex_runtime_notes",
-    "codex_questioning",
-    "gemini_runtime_notes",
-    "gemini_shell_runtime_notes",
-)
-STAGED_SHIM_CONTRACT_FRAGMENTS = (
-    "staged_loading",
-    "workflow_id",
-    "stage_id",
-    "order",
-    "required_init_fields",
-    "mode_paths",
-    "loaded_authorities",
-    "eager_authorities",
-    "conditional_authorities",
-    "must_not_eager_load",
-    "next_stages",
-    "allowed_tools",
-    "writes_allowed",
-    "produced_state",
-    "checkpoints",
 )
 
 
@@ -231,43 +211,6 @@ PEER_REVIEW_PUBLICATION_LANE_FRAGMENTS = (
     "Use centralized preflight's selected publication/review roots for GPD-authored review artifacts.",
     "Keep the manuscript and manuscript-local publication manifests rooted at the resolved manuscript directory.",
 )
-PROTOCOL_BUNDLE_JIT_FIELDS = (
-    "selected_protocol_bundle_ids",
-    "protocol_bundle_count",
-    "protocol_bundle_context",
-    "protocol_bundle_verifier_extensions",
-)
-PROTOCOL_BUNDLE_JIT_COMMANDS = (
-    "execute-phase",
-    "literature-review",
-    "map-research",
-    "plan-phase",
-    "quick",
-    "research-phase",
-    "respond-to-referees",
-    "verify-work",
-    "write-paper",
-)
-PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS = (
-    "Statistical Mechanics Simulation",
-    "Numerical Relativity",
-    "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md",
-    "{GPD_INSTALL_DIR}/references/protocols/numerical-relativity.md",
-    "Estimator policies:",
-    "Decisive artifacts:",
-)
-
-
-def _staged_command_has_protocol_bundle_fields(command_name: str) -> bool:
-    if command_name not in PROTOCOL_BUNDLE_JIT_COMMANDS:
-        return False
-    manifest = load_workflow_stage_manifest_from_path(
-        WORKFLOWS_DIR / f"{command_name}-stage-manifest.json",
-        expected_workflow_id=command_name,
-    )
-    return any(
-        any(field in stage.required_init_fields for field in PROTOCOL_BUNDLE_JIT_FIELDS) for stage in manifest.stages
-    )
 
 
 def _write_bundle_projection_project(cwd: Path, *, selected: bool) -> None:
@@ -490,16 +433,6 @@ def _project_installed_shared_markdown(path: Path, runtime: str) -> str:
     return get_adapter(runtime).translate_shared_markdown(_read(path), "/runtime/", install_scope="--local")
 
 
-def _bridge_for_projection(runtime: str, target_dir: Path) -> str:
-    descriptor = get_runtime_descriptor(runtime)
-    return build_runtime_cli_bridge_command(
-        runtime,
-        target_dir=target_dir,
-        config_dir_name=descriptor.config_dir_name,
-        is_global=False,
-    )
-
-
 def _project_fixture_command(content: str, runtime: str, target_dir: Path) -> str:
     descriptor = get_runtime_descriptor(runtime)
     return project_markdown_for_runtime(
@@ -527,92 +460,14 @@ def _project_command_for_runtime(command_name: str, runtime: str, target_dir: Pa
     )
 
 
-def _shell_fence_bodies(text: str) -> tuple[str, ...]:
-    return tuple(
-        fence.body
-        for fence in iter_markdown_fences(text)
-        if fence.info.lower() in DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES
-    )
-
-
-def _normalized_runtime_bridge_text(text: str) -> str:
-    return RUNTIME_BRIDGE_COMMAND_RE.sub(NORMALIZED_RUNTIME_BRIDGE_MARKER, text)
-
-
-def _raw_include_count(text: str, include_suffix: str) -> int:
-    return sum(
-        1 for line in text.splitlines() if line.strip().startswith("@") and line.strip().endswith(include_suffix)
-    )
-
-
 def _standalone_install_dir_include_lines(text: str) -> tuple[str, ...]:
     return tuple(line for line in text.splitlines() if line.strip().startswith("@{GPD_INSTALL_DIR}/"))
 
 
-def _has_compact_non_native_shim(text: str) -> bool:
-    return (
-        _has_staged_shim_sentinel(text)
-        or _has_help_bridge_shim_sentinel(text)
-        or _has_workflow_reference_shim_sentinel(text)
-    )
-
-
-def _has_staged_shim_sentinel(text: str) -> bool:
-    return any(sentinel in text for sentinel in STAGED_SHIM_SENTINELS)
-
-
-def _has_help_bridge_shim_sentinel(text: str) -> bool:
-    return any(sentinel in text for sentinel in HELP_BRIDGE_SHIM_SENTINELS)
-
-
-def _has_workflow_reference_shim_sentinel(text: str) -> bool:
-    return COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in text
-
-
-def _assert_no_unresolved_include_markers(text: str, *, label: str) -> None:
-    lowered = text.lower()
-    offenders = [marker for marker in UNRESOLVED_INCLUDE_MARKERS if marker in lowered]
-    assert offenders == [], f"{label} contains unresolved include marker(s): {', '.join(offenders)}"
-
-
-def _assert_runtime_note_tags_not_repeated(text: str, *, label: str) -> None:
-    for tag in RUNTIME_NOTE_TAGS:
-        opens = text.count(f"<{tag}>")
-        closes = text.count(f"</{tag}>")
-        assert opens == closes, f"{label} has unbalanced {tag}: {opens}/{closes}"
-        assert opens <= 1, f"{label} repeats {tag}: {opens}"
-
-
 def _workflow_authority_for_shimmed_projection(command_name: str, projected: str, runtime: str) -> str:
-    if _has_compact_non_native_shim(projected):
+    if has_compact_non_native_shim(projected):
         return projected + "\n" + _project_installed_shared_markdown(WORKFLOWS_DIR / f"{command_name}.md", runtime)
     return projected
-
-
-def _first_shell_command(body: str) -> str | None:
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            return stripped
-    return None
-
-
-def _first_shell_commands(text: str) -> tuple[str, ...]:
-    return tuple(command for body in _shell_fence_bodies(text) if (command := _first_shell_command(body)))
-
-
-def _assert_runtime_note_block_count(text: str, tag: str, expected_count: int) -> None:
-    assert text.count(f"<{tag}>") == expected_count
-    assert text.count(f"</{tag}>") == expected_count
-
-
-def _single_runtime_note_block(text: str, tag: str) -> str:
-    _assert_runtime_note_block_count(text, tag, 1)
-    start_marker = f"<{tag}>"
-    end_marker = f"</{tag}>"
-    start = text.index(start_marker) + len(start_marker)
-    end = text.index(end_marker, start)
-    return text[start:end].strip()
 
 
 def _has_line_with_terms(text: str, *terms: str) -> bool:
@@ -621,7 +476,7 @@ def _has_line_with_terms(text: str, *terms: str) -> bool:
 
 
 def _assert_codex_compact_runtime_note(text: str, bridge: str) -> None:
-    block = _single_runtime_note_block(text, "codex_runtime_notes")
+    block = single_runtime_note_block(text, "codex_runtime_notes")
     assert "runtime-command-snippets.md#runtime-shell-bridge" in block
     assert bridge in block
     assert _has_line_with_terms(block, "bridge")
@@ -630,7 +485,7 @@ def _assert_codex_compact_runtime_note(text: str, bridge: str) -> None:
 
 
 def _assert_codex_inline_freeform_questioning(text: str) -> None:
-    block = _single_runtime_note_block(text, "codex_questioning")
+    block = single_runtime_note_block(text, "codex_questioning")
     assert "runtime-command-snippets.md#runtime-questioning" in block
     assert _has_line_with_terms(block, "ask", "once")
     assert "ask_user" not in text.casefold()
@@ -671,8 +526,8 @@ def test_non_native_projected_selected_agents_stay_budgeted_without_raw_install_
     budget = SELECTED_AGENT_PROJECTION_BUDGETS[agent_name]
     label = f"{runtime} {agent_name}"
 
-    _assert_no_unresolved_include_markers(projected, label=label)
-    _assert_runtime_note_tags_not_repeated(projected, label=label)
+    assert_no_unresolved_include_markers(projected, label=label)
+    assert_runtime_note_tags_not_repeated(projected, label=label)
     assert _standalone_install_dir_include_lines(projected) == ()
     assert "@{GPD_INSTALL_DIR}" not in projected
     assert "{GPD_INSTALL_DIR}" not in projected
@@ -700,7 +555,7 @@ def test_projected_runtime_note_blocks_are_not_repeated(
 ) -> None:
     projected = _project_markdown(path, runtime, is_agent=surface_kind == "agent")
 
-    _assert_runtime_note_tags_not_repeated(projected, label=f"{runtime} {surface_kind} {path.stem}")
+    assert_runtime_note_tags_not_repeated(projected, label=f"{runtime} {surface_kind} {path.stem}")
 
 
 @pytest.mark.parametrize("command_name", STAGED_INIT_TARGET_COMMANDS)
@@ -711,7 +566,7 @@ def test_staged_init_target_command_projection_stays_under_baseline_budget(
 ) -> None:
     projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
     budget = STAGED_INIT_COMMAND_PROJECTION_BUDGETS[command_name][runtime]
-    normalized_projected = _normalized_runtime_bridge_text(projected)
+    normalized_projected = normalized_runtime_bridge_text(projected)
 
     assert get_adapter(runtime).format_command(command_name) in projected
     assert len(normalized_projected) <= budget
@@ -727,14 +582,14 @@ def test_staged_init_target_non_native_command_shims_use_exact_runtime_bridge(
 ) -> None:
     descriptor = get_runtime_descriptor(runtime)
     target_dir = tmp_path / descriptor.config_dir_name
-    bridge = _bridge_for_projection(runtime, target_dir)
+    bridge = runtime_bridge_command(runtime, target_dir)
 
     projected = _project_command_for_runtime(command_name, runtime, target_dir)
 
     assert get_adapter(runtime).format_command(command_name) in projected
-    assert _has_staged_shim_sentinel(projected)
-    assert _expected_target_init_command(command_name, bridge) in _first_shell_commands(projected)
-    assert f"gpd --raw init {command_name}" not in "\n".join(_shell_fence_bodies(projected))
+    assert has_staged_shim_sentinel(projected)
+    assert _expected_target_init_command(command_name, bridge) in first_runnable_shell_commands(projected)
+    assert f"gpd --raw init {command_name}" not in "\n".join(shell_fence_bodies(projected))
 
 
 @pytest.mark.parametrize(
@@ -751,15 +606,15 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
     projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
     descriptor = get_runtime_descriptor(runtime)
 
-    _assert_no_unresolved_include_markers(projected, label=f"{runtime} {command_name}")
+    assert_no_unresolved_include_markers(projected, label=f"{runtime} {command_name}")
     assert get_adapter(runtime).format_command(command_name) in projected
 
     if descriptor.native_include_support:
         for include_path in case.native_include_paths:
-            assert _raw_include_count(projected, include_path) == 1
-        assert _raw_include_count(projected, f"workflows/{command_name}-stage-manifest.json") == 0
+            assert raw_include_count(projected, include_path) == 1
+        assert raw_include_count(projected, f"workflows/{command_name}-stage-manifest.json") == 0
         assert f"<!-- [included: {command_name}.md] -->" not in projected
-        assert not _has_staged_shim_sentinel(projected)
+        assert not has_staged_shim_sentinel(projected)
         return
 
     expanded_workflow = expanded_workflow_authority_text(
@@ -771,10 +626,10 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
     )
     init_lines = tuple(line.strip() for line in projected.splitlines() if f"--raw init {command_name}" in line)
 
-    assert _raw_include_count(projected, f"workflows/{command_name}.md") == 0
+    assert raw_include_count(projected, f"workflows/{command_name}.md") == 0
     assert f"<!-- [included: {command_name}.md] -->" not in projected
-    assert _has_staged_shim_sentinel(projected)
-    assert not _has_help_bridge_shim_sentinel(projected)
+    assert has_staged_shim_sentinel(projected)
+    assert not has_help_bridge_shim_sentinel(projected)
     assert any(f"--stage {case.first_stage_id}" in line for line in init_lines)
     assert f'first_stage="{case.first_stage_id}"' in projected
     for fragment in (*STAGED_SHIM_CONTRACT_FRAGMENTS, *case.staged_loading_keys):
@@ -792,13 +647,13 @@ def test_hotspot_commands_use_native_include_or_compact_workflow_reference_shim(
     projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
     descriptor = get_runtime_descriptor(runtime)
 
-    _assert_no_unresolved_include_markers(projected, label=f"{runtime} {command_name}")
+    assert_no_unresolved_include_markers(projected, label=f"{runtime} {command_name}")
     assert get_adapter(runtime).format_command(command_name) in projected
 
     if descriptor.native_include_support:
-        assert _raw_include_count(projected, f"workflows/{command_name}.md") == 1
+        assert raw_include_count(projected, f"workflows/{command_name}.md") == 1
         assert f"<!-- [included: {command_name}.md] -->" not in projected
-        assert not _has_workflow_reference_shim_sentinel(projected)
+        assert not has_workflow_reference_shim_sentinel(projected)
         return
 
     workflow_source = _read(WORKFLOWS_DIR / f"{command_name}.md")
@@ -809,11 +664,11 @@ def test_hotspot_commands_use_native_include_or_compact_workflow_reference_shim(
         runtime=runtime,
     )
 
-    assert _raw_include_count(projected, f"workflows/{command_name}.md") == 0
+    assert raw_include_count(projected, f"workflows/{command_name}.md") == 0
     assert f"<!-- [included: {command_name}.md] -->" not in projected
-    assert _has_workflow_reference_shim_sentinel(projected)
-    assert not _has_staged_shim_sentinel(projected)
-    assert not _has_help_bridge_shim_sentinel(projected)
+    assert has_workflow_reference_shim_sentinel(projected)
+    assert not has_staged_shim_sentinel(projected)
+    assert not has_help_bridge_shim_sentinel(projected)
     assert f'workflow="{command_name}"' in projected
     assert f"workflows/{command_name}.md" in projected
     assert "Read these installed authority files before acting:" in projected
@@ -831,28 +686,14 @@ def test_runtime_projected_staged_commands_keep_protocol_bundle_jit_visible_with
     runtime: str,
 ) -> None:
     projected = _project_markdown(COMMANDS_DIR / f"{case.command_name}.md", runtime, is_agent=False)
-    descriptor = get_runtime_descriptor(runtime)
-    has_bundle_fields = _staged_command_has_protocol_bundle_fields(case.command_name)
+    has_bundle_fields = staged_command_has_protocol_bundle_fields(WORKFLOWS_DIR, case.command_name)
 
-    if not has_bundle_fields:
-        assert "<protocol_bundle_jit>" not in projected
-        return
-
-    for marker in PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS:
-        assert marker not in projected
-
-    if descriptor.native_include_support:
-        for include_path in case.native_include_paths:
-            assert _raw_include_count(projected, include_path) == 1
-        assert "<protocol_bundle_jit>" not in projected
-        return
-
-    assert "<protocol_bundle_jit>" in projected
-    assert "use those init payload fields as the selected-bundle loading map" in projected
-    assert "load only selected asset paths named by `protocol_bundle_context`" in projected
-    assert "do not inline protocol bundle catalogs during bootstrap" in projected
-    for field in PROTOCOL_BUNDLE_JIT_FIELDS:
-        assert field in projected
+    assert_protocol_bundle_jit_shape(
+        projected,
+        case=case,
+        runtime=runtime,
+        has_bundle_fields=has_bundle_fields,
+    )
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)
@@ -860,19 +701,19 @@ def test_runtime_projected_help_uses_native_include_or_compact_help_bridge_shim(
     projected = _project_markdown(COMMANDS_DIR / "help.md", runtime, is_agent=False)
     descriptor = get_runtime_descriptor(runtime)
 
-    _assert_no_unresolved_include_markers(projected, label=f"{runtime} help")
+    assert_no_unresolved_include_markers(projected, label=f"{runtime} help")
     assert get_adapter(runtime).format_command("help") in projected
 
     if descriptor.native_include_support:
-        assert _raw_include_count(projected, "workflows/help.md") == 1
+        assert raw_include_count(projected, "workflows/help.md") == 1
         assert "<!-- [included: help.md] -->" not in projected
-        assert not _has_help_bridge_shim_sentinel(projected)
+        assert not has_help_bridge_shim_sentinel(projected)
         return
 
-    assert _raw_include_count(projected, "workflows/help.md") == 0
+    assert raw_include_count(projected, "workflows/help.md") == 0
     assert "<!-- [included: help.md] -->" not in projected
-    assert _has_help_bridge_shim_sentinel(projected)
-    assert not _has_staged_shim_sentinel(projected)
+    assert has_help_bridge_shim_sentinel(projected)
+    assert not has_staged_shim_sentinel(projected)
     assert "<current-help-command>" not in projected
     assert "--raw help" in projected
     assert "--raw help --all" in projected
@@ -1003,12 +844,12 @@ def test_runtime_projected_verify_work_surface_keeps_concise_guidance_visible(ru
     descriptor = get_runtime_descriptor(runtime)
     visible_text = (
         _project_installed_shared_markdown(WORKFLOWS_DIR / "verify-work.md", runtime)
-        if descriptor.native_include_support or _has_compact_non_native_shim(projected)
+        if descriptor.native_include_support or has_compact_non_native_shim(projected)
         else projected
     )
 
     if descriptor.native_include_support:
-        assert _raw_include_count(projected, "workflows/verify-work.md") == 1
+        assert raw_include_count(projected, "workflows/verify-work.md") == 1
     _assert_fragments_visible(
         visible_text,
         VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS,
@@ -1056,7 +897,7 @@ def test_runtime_projected_spawn_contract_blocks_match_canonical_command_content
             assert "@/runtime/get-physics-done/workflows/" in projected
         return
 
-    if _has_staged_shim_sentinel(projected):
+    if has_staged_shim_sentinel(projected):
         assert projected_contracts == source_contracts
         assert "staged_loading" in projected
         return
@@ -1066,7 +907,7 @@ def test_runtime_projected_spawn_contract_blocks_match_canonical_command_content
 
 def test_codex_projected_command_surface_matches_install_runtime_rewrites(tmp_path: Path) -> None:
     target_dir = tmp_path / ".codex"
-    bridge = _bridge_for_projection("codex", target_dir)
+    bridge = runtime_bridge_command("codex", target_dir)
     source = (
         "---\n"
         "name: gpd:projection-probe\n"
@@ -1090,7 +931,7 @@ def test_codex_projected_command_surface_matches_install_runtime_rewrites(tmp_pa
 
 def test_gemini_projected_command_surface_matches_install_runtime_rewrites(tmp_path: Path) -> None:
     target_dir = tmp_path / ".gemini"
-    bridge = _bridge_for_projection("gemini", target_dir)
+    bridge = runtime_bridge_command("gemini", target_dir)
     source = (
         "---\n"
         "name: gpd:projection-probe\n"
@@ -1111,10 +952,10 @@ def test_gemini_projected_command_surface_matches_install_runtime_rewrites(tmp_p
 
     projected = _project_fixture_command(source, "gemini", target_dir)
 
-    _assert_runtime_note_block_count(projected, "gemini_runtime_notes", 1)
-    _assert_runtime_note_block_count(projected, "gemini_shell_runtime_notes", 1)
-    shell_text = "\n".join(_shell_fence_bodies(projected))
-    assert _first_shell_commands(projected) == (
+    assert_runtime_note_tag_count(projected, "gemini_runtime_notes", 1)
+    assert_runtime_note_tag_count(projected, "gemini_shell_runtime_notes", 1)
+    shell_text = "\n".join(shell_fence_bodies(projected))
+    assert first_runnable_shell_commands(projected) == (
         f"{bridge} config ensure-section",
         f'{bridge} config set model_profile "$PROFILE"',
     )
@@ -1125,7 +966,7 @@ def test_gemini_projected_command_surface_matches_install_runtime_rewrites(tmp_p
 
 def test_gemini_projected_shell_allowlist_matches_policy_prefixes(tmp_path: Path) -> None:
     target_dir = tmp_path / ".gemini"
-    bridge = _bridge_for_projection("gemini", target_dir)
+    bridge = runtime_bridge_command("gemini", target_dir)
     source = (
         "---\n"
         "name: gpd:projection-probe\n"
@@ -1164,9 +1005,9 @@ def test_gemini_projected_shell_allowlist_matches_policy_prefixes(tmp_path: Path
     assert all("PROJECT_CONTRACT_JSON" not in prefix for prefix in policy_prefixes)
     assert all(not prefix.startswith("printf") for prefix in policy_prefixes)
 
-    shell_bodies = _shell_fence_bodies(projected)
+    shell_bodies = shell_fence_bodies(projected)
     assert shell_bodies
-    first_commands = _first_shell_commands(projected)
+    first_commands = first_runnable_shell_commands(projected)
     assert first_commands == (
         f"{bridge} --raw validate project-contract GPD/.approved-project-contract.json --mode approved",
         "git init",
@@ -1180,7 +1021,7 @@ def test_gemini_projected_shell_allowlist_matches_policy_prefixes(tmp_path: Path
 
 def test_gemini_real_command_shell_fences_start_with_policy_prefixes(tmp_path: Path) -> None:
     target_dir = tmp_path / ".gemini"
-    bridge = _bridge_for_projection("gemini", target_dir)
+    bridge = runtime_bridge_command("gemini", target_dir)
     policy_prefixes = gemini_module._gemini_policy_command_prefixes(bridge)
     offenders: list[str] = []
 
@@ -1194,8 +1035,8 @@ def test_gemini_real_command_shell_fences_start_with_policy_prefixes(tmp_path: P
             workflow_target_dir=target_dir,
             command_name=command_name,
         )
-        for body in _shell_fence_bodies(projected):
-            first_command = _first_shell_command(body)
+        for body in shell_fence_bodies(projected):
+            first_command = first_runnable_shell_command(body)
             if first_command and not first_command.startswith(policy_prefixes):
                 offenders.append(f"{command_name}: {first_command}")
 
@@ -1209,7 +1050,7 @@ def test_projected_command_surfaces_rewrite_fenced_cli_invocations_to_runtime_br
 ) -> None:
     descriptor = get_runtime_descriptor(runtime)
     target_dir = tmp_path / descriptor.config_dir_name
-    bridge = _bridge_for_projection(runtime, target_dir)
+    bridge = runtime_bridge_command(runtime, target_dir)
     source = (
         "---\n"
         "name: gpd:projection-probe\n"
@@ -1237,7 +1078,7 @@ def test_projected_command_surfaces_rewrite_tilde_fenced_cli_invocations_to_runt
 ) -> None:
     descriptor = get_runtime_descriptor(runtime)
     target_dir = tmp_path / descriptor.config_dir_name
-    bridge = _bridge_for_projection(runtime, target_dir)
+    bridge = runtime_bridge_command(runtime, target_dir)
     source = (
         "---\n"
         "name: gpd:projection-probe\n"

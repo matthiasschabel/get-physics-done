@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from functools import lru_cache
 
 from gpd.adapters import get_adapter, iter_runtime_descriptors
@@ -24,10 +24,11 @@ from gpd.core.public_surface_contract import (
     recovery_cross_workspace_command,
     recovery_local_snapshot_command,
 )
-from gpd.core.public_surface_renderer import public_surface_runtime_surfaces, render_public_surface_block
+from gpd.core.public_surface_renderer import render_public_surface_block
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from scripts.render_public_surface import check_generated_regions, generated_region_markers
 from tests.assertion_taxonomy_support import FragmentMode, assert_fragments, public_exact, semantic_anchor
+from tests.markdown_test_support import extract_marker_range
 
 _RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
 _DOCS_PUBLIC_OWNER = "docs onboarding contract"
@@ -137,8 +138,6 @@ def _action_surface_fragments(action: str, *, include_bare: bool = False) -> tup
 
 __all__ = [
     "DOCTOR_RUNTIME_SCOPE_RE",
-    "ParsedMarkdownLink",
-    "ParsedMarkdownTable",
     "assert_cost_advisory_contract",
     "assert_cost_surface_discoverability",
     "assert_execution_observability_surface_contract",
@@ -150,11 +149,11 @@ __all__ = [
     "assert_beginner_hub_preflight_contract",
     "assert_beginner_router_bridge_contract",
     "assert_beginner_startup_routing_contract",
+    "assert_any_docs_semantic_anchor",
+    "assert_docs_public_exact",
     "assert_docs_release_source_policy_contract",
+    "assert_docs_semantic_anchor",
     "assert_local_heading_links_resolve",
-    "assert_markdown_link",
-    "assert_os_install_matrix_contract",
-    "assert_os_next_steps_table_contract",
     "assert_public_surface_generated_file_current",
     "assert_public_surface_generated_region",
     "assert_publication_lane_boundary_contract",
@@ -163,13 +162,10 @@ __all__ = [
     "assert_resume_authority_contract",
     "assert_settings_local_terminal_follow_up_contract",
     "assert_start_workflow_router_contract",
-    "assert_supported_runtimes_table_contract",
     "assert_tour_command_surface_contract",
     "assert_unattended_readiness_contract",
     "assert_wolfram_plan_boundary_contract",
     "assert_workflow_preset_surface_contract",
-    "parse_markdown_links",
-    "parse_markdown_table",
     "resume_authority_public_vocabulary_intro",
     "resume_backend_only_fields",
 ]
@@ -213,85 +209,6 @@ def _first_index_of_any(content: str, fragments: Iterable[str], *, label: str) -
     return min(positions)
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
-class ParsedMarkdownTable:
-    """A simple parsed markdown table with normalized cell values."""
-
-    headers: tuple[str, ...]
-    rows: tuple[dict[str, str], ...]
-
-
-@dataclasses.dataclass(frozen=True, slots=True)
-class ParsedMarkdownLink:
-    """A markdown inline link split into public label and target."""
-
-    label: str
-    href: str
-
-
-_TABLE_SEPARATOR_RE = re.compile(r":?-{3,}:?")
-_INLINE_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)]\(([^)\n]+)\)")
-
-
-def _strip_wrapping_code_span(value: str) -> str:
-    stripped = value.strip()
-    if stripped.startswith("`") and stripped.endswith("`") and stripped.count("`") == 2:
-        return stripped[1:-1]
-    return stripped
-
-
-def _split_markdown_table_row(line: str) -> tuple[str, ...]:
-    stripped = line.strip()
-    if not stripped.startswith("|") or not stripped.endswith("|"):
-        raise AssertionError(f"expected markdown table row with edge pipes: {line!r}")
-    return tuple(_strip_wrapping_code_span(cell) for cell in stripped.strip("|").split("|"))
-
-
-def _is_markdown_table_separator(line: str) -> bool:
-    if "|" not in line:
-        return False
-    cells = tuple(cell.strip().replace(" ", "") for cell in line.strip().strip("|").split("|"))
-    return bool(cells) and all(_TABLE_SEPARATOR_RE.fullmatch(cell) for cell in cells)
-
-
-def parse_markdown_table(section: str, *, context: str = "markdown section") -> ParsedMarkdownTable:
-    """Parse the first pipe table in a markdown section."""
-
-    lines = section.splitlines()
-    for index, line in enumerate(lines[:-1]):
-        if not line.strip().startswith("|") or not _is_markdown_table_separator(lines[index + 1]):
-            continue
-
-        headers = _split_markdown_table_row(line)
-        rows: list[dict[str, str]] = []
-        row_index = index + 2
-        while row_index < len(lines) and lines[row_index].strip().startswith("|"):
-            if _is_markdown_table_separator(lines[row_index]):
-                row_index += 1
-                continue
-            values = _split_markdown_table_row(lines[row_index])
-            if len(values) != len(headers):
-                raise AssertionError(
-                    f"malformed markdown table in {context}: row has {len(values)} cells, expected {len(headers)}"
-                )
-            rows.append(dict(zip(headers, values, strict=True)))
-            row_index += 1
-
-        if not rows:
-            raise AssertionError(f"markdown table in {context} has no body rows")
-        return ParsedMarkdownTable(headers=headers, rows=tuple(rows))
-
-    raise AssertionError(f"missing markdown table in {context}")
-
-
-def parse_markdown_links(section: str) -> tuple[ParsedMarkdownLink, ...]:
-    """Return inline markdown links with label and href kept separate."""
-
-    return tuple(
-        ParsedMarkdownLink(label=match.group(1), href=match.group(2)) for match in _INLINE_LINK_RE.finditer(section)
-    )
-
-
 def _code_label_bullets(section: str, *, context: str) -> dict[str, str]:
     rows: dict[str, str] = {}
     for line in section.splitlines():
@@ -326,13 +243,6 @@ def _assert_code_label_bullet_terms(
             )
 
 
-def assert_markdown_link(section: str, label: str, href: str, *, context: str) -> None:
-    links = parse_markdown_links(section)
-    if any(link.label == label and link.href == href for link in links):
-        return
-    raise AssertionError(f"missing markdown link in {context}: label={label!r} href={href!r}; links={links!r}")
-
-
 def _assert_public_fragments(
     content: str,
     label: str,
@@ -354,29 +264,56 @@ def _assert_public_fragments(
     )
 
 
-def _rows_by(table: ParsedMarkdownTable, key_header: str, *, context: str) -> dict[str, dict[str, str]]:
-    rows: dict[str, dict[str, str]] = {}
-    for row in table.rows:
-        key = row.get(key_header)
-        if key is None:
-            raise AssertionError(f"missing key header {key_header!r} in {context}: headers={table.headers!r}")
-        if key in rows:
-            raise AssertionError(f"duplicate markdown table row key in {context}: {key!r}")
-        rows[key] = row
-    return rows
+def assert_docs_public_exact(
+    content: str,
+    label: str,
+    fragments: Iterable[str] | str,
+    *,
+    mode: FragmentMode = FragmentMode.ALL,
+    context: str,
+) -> None:
+    """Assert docs-owned public fragments with consistent ownership metadata."""
+
+    _assert_public_fragments(content, label, fragments, mode=mode, context=context)
+
+
+def assert_docs_semantic_anchor(
+    content: str,
+    label: str,
+    fragments: Iterable[str] | str,
+    *,
+    mode: FragmentMode = FragmentMode.ALL,
+    context: str,
+) -> None:
+    """Assert docs-owned semantic anchors without repeating taxonomy boilerplate."""
+
+    assert_fragments(content, semantic_anchor(label, fragments, mode=mode, context=context))
+
+
+def assert_any_docs_semantic_anchor(
+    docs: Mapping[str, str],
+    label: str,
+    fragments: Iterable[str] | str,
+    *,
+    context: str,
+) -> None:
+    """Assert at least one named doc contains a docs-owned semantic anchor."""
+
+    failures: list[str] = []
+    for doc_name, content in docs.items():
+        try:
+            assert_docs_semantic_anchor(content, label, fragments, context=f"{context}: {doc_name}")
+        except AssertionError as exc:
+            failures.append(f"{doc_name}: {exc}")
+        else:
+            return
+    joined = "\n".join(failures)
+    raise AssertionError(f"expected {label} in at least one document for {context}\n{joined}")
 
 
 def _extract_generated_region(content: str, block_id: str, *, context: str) -> str:
     start_marker, end_marker = generated_region_markers(block_id)
-    try:
-        start = content.index(start_marker) + len(start_marker)
-    except ValueError as exc:
-        raise AssertionError(f"missing generated public-surface start marker {block_id!r} in {context}") from exc
-    try:
-        end = content.index(end_marker, start)
-    except ValueError as exc:
-        raise AssertionError(f"missing generated public-surface end marker {block_id!r} in {context}") from exc
-    return content[start:end].strip("\n")
+    return extract_marker_range(content, start_marker, end_marker, context=context).strip("\n")
 
 
 def assert_public_surface_generated_region(content: str, block_id: str, *, context: str) -> None:
@@ -398,151 +335,6 @@ def assert_public_surface_generated_file_current(content: str, *, context: str) 
     if diffs:
         rendered_diffs = "\n".join(diff.diff for diff in diffs)
         raise AssertionError(f"generated public-surface regions are stale in {context}:\n{rendered_diffs}")
-
-
-def _assert_table_headers(table: ParsedMarkdownTable, expected_headers: tuple[str, ...], *, context: str) -> None:
-    if table.headers != expected_headers:
-        raise AssertionError(
-            f"unexpected markdown table headers in {context}: {table.headers!r} != {expected_headers!r}"
-        )
-
-
-def _assert_row_order(
-    table: ParsedMarkdownTable, key_header: str, expected_keys: tuple[str, ...], *, context: str
-) -> None:
-    observed = tuple(row[key_header] for row in table.rows)
-    if observed != expected_keys:
-        raise AssertionError(f"unexpected markdown table row order in {context}: {observed!r} != {expected_keys!r}")
-
-
-def _surfaces_in_public_docs_order(surfaces: Iterable[object], *, context: str) -> tuple[object, ...]:
-    surface_tuple = tuple(surfaces)
-    install_flags = [surface.install_flag for surface in surface_tuple]
-    duplicates = sorted({flag for flag in install_flags if install_flags.count(flag) > 1})
-    if duplicates:
-        raise AssertionError(f"runtime metadata contains duplicate install flags in {context}: {duplicates!r}")
-    return public_surface_runtime_surfaces(surface_tuple)
-
-
-def _next_step_command_key(surface: object) -> tuple[str, ...]:
-    return (
-        surface.start_command,
-        surface.tour_command,
-        surface.new_project_minimal_command,
-        surface.map_research_command,
-        surface.resume_work_command,
-    )
-
-
-def _next_step_surface_groups(surfaces: Iterable[object], *, context: str) -> tuple[tuple[object, ...], ...]:
-    groups: list[list[object]] = []
-    by_key: dict[tuple[str, ...], list[object]] = {}
-    for surface in _surfaces_in_public_docs_order(surfaces, context=context):
-        key = _next_step_command_key(surface)
-        group = by_key.get(key)
-        if group is None:
-            group = []
-            by_key[key] = group
-            groups.append(group)
-        group.append(surface)
-    return tuple(tuple(group) for group in groups)
-
-
-def _next_step_group_label(group: tuple[object, ...]) -> str:
-    return " / ".join(surface.display_name for surface in group)
-
-
-def _next_step_group_values(groups: tuple[tuple[object, ...], ...], attribute_name: str) -> tuple[str, ...]:
-    return tuple(getattr(group[0], attribute_name) for group in groups)
-
-
-def assert_os_install_matrix_contract(
-    section: str,
-    surfaces: Iterable[object],
-    *,
-    bootstrap_command: str,
-    context: str,
-) -> None:
-    """Assert an OS guide install table against runtime onboarding metadata."""
-
-    table = parse_markdown_table(section, context=context)
-    _assert_table_headers(table, ("Runtime", "Install command"), context=context)
-    surface_tuple = _surfaces_in_public_docs_order(surfaces, context=context)
-    _assert_row_order(table, "Runtime", tuple(surface.display_name for surface in surface_tuple), context=context)
-    rows = _rows_by(table, "Runtime", context=context)
-    for surface in surface_tuple:
-        expected_command = f"{bootstrap_command} {surface.install_flag} --local"
-        actual_command = rows[surface.display_name]["Install command"]
-        if actual_command != expected_command:
-            raise AssertionError(
-                f"unexpected install command in {context} for {surface.display_name}: "
-                f"{actual_command!r} != {expected_command!r}"
-            )
-
-
-def assert_os_next_steps_table_contract(section: str, surfaces: Iterable[object], *, context: str) -> None:
-    """Assert the OS guide next-step table against runtime onboarding metadata."""
-
-    table = parse_markdown_table(section, context=context)
-    groups = _next_step_surface_groups(surfaces, context=context)
-    expected_headers = ("What you want to do", *(_next_step_group_label(group) for group in groups))
-    _assert_table_headers(table, expected_headers, context=context)
-    expected_rows = {
-        "Not sure which path fits this folder": _next_step_group_values(groups, "start_command"),
-        "Want a guided overview": _next_step_group_values(groups, "tour_command"),
-        "Start a new project": _next_step_group_values(groups, "new_project_minimal_command"),
-        "Map an existing folder": _next_step_group_values(groups, "map_research_command"),
-        "Rediscover the workspace in your normal terminal": tuple(local_cli_resume_command() for _group in groups),
-        "Continue in the reopened runtime": _next_step_group_values(groups, "resume_work_command"),
-    }
-    _assert_row_order(table, "What you want to do", tuple(expected_rows), context=context)
-    rows = _rows_by(table, "What you want to do", context=context)
-    for row_label, expected_values in expected_rows.items():
-        row = rows[row_label]
-        for header, expected_value in zip(expected_headers[1:], expected_values, strict=True):
-            actual_value = row[header]
-            if actual_value != expected_value:
-                raise AssertionError(
-                    f"unexpected next-step command in {context} for {row_label!r} / {header!r}: "
-                    f"{actual_value!r} != {expected_value!r}"
-                )
-
-
-def assert_supported_runtimes_table_contract(section: str, surfaces: Iterable[object], *, context: str) -> None:
-    """Assert the root README supported-runtime table against onboarding metadata."""
-
-    table = parse_markdown_table(section, context=context)
-    expected_headers = (
-        "Runtime",
-        "`npx` flag",
-        "Help",
-        "Start",
-        "Tour",
-        "New work",
-        "Existing work",
-        "Return later",
-    )
-    _assert_table_headers(table, expected_headers, context=context)
-    surface_tuple = _surfaces_in_public_docs_order(surfaces, context=context)
-    _assert_row_order(table, "Runtime", tuple(surface.display_name for surface in surface_tuple), context=context)
-    rows = _rows_by(table, "Runtime", context=context)
-    for surface in surface_tuple:
-        expected_row = {
-            "Runtime": surface.display_name,
-            "`npx` flag": surface.install_flag,
-            "Help": surface.help_command,
-            "Start": surface.start_command,
-            "Tour": surface.tour_command,
-            "New work": surface.new_project_minimal_command,
-            "Existing work": surface.map_research_command,
-            "Return later": surface.resume_work_command,
-        }
-        actual_row = rows[surface.display_name]
-        if actual_row != expected_row:
-            raise AssertionError(
-                f"unexpected supported-runtime row in {context} for {surface.display_name}: "
-                f"{actual_row!r} != {expected_row!r}"
-            )
 
 
 def _markdown_heading_ids(content: str) -> set[str]:

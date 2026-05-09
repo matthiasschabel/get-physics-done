@@ -42,7 +42,12 @@ from gpd.core.frontmatter import (
 )
 from gpd.core.observability import instrument_gpd_function
 from gpd.core.return_contract import GpdReturnValidationResult, validate_gpd_return_markdown
-from gpd.core.return_gate import ReturnGateFailure, return_gate_from_validation_result
+from gpd.core.return_repair_classifier import (
+    REPAIRABLE_RETURN_CLASSES,
+    return_failure_class_from_repair_class,
+    return_repair_class_from_validation_error,
+    return_repair_hint,
+)
 from gpd.core.utils import (
     compare_phase_numbers,
     generate_slug,
@@ -855,11 +860,7 @@ def _return_validation_failure_result(
     validation: GpdReturnValidationResult,
     content: str,
 ) -> ApplyChildReturnResult:
-    gate_result = return_gate_from_validation_result(validation, content=content, required_status=None)
-    failures = [
-        _apply_failure_from_return_gate_failure(failure, repair_hint=gate_result.repair_hint)
-        for failure in gate_result.failures
-    ]
+    failures = [_apply_failure_from_return_validation_error(error, content=content) for error in validation.errors]
     errors = list(validation.errors)
     warnings = list(validation.warnings)
     if not failures and errors:
@@ -869,13 +870,11 @@ def _return_validation_failure_result(
                 code=RETURN_MALFORMED_BLOCKING_FAILURE_CLASS,
                 message=error,
                 repairable=False,
-                repair_hint=gate_result.repair_hint,
+                repair_hint=return_repair_hint("field_shape_error"),
             )
             for error in errors
         ]
-    failure_classes = [failure_class.value for failure_class in gate_result.failure_classes]
-    if not failure_classes:
-        failure_classes = _failure_classes_from_apply_failures(failures)
+    failure_classes = _failure_classes_from_apply_failures(failures)
     return ApplyChildReturnResult(
         passed=False,
         status="failed",
@@ -887,19 +886,18 @@ def _return_validation_failure_result(
     )
 
 
-def _apply_failure_from_return_gate_failure(
-    failure: ReturnGateFailure,
+def _apply_failure_from_return_validation_error(
+    error: str,
     *,
-    repair_hint: str | None,
+    content: str,
 ) -> ApplyChildReturnFailure:
+    repair_class = return_repair_class_from_validation_error(error, content=content)
     return ApplyChildReturnFailure(
-        failure_class=failure.failure_class.value,
-        code=failure.code,
-        message=failure.message,
-        path=failure.path,
-        command=failure.command,
-        repairable=failure.repairable,
-        repair_hint=repair_hint,
+        failure_class=return_failure_class_from_repair_class(repair_class),
+        code=repair_class,
+        message=error,
+        repairable=repair_class in REPAIRABLE_RETURN_CLASSES,
+        repair_hint=return_repair_hint(repair_class),
     )
 
 

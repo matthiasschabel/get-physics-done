@@ -1,4 +1,4 @@
-"""Focused tests for compact child gate snippet rendering."""
+"""Focused tests for child gate tuple schema and parsing."""
 
 from __future__ import annotations
 
@@ -7,21 +7,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gpd.core.child_gate_snippets import (
-    CHILD_GATE_SNIPPET_IDS,
+from gpd.core.child_handoff import (
     ChildGateApplicator,
     ChildGateArtifact,
     ChildGateFreshness,
     ChildGateTuple,
-    child_gate_snippet_ids,
     child_gate_tuple_from_payload,
-    render_child_gate_prompt_block,
-    render_child_gate_snippet,
-    render_child_gate_snippets,
-    render_child_gate_tuple,
+    parse_child_gate_markdown,
 )
 from gpd.core.handoff_artifacts import HandoffFailureClass
-from gpd.core.return_skeleton import GPD_RETURN_ROLE_PROFILES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -52,8 +46,19 @@ def _planner_gate() -> ChildGateTuple:
     )
 
 
+def _gate_markdown(gate: ChildGateTuple) -> str:
+    rendered = yaml.safe_dump(
+        {"child_gate": gate.to_payload()},
+        default_flow_style=False,
+        allow_unicode=False,
+        sort_keys=False,
+        width=999999,
+    ).rstrip()
+    return f"```yaml\n{rendered}\n```\n"
+
+
 def test_child_gate_tuple_renders_compact_yaml_with_inferred_return_profile() -> None:
-    rendered = render_child_gate_tuple(_planner_gate())
+    rendered = _gate_markdown(_planner_gate())
 
     payload = yaml.safe_load(rendered.removeprefix("```yaml\n").removesuffix("```\n"))
     child_gate = payload["child_gate"]
@@ -117,7 +122,7 @@ def test_child_gate_tuple_accepts_compact_prompt_tuple_shape() -> None:
                 "validators": ["gpd validate handoff-artifacts ..."],
                 "applicator": "none",
                 "failure_route": "stage-recovery-gate -> retry writer | stop",
-                "write_allowlist": ["${PAPER_DIR}/intro.tex"],
+                "allowed_write_paths": ["${PAPER_DIR}/intro.tex"],
             }
         }
     )
@@ -131,69 +136,37 @@ def test_child_gate_tuple_accepts_compact_prompt_tuple_shape() -> None:
     assert set(gate.failure_route) == set(HandoffFailureClass)
 
 
-def test_child_gate_tuple_rejects_unknown_profile_status_and_invalid_freshness() -> None:
+def test_parse_child_gate_markdown_accepts_raw_and_fenced_payloads() -> None:
+    raw = """
+id: planner_initial_plan
+role: gpd-planner
+required_status: completed
+"""
+    fenced = f"```yaml\nchild_gate:\n  {raw.strip().replace(chr(10), chr(10) + '  ')}\n```\n"
+
+    assert parse_child_gate_markdown(raw).return_profile == "planner"
+    assert parse_child_gate_markdown(fenced).return_profile == "planner"
+
+
+def test_child_gate_tuple_rejects_unknown_profile_status_route_and_invalid_freshness() -> None:
     with pytest.raises(ValueError, match="unknown gpd_return role profile"):
         ChildGateTuple(id="bad", role="gpd-unknown", required_status="completed")
 
     with pytest.raises(ValueError, match="unknown gpd_return status"):
         ChildGateTuple(id="bad", role="gpd-planner", required_status="done")
 
+    with pytest.raises(ValueError, match="unknown gpd_return status"):
+        ChildGateTuple(id="bad", role="gpd-planner", status_route={"waiting": "pause"})
+
+    with pytest.raises(ValueError, match="unknown handoff failure class"):
+        ChildGateTuple(
+            id="bad",
+            role="gpd-planner",
+            failure_route={"not_a_failure": "retry"},
+        )
+
     with pytest.raises(ValueError, match="freshness marker is required"):
         ChildGateFreshness(require_mtime_at_or_after_marker=True)
-
-
-def test_return_profile_snippet_sources_profile_fields_from_return_skeleton() -> None:
-    rendered = render_child_gate_snippet("return_profile", role="gpd-planner", status="completed")
-
-    assert "`gpd return skeleton --role planner --status completed`" in rendered
-    assert "`return_contract.py` validates" in rendered
-    for field_name in GPD_RETURN_ROLE_PROFILES["planner"].role_fields_by_status["completed"]:
-        if field_name in {"phase", "plans_created", "waves"}:
-            assert f"`{field_name}`" in rendered
-
-
-def test_static_snippets_render_short_authority_pointers_and_failure_classes() -> None:
-    assert child_gate_snippet_ids() == CHILD_GATE_SNIPPET_IDS
-
-    snippets = {snippet_id: render_child_gate_snippet(snippet_id) for snippet_id in CHILD_GATE_SNIPPET_IDS}
-
-    assert "gpd return skeleton --role <role> --status <status>" in snippets["return_profile"]
-    assert "references/orchestration/child-artifact-gate.md" in snippets["child_artifact_gate"]
-    assert "local `child_gate` tuple" in snippets["child_artifact_gate"]
-    assert "`primary_failure_class`" in snippets["child_artifact_gate"]
-    assert "`selected_route`" in snippets["child_artifact_gate"]
-    assert "references/orchestration/continuation-boundary.md" in snippets["continuation_boundary"]
-    assert "child-owned `checkpoint_intent`" in snippets["continuation_boundary"]
-    assert "Parent/applicator owns durable resume context" in snippets["continuation_boundary"]
-    assert "references/verification/verification-status-authority.md" in snippets["verification_status_authority"]
-    assert "verification report frontmatter `status`" in snippets["verification_status_authority"]
-    assert "Prose is not authority" in snippets["prose_is_not_authority"]
-    assert "child artifact gate result" in snippets["prose_is_not_authority"]
-
-    for failure_class in HandoffFailureClass:
-        assert f"`{failure_class.value}`" in snippets["child_artifact_gate"]
-
-    assert all(len(snippet.splitlines()) <= 2 for snippet in snippets.values())
-
-
-def test_render_child_gate_snippets_and_prompt_block_are_deterministic() -> None:
-    gate = _planner_gate()
-
-    rendered = render_child_gate_snippets(("child_artifact_gate", "prose_is_not_authority"))
-    prompt_block = render_child_gate_prompt_block(gate)
-
-    assert rendered == render_child_gate_snippets(("child_artifact_gate", "prose_is_not_authority"))
-    assert prompt_block == render_child_gate_prompt_block(gate)
-    assert "Child artifact gate:" in prompt_block
-    assert "Continuation boundary:" in prompt_block
-    assert "Prose is not authority:" in prompt_block
-    assert "child_gate:" in prompt_block
-    assert "planner_initial_plan" in prompt_block
-
-
-def test_unknown_snippet_id_fails_closed() -> None:
-    with pytest.raises(ValueError, match="unknown child gate snippet id"):
-        render_child_gate_snippet("artifact_gate")
 
 
 def test_workflow_child_gate_yaml_blocks_parse_as_child_gate_tuples() -> None:

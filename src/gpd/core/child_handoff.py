@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import fnmatch
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from gpd.core.child_gate_snippets import ChildGateTuple, child_gate_tuple_from_payload
 from gpd.core.handoff_artifacts import (
     HandoffArtifactValidationResult,
     HandoffFailure,
@@ -19,6 +19,7 @@ from gpd.core.handoff_artifacts import (
     validate_handoff_artifacts_markdown,
 )
 from gpd.core.return_contract import validate_gpd_return_markdown
+from gpd.core.return_skeleton import RETURN_STATUS_ORDER, list_gpd_return_profiles, normalize_return_profile_id
 
 SafeChildHandoffValidatorId = Literal[
     "readable",
@@ -46,6 +47,273 @@ SAFE_CHILD_HANDOFF_VALIDATORS: frozenset[str] = frozenset(
 """Validator ids this wrapper may dispatch without evaluating shell text."""
 
 _YAML_FENCE_RE = re.compile(r"```ya?ml\s*\n([\s\S]*?)```")
+
+
+class ChildGateArtifact(BaseModel):
+    """One callsite-owned child artifact expectation."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    path: str
+    kind: Literal["path", "glob"] = "path"
+    required: bool = True
+    must_be_named_in_files_written: bool = True
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def _normalize_path(cls, value: object) -> str:
+        return _normalize_text(value, field_name="path")
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "path": self.path,
+            "kind": self.kind,
+            "required": self.required,
+            "must_be_named_in_files_written": self.must_be_named_in_files_written,
+        }
+
+
+class ChildGateFreshness(BaseModel):
+    """Tuple field for freshness checks owned by the callsite."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    marker: str | None = None
+    require_mtime_at_or_after_marker: bool = False
+    preexisting_artifacts: Literal["recovery_evidence_only", "allowed", "blocked", "not_applicable"] = (
+        "recovery_evidence_only"
+    )
+
+    @field_validator("marker", mode="before")
+    @classmethod
+    def _normalize_marker(cls, value: object) -> str | None:
+        return _normalize_optional_text(value, field_name="marker")
+
+    @model_validator(mode="after")
+    def _require_marker_when_mtime_gate_is_enabled(self) -> Self:
+        if self.require_mtime_at_or_after_marker and self.marker is None:
+            raise ValueError("freshness marker is required when mtime freshness is enabled")
+        return self
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "require_mtime_at_or_after_marker": self.require_mtime_at_or_after_marker,
+            "preexisting_artifacts": self.preexisting_artifacts,
+        }
+        if self.marker is not None:
+            payload = {"marker": self.marker, **payload}
+        return payload
+
+
+class ChildGateApplicator(BaseModel):
+    """Tuple field for callsite-owned durable effects."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    command: str = "none"
+    require_passed_true: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_compact_applicator(cls, value: object) -> object:
+        if isinstance(value, str):
+            return {"command": value}
+        return value
+
+    @field_validator("command", mode="before")
+    @classmethod
+    def _normalize_command(cls, value: object) -> str:
+        return _normalize_text(value, field_name="command")
+
+    @model_validator(mode="after")
+    def _reject_passed_gate_without_applicator(self) -> Self:
+        if self.command == "none" and self.require_passed_true:
+            raise ValueError("applicator require_passed_true requires a command")
+        return self
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "command": self.command,
+            "require_passed_true": self.require_passed_true,
+        }
+
+
+class ChildGateTuple(BaseModel):
+    """Callsite-owned child gate tuple consumed by the read-only handoff validator."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    role: str
+    return_profile: str
+    required_status: str = "completed"
+    expected_artifacts: tuple[ChildGateArtifact, ...] = ()
+    allowed_roots: tuple[str, ...] = ()
+    freshness: ChildGateFreshness | None = None
+    validators: tuple[str, ...] = ()
+    applicator: ChildGateApplicator = Field(default_factory=ChildGateApplicator)
+    failure_route: dict[HandoffFailureClass, str] = Field(default_factory=lambda: dict(_DEFAULT_FAILURE_ROUTE))
+    status_route: dict[str, str] = Field(default_factory=dict)
+    write_allowlist: tuple[str, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _infer_return_profile(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        payload = dict(value)
+        if "freshness" not in payload and "freshness_marker" in payload:
+            payload["freshness"] = {
+                "marker": _normalize_freshness_marker(payload.pop("freshness_marker")),
+                "require_mtime_at_or_after_marker": True,
+                "preexisting_artifacts": "recovery_evidence_only",
+            }
+        if "write_allowlist" not in payload and "allowed_write_paths" in payload:
+            payload["write_allowlist"] = payload.pop("allowed_write_paths")
+        raw_failure_route = payload.get("failure_route")
+        if isinstance(raw_failure_route, Mapping):
+            failure_route: dict[str, object] = {}
+            status_route = (
+                dict(payload.get("status_route", {})) if isinstance(payload.get("status_route"), Mapping) else {}
+            )
+            for key, route in raw_failure_route.items():
+                key_text = str(key)
+                if key_text in {failure_class.value for failure_class in HandoffFailureClass}:
+                    failure_route[key_text] = route
+                elif key_text.strip().lower() in RETURN_STATUS_ORDER:
+                    status_route[key_text] = route
+                else:
+                    failure_route[key_text] = route
+            payload["failure_route"] = failure_route
+            if status_route:
+                payload["status_route"] = status_route
+        raw_profile = payload.get("return_profile")
+        if isinstance(raw_profile, str) and raw_profile.strip():
+            payload["return_profile"] = _profile_id_for_role_or_profile(raw_profile)
+            return payload
+        raw_role = payload.get("role")
+        if not isinstance(raw_role, str) or not raw_role.strip():
+            return payload
+        payload["return_profile"] = _profile_id_for_role_or_profile(raw_role)
+        return payload
+
+    @field_validator("id", "role", mode="before")
+    @classmethod
+    def _normalize_required_text(cls, value: object, info) -> str:
+        return _normalize_text(value, field_name=info.field_name)
+
+    @field_validator("return_profile", mode="before")
+    @classmethod
+    def _normalize_return_profile(cls, value: object) -> str:
+        return _profile_id_for_role_or_profile(_normalize_text(value, field_name="return_profile"))
+
+    @field_validator("required_status", mode="before")
+    @classmethod
+    def _normalize_required_status(cls, value: object) -> str:
+        return _normalize_status(value, field_name="required_status")
+
+    @field_validator("allowed_roots", "validators", mode="before")
+    @classmethod
+    def _normalize_text_tuple(cls, value: object, info) -> tuple[str, ...]:
+        return _normalize_text_sequence(value, field_name=info.field_name)
+
+    @field_validator("expected_artifacts", mode="before")
+    @classmethod
+    def _normalize_expected_artifacts(cls, value: object) -> object:
+        if value is None:
+            return ()
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
+            return value
+        return [{"path": item} if isinstance(item, str) else item for item in value]
+
+    @field_validator("write_allowlist", mode="before")
+    @classmethod
+    def _normalize_write_allowlist(cls, value: object) -> tuple[str, ...]:
+        return _normalize_text_sequence(value, field_name="write_allowlist")
+
+    @field_validator("failure_route", mode="before")
+    @classmethod
+    def _normalize_failure_route(cls, value: object) -> dict[HandoffFailureClass, str]:
+        if value is None:
+            return dict(_DEFAULT_FAILURE_ROUTE)
+        if isinstance(value, str):
+            route = _normalize_text(value, field_name="failure_route")
+            return dict.fromkeys(HandoffFailureClass, route)
+        if not isinstance(value, Mapping):
+            raise ValueError("failure_route must be a mapping")
+        normalized: dict[HandoffFailureClass, str] = {}
+        for raw_failure_class, raw_action in value.items():
+            try:
+                failure_class = HandoffFailureClass(str(raw_failure_class))
+            except ValueError as exc:
+                known = ", ".join(failure.value for failure in HandoffFailureClass)
+                raise ValueError(
+                    f"unknown handoff failure class '{raw_failure_class}'. Must be one of: {known}"
+                ) from exc
+            normalized[failure_class] = _normalize_text(raw_action, field_name=f"failure_route.{failure_class.value}")
+        return normalized or dict(_DEFAULT_FAILURE_ROUTE)
+
+    @field_validator("status_route", mode="before")
+    @classmethod
+    def _normalize_status_route(cls, value: object) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, Mapping):
+            raise ValueError("status_route must be a mapping")
+        normalized: dict[str, str] = {}
+        for raw_key, raw_value in value.items():
+            status = _normalize_status(raw_key, field_name="status_route key")
+            normalized[status] = _normalize_text(raw_value, field_name=f"status_route.{raw_key}")
+        return normalized
+
+    @model_validator(mode="after")
+    def _ensure_return_profile_supports_status(self) -> Self:
+        profiles = list_gpd_return_profiles(role=self.return_profile, status=self.required_status)
+        if not profiles["profiles"]:
+            raise ValueError(
+                f"return profile '{self.return_profile}' has no status metadata for '{self.required_status}'"
+            )
+        return self
+
+    def to_payload(self) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "id": self.id,
+            "role": self.role,
+            "return_profile": self.return_profile,
+            "required_status": self.required_status,
+        }
+        if self.expected_artifacts:
+            payload["expected_artifacts"] = [artifact.to_payload() for artifact in self.expected_artifacts]
+        if self.allowed_roots:
+            payload["allowed_roots"] = list(self.allowed_roots)
+        if self.freshness is not None:
+            payload["freshness"] = self.freshness.to_payload()
+        if self.validators:
+            payload["validators"] = list(self.validators)
+        if self.write_allowlist:
+            payload["write_allowlist"] = list(self.write_allowlist)
+        payload["applicator"] = self.applicator.to_payload()
+        payload["failure_route"] = {
+            failure_class.value: self.failure_route[failure_class]
+            for failure_class in HandoffFailureClass
+            if failure_class in self.failure_route
+        }
+        if self.status_route:
+            payload["status_route"] = dict(self.status_route)
+        return payload
+
+
+_DEFAULT_FAILURE_ROUTE: dict[HandoffFailureClass, str] = {
+    HandoffFailureClass.RETURN_MISSING: "retry_once",
+    HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE: "repair_prompt_once",
+    HandoffFailureClass.RETURN_MALFORMED_BLOCKING: "fail_closed",
+    HandoffFailureClass.ARTIFACT_MISSING: "retry_once_or_main_context_fallback",
+    HandoffFailureClass.ARTIFACT_STALE: "retry_once",
+    HandoffFailureClass.ARTIFACT_PATH_REPAIRABLE: "repair_path_once",
+    HandoffFailureClass.ARTIFACT_ROOT_BLOCKED: "fail_closed",
+    HandoffFailureClass.VALIDATOR_FAILED: "revision_loop",
+    HandoffFailureClass.APPLICATOR_FAILED: "fail_closed_with_mutation_report",
+}
 
 
 class ChildHandoffValidatorResult(BaseModel):
@@ -110,12 +378,26 @@ class ChildHandoffValidationResult(BaseModel):
 
 __all__ = [
     "SAFE_CHILD_HANDOFF_VALIDATORS",
+    "ChildGateApplicator",
+    "ChildGateArtifact",
+    "ChildGateFreshness",
+    "ChildGateTuple",
     "ChildHandoffValidationRequest",
     "ChildHandoffValidationResult",
     "ChildHandoffValidatorResult",
+    "child_gate_tuple_from_payload",
     "parse_child_gate_markdown",
     "validate_child_handoff",
 ]
+
+
+def child_gate_tuple_from_payload(payload: Mapping[str, object]) -> ChildGateTuple:
+    """Build a tuple from either a raw tuple payload or ``{"child_gate": ...}``."""
+
+    candidate = payload.get("child_gate") if "child_gate" in payload else payload
+    if not isinstance(candidate, Mapping):
+        raise ValueError("child_gate payload must be a mapping")
+    return ChildGateTuple.model_validate(candidate)
 
 
 def parse_child_gate_markdown(content: str) -> ChildGateTuple:
@@ -170,19 +452,25 @@ def validate_child_handoff(
         fresh_after=request.fresh_after,
     )
 
+    freshness_failures = _freshness_failures(gate_tuple, request.fresh_after)
+    write_allowlist_failures = _write_allowlist_failures(
+        request.project_root,
+        gate_tuple,
+        artifact_result.files_written,
+    )
+    authority_failures = [*freshness_failures, *write_allowlist_failures]
+
     validator_results: list[ChildHandoffValidatorResult] = []
     validator_failures: list[HandoffFailure] = []
     validator_errors: list[str] = []
     validator_warnings: list[str] = []
-    if artifact_result.passed:
+    if artifact_result.passed and not authority_failures:
         for raw_validator in gate_tuple.validators:
             normalized_validator = _safe_validator_id(raw_validator)
             if normalized_validator is None:
                 continue
             if normalized_validator not in SAFE_CHILD_HANDOFF_VALIDATORS:
-                message = (
-                    f"unsupported child-handoff validator {raw_validator!r}; use a named safe validator id"
-                )
+                message = f"unsupported child-handoff validator {raw_validator!r}; use a named safe validator id"
                 validator_failures.append(
                     _handoff_failure(
                         HandoffFailureClass.VALIDATOR_FAILED,
@@ -219,12 +507,28 @@ def validate_child_handoff(
                     )
                 )
 
-    failures = [*artifact_result.failures, *validator_failures]
-    failure_classes = _failure_classes(failures)
-    passed = artifact_result.passed and not validator_failures
-    read_only_passed = passed
     requires_applicator_pass = _requires_applicator_pass(gate_tuple)
+    read_only_passed = artifact_result.passed and not authority_failures and not validator_failures
     applicator_required_unrun = read_only_passed and requires_applicator_pass
+    applicator_failures: list[HandoffFailure] = []
+    applicator_errors: list[str] = []
+    if applicator_required_unrun:
+        message = (
+            "required child-gate applicator was not run by read-only child-handoff validation: "
+            f"{gate_tuple.applicator.command}"
+        )
+        applicator_failures.append(
+            _handoff_failure(
+                HandoffFailureClass.APPLICATOR_FAILED,
+                "applicator_required_unrun",
+                message,
+                command=gate_tuple.applicator.command,
+            )
+        )
+        applicator_errors.append(message)
+    failures = [*artifact_result.failures, *authority_failures, *validator_failures, *applicator_failures]
+    failure_classes = _failure_classes(failures)
+    passed = read_only_passed and not applicator_required_unrun
     acceptance_complete = read_only_passed and not applicator_required_unrun
     warnings = [*artifact_result.warnings, *validator_warnings]
     if gate_tuple.applicator.command != "none":
@@ -246,7 +550,12 @@ def validate_child_handoff(
         primary_failure_class=failure_classes[0] if failure_classes else None,
         failure_classes=failure_classes,
         failures=failures,
-        errors=[*artifact_result.errors, *validator_errors],
+        errors=[
+            *artifact_result.errors,
+            *[failure.message for failure in authority_failures],
+            *validator_errors,
+            *applicator_errors,
+        ],
         warnings=warnings,
         checked_files=list(artifact_result.checked_files),
         expected_artifacts=list(artifact_result.expected_artifacts),
@@ -371,6 +680,82 @@ def _expected_artifact_globs(gate: ChildGateTuple) -> list[str]:
     ]
 
 
+def _freshness_failures(gate: ChildGateTuple, fresh_after: datetime | None) -> list[HandoffFailure]:
+    freshness = gate.freshness
+    if freshness is None or not freshness.require_mtime_at_or_after_marker or fresh_after is not None:
+        return []
+    marker = freshness.marker or "<missing marker>"
+    message = (
+        "child_gate freshness requires artifact mtime at or after "
+        f"{marker!r}, but no --fresh-after timestamp was provided"
+    )
+    return [
+        _handoff_failure(
+            HandoffFailureClass.ARTIFACT_STALE,
+            "freshness_requires_fresh_after",
+            message,
+        )
+    ]
+
+
+def _write_allowlist_failures(
+    project_root: Path,
+    gate: ChildGateTuple,
+    files_written: list[str],
+) -> list[HandoffFailure]:
+    if not gate.write_allowlist or not files_written:
+        return []
+
+    allowed_patterns = _write_allowlist_patterns(gate)
+    failures: list[HandoffFailure] = []
+    root = project_root.expanduser().resolve(strict=False)
+    for relpath in files_written:
+        normalized = _normalize_return_path(relpath)
+        if not _is_project_local_path(root, normalized):
+            continue
+        if _matches_any_write_pattern(normalized, allowed_patterns):
+            continue
+        message = f"files_written entry is outside child_gate write_allowlist: {normalized}"
+        failures.append(
+            _handoff_failure(
+                HandoffFailureClass.ARTIFACT_ROOT_BLOCKED,
+                "outside_write_allowlist",
+                message,
+                path=normalized,
+            )
+        )
+    return failures
+
+
+def _write_allowlist_patterns(gate: ChildGateTuple) -> tuple[str, ...]:
+    patterns: list[str] = []
+    patterns.extend(artifact.path for artifact in gate.expected_artifacts if artifact.required)
+    patterns.extend(gate.write_allowlist)
+    return tuple(dict.fromkeys(_normalize_return_path(pattern) for pattern in patterns))
+
+
+def _is_project_local_path(project_root: Path, relpath: str) -> bool:
+    if not relpath:
+        return False
+    raw_path = Path(relpath)
+    if raw_path.is_absolute() or any(part == ".." for part in raw_path.parts):
+        return False
+    return (project_root / raw_path).resolve(strict=False).is_relative_to(project_root)
+
+
+def _matches_any_write_pattern(relpath: str, patterns: tuple[str, ...]) -> bool:
+    for pattern in patterns:
+        if _matches_write_pattern(relpath, pattern):
+            return True
+    return False
+
+
+def _matches_write_pattern(relpath: str, pattern: str) -> bool:
+    if any(char in pattern for char in "*?["):
+        return fnmatch.fnmatch(relpath, pattern)
+    return relpath == pattern
+
+
 def _safe_validator_id(raw_validator: str) -> str | None:
     normalized = raw_validator.strip()
     lowered = normalized.casefold()
@@ -413,7 +798,9 @@ def _run_safe_validator(
         path = (root / relpath).resolve(strict=False)
         try:
             if validator_id in {"readable", "paper-section-readable"}:
-                _validate_readable_text(path, relpath=relpath, require_non_empty=validator_id == "paper-section-readable")
+                _validate_readable_text(
+                    path, relpath=relpath, require_non_empty=validator_id == "paper-section-readable"
+                )
             elif validator_id == "plan-contract":
                 errors.extend(_frontmatter_errors(path, relpath=relpath, schema="plan"))
             elif validator_id == "plan-preflight":
@@ -528,12 +915,14 @@ def _handoff_failure(
     code: str,
     message: str,
     *,
+    path: str | None = None,
     command: str | None = None,
 ) -> HandoffFailure:
     return HandoffFailure(
         failure_class=failure_class,
         code=code,
         message=message,
+        path=path,
         command=command,
         repairable=False,
     )
@@ -564,3 +953,51 @@ def _selected_route(
     if failure_classes:
         return gate.failure_route.get(failure_classes[0], "fail_closed")
     return "fail_closed"
+
+
+def _profile_id_for_role_or_profile(value: str | None) -> str:
+    return normalize_return_profile_id(value)
+
+
+def _normalize_text(value: object, *, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError(f"{field_name} must be a non-empty string")
+    return normalized
+
+
+def _normalize_status(value: object, *, field_name: str) -> str:
+    normalized = _normalize_text(value, field_name=field_name).lower()
+    if normalized not in RETURN_STATUS_ORDER:
+        statuses = ", ".join(RETURN_STATUS_ORDER)
+        raise ValueError(f"unknown gpd_return status '{value}'. Must be one of: {statuses}")
+    return normalized
+
+
+def _normalize_freshness_marker(value: object) -> str:
+    marker = _normalize_text(value, field_name="freshness_marker")
+    if marker.casefold().startswith("after "):
+        return marker[6:].strip()
+    return marker
+
+
+def _normalize_optional_text(value: object, *, field_name: str) -> str | None:
+    if value is None:
+        return None
+    return _normalize_text(value, field_name=field_name)
+
+
+def _normalize_text_sequence(value: object, *, field_name: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        value = (value,)
+    if not isinstance(value, Iterable):
+        raise ValueError(f"{field_name} must be an iterable of strings")
+
+    normalized: list[str] = []
+    for index, item in enumerate(value):
+        normalized.append(_normalize_text(item, field_name=f"{field_name}[{index}]"))
+    return tuple(normalized)

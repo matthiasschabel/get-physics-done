@@ -7,7 +7,6 @@ from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
-from pydantic import ValidationError as PydanticValidationError
 
 from gpd.core.return_contract import (
     ALLOWED_RETURN_EXTENSION_FIELDS,
@@ -141,9 +140,9 @@ def build_gpd_return_skeleton(
 
     envelope: dict[str, object] = {
         "status": normalized_status,
-        "files_written": _normalize_string_sequence(files_written, field_name="files_written"),
-        "issues": _normalize_string_sequence(issues, field_name="issues"),
-        "next_actions": _normalize_string_sequence(next_actions, field_name="next_actions"),
+        "files_written": _string_sequence_candidate(files_written, field_name="files_written"),
+        "issues": _string_sequence_candidate(issues, field_name="issues"),
+        "next_actions": _string_sequence_candidate(next_actions, field_name="next_actions"),
     }
 
     for field_name in profile.default_render_fields_by_status[normalized_status]:
@@ -152,16 +151,12 @@ def build_gpd_return_skeleton(
         envelope[field_name] = _default_value_for_field(field_name, phase=normalized_phase, plan=normalized_plan)
 
     if normalized_phase is not None:
-        _assert_field_can_be_rendered("phase", status=normalized_status)
         envelope["phase"] = normalized_phase
     if normalized_plan is not None:
-        _assert_field_can_be_rendered("plan", status=normalized_status)
         envelope["plan"] = normalized_plan
 
     if extra_fields:
-        for field_name, value in extra_fields.items():
-            _assert_field_can_be_rendered(field_name, status=normalized_status)
-            envelope[field_name] = value
+        envelope.update(extra_fields)
 
     warnings: list[str] = []
     applicator_ready = False
@@ -227,17 +222,7 @@ def build_gpd_return_skeleton(
 def render_gpd_return_yaml(envelope: Mapping[str, object]) -> str:
     """Render a canonical YAML payload with the required top-level key."""
 
-    payload = _validate_and_dump_envelope(envelope)
-    return (
-        yaml.safe_dump(
-            {"gpd_return": payload},
-            default_flow_style=False,
-            allow_unicode=True,
-            sort_keys=False,
-            width=999999,
-        ).rstrip()
-        + "\n"
-    )
+    return _dump_gpd_return_yaml(_validate_and_dump_envelope(envelope))
 
 
 def render_gpd_return_markdown(envelope: Mapping[str, object]) -> str:
@@ -317,11 +302,21 @@ def normalize_return_profile_id(value: str | None, *, field_name: str = "role") 
 
 
 def _normalize_status(status: str) -> str:
-    normalized = _normalize_identifier(status, field_name="status")
-    if normalized not in VALID_RETURN_STATUSES:
+    candidate = _normalize_identifier(status, field_name="status")
+    try:
+        return str(
+            _validate_and_dump_envelope(
+                {
+                    "status": candidate,
+                    "files_written": [],
+                    "issues": [],
+                    "next_actions": [],
+                }
+            )["status"]
+        )
+    except ValueError as exc:
         statuses = ", ".join(RETURN_STATUS_ORDER)
-        raise ValueError(f"unknown gpd_return status '{status}'. Must be one of: {statuses}")
-    return normalized
+        raise ValueError(f"unknown gpd_return status '{status}'. Must be one of: {statuses}") from exc
 
 
 def _normalize_identifier(value: str, *, field_name: str) -> str:
@@ -344,19 +339,13 @@ def _normalize_optional_text(value: str | None, *, field_name: str) -> str | Non
     return normalized
 
 
-def _normalize_string_sequence(values: Iterable[str], *, field_name: str) -> list[str]:
+def _string_sequence_candidate(values: Iterable[str], *, field_name: str) -> list[str]:
     if isinstance(values, str):
         raise ValueError(f"{field_name} must be an iterable of strings, not a string")
-
-    normalized: list[str] = []
-    for index, value in enumerate(values):
-        if not isinstance(value, str):
-            raise ValueError(f"{field_name}[{index}] must be a string")
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError(f"{field_name}[{index}] must be a non-empty string")
-        normalized.append(stripped)
-    return normalized
+    try:
+        return list(values)
+    except TypeError as exc:
+        raise ValueError(f"{field_name} must be an iterable of strings") from exc
 
 
 def _normalize_checkpoint_resume_file(resume_file: str | None, *, project_root: str | Path | None) -> str:
@@ -417,30 +406,24 @@ def _checkpoint_intent_payload(
 
 
 def _validate_and_dump_envelope(envelope: Mapping[str, object]) -> dict[str, object]:
-    try:
-        validated = GpdReturnEnvelope.model_validate(dict(envelope))
-    except PydanticValidationError as exc:
-        errors = "; ".join(_format_validation_error(exc))
-        raise ValueError(f"invalid gpd_return skeleton: {errors}") from exc
-    return validated.model_dump(mode="json", exclude_none=True, exclude_unset=True)
+    validation = validate_gpd_return_markdown(f"```yaml\n{_dump_gpd_return_yaml(envelope).rstrip()}\n```\n")
+    if not validation.passed or validation.envelope is None:
+        errors = "; ".join(validation.errors)
+        raise ValueError(f"invalid gpd_return skeleton: {errors}")
+    return validation.envelope.model_dump(mode="json", exclude_none=True, exclude_unset=True)
 
 
-def _format_validation_error(exc: PydanticValidationError) -> list[str]:
-    errors: list[str] = []
-    for item in exc.errors():
-        location = ".".join(str(part) for part in item.get("loc", ())) or "gpd_return"
-        message = str(item.get("msg", "validation error"))
-        if message.startswith("Value error, "):
-            message = message[len("Value error, ") :]
-        errors.append(f"{location}: {message}")
-    return errors
-
-
-def _assert_field_can_be_rendered(field_name: str, *, status: str) -> None:
-    if field_name not in KNOWN_RETURN_FIELD_NAMES:
-        raise ValueError(f"unknown gpd_return field '{field_name}'")
-    if not _field_allowed_for_status(field_name, status):
-        raise ValueError(f"status '{status}' does not allow gpd_return field '{field_name}'")
+def _dump_gpd_return_yaml(envelope: Mapping[str, object]) -> str:
+    return (
+        yaml.safe_dump(
+            {"gpd_return": dict(envelope)},
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+            width=999999,
+        ).rstrip()
+        + "\n"
+    )
 
 
 def _fields_allowed_for_status(status: str) -> tuple[str, ...]:

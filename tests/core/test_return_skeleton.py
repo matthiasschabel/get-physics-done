@@ -225,12 +225,12 @@ def test_return_skeleton_rejects_unknown_role_status_and_fields() -> None:
     with pytest.raises(ValueError, match="unknown gpd_return status"):
         build_gpd_return_skeleton(role="executor", status="done")
 
-    with pytest.raises(ValueError, match="unknown gpd_return field"):
+    with pytest.raises(ValueError, match="Unknown gpd_return top-level field"):
         build_gpd_return_skeleton(role="executor", status="completed", extra_fields={"file_written": []})
 
 
 def test_return_skeleton_rejects_status_disallowed_extra_fields() -> None:
-    with pytest.raises(ValueError, match="status 'blocked' does not allow gpd_return field 'state_updates'"):
+    with pytest.raises(ValueError, match="status 'blocked' does not allow gpd_return field\\(s\\): state_updates"):
         build_gpd_return_skeleton(
             role="executor",
             status="blocked",

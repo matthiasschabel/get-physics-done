@@ -1941,32 +1941,6 @@ def phase_plan_index(
     _output(phase_plan_index(_read_only_project_scoped_cwd(), phase_num))
 
 
-@phase_app.command("verification-summary")
-def phase_verification_summary(
-    phase_num: str | None = typer.Argument(None, help="Phase number"),
-    phase: str | None = typer.Option(None, "--phase", help="Phase number (option form for prompt helpers)."),
-    wave: str | None = typer.Option(None, "--wave", help="Restrict the summary to one wave number."),
-    all_waves: bool = typer.Option(False, "--all-waves", help="Summarize all waves in the phase."),
-) -> None:
-    """Summarize phase/wave verification evidence without mutating state."""
-    from gpd.core.phase_verification_summary import build_phase_verification_summary
-
-    if phase_num and phase and phase_num != phase:
-        _error("phase verification-summary received conflicting phase values")
-    selected_phase = phase or phase_num
-    if not selected_phase:
-        _error("phase verification-summary requires a phase number")
-    result = build_phase_verification_summary(
-        _read_only_project_scoped_cwd(),
-        selected_phase,
-        wave=wave,
-        all_waves=all_waves,
-    )
-    _output(result)
-    if not result.structural_valid:
-        raise typer.Exit(code=1)
-
-
 @phase_app.command("find")
 def phase_find(
     phase_num: str = typer.Argument(..., help="Phase number to find"),

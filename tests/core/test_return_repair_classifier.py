@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from gpd.core.return_repair_classifier import classify_gpd_return_repair
+from gpd.core.return_repair_classifier import (
+    REPAIRABLE_RETURN_CLASSES,
+    classify_gpd_return_repair,
+    return_failure_class_from_repair_class,
+    return_repair_class_from_validation_error,
+    return_repair_hint,
+)
 from gpd.core.state import default_state_dict, generate_state_markdown
 
 
@@ -48,6 +54,9 @@ def test_classifies_plain_prose_without_candidate_as_missing_block() -> None:
     assert result.primary_class == "missing_block"
     assert result.recovery_route == "retry_child"
     assert result.original_errors == ["No gpd_return YAML block found"]
+    assert result.safe_to_apply is False
+    assert result.mutated is False
+    assert result.mutates is False
 
 
 @pytest.mark.parametrize(
@@ -132,6 +141,9 @@ def test_classifies_scalar_list_drift() -> None:
 
     assert result.primary_class == "scalar_list_drift"
     assert "list" in result.original_errors[0]
+    assert result.safe_to_apply is False
+    assert result.mutated is False
+    assert result.mutates is False
 
 
 def test_classifies_unknown_typo_field() -> None:
@@ -230,6 +242,9 @@ def test_classifies_valid_non_completed_return_without_treating_it_as_malformed(
     assert result.recovery_route == "route_by_status"
     assert result.status == "checkpoint"
     assert result.original_errors == []
+    assert result.safe_to_apply is False
+    assert result.mutated is False
+    assert result.mutates is False
 
 
 def test_can_accept_non_completed_status_when_required() -> None:
@@ -250,6 +265,66 @@ def test_classifies_multiple_canonical_blocks_as_ambiguous() -> None:
     assert result.primary_class == "ambiguous_multiple_returns"
     assert result.valid is False
     assert result.accepted_for_success is False
+
+
+@pytest.mark.parametrize(
+    ("error", "content", "repair_class", "failure_class", "repairable"),
+    [
+        (
+            "No gpd_return YAML block found",
+            "# Summary\n\nNo machine-readable return here.\n",
+            "missing_block",
+            "return_missing",
+            True,
+        ),
+        (
+            "Missing required field: status",
+            None,
+            "missing_required_fields",
+            "return_malformed_repairable",
+            True,
+        ),
+        (
+            "files_written: Input should be a valid list",
+            None,
+            "scalar_list_drift",
+            "return_malformed_repairable",
+            True,
+        ),
+        (
+            "Multiple gpd_return YAML blocks found: expected exactly one, got 2",
+            None,
+            "ambiguous_multiple_returns",
+            "return_malformed_blocking",
+            False,
+        ),
+        (
+            "status 'blocked' does not allow gpd_return field 'state_updates'",
+            None,
+            "status_field_forbidden",
+            "return_malformed_blocking",
+            False,
+        ),
+    ],
+)
+def test_validation_error_helper_preserves_apply_return_failure_classes(
+    error: str,
+    content: str | None,
+    repair_class: str,
+    failure_class: str,
+    repairable: bool,
+) -> None:
+    classified = return_repair_class_from_validation_error(error, content=content)
+
+    assert classified == repair_class
+    assert return_failure_class_from_repair_class(classified) == failure_class
+    assert (classified in REPAIRABLE_RETURN_CLASSES) is repairable
+    assert return_repair_hint(classified)
+
+
+def test_valid_repair_class_has_no_failure_class() -> None:
+    with pytest.raises(ValueError, match="valid returns"):
+        return_failure_class_from_repair_class("valid")
 
 
 def test_classifier_does_not_write_state_files(tmp_path: Path) -> None:

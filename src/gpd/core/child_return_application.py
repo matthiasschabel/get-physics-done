@@ -31,6 +31,7 @@ from gpd.core.continuation import (
     normalize_continuation_bounded_segment_with_issues,
     normalize_continuation_reference,
 )
+from gpd.core.handoff_artifacts import HandoffFailureClass
 from gpd.core.recent_projects import recent_projects_index_path
 from gpd.core.results import state_has_canonical_result_id
 from gpd.core.return_contract import (
@@ -38,7 +39,6 @@ from gpd.core.return_contract import (
     GpdReturnContinuationUpdate,
     GpdReturnEnvelope,
 )
-from gpd.core.return_gate import ReturnGateFailureClass
 from gpd.core.state import (
     StateUpdateResult,
     load_state_json_readonly,
@@ -73,10 +73,10 @@ _CHILD_RETURN_BOUNDED_SEGMENT_RECORDED_BY = "apply_child_return_updates"
 _CHECKPOINT_BOUNDED_SEGMENT_RESUME_FILE_REQUIRED_ERROR = (
     "set_bounded_segment: checkpoint returns must include continuation_update.bounded_segment.resume_file"
 )
-APPLICATOR_FAILED_FAILURE_CLASS = ReturnGateFailureClass.APPLICATOR_FAILED.value
-RETURN_MISSING_FAILURE_CLASS = ReturnGateFailureClass.RETURN_MISSING.value
-RETURN_MALFORMED_REPAIRABLE_FAILURE_CLASS = ReturnGateFailureClass.RETURN_MALFORMED_REPAIRABLE.value
-RETURN_MALFORMED_BLOCKING_FAILURE_CLASS = ReturnGateFailureClass.RETURN_MALFORMED_BLOCKING.value
+APPLICATOR_FAILED_FAILURE_CLASS = HandoffFailureClass.APPLICATOR_FAILED.value
+RETURN_MISSING_FAILURE_CLASS = HandoffFailureClass.RETURN_MISSING.value
+RETURN_MALFORMED_REPAIRABLE_FAILURE_CLASS = HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE.value
+RETURN_MALFORMED_BLOCKING_FAILURE_CLASS = HandoffFailureClass.RETURN_MALFORMED_BLOCKING.value
 
 
 @dataclass(frozen=True)

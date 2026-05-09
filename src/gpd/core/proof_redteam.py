@@ -14,7 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gpd.contracts import PROOF_AUDIT_REVIEWER
 from gpd.core.frontmatter import FrontmatterParseError, extract_frontmatter
-from gpd.core.proof_review import _read_proof_redteam_status
+from gpd.core.proof_redteam_contract import (
+    PROOF_REDTEAM_OPEN_STATUS_VALUES,
+    PROOF_REDTEAM_REQUIRED_COVERAGE_SUBSECTIONS,
+    PROOF_REDTEAM_REQUIRED_SECTIONS,
+    read_proof_redteam_status,
+)
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.utils import atomic_write
 
@@ -38,7 +43,7 @@ PROOF_REDTEAM_BODY_CONTRACT = (
     "structured gaps, and an adversarial probe before treating the claim as established."
 )
 
-_SUPPORTED_SKELETON_STATUSES = frozenset({"gaps_found", "human_needed"})
+_SUPPORTED_SKELETON_STATUSES = frozenset(PROOF_REDTEAM_OPEN_STATUS_VALUES)
 _PLACEHOLDER_PROOF_ARTIFACT_PATH = "TODO-proof-artifact-path"
 
 
@@ -100,7 +105,7 @@ def validate_proof_redteam_artifact(
     """Validate a proof-redteam artifact through the existing strict proof-review parser."""
 
     artifact_path = Path(path)
-    status, error = _read_proof_redteam_status(
+    status, error = read_proof_redteam_status(
         artifact_path,
         project_root=Path(project_root),
         expected_manuscript_path=expected_manuscript_path,
@@ -451,11 +456,25 @@ def _body_stub(
     proof_artifact_path: str,
     status: ProofRedteamSkeletonStatus,
 ) -> str:
+    (
+        root_heading,
+        inventory_heading,
+        ledger_heading,
+        adversarial_heading,
+        verdict_heading,
+        follow_up_heading,
+    ) = PROOF_REDTEAM_REQUIRED_SECTIONS
+    (
+        named_parameter_heading,
+        hypothesis_heading,
+        quantifier_heading,
+        conclusion_heading,
+    ) = PROOF_REDTEAM_REQUIRED_COVERAGE_SUBSECTIONS
     proof_location = f"{proof_artifact_path}:TODO"
     claim_line = claim_text or f"TODO exact statement for {claim_id}"
     return (
-        "# Proof Redteam\n\n"
-        "## Proof Inventory\n\n"
+        f"{root_heading}\n\n"
+        f"{inventory_heading}\n\n"
         f"- Exact claim / theorem text: {claim_line}\n"
         "- Claim / theorem target: TODO identify the theorem target under audit.\n"
         "- Named parameters:\n"
@@ -466,33 +485,33 @@ def _body_stub(
         "  - TODO list every quantifier and domain obligation.\n"
         "- Conclusion clauses:\n"
         "  - TODO list each conclusion clause that the proof must establish.\n\n"
-        "## Coverage Ledger\n\n"
-        "### Named-Parameter Coverage\n\n"
+        f"{ledger_heading}\n\n"
+        f"{named_parameter_heading}\n\n"
         "| Parameter | Role / Domain | Proof Location | Status | Notes |\n"
         "| --- | --- | --- | --- | --- |\n"
         f"| TODO | TODO | {proof_location} | open | Builder skeleton; audit needed. |\n\n"
-        "### Hypothesis Coverage\n\n"
+        f"{hypothesis_heading}\n\n"
         "| Hypothesis | Proof Location | Status | Notes |\n"
         "| --- | --- | --- | --- |\n"
         f"| TODO | {proof_location} | open | Builder skeleton; audit needed. |\n\n"
-        "### Quantifier / Domain Coverage\n\n"
+        f"{quantifier_heading}\n\n"
         "| Obligation | Proof Location | Status | Notes |\n"
         "| --- | --- | --- | --- |\n"
         f"| TODO | {proof_location} | open | Builder skeleton; audit needed. |\n\n"
-        "### Conclusion-Clause Coverage\n\n"
+        f"{conclusion_heading}\n\n"
         "| Clause | Proof Location | Status | Notes |\n"
         "| --- | --- | --- | --- |\n"
         f"| TODO | {proof_location} | open | Builder skeleton; audit needed. |\n\n"
-        "## Adversarial Probe\n\n"
+        f"{adversarial_heading}\n\n"
         "- Probe type: TODO counterexample attempt, boundary case, dropped-parameter test, or narrower-case challenge.\n"
         "- Result: TODO record the adversarial result before closure.\n\n"
-        "## Verdict\n\n"
+        f"{verdict_heading}\n\n"
         "- Scope status: `unclear`\n"
         "- Quantifier status: `unclear`\n"
         "- Counterexample status: `not_attempted`\n"
         "- Blocking gaps:\n"
         f"  - Current skeleton status is `{status}`; replace TODO coverage before closure.\n\n"
-        "## Required Follow-Up\n\n"
+        f"{follow_up_heading}\n\n"
         "- Replace every TODO with exact proof locations, structured gaps, and required repair work.\n"
     )
 
@@ -522,31 +541,18 @@ def _normalize_finalizer_manuscript_fields(
     expected_manuscript_sha256: str | None,
     expected_round: int | None,
 ) -> tuple[dict[str, object], str | None]:
-    provided = (
-        expected_manuscript_path is not None,
-        expected_manuscript_sha256 is not None,
-        expected_round is not None,
-    )
-    if any(provided) and not all(provided):
-        return {}, (
+    return _normalize_scoped_manuscript_fields(
+        manuscript_path=expected_manuscript_path,
+        manuscript_sha256=expected_manuscript_sha256,
+        round_number=expected_round,
+        incomplete_error=(
             "manuscript-scoped proof-redteam finalization requires expected_manuscript_path, "
             "expected_manuscript_sha256, and expected_round"
-        )
-    if not any(provided):
-        return {}, None
-    normalized_path = expected_manuscript_path.strip() if expected_manuscript_path is not None else ""
-    normalized_sha = expected_manuscript_sha256.strip().lower() if expected_manuscript_sha256 is not None else ""
-    if not normalized_path:
-        return {}, "expected_manuscript_path must not be blank"
-    if len(normalized_sha) != 64 or any(char not in "0123456789abcdef" for char in normalized_sha):
-        return {}, "expected_manuscript_sha256 must be a lowercase 64-hex digest"
-    if expected_round is None or expected_round < 1:
-        return {}, "expected_round must be a positive integer"
-    return {
-        "manuscript_path": normalized_path,
-        "manuscript_sha256": normalized_sha,
-        "round": expected_round,
-    }, None
+        ),
+        path_field_name="expected_manuscript_path",
+        sha_field_name="expected_manuscript_sha256",
+        round_field_name="expected_round",
+    )
 
 
 def _normalize_manuscript_fields(
@@ -555,32 +561,56 @@ def _normalize_manuscript_fields(
     manuscript_sha256: str | None,
     round_number: int | None,
 ) -> dict[str, object]:
+    fields, error = _normalize_scoped_manuscript_fields(
+        manuscript_path=manuscript_path,
+        manuscript_sha256=manuscript_sha256,
+        round_number=round_number,
+        incomplete_error=(
+            "manuscript-scoped proof-redteam skeletons require manuscript_path, manuscript_sha256, and round_number"
+        ),
+        path_field_name="manuscript_path",
+        sha_field_name="manuscript_sha256",
+        round_field_name="round_number",
+    )
+    if error is not None:
+        raise ValueError(error)
+    return fields
+
+
+def _normalize_scoped_manuscript_fields(
+    *,
+    manuscript_path: str | None,
+    manuscript_sha256: str | None,
+    round_number: int | None,
+    incomplete_error: str,
+    path_field_name: str,
+    sha_field_name: str,
+    round_field_name: str,
+) -> tuple[dict[str, object], str | None]:
     provided = (
         manuscript_path is not None,
         manuscript_sha256 is not None,
         round_number is not None,
     )
     if any(provided) and not all(provided):
-        raise ValueError(
-            "manuscript-scoped proof-redteam skeletons require manuscript_path, manuscript_sha256, and round_number"
-        )
+        return {}, incomplete_error
     if not any(provided):
-        return {}
+        return {}, None
     normalized_manuscript_path = manuscript_path.strip() if manuscript_path is not None else ""
     normalized_manuscript_sha256 = manuscript_sha256.strip().lower() if manuscript_sha256 is not None else ""
     if not normalized_manuscript_path:
-        raise ValueError("manuscript_path must not be blank")
+        return {}, f"{path_field_name} must not be blank"
     if len(normalized_manuscript_sha256) != 64 or any(
         char not in "0123456789abcdef" for char in normalized_manuscript_sha256
     ):
-        raise ValueError("manuscript_sha256 must be a lowercase 64-hex digest")
+        return {}, f"{sha_field_name} must be a lowercase 64-hex digest"
     if round_number is None or round_number < 1:
-        raise ValueError("round_number must be a positive integer")
+        return {}, f"{round_field_name} must be a positive integer"
     return {
         "manuscript_path": normalized_manuscript_path,
         "manuscript_sha256": normalized_manuscript_sha256,
         "round": round_number,
-    }
+    }, None
 
 
 class _FinalizerProofArtifactPathResolution(BaseModel):

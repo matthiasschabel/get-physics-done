@@ -11,6 +11,12 @@ from gpd.core.proof_redteam import (
     finalize_proof_redteam_artifact,
     validate_proof_redteam_artifact,
 )
+from gpd.core.proof_redteam_contract import (
+    PROOF_REDTEAM_OPEN_STATUS_VALUES,
+    PROOF_REDTEAM_REQUIRED_COVERAGE_SUBSECTIONS,
+    PROOF_REDTEAM_REQUIRED_SECTIONS,
+    PROOF_REDTEAM_STATUS_VALUES,
+)
 from tests.manuscript_test_support import write_proof_review_package
 
 
@@ -97,6 +103,12 @@ def test_proof_redteam_skeleton_supports_human_needed_without_certifying() -> No
     assert "passed" not in skeleton.markdown_draft
 
 
+def test_proof_redteam_skeleton_statuses_are_shared_open_statuses() -> None:
+    assert PROOF_REDTEAM_STATUS_VALUES == ("passed", "gaps_found", "human_needed")
+    assert PROOF_REDTEAM_OPEN_STATUS_VALUES == ("gaps_found", "human_needed")
+    assert "passed" not in PROOF_REDTEAM_OPEN_STATUS_VALUES
+
+
 def test_proof_redteam_skeleton_rejects_passed_status() -> None:
     with pytest.raises(ValueError, match="gaps_found.*human_needed"):
         build_proof_redteam_skeleton(claim_id="CLM-001", status="passed")
@@ -134,6 +146,69 @@ def test_validate_proof_redteam_artifact_accepts_conservative_skeleton_with_real
     assert result.valid is True
     assert result.status == "gaps_found"
     assert result.errors == []
+
+
+def test_proof_redteam_skeleton_body_sections_follow_shared_contract() -> None:
+    skeleton = build_proof_redteam_skeleton(
+        claim_id="CLM-001",
+        claim_text="For every r_0 > 0, the orbit intersects the target annulus.",
+    )
+
+    for section in PROOF_REDTEAM_REQUIRED_SECTIONS:
+        assert section in skeleton.body_stub
+    for subsection in PROOF_REDTEAM_REQUIRED_COVERAGE_SUBSECTIONS:
+        assert subsection in skeleton.body_stub
+
+
+@pytest.mark.parametrize("section", PROOF_REDTEAM_REQUIRED_SECTIONS)
+def test_validate_proof_redteam_artifact_rejects_missing_shared_required_section(
+    tmp_path: Path,
+    section: str,
+) -> None:
+    proof_path = tmp_path / "paper" / "theorem.tex"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("\\begin{theorem}Demo.\\end{theorem}\n", encoding="utf-8")
+    skeleton = build_proof_redteam_skeleton(
+        claim_id="CLM-001",
+        claim_text="For every r_0 > 0, the orbit intersects the target annulus.",
+        proof_artifact_paths=["paper/theorem.tex"],
+    )
+    artifact_path = tmp_path / "PROOF-REDTEAM.md"
+    artifact_path.write_text(
+        skeleton.markdown_draft.replace(section, f"REMOVED-{section.replace('#', '').replace(' ', '-')}", 1),
+        encoding="utf-8",
+    )
+
+    result = validate_proof_redteam_artifact(artifact_path, project_root=tmp_path)
+
+    assert result.valid is False
+    assert result.errors
+    assert "proof-redteam body is missing required sections" in result.errors[0]
+
+
+@pytest.mark.parametrize("subsection", PROOF_REDTEAM_REQUIRED_COVERAGE_SUBSECTIONS)
+def test_validate_proof_redteam_artifact_rejects_missing_shared_coverage_subsection(
+    tmp_path: Path,
+    subsection: str,
+) -> None:
+    proof_path = tmp_path / "paper" / "theorem.tex"
+    proof_path.parent.mkdir(parents=True)
+    proof_path.write_text("\\begin{theorem}Demo.\\end{theorem}\n", encoding="utf-8")
+    skeleton = build_proof_redteam_skeleton(
+        claim_id="CLM-001",
+        claim_text="For every r_0 > 0, the orbit intersects the target annulus.",
+        proof_artifact_paths=["paper/theorem.tex"],
+    )
+    artifact_path = tmp_path / "PROOF-REDTEAM.md"
+    artifact_path.write_text(
+        skeleton.markdown_draft.replace(subsection, f"REMOVED-{subsection.replace('#', '').replace(' ', '-')}", 1),
+        encoding="utf-8",
+    )
+
+    result = validate_proof_redteam_artifact(artifact_path, project_root=tmp_path)
+
+    assert result.valid is False
+    assert result.errors == [f"proof-redteam coverage subsection is empty: {subsection}"]
 
 
 def test_validate_proof_redteam_artifact_surfaces_existing_parser_errors(tmp_path: Path) -> None:
@@ -255,6 +330,59 @@ def test_finalize_proof_redteam_artifact_rejects_missing_proof_artifact(tmp_path
     assert result.valid is False
     assert result.errors == ["proof_artifact_path does not resolve to a readable file: paper/missing.tex"]
     assert artifact_path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize(
+    ("manuscript_kwargs", "expected_error"),
+    [
+        (
+            {"expected_manuscript_path": "paper/main.tex"},
+            "manuscript-scoped proof-redteam finalization requires expected_manuscript_path, "
+            "expected_manuscript_sha256, and expected_round",
+        ),
+        (
+            {
+                "expected_manuscript_path": " ",
+                "expected_manuscript_sha256": "a" * 64,
+                "expected_round": 1,
+            },
+            "expected_manuscript_path must not be blank",
+        ),
+        (
+            {
+                "expected_manuscript_path": "paper/main.tex",
+                "expected_manuscript_sha256": "not-a-sha",
+                "expected_round": 1,
+            },
+            "expected_manuscript_sha256 must be a lowercase 64-hex digest",
+        ),
+        (
+            {
+                "expected_manuscript_path": "paper/main.tex",
+                "expected_manuscript_sha256": "a" * 64,
+                "expected_round": 0,
+            },
+            "expected_round must be a positive integer",
+        ),
+    ],
+)
+def test_finalize_proof_redteam_artifact_reuses_manuscript_binding_validation(
+    tmp_path: Path,
+    manuscript_kwargs: dict[str, object],
+    expected_error: str,
+) -> None:
+    result = finalize_proof_redteam_artifact(
+        tmp_path / "missing-PROOF-REDTEAM.md",
+        project_root=tmp_path,
+        claim_id="CLM-001",
+        claim_text="For every r_0 > 0, the orbit intersects the target annulus.",
+        proof_artifact_path="paper/theorem.tex",
+        reviewed_at="2026-05-07T12:00:00Z",
+        **manuscript_kwargs,
+    )
+
+    assert result.valid is False
+    assert result.errors == [expected_error]
 
 
 @pytest.mark.parametrize(

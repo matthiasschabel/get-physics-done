@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -14,10 +15,16 @@ from gpd.core.return_contract import (
 )
 
 __all__ = [
+    "REPAIRABLE_RETURN_CLASSES",
+    "RETURN_REPAIR_HINTS",
     "ReturnRepairClassification",
     "ReturnRepairClass",
+    "ReturnRepairFailureClass",
     "ReturnRepairRecoveryRoute",
     "classify_gpd_return_repair",
+    "return_failure_class_from_repair_class",
+    "return_repair_class_from_validation_error",
+    "return_repair_hint",
 ]
 
 ReturnRepairClass = Literal[
@@ -46,6 +53,12 @@ ReturnRepairRecoveryRoute = Literal[
     "route_by_status",
     "explicit_main_context_fallback_with_own_return",
     "block_and_surface_errors",
+]
+
+ReturnRepairFailureClass = Literal[
+    "return_missing",
+    "return_malformed_repairable",
+    "return_malformed_blocking",
 ]
 
 ReturnRepairConfidence = Literal["high", "medium", "low"]
@@ -98,6 +111,7 @@ _LIST_DRIFT_MARKERS = (
     "checkpoint_hashes must be a list",
     "decisions must be a list",
     "blockers must be a list",
+    "Input should be a valid list",
 )
 _FIELD_SHAPE_MARKERS = (
     "must be a list",
@@ -109,7 +123,7 @@ _FIELD_SHAPE_MARKERS = (
     "Input should be a valid",
 )
 
-_REPAIR_HINTS: dict[ReturnRepairClass, str] = {
+RETURN_REPAIR_HINTS: Mapping[ReturnRepairClass, str] = {
     "valid": "The return envelope validates and is acceptable for the requested status.",
     "missing_block": "Retry the child with one fenced ```yaml block whose top-level key is gpd_return.",
     "unfenced_candidate": "Retry with the candidate return wrapped in a canonical ```yaml gpd_return block.",
@@ -127,6 +141,40 @@ _REPAIR_HINTS: dict[ReturnRepairClass, str] = {
     "continuation_schema_error": "Stop and surface the continuation schema error before any durable application.",
     "valid_non_completed": "Route by the typed non-completed status instead of treating it as a malformed return.",
     "ambiguous_multiple_returns": "Retry with exactly one canonical gpd_return block.",
+}
+
+REPAIRABLE_RETURN_CLASSES: frozenset[ReturnRepairClass] = frozenset(
+    {
+        "missing_block",
+        "unfenced_candidate",
+        "wrong_fence_language",
+        "yaml_parse_error",
+        "top_level_shape_error",
+        "missing_required_fields",
+        "invalid_status",
+        "scalar_list_drift",
+        "field_shape_error",
+        "unknown_field",
+    }
+)
+
+_RETURN_FAILURE_CLASS_BY_REPAIR_CLASS: Mapping[str, ReturnRepairFailureClass] = {
+    "missing_block": "return_missing",
+    "unfenced_candidate": "return_malformed_repairable",
+    "wrong_fence_language": "return_malformed_repairable",
+    "yaml_parse_error": "return_malformed_repairable",
+    "top_level_shape_error": "return_malformed_repairable",
+    "missing_required_fields": "return_malformed_repairable",
+    "invalid_status": "return_malformed_repairable",
+    "scalar_list_drift": "return_malformed_repairable",
+    "field_shape_error": "return_malformed_repairable",
+    "unknown_field": "return_malformed_repairable",
+    "status_field_forbidden": "return_malformed_blocking",
+    "transport_payload_in_return": "return_malformed_blocking",
+    "applicator_owned_metadata": "return_malformed_blocking",
+    "continuation_schema_error": "return_malformed_blocking",
+    "valid_non_completed": "return_malformed_blocking",
+    "ambiguous_multiple_returns": "return_malformed_blocking",
 }
 
 
@@ -201,6 +249,57 @@ def classify_gpd_return_repair(
     )
 
 
+def return_repair_hint(repair_class: ReturnRepairClass) -> str:
+    """Return the stable user-facing repair hint for a repair class."""
+
+    return RETURN_REPAIR_HINTS[repair_class]
+
+
+def return_failure_class_from_repair_class(repair_class: ReturnRepairClass) -> ReturnRepairFailureClass:
+    """Map rich return-repair classes to stable applicator failure classes."""
+
+    if repair_class == "valid":
+        raise ValueError("valid returns do not have a failure class")
+    return _RETURN_FAILURE_CLASS_BY_REPAIR_CLASS[repair_class]
+
+
+def return_repair_class_from_validation_error(
+    error: str,
+    *,
+    content: str | None = None,
+) -> ReturnRepairClass:
+    """Classify one canonical parser error without mutating child output."""
+
+    if error == "No gpd_return YAML block found":
+        return _classify_missing_block(content or "")
+    if error.startswith("Multiple gpd_return YAML blocks found:"):
+        return "ambiguous_multiple_returns"
+    if error.startswith("Missing required field:"):
+        return "missing_required_fields"
+
+    if "gpd_return YAML parse error" in error:
+        if _contains_any(error, _TOP_LEVEL_SHAPE_MARKERS):
+            return "top_level_shape_error"
+        return "yaml_parse_error"
+    if "canonical lowercase" in error or "Invalid status" in error or "status must be" in error:
+        return "invalid_status"
+    if "Unknown gpd_return top-level field" in error:
+        return "unknown_field"
+    if "status '" in error and "does not allow gpd_return field" in error:
+        return "status_field_forbidden"
+    if "execution_segment" in error:
+        return "transport_payload_in_return"
+    if "applicator-owned" in error:
+        return "applicator_owned_metadata"
+    if _is_continuation_schema_error(error):
+        return "continuation_schema_error"
+    if _contains_any(error, _LIST_DRIFT_MARKERS):
+        return "scalar_list_drift"
+    if _contains_any(error, _FIELD_SHAPE_MARKERS):
+        return "field_shape_error"
+    return "field_shape_error"
+
+
 def _normalize_required_status(status: str | None) -> str | None:
     if status is None:
         return None
@@ -238,7 +337,7 @@ def _classification(
         original_errors=original_errors,
         original_warnings=original_warnings,
         recovery_route=recovery_route,
-        repair_hint=_REPAIR_HINTS[primary_class],
+        repair_hint=return_repair_hint(primary_class),
         status=status,
         required_status=required_status,
         fields=fields or {},
@@ -247,33 +346,10 @@ def _classification(
 
 
 def _classify_validation_errors(content: str, errors: list[str]) -> ReturnRepairClass:
-    if errors == ["No gpd_return YAML block found"]:
-        return _classify_missing_block(content)
-
-    joined = "\n".join(errors)
-    if "gpd_return YAML parse error" in joined:
-        if _contains_any(joined, _TOP_LEVEL_SHAPE_MARKERS):
-            return "top_level_shape_error"
-        return "yaml_parse_error"
-
-    if any(error.startswith("Missing required field:") for error in errors):
-        return "missing_required_fields"
-    if "canonical lowercase" in joined or "Invalid status" in joined or "status must be" in joined:
-        return "invalid_status"
-    if "Unknown gpd_return top-level field" in joined:
-        return "unknown_field"
-    if "status '" in joined and "does not allow gpd_return field" in joined:
-        return "status_field_forbidden"
-    if "execution_segment" in joined:
-        return "transport_payload_in_return"
-    if "applicator-owned" in joined:
-        return "applicator_owned_metadata"
-    if _is_continuation_schema_error(joined):
-        return "continuation_schema_error"
-    if _contains_any(joined, _LIST_DRIFT_MARKERS):
-        return "scalar_list_drift"
-    if _contains_any(joined, _FIELD_SHAPE_MARKERS):
-        return "field_shape_error"
+    for error in errors:
+        repair_class = return_repair_class_from_validation_error(error, content=content)
+        if repair_class != "field_shape_error":
+            return repair_class
     return "field_shape_error"
 
 

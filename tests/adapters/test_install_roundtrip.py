@@ -103,7 +103,7 @@ INTERNAL_HELPER_LABEL_STEMS = (
     "apply-return-updates",
 )
 LOCAL_HELPER_TERM_RE = re.compile(
-    r"\b(?:stage\s+field-access|phase\s+(?:checkpoint|verification-summary|closeout-readiness)|"
+    r"\b(?:stage\s+field-access|phase\s+(?:checkpoint|closeout-readiness)|"
     r"validate\s+child-handoff|return\s+skeleton|apply-return-updates)\b"
 )
 PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS = (

@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from gpd.cli import app
 from gpd.core.phase_closeout import phase_closeout_readiness
+from gpd.core.proof_redteam import build_proof_redteam_skeleton
 from gpd.core.state import default_state_dict
 
 
@@ -142,6 +143,28 @@ def test_closeout_readiness_malformed_verification_blocks_closeout(tmp_path: Pat
     assert any("canonical verification report blocked" in blocker for blocker in result.blockers)
 
 
+def test_closeout_readiness_uses_top_level_verification_frontmatter_only(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path)
+    (phase_dir / "02-VERIFICATION.md").write_text(
+        "---\n"
+        "status: passed\n"
+        "score: closeout test\n"
+        "---\n\n"
+        "contract_results:\n"
+        "  claims:\n"
+        "    claim-a:\n"
+        "      status: gaps_found\n",
+        encoding="utf-8",
+    )
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is True
+    assert result.verification_status == "passed"
+    assert result.verification_routing_status == "passed"
+    assert not any("canonical verification report" in blocker for blocker in result.blockers)
+
+
 def test_closeout_readiness_active_bounded_segment_blocks_closeout(tmp_path: Path) -> None:
     _write_phase_project(tmp_path)
     _write_state(tmp_path, bounded_segment=True)
@@ -176,6 +199,24 @@ def test_closeout_readiness_blocks_proof_bearing_work_without_passed_proof_redte
     assert "proof-bearing work requires a passed proof-redteam artifact" in result.blockers
 
 
+def test_closeout_readiness_blocks_non_passed_proof_redteam_artifact(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, proof_bearing=True)
+    skeleton = build_proof_redteam_skeleton(
+        claim_id="claim-a",
+        proof_artifact_paths=["GPD/phases/02-analysis/02-01-PLAN.md"],
+        status="gaps_found",
+    )
+    (phase_dir / "02-01-PROOF-REDTEAM.md").write_text(skeleton.markdown_draft, encoding="utf-8")
+
+    result = phase_closeout_readiness(tmp_path, "02", require_verification=True)
+
+    assert result.ready is False
+    assert result.proof_redteam_required is True
+    assert result.proof_redteam_ready is False
+    assert result.proof_redteam_artifacts == ["GPD/phases/02-analysis/02-01-PROOF-REDTEAM.md"]
+    assert any("reports status 'gaps_found'; expected 'passed'" in blocker for blocker in result.blockers)
+
+
 def test_phase_closeout_readiness_cli_emits_json_and_nonzero_when_blocked(tmp_path: Path) -> None:
     _write_phase_project(tmp_path, verification_status=None)
 
@@ -197,3 +238,11 @@ def test_phase_closeout_readiness_cli_emits_json_and_nonzero_when_blocked(tmp_pa
     assert payload["ready"] is False
     assert payload["read_only"] is True
     assert payload["mutated"] is False
+
+
+def test_phase_help_lists_closeout_readiness_not_removed_verification_summary() -> None:
+    result = RUNNER.invoke(app, ["phase", "--help"])
+
+    assert result.exit_code == 0
+    assert "closeout-readiness" in result.output
+    assert "verification-summary" not in result.output

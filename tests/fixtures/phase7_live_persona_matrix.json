@@ -3,177 +3,85 @@
   "rows": [
     {
       "row_id": "LP01-START-PROJECTLESS-READONLY",
-      "persona": "zero_coder",
-      "workflow": "start_empty_folder",
       "fixture_family": "empty_projectless_folder",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "assumes_initialized_project",
-        "preapproval_product_write",
-        "official_command_names_hidden"
-      ],
-      "allowed_write_class": "none",
       "source_owners": ["src/gpd/specs/workflows/start.md"],
       "test_owners": ["tests/core/test_start_prompt.py"],
-      "acceptance_metric": "projectless_menu_visible_without_product_write",
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP02-RESUME-CONTEXT-LOSS",
-      "persona": "returning_researcher",
-      "workflow": "resume_work_after_context_loss",
       "fixture_family": "context_loss_resume_project",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "wrong_project_context",
-        "unapproved_auto_execution",
-        "continuation_state_lost"
-      ],
-      "allowed_write_class": "none",
-      "source_owners": [
-        "src/gpd/specs/workflows/resume-work.md",
-        "src/gpd/core/resume_surface.py"
-      ],
-      "test_owners": [
-        "tests/core/test_resume_work_stage_contract.py",
-        "tests/core/test_resume_reentry_contract.py"
-      ],
-      "acceptance_metric": "resume_context_rebound_without_auto_execute",
+      "source_owners": ["src/gpd/specs/workflows/resume-work.md", "src/gpd/core/resume_surface.py"],
+      "test_owners": ["tests/core/test_resume_work_stage_contract.py", "tests/core/test_resume_reentry_contract.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP03-STALE-VERIFY-ARTIFACT",
-      "persona": "skeptical_reviewer",
-      "workflow": "verify_work_stale_artifact",
       "fixture_family": "stale_verification_artifact",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "false_success_claim",
-        "stale_evidence_trusted"
-      ],
-      "allowed_write_class": "none",
       "source_owners": [
         "src/gpd/specs/workflows/verify-work.md",
         "src/gpd/specs/references/verification/verification-status-authority.md",
         "src/gpd/core/phase_closeout.py"
       ],
-      "test_owners": [
-        "tests/core/test_phase4_persona_lifecycle_matrix.py",
-        "tests/core/test_phase_lifecycle_live_contract.py"
-      ],
-      "acceptance_metric": "stale_evidence_rejected_no_false_pass",
+      "test_owners": ["tests/core/test_phase4_persona_lifecycle_matrix.py", "tests/core/test_phase_lifecycle_live_contract.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP04-STOP-MID-EXECUTION",
-      "persona": "interrupting_user",
-      "workflow": "stop_mid_execution",
       "fixture_family": "interrupted_execution",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "post_stop_command_attempt",
-        "post_stop_write_attempt",
-        "post_stop_subagent_spawn"
-      ],
-      "allowed_write_class": "none",
       "source_owners": [
         "src/gpd/specs/workflows/execute-phase/checkpoint-resume.md",
         "src/gpd/specs/workflows/execute-phase/wave-dispatch.md"
       ],
-      "test_owners": [
-        "tests/core/test_execute_phase_consistency_contract.py",
-        "tests/core/test_execute_phase_ownership_boundaries.py"
-      ],
-      "acceptance_metric": "stop_halts_followup_actions",
+      "test_owners": ["tests/core/test_execute_phase_consistency_contract.py", "tests/core/test_execute_phase_ownership_boundaries.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP05-NEW-PROJECT-MINIMAL-VAGUE",
-      "persona": "non_coder",
-      "workflow": "new_project_minimal_vague_intake",
       "fixture_family": "vague_minimal_project",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "questionnaire_dump",
-        "preapproval_mutation"
-      ],
-      "allowed_write_class": "project_scoped_after_approval",
       "source_owners": [
         "src/gpd/specs/workflows/new-project/scope-intake.md",
         "src/gpd/specs/workflows/new-project/scope-approval.md"
       ],
-      "test_owners": [
-        "tests/core/test_new_project_stage_contract.py",
-        "tests/core/test_new_project_project_contract_visibility.py"
-      ],
-      "acceptance_metric": "single_intake_choice_before_mutation",
+      "test_owners": ["tests/core/test_new_project_stage_contract.py", "tests/core/test_new_project_project_contract_visibility.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP06-MAP-RESEARCH-EXISTING",
-      "persona": "busy_pi",
-      "workflow": "map_research_existing_work",
       "fixture_family": "existing_research_selection",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "duplicate_intake",
-        "unselected_file_remap"
-      ],
-      "allowed_write_class": "project_scoped_after_approval",
       "source_owners": ["src/gpd/specs/workflows/map-research.md"],
-      "test_owners": [
-        "tests/core/test_map_research_stage_contract.py",
-        "tests/core/test_prompt_wiring.py"
-      ],
-      "acceptance_metric": "selected_files_only_no_duplicate_intake",
+      "test_owners": ["tests/core/test_map_research_stage_contract.py", "tests/core/test_prompt_wiring.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP07-WRITE-PAPER-GAPS",
-      "persona": "publication_pressure",
-      "workflow": "write_paper_with_gaps",
       "fixture_family": "publication_gap_project",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": ["premature_submission_ready_claim"],
-      "allowed_write_class": "project_scoped_after_approval",
       "source_owners": [
         "src/gpd/specs/workflows/write-paper/paper-bootstrap.md",
         "src/gpd/specs/workflows/write-paper/publication-review-finalization.md",
         "src/gpd/commands/write-paper.md"
       ],
-      "test_owners": [
-        "tests/core/test_write_paper_handoff_artifact_gates.py",
-        "tests/core/test_publication_agent_handoff_contracts.py"
-      ],
-      "acceptance_metric": "gap_state_blocks_submission_ready_claim",
+      "test_owners": ["tests/core/test_write_paper_handoff_artifact_gates.py", "tests/core/test_publication_agent_handoff_contracts.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP08-CHILD-CHECKPOINT-RETURN",
-      "persona": "child_handoff",
-      "workflow": "checkpoint_return",
       "fixture_family": "child_checkpoint_return",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "child_checkpoint_treated_as_final",
-        "parent_continuation_lost"
-      ],
-      "allowed_write_class": "none",
       "source_owners": [
         "src/gpd/core/child_return_application.py",
         "src/gpd/core/checkpoint_intent.py",
@@ -184,104 +92,42 @@
         "tests/core/test_phase_lifecycle_live_contract.py",
         "tests/core/test_child_handoff.py"
       ],
-      "acceptance_metric": "checkpoint_return_keeps_parent_continuation",
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP09-WORKSPACE-WRITE-BOUNDARY",
-      "persona": "operator",
-      "workflow": "wrong_workspace_write",
       "fixture_family": "write_boundary_canary",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "active_checkout_write",
-        "user_home_state_write"
-      ],
-      "allowed_write_class": "blocked_or_deferred",
-      "source_owners": [
-        "src/gpd/specs/workflows/map-research.md",
-        "src/gpd/specs/workflows/start.md"
-      ],
-      "test_owners": [
-        "tests/core/test_execute_phase_ownership_boundaries.py",
-        "tests/core/test_start_prompt.py"
-      ],
-      "acceptance_metric": "writes_classified_and_blocked_outside_project",
+      "source_owners": ["src/gpd/specs/workflows/map-research.md", "src/gpd/specs/workflows/start.md"],
+      "test_owners": ["tests/core/test_execute_phase_ownership_boundaries.py", "tests/core/test_start_prompt.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP10-RUNTIME-PERMISSION-BLOCK",
-      "persona": "runtime_power_user",
-      "workflow": "credential_permission_block",
       "fixture_family": "runtime_permission_denial",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "credential_material_exposed",
-        "fake_execution_claim",
-        "wrong_next_step_command"
-      ],
-      "allowed_write_class": "blocked_or_deferred",
-      "source_owners": [
-        "src/gpd/adapters/runtime_catalog.json",
-        "src/gpd/adapters/runtime_catalog.py"
-      ],
-      "test_owners": [
-        "tests/adapters/test_runtime_catalog.py",
-        "tests/core/test_runtime_command_surfaces.py"
-      ],
-      "acceptance_metric": "permission_block_redacted_and_next_step_native",
+      "source_owners": ["src/gpd/adapters/runtime_catalog.json", "src/gpd/adapters/runtime_catalog.py"],
+      "test_owners": ["tests/adapters/test_runtime_catalog.py", "tests/core/test_runtime_command_surfaces.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP11-SET-PROFILE-REVIEW-CANARY",
-      "persona": "all_runtimes",
-      "workflow": "set_profile_review",
       "fixture_family": "profile_config_canary",
-      "target_runtimes": ["all_supported"],
       "runtime_scope": ["all_supported"],
-      "failure_classes": [
-        "write_outside_bounded_config_canary",
-        "runtime_specific_model_pin_changed"
-      ],
-      "allowed_write_class": "bounded_config_only",
-      "source_owners": [
-        "src/gpd/specs/workflows/set-profile.md",
-        "src/gpd/commands/set-profile.md"
-      ],
-      "test_owners": [
-        "tests/core/test_workflow_prompt_dedup.py",
-        "tests/core/test_prompt_wiring.py"
-      ],
-      "acceptance_metric": "only_model_profile_config_canary_written",
+      "source_owners": ["src/gpd/specs/workflows/set-profile.md", "src/gpd/commands/set-profile.md"],
+      "test_owners": ["tests/core/test_workflow_prompt_dedup.py", "tests/core/test_prompt_wiring.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     },
     {
       "row_id": "LP12-GEMINI-POLICY-DENIAL",
-      "persona": "gemini_heavy",
-      "workflow": "gemini_shell_policy_denial",
       "fixture_family": "gemini_policy_denial",
-      "target_runtimes": ["gemini"],
       "runtime_scope": ["gemini"],
-      "failure_classes": [
-        "denied_shell_substitution",
-        "unvalidated_write_after_policy_denial"
-      ],
-      "allowed_write_class": "blocked_or_deferred",
-      "source_owners": [
-        "src/gpd/adapters/gemini_shell_patches.py",
-        "src/gpd/adapters/gemini.py"
-      ],
-      "test_owners": [
-        "tests/adapters/test_gemini_shell_projection.py",
-        "tests/adapters/test_gemini.py"
-      ],
-      "acceptance_metric": "denied_shell_keeps_no_unvalidated_write",
+      "source_owners": ["src/gpd/adapters/gemini_shell_patches.py", "src/gpd/adapters/gemini.py"],
+      "test_owners": ["tests/adapters/test_gemini_shell_projection.py", "tests/adapters/test_gemini.py"],
       "provider_launch_allowed": false,
       "network_allowed": false
     }

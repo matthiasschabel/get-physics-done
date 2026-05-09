@@ -77,14 +77,11 @@ For proof-bearing claims, a missing, malformed, wrong-round, wrong-root, or non-
 
 Stage-review validation alone is not proof-redteam clearance: aligned `proof_audits[]` entries in `${REVIEW_ROOT}/STAGE-math{round_suffix}.json` are necessary review evidence, but they do not by themselves clear a favorable final decision without the same-round proof-redteam artifact and strict final-decision validation.
 
-Write `${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json` and
-`${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json`. Keep `manuscript_path` non-empty
-and identical across ledger, decision, and staged-review artifacts for this round.
-In `REFEREE-DECISION{round_suffix}.json`, set every strict policy field explicitly.
-Its `stage_artifacts` list may contain only the five canonical `STAGE-reader`,
-`STAGE-literature`, `STAGE-math`, `STAGE-physics`, and `STAGE-interestingness` JSON
-files for this round. `CLAIMS{round_suffix}.json` is the separately validated claim
-index, not a `stage_artifacts` entry.
+Use `publication-final-adjudication-boundary.md` for upstream read-only input
+policy, strict decision validation, same-round proof-redteam clearance, and fresh
+`gpd_return.files_written` enforcement. Locally keep `manuscript_path` non-empty
+and identical across ledger, decision, and staged-review artifacts for this
+round; set every strict `REFEREE-DECISION{round_suffix}.json` policy field.
 
 Your writable scope is limited to Stage 6-owned adjudication artifacts for this round:
 `${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md`,

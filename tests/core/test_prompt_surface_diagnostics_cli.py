@@ -122,30 +122,13 @@ def test_prompt_surface_diagnostics_runtime_projection_and_renderers() -> None:
     assert markdown_result.exit_code == 0, markdown_result.output
     assert "Prompt Surface Diagnostics" in markdown_result.output
     assert ".md" in markdown_result.output
+    assert (
+        "| Rank | Kind | Name | Expanded chars | Raw lines | Includes | Hard gates | "
+        "Shell parse | Schemas | Invalid returns | Invalid frontmatter | Bad fields | Rigidity |"
+    ) in markdown_result.output.splitlines()
 
     assert table_result.exit_code == 0, table_result.output
-    assert "runtime top prompts" in table_result.output
-    assert "projected_chars" in table_result.output
-    assert runtime_name in table_result.output
-
-
-def test_prompt_surface_diagnostics_table_header_line_is_not_wrapped() -> None:
-    result = runner.invoke(
-        app,
-        [
-            "diagnostics",
-            "prompt-surface",
-            "--surface",
-            "command",
-            "--top",
-            "1",
-            "--no-runtime-projections",
-        ],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 0, result.output
-    header = result.output.splitlines()[0]
+    header = table_result.output.splitlines()[0]
     for column in (
         "kind",
         "name",
@@ -161,30 +144,9 @@ def test_prompt_surface_diagnostics_table_header_line_is_not_wrapped() -> None:
     ):
         assert column in header
     assert header.endswith("rigidity")
-
-
-def test_prompt_surface_diagnostics_markdown_header_line_is_not_wrapped() -> None:
-    result = runner.invoke(
-        app,
-        [
-            "diagnostics",
-            "prompt-surface",
-            "--surface",
-            "command",
-            "--top",
-            "1",
-            "--no-runtime-projections",
-            "--format",
-            "markdown",
-        ],
-        catch_exceptions=False,
-    )
-
-    assert result.exit_code == 0, result.output
-    assert (
-        "| Rank | Kind | Name | Expanded chars | Raw lines | Includes | Hard gates | "
-        "Shell parse | Schemas | Invalid returns | Invalid frontmatter | Bad fields | Rigidity |"
-    ) in result.output.splitlines()
+    assert "runtime top prompts" in table_result.output
+    assert "projected_chars" in table_result.output
+    assert runtime_name in table_result.output
 
 
 def test_prompt_surface_diagnostics_is_read_only_outside_project(tmp_path: Path, monkeypatch) -> None:

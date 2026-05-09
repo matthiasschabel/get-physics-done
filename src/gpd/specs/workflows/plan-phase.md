@@ -16,7 +16,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Parse only the fields named by `BOOTSTRAP_INIT.staged_loading.required_init_fields`; this stage-selected payload includes `project_contract_gate` before any authoritative contract use.
+Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. The staged field-access helper is the source of truth for which fields are available; use `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction` after later reloads. Parse only the fields named by `BOOTSTRAP_INIT.staged_loading.required_init_fields`; this stage-selected payload includes `project_contract_gate` before any authoritative contract use.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Present draft plans for user review before approval or execution; do not weaken the contract gate.
@@ -29,7 +29,7 @@ Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style ins
 - Tangent policy: when multiple viable approaches or optional side questions appear, do NOT silently branch or widen the plan. Use the canonical tangent decision model below instead of assuming extra plans or branches. `git.branching_strategy` does not override this rule.
 - All modes still require contract completeness, decisive outputs, required anchors, forbidden-proxy handling, and disconfirming paths before execution starts.
 
-**Staged init access rule:** after every `gpd --raw init plan-phase ... --stage <stage_id>` reload, treat the new `INIT.staged_loading.required_init_fields` as the source of truth for which fields are available. Derive only the stage-local values needed for the next branch from that current payload; do not reuse shell variables parsed from an older stage. The staged field-access helper can confirm the manifest-selected fields with `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction`; for shell snippets that truly need aliases, request explicit `--alias ALIAS=field` bindings instead of a cross-stage inventory.
+**Staged init access rule:** after every `gpd --raw init plan-phase ... --stage <stage_id>` reload, follow `references/orchestration/agent-module-loading.md`: read only the current `INIT.staged_loading.required_init_fields`, derive stage-local values from that payload, and request explicit `--alias ALIAS=field` bindings for shell snippets that need aliases. Do not reuse shell variables parsed from an older stage.
 
 ```bash
 REQUESTED_PHASE="${PHASE}"
@@ -305,7 +305,7 @@ Status route: `completed` runs the tuple before step 6; `checkpoint` uses the co
 
 **Verify RESEARCH.md was written (guard against silent researcher failure):**
 
-Use the `phase_researcher_context_refresh` child_gate tuple above as the only success gate for the researcher handoff. The expected artifact is `${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md`; it must be readable, inside `${PHASE_DIR}`, named by the typed return's file list, and newer than `RESEARCH_HANDOFF_STARTED_AT`. If the tuple fails, stop or retry the handoff. After it passes, re-read the research file from disk; the earlier init `research_content` is no longer current after the researcher writes.
+Use the `phase_researcher_context_refresh` child_gate tuple above as the only researcher success gate. After it passes, re-read the research file from disk: `${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md`; the earlier init `research_content` is no longer current.
 
 ## 5.1 Handle Researcher Checkpoint
 
@@ -498,13 +498,7 @@ If the user chooses Main-context plan or any manual bounded authoring branch, it
 
 On completed returns, consume `gpd_return.roadmap_updates` before checker review or next-step output. The planner returns proposed roadmap edits; the orchestrator applies them to `GPD/ROADMAP.md` and verifies placeholders/count against fresh `*-PLAN.md` artifacts. If missing, malformed, or unapplied, treat the handoff as incomplete: Retry planner / Apply manually / Abort.
 
-Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch. For a planner handoff, derive that list from the typed `PLANNER_RETURN`; for a main-context authoring branch, build a complete orchestrator-owned return with `gpd return skeleton --role planner --status completed` and one `--file` entry per newly written plan. Then run the planner child_gate tuple once:
-
-- all files are readable `${PHASE_DIR}/*-PLAN.md` paths;
-- every file is named by the return, has suffix `-PLAN.md`, and is fresh after `PLANNER_HANDOFF_STARTED_AT` when a child handoff was used;
-- every file passes `gpd validate plan-contract`;
-- every file passes the structured plan preflight validator;
-- failure at any point is `status: blocked`, not `planned_ready` or a `gpd:execute-phase` route.
+Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch. For a planner handoff, derive that list from the typed `PLANNER_RETURN`; for a main-context branch, build an orchestrator-owned `gpd return skeleton --role planner --status completed` with one `--file` entry per newly written plan. Then run the planner child_gate tuple once; all files are readable `${PHASE_DIR}/*-PLAN.md` paths, every file passes `gpd validate plan-contract`, and every file passes the structured plan preflight validator, or the route is `status: blocked`, not `planned_ready` / `gpd:execute-phase`.
 
 ## 9b. Handle Planner Checkpoint
 

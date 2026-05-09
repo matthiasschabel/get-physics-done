@@ -11,7 +11,7 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-_PHASE7_TRACKED_LOC_CAP = 2_000
+_PHASE7_TRACKED_LOC_CAP = 1_200
 _PHASE7_PERSONA_ROW_COUNT_MIN = 10
 _PHASE7_PERSONA_ROW_COUNT_MAX = 12
 _PHASE7_ROW_ID_RE = re.compile(r"^LP(0[1-9]|1[0-2])(?:-[A-Z0-9]+)*$")
@@ -123,6 +123,8 @@ def test_phase7_fixture_rows_name_existing_source_and_test_owners() -> None:
         assert source_owners
         assert test_owners
         assert all(runtime == "all_supported" or runtime in runtime_names for runtime in runtime_scope)
+        assert row.get("provider_launch_allowed") is False
+        assert row.get("network_allowed") is False
 
         for owner in (*source_owners, *test_owners):
             owner_file = REPO_ROOT / owner

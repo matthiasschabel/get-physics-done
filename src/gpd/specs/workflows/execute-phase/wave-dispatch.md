@@ -298,143 +298,53 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
 9. **Execute checkpoint plans between waves** -- see `<checkpoint_handling>`.
 
-   Before unlocking downstream dependent waves, confirm that risky-wave plans passed the first meaningful review point:
+	   Before unlocking downstream dependent waves, apply
+	   `{GPD_INSTALL_DIR}/references/execution/execute-plan-checkpoints.md` and
+	   `{GPD_INSTALL_DIR}/references/planning/planning-config.md` to the
+	   first-result/pre-fanout gate.
 
-	   - the first load-bearing result exists
-	   - the result is tied to a contract-relevant output, not only a proxy
-	   - one quick sanity/benchmark/convention check passed
-	   - if the plan is proof-bearing, `{plan_id}-PROOF-REDTEAM.md` exists and reports `status: passed`
-	   - decisive anchors still missing were explicitly named and re-questioned if necessary
-	   - if the contract owed a decisive comparison, either that comparison now has a pass verdict or the downstream work was explicitly scoped so it does not rely on that unresolved claim
-	   - if `review_cadence=dense` and the just-completed first wave emitted no `result/produce` or `result/log` event at all, STOP and require explicit user confirmation before advancing — a dense wave that produced no result event is indistinguishable from a silent failure and the first-result gate never had anything to trip on
+	   Hard gate: the first load-bearing result exists, is contract-relevant rather
+	   than proxy-only, has at least one sanity/benchmark/convention check, clears
+	   proof-redteam when proof-bearing, and either resolves decisive anchors or
+	   scopes downstream work away from unresolved claims. If `review_cadence=dense`
+	   and the just-completed first wave emitted no `result/produce` or
+	   `result/log` event, STOP for explicit confirmation.
 
-   If this gate fails: STOP — do not let wrong early assumptions scale out.
+	   Live gate state must include `checkpoint_reason: pre_fanout`,
+	   `pre_fanout_review_pending: true`, `downstream_locked: true`, the reviewed
+	   `last_result_label` or `last_artifact_path`, proof-redteam status when
+	   relevant, and `skeptical_requestioning_required` plus
+	   `skeptical_requestioning_summary`, `weakest_unchecked_anchor`, and
+	   `disconfirming_observation` when the first result is anchor-thin. Tangents at
+	   the same stop stay in this payload via `tangent_summary` and
+	   `tangent_decision: ignore | defer | branch_later | pursue_now`.
 
-   **Machine-state requirement for risky fanout gates:** when this review point pauses execution, record it as live execution state, not only prose. Emit an execution gate event with:
+	   Normalize fanout-lock-only events into this same live review stop. Gate
+	   clears are reason-scoped, and for `pre_fanout` the gate-clear and `fanout
+	   unlock` are separate transitions; downstream stays locked until both are
+	   recorded. Do not create side branches or subagents from executor initiative
+	   alone.
 
-	   - `checkpoint_reason: pre_fanout`
-	   - `pre_fanout_review_pending: true`
-	   - `downstream_locked: true`
-	   - `last_result_label` or `last_artifact_path` for the first load-bearing output being reviewed
-	   - `proof_redteam_required: true` and `proof_redteam_status` when the reviewed output is proof-bearing
-	   - `skeptical_requestioning_required: true` when the first result still looks proxy-only, anchor-thin, or otherwise short of the decisive evidence the contract still owes
-   - `skeptical_requestioning_summary`, `weakest_unchecked_anchor`, and `disconfirming_observation` whenever skeptical re-questioning is required
-   - optional `tangent_summary` and `tangent_decision` when the same bounded stop surfaced an unexpected but non-blocking alternative path that still needs explicit handling
+   10. **Inter-wave verification gate (if more waves remain):**
 
-   If the runtime or agent only emits a fanout-lock event, normalize it into the same live review stop: treat the lock as `checkpoint_reason=pre_fanout`, mark `waiting_for_review=true`, and keep downstream locked until the review is explicitly cleared.
+	   Enable from init/context fields only: `dense` always; `adaptive` when the
+	   completed wave affects decisive evidence, dependent baselines, or live
+	   skeptical/pre-fanout state; `sparse` only after a failed sanity check, anchor
+	   gap, or pre-fanout dependency warning. `YOLO_RESTRICTIONS=no_skip_inter_wave`
+	   forces the gate.
 
-   Gate clears are reason-scoped: clearing `first_result` must not erase `pre_fanout` or skeptical review flags, and skeptical re-questioning should be cleared explicitly when it is resolved.
+	   If enabled, collect only SUMMARY.md files for plans that ran in the current
+	   wave. Run convention, dimensional, and identity scans plus the checks named
+	   by `INTER_WAVE_CHECKS` (`convergence_spot_check`, `plausibility_scan`,
+	   `latex_compile`, etc.). Use surfaced SUMMARY `key-files` and contract
+	   deliverables for durable artifact paths; do not assume artifacts live beside
+	   the SUMMARY in `GPD/phases/**`.
+	   When `latex_compile` is active, resolve and bind `MANUSCRIPT_ROOT` and the manifest-recorded TeX entrypoint before compiling.
 
-   For `pre_fanout`, the matching gate-clear and `fanout unlock` are separate transitions: the clear records the review outcome, the unlock releases downstream work. Keep the segment live on status, notify, and resume surfaces until both have been observed. Do not silently continue on "looks fine" prose alone.
-
-   **Tangent proposals at the same stop:** if the first result suggests an unexpected but non-blocking alternative path, keep it inside the same review conversation rather than spawning extra work. Resolve it with one of:
-
-   - `ignore` — continue mainline execution unchanged
-   - `defer` — note it in outputs as future work and continue
-   - `branch_later` — recommend an explicit `gpd:tangent ...` or `gpd:branch-hypothesis ...` follow-up after the bounded stop
-   - `pursue_now` — only if the user explicitly asked for tangent exploration or the approved contract already covers it
-
-   **Machine-state bridge for tangent proposals:** when a tangent proposal is relevant at this stop, keep it inside the same live execution payload instead of inventing a new tangent state machine. Emit:
-
-   - `tangent_summary` — one short description of the alternative path
-   - `tangent_decision` — one of `ignore | defer | branch_later | pursue_now` once classified
-
-   Do not create a new branch, child plan, or side subagent from executor initiative alone. In `research_mode=exploit`, treat optional tangent proposals as suppressed unless explicit request overrides that default.
-
-10. **Inter-wave verification gate (if more waves remain):**
-
-   Before spawning the next wave, run lightweight verification on the just-completed wave's outputs. This catches errors cheaply before they propagate to downstream waves.
-
-   **Determine if gate is enabled from init/context fields only:**
-
-   - if `review_cadence == dense`: enable inter-wave verification
-   - if `review_cadence == adaptive`: enable it when the completed wave established or challenged a decisive evidence path, introduced a new baseline/estimator that later waves depend on, or left any skeptical or pre-fanout state unresolved
-   - if `review_cadence == sparse`: skip the routine gate unless the just-completed wave triggered a failed sanity check, anchor gap, or pre-fanout dependency warning
-
-	   **If enabled:**
-
-   First, collect the SUMMARY.md files produced by the just-completed wave from the phase index plan IDs. Only include summaries whose matching plan ran in the current wave.
-
-   Run lightweight checks on the wave's SUMMARY.md outputs:
-
-   a. **Convention consistency** — verify convention lock hasn't drifted:
-
-   Run the convention check and warn if any required convention lock is incomplete.
-
-   b. **Dimensional spot-check** — scan the wave's SUMMARY.md files for key results and verify dimensional consistency:
-
-   For each SUMMARY.md produced in the just-completed wave, extract key equations (from `key_results` or `equations` frontmatter fields) and verify that:
-   - Both sides of each equation have the same dimensions
-   - Function arguments are dimensionless
-   - No bare dimensionful quantities appear where dimensionless ones are expected
-
-   This is a lightweight scan (~2-5k tokens), not a full dimensional analysis. It checks the SUMMARY outputs, not the derivation internals.
-
-   c. **Unverified identity scan** — check for IDENTITY_CLAIM tags without verification:
-
-   Inspect the current wave summaries and their surfaced durable artifact paths for `IDENTITY_SOURCE: training_data` claims that lack an `IDENTITY_VERIFIED` marker.
-
-   Prefer paths surfaced through SUMMARY `key-files` or contract deliverables. Do not assume durable artifacts live beside the SUMMARY in `GPD/phases/**`.
-
-   If unverified identities are found: flag as WARNING. These identities may be correct but have not been numerically tested — downstream waves building on them carry unquantified risk.
-
-   d. **Computation-type-specific checks** (driven by `INTER_WAVE_CHECKS` from `adapt_to_computation_type`):
-
-   **If `convergence_spot_check` in INTER_WAVE_CHECKS** (numerical phases):
-
-   Scan the wave's SUMMARY.md files for convergence-related metrics. Look for keywords: `convergence`, `error`, `residual`, `tolerance`, `iterations`, `grid_size`. Flag if:
-   - A convergence metric worsened compared to the previous wave's output
-   - A residual exceeds 1e-3 without explicit justification
-   - An iteration count hit a hard limit (suggests non-convergence)
-
-   Extract convergence, residual, error, tolerance, iteration, and grid-size metrics from current wave summaries and flag worsening or unexplained high residuals.
-
-   **If `plausibility_scan` in INTER_WAVE_CHECKS** (analysis/validation phases):
-
-   Scan the wave's SUMMARY.md outputs for physically implausible values:
-   - NaN or Inf in results
-   - Negative values where positivity is expected (energies of bound states, probabilities, cross-sections)
-   - Order-of-magnitude jumps (>10x) between related quantities in successive waves
-
-   Inspect current wave summaries for NaN/Inf markers, divergent behavior, sign violations for positive quantities, and order-of-magnitude jumps.
-
-   **If `latex_compile` in INTER_WAVE_CHECKS** (paper-writing phases):
-
-   If `pdflatex` is available, compile the paper after each wave to catch LaTeX errors early:
-
-   If a manuscript root has already been resolved for this workflow, bind it as `MANUSCRIPT_ROOT` before compiling from that root. Otherwise, resolve it locally from `paper/`, `manuscript/`, or `draft/` before checking for the manifest.
-
-   If a compiler is available and the manuscript manifest exists, resolve the manifest-recorded TeX entrypoint with a structured JSON read, compile from the manuscript root, and surface the first LaTeX error lines as warnings.
-
-   Flag any LaTeX errors as WARNING — they should be fixed before the next wave adds more content.
-
-	   For proof-bearing waves, treat the proof-redteam artifact as part of this inter-wave gate even when the cadence would otherwise skip routine checks. Missing or open proof audits keep downstream work locked.
-
-	   **If any check fails:**
-
-   ```
-   ---
-   ## Inter-wave verification gate
-
-   **Convention check:** {PASS | WARNING: {details}}
-   **Dimensional check:** {PASS | WARNING: {details}}
-   **Identity check:** {PASS | WARNING: {N} unverified training_data identities}
-   **Convergence check:** {PASS | WARNING: {details} | SKIPPED (not numerical phase)}
-   **Plausibility check:** {PASS | WARNING: {details} | SKIPPED (not analysis/validation phase)}
-   **LaTeX compile:** {PASS | WARNING: {N} errors | SKIPPED (not paper-writing phase)}
-
-   Options:
-   1. Continue to next wave (accept warnings)
-   2. Fix issues before continuing
-   3. Stop execution and investigate
-   ---
-   ```
-
-   Present options and wait for user response (or auto-continue in YOLO mode if both are warnings, not errors — unless `YOLO_RESTRICTIONS` includes `no_skip_inter_wave`, in which case always present).
-
-   **If disabled:** Skip verification gate, proceed directly to step 11. Exception: if `YOLO_RESTRICTIONS` includes `no_skip_inter_wave`, the gate runs even when disabled by config.
-
-   **Cost:** ~2-5k tokens per inter-wave gate. For a 4-wave phase with deep-theory profile, this is ~10-15k tokens overhead — negligible compared to the cost of a sign error propagating through 3 subsequent waves.
+	   Hard failures stop before the next wave. Soft warnings are surfaced for
+	   user choice, except YOLO may auto-continue through warnings when the
+	   restrictions allow it. Proof-bearing waves always include proof-redteam in
+	   this gate; missing or open proof audits keep downstream work locked.
 
 11. **Inter-wave transition display:**
 

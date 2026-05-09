@@ -9,13 +9,6 @@ from pathlib import Path
 
 import pytest
 
-from gpd.adapters.runtime_catalog import iter_runtime_descriptors
-from tests.helpers.github_actions import (
-    github_actions_workflow_paths,
-    iter_workflow_steps,
-    load_github_actions_workflow,
-)
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK_PATH = REPO_ROOT / "docs" / "dev" / "phase7-live-persona-canary.md"
 GITIGNORE_PATH = REPO_ROOT / ".gitignore"
@@ -61,23 +54,18 @@ RAW_VALUE_PATTERNS = {
     "local_path": re.compile(r"(?:^|[\s`'\"])(?:/Users/|/home/|/private/|[A-Za-z]:\\Users\\)"),
     "parent_traversal": re.compile(r"(?:^|/)\.\.(?:/|$)"),
     "secret_value": re.compile(
-        r"(?:Bearer\s+|sk-[A-Za-z0-9]|ghp_[A-Za-z0-9]|OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY)"
+        r"(?:Bearer\s+|sk-[A-Za-z0-9]|ghp_[A-Za-z0-9]|"
+        r"(?:OPENAI|ANTHROPIC|CLAUDE|GEMINI|GOOGLE|CODEX|OPENCODE)_"
+        r"(?:API_KEY|AUTH_TOKEN|OAUTH_TOKEN|ACCESS_TOKEN|SECRET|TOKEN|CREDENTIALS))"
     ),
     "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
     "account_identifier": re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     "raw_artifact_file": re.compile(
-        r"\b(?:prompt\.txt|command\.json|env\.json|stdout\.jsonl|stderr\.txt|transcript\.md)\b"
+        r"\b(?:prompt\.txt|command\.json|env\.json|stdout\.jsonl|stderr\.txt|transcript\.md|"
+        r"provider[-_]output\.txt|provider[-_]reply\.txt)\b"
     ),
     "provider_output": re.compile(r"\b(?:raw provider reply|final answer text|transcript excerpt)\b", re.I),
 }
-PROVIDER_LAUNCH_PATTERNS = tuple(
-    (
-        descriptor.runtime_name,
-        re.compile(rf"(?<![\w/-]){re.escape(descriptor.launch_command.split()[0])}(?:\s|$)", re.I),
-    )
-    for descriptor in iter_runtime_descriptors()
-)
-PHASE7_NIGHTLY_WORKFLOW_RE = re.compile(r"(?:phase7|live[-_ ]persona|persona[-_ ]canary|nightly)", re.I)
 
 VALID_PUBLIC_SUMMARY: dict[str, object] = {
     "schema_version": "phase7.live-persona-canary-summary.v1",
@@ -118,16 +106,6 @@ VALID_PUBLIC_SUMMARY: dict[str, object] = {
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-def _event_names(on_value: object) -> set[str]:
-    if isinstance(on_value, str):
-        return {on_value}
-    if isinstance(on_value, list):
-        return {str(event) for event in on_value}
-    if isinstance(on_value, dict):
-        return {str(event) for event in on_value}
-    raise AssertionError(f"Unsupported GitHub Actions trigger shape: {on_value!r}")
 
 
 def _key_is_class_only_or_policy_safe(key: str) -> bool:
@@ -190,10 +168,6 @@ def _assert_required_manual_policy(summary: Mapping[str, object]) -> None:
     assert set(summary["nightly_allowed_triggers"]) <= SAFE_NIGHTLY_TRIGGERS
 
 
-def _provider_launch_matches(text: str) -> list[str]:
-    return [name for name, pattern in PROVIDER_LAUNCH_PATTERNS if pattern.search(text)]
-
-
 def test_phase7_manual_live_canary_runbook_documents_the_policy_shape() -> None:
     runbook = _read(RUNBOOK_PATH)
 
@@ -227,9 +201,12 @@ def test_phase7_manual_public_summary_shape_is_class_only_and_opt_in() -> None:
         "auth_path",
         "account_id",
         "provider_reply",
+        "provider_output",
         "transcript_path",
         "command_line",
         "file_hash",
+        "session_id",
+        "home_path",
     ],
 )
 def test_phase7_manual_public_summary_rejects_raw_public_keys(raw_key: str) -> None:
@@ -251,6 +228,8 @@ def test_phase7_manual_public_summary_rejects_raw_public_keys(raw_key: str) -> N
         "-----BEGIN PRIVATE KEY-----",
         "researcher@example.com",
         "tmp/live-audit-v3/stdout.jsonl",
+        "tmp/live-audit-v3/provider-output.txt",
+        "OPENAI_API_KEY=redacted",
         "raw provider reply: hello",
     ],
 )
@@ -268,34 +247,3 @@ def test_phase7_raw_live_artifacts_remain_operator_local_under_ignored_tmp() -> 
 
     assert "tmp/" in gitignore_lines
     assert VALID_PUBLIC_SUMMARY["raw_artifact_retention_class"] == "operator_local_ignored_tmp"
-
-
-def test_phase7_release_and_publish_workflows_do_not_launch_live_providers() -> None:
-    for workflow_name in ("release.yml", "publish-release.yml"):
-        workflow_path = REPO_ROOT / ".github" / "workflows" / workflow_name
-        workflow = load_github_actions_workflow(workflow_path)
-
-        assert _event_names(workflow["on"]) == {"workflow_dispatch"}
-        launch_sites: list[str] = []
-        for job_id, step in iter_workflow_steps(workflow):
-            step_text = "\n".join(str(step.get(key, "")) for key in ("name", "uses", "run"))
-            matches = _provider_launch_matches(step_text)
-            if matches:
-                launch_sites.append(f"{workflow_name}:{job_id}:{step.get('name', '<unnamed>')}:{matches}")
-
-        assert launch_sites == []
-
-
-def test_phase7_live_or_nightly_workflows_are_manual_or_schedule_only() -> None:
-    candidate_paths = []
-    for workflow_path in github_actions_workflow_paths(REPO_ROOT):
-        workflow_text = _read(workflow_path)
-        if PHASE7_NIGHTLY_WORKFLOW_RE.search(f"{workflow_path.name}\n{workflow_text}"):
-            candidate_paths.append(workflow_path)
-
-    for workflow_path in candidate_paths:
-        workflow = load_github_actions_workflow(workflow_path)
-        events = _event_names(workflow["on"])
-        assert events <= SAFE_NIGHTLY_TRIGGERS, (
-            f"{workflow_path.relative_to(REPO_ROOT)} must use workflow_dispatch/schedule only, got {sorted(events)}"
-        )

@@ -74,40 +74,19 @@ unsurfaced.
 </step>
 
 <step name="generate_figure_tracker">
-**After all waves complete successfully, inventory generated figures/plots into FIGURE_TRACKER.md:**
+After all waves complete successfully, scan this phase's SUMMARY.md key-files
+and durable figure roots for generated PDF/PNG/EPS/SVG/JPEG/TIFF figures. Stable
+figure roots are `artifacts/phases/${phase_number}-${phase_slug}/`, `figures/`,
+or `paper/figures/`, not `GPD/phases/**`. Generated figures and plots should live in stable workspace roots. Durable figure roots include `figures/`, or `paper/figures/`.
 
-Scan all SUMMARY.md files from this phase for figure-related artifacts:
+If figures exist, load `{GPD_INSTALL_DIR}/templates/paper/figure-tracker.md`,
+append to existing `paper/FIGURE_TRACKER.md` or create it from the template, and
+commit the tracker after pre-commit checking. Entries record source phase,
+source/data files, status, and update date. If no figures exist, skip silently.
 
-Inspect summary `key-files.created` entries and durable figure roots for generated PDF, PNG, EPS, SVG, JPEG, or TIFF artifacts whose names indicate figures, plots, spectra, convergence, or diagrams.
-
-Generated figures and plots should live in stable workspace roots such as `artifacts/phases/${phase_number}-${phase_slug}/`, `figures/`, or `paper/figures/`, not under `GPD/phases/**`.
-
-**If any figures found:**
-
-Read the figure tracker template from `{GPD_INSTALL_DIR}/templates/paper/figure-tracker.md` using the runtime's normal file-read mechanism.
-
-**If `paper/FIGURE_TRACKER.md` already exists:** Append new figures to the existing registry. Do not overwrite existing entries.
-
-**If it does not exist:** Create it from the template:
-
-Ensure `paper/` exists before writing the tracker.
-
-Write `paper/FIGURE_TRACKER.md` with:
-
-- One entry per discovered figure/plot
-- `Source phase` set to the current phase number
-- `Source file` set to the script or notebook that generated it (from SUMMARY key-files)
-- `Data file(s)` set to any associated data files (from SUMMARY key-files)
-- `Status` set to "Data ready" or "Draft" based on file inspection
-- `Last updated` set to today's date
-
-Commit:
-
-Run pre-commit checking for `paper/FIGURE_TRACKER.md`, then commit it with a phase-scoped figure-tracker message.
-
-**If no figures found:** Skip silently (not all phases produce visual outputs).
-
-**Experimental comparison artifact:** If any plan in this phase compared theoretical predictions with experimental or observational data (PHENO-type objectives, or plans whose SUMMARY mentions "experimental comparison", "pull", "chi-squared", or "theory vs data"), create `paper/EXPERIMENTAL_COMPARISON.md` using `{GPD_INSTALL_DIR}/templates/paper/experimental-comparison.md`. Populate with comparison tables, pull values, and discrepancy classifications from the plan SUMMARYs. Skip if no experimental comparison was performed.
+If the phase compared theory with experimental or observational data, create
+`paper/EXPERIMENTAL_COMPARISON.md` from
+`{GPD_INSTALL_DIR}/templates/paper/experimental-comparison.md`; otherwise skip.
 
 </step>
 
@@ -116,31 +95,10 @@ Run pre-commit checking for `paper/FIGURE_TRACKER.md`, then commit it with a pha
 
 This step runs unconditionally -- for fully successful phases it is a brief confirmation; for phases with failures it is the critical decision point.
 
-**1. Collect execution outcomes:**
-
 Build recovery outcome lists from the phase index, current summary artifacts, and the orchestrator's maintained failed/skipped records. Track succeeded, failed, skipped, and rolled-back plan IDs with reasons; do not infer success from a previous summary alone when spot-checks failed.
 
-**2. Present recovery report:**
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD > PHASE {X} EXECUTION REPORT
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-### Results
-
-| Plan | Status | Detail |
-| ---- | ------ | ------ |
-| {id} | Passed | {one-liner from SUMMARY} |
-| {id} | FAILED | {failure reason} |
-| {id} | Skipped | Depends on failed {dep_id} |
-
-**Summary:** {succeeded_count} passed, {failed_count} failed, {skipped_count} skipped
-```
-
-**3. If ALL plans passed:** Proceed to `verify_phase_goal` as normal. Report is informational only.
-
-**4. If ANY failures or skips occurred:**
+If all plans passed, proceed to `verify_phase_goal`; the report is informational
+only. If any failures or skips occurred:
 
 Create a recovery section in the phase directory. For physics-specific root cause analysis, consult `{GPD_INSTALL_DIR}/templates/recovery-plan.md`:
 
@@ -148,76 +106,17 @@ Create a recovery section in the phase directory. For physics-specific root caus
 RECOVERY_FILE="${phase_dir}/PHASE-RECOVERY.md"
 ```
 
-Write `PHASE-RECOVERY.md`:
-
-```markdown
----
-phase: { PHASE_NUMBER }
-phase_name: { PHASE_NAME }
-created: { ISO timestamp }
-plans_succeeded: [{ list }]
-plans_failed: [{ list }]
-plans_skipped: [{ list }]
-checkpoint_tags: [{ list of all remaining gpd-checkpoint tags for this phase }]
----
-
-# Phase {X} Recovery
-
-## Execution Summary
-
-{succeeded_count}/{total_count} plans completed successfully.
-
-## Failed Plans
-
-### {PLAN_ID}: {plan name}
-
-- **Failed at:** Task {N} -- {task name}
-- **Reason:** {detailed failure reason}
-- **Checkpoint:** {checkpoint tag, if preserved}
-- **Recovery:** See RECOVERY-{PLAN}.md (created by execute-plan)
-
-## Skipped Plans
-
-### {PLAN_ID}: {plan name}
-
-- **Skipped because:** Depends on failed plan {dep_id}
-- **Would have computed:** {objective from PLAN.md}
-
-## Recovery Options
-
-1. Fix failing plans and re-execute: `gpd:execute-phase {X}` (auto-detects partial completion)
-2. Re-plan failed tasks: `gpd:plan-phase {X} --gaps` (creates new plans for unfinished work)
-3. Revise phase goal: `gpd:discuss-phase {X}` (rethink approach based on what failed)
-4. Continue to next phase: `gpd:plan-phase {X+1}` (if remaining work is non-critical)
-```
+Write `PHASE-RECOVERY.md` with frontmatter for phase, timestamp, succeeded,
+failed, skipped, and checkpoint tags. Include failed/skipped plan summaries,
+links to plan recovery files when present, and these recovery routes:
+`gpd:execute-phase {X}`, `gpd:plan-phase {X} --gaps`, `gpd:discuss-phase {X}`,
+or `gpd:plan-phase {X+1}` when remaining work is non-critical.
 
 Commit the recovery document after pre-commit checking `${RECOVERY_FILE}` and `GPD/STATE.md`.
 
-**5. Offer actionable next steps based on failure pattern:**
-
-```
-──────────────────────────────────────────────────────
-## Next Steps
-
-{If single plan failed, rest passed:}
-  The failure is isolated. Fix and re-execute:
-  `gpd:execute-phase {X}` -- will resume from the failed plan
-
-{If multiple plans failed in same wave:}
-  Multiple failures in Wave {N} suggest a systemic issue.
-  Review the phase approach before retrying:
-  `gpd:discuss-phase {X}` -- reassess methodology
-
-{If failures cascaded through dependencies:}
-  The root failure in {ROOT_PLAN} cascaded to {N} dependent plans.
-  Fix the root cause first:
-  Review: ${phase_dir}/RECOVERY-{ROOT_PLAN}.md
-
-{If all plans failed:}
-  Complete phase failure. The phase goal or approach may need revision:
-  `gpd:plan-phase {X}` -- re-plan from scratch
-──────────────────────────────────────────────────────
-```
+Offer next steps based on failure pattern: isolated failed plan -> re-execute;
+same-wave multiple failures -> discuss-phase; dependency cascade -> fix root
+plan first; complete phase failure -> re-plan.
 
 </step>
 
@@ -433,35 +332,11 @@ task(
 )
 ```
 
-**Circuit breaker (hard stop): Maximum 2 verification-gap closure cycles.** After 2 failed verification cycles (with debugger diagnosis on the second), STOP the loop. Present a diagnostic summary to the user:
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD > CIRCUIT BREAKER: VERIFICATION LOOP HALTED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Phase {X} has failed verification twice after gap closure attempts.
-
-### Attempt 1
-- Gaps found: {list from first VERIFICATION.md}
-- Gap closure plans: {list of plans created}
-- Re-verification result: {what still failed}
-
-### Attempt 2
-- Remaining gaps: {list from second VERIFICATION.md}
-- Gap closure plans: {list of plans created}
-- Re-verification result: {what still failed}
-
-### Root Cause Hypothesis
-{System's best hypothesis for why gap closure is not resolving the issue}
-
-### Suggested Actions
-1. `gpd:debug` — Systematic investigation of the persistent failure
-2. `gpd:discuss-phase {X}` — Reassess the approach with fresh perspective
-3. Manual intervention — The issue may require researcher insight
-
-Do NOT attempt a third automated cycle.
-```
+**Circuit breaker (hard stop): Maximum 2 verification-gap closure cycles.** After
+2 failed verification cycles (with debugger diagnosis on the second), STOP the
+loop. Summarize both attempts, remaining gaps, root-cause hypothesis, and next
+routes (`gpd:debug`, `gpd:discuss-phase {X}`, or manual intervention). Do NOT
+attempt a third automated cycle.
 
 **After gap closure execution completes (`$GAPS_ONLY` is true):**
 

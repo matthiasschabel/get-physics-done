@@ -1,17 +1,20 @@
 ---
 load_when:
-  - "checking plans"
-  - "planner-review"
-  - "gap repair plan review"
   - "dimension detail"
   - "ambiguous blocker classification"
+  - "deep/full plan-check profile"
+  - "compact D0-D16 index needs examples"
+  - "unfamiliar dimension"
 tier: 1
 context_cost: large
 ---
 
 # Plan Checker Dimension Catalog
 
-Full D0-D16 criteria for `gpd-plan-checker`. Load this file for every full plan check, and use it as the authoritative detail behind the compact dimension index in the agent prompt.
+Detailed D0-D16 criteria for `gpd-plan-checker`. The compact D0-D16 index in
+the agent prompt stays mandatory; load this catalog only when that index flags
+ambiguity, blocker classification needs examples, the profile is deep/full, or a
+plan touches an unfamiliar dimension.
 
 ## Dimension 0: Contract Gate
 
@@ -60,17 +63,6 @@ Treat a plan as risky if it relies on approximations, novel inference, weak anch
 - Observable claimed but no task connects theory to measurable quantity
 - Research question requires comparison with experiment but no data analysis task exists
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: research_question_coverage
-  severity: blocker
-  description: "RQ-03 (low-temperature limit of specific heat) has no covering task"
-  plan: "04-01"
-  fix_hint: "Add task for asymptotic expansion of partition function in T->0 limit"
-```
-
 ## Dimension 2: Task Completeness
 
 **Question:** Does every task have Formulation + Method + Validation + Deliverable?
@@ -98,18 +90,6 @@ issue:
 - No error estimation strategy for numerical work
 - No specification of units or conventions
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: task_completeness
-  severity: blocker
-  description: "Task 3 missing <validation> element - no way to verify RG flow equations"
-  plan: "04-01"
-  task: 3
-  fix_hint: "Add check of known fixed points, comparison with epsilon-expansion results, or Zamolodchikov c-theorem constraint"
-```
-
 ## Dimension 3: Mathematical Prerequisite Completeness
 
 **Question:** Are all mathematical tools and prerequisites available for the planned approach?
@@ -129,18 +109,6 @@ issue:
 - Coordinate system or gauge choice absent when result depends on it
 - Tensor notation or index conventions used inconsistently across tasks
 - Symmetry assumptions stated but not verified for the specific model
-
-**Example issue:**
-
-```yaml
-issue:
-  dimension: mathematical_prerequisites
-  severity: blocker
-  description: "Task 2 uses saddle-point approximation for path integral but no task verifies the large-N justification"
-  plan: "04-02"
-  task: 2
-  fix_hint: "Add prerequisite task establishing 1/N expansion validity or add justification to Task 2 formulation"
-```
 
 ## Dimension 4: Approximation Validity
 
@@ -164,18 +132,6 @@ issue:
 - Born approximation for strong coupling
 - Linearization of inherently nonlinear dynamics without estimating nonlinear corrections
 - Multiple approximations compounded without tracking cumulative error
-
-**Example issue:**
-
-```yaml
-issue:
-  dimension: approximation_validity
-  severity: blocker
-  description: "Plan uses Born approximation for scattering cross-section but target regime includes resonances where Born breaks down"
-  plan: "04-01"
-  task: 2
-  fix_hint: "Use partial wave analysis or T-matrix approach for resonance regime; Born is valid only for high-energy/weak-potential limit"
-```
 
 ## Dimension 5: Computational Feasibility
 
@@ -207,18 +163,6 @@ issue:
 | Sparse linear algebra | nnz < 10^7 | nnz ~ 10^8 | nnz > 10^9 |
 | MC sampling | 10^4-10^6 samples | 10^7 samples | 10^8+ without justification |
 | DFT (plane-wave) | < 100 atoms | 100-500 atoms | > 500 atoms (need linear-scaling) |
-
-**Example issue:**
-
-```yaml
-issue:
-  dimension: computational_feasibility
-  severity: blocker
-  description: "Task 4 plans exact diagonalization of 24-site Hubbard model (dim ~10^8) without specifying Lanczos or shift-invert strategy"
-  plan: "04-03"
-  task: 4
-  fix_hint: "Specify iterative eigensolver (Lanczos/Arnoldi) targeting low-energy sector, or reduce system size and extrapolate"
-```
 
 ## Dimension 6: Validation Strategy Adequacy
 
@@ -257,17 +201,6 @@ issue:
 - If Dimension 16 flags limited or uncertain computational capability: escalate from info to warning
 - In all cases, plans should include at least one analytical cross-check (limiting case, dimensional analysis, or symmetry argument) as a verification anchor that works even without code execution
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: validation_strategy
-  severity: blocker
-  description: "Scattering amplitude has no task checking optical theorem (unitarity constraint)"
-  plan: "04-01"
-  fix_hint: "Add validation task: verify Im[f(0)] = k*sigma_tot/(4*pi) at each computed energy"
-```
-
 ## Dimension 7: Anomaly and Topological Awareness
 
 **Question:** If the research involves quantum field theories, many-body systems, or topological phases, are anomalies and topological properties properly accounted for?
@@ -287,17 +220,6 @@ issue:
 - Gauge theory with chiral fermions and no anomaly cancellation check
 - Theta terms or Chern-Simons terms ignored when they could contribute
 - Bulk-boundary correspondence not checked in topological systems
-
-**Example issue:**
-
-```yaml
-issue:
-  dimension: anomaly_awareness
-  severity: blocker
-  description: "Plan derives chiral condensate in QCD-like theory but never checks ABJ anomaly or anomaly matching between confined and deconfined phases"
-  plan: "04-02"
-  fix_hint: "Add task verifying 't Hooft anomaly matching conditions between UV quarks and IR hadrons"
-```
 
 ## Dimension 8: Result Wiring and Coherence
 
@@ -327,18 +249,6 @@ Partition function -> Thermodynamics: Does action mention differentiation?
 Scattering amplitude -> Cross section: Does action mention squaring and phase space?
 Band structure -> DOS: Does action mention integration/tetrahedron method?
 Symmetry analysis -> Selection rules: Does action mention matrix elements?
-```
-
-**Example issue:**
-
-```yaml
-issue:
-  dimension: result_wiring
-  severity: warning
-  description: "Task 2 derives Green's function in frequency space but Task 3 needs time-domain correlator -- no Fourier transform task exists"
-  plan: "04-01"
-  artifacts: ["green_function_omega.py", "correlator_analysis.py"]
-  fix_hint: "Add task for inverse Fourier transform or modify Task 3 to work in frequency domain"
 ```
 
 ## Dimension 9: Dependency Correctness
@@ -375,17 +285,6 @@ Convergence tests -> Production runs (parameters must be validated first)
 Raw computation -> Post-processing/analysis (data must exist first)
 ```
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: dependency_correctness
-  severity: blocker
-  description: "Plan 02 (numerical diagonalization) runs in Wave 1 but depends on Hamiltonian matrix elements from Plan 01 (analytical derivation)"
-  plans: ["01", "02"]
-  fix_hint: "Add depends_on: ['01'] to Plan 02 and move to Wave 2"
-```
-
 ## Dimension 10: Scope Sanity
 
 **Question:** Will plans complete within context budget?
@@ -412,20 +311,6 @@ issue:
 - Literature review spanning more than 3 subfields in one task
 - Ambitious scope without fallback strategy (what if the integral doesn't converge analytically?)
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: scope_sanity
-  severity: blocker
-  description: "Plan 01 has 5 tasks covering Hamiltonian construction, diagonalization, thermodynamics, phase diagram, AND finite-size scaling"
-  plan: "01"
-  metrics:
-    tasks: 5
-    estimated_equations: 40
-  fix_hint: "Split into: 01 (Hamiltonian + spectrum), 02 (thermodynamics + phase diagram), 03 (finite-size scaling)"
-```
-
 ## Dimension 11: Contract Completeness And Artifact Derivation
 
 **Question:** Does the plan contract trace back to the research question and block false progress?
@@ -450,20 +335,6 @@ issue:
 - Proxy-only plans where the plan would produce activity without decisive evidence
 - No clear path from artifacts to a publishable figure, table, or equation
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: contract_completeness
-  severity: warning
-  description: "Plan 02 contract claims are method-focused, not physics-focused"
-  plan: "02"
-  problematic_claims:
-    - "Lanczos algorithm converges"
-    - "HDF5 file written"
-  fix_hint: "Reframe as physics outcomes: 'Ground state energy determined within 0.1%', 'Spin correlation function computed for all distances'"
-```
-
 ## Dimension 12: Literature Awareness
 
 **Question:** Is the plan aware of relevant prior work to avoid rediscovery and ensure correctness?
@@ -485,18 +356,6 @@ issue:
 
 **Independent verification:** Use external literature lookup to verify at least one key literature claim per plan. Do not rely solely on grepping project files. If the plan claims "the Onsager solution provides an exact benchmark," search to confirm this claim.
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: literature_awareness
-  severity: warning
-  description: "Plan 01 proposes numerical computation of 1D Ising model partition function, which has Onsager's exact solution"
-  plan: "01"
-  task: 2
-  fix_hint: "Use exact transfer matrix solution; reserve numerics for the disordered case where exact results don't exist"
-```
-
 ## Dimension 13: Path to Publication
 
 **Question:** Is there a clear trajectory from the planned work to a communicable, publishable result?
@@ -516,17 +375,6 @@ issue:
 - Results are technically correct but not framed to answer a meaningful question
 - Missing uncertainty quantification that would be required for publication
 - No task addresses "so what?" -- the significance of the result
-
-**Example issue:**
-
-```yaml
-issue:
-  dimension: path_to_publication
-  severity: warning
-  description: "Plan produces phase diagram data but no task creates publication-quality figure or discusses physical interpretation of phase boundaries"
-  plan: "04-03"
-  fix_hint: "Add task for figure generation with labeled axes, error bars, and comparison to experimental data from Ref. [X]"
-```
 
 ## Dimension 14: Failure Mode Identification
 
@@ -557,18 +405,6 @@ issue:
 - Perturbative calculation without estimate of higher-order corrections
 - Single computational method with no cross-check
 
-**Example issue:**
-
-```yaml
-issue:
-  dimension: failure_mode_identification
-  severity: warning
-  description: "Plan relies entirely on perturbation theory to 2nd order with no discussion of convergence or estimate of 3rd-order contribution"
-  plan: "04-02"
-  task: 3
-  fix_hint: "Add Pade resummation as fallback, or estimate 3rd-order contribution to bound error, or add non-perturbative cross-check"
-```
-
 ## Dimension 15: Context Compliance (if CONTEXT.md exists)
 
 **Question:** Do plans honor researcher decisions from gpd:discuss-phase?
@@ -588,33 +424,6 @@ issue:
 - Task contradicts a locked decision (e.g., researcher said "use tight-binding model", plan uses DFT)
 - Task implements something from Deferred Ideas
 - Plan ignores researcher's stated preference for method, approximation, or scope
-
-**Example -- contradiction:**
-
-```yaml
-issue:
-  dimension: context_compliance
-  severity: blocker
-  description: "Plan contradicts locked decision: researcher specified 'real-space DMRG' but Task 2 implements momentum-space approach"
-  plan: "01"
-  task: 2
-  researcher_decision: "Method: real-space DMRG (from Decisions section)"
-  plan_method: "Momentum-space RG with truncation..."
-  fix_hint: "Change Task 2 to implement real-space DMRG per researcher decision"
-```
-
-**Example -- scope creep:**
-
-```yaml
-issue:
-  dimension: context_compliance
-  severity: blocker
-  description: "Plan includes deferred investigation: 'finite-temperature extension' was explicitly deferred"
-  plan: "02"
-  task: 1
-  deferred_idea: "Finite-temperature effects (Deferred Ideas section)"
-  fix_hint: "Remove finite-T task - belongs in future phase per researcher decision"
-```
 
 ## Dimension 16: Computational Environment Validation
 
@@ -649,42 +458,6 @@ issue:
 - Code requires specific OS features (Linux-only system calls, Windows COM objects)
 
 **Key principle:** The executor agent runs in a computational environment with Python, standard scientific packages, and file I/O. Plans should not assume anything beyond this without explicit justification. When specialized tools are genuinely needed, the plan must declare them in `tool_requirements`, keep `researcher_setup` for human-only credentials/setup, and then either (a) confirm availability, (b) provide installation instructions as a permission-gated prerequisite task, or (c) offer a fallback using standard tools.
-
-**Example — licensed software:**
-
-```yaml
-issue:
-  dimension: environment_validation
-  severity: blocker
-  description: "Task 3 requires Mathematica for symbolic Groebner basis computation but availability is not confirmed"
-  plan: "04-02"
-  task: 3
-  fix_hint: "Declare `tool_requirements: [{id: wolfram-cas, tool: wolfram, purpose: ..., fallback: ...}]`, use sympy.polys.groebnertools as alternative, or add prerequisite confirming Mathematica access via Wolfram Engine"
-```
-
-**Example — hardware assumption:**
-
-```yaml
-issue:
-  dimension: environment_validation
-  severity: warning
-  description: "Task 2 plans GPU-accelerated Monte Carlo (10^8 samples) but GPU availability is not established"
-  plan: "04-01"
-  task: 2
-  fix_hint: "Add CPU fallback with reduced sample count (10^6), or confirm GPU access as prerequisite"
-```
-
-**Example — compiled code:**
-
-```yaml
-issue:
-  dimension: environment_validation
-  severity: warning
-  description: "Plan requires LAPACK routine ZHEEVD via compiled Fortran interface but only scipy.linalg wrappers are guaranteed"
-  plan: "04-03"
-  task: 1
-  fix_hint: "Use scipy.linalg.eigh which wraps LAPACK internally -- no direct Fortran interface needed"
-```
 
 ## Benchmark Contract Anchor Example
 

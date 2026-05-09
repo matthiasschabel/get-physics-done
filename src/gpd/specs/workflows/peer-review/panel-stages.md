@@ -103,12 +103,9 @@ gpd validate review-claim-index ${REVIEW_ROOT}/CLAIMS{round_suffix}.json
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-reader{round_suffix}.json
 ```
 
-If Stage 1 fails, STOP. Later stages depend on its claim map. Apply the publication
-stage-recovery gate. Retry Stage 1 once with the same persisted inputs and an
-explicit reminder to match the `StageReviewReport` and `ClaimIndex` JSON schemas
-from `peer-review-panel.md`, then rerun the validators above. If the retry also
-fails, STOP and report the stage name, missing or malformed fields, and any partial
-output. Do not proceed to Stages 2-6.
+If Stage 1 fails, apply the publication stage-recovery gate and retry once from
+the same persisted inputs with a `StageReviewReport` / `ClaimIndex` schema
+reminder. If validation still fails, STOP; do not proceed to Stages 2-6.
 </stage_1_claim_extraction>
 
 <stage_2_3_and_proof_redteam>
@@ -157,11 +154,9 @@ The `gpd-check-proof` task must carry the active `manuscript_path`,
 Require theorem-binding frontmatter (`claim_ids` and non-empty
 `proof_artifact_paths`) before accepting the proof-redteam artifact.
 
-Reconstruct the theorem / proof inventory explicitly before judging the proof. If any
-named parameter, hypothesis, quantifier, or conclusion clause disappears from the
-proof, set `status: gaps_found`. Do not silently accept a proof of a narrower special
-case. Run at least one adversarial probe against scope, quantifier coverage, or hidden
-assumptions before you pass the proof.
+Use the proof-redteam references for adversarial proof critique. Locally require
+full theorem/proof inventory coverage; narrower special-case proofs report
+`status: gaps_found`.
 
 If the runtime supports parallel subagent execution, run Stage 2, Stage 3, and the
 conditional proof-critique pass in parallel when theorem-bearing claims are present.
@@ -178,18 +173,13 @@ gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-math{round_suffix}.json
 
 If proof-bearing review is active, also require
 `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` with reviewer `gpd-check-proof`,
-same-round theorem binding, non-empty `claim_ids`, non-empty `proof_artifact_paths`,
-and canonical sections `# Proof Redteam`, `## Proof Inventory`,
-`## Coverage Ledger`, `## Adversarial Probe`, `## Verdict`, and
-`## Required Follow-Up`.
-
-Missing file, missing frontmatter, missing required sections, wrong-round artifacts,
-wrong-root artifacts, `status: gaps_found`, or `status: human_needed` remain hard
-blockers for a favorable recommendation.
-If the proof-redteam artifact is missing, malformed, lacks canonical frontmatter,
-or omits required sections, retry `gpd-check-proof` once with the same inputs.
-If the retry also fails, STOP the pipeline and report that proof review could not
-be completed.
+same-round theorem binding, non-empty `claim_ids`, non-empty
+`proof_artifact_paths`, and the canonical proof-redteam sections. Missing,
+malformed, wrong-round, wrong-root, `status: gaps_found`, or
+`status: human_needed` artifacts block favorable recommendation; retry
+`gpd-check-proof` once, then STOP if still invalid.
+If the proof-redteam artifact is missing, malformed, or stale, retry `gpd-check-proof` once with the same inputs.
+If the retry also fails, STOP the pipeline and report that proof review could not be completed.
 
 Before Stage 4 can spawn, the branch barrier must pass: every launched child has a
 typed return, every persisted artifact above exists and validates, and downstream work
@@ -210,9 +200,8 @@ Validate before proceeding:
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-physics{round_suffix}.json
 ```
 
-Apply the publication stage-recovery gate. Retry Stage 4 once with the same persisted
-inputs and an explicit schema reminder. If the retry also fails, STOP and do not
-proceed to Stage 5.
+Apply the publication stage-recovery gate. Retry Stage 4 once from the same
+persisted inputs; if validation still fails, STOP and do not proceed to Stage 5.
 After `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` validates, Stage 5 starts
 from persisted stage artifacts and declared carry-forward inputs only.
 </stage_4_physics>

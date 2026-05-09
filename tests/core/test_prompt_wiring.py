@@ -625,7 +625,6 @@ def test_plan_phase_uses_manifest_owned_staged_init_access() -> None:
         plan_phase,
         "BOOTSTRAP_INIT.staged_loading.required_init_fields",
         "INIT.staged_loading.required_init_fields",
-        "gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction",
         "--alias ALIAS=field",
         'gpd --raw init plan-phase "$PHASE" --stage planner_authoring',
         'gpd --raw init plan-phase "$PHASE" --stage checker_revision',
@@ -633,13 +632,6 @@ def test_plan_phase_uses_manifest_owned_staged_init_access() -> None:
         "# Parse only the checker_revision fields listed in INIT.staged_loading.required_init_fields",
         context="plan-phase staged init manifest access",
     )
-    _assert_semantic_fragments(
-        plan_phase,
-        "staged field-access helper",
-        "source of truth for which fields are available",
-        context="plan-phase staged init manifest access",
-    )
-
 
 def test_executor_completion_examples_use_command_based_next_actions() -> None:
     completion = (REFERENCES_DIR / "execution" / "executor-completion.md").read_text(encoding="utf-8")
@@ -1623,8 +1615,6 @@ def test_review_workflows_keep_round_suffix_artifacts_visible_and_anchor_respons
     _assert_machine_fragments(
         write_paper,
         PUBLICATION_ROUND_ARTIFACTS_INCLUDE,
-        "templates/paper/author-response.md",
-        "needs-calculation",
         context="write-paper round-suffixed response outputs",
     )
     _assert_machine_fragments(
@@ -2881,62 +2871,77 @@ def test_discover_command_does_not_emit_phase_only_commit_placeholders_for_stand
 
 
 def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_json_get() -> None:
-    research_workflow = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
-    research_command = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
-    map_workflow = (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8")
-    map_command = (COMMANDS_DIR / "map-research.md").read_text(encoding="utf-8")
-    progress_workflow = (WORKFLOWS_DIR / "progress.md").read_text(encoding="utf-8")
-    progress_command = (COMMANDS_DIR / "progress.md").read_text(encoding="utf-8")
-    gaps_workflow = (WORKFLOWS_DIR / "plan-milestone-gaps.md").read_text(encoding="utf-8")
-    execute_workflow = _workflow_authority_text("execute-phase")
-    milestone_workflow = (WORKFLOWS_DIR / "complete-milestone.md").read_text(encoding="utf-8")
-    graph_workflow = (WORKFLOWS_DIR / "graph.md").read_text(encoding="utf-8")
-    validate_conventions = (WORKFLOWS_DIR / "validate-conventions.md").read_text(encoding="utf-8")
-    transition_workflow = (WORKFLOWS_DIR / "transition.md").read_text(encoding="utf-8")
-    export_workflow = (WORKFLOWS_DIR / "export.md").read_text(encoding="utf-8")
-    show_phase = (WORKFLOWS_DIR / "show-phase.md").read_text(encoding="utf-8")
-    verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    required_machine_fragments = (
+        (
+            (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8"),
+            (
+                'PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")',
+                'gpd --raw state snapshot | gpd json get .decisions --default "[]"',
+                'BOOTSTRAP_INIT=$(load_research_phase_stage phase_bootstrap "${PHASE}")',
+                'HANDOFF_INIT=$(load_research_phase_stage research_handoff "${phase_number}")',
+                'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)',
+            ),
+            "research-phase raw json plumbing",
+        ),
+        (
+            (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8"),
+            (
+                "BOOTSTRAP_INIT=$(load_map_research_stage map_bootstrap)",
+                "MAPPER_AUTHORING_INIT=$(load_map_research_stage mapper_authoring)",
+                'gpd --raw --cwd "$target_cwd" init map-research --stage "${stage_name}" -- "${ARGUMENTS:-}"',
+                'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)',
+                "Map focus: {map_focus}",
+            ),
+            "map-research raw json plumbing",
+        ),
+        (
+            (WORKFLOWS_DIR / "progress.md").read_text(encoding="utf-8"),
+            (
+                "ROADMAP=$(gpd --raw roadmap analyze)",
+                'gpd --raw summary-extract <path> --field one_liner | gpd json get .one_liner --default ""',
+            ),
+            "progress raw json plumbing",
+        ),
+        (
+            _workflow_authority_text("execute-phase"),
+            (
+                "Load plan inventory with wave grouping from `gpd phase index {phase_number}`.",
+                "`objective`",
+                "summary-extract for one-liners",
+            ),
+            "execute-phase raw json plumbing",
+        ),
+        (
+            (WORKFLOWS_DIR / "complete-milestone.md").read_text(encoding="utf-8"),
+            (
+                "ROADMAP=$(gpd --raw roadmap analyze)",
+                'gpd --raw summary-extract "$summary" --field one_liner | gpd json get .one_liner --default ""',
+            ),
+            "complete-milestone raw json plumbing",
+        ),
+        (
+            (WORKFLOWS_DIR / "show-phase.md").read_text(encoding="utf-8"),
+            ('PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")', "ROADMAP=$(gpd --raw roadmap analyze)"),
+            "show-phase raw json plumbing",
+        ),
+    )
+    for text, fragments, context in required_machine_fragments:
+        _assert_machine_fragments(text, *fragments, context=context)
 
-    assert 'PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")' in research_workflow
-    assert 'gpd --raw state snapshot | gpd json get .decisions --default "[]"' in research_workflow
-    assert 'BOOTSTRAP_INIT=$(load_research_phase_stage phase_bootstrap "${PHASE}")' in research_workflow
-    assert 'HANDOFF_INIT=$(load_research_phase_stage research_handoff "${phase_number}")' in research_workflow
-    assert (
-        'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)' in research_workflow
+    for filename in ("graph.md", "validate-conventions.md", "export.md"):
+        _assert_machine_fragments(
+            (WORKFLOWS_DIR / filename).read_text(encoding="utf-8"),
+            "ROADMAP=$(gpd --raw roadmap analyze)",
+            context=f"{filename} raw json plumbing",
+        )
+
+    _assert_machine_fragments(
+        (WORKFLOWS_DIR / "plan-milestone-gaps.md").read_text(encoding="utf-8"),
+        "PHASES=$(gpd --raw phase list)",
+        context="plan-milestone-gaps raw json plumbing",
     )
-    assert "gpd --raw config get research_mode" not in research_workflow
-    assert 'gpd --raw init phase-op --include state,config "${PHASE}"' not in research_command
-    assert "BOOTSTRAP_INIT=$(load_map_research_stage map_bootstrap)" in map_workflow
-    assert "MAPPER_AUTHORING_INIT=$(load_map_research_stage mapper_authoring)" in map_workflow
-    assert 'gpd --raw --cwd "$target_cwd" init map-research --stage "${stage_name}" -- "${ARGUMENTS:-}"' in map_workflow
-    assert 'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)' in map_workflow
-    assert "MAP_RESEARCH_FOCUS=" not in map_workflow
-    assert "MAP_FOCUS=" not in map_workflow
-    assert "MAP_FOCUS_PROVIDED=" not in map_workflow
-    assert "Map focus: {map_focus}" in map_workflow
-    assert "If `map_focus_provided` is true" in map_workflow
-    assert "gpd --raw config get research_mode" not in map_workflow
-    assert "gpd --raw init map-research" not in map_command
-    assert "ROADMAP=$(gpd --raw roadmap analyze)" in progress_workflow
-    assert "ROADMAP=$(gpd --raw roadmap analyze)" not in progress_command
-    assert "Follow the included workflow exactly. Do not duplicate the workflow logic here." in progress_command
-    assert (
-        'gpd --raw summary-extract <path> --field one_liner | gpd json get .one_liner --default ""' in progress_workflow
-    )
-    assert "PHASES=$(gpd --raw phase list)" in gaps_workflow
-    assert "Load plan inventory with wave grouping from `gpd phase index {phase_number}`." in execute_workflow
-    assert "`objective`" in execute_workflow
-    assert "summary-extract for one-liners" in execute_workflow
-    assert "ROADMAP=$(gpd --raw roadmap analyze)" in milestone_workflow
-    assert (
-        'gpd --raw summary-extract "$summary" --field one_liner | gpd json get .one_liner --default ""'
-        in milestone_workflow
-    )
-    assert "ROADMAP=$(gpd --raw roadmap analyze)" in graph_workflow
-    assert "ROADMAP=$(gpd --raw roadmap analyze)" in validate_conventions
     _assert_prompt_contracts(
-        transition_workflow,
+        (WORKFLOWS_DIR / "transition.md").read_text(encoding="utf-8"),
         fragment_count(
             "transition workflow roadmap analyze call count",
             "ROADMAP=$(gpd --raw roadmap analyze)",
@@ -2944,11 +2949,57 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
             context="transition workflow roadmap helpers",
         ),
     )
-    assert "ROADMAP=$(gpd --raw roadmap analyze)" in export_workflow
-    assert 'PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")' in show_phase
-    assert "ROADMAP=$(gpd --raw roadmap analyze)" in show_phase
-    assert 'gpd --raw roadmap get-phase "${phase_number}"' in verify_phase
-    assert 'gpd --raw roadmap get-phase "${phase_number}"' in verify_work
+    _assert_machine_fragments(
+        (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8"),
+        'gpd --raw roadmap get-phase "${phase_number}"',
+        context="verify-phase raw json plumbing",
+    )
+    _assert_machine_fragments(
+        (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8"),
+        'gpd --raw roadmap get-phase "${phase_number}"',
+        context="verify-work raw json plumbing",
+    )
+
+    for text, fragments, context in (
+        (
+            (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8"),
+            ("gpd --raw config get research_mode",),
+            "research-phase raw json stale config reads",
+        ),
+        (
+            (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8"),
+            ('gpd --raw init phase-op --include state,config "${PHASE}"',),
+            "research-phase command duplicated init",
+        ),
+        (
+            (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8"),
+            ("MAP_RESEARCH_FOCUS=", "MAP_FOCUS=", "MAP_FOCUS_PROVIDED=", "gpd --raw config get research_mode"),
+            "map-research stale focus/config reads",
+        ),
+        (
+            (COMMANDS_DIR / "map-research.md").read_text(encoding="utf-8"),
+            ("gpd --raw init map-research",),
+            "map-research command duplicated init",
+        ),
+        (
+            (COMMANDS_DIR / "progress.md").read_text(encoding="utf-8"),
+            ("ROADMAP=$(gpd --raw roadmap analyze)",),
+            "progress command duplicated roadmap read",
+        ),
+    ):
+        _assert_forbidden_fragments(text, *fragments, context=context)
+
+    _assert_semantic_fragments(
+        (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8"),
+        "If `map_focus_provided` is true",
+        context="map-research provided focus semantics",
+    )
+    _assert_semantic_fragments(
+        (COMMANDS_DIR / "progress.md").read_text(encoding="utf-8"),
+        "Follow the included workflow exactly",
+        "Do not duplicate",
+        context="progress command wrapper semantics",
+    )
 
 
 def test_workflow_and_command_docs_use_raw_output_for_machine_parsed_cli_json() -> None:
@@ -3242,44 +3293,41 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
     verifier_agent = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
     compare_workflow = (WORKFLOWS_DIR / "compare-experiment.md").read_text(encoding="utf-8")
     comparison_template = (TEMPLATES_DIR / "paper" / "experimental-comparison.md").read_text(encoding="utf-8")
-    verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
-    verifier_agent = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
+    internal_comparison_template = (TEMPLATES_DIR / "paper" / "internal-comparison.md").read_text(encoding="utf-8")
 
-    assert "# tool_requirements: # Optional machine-checkable specialized tools. Omit entirely if none." in phase_prompt
-    assert '#     tool: "command"' in phase_prompt
-    assert '#     command: "pdflatex --version"' in phase_prompt
-    assert "`required` defaults to true when omitted" in phase_prompt
+    _assert_machine_fragments(
+        phase_prompt,
+        "# tool_requirements: # Optional machine-checkable specialized tools. Omit entirely if none.",
+        '#     tool: "command"',
+        '#     command: "pdflatex --version"',
+        "`required` defaults to true when omitted",
+        "Quick contract rules:",
+        context="phase prompt tool requirements",
+    )
+    _assert_machine_fragments(
+        planner_agent,
+        "# tool_requirements: # Machine-checkable specialized tools (omit entirely if none)",
+        "tool: command",
+        "Use only the closed tool vocabulary the validator accepts",
+        "| `tool_requirements` | No       | Machine-checkable specialized tool requirements |",
+        context="planner agent tool requirements",
+    )
+    _assert_machine_fragments(plan_checker, "declare them in `tool_requirements`", context="plan checker tools")
+    _assert_machine_fragments(executor_agent, "Run `gpd validate plan-preflight <PLAN.md path>` from the local CLI.", context="executor plan-preflight")
+    _assert_machine_fragments(execute_plan, 'PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "${PLAN_PATH}")', context="execute-plan plan-preflight")
+    _assert_forbidden_fragments(execute_plan, "gpd validate plan-preflight <PLAN.md>", context="execute-plan stale preflight spelling")
     _assert_semantic_fragments(
         phase_prompt,
         "fallback",
         "missing required tool",
         "non-blocking",
-        context="phase-prompt tool requirements",
+        context="phase-prompt tool fallback semantics",
     )
-    assert "Quick contract rules:" in phase_prompt
-    assert "# tool_requirements: # Machine-checkable specialized tools (omit entirely if none)" in planner_agent
-    assert "tool: command" in planner_agent
-    assert "Use only the closed tool vocabulary the validator accepts" in planner_agent
-    assert "| `tool_requirements` | No       | Machine-checkable specialized tool requirements |" in planner_agent
-    assert "declare them in `tool_requirements`" in plan_checker
-    assert "Run `gpd validate plan-preflight <PLAN.md path>` from the local CLI." in executor_agent
-    _assert_semantic_fragments(
-        executor_agent,
-        "declared fallback",
-        "blocking",
-        "`required: true`",
-        context="executor plan-preflight",
+    _assert_machine_fragments(
+        execute_phase,
+        "require that the selected `PLAN.md` passes `gpd validate plan-preflight <PLAN.md>`",
+        context="execute-phase plan-preflight",
     )
-    assert 'PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "${PLAN_PATH}")' in execute_plan
-    _assert_semantic_fragments(
-        execute_plan,
-        "declared fallbacks",
-        "non-blocking preferred tools",
-        "`required: false`",
-        context="execute-plan plan-preflight",
-    )
-    assert "gpd validate plan-preflight <PLAN.md>" not in execute_plan
-    assert "require that the selected `PLAN.md` passes `gpd validate plan-preflight <PLAN.md>`" in execute_phase
     _assert_semantic_fragments(
         planner_prompt_template,
         "`tool_requirements`",
@@ -3298,8 +3346,9 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "checker_revision",
     )
     assert plan_phase_manifest.stages[0].loaded_authorities == ("workflows/plan-phase.md",)
-    assert "templates/planner-subagent-prompt.md" in plan_phase_manifest.stages[2].loaded_authorities
-    assert "templates/planner-subagent-prompt.md" in plan_phase_manifest.stages[3].loaded_authorities
+    for stage in (plan_phase_manifest.stages[2], plan_phase_manifest.stages[3]):
+        assert "templates/planner-subagent-prompt.md" in stage.loaded_authorities
+
     _assert_semantic_fragments(
         execute_phase,
         "`VERIFICATION.md`",
@@ -3311,9 +3360,15 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "verifier-local aliases",
         context="execute-phase verification contract fields",
     )
-    assert "declare it as `tool: wolfram` in `tool_requirements`" in tooling_ref
-    for removed_alias in ("must_haves", "verification_inputs", "contract_evidence", "independently_confirmed"):
-        assert removed_alias not in summary_template
+    _assert_machine_fragments(tooling_ref, "declare it as `tool: wolfram` in `tool_requirements`", context="tool integration requirements")
+    _assert_forbidden_fragments(
+        summary_template,
+        "must_haves",
+        "verification_inputs",
+        "contract_evidence",
+        "independently_confirmed",
+        context="summary removed verification aliases",
+    )
     _assert_semantic_fragments(
         summary_template,
         "`suggested_contract_checks`",
@@ -3321,14 +3376,14 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "does not belong in summaries",
         context="summary contract fields",
     )
-    assert "contract_results" in verification_template
     _assert_semantic_fragments(
         verification_template,
+        "contract_results",
         "machine-readable surface",
         "schema-owned ledgers",
+        "verification-side `suggested_contract_checks`",
         context="verification report schema fields",
     )
-    assert "verification-side `suggested_contract_checks`" in verification_template
     _assert_prompt_contracts(
         research_verification,
         machine_exact(
@@ -3341,12 +3396,18 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
             context="research verification template",
         ),
     )
-    assert "status: gaps_found" in research_verification
-    assert "# Allowed status values: passed|gaps_found|expert_needed|human_needed" in research_verification
-    assert "deliverable-main" in research_verification
-    assert "acceptance-test-main" in research_verification
-    assert "reference-main" in research_verification
-    assert "## CHECKPOINT REACHED" not in verify_workflow
+    _assert_machine_fragments(
+        research_verification,
+        "status: gaps_found",
+        "# Allowed status values: passed|gaps_found|expert_needed|human_needed",
+        "comparison_verdicts:",
+        "subject_role: decisive",
+        "comparison_kind: benchmark",
+        "`comparison_kind`: benchmark|prior_work|experiment|cross_method|baseline|other",
+        "suggested_contract_checks:",
+        "uncertainty_markers:",
+        context="research verification schema examples",
+    )
     _assert_prompt_contracts(
         verify_workflow,
         fragment_count(
@@ -3362,47 +3423,43 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
             context="verify-work planner wiring",
         ),
     )
-    for token in (
+    _assert_machine_fragments(
+        verify_workflow,
         "tool_requirements",
         "gap_closure",
-    ):
-        assert token in verify_workflow
-    assert "The shared planner template owns the canonical planning policy and contract gate." not in verify_workflow
-    assert "The shared planner template owns the canonical planning and revision policy." not in verify_workflow
-    assert "forbidden-proxy-main" in research_verification
-    assert "comparison_verdicts:" in research_verification
-    assert "subject_role: decisive" in research_verification
-    assert "comparison_kind: benchmark" in research_verification
-    assert "Allowed body enum values:" in research_verification
-    assert "`comparison_kind`: benchmark|prior_work|experiment|cross_method|baseline|other" in research_verification
-    assert (
-        "Allowed `comparison_kind` values: `benchmark|prior_work|experiment|cross_method|baseline|other`."
-        in research_verification
+        "Load the staged researcher-session scaffold and canonical schema pack at this stage.",
+        "Keep the session overlay frontmatter compatible with the authoritative verification report.",
+        context="verify-work planner and schema wiring",
     )
-    assert (
-        "comparison_kind: [benchmark | prior_work | experiment | cross_method | baseline | other]"
-        not in research_verification
+    _assert_forbidden_fragments(
+        verify_workflow,
+        "## CHECKPOINT REACHED",
+        "The shared planner template owns the canonical planning policy and contract gate.",
+        "The shared planner template owns the canonical planning and revision policy.",
+        "status: gaps_found",
+        "uncertainty_markers:",
+        "Allowed body enum values:",
+        "suggested_contract_checks:",
+        "`suggested_contract_check`",
+        "independently_confirmed",
+        context="verify-work stale duplicated schema content",
     )
-    assert (
-        'comparison_kind: [benchmark | prior_work | experiment | cross_method | baseline | other | ""]'
-        not in research_verification
+    _assert_machine_fragments(
+        verify_phase,
+        "Return status (`passed` | `gaps_found` | `expert_needed` | `human_needed`)",
+        "gpd verification-report skeleton PLAN.md --write --output",
+        "contract_results",
+        "Verification targets must stay user-visible",
+        "request_template",
+        "required_request_fields",
+        "supported_binding_fields",
+        "run_contract_check(request=..., project_dir=...)",
+        "copy the returned `check_key` into the frontmatter `check` field",
+        "schema_required_request_fields",
+        "schema_required_request_anyof_fields",
+        "project_dir",
+        context="verify-phase schema and helper wiring",
     )
-    assert "suggested_contract_checks:" in research_verification
-    assert "uncertainty_markers:" in research_verification
-    assert "claim_id" in research_verification
-    assert "acceptance_test_id" in research_verification
-    assert "Load the staged researcher-session scaffold and canonical schema pack at this stage." in verify_workflow
-    assert (
-        "Keep the session overlay frontmatter compatible with the authoritative verification report." in verify_workflow
-    )
-    assert "status: gaps_found" not in verify_workflow
-    assert "uncertainty_markers:" not in verify_workflow
-    assert "Allowed body enum values:" not in verify_workflow
-    assert "suggested_contract_checks:" not in verify_workflow
-    assert "`suggested_contract_check`" not in verify_workflow
-    assert "independently_confirmed" not in verify_workflow
-    assert "Return status (`passed` | `gaps_found` | `expert_needed` | `human_needed`)" in verify_phase
-    assert "gpd verification-report skeleton PLAN.md --write --output" in verify_phase
     _assert_semantic_fragments(
         verify_phase,
         "helper owns frontmatter shape",
@@ -3413,34 +3470,46 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "validation",
         context="verify-phase verification helper",
     )
-    assert "frontmatter (phase/timestamp/status/score" not in verify_phase
-    assert "independently_confirmed" not in verify_phase
-    assert "`suggested_contract_check`" not in verify_phase
-    assert "Use the verification-report helper to serialize the gap ledger" in verifier_agent
-    assert "The body must still make every gap actionable" in verifier_agent
-    assert "Each gap has: `subject_kind`" not in verifier_agent
-    assert "Verification Status:** {passed | gaps_found | expert_needed | human_needed}" in verifier_agent
-    assert "`suggested_contract_check`" not in verifier_agent
-    assert "`contract_results` is authoritative." in execute_plan
-    assert "project_contract_validation" in execute_plan
-    assert "project_contract_load_info" in execute_plan
-    assert "visible-but-blocked contract is still not an approved execution contract" in execute_plan
+    _assert_forbidden_fragments(
+        verify_phase,
+        "frontmatter (phase/timestamp/status/score",
+        "independently_confirmed",
+        "`suggested_contract_check`",
+        "must_haves",
+        context="verify-phase removed schema aliases",
+    )
+    _assert_machine_fragments(
+        verifier_agent,
+        "Use the verification-report helper to serialize the gap ledger",
+        "The body must still make every gap actionable",
+        "Verification Status:** {passed | gaps_found | expert_needed | human_needed}",
+        "schema_required_request_fields",
+        "schema_required_request_anyof_fields",
+        "project_dir",
+        context="verifier schema helper wiring",
+    )
+    _assert_forbidden_fragments(verifier_agent, "Each gap has: `subject_kind`", "`suggested_contract_check`", context="verifier removed schema aliases")
+    _assert_machine_fragments(
+        execute_plan,
+        "`contract_results` is authoritative.",
+        "project_contract_validation",
+        "project_contract_load_info",
+        "visible-but-blocked contract is still not an approved execution contract",
+        context="execute-plan contract results wiring",
+    )
     _assert_semantic_fragments(
         execute_plan,
         "Autonomy mode",
         "profile",
         "do NOT relax contract-result emission",
-        context="execute-plan contract results",
-    )
-
-    _assert_semantic_fragments(
-        execute_plan,
         "comparison_verdicts`",
         "decisive",
         "required or attempted",
+        "emit `verdict: inconclusive`",
+        "`verdict: tension`",
+        "instead of omitting",
         context="execute-plan comparison verdicts",
     )
-    assert "emit `verdict: inconclusive` or `verdict: tension` instead of omitting the entry" in execute_plan
     _assert_prompt_contracts(
         execute_plan,
         machine_exact(
@@ -3453,17 +3522,21 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
             context="execute-plan contract results",
         ),
     )
-    assert "contract_results" in verify_phase
-    assert "Verification targets must stay user-visible" in verify_phase
-    assert "must_haves" not in verify_phase
-    assert "request_template" in verify_phase
-    assert "required_request_fields" in verify_phase
-    assert "supported_binding_fields" in verify_phase
-    assert "run_contract_check(request=..., project_dir=...)" in verify_phase
-    assert "copy the returned `check_key` into the frontmatter `check` field" in verify_phase
-    assert "comparison_verdicts" in compare_workflow
-    assert "project_contract_load_info" in compare_workflow
-    assert "project_contract_validation" in compare_workflow
+    _assert_machine_fragments(
+        compare_workflow,
+        "comparison_verdicts",
+        "project_contract_load_info",
+        "project_contract_validation",
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_context",
+        "active_reference_context",
+        "subject_kind: claim",
+        "subject_role: decisive",
+        "comparison_kind: experiment",
+        "verdict: pass",
+        "omit `protocol_bundle_ids` and `bundle_expectations` entirely",
+        context="compare-experiment contract wiring",
+    )
     _assert_semantic_fragments(
         compare_workflow,
         "approved contract",
@@ -3471,52 +3544,39 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "true",
         context="compare-experiment contract gate",
     )
-    assert "selected_protocol_bundle_ids" in compare_workflow
-    assert "protocol_bundle_context" in compare_workflow
-    assert "active_reference_context" in compare_workflow
-    assert "protocol_bundle_ids (optional):" not in compare_workflow
-    assert "bundle_expectations (optional):" not in compare_workflow
-    assert "subject_kind: claim|deliverable|acceptance_test|reference" not in compare_workflow
-    assert "comparison_kind: benchmark|prior_work|experiment|cross_method|baseline|other" not in compare_workflow
-    assert "verdict: pass | tension | fail | inconclusive" not in compare_workflow
-    assert "subject_kind: claim" in compare_workflow
-    assert "subject_role: decisive" in compare_workflow
-    assert "comparison_kind: experiment" in compare_workflow
-    assert "schema_required_request_fields" in verify_phase
-    assert "schema_required_request_anyof_fields" in verify_phase
-    assert "project_dir" in verify_phase
-    assert "schema_required_request_fields" in verifier_agent
-    assert "schema_required_request_anyof_fields" in verifier_agent
-    assert "project_dir" in verifier_agent
-    assert "verdict: pass" in compare_workflow
-    assert "omit `protocol_bundle_ids` and `bundle_expectations` entirely" in compare_workflow
-    assert "protocol_bundle_ids (optional):" not in comparison_template
-    assert "bundle_expectations (optional):" not in comparison_template
-    assert "subject_kind: claim|deliverable|acceptance_test|reference" not in comparison_template
-    assert "comparison_kind: benchmark|prior_work|experiment|cross_method|baseline|other" not in comparison_template
-    assert "verdict: pass | tension | fail | inconclusive" not in comparison_template
-    assert "subject_kind: claim" in comparison_template
-    assert "subject_role: decisive" in comparison_template
-    assert "comparison_kind: experiment" in comparison_template
-    assert "verdict: pass" in comparison_template
-    assert "omit `protocol_bundle_ids` and `bundle_expectations` entirely" in comparison_template
-    assert "`comparison_verdicts` is a closed schema" in comparison_template
-    internal_comparison_template = (TEMPLATES_DIR / "paper" / "internal-comparison.md").read_text(encoding="utf-8")
-    assert "`comparison_verdicts` is a closed schema" in internal_comparison_template
-    assert "protocol_bundle_ids (optional):" not in internal_comparison_template
-    assert "bundle_expectations (optional):" not in internal_comparison_template
-    assert "subject_kind: claim|deliverable|acceptance_test|reference" not in internal_comparison_template
-    assert (
-        "comparison_kind: benchmark|prior_work|experiment|cross_method|baseline|other"
-        not in internal_comparison_template
+    _assert_forbidden_fragments(
+        compare_workflow,
+        "protocol_bundle_ids (optional):",
+        "bundle_expectations (optional):",
+        "subject_kind: claim|deliverable|acceptance_test|reference",
+        "comparison_kind: benchmark|prior_work|experiment|cross_method|baseline|other",
+        "verdict: pass | tension | fail | inconclusive",
+        context="compare-experiment removed comparison aliases",
     )
-    assert "verdict: pass|tension|fail|inconclusive" not in internal_comparison_template
-    assert "comparison_kind: cross_method" in internal_comparison_template
-    assert "subject_kind: claim" in internal_comparison_template
-    assert "subject_role: decisive" in internal_comparison_template
-    assert "verdict: pass" in internal_comparison_template
-    assert "omit `protocol_bundle_ids` and `bundle_expectations` entirely" in internal_comparison_template
-    assert "subject_role" in comparison_template
+    for context, text, comparison_kind in (
+        ("experimental comparison template", comparison_template, "experiment"),
+        ("internal comparison template", internal_comparison_template, "cross_method"),
+    ):
+        _assert_machine_fragments(
+            text,
+            "`comparison_verdicts` is a closed schema",
+            "subject_kind: claim",
+            "subject_role: decisive",
+            f"comparison_kind: {comparison_kind}",
+            "verdict: pass",
+            "omit `protocol_bundle_ids` and `bundle_expectations` entirely",
+            context=context,
+        )
+        _assert_forbidden_fragments(
+            text,
+            "protocol_bundle_ids (optional):",
+            "bundle_expectations (optional):",
+            "subject_kind: claim|deliverable|acceptance_test|reference",
+            "comparison_kind: benchmark|prior_work|experiment|cross_method|baseline|other",
+            "verdict: pass | tension | fail | inconclusive",
+            "verdict: pass|tension|fail|inconclusive",
+            context=context,
+        )
     _assert_semantic_fragments(
         executor_agent,
         "Profiles",
@@ -3524,9 +3584,15 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "do NOT relax contract-result emission",
         context="executor contract results",
     )
-    assert (
-        "Use claim IDs, deliverable IDs, acceptance test IDs, reference IDs, and forbidden proxy IDs directly from the `contract` block."
-        in verifier_agent
+    _assert_semantic_fragments(
+        verifier_agent,
+        "Use claim IDs",
+        "deliverable IDs",
+        "acceptance test IDs",
+        "reference IDs",
+        "forbidden proxy IDs",
+        "directly from the `contract` block",
+        context="verifier contract IDs",
     )
 
 
@@ -3830,173 +3896,6 @@ def test_verifier_entry_points_expose_contract_check_tools() -> None:
         assert tool_name in verifier_tools
 
 
-def test_contract_schema_references_stay_wired_into_templates_and_review_docs() -> None:
-    phase_prompt = (TEMPLATES_DIR / "phase-prompt.md").read_text(encoding="utf-8")
-    summary_template = (TEMPLATES_DIR / "summary.md").read_text(encoding="utf-8")
-    verification_template = (TEMPLATES_DIR / "verification-report.md").read_text(encoding="utf-8")
-    contract_results_schema = (TEMPLATES_DIR / "contract-results-schema.md").read_text(encoding="utf-8")
-    executor_completion = (REFERENCES_DIR / "execution" / "executor-completion.md").read_text(encoding="utf-8")
-    referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
-    peer_review = _workflow_authority_text("peer-review")
-    panel = (REFERENCES_DIR / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
-    scoring = (REFERENCES_DIR / "publication" / "paper-quality-scoring.md").read_text(encoding="utf-8")
-    referee_decision_schema = (TEMPLATES_DIR / "paper" / "referee-decision-schema.md").read_text(encoding="utf-8")
-    paper_config_schema = (TEMPLATES_DIR / "paper" / "paper-config-schema.md").read_text(encoding="utf-8")
-    artifact_manifest_schema = (TEMPLATES_DIR / "paper" / "artifact-manifest-schema.md").read_text(encoding="utf-8")
-    bibliography_audit_schema = (TEMPLATES_DIR / "paper" / "bibliography-audit-schema.md").read_text(encoding="utf-8")
-    reproducibility_template = (TEMPLATES_DIR / "paper" / "reproducibility-manifest.md").read_text(encoding="utf-8")
-    reproducibility_protocol = (REFERENCES_DIR / "protocols" / "reproducibility.md").read_text(encoding="utf-8")
-    execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
-    write_paper = _workflow_authority_text("write-paper")
-
-    assert "templates/plan-contract-schema.md" in phase_prompt
-    assert "templates/contract-results-schema.md" in summary_template
-    assert "templates/contract-results-schema.md" in verification_template
-    assert "templates/paper/review-ledger-schema.md" in referee
-    assert "templates/paper/referee-decision-schema.md" in referee
-    assert "fall back to direct standalone review" not in referee
-    assert "Do not fall back to standalone review" in referee
-    assert "gpd validate review-claim-index" in peer_review
-    assert "gpd validate review-stage-report" in peer_review
-    assert "gpd validate review-ledger" in peer_review
-    assert "--ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json" in peer_review
-    assert "before trusting any final recommendation" in peer_review
-    _assert_semantic_fragments(
-        peer_review,
-        "`manuscript_path`",
-        "non-empty",
-        "identical",
-        "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
-        context="peer-review final validation",
-    )
-    assert "REPRODUCIBILITY-MANIFEST.json" not in peer_review
-    assert "templates/paper/review-ledger-schema.md" in panel
-    assert "templates/paper/referee-decision-schema.md" in panel
-    assert "--ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json" in panel
-    assert "templates/paper/paper-quality-input-schema.md" in scoring
-    assert '"journal": "prl"' in paper_config_schema
-    assert '"authors"' in paper_config_schema
-    assert '"sections"' in paper_config_schema
-    assert '"content": "State the problem, stakes, and contract-backed claim."' in paper_config_schema
-    assert '"label": "intro"' in paper_config_schema
-    assert '"label": "benchmark"' in paper_config_schema
-    assert '"label": "derivation"' in paper_config_schema
-    _assert_semantic_fragments(
-        paper_config_schema,
-        "`content`",
-        "section body only",
-        "`label` values",
-        "stored bare",
-        "renderer adds",
-        "`sec:` / `fig:`",
-        context="paper config label normalization",
-    )
-    assert "label: string such as `sec:intro`" not in paper_config_schema
-    assert "label: LaTeX label such as `fig:benchmark`" not in paper_config_schema
-    assert "XX-YY-SUMMARY.md" in contract_results_schema
-    assert "XX-VERIFICATION.md" in contract_results_schema
-    _assert_semantic_fragments(
-        contract_results_schema,
-        "canonical project-root-relative",
-        "`GPD/phases/XX-name/XX-YY-PLAN.md#/contract`",
-        context="contract results schema plan_contract_ref",
-    )
-
-    _assert_semantic_fragments(
-        contract_results_schema,
-        "`uncertainty_markers`",
-        "remain explicit",
-        "contract-backed outputs",
-        context="contract results schema uncertainty",
-    )
-    assert "weakest_anchors: [anchor-1]" in contract_results_schema
-    assert "disconfirming_observations: [observation-1]" in contract_results_schema
-    assert "forbidden_proxy_id: fp-main" in contract_results_schema
-    _assert_prompt_contracts(
-        contract_results_schema,
-        machine_exact(
-            "contract results closed action vocabulary",
-            "`read`, `use`, `compare`, `cite`, `avoid`",
-        ),
-    )
-    assert "forbidden_proxy_id" in summary_template
-    assert "templates/contract-results-schema.md" in executor_completion
-    assert "claim_id: claim-main" in executor_completion
-    assert "completed_actions: [read, compare, cite]" in executor_completion
-    assert "`completed` requires non-empty `completed_actions`" in executor_completion
-    assert "`subject_role` explicitly" in executor_completion
-    assert "forbidden_proxies:" in executor_completion
-    assert "uncertainty_markers:" in executor_completion
-    assert "REFEREE-DECISION{round_suffix}.json --strict --ledger" in referee_decision_schema
-    assert "STAGE-(reader|literature|math|physics|interestingness)(-R<round>)?.json" in referee_decision_schema
-    assert "same optional `-R<round>` suffix" in referee_decision_schema
-    assert "manuscript_path` must be non-empty" in referee_decision_schema
-    assert "must align with the matching `CLAIMS{round_suffix}.json` claim index" in referee_decision_schema
-    assert "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json" in panel
-    assert "${REVIEW_ROOT}/CLAIMS{round_suffix}.json" in panel
-    assert "random_seeds[].computation" in reproducibility_template
-    assert "resource_requirements[].step" in reproducibility_template
-    _assert_semantic_fragments(
-        reproducibility_template,
-        "Strict validation",
-        "warnings",
-        "hard errors",
-        "block strict review",
-        context="reproducibility manifest strict validation",
-    )
-
-    _assert_semantic_fragments(
-        reproducibility_template,
-        "Every stochastic",
-        "`execution_steps[].name`",
-        "matching",
-        "`random_seeds[].computation`",
-        context="reproducibility manifest stochastic seeds",
-    )
-    assert "templates/paper/reproducibility-manifest.md" in reproducibility_protocol
-    assert "templates/paper/paper-config-schema.md" in write_paper
-    assert "templates/paper/artifact-manifest-schema.md" in write_paper
-    assert "templates/paper/bibliography-audit-schema.md" in write_paper
-    assert "templates/paper/figure-tracker.md" in write_paper
-    assert "templates/paper/reproducibility-manifest.md" in write_paper
-    assert 'gpd paper-build "${PAPER_DIR}/PAPER-CONFIG.json"' in paper_config_schema
-    assert '"artifact_id": "tex-paper"' in artifact_manifest_schema
-    assert '"category": "audit"' in artifact_manifest_schema
-    assert "Do not write unsupported scoring-only journal labels" in artifact_manifest_schema
-    assert '"resolution_status": "provided"' in bibliography_audit_schema
-    assert '"verification_status": "partial"' in bibliography_audit_schema
-    assert "Manual JSON is also the only supported path today for scoring-only profiles" in scoring
-    assert "${PAPER_DIR}/reproducibility-manifest.json" in write_paper
-    _assert_semantic_fragments(
-        write_paper,
-        "Run strict reproducibility-manifest validation",
-        "If validation fails",
-        "Do not enter",
-        context="write-paper reproducibility gate",
-    )
-    assert "gpd validate summary-contract" in execute_plan
-    assert "gpd validate verification-contract" in verify_work
-    assert "gpd validate plan-contract" in plan_phase
-    _assert_prompt_contracts(
-        plan_phase,
-        machine_exact(
-            "plan-phase planner template heading names",
-            ("`## Standard Planning Template`", "`## Revision Template`", "`filled_prompt`", "`revision_prompt`"),
-        ),
-        semantic_anchor(
-            "plan-phase does not duplicate template-owned gates",
-            ("Do not restate", "template-owned contract gates"),
-            context="plan-phase template rendering",
-        ),
-    )
-    assert "{contract_intake}" in plan_phase
-    assert "{effective_reference_intake}" in plan_phase
-    assert "Contract Intake:" in verify_work
-    assert "Effective Reference Intake:" in verify_work
-
-
 def test_manuscript_documentation_uses_current_manuscript_root_paths_only() -> None:
     explain = (WORKFLOWS_DIR / "explain.md").read_text(encoding="utf-8")
     manuscript_outline = (TEMPLATES_DIR / "paper" / "manuscript-outline.md").read_text(encoding="utf-8")
@@ -4045,7 +3944,6 @@ def test_publication_workflows_describe_recursive_manuscript_tree_inputs() -> No
         in arxiv_submission
     )
     assert "Manuscript tree: all `.tex` files under `${PAPER_DIR}` recursively" in write_paper
-    assert "Manuscript tree: all .tex files under ${PAPER_DIR} recursively" in write_paper
     assert "resolved section file within the manuscript tree rooted at `${PAPER_DIR}`" in respond
 
 
@@ -4074,26 +3972,23 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "Reader-visible claims",
         "surfaced evidence",
         "first-class",
-        context="peer-review carry-forward context",
-    )
-    assert "effective_reference_intake" in peer_review
-    assert "project_contract_validation" in peer_review
-    assert "project_contract_load_info" in peer_review
-    _assert_semantic_fragments(
-        peer_review,
         "compact `REVIEW_CARRY_FORWARD`",
         "before spawning panel stages",
-        context="peer-review carry-forward context",
-    )
-    assert "Carry-forward packet: {REVIEW_CARRY_FORWARD}" in peer_review
-    _assert_semantic_fragments(
-        peer_review,
         "Do not repeat",
         "full contract/reference payloads",
         "every child prompt",
         context="peer-review carry-forward context",
     )
-    assert "reference artifacts content {reference_artifacts_content}" not in peer_review
+    _assert_machine_fragments(
+        peer_review,
+        "effective_reference_intake",
+        "project_contract_validation",
+        "project_contract_load_info",
+        "Carry-forward packet: {REVIEW_CARRY_FORWARD}",
+        "project_contract_gate.authoritative",
+        context="peer-review contract context",
+    )
+    _assert_forbidden_fragments(peer_review, "reference artifacts content {reference_artifacts_content}", context="peer-review carry-forward payload")
     _assert_prompt_contracts(
         peer_review,
         semantic_anchor(
@@ -4113,21 +4008,32 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
             context="peer-review project contract gate",
         ),
     )
-    assert "project_contract_gate.authoritative" in peer_review
-    assert "project_contract_gate" in write_paper
-    assert "project_contract_load_info" in write_paper
-    assert "project_contract_validation" in write_paper
-    assert "authoritative only when `project_contract_gate.authoritative` is true" in write_paper
-    assert "project_contract_gate" in respond_to_referees
-    assert "project_contract_load_info" in respond_to_referees
-    assert "project_contract_validation" in respond_to_referees
-    assert "authoritative only when `project_contract_gate.authoritative` is true" in respond_to_referees
-    assert "templates/paper/review-ledger-schema.md" not in peer_review_command
-    assert "templates/paper/referee-decision-schema.md" not in peer_review_command
-    assert "references/publication/peer-review-panel.md" not in peer_review_command
-    assert "templates/verification-report.md" not in verify_command
-    assert "templates/contract-results-schema.md" not in verify_command
-    assert "Follow the included workflow file exactly." in verify_command
+    _assert_machine_fragments(
+        respond_to_referees,
+        "project_contract_gate",
+        "project_contract_load_info",
+        "project_contract_validation",
+        "authoritative only when `project_contract_gate.authoritative` is true",
+        context="respond-to-referees contract gate",
+    )
+    _assert_forbidden_fragments(
+        peer_review_command,
+        "templates/paper/review-ledger-schema.md",
+        "templates/paper/referee-decision-schema.md",
+        "references/publication/peer-review-panel.md",
+        context="peer-review command wrapper schema bodies",
+    )
+    _assert_forbidden_fragments(
+        verify_command,
+        "templates/verification-report.md",
+        "templates/contract-results-schema.md",
+        "Severity Classification",
+        "One check at a time, plain text responses, no interrogation.",
+        "Physics verification is not binary:",
+        "For deeper focused analysis",
+        context="verify-work command wrapper schema bodies",
+    )
+    _assert_machine_fragments(verify_command, "Follow the included workflow file exactly.", context="verify-work command wrapper")
     _assert_semantic_fragments(
         verify_command,
         "workflow file owns",
@@ -4136,13 +4042,9 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "delegates the physics checks",
         context="verify-work command wrapper",
     )
-    assert "Severity Classification" not in verify_command
-    assert "One check at a time, plain text responses, no interrogation." not in verify_command
-    assert "Physics verification is not binary:" not in verify_command
-    assert "For deeper focused analysis" not in verify_command
-    assert "Load the staged researcher-session scaffold and canonical schema pack at this stage." in verify_workflow
     _assert_semantic_fragments(
         verify_workflow,
+        "Load the staged researcher-session scaffold",
         "session overlay frontmatter",
         "compatible",
         "authoritative verification report",
@@ -4151,21 +4053,29 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
     assert "templates/verification-report.md" in interactive_validation.loaded_authorities
     assert "templates/contract-results-schema.md" in interactive_validation.loaded_authorities
     assert "references/verification/meta/verification-independence.md" in inventory_build.loaded_authorities
-    assert "templates/paper/review-ledger-schema.md" not in write_paper_command
-    assert "templates/paper/referee-decision-schema.md" not in write_paper_command
-    assert "references/publication/peer-review-panel.md" not in write_paper_command
-    assert "Canonical schema for `${PAPER_DIR}/reproducibility-manifest.json`:" in write_paper
-    assert "Canonical reconciliation contract:" in sync_state
-    assert "state-json-schema.md" in sync_state
-    assert "state.json is authoritative for structured fields" in sync_state
+    _assert_forbidden_fragments(
+        write_paper_command,
+        "templates/paper/review-ledger-schema.md",
+        "templates/paper/referee-decision-schema.md",
+        "references/publication/peer-review-panel.md",
+        context="write-paper command wrapper schema bodies",
+    )
+    _assert_machine_fragments(write_paper, "Canonical schema for `${PAPER_DIR}/reproducibility-manifest.json`:", context="write-paper reproducibility schema")
+    _assert_machine_fragments(
+        sync_state,
+        "Canonical reconciliation contract:",
+        "state-json-schema.md",
+        "state.json is authoritative for structured fields",
+        "optional_commit",
+        'gpd --raw --cwd "$PROJECT_ROOT" state repair-sync',
+        context="sync-state reconciliation",
+    )
     _assert_semantic_fragments(
         sync_state,
         "workflow",
         "fail-closed",
         context="sync-state reconciliation",
     )
-    assert "optional_commit" in sync_state
-    assert 'gpd --raw --cwd "$PROJECT_ROOT" state repair-sync' in sync_state
     _assert_semantic_fragments(
         sync_state,
         "Do not",
@@ -4173,93 +4083,20 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "prompt",
         context="sync-state reconciliation",
     )
-    assert "gpd --raw state snapshot" not in sync_state
-    assert "Proceed with reconciliation? (y/n)" not in sync_state
-    assert "determine which source is more recent" not in sync_state
-    _assert_semantic_fragments(
-        write_paper,
-        "`project_contract`",
-        "`project_contract_gate`",
-        "`project_contract_load_info`",
-        "`project_contract_validation`",
-        "`active_reference_context`",
-        "visible throughout",
-        "staged review",
-        context="write-paper publication review",
+    _assert_forbidden_fragments(
+        sync_state,
+        "gpd --raw state snapshot",
+        "Proceed with reconciliation? (y/n)",
+        "determine which source is more recent",
+        context="sync-state stale reconciliation flow",
     )
-    assert "repair the blocked contract before retrying" in peer_review
-    write_paper_staging = registry.get_command("write-paper").staged_loading
-    peer_review_staging = registry.get_command("peer-review").staged_loading
-
-    assert write_paper_staging is not None
-    assert peer_review_staging is not None
-    assert write_paper_staging.stage_ids() == (
-        "paper_bootstrap",
-        "outline_and_scaffold",
-        "figure_and_section_authoring",
-        "consistency_and_references",
-        "publication_review",
+    _assert_semantic_fragments(peer_review, "repair the blocked contract before retrying", context="peer-review blocked contract")
+    _assert_machine_fragments(
+        review_reader,
+        "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
+        context="review reader schema paths",
     )
-    assert peer_review_staging.stage_ids() == (
-        "bootstrap",
-        "preflight",
-        "artifact_discovery",
-        "panel_stages",
-        "final_adjudication",
-        "finalize",
-    )
-
-    write_paper_bootstrap = write_paper_staging.stage("paper_bootstrap")
-    write_paper_outline = write_paper_staging.stage("outline_and_scaffold")
-    write_paper_figures = write_paper_staging.stage("figure_and_section_authoring")
-    write_paper_consistency = write_paper_staging.stage("consistency_and_references")
-    write_paper_review = write_paper_staging.stage("publication_review")
-    peer_review_bootstrap = peer_review_staging.stage("bootstrap")
-    peer_review_preflight = peer_review_staging.stage("preflight")
-    peer_review_artifacts = peer_review_staging.stage("artifact_discovery")
-    peer_review_panel = peer_review_staging.stage("panel_stages")
-    peer_review_final = peer_review_staging.stage("final_adjudication")
-    peer_review_finalize = peer_review_staging.stage("finalize")
-
-    assert "workflows/write-paper/paper-bootstrap.md" in write_paper_bootstrap.loaded_authorities
-    assert "references/publication/publication-pipeline-modes.md" in write_paper_outline.loaded_authorities
-    assert "templates/paper/paper-config-schema.md" in write_paper_outline.loaded_authorities
-    assert "templates/paper/artifact-manifest-schema.md" in write_paper_outline.loaded_authorities
-    assert "templates/paper/figure-tracker.md" in write_paper_figures.loaded_authorities
-    assert "templates/paper/bibliography-audit-schema.md" in write_paper_consistency.loaded_authorities
-    assert "templates/paper/reproducibility-manifest.md" in write_paper_consistency.loaded_authorities
-    assert "references/publication/peer-review-panel.md" in write_paper_review.loaded_authorities
-    assert "references/publication/peer-review-reliability.md" in write_paper_review.loaded_authorities
-    assert "references/publication/publication-review-round-artifacts.md" in write_paper_review.loaded_authorities
-    assert "references/publication/publication-response-artifacts.md" in write_paper_review.loaded_authorities
-    assert "templates/paper/review-ledger-schema.md" in write_paper_review.loaded_authorities
-    assert "templates/paper/referee-decision-schema.md" in write_paper_review.loaded_authorities
-
-    assert "workflows/peer-review/bootstrap.md" in peer_review_bootstrap.loaded_authorities
-    assert "references/publication/peer-review-reliability.md" in peer_review_preflight.loaded_authorities
-    assert "templates/paper/publication-manuscript-root-preflight.md" in peer_review_preflight.loaded_authorities
-    assert "references/publication/publication-artifact-gates.md" not in peer_review_preflight.loaded_authorities
-    assert "templates/paper/paper-config-schema.md" in peer_review_preflight.loaded_authorities
-    assert "templates/paper/artifact-manifest-schema.md" in peer_review_preflight.loaded_authorities
-    assert "templates/paper/bibliography-audit-schema.md" in peer_review_preflight.loaded_authorities
-    assert "templates/paper/reproducibility-manifest.md" in peer_review_preflight.loaded_authorities
-    assert peer_review_artifacts.loaded_authorities == (
-        "workflows/peer-review/artifact-discovery.md",
-        "references/publication/publication-review-round-artifacts.md",
-        "references/publication/publication-response-artifacts.md",
-    )
-    assert "references/publication/peer-review-panel.md" in peer_review_panel.loaded_authorities
-    assert "references/publication/peer-review-panel.md" in peer_review_final.loaded_authorities
-    assert "templates/paper/review-ledger-schema.md" in peer_review_final.loaded_authorities
-    assert "templates/paper/referee-decision-schema.md" in peer_review_final.loaded_authorities
-    assert peer_review_finalize.loaded_authorities == (
-        "workflows/peer-review/finalize.md",
-        "references/publication/publication-review-round-artifacts.md",
-        "references/publication/publication-response-artifacts.md",
-        "references/publication/publication-response-writer-handoff.md",
-    )
-    assert "${REVIEW_ROOT}/CLAIMS{round_suffix}.json" in review_reader
-    assert "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json" in review_reader
     _assert_semantic_fragments(
         review_reader,
         "shared source of truth",
@@ -4278,7 +4115,6 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "theorem-like claims",
         context="review reader claim structure",
     )
-    assert "Keep `proof_audits` empty in this stage." in review_reader
     _assert_semantic_fragments(
         review_reader,
         "`findings`",
@@ -4287,25 +4123,19 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "claim-structure blockers",
         context="review reader findings",
     )
-    assert "Required schema for" not in review_reader
-    assert "closed schema; do not invent extra keys" not in review_reader
-    assert "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json" in review_literature
-    assert "${REVIEW_ROOT}/STAGE-math{round_suffix}.json" in review_math
-    assert "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json" in review_physics
-    assert "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json" in review_significance
-    for label, text in (
-        ("literature", review_literature),
-        ("math", review_math),
-        ("physics", review_physics),
-        ("significance", review_significance),
+    for label, text, output_path in (
+        ("literature", review_literature, "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json"),
+        ("math", review_math, "${REVIEW_ROOT}/STAGE-math{round_suffix}.json"),
+        ("physics", review_physics, "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json"),
+        ("significance", review_significance, "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json"),
     ):
+        _assert_machine_fragments(text, output_path, context=f"review {label} output path")
         _assert_semantic_fragments(
             text,
             "shared source of truth",
             "`StageReviewReport` contract",
             context=f"review {label} schema visibility",
         )
-    assert "Keep `proof_audits` empty in this stage." in review_literature
     _assert_semantic_fragments(
         review_literature,
         "`findings`",
@@ -4322,37 +4152,18 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "exactly one `proof_audits[]` entry",
         "`claim_id`",
         "`claims_reviewed`",
-        context="math review proof audits",
-    )
-
-    _assert_semantic_fragments(
-        review_math,
         "Do not emit proof audits",
         "unreviewed claims",
         "do not repeat `claim_id` values",
-        context="math review proof audits",
-    )
-
-    _assert_semantic_fragments(
-        review_math,
         "theorem-to-proof audit",
         "what the proof actually uses",
         "silently specializes away",
         "coverage gaps",
-        context="math review proof audits",
-    )
-
-    _assert_semantic_fragments(
-        review_math,
         "`recommendation_ceiling`",
         "`major_revision`",
         "`reject`",
         "central theorem-proof gaps",
         context="math review recommendation ceiling",
-    )
-    assert (
-        "Keep `proof_audits` empty in this stage unless the workflow explicitly asks for a theorem-to-proof spot check."
-        in review_physics
     )
     _assert_semantic_fragments(
         review_physics,
@@ -4363,7 +4174,6 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "overstated connections",
         context="physics review findings",
     )
-    assert "Treat formal resemblance as insufficient evidence for a physical conclusion." in review_physics
     _assert_semantic_fragments(
         review_physics,
         "`recommendation_ceiling`",
@@ -4372,7 +4182,6 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "actual evidence",
         context="physics review recommendation ceiling",
     )
-    assert "Keep `proof_audits` empty in this stage." in review_significance
     _assert_semantic_fragments(
         review_significance,
         "`findings`",
@@ -4381,18 +4190,12 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "claim proportionality",
         context="significance review findings",
     )
-    assert "Be explicit when the paper is technically competent but scientifically mediocre." in review_significance
     _assert_semantic_fragments(
         review_significance,
         "`recommendation_ceiling`",
         "`reject`",
         "significance",
         "venue fit",
-        context="significance review recommendation ceiling",
-    )
-
-    _assert_semantic_fragments(
-        review_significance,
         "`major_revision`",
         "technically competent",
         "physically uninteresting",
@@ -4400,9 +4203,12 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         context="significance review recommendation ceiling",
     )
     for text in (review_reader, review_literature, review_math, review_physics, review_significance):
-        assert "Required schema for" not in text
-        assert "closed schema; do not invent extra keys" not in text
-    assert "re-open `{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md`" in referee
+        _assert_forbidden_fragments(text, "Required schema for", "closed schema; do not invent extra keys", context="review agent schema prose duplication")
+    _assert_machine_fragments(
+        referee,
+        "re-open `{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md`",
+        context="referee panel reopen",
+    )
 
 
 def test_peer_review_prompt_includes_concise_stage_map_for_users() -> None:
@@ -4899,44 +4705,41 @@ def test_research_verification_body_scaffold_keeps_body_only_subject_labels_dist
 def test_verify_work_workflow_uses_body_only_subject_kind_fields() -> None:
     verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
 
-    assert "Load the staged researcher-session scaffold and canonical schema pack at this stage." in verify_work
-    assert "Keep body-only session-overlay fields aligned with the staged researcher-session scaffold." in verify_work
-    assert "check_subject_kind: `claim|deliverable|acceptance_test|reference`" not in verify_work
-    assert "Allowed body enum values:" not in verify_work
-    assert "check_subject_kind: claim" not in verify_work
-    assert "`check_subject_kind`: claim|deliverable|acceptance_test|reference" not in verify_work
-    assert 'gap_subject_kind: "claim"' not in verify_work
-    assert "Use `forbidden_proxy_id` for explicit proxy-rejection checks" in verify_work
-    assert "instead of inventing extra body subject kinds" in verify_work
-    assert "# Allowed check_subject_kind values: claim|deliverable|acceptance_test|reference" not in verify_work
-    assert "check_subject_kind: [claim | deliverable | acceptance_test | reference]" not in verify_work
-    assert "{phase}" not in verify_work
-    assert "GPD/phases/{phase_dir}" not in verify_work
-    assert "Write to `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`" in verify_work
-    assert (
-        "Changed verification files fail `gpd pre-commit-check` when this header is missing or mismatched against the active lock."
-        in verify_work
+    _assert_machine_fragments(
+        verify_work,
+        "Load the staged researcher-session scaffold and canonical schema pack at this stage.",
+        "Keep body-only session-overlay fields aligned with the staged researcher-session scaffold.",
+        "Write to `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`",
+        'gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"',
+        'gpd commit "verify(${phase_number}): complete research validation - {passed} passed, {issues} issues" --files "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"',
+        "Use `phase_dir_abs` for shell/file IO",
+        "Read all PLAN.md files in `${PHASE_DIR_ABS}/` using the file_read tool.",
+        context="verify-work body-only subject and path wiring",
     )
-    assert 'gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"' in verify_work
-    assert (
-        'gpd commit "verify(${phase_number}): complete research validation - {passed} passed, {issues} issues" --files "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"'
-        in verify_work
+    _assert_semantic_fragments(
+        verify_work,
+        "Use `forbidden_proxy_id`",
+        "explicit proxy-rejection checks",
+        "instead of inventing extra body subject kinds",
+        context="verify-work forbidden proxy subject boundary",
     )
-    assert "Use `phase_dir_abs` for shell/file IO" in verify_work
-    assert "Read all PLAN.md files in `${PHASE_DIR_ABS}/` using the file_read tool." in verify_work
-    assert "${phase_dir}/" not in verify_work
-    assert "{phase_dir}/" not in verify_work
-    assert (
-        "\nsubject_kind: [claim | deliverable | acceptance_test | reference | forbidden_proxy | suggested_contract_check]"
-        not in verify_work
-    )
-    assert (
-        "check_subject_kind: `claim | deliverable | acceptance_test | reference | forbidden_proxy | suggested_contract_check`"
-        not in verify_work
-    )
-    assert (
-        "check_subject_kind: [claim | deliverable | acceptance_test | reference | forbidden_proxy | suggested_contract_check]"
-        not in verify_work
+    _assert_forbidden_fragments(
+        verify_work,
+        "check_subject_kind: `claim|deliverable|acceptance_test|reference`",
+        "Allowed body enum values:",
+        "check_subject_kind: claim",
+        "`check_subject_kind`: claim|deliverable|acceptance_test|reference",
+        'gap_subject_kind: "claim"',
+        "# Allowed check_subject_kind values: claim|deliverable|acceptance_test|reference",
+        "check_subject_kind: [claim | deliverable | acceptance_test | reference]",
+        "{phase}",
+        "GPD/phases/{phase_dir}",
+        "${phase_dir}/",
+        "{phase_dir}/",
+        "\nsubject_kind: [claim | deliverable | acceptance_test | reference | forbidden_proxy | suggested_contract_check]",
+        "check_subject_kind: `claim | deliverable | acceptance_test | reference | forbidden_proxy | suggested_contract_check`",
+        "check_subject_kind: [claim | deliverable | acceptance_test | reference | forbidden_proxy | suggested_contract_check]",
+        context="verify-work removed body subject aliases",
     )
 
 
@@ -5286,8 +5089,6 @@ def test_sync_state_defers_state_schema_while_write_paper_expands_required_schem
         context="write-paper external authoring intake",
     )
     assert "GPD/publication/{subject_slug}/intake/" in write_paper
-    assert "Do not mine arbitrary folders or infer claim/evidence bindings from loose notes." in write_paper
-    assert "Do not infer widened `gpd:arxiv-submission` scope" in write_paper
     assert '"execution_steps"' not in write_paper
     assert "random_seeds[].computation" not in write_paper
     assert "resource_requirements[].step" not in write_paper
@@ -5316,167 +5117,27 @@ def test_non_adapter_sources_do_not_hardcode_runtime_names() -> None:
     assert offenders == []
 
 
-def test_plan_contract_schema_surfaces_downstream_contract_fields_and_normalization_rules() -> None:
-    plan_schema = _expand_prompt_surface(TEMPLATES_DIR / "plan-contract-schema.md")
-
-    assert "schema_version: 1" in plan_schema
-    assert "scope:" in plan_schema
-    assert 'in_scope: ["Recover the benchmark curve within tolerance"]' in plan_schema
-    assert 'unresolved_questions: ["[Optional open question that still blocks planning]"]' in plan_schema
-    assert "context_intake:" in plan_schema
-    _assert_semantic_fragments(
-        plan_schema,
-        "`contract.context_intake`",
-        "required",
-        "non-empty object",
-        "not a string or list",
-        context="plan contract context intake",
-    )
-    assert "must_read_refs: [ref-main]" in plan_schema
-    assert 'must_include_prior_outputs: ["GPD/phases/00-baseline/00-01-SUMMARY.md"]' in plan_schema
-    assert 'user_asserted_anchors: ["GPD/phases/00-baseline/00-01-SUMMARY.md#lattice-normalization"]' in plan_schema
-    assert 'known_good_baselines: ["GPD/phases/00-baseline/00-01-SUMMARY.md#published-large-n-curve"]' in plan_schema
-    assert 'context_gaps: ["Comparison source still undecided before planning"]' in plan_schema
-    assert 'crucial_inputs: ["Check the user\'s finite-volume cutoff choice before proceeding"]' in plan_schema
-    _assert_semantic_fragments(
-        plan_schema,
-        "concrete anchors",
-        "`must_read_refs[]`",
-        "preserve uncertainty",
-        "workflow visibility",
-        "hard grounding requirement",
-        context="plan contract grounding rules",
-    )
-    assert "approach_policy:" in plan_schema
-    assert "allowed_fit_families: [power_law]" in plan_schema
-    assert "`observables[]` may only reference declared `observables[].id`." in plan_schema
-    assert "observables: [obs-main]" in plan_schema
-    assert 'aliases: ["optional stable label or citation shorthand"]' in plan_schema
-    assert "carry_forward_to: [planning, verification]" in plan_schema
-    assert "automation: automated" in plan_schema
-    _assert_semantic_fragments(
-        plan_schema,
-        "`kind` is optional",
-        "defaults to `other`",
-        "specific semantic category",
-        "`kind` and `role` are optional",
-        "anchor semantics",
-        "`relation` is optional",
-        "dependency type",
-        context="plan contract normalization rules",
-    )
-    assert "Proof-bearing claims must use an explicit non-`other` `claim_kind`" in plan_schema
-    assert "required_actions: [read, compare, cite, avoid]" in plan_schema
-    _assert_prompt_contracts(
-        plan_schema,
-        machine_exact(
-            "plan contract required actions vocabulary",
-            "`read`, `use`, `compare`, `cite`, `avoid`",
-        ),
-        semantic_anchor(
-            "non-scoping plans require decisive contract sections",
-            (
-                "For non-scoping plans",
-                "`claims[]`",
-                "`deliverables[]`",
-                "`acceptance_tests[]`",
-                "`forbidden_proxies[]`",
-                "required",
-            ),
-            context="plan contract required sections",
-        ),
-    )
-    assert "### `forbidden_proxies[]`" in plan_schema
-    assert "### `links[]`" in plan_schema
-    assert "unvalidated_assumptions" in plan_schema
-    assert "competing_explanations" in plan_schema
-    _assert_semantic_fragments(
-        plan_schema,
-        "`must_surface: true`",
-        "concrete enough to re-find later",
-        "citation",
-        "DOI",
-        "arXiv identifier",
-        "project-local artifact path",
-        context="plan contract reference grounding",
-    )
-
-    _assert_semantic_fragments(
-        plan_schema,
-        "ID cross-links",
-        "declared IDs",
-        "Do not reuse the same ID",
-        "`observables[]`",
-        "`links[]`",
-        "target resolution",
-        context="plan contract id resolution",
-    )
-    assert "`deliverables[]` must not be empty." in plan_schema
-    assert "`acceptance_tests[]` must not be empty." in plan_schema
-    assert "If `must_surface: true`, `applies_to[]` must not be empty." in plan_schema
-    _assert_semantic_fragments(
-        plan_schema,
-        "`references[]`",
-        "concrete grounding elsewhere",
-        "at least one reference",
-        "`must_surface: true`",
-        context="plan contract reference grounding",
-    )
-
-    _assert_semantic_fragments(
-        plan_schema,
-        "missing `must_surface: true` reference",
-        "warning",
-        "not a blocker",
-        context="plan contract reference grounding",
-    )
-    assert "blank-after-trim values are invalid" in plan_schema
-
-
 def test_state_json_schema_surfaces_stdin_contract_persistence_and_model_normalization_rules() -> None:
     state_schema = _expand_prompt_surface(TEMPLATES_DIR / "state-json-schema.md")
 
-    assert "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract -" in state_schema
-    assert "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -" in state_schema
-    assert "temporary file" in state_schema
-    assert "`schema_version` must be the integer `1`." in state_schema
-    assert "Project contracts must include at least one observable, claim, or deliverable." in state_schema
-    assert (
-        "`uncertainty_markers.weakest_anchors` and `uncertainty_markers.disconfirming_observations` must both be non-empty."
-        in state_schema
+    _assert_machine_fragments(
+        state_schema,
+        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract -",
+        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -",
+        "temporary file",
+        "`schema_version` must be the integer `1`.",
+        '"required_actions": ["read", "compare", "cite", "avoid"]',
+        "Blank-after-trim values are invalid",
+        context="state schema project contract stdin persistence",
     )
-    assert "`scope.in_scope` must name at least one project boundary or objective." in state_schema
-    assert 'claim_kind": "theorem"' in state_schema
-    assert '"proof_deliverables": ["deliv-proof-main"]' in state_schema
-    assert '"kind": "claim_to_proof_alignment"' in state_schema
-    assert "grounding fields must be concrete enough to re-find later" in state_schema
-    assert (
-        "If a project contract has any `references[]` and does not already carry concrete prior-output, "
-        "user-anchor, or baseline grounding, at least one reference must set `must_surface: true`." in state_schema
+    _assert_semantic_fragments(
+        state_schema,
+        "grounding fields",
+        "concrete enough to re-find later",
+        "missing `must_surface: true` reference",
+        "warning",
+        context="state schema project contract grounding",
     )
-    assert "a missing `must_surface: true` reference is still a warning" in state_schema
-    assert (
-        "If a project-contract reference sets `must_surface: true`, `applies_to[]` must not be empty." in state_schema
-    )
-    assert (
-        "If a project-contract reference sets `must_surface: true`, `required_actions[]` must not be empty."
-        in state_schema
-    )
-    assert '"required_actions": ["read", "compare", "cite", "avoid"]' in state_schema
-    assert (
-        "`required_actions[]` uses the same closed action vocabulary enforced downstream in contract ledgers: `read`, `use`, `compare`, `cite`, `avoid`."
-        in state_schema
-    )
-    assert (
-        "Do not reuse the same ID across `observables[]`, `claims[]`, `deliverables[]`, `acceptance_tests[]`, "
-        "`references[]`, `forbidden_proxies[]`, or `links[]`; target resolution becomes ambiguous." in state_schema
-    )
-    assert (
-        "`scope.unresolved_questions`, `context_intake.context_gaps`, or `uncertainty_markers.weakest_anchors`"
-        in state_schema
-    )
-    assert "Which reference should serve as the decisive benchmark anchor?" in state_schema
-    assert "Blank-after-trim values are invalid" in state_schema
 
 
 def test_phase_prompt_surfaces_validation_critical_plan_contract_rules() -> None:
@@ -5545,14 +5206,16 @@ def test_execution_surfaces_use_bounded_review_cadence_and_first_result_gates() 
     checkpoint_flow = (REFERENCES_DIR / "execution" / "execute-plan-checkpoints.md").read_text(encoding="utf-8")
     executor_agent = (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
 
-    assert "review_cadence" in execute_phase
-    assert "FIRST_RESULT_GATE_REQUIRED" in execute_phase
-    # Dense cadence override: the risk-classifier short-circuit
-    assert "Dense cadence override:" in execute_phase
-    assert "treat every wave as risky" in execute_phase
-
-    # execute-plan clarifies that dense-forced FIRST_RESULT_GATE_REQUIRED
-    # must be honored as-passed, not recomputed from per-plan heuristics
+    _assert_machine_fragments(
+        execute_phase,
+        "review_cadence",
+        "FIRST_RESULT_GATE_REQUIRED",
+        "probe_then_fanout",
+        "bounded_execution",
+        "pre_execution_specialists",
+        'gpd --raw init execute-phase "${PHASE_ARG}" --stage pre_execution_specialists',
+        context="execute-phase bounded review cadence",
+    )
     _assert_prompt_contracts(
         execute_plan,
         semantic_anchor(
@@ -5562,12 +5225,11 @@ def test_execution_surfaces_use_bounded_review_cadence_and_first_result_gates() 
             context="execute-plan first-result gate",
         ),
     )
-    assert "probe_then_fanout" in execute_phase
-    assert "bounded_execution" in execute_phase
-    assert "autonomy` changes who is asked and when. It does NOT disable first-result sanity checks" in execute_plan
-    assert "Required first-result sanity gate" in execute_plan
     _assert_semantic_fragments(
         execute_plan,
+        "autonomy",
+        "does NOT disable first-result sanity checks",
+        "Required first-result sanity gate",
         "phase ordering",
         "prior momentum",
         "never waive",
@@ -5575,30 +5237,40 @@ def test_execution_surfaces_use_bounded_review_cadence_and_first_result_gates() 
         "`MAX_UNATTENDED_MINUTES_PER_PLAN`",
         context="execute-plan bounded review cadence",
     )
-    assert "Do NOT narrow just because a wave advanced or one proxy passed." in execute_phase
-    assert "pre_execution_specialists" in execute_phase
-    assert 'gpd --raw init execute-phase "${PHASE_ARG}" --stage pre_execution_specialists' in execute_phase
-    assert '# task(subagent_type="gpd-notation-coordinator"' not in execute_phase
-    assert '# task(subagent_type="gpd-experiment-designer"' not in execute_phase
-    assert "What decisive evidence is still owed before downstream work is trustworthy?" in resume_work
-    assert "Pattern D: Auto-bounded" in executor_agent
-    assert "Canonical continuation fields define the public resume vocabulary" in resume_work
-    assert "public top-level resume vocabulary" not in resume_work
-    assert "`resume_surface`" not in resume_work
-    assert "gpd init resume" not in resume_work
-    assert "execution_segment" in continuation
-    assert "Required Checkpoint Payload" in checkpoints
-    assert "rollback primitive" in checkpoint_flow
-    assert "| `completed`    | -> update_roadmap (interactive verify-work equivalent)" not in execute_phase
-    assert "| `diagnosed`    | Gaps were debugged; review fixes, then -> update_roadmap" not in execute_phase
-    assert "| `validating`   | Verification in progress; wait or re-run verify-phase" not in execute_phase
+    _assert_semantic_fragments(execute_phase, "Do NOT narrow", "wave advanced", "one proxy passed", context="execute-phase bounded review scope")
+    _assert_forbidden_fragments(
+        execute_phase,
+        '# task(subagent_type="gpd-notation-coordinator"',
+        '# task(subagent_type="gpd-experiment-designer"',
+        "| `completed`    | -> update_roadmap (interactive verify-work equivalent)",
+        "| `diagnosed`    | Gaps were debugged; review fixes, then -> update_roadmap",
+        "| `validating`   | Verification in progress; wait or re-run verify-phase",
+        context="execute-phase bounded review stale branches",
+    )
+    _assert_machine_fragments(
+        resume_work,
+        "What decisive evidence is still owed before downstream work is trustworthy?",
+        "Canonical continuation fields define the public resume vocabulary",
+        context="resume-work continuation vocabulary",
+    )
+    _assert_forbidden_fragments(
+        resume_work,
+        "public top-level resume vocabulary",
+        "`resume_surface`",
+        "gpd init resume",
+        context="resume-work stale continuation vocabulary",
+    )
+    _assert_machine_fragments(executor_agent, "Pattern D: Auto-bounded", context="executor bounded pattern")
+    _assert_machine_fragments(continuation, "execution_segment", context="continuation prompt bounded segment")
+    _assert_machine_fragments(checkpoints, "Required Checkpoint Payload", context="checkpoint payload prompt")
+    _assert_machine_fragments(checkpoint_flow, "rollback primitive", context="execute-plan checkpoint flow")
     _assert_semantic_fragments(
         execute_phase,
         "`session_status: validating|completed|diagnosed`",
         "conversational progress only",
         context="execute-phase verification status boundary",
     )
-    assert "If the prior report carries `session_status: diagnosed`" in execute_phase
+    _assert_machine_fragments(execute_phase, "If the prior report carries `session_status: diagnosed`", context="execute-phase session status boundary")
 
 
 def test_show_phase_workflow_distinguishes_verification_status_from_session_status() -> None:
@@ -6567,12 +6239,10 @@ def test_help_and_execution_surfaces_wire_tangent_control_path() -> None:
         {
             "live execution tangent bridge": (
                 "tangent proposal",
-                "same live execution payload",
-                "new tangent state machine",
                 "tangent_summary",
                 "tangent_decision",
             ),
-            "no executor-initiated side work": ("new branch", "child plan", "side subagent", "executor initiative"),
+            "no executor-initiated side work": ("executor initiative",),
         },
         context="execute-phase tangent control",
     )

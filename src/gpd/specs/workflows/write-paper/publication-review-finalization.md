@@ -33,25 +33,16 @@ Branch by write-paper lane before finalizing.
 
 **Project-backed lane:** run the staged `gpd:peer-review` authorities for the
 resolved `${PAPER_DIR}/{topic_specific_stem}.tex` target recorded in
-`ARTIFACT-MANIFEST.json`. Load the publication round artifact, peer-review panel,
-reliability, review-ledger, referee-decision, and stage-recovery authorities
-listed in this stage manifest. Do not copy the full panel protocol into
-write-paper; keep behavior aligned with the standalone peer-review workflow.
+`ARTIFACT-MANIFEST.json`. Use the stage manifest's publication/review
+authorities; do not inline the standalone panel protocol here.
 
 Load `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md`
 before review-round routing and `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`
 before paired response authoring.
 
-Use `gpd-referee` only as the final adjudicator through the peer-review final
-adjudication authority. Keep `project_contract`, `project_contract_gate`,
-`project_contract_load_info`, `project_contract_validation`, and
-`active_reference_context` visible throughout staged review; the contract remains
-authoritative only when `project_contract_gate.authoritative` is true.
-
-For theorem-style or `proof_obligation` claims, this stage carries the mandatory
-auxiliary proof-redteam gate from peer review. Missing or open proof-redteam
-artifacts are fail-closed blockers even if the rest of the manuscript review
-looks clean.
+Use `gpd-referee` only through the peer-review final-adjudication authority. Keep
+the project-contract gate fields and `active_reference_context` visible; theorem
+or `proof_obligation` claims inherit the mandatory proof-redteam gate.
 
 Read `${selected_review_root}/REFEREE-DECISION{round_suffix}.json` and
 `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json` first when they
@@ -59,8 +50,6 @@ exist, then read `${selected_publication_root}/REFEREE-REPORT{round_suffix}.md`
 and assess the findings.
 
 **External-authoring lane:** do **not** run the embedded staged panel here.
-Embedded `write-paper` review parity for the bounded external-authoring lane is
-deferred until the managed publication lineage is unified end to end.
 Embedded `write-paper` review parity for the bounded external-authoring lane is deferred until the managed publication lineage is unified end to end.
 
 Instead, verify the bounded manuscript-root handoff under `${PAPER_DIR}`:
@@ -126,26 +115,14 @@ When revising a paper in response to referee reports:
    `fixed` until the corresponding section file changes have landed on disk.
 3. Produce paired response artifacts after manuscript edits land.
 
-```
-task(
-  subagent_type="gpd-paper-writer",
-  model="{writer_model}",
-  readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-paper-writer.md for your role and instructions.\n\nRead the canonical <author_response> protocol at {GPD_INSTALL_DIR}/templates/paper/author-response.md, the canonical referee response template at {GPD_INSTALL_DIR}/templates/paper/referee-response.md, and the shared publication response-writer handoff at {GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md. Produce both response artifacts at the concrete paths below.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n" +
-    "selected_publication_root: ${selected_publication_root}\n" +
-    "selected_review_root: ${selected_review_root}\n" +
-    "author_response_path: ${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md\n" +
-    "referee_response_path: ${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md\n" +
-    "Referee report: ${selected_publication_root}/REFEREE-REPORT{round_suffix}.md\n" +
-    "Review ledger (if present): ${selected_review_root}/REVIEW-LEDGER{round_suffix}.json\n" +
-    "Decision artifact (if present): ${selected_review_root}/REFEREE-DECISION{round_suffix}.json\n" +
-    "Manuscript tree: all .tex files under ${PAPER_DIR} recursively, rooted at the manifest-resolved manuscript directory, after the section revision agents have landed their edits\n" +
-    "Round: {N}\n\n" +
-    "For each REF-xxx issue, classify as fixed/rebutted/acknowledged/needs-calculation only after the corresponding manuscript edits exist on disk.\n" +
-    "Write to ${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md and ${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md",
-  description="Author response: round {N}"
-)
-```
+Spawn `gpd-paper-writer` through
+`{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`
+after loading `{GPD_INSTALL_DIR}/templates/paper/author-response.md`.
+Pass `<autonomy_mode>{AUTONOMY}</autonomy_mode>`,
+`<research_mode>{RESEARCH_MODE}</research_mode>`, selected roots, round,
+referee report, optional ledger/decision paths, manifest-resolved manuscript
+tree, and the two concrete response paths below. For each `REF-xxx` issue,
+classify it only after the corresponding manuscript edits exist on disk.
 
 Response-pair child gate:
 

@@ -41,7 +41,7 @@ if [ -n "$PROJECT_ROOT" ]; then
 fi
 ```
 
-Parse bootstrap JSON using the manifest-owned `paper_bootstrap.required_init_fields` in `write-paper-stage-manifest.json`; `gpd --raw stage field-access write-paper --stage paper_bootstrap --style instruction` is the helper-owned field inventory. Keep `project_contract_gate` visible before authoritative-use decisions; do not duplicate the manifest's required-field list in prose.
+Parse bootstrap JSON using the manifest-owned `paper_bootstrap.required_init_fields` in `write-paper-stage-manifest.json`; `gpd --raw stage field-access write-paper --stage paper_bootstrap --style instruction` is the helper-owned field inventory. Keep `project_contract_gate` visible before authoritative-use decisions; use `project_contract` as authoritative only when `project_contract_gate.authoritative` is true; do not duplicate the manifest's required-field list in prose.
 
 When later steps need publication routing, use the derived manuscript review statuses from init, including `derived_manuscript_reference_status` and `derived_manuscript_proof_review_status`, before reconstructing that status from source ordering or prose. If `derived_manuscript_reference_status` is present, use it for the resolved manuscript root. Use `derived_manuscript_proof_review_status` as proof-review freshness for theorem-bearing results.
 
@@ -76,9 +76,8 @@ The bounded external-authoring lane has one entrypoint only:
   optional `results[]`, optional `figures[]`, bibliography / citation-source
   input, and optional conventions / notation note
 
-When a workflow exposes the bounded external-authoring lane, accept one explicit
-intake manifest only.
-Do not infer widened `gpd:arxiv-submission` scope from this lane.
+External-authoring invariant: accept one explicit intake manifest only; do not
+infer widened `gpd:arxiv-submission` scope from this lane.
 
 If a launch supplies a bare positional title/path that looks like external
 authoring input but omits `--intake`, stop before writes with a typed blocker:
@@ -168,20 +167,17 @@ For `external_authoring_intake`, skip milestone digest lookup. Use only the
 intake manifest and `GPD/publication/{subject_slug}/intake/` provenance state:
 `central_claim`, `claims[]` with explicit evidence bindings, `source_notes[]`,
 optional `results[]`, optional `figures[]`, bibliography / citation-source
-input, and optional conventions / notation note. Do not scan
-`GPD/milestones/*`, `GPD/phases/*`, `GPD/state.json`, or arbitrary folders to
-fill missing evidence for this lane.
-Do not mine arbitrary folders or infer claim/evidence bindings from loose notes.
+  input, and optional conventions / notation note. Do not scan
+  `GPD/milestones/*`, `GPD/phases/*`, `GPD/state.json`, or arbitrary folders to
+  fill missing evidence for this lane.
 
 For the project-backed lane, prefer research digests generated during milestone
 completion. Cross-check recursive digest discovery against `GPD/MILESTONES.md`;
 if the index lists a digest but discovery returns nothing, report a consistency
 issue rather than silently downgrading to raw-phase mode. When digest coverage is
-insufficient, use structured init fields first:
-`derived_convention_lock`, `derived_intermediate_results`, and
-`derived_approximations`; then read summary artifacts (`SUMMARY.md` and
-`*-SUMMARY.md`, including `GPD/phases/*/*SUMMARY.md`) before raw phase files.
-Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`) before raw phase files.
+  insufficient, use structured init fields first:
+  `derived_convention_lock`, `derived_intermediate_results`, and
+  `derived_approximations`; then Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`, including `GPD/phases/*/*SUMMARY.md`) before raw phase files.
 
 Catalog evidence by section candidate:
 - derivations, numerical outputs, figures, and source data

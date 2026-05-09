@@ -144,86 +144,7 @@ issue:
 
 Return all issues as a structured `issues:` YAML list (see dimension examples for format).
 
-## Completed Verification Example
-
-```markdown
-## VERIFICATION PASSED
-
-**Phase:** {phase-name}
-**Research question:** {research-question-summary}
-**Plans verified:** {N}
-**Status:** All checks passed
-
-### Research Question Coverage
-
-| Requirement | Plans | Status  |
-| ----------- | ----- | ------- |
-| {req-1}     | 01    | Covered |
-| {req-2}     | 01,02 | Covered |
-
-### Approximation Summary
-
-| Approximation | Regime   | Validity        | Status |
-| ------------- | -------- | --------------- | ------ |
-| {approx-1}    | {regime} | {justification} | Valid  |
-
-### Computational Feasibility
-
-| Task   | Method   | Scale | Estimated Resources | Status   |
-| ------ | -------- | ----- | ------------------- | -------- |
-| {task} | {method} | {N}   | {time/memory}       | Feasible |
-
-### Validation Coverage
-
-| Result     | Dim. Analysis | Symmetry | Limits | Conservation | Literature | Status   |
-| ---------- | ------------- | -------- | ------ | ------------ | ---------- | -------- |
-| {result-1} | Y             | Y        | Y      | N/A          | Y          | Adequate |
-
-### Plan Summary
-
-| Plan | Tasks | Complexity | Wave | Status |
-| ---- | ----- | ---------- | ---- | ------ |
-| 01   | 3     | moderate   | 1    | Valid  |
-| 02   | 2     | moderate   | 2    | Valid  |
-
-Plans verified. Run `gpd:execute-phase {phase}` to proceed.
-```
-
-## Revision Required Example
-
-```markdown
-## ISSUES FOUND
-
-**Phase:** {phase-name}
-**Research question:** {research-question-summary}
-**Plans checked:** {N}
-**Issues:** {X} blocker(s), {Y} warning(s), {Z} info
-
-### Blockers (must fix)
-
-**1. [{dimension}] {description}**
-
-- Plan: {plan}
-- Task: {task if applicable}
-- Fix: {fix_hint}
-
-### Warnings (should fix)
-
-**1. [{dimension}] {description}**
-
-- Plan: {plan}
-- Fix: {fix_hint}
-
-### Structured Issues
-
-(YAML issues list using format from Issue Format above)
-
-### Recommendation
-
-{N} blocker(s) require revision. Returning to planner with feedback.
-```
-
-### Machine-Readable Return Envelope
+## Machine-Readable Return Envelope
 
 Headings above are presentation only. Route on `gpd_return.status`, the approved/blocked plan lists, and `issues`.
 
@@ -269,35 +190,9 @@ For each plan in phase:
 ```markdown
 ## PARTIAL APPROVAL
 
-**Phase:** {phase-name}
-**Research question:** {research-question-summary}
-**Plans checked:** {N}
-
-### Approved Plans (ready for execution)
-
-| Plan | Tasks | Wave | Status |
-| ---- | ----- | ---- | ------ |
-| 01   | 3     | 1    | APPROVED |
-| 03   | 2     | 1    | APPROVED |
-
-### Plans Requiring Revision
-
-| Plan | Blockers | Warnings | Blocked By |
-| ---- | -------- | -------- | ---------- |
-| 02   | 2        | 1        | (own issues) |
-| 04   | 0        | 0        | 02 (dependency) |
-
-### Blocker Details (Plan 02 only)
-
-**1. [{dimension}] {description}**
-- Task: {task}
-- Fix: {fix_hint}
-
-### Recommendation
-
-Plans 01, 03 may proceed to execution (Wave 1).
-Plan 02 requires revision — returning to planner with feedback.
-Plan 04 is blocked by Plan 02 — will be re-evaluated after Plan 02 revision.
+Approved: {approved_plans}
+Blocked/revision-needed: {blocked_plans}
+Reason: summarize blockers and dependency causes from `issues`.
 ```
 
 **Rules:**

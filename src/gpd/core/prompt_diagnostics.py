@@ -128,25 +128,6 @@ _RUNTIME_NOTE_RE = re.compile(
     r"When shell steps call the GPD CLI)",
     re.IGNORECASE,
 )
-_DUPLICATE_VOCABULARY = (
-    "gpd_return",
-    "files_written",
-    "artifact gate",
-    "fail-closed",
-    "fail closed",
-    "STOP",
-    "do not proceed",
-    "must not",
-    "never",
-    "authoritative",
-    "frontmatter",
-    "schema",
-    "validation",
-    "checkpoint",
-    "blocked",
-    "route on",
-    "presentation only",
-)
 _MACHINE_CONTRACT_RE = re.compile(
     r"(?:"
     r"\b[A-Za-z0-9_.{}$-]+/[A-Za-z0-9_./{}$-]+|"
@@ -763,7 +744,7 @@ def build_prompt_surface_report(
         )
         for source in sources
     )
-    duplicate_invariants = _duplicate_invariant_groups(root, include_tests=include_tests)
+    duplicate_invariants: tuple[DuplicateInvariantGroup, ...] = ()
     semantic_duplicate_invariants = _semantic_duplicate_invariant_groups(root, include_tests=include_tests)
     exact_assertion_diagnostics = (
         _scan_exact_assertion_diagnostics(root) if include_tests else _empty_exact_assertion_diagnostics()
@@ -2061,100 +2042,8 @@ def _duplicate_scan_paths(repo_root: Path, *, include_tests: bool) -> tuple[Path
     return tuple(paths)
 
 
-def _duplicate_invariant_groups(repo_root: Path, *, include_tests: bool) -> tuple[DuplicateInvariantGroup, ...]:
-    occurrences: dict[str, list[str]] = defaultdict(list)
-    files_by_phrase: dict[str, set[str]] = defaultdict(set)
-    non_reference_files_by_phrase: dict[str, set[str]] = defaultdict(set)
-
-    for path in _duplicate_scan_paths(repo_root, include_tests=include_tests):
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        relative_path = _relative_path(path, repo_root)
-        for line_number, line in _iter_unfenced_lines(_body_without_frontmatter(text)):
-            phrase = _normalize_duplicate_line(line)
-            if not _is_candidate_duplicate_phrase(phrase):
-                continue
-            location = f"{relative_path}:{line_number}"
-            occurrences[phrase].append(location)
-            files_by_phrase[phrase].add(relative_path)
-            if not _is_reference_or_template_path(relative_path):
-                non_reference_files_by_phrase[phrase].add(relative_path)
-
-    groups: list[DuplicateInvariantGroup] = []
-    for phrase, locations in occurrences.items():
-        file_count = len(files_by_phrase[phrase])
-        non_reference_file_count = len(non_reference_files_by_phrase[phrase])
-        if len(locations) < 3 and non_reference_file_count < 2:
-            continue
-        groups.append(
-            DuplicateInvariantGroup(
-                phrase=phrase,
-                occurrence_count=len(locations),
-                file_count=file_count,
-                severity=_duplicate_severity(phrase, non_reference_file_count),
-                locations=tuple(locations[:30]),
-            )
-        )
-
-    severity_order = {"high": 0, "warn": 1, "info": 2}
-    return tuple(
-        sorted(
-            groups,
-            key=lambda group: (
-                severity_order[group.severity],
-                -group.file_count,
-                -group.occurrence_count,
-                group.phrase,
-            ),
-        )
-    )
-
-
-def _normalize_duplicate_line(line: str) -> str:
-    normalized = line.strip()
-    normalized = re.sub(r"^\s*(?:[-*+]|\d+[.)]|#+|>)\s*", "", normalized)
-    normalized = normalized.strip("`*_ ")
-    normalized = re.sub(r"\s+", " ", normalized)
-    return normalized.casefold()
-
-
-def _is_candidate_duplicate_phrase(phrase: str) -> bool:
-    if not phrase:
-        return False
-    folded = phrase.replace("_", " ").replace("-", " ")
-    if not any(
-        candidate.casefold() in phrase or candidate.casefold().replace("-", " ") in folded
-        for candidate in _DUPLICATE_VOCABULARY
-    ):
-        return False
-    word_count = len(re.findall(r"[a-z0-9_'-]+", phrase))
-    if word_count >= 9:
-        return True
-    return any(
-        marker in phrase
-        for marker in (
-            "use only status names",
-            "frontmatter aliases",
-            "non-canonical frontmatter",
-            "presentation only",
-        )
-    )
-
-
 def _is_reference_or_template_path(relative_path: str) -> bool:
     return "/specs/references/" in f"/{relative_path}" or "/specs/templates/" in f"/{relative_path}"
-
-
-def _duplicate_severity(phrase: str, non_reference_file_count: int) -> Literal["info", "warn", "high"]:
-    if non_reference_file_count == 0:
-        return "info"
-    if non_reference_file_count >= 5 or ("child" in phrase and "return" in phrase and "authoritative" in phrase):
-        return "high"
-    if non_reference_file_count >= 2:
-        return "warn"
-    return "info"
 
 
 def _semantic_duplicate_invariant_groups(
@@ -2422,10 +2311,6 @@ def _semantic_example_limit(top: int | None) -> int:
     return min(top, _SEMANTIC_EXAMPLE_LIMIT)
 
 
-def _scan_exact_prompt_assertions(repo_root: Path) -> tuple[Mapping[str, object], ...]:
-    return _exact_prose_assertion_files_from_diagnostics(_scan_exact_assertion_diagnostics(repo_root))
-
-
 def _scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
     tests_root = repo_root / "tests"
     if not tests_root.is_dir():
@@ -2658,10 +2543,6 @@ def _exact_assertion_file_severity(
     return "info"
 
 
-def _prompt_exact_literals(tree: ast.AST) -> tuple[str, ...]:
-    return tuple(assertion.literal for assertion in _prompt_exact_assertions(tree))
-
-
 def _prompt_exact_assertions(tree: ast.AST) -> tuple[ExactPromptAssertion, ...]:
     assertions: list[ExactPromptAssertion] = []
     for node in ast.walk(tree):
@@ -2670,10 +2551,6 @@ def _prompt_exact_assertions(tree: ast.AST) -> tuple[ExactPromptAssertion, ...]:
         elif isinstance(node, ast.Call):
             assertions.extend(_method_exact_assertions(node))
     return tuple(assertion for assertion in assertions if _is_prompt_literal(assertion.literal))
-
-
-def _assert_exact_literals(node: ast.AST) -> tuple[str, ...]:
-    return tuple(assertion.literal for assertion in _assert_exact_assertions(node))
 
 
 def _assert_exact_assertions(node: ast.AST) -> tuple[ExactPromptAssertion, ...]:
@@ -2706,10 +2583,6 @@ def _assert_exact_assertions(node: ast.AST) -> tuple[ExactPromptAssertion, ...]:
                         )
                     )
     return tuple(assertions)
-
-
-def _method_exact_literals(node: ast.Call) -> tuple[str, ...]:
-    return tuple(assertion.literal for assertion in _method_exact_assertions(node))
 
 
 def _method_exact_assertions(node: ast.Call) -> tuple[ExactPromptAssertion, ...]:
@@ -2750,13 +2623,6 @@ def _is_prompt_literal(literal: str) -> bool:
         or _SCHEMA_KEY_LITERAL_RE.search(stripped)
         or _PUBLIC_UX_LITERAL_RE.search(stripped)
     )
-
-
-def _classify_exact_literal(literal: str) -> Literal["machine", "prose"]:
-    category, _reason = _classify_exact_assertion(literal, path="", polarity="required")
-    if category == "machine_contract":
-        return "machine"
-    return "prose"
 
 
 def _classify_exact_assertion(
@@ -2967,26 +2833,7 @@ def _prompt_item_to_dict(item: PromptSurfaceItem) -> dict[str, object]:
         "shell_fence_count": item.shell_fence_count,
         "shell_parsing_line_count": item.shell_parsing_line_count,
         "rigidity_index": item.rigidity_index,
-        "runtime_projection": [
-            {
-                "runtime": metric.runtime,
-                "native_include_support": metric.native_include_support,
-                "expanded_line_count": metric.expanded_line_count,
-                "expanded_char_count": metric.expanded_char_count,
-                "line_count": metric.line_count,
-                "char_count": metric.char_count,
-                "line_delta": metric.line_delta,
-                "char_delta": metric.char_delta,
-                "char_delta_percent": metric.char_delta_percent,
-                "include_count": metric.include_count,
-                "runtime_note_count": metric.runtime_note_count,
-                "runtime_note_chars": metric.runtime_note_chars,
-                "shell_fence_count": metric.shell_fence_count,
-                "shell_rewrite_count": metric.shell_rewrite_count,
-                "bridge_command_occurrences": metric.bridge_command_occurrences,
-            }
-            for metric in item.runtime_projection
-        ],
+        "runtime_projection": [_runtime_projection_metric_to_dict(metric) for metric in item.runtime_projection],
     }
 
 

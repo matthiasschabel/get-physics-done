@@ -8,7 +8,7 @@ Do not load this index as a stage authority.
 
 - `paper_bootstrap` -> `workflows/write-paper/paper-bootstrap.md`
   Bootstrap, lane normalization, manuscript/project preflight, evidence
-  inventory, citation-source readiness, and fail-closed blockers.
+  inventory, citation-source readiness, and fail-closed blockers. Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`) from `GPD/phases/*/*SUMMARY.md` when milestone digests are insufficient.
 - `outline_and_scaffold` -> `workflows/write-paper/outline-scaffold.md`
   Journal key selection, outline, `${PAPER_DIR}/PAPER-CONFIG.json`, and
   `gpd paper-build` scaffold generation.
@@ -20,7 +20,8 @@ Do not load this index as a stage authority.
   and reproducibility manifest.
 - `publication_review` -> `workflows/write-paper/publication-review-finalization.md`
   Project-backed staged peer-review handoff, external-authoring review routing,
-  final review, and in-workflow revision/response artifacts.
+  final review, and in-workflow revision/response artifacts. Response routing
+  uses `templates/paper/author-response.md` and can classify `needs-calculation`.
 </stage_authorities>
 
 <stage_loading_rule>
@@ -49,6 +50,7 @@ The staged authorities reference these canonical contracts as needed:
 - `templates/paper/bibliography-audit-schema.md`
 - `templates/paper/figure-tracker.md`
 - `templates/paper/reproducibility-manifest.md`
+- `templates/paper/author-response.md`
 - `templates/paper/review-ledger-schema.md`
 - `templates/paper/referee-decision-schema.md`
 </canonical_references>

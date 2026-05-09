@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -16,8 +18,9 @@ def _read(path: Path) -> str:
 def test_literature_review_command_stays_thin_and_leaves_routing_to_the_workflow() -> None:
     command = _read(COMMANDS_DIR / "literature-review.md")
 
-    assert "Follow the included literature-review workflow exactly." in command
-    assert "The workflow owns staged loading, scope fixing, artifact gating, and citation verification." in command
+    assert "@{GPD_INSTALL_DIR}/workflows/literature-review/review-bootstrap.md" in command
+    assert "Read the included literature-review bootstrap authority first." in command
+    assert "scope fixing, artifact gating, citation verification" in command
     assert "explicit topic or research question" in command
     assert "under `GPD/literature/` rooted at the current workspace" in command
     assert "Standalone empty invocations should already have failed preflight." in command
@@ -27,7 +30,7 @@ def test_literature_review_command_stays_thin_and_leaves_routing_to_the_workflow
 
 
 def test_literature_review_workflow_requires_reviewer_and_bibliographer_spawn_contracts() -> None:
-    workflow = _read(WORKFLOWS_DIR / "literature-review.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "literature-review")
 
     assert 'subagent_type="gpd-literature-reviewer"' in workflow
     assert 'subagent_type="gpd-bibliographer"' in workflow
@@ -49,7 +52,7 @@ def test_literature_review_workflow_requires_reviewer_and_bibliographer_spawn_co
 
 
 def test_literature_review_workflow_removes_legacy_commit_ownership_and_keeps_completion_fail_closed() -> None:
-    workflow = _read(WORKFLOWS_DIR / "literature-review.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "literature-review")
 
     assert "gpd commit" not in workflow
     assert "Return to orchestrator through the typed child-return contract." in workflow

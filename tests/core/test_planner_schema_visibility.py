@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLANNER_ROLE = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-planner.md"
 PLAN_PHASE = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "plan-phase.md"
+WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 VERIFY_WORK = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "verify-work.md"
 QUICK = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "quick.md"
 
@@ -17,9 +20,9 @@ def _read(path: Path) -> str:
 
 def test_planner_role_owns_schema_visibility_and_workflows_use_the_short_role_preamble() -> None:
     planner_role = _read(PLANNER_ROLE)
-    plan_phase = _read(PLAN_PHASE)
-    verify_work = _read(VERIFY_WORK)
-    quick = _read(QUICK)
+    plan_phase = workflow_authority_text(WORKFLOWS_DIR, PLAN_PHASE.name)
+    verify_work = workflow_authority_text(WORKFLOWS_DIR, VERIFY_WORK.name)
+    quick = workflow_authority_text(WORKFLOWS_DIR, QUICK.name)
 
     required_markers = (
         "{GPD_INSTALL_DIR}/templates/phase-prompt.md",

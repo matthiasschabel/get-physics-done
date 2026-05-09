@@ -26,7 +26,7 @@ Orchestrator role: validate the phase input, then hand off to the workflow-owned
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/research-phase.md
+@{GPD_INSTALL_DIR}/workflows/research-phase/phase-bootstrap.md
 </execution_context>
 
 <context>
@@ -36,7 +36,7 @@ Normalize phase input before any directory lookups.
 </context>
 
 <process>
-Follow the included research-phase workflow.
+Follow the included research-phase bootstrap authority. After staged reload, follow only `staged_loading.eager_authorities` for the research handoff.
 Do not duplicate init, spawn, or return routing here.
 Research depth follows the workflow-owned `research_mode`.
 </process>

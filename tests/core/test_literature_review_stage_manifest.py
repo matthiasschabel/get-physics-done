@@ -33,26 +33,27 @@ def test_literature_review_stage_manifest_defers_reference_artifacts_and_tracks_
     review_handoff = manifest.stage("review_handoff")
     completion_gate = manifest.stage("completion_gate")
 
-    assert bootstrap.loaded_authorities == ("workflows/literature-review.md",)
+    assert bootstrap.loaded_authorities == ("workflows/literature-review/review-bootstrap.md",)
     assert "reference_artifact_files" not in bootstrap.required_init_fields
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
-    assert "references/orchestration/runtime-delegation-note.md" not in bootstrap.must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
+    assert "workflows/literature-review/scope-locked.md" in bootstrap.must_not_eager_load
 
     assert "reference_artifact_files" in scope_locked.required_init_fields
     assert "reference_artifacts_content" in scope_locked.required_init_fields
-    assert scope_locked.loaded_authorities == ("workflows/literature-review.md",)
-    assert "references/orchestration/runtime-delegation-note.md" not in scope_locked.must_not_eager_load
+    assert scope_locked.loaded_authorities == ("workflows/literature-review/scope-locked.md",)
+    assert "references/orchestration/runtime-delegation-note.md" in scope_locked.must_not_eager_load
 
     assert review_handoff.loaded_authorities == (
-        "workflows/literature-review.md",
+        "workflows/literature-review/review-handoff.md",
         "references/orchestration/runtime-delegation-note.md",
     )
     assert "GPD/literature/slug-REVIEW.md" in review_handoff.writes_allowed
     assert "GPD/literature/slug-CITATION-SOURCES.json" in review_handoff.writes_allowed
     assert "GPD/literature/slug-CITATION-AUDIT.md" in review_handoff.writes_allowed
 
-    assert completion_gate.loaded_authorities == ("workflows/literature-review.md",)
-    assert "references/orchestration/runtime-delegation-note.md" not in completion_gate.must_not_eager_load
+    assert completion_gate.loaded_authorities == ("workflows/literature-review/completion-gate.md",)
+    assert "references/orchestration/runtime-delegation-note.md" in completion_gate.must_not_eager_load
     assert completion_gate.writes_allowed == ()
 
 
@@ -64,15 +65,17 @@ def test_literature_review_command_prompt_budget_stays_close_to_the_workflow_sur
         path_prefix=PATH_PREFIX,
     )
     workflow = measure_prompt_surface(
-        WORKFLOWS_DIR / "literature-review.md",
+        WORKFLOWS_DIR / "literature-review" / "review-bootstrap.md",
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
 
     assert metrics.raw_include_count == 1
-    assert "@{GPD_INSTALL_DIR}/workflows/literature-review.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/literature-review/review-bootstrap.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/literature-review.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md" not in command_text
     assert metrics.expanded_line_count > workflow.expanded_line_count
     assert metrics.expanded_char_count > workflow.expanded_char_count
     assert metrics.expanded_line_count < workflow.expanded_line_count + 250
     assert metrics.expanded_char_count < workflow.expanded_char_count + 15000
+    assert metrics.expanded_char_count < 12000

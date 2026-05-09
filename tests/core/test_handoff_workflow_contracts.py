@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -26,7 +28,7 @@ def test_planner_template_routes_on_typed_gpd_return_status_not_heading_markers(
 
 
 def test_plan_phase_uses_structured_status_and_artifact_gating_for_research_and_planner_returns() -> None:
-    workflow = _read(WORKFLOWS_DIR / "plan-phase.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "plan-phase.md")
 
     assert 'REQUIREMENTS=$(echo "$INIT" | gpd json get .requirements_content --default "")' in workflow
     assert 'grep -A100 "## Requirements"' not in workflow
@@ -38,7 +40,7 @@ def test_plan_phase_uses_structured_status_and_artifact_gating_for_research_and_
 
 
 def test_research_phase_routes_on_typed_status_and_expected_artifacts() -> None:
-    workflow = _read(WORKFLOWS_DIR / "research-phase.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "research-phase")
 
     assert "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in workflow
     assert "role=`gpd-phase-researcher`" in workflow
@@ -52,7 +54,7 @@ def test_research_phase_routes_on_typed_status_and_expected_artifacts() -> None:
 
 
 def test_map_research_routes_on_typed_status_and_expected_artifacts() -> None:
-    workflow = _read(WORKFLOWS_DIR / "map-research.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "map-research")
 
     assert "Each mapper agent is a one-shot file-producing handoff." in workflow
     assert "Route on `gpd_return.status`, then verify `gpd_return.files_written` against the expected artifacts before accepting the run." in workflow
@@ -65,7 +67,7 @@ def test_map_research_routes_on_typed_status_and_expected_artifacts() -> None:
 
 
 def test_verify_work_uses_status_payload_session_lookup_and_canonical_verification_status() -> None:
-    workflow = _read(WORKFLOWS_DIR / "verify-work.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
 
     assert "gpd frontmatter get \"$file\" --field session_status" not in workflow
     assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in workflow

@@ -7,7 +7,7 @@
       "order": 1,
       "purpose": "state-file existence detection and reconciliation path selection",
       "mode_paths": [
-        "workflows/sync-state.md"
+        "workflows/sync-state/sync-bootstrap.md"
       ],
       "required_init_fields": [
         "workspace_root",
@@ -26,10 +26,14 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/sync-state.md"
+        "workflows/sync-state/sync-bootstrap.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/sync-state.md",
+        "workflows/sync-state/single-source-recovery.md",
+        "workflows/sync-state/conflict-analysis.md",
+        "workflows/sync-state/reconcile-and-validate.md",
         "templates/state-json-schema.md"
       ],
       "allowed_tools": [
@@ -58,7 +62,7 @@
       "order": 2,
       "purpose": "missing-file regeneration from the single authoritative surviving source",
       "mode_paths": [
-        "workflows/sync-state.md"
+        "workflows/sync-state/single-source-recovery.md"
       ],
       "required_init_fields": [
         "project_root",
@@ -76,10 +80,13 @@
         "project_contract_validation"
       ],
       "loaded_authorities": [
+        "workflows/sync-state/single-source-recovery.md",
         "templates/state-json-schema.md"
       ],
       "conditional_authorities": [],
-      "must_not_eager_load": [],
+      "must_not_eager_load": [
+        "workflows/sync-state.md"
+      ],
       "allowed_tools": [
         "file_read",
         "file_write",
@@ -107,7 +114,7 @@
       "order": 3,
       "purpose": "deterministic comparison of mirrored fields under schema authority",
       "mode_paths": [
-        "workflows/sync-state.md"
+        "workflows/sync-state/conflict-analysis.md"
       ],
       "required_init_fields": [
         "project_root",
@@ -125,10 +132,13 @@
         "project_contract_validation"
       ],
       "loaded_authorities": [
+        "workflows/sync-state/conflict-analysis.md",
         "templates/state-json-schema.md"
       ],
       "conditional_authorities": [],
-      "must_not_eager_load": [],
+      "must_not_eager_load": [
+        "workflows/sync-state.md"
+      ],
       "allowed_tools": [
         "file_read",
         "file_write",
@@ -154,7 +164,7 @@
       "order": 4,
       "purpose": "apply the chosen repair path, validate both state files, and optionally commit",
       "mode_paths": [
-        "workflows/sync-state.md"
+        "workflows/sync-state/reconcile-and-validate.md"
       ],
       "required_init_fields": [
         "project_root",
@@ -172,10 +182,13 @@
         "project_contract_validation"
       ],
       "loaded_authorities": [
+        "workflows/sync-state/reconcile-and-validate.md",
         "templates/state-json-schema.md"
       ],
       "conditional_authorities": [],
-      "must_not_eager_load": [],
+      "must_not_eager_load": [
+        "workflows/sync-state.md"
+      ],
       "allowed_tools": [
         "file_read",
         "file_write",

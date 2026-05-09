@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
@@ -13,7 +15,7 @@ def _read(path: Path) -> str:
 
 
 def test_new_project_synthesizer_seam_routes_on_typed_returns_and_rejects_stale_summary_files() -> None:
-    workflow = _read(WORKFLOWS_DIR / "new-project.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-project")
 
     assert "After all 4 scout artifacts pass the gate, spawn synthesizer to create SUMMARY.md:" in workflow
     assert "<research_files>" in workflow
@@ -30,7 +32,7 @@ def test_new_project_synthesizer_seam_routes_on_typed_returns_and_rejects_stale_
 
 
 def test_new_milestone_synthesizer_seam_keeps_child_contract_visible_and_task_local() -> None:
-    workflow = _read(WORKFLOWS_DIR / "new-milestone.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     assert "Apply `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md` before counting any scout as complete." in workflow
     assert "After all 4 complete and required artifacts are present, spawn synthesizer:" in workflow

@@ -14,7 +14,8 @@ def test_sync_state_wrapper_stays_thin_while_schema_visibility_remains_in_the_ex
     raw = COMMAND.read_text(encoding="utf-8")
     expanded = get_command("gpd:sync-state").content
 
-    assert raw.count("@{GPD_INSTALL_DIR}/workflows/sync-state.md") == 1
+    assert raw.count("@{GPD_INSTALL_DIR}/workflows/sync-state/sync-bootstrap.md") == 1
+    assert "@{GPD_INSTALL_DIR}/workflows/sync-state.md" not in raw
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw
     assert "@GPD/STATE.md" not in raw
     assert "@GPD/state.json" not in raw
@@ -24,4 +25,4 @@ def test_sync_state_wrapper_stays_thin_while_schema_visibility_remains_in_the_ex
     assert "state-json-schema.md" in expanded
     assert "# state.json Schema" not in expanded
     assert "Authoritative vs Derived" not in expanded
-    assert "`convention_lock`" in expanded
+    assert "`convention_lock`" not in expanded

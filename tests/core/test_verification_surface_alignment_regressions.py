@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "src" / "gpd" / "specs" / "templates"
 WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / "src" / "gpd" / "specs" / "workflows"
 
 
 def _read(relative_path: str) -> str:
+    if relative_path == "src/gpd/specs/workflows/verify-work.md":
+        return workflow_authority_text(WORKFLOWS_DIR, "verify-work")
     return (Path(__file__).resolve().parents[2] / relative_path).read_text(encoding="utf-8")
 
 

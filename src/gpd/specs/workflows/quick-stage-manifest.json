@@ -48,20 +48,22 @@
       "purpose": "quick task intake, workspace bootstrap, and contract-gate preflight",
       "init_spec_id": "quick.task_bootstrap.v1",
       "mode_paths": [
-        "workflows/quick.md"
+        "workflows/quick/task-bootstrap.md"
       ],
       "required_init_field_groups": [
         "task_common"
       ],
       "loaded_authorities": [
-        "workflows/quick.md",
+        "workflows/quick/task-bootstrap.md",
         "references/quick/quick-mode-boundary.md",
         "references/quick/quick-durability-minimum.md",
-        "references/quick/quick-reroute-rules.md",
-        "references/orchestration/runtime-delegation-note.md"
+        "references/quick/quick-reroute-rules.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/quick/task-authoring.md",
+        "references/orchestration/runtime-delegation-note.md",
+        "workflows/quick.md",
         "references/verification/core/proof-redteam-workflow-gate.md",
         "references/publication/publication-pipeline-modes.md",
         "references/publication/peer-review-panel.md",
@@ -103,13 +105,13 @@
       "purpose": "quick planner prompt assembly and task-plan authoring",
       "init_spec_id": "quick.task_authoring.v1",
       "mode_paths": [
-        "workflows/quick.md"
+        "workflows/quick/task-authoring.md"
       ],
       "required_init_field_groups": [
         "task_common"
       ],
       "loaded_authorities": [
-        "workflows/quick.md",
+        "workflows/quick/task-authoring.md",
         "references/quick/quick-mode-boundary.md",
         "references/quick/quick-durability-minimum.md",
         "references/quick/quick-reroute-rules.md",
@@ -117,6 +119,7 @@
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/quick.md",
         "references/verification/core/proof-redteam-workflow-gate.md",
         "references/publication/publication-pipeline-modes.md",
         "references/publication/peer-review-panel.md",
@@ -155,14 +158,14 @@
       "purpose": "reference-aware quick planner prompt assembly for tasks that explicitly need project anchors or lookup context",
       "init_spec_id": "quick.reference_context.v1",
       "mode_paths": [
-        "workflows/quick.md"
+        "workflows/quick/task-authoring.md"
       ],
       "required_init_field_groups": [
         "task_common",
         "reference_runtime_context"
       ],
       "loaded_authorities": [
-        "workflows/quick.md",
+        "workflows/quick/task-authoring.md",
         "references/quick/quick-mode-boundary.md",
         "references/quick/quick-durability-minimum.md",
         "references/quick/quick-reroute-rules.md",
@@ -170,6 +173,7 @@
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/quick.md",
         "references/verification/core/proof-redteam-workflow-gate.md",
         "references/publication/publication-pipeline-modes.md",
         "references/publication/peer-review-panel.md",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
@@ -12,7 +14,7 @@ def _read(path: Path) -> str:
 
 
 def test_literature_review_workflow_routes_on_typed_status_and_artifact_gate() -> None:
-    workflow = _read(WORKFLOWS_DIR / "literature-review.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "literature-review")
 
     assert "Route on `gpd_return.status` and the artifact gate;" in workflow
     assert "presentation only" in workflow

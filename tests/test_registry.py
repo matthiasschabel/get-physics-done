@@ -2095,8 +2095,12 @@ class TestRegistryPromptIncludeInlining:
             assert fragment in agent.system_prompt
         assert "<!-- [included:" not in agent.system_prompt
 
-    def test_verify_work_skill_surface_keeps_fallback_schema_bridge_visible(self) -> None:
+    def test_verify_work_skill_surface_defers_fallback_schema_bridge_to_inventory_stage(self) -> None:
         skill = registry.get_skill("gpd-verify-work")
+        repo_root = Path(__file__).resolve().parents[1]
+        inventory_stage = (
+            repo_root / "src" / "gpd" / "specs" / "workflows" / "verify-work" / "inventory-build.md"
+        ).read_text(encoding="utf-8")
 
         durable_fragments = (
             "fallback verifier execution is still `gpd-verifier` execution",
@@ -2118,8 +2122,11 @@ class TestRegistryPromptIncludeInlining:
         )
 
         assert skill.source_kind == "command"
+        assert "Stage id: `session_router`." in skill.content
+        assert "Do not assume reference ledgers, protocol bundles, or report schemas are loaded here." in skill.content
         for fragment in durable_fragments:
-            assert fragment in skill.content
+            assert fragment not in skill.content
+            assert fragment in inventory_stage
 
     def test_project_researcher_system_prompt_keeps_one_shot_checkpoint_contract_visible(self) -> None:
         agent = registry.get_skill("gpd-project-researcher")
@@ -2906,9 +2913,15 @@ class TestPublicAPI:
 
         command = registry.get_command("gpd:new-milestone")
 
-        assert "gpd-roadmapper spawned with staged continuation context" in command.content
-        assert "gpd-roadmapper" in command.content
-        assert "roadmapper" in command.content
+        assert command.staged_loading is not None
+        assert command.staged_loading.stages[0].loaded_authorities[0] == (
+            "workflows/new-milestone/milestone-bootstrap.md"
+        )
+        assert "gpd-roadmapper spawned with staged continuation context" not in command.content
+        assert any(
+            contract.get("expected_artifacts") == ["GPD/ROADMAP.md", "GPD/REQUIREMENTS.md"]
+            for contract in command.spawn_contracts
+        )
 
     def test_get_command_new_milestone_surfaces_staged_loading_manifest(
         self,
@@ -3093,9 +3106,13 @@ class TestPublicAPI:
             "interactive_validation",
             "gap_repair",
         )
-        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/verify-work.md",)
+        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/verify-work/session-router.md",)
+        assert cmd.staged_loading.stages[1].loaded_authorities == (
+            "workflows/verify-work/phase-bootstrap.md",
+            "references/verification/core/proof-redteam-workflow-gate.md",
+        )
         assert cmd.staged_loading.stages[2].loaded_authorities == (
-            "workflows/verify-work.md",
+            "workflows/verify-work/inventory-build.md",
             "references/verification/meta/verification-independence.md",
         )
         assert cmd.staged_loading.stages[2].next_stages == ("interactive_validation",)
@@ -3115,7 +3132,7 @@ class TestPublicAPI:
             "task",
         )
         assert cmd.staged_loading.stages[3].loaded_authorities == (
-            "workflows/verify-work.md",
+            "workflows/verify-work/interactive-validation.md",
             "templates/research-verification.md",
             "templates/verification-report.md",
             "templates/contract-results-schema.md",
@@ -3129,7 +3146,7 @@ class TestPublicAPI:
             "check results remain contract-backed",
         )
         assert cmd.staged_loading.stages[4].loaded_authorities == (
-            "workflows/verify-work.md",
+            "workflows/verify-work/gap-repair.md",
             "templates/research-verification.md",
             "templates/verification-report.md",
             "templates/contract-results-schema.md",
@@ -3221,12 +3238,14 @@ class TestPublicAPI:
         assert cmd.staged_loading.workflow_id == "research-phase"
         assert cmd.staged_loading.stage_ids() == ("phase_bootstrap", "research_handoff")
         assert cmd.staged_loading.stages[0].loaded_authorities == (
-            "workflows/research-phase.md",
+            "workflows/research-phase/phase-bootstrap.md",
             "references/orchestration/model-profile-resolution.md",
         )
-        assert "references/orchestration/runtime-delegation-note.md" not in cmd.staged_loading.stages[0].must_not_eager_load
+        assert "workflows/research-phase.md" in cmd.staged_loading.stages[0].must_not_eager_load
+        assert "workflows/research-phase/research-handoff.md" in cmd.staged_loading.stages[0].must_not_eager_load
+        assert "references/orchestration/runtime-delegation-note.md" in cmd.staged_loading.stages[0].must_not_eager_load
         assert cmd.staged_loading.stages[1].loaded_authorities == (
-            "workflows/research-phase.md",
+            "workflows/research-phase/research-handoff.md",
             "references/orchestration/model-profile-resolution.md",
             "references/orchestration/runtime-delegation-note.md",
         )

@@ -13,4 +13,7 @@ def test_quick_command_wrapper_surfaces_staged_handoff_and_preserves_workflow_ga
 
     assert "workflow owns the staged quick planner handoff" in command
     assert "staged planner loading" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/quick/task-bootstrap.md" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/quick.md" not in command
+    assert "included first-stage quick authority" in command
     assert "Preserve all workflow gates (validation, task description, staged planner loading, planning, execution, preflight, state updates, commits)." in command

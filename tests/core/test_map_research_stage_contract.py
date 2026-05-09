@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -25,21 +26,23 @@ def test_map_research_stage_manifest_defers_heavy_context_and_tracks_visible_del
     bootstrap = manifest.stage("map_bootstrap")
     authoring = manifest.stage("mapper_authoring")
 
-    assert bootstrap.loaded_authorities == ("workflows/map-research.md",)
+    assert bootstrap.loaded_authorities == ("workflows/map-research/map-bootstrap.md",)
     assert "project_root" in bootstrap.required_init_fields
     assert "project_root_source" in bootstrap.required_init_fields
     assert "project_root_auto_selected" in bootstrap.required_init_fields
     assert "workspace_root" in bootstrap.required_init_fields
     assert "research_map_dir_absolute" in bootstrap.required_init_fields
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
-    assert "references/orchestration/runtime-delegation-note.md" not in bootstrap.must_not_eager_load
+    assert "workflows/map-research.md" in bootstrap.must_not_eager_load
+    assert "workflows/map-research/mapper-authoring.md" in bootstrap.must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
     assert bootstrap.writes_allowed == (
         "GPD/research-map",
         "GPD/research-map.archive-*",
     )
 
     assert authoring.loaded_authorities == (
-        "workflows/map-research.md",
+        "workflows/map-research/mapper-authoring.md",
         "references/orchestration/runtime-delegation-note.md",
     )
     assert "reference_artifacts_content" in authoring.required_init_fields
@@ -48,7 +51,7 @@ def test_map_research_stage_manifest_defers_heavy_context_and_tracks_visible_del
 
 
 def test_map_research_workflow_uses_project_rooted_map_targets_for_side_effects() -> None:
-    text = (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "map-research")
 
     assert 'PROJECT_ROOT=$(echo "$BOOTSTRAP_INIT" | gpd json get .project_root --default "")' in text
     assert (

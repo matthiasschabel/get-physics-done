@@ -64,7 +64,7 @@ def test_transition_workflow_stays_runtime_neutral() -> None:
 
 def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_state_table() -> None:
     quick_command = (COMMANDS_DIR / "quick.md").read_text(encoding="utf-8")
-    quick_workflow = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
+    quick_workflow = workflow_authority_text(WORKFLOWS_DIR, "quick")
 
     assert "context_mode: project-required" in quick_command
     assert "Quick Tasks Completed" not in quick_command
@@ -203,10 +203,7 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         WORKFLOWS_DIR / "respond-to-referees.md",
         WORKFLOWS_DIR / "arxiv-submission.md",
     ):
-        if path.stem in {"write-paper", "peer-review"}:
-            text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
-        else:
-            text = path.read_text(encoding="utf-8")
+        text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
         expected_bootstrap_counts = {
             "write-paper.md": 0,
             "peer-review.md": 0,
@@ -257,7 +254,8 @@ def test_literature_and_research_commands_trim_inline_methodology_blocks() -> No
     research_phase = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
     assert "Run the literature-review workflow as a thin wrapper" in literature
-    assert "Follow the included literature-review workflow exactly." in literature
+    assert "Read the included literature-review bootstrap authority first." in literature
+    assert "The staged workflow owns scope fixing, artifact gating, citation verification" in literature
     assert "A physics literature review is not a bibliography." not in literature
     assert "Method A lineage: paper1 -> paper2 -> paper3" not in literature
     assert "What do I not know that I don't know?" not in research_phase
@@ -351,7 +349,7 @@ def test_settings_workflow_reuses_one_terminal_follow_up_list() -> None:
 
 
 def test_sync_state_workflow_keeps_optional_commit_outside_core_reconcile_path() -> None:
-    sync_state = (WORKFLOWS_DIR / "sync-state.md").read_text(encoding="utf-8")
+    sync_state = workflow_authority_text(WORKFLOWS_DIR, "sync-state")
 
     assert "This workflow is intentionally fail-closed" in sync_state
     assert "No state files found. Run gpd:new-project" in sync_state

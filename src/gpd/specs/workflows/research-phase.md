@@ -1,233 +1,29 @@
 <purpose>
-Research mathematical methods, physical principles, and computational tools needed to approach a phase. Spawns gpd-phase-researcher with phase context.
-
-Standalone, one-shot research command. For most workflows, use `gpd:plan-phase` which integrates research automatically.
+Compatibility index for the staged `research-phase` workflow.
 </purpose>
 
-<process>
+<stage_authority_index>
+The active authority is selected by `research-phase-stage-manifest.json`. Do not load this index as a stage authority.
 
-## Step 0: Initialize Context
+- `phase_bootstrap` -> `workflows/research-phase/phase-bootstrap.md`
+  Phase argument validation, staged bootstrap init, existing research routing, phase context gathering, and model-profile setup.
+- `research_handoff` -> `workflows/research-phase/research-handoff.md`
+  Reference/contract handoff refresh, `gpd-phase-researcher` spawn, `RESEARCH.md` artifact gate, typed return routing, and continuation handoff.
+</stage_authority_index>
 
-**Load phase context and resolve model:**
-
-```bash
-load_research_phase_stage() {
-  local stage_name="$1"
-  local phase_arg="$2"
-  local init_payload=""
-
-  init_payload=$(gpd --raw init research-phase "${phase_arg}" --stage "${stage_name}" 2>/dev/null)
-  if [ $? -ne 0 ] || [ -z "$init_payload" ]; then
-    echo "ERROR: staged gpd initialization failed for stage '${stage_name}': ${init_payload}"
-    return 1
-  fi
-
-  printf '%s' "$init_payload"
-  return 0
-}
-
-BOOTSTRAP_INIT=$(load_research_phase_stage phase_bootstrap "${PHASE}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $BOOTSTRAP_INIT"
-  # STOP; surface the error.
-fi
-```
-
-Extract from init JSON: `phase_dir`, `phase_number`, `phase_name`, `phase_found`, `autonomy`, `research_mode`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+<stage_loading_rule>
+The public command includes only `workflows/research-phase/phase-bootstrap.md`. The research handoff is reached with:
 
 ```bash
-RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)
+gpd --raw init research-phase "${phase_number}" --stage research_handoff
 ```
 
-The init-derived `RESEARCH_MODE` is the single source of truth for depth; do not re-query config later in the workflow.
+Load only the active stage's `staged_loading.eager_authorities`; never read `staged_loading.must_not_eager_load` or this root workflow index as active authority.
+</stage_loading_rule>
 
-**If `phase_found` is false:** Error and exit.
-
-**Mode-aware behavior:**
-- `research_mode=explore`: Comprehensive research — survey all viable methods, include failed approaches from literature, 10+ papers.
-- `research_mode=exploit`: Focused research — direct methods only, 3-5 key papers, skip speculative approaches.
-- `research_mode=balanced` (default): Use the standard research depth for this workflow and keep the default contract and anchor coverage unless the topic calls for broader or narrower review.
-- `research_mode=adaptive`: Start broad enough to compare viable method families, then narrow only after prior decisive evidence or an explicit approach lock shows the method family is stable.
-- `autonomy=supervised`: Present the `RESEARCH.md` draft for user review before treating the handoff as complete.
-- `autonomy=balanced`: Accept the researcher handoff automatically once `RESEARCH.md` exists and passes the artifact check, then present the research summary before returning control.
-- `autonomy=yolo`: Accept the researcher handoff automatically once `RESEARCH.md` exists and passes the artifact check without any extra summary-review pause.
-
-@{GPD_INSTALL_DIR}/references/orchestration/model-profile-resolution.md
-
-```bash
-RESEARCHER_MODEL=$(gpd resolve-model gpd-phase-researcher)
-```
-
-## Step 1: Validate Phase
-
-```bash
-PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")
-```
-
-If `found` is false: Error and exit. Extract `goal` and `section` from JSON.
-
-## Step 2: Check Existing Research
-
-```bash
-ls "${phase_dir}/"*-RESEARCH.md 2>/dev/null
-```
-
-If exists: Offer update/view/skip options.
-
-## Step 3: Gather Phase Context
-
-```bash
-# Phase section from roadmap (already loaded in PHASE_INFO)
-echo "$PHASE_INFO" | gpd json get .section --default ""
-cat GPD/REQUIREMENTS.md 2>/dev/null
-cat "${phase_dir}/"*-CONTEXT.md 2>/dev/null
-# Decisions from gpd state snapshot (structured JSON)
-gpd --raw state snapshot | gpd json get .decisions --default "[]"
-```
-
-## Step 4: Spawn Researcher
-
-Load the heavier handoff slice only after phase validation, existing-research routing, and context gathering are complete:
-
-Apply `references/orchestration/continuation-boundary.md`; local checkpoint trigger=researcher needs user input.
-
-```bash
-HANDOFF_INIT=$(load_research_phase_stage research_handoff "${phase_number}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $HANDOFF_INIT"
-  exit 1
-fi
-```
-
-Use the staged refresh for `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `state_content`, `config_content`, and `roadmap_content` before assembling the child handoff.
-
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
-
-```
-task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-phase-researcher.md for your role and instructions.
-
-<objective>
-Research mathematical methods, physical principles, and computational approaches for Phase {phase}: {name}
-</objective>
-
-Research depth: use the active workflow research_mode from init/config ({RESEARCH_MODE}).
-
-<context>
-Phase description: {description}
-Requirements: {requirements}
-Prior decisions: {decisions}
-Phase context: {context_md}
-</context>
-
-<protocol_bundle_handoff>
-<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
-<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
-<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
-</protocol_bundle_handoff>
-
-When `selected_protocol_bundle_ids` is non-empty, use the bundle context, load manifest, anchor prompts, reference prompts, assets, decisive-artifact guidance, and verifier extensions as the primary specialized research surface. Use the broad physics research directives below only for uncovered areas or when no bundle is selected.
-
-<physics_research_directives>
-Cover only what is needed for this phase:
-- mathematical framework: governing equations, symmetries, function spaces, boundary/initial data
-- standard results: exact solutions, approximations, validity regimes, key references
-- limiting cases: classical/non-relativistic/thermodynamic, weak/strong coupling, asymptotics
-- computational methods: algorithms, packages, convergence/error scaling, performance constraints
-- dimensional scales: physical scales, dimensionless parameters, regime placement
-- pitfalls: instabilities, gauge/regularization/renormalization, notation conflicts, known errors
-</physics_research_directives>
-
-<output>
-Write to: {phase_dir}/{phase_number}-RESEARCH.md
-</output>",
-  subagent_type="gpd-phase-researcher",
-  model="{researcher_model}",
-  readonly=false
-)
-```
-
-Add this contract inside the spawned prompt when adapting it:
-
-```markdown
-<spawn_contract>
-write_scope:
-  mode: scoped_write
-  allowed_paths:
-    - "{phase_dir}/{phase_number}-RESEARCH.md"
-expected_artifacts:
-  - "{phase_dir}/{phase_number}-RESEARCH.md"
-shared_state_policy: return_only
-</spawn_contract>
-```
-
-Child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-phase-researcher`; expected=`{phase_dir}/{phase_number}-RESEARCH.md`; allowed_root=`{phase_dir}`; validators=readable research artifact; applicator=none; failure=`retry research | skip to plan-phase | abort/discuss`.
-
-## Step 5: Handle Return
-
-**If the researcher agent fails to spawn or returns an error:** Report the failure. End with `## > Next Up`: primary `gpd:research-phase {phase_number}` to retry, plus `gpd:plan-phase {phase_number}` to skip research and plan directly, and `gpd:suggest-next`. Do not silently continue without research output.
-
-- **Artifact gate:** Accept completed only after the gate tuple passes for `RESEARCH.md`. If the artifact is missing, unreadable, or absent from `gpd_return.files_written`, end with `## > Next Up`: primary `gpd:research-phase {phase_number}` to retry, plus `gpd:plan-phase {phase_number}` and `gpd:suggest-next`.
-- `gpd_return.status: completed` -- Display summary and end with `## > Next Up`: primary `gpd:plan-phase {phase_number}`, plus `gpd:research-phase {phase_number}` to dig deeper, `gpd:show-phase {phase_number}` to review, and `gpd:suggest-next`.
-- `gpd_return.status: checkpoint` -- Present the checkpoint and continue only through a fresh continuation handoff under `references/orchestration/continuation-boundary.md`. End with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:research-phase {phase_number}` and `gpd:suggest-next`.
-- `gpd_return.status: blocked` or `failed` -- Show attempts and end with `## > Next Up`: primary `gpd:discuss-phase {phase_number}` to add context, plus `gpd:research-phase {phase_number}` and `gpd:suggest-next`.
-
-## Step 6: Spawn Continuation Researcher
-
-```markdown
-<objective>
-Continue research as a fresh continuation handoff for Phase {phase_number}: {phase_name}
-</objective>
-
-<prior_state>
-Research file path: {phase_dir}/{phase_number}-RESEARCH.md
-Read that file before continuing so you inherit the prior research state instead of relying on inline prompt state.
-</prior_state>
-
-<checkpoint_response>
-**Type:** {checkpoint_type}
-**Response:** {user_response}
-</checkpoint_response>
-
-<protocol_bundle_handoff>
-<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
-<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
-<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
-</protocol_bundle_handoff>
-
-<spawn_contract>
-write_scope:
-  mode: scoped_write
-  allowed_paths:
-    - "{phase_dir}/{phase_number}-RESEARCH.md"
-expected_artifacts:
-  - "{phase_dir}/{phase_number}-RESEARCH.md"
-shared_state_policy: return_only
-</spawn_contract>
-```
-
-```bash
-task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-phase-researcher.md for your role and instructions.\n\n" + continuation_prompt,
-  subagent_type="gpd-phase-researcher",
-  model="{researcher_model}",
-  readonly=false,
-  description="Continue research Phase {phase}"
-)
-```
-
-</process>
-
-<success_criteria>
-- [ ] Phase argument validated and phase info loaded
-- [ ] Existing research checked (update/skip offered if present)
-- [ ] Phase context gathered (roadmap section, requirements, prior decisions)
-- [ ] gpd-phase-researcher spawned with physics research directives
-- [ ] RESEARCH.md written to phase directory and named in `gpd_return.files_written`
-- [ ] Research return handled via typed `gpd_return.status` and artifact gating
-- [ ] Research covers: mathematical framework, known solutions, limiting cases, computational methods, dimensional analysis, potential pitfalls
-- [ ] Return handled (complete/checkpoint/inconclusive)
-- [ ] Next action offered (plan phase, dig deeper, review)
-</success_criteria>
+<canonical_references>
+- `references/orchestration/model-profile-resolution.md`
+- `references/orchestration/runtime-delegation-note.md`
+- `references/orchestration/continuation-boundary.md`
+- `references/orchestration/child-artifact-gate.md`
+</canonical_references>

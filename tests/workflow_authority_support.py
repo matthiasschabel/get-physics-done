@@ -7,24 +7,64 @@ from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
 
-STAGED_WORKFLOW_AUTHORITY_NAMES = {"execute-phase", "peer-review", "write-paper"}
+STAGED_WORKFLOW_AUTHORITY_NAMES = {
+    "arxiv-submission",
+    "execute-phase",
+    "literature-review",
+    "map-research",
+    "new-milestone",
+    "new-project",
+    "peer-review",
+    "plan-phase",
+    "quick",
+    "research-phase",
+    "respond-to-referees",
+    "resume-work",
+    "sync-state",
+    "verify-work",
+    "write-paper",
+}
 
 
 def workflow_authority_text(workflows_dir: Path, name: str) -> str:
     """Return root workflow text plus split stage authorities when present."""
 
+    return "\n\n".join(path.read_text(encoding="utf-8") for path in workflow_authority_paths(workflows_dir, name))
+
+
+def workflow_authority_paths(workflows_dir: Path, name: str) -> tuple[Path, ...]:
+    """Return root workflow path plus split stage authority paths when present."""
+
     workflow_name = name.removesuffix(".md")
     root = workflows_dir / f"{workflow_name}.md"
-    parts = [root.read_text(encoding="utf-8")]
+    paths = [root]
+    if _uses_split_stage_authorities(workflows_dir, workflow_name):
+        paths.extend(_ordered_stage_authority_paths(workflows_dir, workflow_name))
+    return tuple(paths)
+
+
+def _uses_split_stage_authorities(workflows_dir: Path, workflow_name: str) -> bool:
+    """Return whether tests should aggregate split stage authority files."""
+
     stage_dir = workflows_dir / workflow_name
-    if workflow_name in STAGED_WORKFLOW_AUTHORITY_NAMES and stage_dir.is_dir():
-        stage_paths = _ordered_stage_authority_paths(workflows_dir, workflow_name)
-        parts.extend(path.read_text(encoding="utf-8") for path in stage_paths)
-    return "\n\n".join(parts)
+    if not stage_dir.is_dir():
+        return False
+    if workflow_name in STAGED_WORKFLOW_AUTHORITY_NAMES:
+        return True
+    return bool(_manifest_declared_stage_authority_paths(workflows_dir, workflow_name))
 
 
 def _ordered_stage_authority_paths(workflows_dir: Path, workflow_name: str) -> tuple[Path, ...]:
     """Return staged workflow authority files in manifest order."""
+
+    ordered = _manifest_declared_stage_authority_paths(workflows_dir, workflow_name)
+    if ordered:
+        return ordered
+    return tuple(sorted((workflows_dir / workflow_name).glob("*.md")))
+
+
+def _manifest_declared_stage_authority_paths(workflows_dir: Path, workflow_name: str) -> tuple[Path, ...]:
+    """Return split workflow authority files declared by the stage manifest."""
 
     manifest_path = workflows_dir / f"{workflow_name}-stage-manifest.json"
     seen: set[Path] = set()
@@ -51,9 +91,7 @@ def _ordered_stage_authority_paths(workflows_dir: Path, workflow_name: str) -> t
                             seen.add(path)
                             ordered.append(path)
 
-    if ordered:
-        return tuple(ordered)
-    return tuple(sorted((workflows_dir / workflow_name).glob("*.md")))
+    return tuple(ordered)
 
 
 def expanded_workflow_authority_text(

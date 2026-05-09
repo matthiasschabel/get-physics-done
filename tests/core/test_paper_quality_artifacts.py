@@ -2197,7 +2197,7 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
         )
     )
     peer_review = workflow_authority_text(repo_root / "src/gpd/specs/workflows", "peer-review")
-    respond = (repo_root / "src/gpd/specs/workflows/respond-to-referees.md").read_text(encoding="utf-8")
+    respond = workflow_authority_text(repo_root / "src/gpd/specs/workflows", "respond-to-referees")
     internal_template = (repo_root / "src/gpd/specs/templates/paper/internal-comparison.md").read_text(encoding="utf-8")
     experimental_template = (repo_root / "src/gpd/specs/templates/paper/experimental-comparison.md").read_text(
         encoding="utf-8"

@@ -11,9 +11,17 @@ from tests.core.test_spawn_contracts import (
 
 
 def test_plan_phase_planner_and_checker_handoffs_carry_inline_spawn_contracts() -> None:
-    path = WORKFLOWS_DIR / "plan-phase.md"
-    workflow = path.read_text(encoding="utf-8")
-    planner_tasks = _task_blocks_by_agent(path, "gpd-planner")
+    research_path = WORKFLOWS_DIR / "plan-phase" / "research-routing.md"
+    planner_path = WORKFLOWS_DIR / "plan-phase" / "planner-authoring.md"
+    checker_path = WORKFLOWS_DIR / "plan-phase" / "checker-revision.md"
+    workflow = "\n\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (research_path, planner_path, checker_path)
+    )
+    planner_tasks = _task_blocks_by_agent(planner_path, "gpd-planner") + _task_blocks_by_agent(
+        checker_path,
+        "gpd-planner",
+    )
     assert len(planner_tasks) >= 2
     for task in planner_tasks:
         _assert_spawn_contract(
@@ -31,7 +39,7 @@ def test_plan_phase_planner_and_checker_handoffs_carry_inline_spawn_contracts() 
     assert "gpd validate plan-contract <each fresh plan>" in workflow
     assert "gpd validate plan-preflight <each fresh plan>" in workflow
 
-    checker = _find_single_task(path, "gpd-plan-checker")
+    checker = _find_single_task(checker_path, "gpd-plan-checker")
     _assert_spawn_contract(checker, ())
     assert "mode: read_only" in checker.text
     assert "artifact_gate:" not in checker.text

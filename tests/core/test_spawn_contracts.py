@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
-from tests.workflow_authority_support import workflow_authority_text
+from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -51,7 +51,7 @@ class TaskBlock:
 
 
 def _read(path: Path) -> str:
-    if path.parent == WORKFLOWS_DIR and path.stem in {"execute-phase", "peer-review", "write-paper"}:
+    if path.parent == WORKFLOWS_DIR and path.stem in STAGED_WORKFLOW_AUTHORITY_NAMES:
         return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
 

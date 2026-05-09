@@ -22,6 +22,8 @@ def test_new_milestone_command_stays_thin_and_only_eagerly_loads_the_workflow() 
     )
 
     assert metrics.raw_include_count == 1
+    assert "@{GPD_INSTALL_DIR}/workflows/new-milestone/milestone-bootstrap.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/new-milestone.md" not in command_text
     assert "Project contract gate:" not in command_text
     assert "Project contract load info:" not in command_text
     assert "Project contract validation:" not in command_text
@@ -44,11 +46,12 @@ def test_new_milestone_command_budget_tracks_the_workflow_without_wrapper_bloat(
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
-    workflow = measure_prompt_surface(
-        WORKFLOWS_DIR / "new-milestone.md",
+    bootstrap = measure_prompt_surface(
+        WORKFLOWS_DIR / "new-milestone" / "milestone-bootstrap.md",
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
 
-    assert command.expanded_line_count < workflow.expanded_line_count + 120
-    assert command.expanded_char_count < workflow.expanded_char_count + 4000
+    assert command.expanded_line_count < bootstrap.expanded_line_count + 120
+    assert command.expanded_char_count < bootstrap.expanded_char_count + 4000
+    assert command.expanded_char_count < 9000

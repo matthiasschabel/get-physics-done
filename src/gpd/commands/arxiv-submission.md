@@ -100,7 +100,7 @@ Output: A submission-ready tarball and checklist of manual steps remaining.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/arxiv-submission.md
+@{GPD_INSTALL_DIR}/workflows/arxiv-submission/bootstrap.md
 </execution_context>
 
 <context>
@@ -112,8 +112,9 @@ This remains a project-backed manuscript workflow: package the resolved built ma
 </context>
 
 <process>
-Follow the included arxiv-submission workflow exactly.
+Follow the included arxiv-submission bootstrap authority exactly. After each staged reload, follow only `staged_loading.eager_authorities` for the active stage and do not read `staged_loading.must_not_eager_load` or the root workflow index.
 </process>
+
 
 <success_criteria>
 - [ ] Workflow ran end to end

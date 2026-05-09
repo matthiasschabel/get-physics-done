@@ -21,7 +21,7 @@ Create executable phase prompts for a research phase.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/plan-phase.md
+@{GPD_INSTALL_DIR}/workflows/plan-phase/phase-bootstrap.md
 </execution_context>
 
 <context>
@@ -40,5 +40,5 @@ Normalize the phase input before any directory lookups.
 </context>
 
 <process>
-Follow the included workflow file exactly.
+Read the included bootstrap authority first. After each stage handoff, reload staged init for the next `stage_id` and read only the files listed in `staged_loading.eager_authorities`; do not load `staged_loading.must_not_eager_load`.
 </process>

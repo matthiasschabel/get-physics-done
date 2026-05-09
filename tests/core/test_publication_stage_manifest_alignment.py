@@ -9,6 +9,7 @@ from gpd.core.workflow_staging import (
     WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT,
     validate_workflow_stage_manifest_payload,
 )
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -267,8 +268,17 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
     assert "selected_review_root" in bootstrap.required_init_fields
     assert "latest_response_artifacts" in bootstrap.required_init_fields
 
+    assert bootstrap.mode_paths == ("workflows/respond-to-referees/bootstrap.md",)
+    assert bootstrap.loaded_authorities == (
+        "workflows/respond-to-referees/bootstrap.md",
+        "references/publication/publication-bootstrap-preflight.md",
+    )
+    assert "workflows/respond-to-referees.md" in bootstrap.must_not_eager_load
+    assert "workflows/respond-to-referees/report-triage.md" in bootstrap.must_not_eager_load
+    assert "workflows/respond-to-referees/response-authoring.md" in bootstrap.must_not_eager_load
+    assert "workflows/respond-to-referees/finalize.md" in bootstrap.must_not_eager_load
     assert report_triage.loaded_authorities == (
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/report-triage.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
         "references/publication/stage-recovery-gate.md",
@@ -286,11 +296,14 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
 
 
 def test_respond_to_referees_workflow_uses_staged_init_without_inline_field_list() -> None:
-    workflow = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    root_index = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
 
+    assert "Do not use this index as active stage authority." in root_index
+    assert "workflows/respond-to-referees/bootstrap.md" in root_index
     assert "gpd --raw init respond-to-referees --stage bootstrap" in workflow
     assert "gpd --raw init phase-op --include config" not in workflow
-    assert "respond-to-referees-stage-manifest.json" in workflow
+    assert "respond-to-referees-stage-manifest.json" in root_index
     assert "INIT.staged_loading.required_init_fields" in workflow
     assert "Parse JSON for: `commit_docs`, `state_exists`, `project_exists`" not in workflow
 

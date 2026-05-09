@@ -81,8 +81,7 @@ Keep the wrapper focused on referee triage, revision routing, and synchronized r
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/respond-to-referees.md
-@{GPD_INSTALL_DIR}/references/publication/publication-review-wrapper-guidance.md
+@{GPD_INSTALL_DIR}/workflows/respond-to-referees/bootstrap.md
 </execution_context>
 
 <context>
@@ -92,7 +91,7 @@ The workflow resolves the manuscript root, review artifacts, and revision target
 </context>
 
 <process>
-Follow the included respond-to-referees workflow exactly.
+Follow the included first-stage authority exactly. Later stages are loaded by the workflow manifest through staged init; the root workflow index is only a staged-file map.
 </process>
 
 <success_criteria>

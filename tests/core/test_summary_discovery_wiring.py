@@ -28,14 +28,14 @@ def test_regression_check_searches_canonical_phase_summary_artifacts() -> None:
 
 
 def test_verify_work_searches_canonical_phase_summary_artifacts() -> None:
-    workflow_text = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
 
     assert "Use canonical artifact discovery helpers during bootstrap." in workflow_text
     assert "verification_report_status_payload" in workflow_text
 
 
 def test_verify_work_searches_canonical_phase_verification_artifacts() -> None:
-    workflow_text = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
 
     assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in workflow_text
     assert "Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here." in workflow_text
@@ -85,7 +85,7 @@ def test_summary_driven_workflows_search_canonical_summary_artifacts() -> None:
     validate_conventions = (WORKFLOWS_DIR / "validate-conventions.md").read_text(encoding="utf-8")
     graph = (WORKFLOWS_DIR / "graph.md").read_text(encoding="utf-8")
     write_paper = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    plan_phase = workflow_authority_text(WORKFLOWS_DIR, "plan-phase")
 
     assert "roadmap-plus-disk union" in complete_milestone
     assert "Standalone `PLAN.md` / `SUMMARY.md` artifacts" in complete_milestone
@@ -146,7 +146,7 @@ def test_command_surfaces_list_standalone_and_numbered_phase_artifacts() -> None
 
 
 def test_respond_to_referees_prefers_canonical_markdown_report_path() -> None:
-    workflow_text = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
 
     assert "`${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` remains the canonical issue-ID source" in workflow_text
     assert "import or normalize it into `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` before parsing comments" in workflow_text

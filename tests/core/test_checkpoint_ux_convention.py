@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from tests.workflow_authority_support import workflow_authority_text
+from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -17,6 +17,12 @@ _CHECKPOINTS_PATH = REFERENCES_DIR / "orchestration" / "checkpoints.md"
 _PLANNER_PATH = AGENTS_DIR / "gpd-planner.md"
 _CONVENTION_PATH = REFERENCES_DIR / "orchestration" / "checkpoint-ux-convention.md"
 _UI_BRAND_PATH = REFERENCES_DIR / "ui" / "ui-brand.md"
+
+
+def _read_prompt(path: Path) -> str:
+    if path.parent == WORKFLOWS_DIR and path.stem in STAGED_WORKFLOW_AUTHORITY_NAMES:
+        return workflow_authority_text(WORKFLOWS_DIR, path.stem)
+    return path.read_text(encoding="utf-8")
 
 
 def test_checkpoint_human_verify_uses_y_n_e_idiom_in_canonical_templates() -> None:
@@ -109,7 +115,7 @@ def test_y_n_prompts_unified_and_carve_outs_preserved() -> None:
     ]
 
     for path in unified_paths:
-        text = path.read_text(encoding="utf-8")
+        text = _read_prompt(path)
         assert "[Y/n/e]" in text, f"expected '[Y/n/e]' prompt in {path}"
 
     for path in carve_out_paths:
@@ -141,11 +147,7 @@ def test_owned_completion_examples_use_canonical_next_up_heading() -> None:
 
     stale_heading_pattern = re.compile(r"(?m)^## (?:Next Up|>> Next Up|▶ Next Up)$")
     for path in paths:
-        text = (
-            workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
-            if path == WORKFLOWS_DIR / "execute-phase.md"
-            else path.read_text(encoding="utf-8")
-        )
+        text = _read_prompt(path)
         assert "## > Next Up" in text, path
         assert not stale_heading_pattern.search(text), path
 
@@ -168,7 +170,7 @@ def test_workflow_y_n_e_prompts_define_edit_branch_semantics() -> None:
     ]
 
     for path in paths:
-        text = path.read_text(encoding="utf-8")
+        text = _read_prompt(path)
         assert "[Y/n/e]" in text, path
         assert "**Edit branch:**" in text, path
         assert "re-present the updated `[Y/n/e]` prompt once" in text, path

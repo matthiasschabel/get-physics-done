@@ -57,7 +57,7 @@
       "order": 1,
       "purpose": "phase lookup, contract-gate validation, and bootstrap routing",
       "mode_paths": [
-        "workflows/plan-phase.md"
+        "workflows/plan-phase/phase-bootstrap.md"
       ],
       "required_init_field_groups": [
         "planner_model_context",
@@ -69,14 +69,19 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/plan-phase.md"
+        "workflows/plan-phase/phase-bootstrap.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "references/orchestration/runtime-delegation-note.md",
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
         "templates/plan-contract-schema.md",
-        "templates/planner-subagent-prompt.md"
+        "templates/planner-subagent-prompt.md",
+        "workflows/plan-phase.md",
+        "workflows/plan-phase/checker-revision.md",
+        "workflows/plan-phase/planner-authoring.md",
+        "workflows/plan-phase/research-routing.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -103,7 +108,7 @@
       "order": 2,
       "purpose": "research reuse, refresh, and gap-closure routing",
       "mode_paths": [
-        "workflows/plan-phase.md"
+        "workflows/plan-phase/research-routing.md"
       ],
       "required_init_field_groups": [
         "planner_model_context",
@@ -122,14 +127,18 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/plan-phase.md",
-        "templates/planner-subagent-prompt.md"
+        "workflows/plan-phase/research-routing.md",
+        "references/orchestration/runtime-delegation-note.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
-        "templates/plan-contract-schema.md"
+        "templates/plan-contract-schema.md",
+        "templates/planner-subagent-prompt.md",
+        "workflows/plan-phase.md",
+        "workflows/plan-phase/checker-revision.md",
+        "workflows/plan-phase/planner-authoring.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -156,7 +165,7 @@
       "order": 3,
       "purpose": "researcher/planner prompt assembly and plan authoring",
       "mode_paths": [
-        "workflows/plan-phase.md"
+        "workflows/plan-phase/planner-authoring.md"
       ],
       "required_init_field_groups": [
         "planner_model_context",
@@ -177,14 +186,16 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/plan-phase.md",
+        "workflows/plan-phase/planner-authoring.md",
         "templates/planner-subagent-prompt.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
-        "templates/plan-contract-schema.md"
+        "templates/plan-contract-schema.md",
+        "workflows/plan-phase.md",
+        "workflows/plan-phase/checker-revision.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -218,7 +229,7 @@
       "order": 4,
       "purpose": "checker audit, structured approval routing, and blocker reporting",
       "mode_paths": [
-        "workflows/plan-phase.md"
+        "workflows/plan-phase/checker-revision.md"
       ],
       "required_init_field_groups": [
         "planning_controls",
@@ -236,14 +247,15 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/plan-phase.md",
+        "workflows/plan-phase/checker-revision.md",
         "templates/planner-subagent-prompt.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
-        "templates/plan-contract-schema.md"
+        "templates/plan-contract-schema.md",
+        "workflows/plan-phase.md"
       ],
       "allowed_tools": [
         "file_read",

@@ -640,7 +640,7 @@ def test_continuation_format_scopes_clear_to_resolved_runtime_followups() -> Non
 
 
 def test_plan_phase_applies_planner_roadmap_updates_in_orchestrator() -> None:
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    plan_phase = _workflow_authority_text("plan-phase")
 
     _assert_semantic_fragments(
         plan_phase,
@@ -655,7 +655,7 @@ def test_plan_phase_applies_planner_roadmap_updates_in_orchestrator() -> None:
 
 
 def test_plan_phase_uses_manifest_owned_staged_init_access() -> None:
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    plan_phase = _workflow_authority_text("plan-phase")
 
     _assert_workflow_calls_staged_init_for_manifest_stages("plan-phase", plan_phase)
     _assert_forbidden_fragments(
@@ -1344,7 +1344,7 @@ def test_slides_prompt_covers_cleanup_non_git_and_thin_source_boundaries() -> No
 
 def test_publication_workflows_surface_no_write_stop_contracts_from_committed_sources() -> None:
     peer_review = _workflow_authority_text("peer-review")
-    arxiv = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    arxiv = _workflow_authority_text("arxiv-submission")
     slides = (WORKFLOWS_DIR / "slides.md").read_text(encoding="utf-8")
 
     _assert_contains_fragments(
@@ -1485,7 +1485,7 @@ def test_list_review_commands_no_duplicates() -> None:
 
 def test_respond_to_referees_references_staged_review_artifacts() -> None:
     command_text = (COMMANDS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    workflow_text = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("respond-to-referees")
     writer_text = (AGENTS_DIR / "gpd-paper-writer.md").read_text(encoding="utf-8")
 
     _assert_public_fragments(
@@ -1495,8 +1495,13 @@ def test_respond_to_referees_references_staged_review_artifacts() -> None:
     )
     _assert_machine_fragments(
         command_text,
+        "@{GPD_INSTALL_DIR}/workflows/respond-to-referees/bootstrap.md",
+        context="respond command first-stage include",
+    )
+    _assert_forbidden_fragments(
+        command_text,
         "@{GPD_INSTALL_DIR}/references/publication/publication-review-wrapper-guidance.md",
-        context="respond command publication wrapper guidance include",
+        context="respond command wrapper guidance no longer frontloaded",
     )
     _assert_semantic_fragments(
         command_text,
@@ -1528,7 +1533,7 @@ def test_respond_to_referees_references_staged_review_artifacts() -> None:
 def test_publication_review_round_detection_prompts_are_shell_safe_and_pair_response_artifacts() -> None:
     peer_review = _workflow_authority_text("peer-review")
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
     reliability = (REFERENCES_DIR / "publication" / "peer-review-reliability.md").read_text(encoding="utf-8")
 
     for content in (peer_review, referee):
@@ -1594,7 +1599,7 @@ def test_publication_review_round_detection_prompts_are_shell_safe_and_pair_resp
 def test_review_workflows_keep_round_suffix_artifacts_visible_and_anchor_response_outputs() -> None:
     peer_review = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
     workflow = _workflow_authority_text("peer-review")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
     write_paper = _workflow_authority_text("write-paper")
     write_paper_expanded = expand_at_includes(write_paper, REPO_ROOT / "src" / "gpd", "/runtime/")
     panel = (REFERENCES_DIR / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
@@ -1851,7 +1856,7 @@ def test_peer_review_prompt_surfaces_generic_claim_kind_as_non_theorem_bearing_b
 
 def test_write_paper_and_arxiv_submission_keep_the_build_boundary_explicit() -> None:
     write_paper = _workflow_authority_text("write-paper")
-    arxiv = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    arxiv = _workflow_authority_text("arxiv-submission")
 
     assert 'gpd paper-build "${PAPER_DIR}/PAPER-CONFIG.json" --output-dir "${PAPER_DIR}"' in write_paper
     _assert_semantic_fragments(
@@ -1908,7 +1913,7 @@ def test_write_paper_source_distinguishes_overclaim_pressure_from_bounded_resume
 
 def test_arxiv_submission_documents_conservative_response_freshness_policy() -> None:
     command = (COMMANDS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
-    workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    workflow = _workflow_authority_text("arxiv-submission")
 
     assert "latest response-round freshness status" in command
     assert "same-round or newer response artifacts without newer staged peer-review clearance" in command
@@ -2298,7 +2303,7 @@ def test_discuss_and_assumption_workflows_surface_anchors_and_fast_falsifiers() 
 
 def test_discuss_and_plan_workflows_resolve_roadmap_only_phases() -> None:
     discuss_text = (WORKFLOWS_DIR / "discuss-phase.md").read_text(encoding="utf-8")
-    plan_text = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    plan_text = _workflow_authority_text("plan-phase")
 
     _assert_forbidden_fragments(
         discuss_text,
@@ -2339,7 +2344,7 @@ def test_discuss_and_plan_workflows_resolve_roadmap_only_phases() -> None:
 def test_planning_and_phase_templates_surface_active_reference_context() -> None:
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
     phase_prompt = (TEMPLATES_DIR / "phase-prompt.md").read_text(encoding="utf-8")
-    workflow_text = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("plan-phase")
 
     _assert_semantic_fragments(
         planner_prompt,
@@ -2446,7 +2451,7 @@ def test_planning_prompts_keep_contract_gate_in_light_mode_and_all_modes() -> No
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
     checker_agent = (AGENTS_DIR / "gpd-plan-checker.md").read_text(encoding="utf-8")
-    workflow_text = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("plan-phase")
 
     assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in planner_prompt
     assert (
@@ -2506,8 +2511,8 @@ def test_planning_prompts_keep_contract_gate_in_light_mode_and_all_modes() -> No
 
 def test_stable_knowledge_remains_background_only_across_planning_verification_and_execution() -> None:
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
-    verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    plan_phase = _workflow_authority_text("plan-phase")
+    verify_workflow = _workflow_authority_text("verify-work")
     verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     execute_phase = _workflow_authority_text("execute-phase")
@@ -2575,7 +2580,7 @@ def test_stable_knowledge_remains_background_only_across_planning_verification_a
 
 def test_plan_checker_requires_contract_gate_and_reference_artifacts() -> None:
     checker_agent = (AGENTS_DIR / "gpd-plan-checker.md").read_text(encoding="utf-8")
-    workflow_text = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("plan-phase")
 
     assert "## Dimension 0: Contract Gate" in checker_agent
     assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in checker_agent
@@ -2617,7 +2622,7 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     state_template = (TEMPLATES_DIR / "state.md").read_text(encoding="utf-8")
     roadmapper_agent = (AGENTS_DIR / "gpd-roadmapper.md").read_text(encoding="utf-8")
     new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
-    new_milestone = (WORKFLOWS_DIR / "new-milestone.md").read_text(encoding="utf-8")
+    new_milestone = _workflow_authority_text("new-milestone")
     new_project_roadmapper = _find_single_task(WORKFLOWS_DIR / "new-project.md", "gpd-roadmapper").text
 
     assert "## Contract Overview" in roadmap_template
@@ -2751,12 +2756,12 @@ def test_new_project_minimal_mode_and_planning_wiring_allow_coarse_scoped_decomp
 
 
 def test_reference_workflows_require_anchor_registry_propagation() -> None:
-    literature_workflow = (WORKFLOWS_DIR / "literature-review.md").read_text(encoding="utf-8")
+    literature_workflow = _workflow_authority_text("literature-review")
     literature_command = (COMMANDS_DIR / "literature-review.md").read_text(encoding="utf-8")
     literature_agent = (AGENTS_DIR / "gpd-literature-reviewer.md").read_text(encoding="utf-8")
     bibliographer_agent = (AGENTS_DIR / "gpd-bibliographer.md").read_text(encoding="utf-8")
     compare_workflow = (WORKFLOWS_DIR / "compare-results.md").read_text(encoding="utf-8")
-    map_workflow = (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8")
+    map_workflow = _workflow_authority_text("map-research")
     map_command = (COMMANDS_DIR / "map-research.md").read_text(encoding="utf-8")
     mapper_agent = (AGENTS_DIR / "gpd-research-mapper.md").read_text(encoding="utf-8")
 
@@ -2792,7 +2797,7 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
     _assert_command_delegates_to_workflow(
         literature_command,
         "literature-review",
-        semantic_fragments=("workflow owns", "staged loading", "scope fixing", "artifact gating", "citation verification"),
+            semantic_fragments=("staged workflow owns", "scope fixing", "artifact gating", "citation verification"),
         stale_fragments=(
             "First, read {GPD_AGENTS_DIR}/gpd-literature-reviewer.md for your role and instructions",
             "Write to: GPD/literature/{slug}-REVIEW.md",
@@ -2856,7 +2861,7 @@ def test_reference_workflows_require_anchor_registry_propagation() -> None:
 
 
 def test_literature_review_stage_manifest_keeps_citation_audit_write_visible() -> None:
-    literature_workflow = (WORKFLOWS_DIR / "literature-review.md").read_text(encoding="utf-8")
+    literature_workflow = _workflow_authority_text("literature-review")
     literature_staging = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "literature-review-stage-manifest.json").read_text(encoding="utf-8")),
         expected_workflow_id="literature-review",
@@ -2889,7 +2894,7 @@ def test_file_producing_command_surfaces_use_canonical_spawn_contract() -> None:
     _assert_command_delegates_to_workflow(
         literature,
         "literature-review",
-        semantic_fragments=("workflow", "staged loading", "artifact gating", "citation verification"),
+            semantic_fragments=("staged workflow", "artifact gating", "citation verification"),
         stale_fragments=(
             "First, read {GPD_AGENTS_DIR}/gpd-literature-reviewer.md for your role and instructions",
             "Write to: GPD/literature/{slug}-REVIEW.md",
@@ -2901,7 +2906,7 @@ def test_file_producing_command_surfaces_use_canonical_spawn_contract() -> None:
 
 def test_research_phase_command_delegates_file_path_and_return_routing_to_the_workflow() -> None:
     command = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
-    workflow = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
+    workflow = _workflow_authority_text("research-phase")
 
     _assert_command_delegates_to_workflow(
         command,
@@ -2925,7 +2930,7 @@ def test_research_phase_command_delegates_file_path_and_return_routing_to_the_wo
 
 
 def test_revision_and_audit_workflows_verify_artifacts_before_trusting_success_text() -> None:
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
     audit = (WORKFLOWS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
     stage_gate = (REPO_ROOT / "src/gpd/specs/references/publication/stage-recovery-gate.md").read_text(encoding="utf-8")
 
@@ -3000,7 +3005,7 @@ def test_discover_command_does_not_emit_phase_only_commit_placeholders_for_stand
 def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_json_get() -> None:
     required_machine_fragments = (
         (
-            (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8"),
+            _workflow_authority_text("research-phase"),
             (
                 'PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")',
                 'gpd --raw state snapshot | gpd json get .decisions --default "[]"',
@@ -3011,7 +3016,7 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
             "research-phase raw json plumbing",
         ),
         (
-            (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8"),
+            _workflow_authority_text("map-research"),
             (
                 "BOOTSTRAP_INIT=$(load_map_research_stage map_bootstrap)",
                 "MAPPER_AUTHORING_INIT=$(load_map_research_stage mapper_authoring)",
@@ -3082,14 +3087,14 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
         context="verify-phase raw json plumbing",
     )
     _assert_machine_fragments(
-        (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8"),
+        _workflow_authority_text("verify-work"),
         'gpd --raw roadmap get-phase "${phase_number}"',
         context="verify-work raw json plumbing",
     )
 
     for text, fragments, context in (
         (
-            (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8"),
+            _workflow_authority_text("research-phase"),
             ("gpd --raw config get research_mode",),
             "research-phase raw json stale config reads",
         ),
@@ -3099,7 +3104,7 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
             "research-phase command duplicated init",
         ),
         (
-            (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8"),
+            _workflow_authority_text("map-research"),
             ("MAP_RESEARCH_FOCUS=", "MAP_FOCUS=", "MAP_FOCUS_PROVIDED=", "gpd --raw config get research_mode"),
             "map-research stale focus/config reads",
         ),
@@ -3117,7 +3122,7 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
         _assert_forbidden_fragments(text, *fragments, context=context)
 
     _assert_semantic_fragments(
-        (WORKFLOWS_DIR / "map-research.md").read_text(encoding="utf-8"),
+        _workflow_authority_text("map-research"),
         "If `map_focus_provided` is true",
         context="map-research provided focus semantics",
     )
@@ -3172,7 +3177,7 @@ def test_planner_subagent_prompt_uses_raw_init_placeholder_source() -> None:
 
 
 def test_research_phase_uses_resolved_phase_dir_for_artifact_paths_and_context_lookups() -> None:
-    research_workflow = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
+    research_workflow = _workflow_authority_text("research-phase")
     research_command = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
     assert "Write to: {phase_dir}/{phase_number}-RESEARCH.md" in research_workflow
@@ -3217,7 +3222,7 @@ def test_phase_research_and_verification_surfaces_keep_anchor_checks_mandatory()
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
     planner_execution = (REFERENCES_DIR / "planning" / "planner-execution-procedure.md").read_text(encoding="utf-8")
     planner_surface = planner_agent + "\n" + planner_execution
-    verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_workflow = _workflow_authority_text("verify-work")
     verify_workflow_expanded = expand_at_includes(verify_workflow, REPO_ROOT / "src/gpd", "/runtime/")
 
     _assert_prompt_concepts(
@@ -3255,7 +3260,7 @@ def test_phase_research_and_verification_surfaces_keep_anchor_checks_mandatory()
         fragment_count(
             "verify-work raw project contract gate block count",
             "**Project Contract Gate:** {project_contract_gate}",
-            expected_count=1,
+            expected_count=2,
             context="verify-work contract gate block",
         ),
     )
@@ -3282,7 +3287,7 @@ def test_phase_research_and_verification_surfaces_keep_anchor_checks_mandatory()
 
 def test_phase_researcher_prompt_keeps_the_one_shot_handoff_and_return_contract_visible() -> None:
     phase_researcher = (AGENTS_DIR / "gpd-phase-researcher.md").read_text(encoding="utf-8")
-    research_workflow = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
+    research_workflow = _workflow_authority_text("research-phase")
     research_command = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
     _assert_machine_fragments(
@@ -3307,12 +3312,12 @@ def test_phase_researcher_prompt_keeps_the_one_shot_handoff_and_return_contract_
 
 
 def test_workflows_surface_structured_proof_review_statuses() -> None:
-    verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_workflow = _workflow_authority_text("verify-work")
     verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
     write_paper = _workflow_authority_text("write-paper")
     peer_review = _workflow_authority_text("peer-review")
-    respond_to_referees = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    arxiv_submission = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    respond_to_referees = _workflow_authority_text("respond-to-referees")
+    arxiv_submission = _workflow_authority_text("arxiv-submission")
 
     _assert_machine_fragments(
         verify_workflow, "phase_proof_review_status", "proof-review freshness summary",
@@ -3442,7 +3447,7 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
     summary_template = (TEMPLATES_DIR / "summary.md").read_text(encoding="utf-8")
     verification_template = (TEMPLATES_DIR / "verification-report.md").read_text(encoding="utf-8")
     research_verification = (TEMPLATES_DIR / "research-verification.md").read_text(encoding="utf-8")
-    verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_workflow = _workflow_authority_text("verify-work")
     verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
     verifier_agent = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
     compare_workflow = (WORKFLOWS_DIR / "compare-experiment.md").read_text(encoding="utf-8")
@@ -3499,7 +3504,7 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "planner_authoring",
         "checker_revision",
     )
-    assert plan_phase_manifest.stages[0].loaded_authorities == ("workflows/plan-phase.md",)
+    assert plan_phase_manifest.stages[0].loaded_authorities == ("workflows/plan-phase/phase-bootstrap.md",)
     for stage in (plan_phase_manifest.stages[2], plan_phase_manifest.stages[3]):
         assert "templates/planner-subagent-prompt.md" in stage.loaded_authorities
 
@@ -3862,7 +3867,7 @@ def test_execute_phase_and_execute_plan_surface_required_reference_and_state_own
 def test_verification_prompts_keep_suggested_contract_check_bindings_schema_tight() -> None:
     verification_template = (TEMPLATES_DIR / "verification-report.md").read_text(encoding="utf-8")
     research_verification = (TEMPLATES_DIR / "research-verification.md").read_text(encoding="utf-8")
-    verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_workflow = _workflow_authority_text("verify-work")
     verifier_agent = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
 
     assert 'suggested_subject_id: ""' not in verification_template
@@ -3896,7 +3901,7 @@ def test_lane5_prompt_examples_keep_schema_valid_contract_fields_visible() -> No
     plan_checker = (AGENTS_DIR / "gpd-plan-checker.md").read_text(encoding="utf-8")
     parameter_sweep = (WORKFLOWS_DIR / "parameter-sweep.md").read_text(encoding="utf-8")
     research_verification = (TEMPLATES_DIR / "research-verification.md").read_text(encoding="utf-8")
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_work = _workflow_authority_text("verify-work")
     verifier = (AGENTS_DIR / "gpd-verifier.md").read_text(encoding="utf-8")
     executor_example = (REFERENCES_DIR / "execution" / "executor-worked-example.md").read_text(encoding="utf-8")
     phase_prompt = _expand_prompt_surface(TEMPLATES_DIR / "phase-prompt.md")
@@ -4088,9 +4093,9 @@ def test_explain_surfaces_keep_workspace_rooted_outputs_and_honest_standalone_ta
 
 
 def test_publication_workflows_describe_recursive_manuscript_tree_inputs() -> None:
-    arxiv_submission = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    arxiv_submission = _workflow_authority_text("arxiv-submission")
     write_paper = _workflow_authority_text("write-paper")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
 
     assert "Keep `\\input{}` / `\\include{}` chains only if every source file is packaged" in arxiv_submission
     assert (
@@ -4105,11 +4110,11 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
     peer_review = _workflow_authority_text("peer-review")
     peer_review_command = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
     verify_command = (COMMANDS_DIR / "verify-work.md").read_text(encoding="utf-8")
-    verify_workflow = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_workflow = _workflow_authority_text("verify-work")
     write_paper = _workflow_authority_text("write-paper")
     write_paper_command = (COMMANDS_DIR / "write-paper.md").read_text(encoding="utf-8")
-    respond_to_referees = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    sync_state = (WORKFLOWS_DIR / "sync-state.md").read_text(encoding="utf-8")
+    respond_to_referees = _workflow_authority_text("respond-to-referees")
+    sync_state = _workflow_authority_text("sync-state")
     review_reader = (AGENTS_DIR / "gpd-review-reader.md").read_text(encoding="utf-8")
     review_literature = (AGENTS_DIR / "gpd-review-literature.md").read_text(encoding="utf-8")
     review_math = (AGENTS_DIR / "gpd-review-math.md").read_text(encoding="utf-8")
@@ -4191,9 +4196,9 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         verify_command,
         "verify-work",
         semantic_fragments=(
-            "workflow file owns",
+            "staged workflow authorities own",
             "detailed check taxonomy",
-            "bootstraps the canonical verification surfaces",
+            "bootstraps the canonical verification surface",
             "delegates the physics checks",
         ),
         context="verify-work command wrapper",
@@ -4533,8 +4538,8 @@ def test_publication_prompts_surface_strict_semantic_manuscript_gates() -> None:
     peer_review_workflow = _workflow_authority_text("peer-review")
     peer_review_index = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
     write_paper_workflow = _workflow_authority_text("write-paper")
-    respond_workflow = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    arxiv_workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    respond_workflow = _workflow_authority_text("respond-to-referees")
+    arxiv_workflow = _workflow_authority_text("arxiv-submission")
     shared_preflight = (TEMPLATES_DIR / "paper" / "publication-manuscript-root-preflight.md").read_text(
         encoding="utf-8"
     )
@@ -4667,8 +4672,8 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
     write_paper_workflow = _workflow_authority_text("write-paper")
     peer_review_workflow = _workflow_authority_text("peer-review")
     peer_review_index = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
-    respond_workflow = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    arxiv_workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    respond_workflow = _workflow_authority_text("respond-to-referees")
+    arxiv_workflow = _workflow_authority_text("arxiv-submission")
     peer_review_workflow_expanded = _expanded_workflow_authority_text("peer-review")
     shared_preflight_include = "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md"
     bootstrap_preflight_include = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
@@ -4797,8 +4802,8 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
 def test_staged_publication_and_quick_workflow_prompts_match_executable_init_paths() -> None:
     write_paper_workflow = _workflow_authority_text("write-paper")
     peer_review_workflow = _workflow_authority_text("peer-review")
-    quick_workflow = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
-    arxiv_workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    quick_workflow = _workflow_authority_text("quick")
+    arxiv_workflow = _workflow_authority_text("arxiv-submission")
     arxiv_staging = registry.get_command("arxiv-submission").staged_loading
 
     _assert_workflow_calls_staged_init_for_manifest_stages("write-paper", write_paper_workflow)
@@ -4859,7 +4864,7 @@ def test_research_verification_body_scaffold_keeps_body_only_subject_labels_dist
 
 
 def test_verify_work_workflow_uses_body_only_subject_kind_fields() -> None:
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_work = _workflow_authority_text("verify-work")
 
     _assert_machine_fragments(
         verify_work,
@@ -4900,7 +4905,7 @@ def test_verify_work_workflow_uses_body_only_subject_kind_fields() -> None:
 
 
 def test_verify_work_active_sessions_use_canonical_verification_path_and_keep_status_separate() -> None:
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_work = _workflow_authority_text("verify-work")
 
     assert 'gpd frontmatter get "$file" --field session_status' not in verify_work
     assert "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`." in verify_work
@@ -5227,12 +5232,14 @@ def test_planner_and_summary_prompt_surfaces_expand_contract_schema_bodies() -> 
 
 def test_sync_state_defers_state_schema_while_write_paper_expands_required_schema_bodies() -> None:
     sync_state = _expand_prompt_surface(COMMANDS_DIR / "sync-state.md")
+    sync_state_workflow = _expanded_workflow_authority_text("sync-state")
     write_paper = _expanded_workflow_authority_text("write-paper")
 
     assert "state-json-schema.md" in sync_state
     assert "# state.json Schema" not in sync_state
     assert "Authoritative vs Derived" not in sync_state
-    assert "`convention_lock`" in sync_state
+    assert "`convention_lock`" not in sync_state
+    assert "`convention_lock`" in sync_state_workflow
     assert "templates/paper/reproducibility-manifest.md" in write_paper
     assert "Reproducibility Manifest Template" not in write_paper
     assert "bibliographer search breadth" in write_paper
@@ -5353,7 +5360,7 @@ def test_execution_surfaces_use_bounded_review_cadence_and_first_result_gates() 
     execute_phase = _workflow_authority_text("execute-phase")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     resume_work = expand_at_includes(
-        (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8"),
+        _workflow_authority_text("resume-work"),
         REPO_ROOT / "src/gpd",
         "/runtime/",
     )
@@ -5490,7 +5497,7 @@ def test_debug_command_and_workflow_wire_directly_to_gpd_debugger() -> None:
 
 
 def test_resume_workflow_surfaces_contract_load_and_validation_state() -> None:
-    raw_resume_work = (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8")
+    raw_resume_work = _workflow_authority_text("resume-work")
     resume_work = expand_at_includes(raw_resume_work, REPO_ROOT / "src/gpd", "/runtime/")
     resume_vocabulary = (REFERENCES_DIR / "orchestration" / "resume-vocabulary.md").read_text(encoding="utf-8")
 
@@ -5586,7 +5593,7 @@ def test_execution_observability_and_resume_workflow_surfaces_stay_conservative_
     )
     progress = (WORKFLOWS_DIR / "progress.md").read_text(encoding="utf-8")
     resume_work = expand_at_includes(
-        (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8"),
+        _workflow_authority_text("resume-work"),
         REPO_ROOT / "src/gpd",
         "/runtime/",
     )
@@ -5617,7 +5624,7 @@ def test_execution_observability_and_resume_workflow_surfaces_stay_conservative_
 def test_pause_resume_and_help_wiring_keep_runtime_handoff_and_local_snapshot_boundary() -> None:
     pause_work = (WORKFLOWS_DIR / "pause-work.md").read_text(encoding="utf-8")
     resume_work = expand_at_includes(
-        (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8"),
+        _workflow_authority_text("resume-work"),
         REPO_ROOT / "src/gpd",
         "/runtime/",
     )
@@ -5702,7 +5709,7 @@ def test_state_portability_reference_keeps_resume_public_vocabulary_note_compact
 
 def test_pause_resume_and_derivation_templates_preserve_result_id_continuity() -> None:
     pause_work = (WORKFLOWS_DIR / "pause-work.md").read_text(encoding="utf-8")
-    resume_work = (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8")
+    resume_work = _workflow_authority_text("resume-work")
     continue_here = (TEMPLATES_DIR / "continue-here.md").read_text(encoding="utf-8")
     derivation_state = (TEMPLATES_DIR / "DERIVATION-STATE.md").read_text(encoding="utf-8")
 
@@ -5736,12 +5743,12 @@ def test_state_compaction_lifecycle_docs_do_not_claim_progress_mutates_state() -
 
 def test_protocol_bundle_context_surfaces_across_planning_execution_and_verification() -> None:
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
-    research_phase = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
+    plan_phase = _workflow_authority_text("plan-phase")
+    research_phase = _workflow_authority_text("research-phase")
     execute_phase = _workflow_authority_text("execute-phase")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     verify_phase = (WORKFLOWS_DIR / "verify-phase.md").read_text(encoding="utf-8")
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_work = _workflow_authority_text("verify-work")
     continuation = (TEMPLATES_DIR / "continuation-prompt.md").read_text(encoding="utf-8")
     planner_agent = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
     checker_agent = (AGENTS_DIR / "gpd-plan-checker.md").read_text(encoding="utf-8")
@@ -5840,7 +5847,7 @@ def test_protocol_bundle_context_surfaces_across_planning_execution_and_verifica
 
 
 def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays_free() -> None:
-    quick = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
+    quick = _workflow_authority_text("quick")
 
     planner_reference_branch = re.search(
         r"If `TASK_AUTHORING_INIT\.staged_loading\.stage_id` is `reference_context`, append this selected reference payload:(.*?)</planning_context>",
@@ -5918,7 +5925,7 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
     agent_delegation = (REFERENCES_DIR / "orchestration" / "agent-delegation.md").read_text(encoding="utf-8")
     execute_phase = _workflow_authority_text("execute-phase")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
-    quick = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
+    quick = _workflow_authority_text("quick")
 
     _assert_semantic_fragments(
         model_resolution,
@@ -6005,7 +6012,7 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
 
 
 def test_verify_work_gap_closure_delegation_surfaces_contract_gate_inputs() -> None:
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_work = _workflow_authority_text("verify-work")
 
     _assert_init_placeholders_visible(
         verify_work,
@@ -6099,10 +6106,10 @@ def test_decisive_comparisons_paper_quality_artifacts_and_profile_invariants_are
 
 def test_publication_workflows_refresh_bibliography_audit_after_bibliography_changes() -> None:
     write_paper = _workflow_authority_text("write-paper")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
     peer_review = _workflow_authority_text("peer-review")
     peer_review_index = (WORKFLOWS_DIR / "peer-review.md").read_text(encoding="utf-8")
-    arxiv_submission = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    arxiv_submission = _workflow_authority_text("arxiv-submission")
     shared_preflight = (TEMPLATES_DIR / "paper" / "publication-manuscript-root-preflight.md").read_text(
         encoding="utf-8"
     )
@@ -6185,8 +6192,8 @@ def test_publication_workflows_keep_manuscript_local_reference_status_rooted_at_
 ):
     write_paper = _workflow_authority_text("write-paper")
     peer_review = _workflow_authority_text("peer-review")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
-    arxiv_submission = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
+    arxiv_submission = _workflow_authority_text("arxiv-submission")
 
     _assert_machine_fragments(
         write_paper,
@@ -6237,10 +6244,10 @@ def test_publication_workflows_keep_manuscript_local_reference_status_rooted_at_
 
 
 def test_respond_to_referees_arxiv_handoff_uses_public_positional_arxiv_target() -> None:
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
     arxiv_command = (COMMANDS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
-    arxiv_workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    arxiv_workflow = _workflow_authority_text("arxiv-submission")
     arxiv_help_block = help_workflow.split(
         "**`gpd:arxiv-submission [manuscript root or .tex entrypoint]`**",
         1,
@@ -6287,11 +6294,11 @@ def test_respond_to_referees_arxiv_handoff_uses_public_positional_arxiv_target()
 
 
 def test_adaptive_mode_and_review_cadence_docs_stay_aligned() -> None:
-    research_phase = (WORKFLOWS_DIR / "research-phase.md").read_text(encoding="utf-8")
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    research_phase = _workflow_authority_text("research-phase")
+    verify_work = _workflow_authority_text("verify-work")
+    plan_phase = _workflow_authority_text("plan-phase")
     new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
-    new_milestone = (WORKFLOWS_DIR / "new-milestone.md").read_text(encoding="utf-8")
+    new_milestone = _workflow_authority_text("new-milestone")
     set_profile = (WORKFLOWS_DIR / "set-profile.md").read_text(encoding="utf-8")
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
     planning_config = (REFERENCES_DIR / "planning" / "planning-config.md").read_text(encoding="utf-8")
@@ -6493,7 +6500,7 @@ def test_help_workflow_uses_reachable_quick_start_for_resume_branch() -> None:
 
 def test_help_and_execution_surfaces_wire_tangent_control_path() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    plan_phase = _workflow_authority_text("plan-phase")
     execute_phase = _workflow_authority_text("execute-phase")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     tangent_workflow = (WORKFLOWS_DIR / "tangent.md").read_text(encoding="utf-8")
@@ -6597,7 +6604,7 @@ def test_help_and_execution_surfaces_wire_tangent_control_path() -> None:
 def test_planner_and_plan_phase_keep_no_silent_branching_and_exploit_tangent_suppression() -> None:
     planner = (REPO_ROOT / "src/gpd/agents/gpd-planner.md").read_text(encoding="utf-8")
     tangent_model = (REFERENCES_DIR / "planning" / "planner-tangent-decision-model.md").read_text(encoding="utf-8")
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    plan_phase = _workflow_authority_text("plan-phase")
 
     for content in (planner + "\n" + tangent_model, plan_phase):
         _assert_semantic_fragments(
@@ -6885,7 +6892,7 @@ def test_expanded_artifact_intake_surfaces_use_cli_text_extraction_helper() -> N
 
 def test_peer_review_and_arxiv_use_subject_aware_publication_roots() -> None:
     peer_review = _workflow_authority_text("peer-review")
-    arxiv_submission = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    arxiv_submission = _workflow_authority_text("arxiv-submission")
 
     for field in (
         "publication_subject_slug",
@@ -6989,10 +6996,10 @@ def test_generated_peer_review_skill_surface_uses_artifact_text_helper_for_non_p
 
 
 def test_verification_and_publication_prompts_keep_decisive_contract_targets_reader_visible() -> None:
-    verify_work = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    verify_work = _workflow_authority_text("verify-work")
     write_paper = _workflow_authority_text("write-paper")
     peer_review = _workflow_authority_text("peer-review")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority_text("respond-to-referees")
 
     _assert_semantic_fragments(
         verify_work,
@@ -7036,7 +7043,7 @@ def test_new_project_spawns_roadmapper_with_shallow_mode_in_standard_mode() -> N
 
 
 def test_new_milestone_keeps_full_roadmap_detail_shallow_mode_false() -> None:
-    new_milestone = (WORKFLOWS_DIR / "new-milestone.md").read_text(encoding="utf-8")
+    new_milestone = _workflow_authority_text("new-milestone")
     assert "<shallow_mode>false</shallow_mode>" in new_milestone
 
 
@@ -7109,7 +7116,7 @@ def test_route_workflow_uses_physics_scope_examples_and_ordered_compound_contrac
 
 
 def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verification() -> None:
-    plan_phase = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    plan_phase = _workflow_authority_text("plan-phase")
     autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
 
     _assert_semantic_fragments(
@@ -7229,7 +7236,7 @@ def test_undo_backtrack_hook_collects_complete_backtrack_row_fields() -> None:
 def test_changed_continuation_surfaces_do_not_reintroduce_session_as_authority() -> None:
     checked_surfaces = {
         "execute-plan": (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8"),
-        "resume-work": (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8"),
+        "resume-work": _workflow_authority_text("resume-work"),
         "checkpoints": (REFERENCES_DIR / "orchestration" / "checkpoints.md").read_text(encoding="utf-8"),
         "github-lifecycle": (REFERENCES_DIR / "execution" / "github-lifecycle.md").read_text(encoding="utf-8"),
         "state-machine": (TEMPLATES_DIR / "state-machine.md").read_text(encoding="utf-8"),

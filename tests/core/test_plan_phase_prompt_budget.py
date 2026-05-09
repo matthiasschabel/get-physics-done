@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
-from tests.prompt_metrics_support import measure_prompt_surface
+from tests.prompt_metrics_support import expanded_prompt_text, measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
@@ -24,11 +24,27 @@ def test_plan_phase_command_stays_thin_and_only_eagerly_loads_the_workflow() -> 
     )
 
     assert metrics.raw_include_count == 1
-    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase/phase-bootstrap.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md" not in command_text
-    assert "Follow the included workflow file exactly." in command_text
+    assert "staged_loading.eager_authorities" in command_text
+    assert "staged_loading.must_not_eager_load" in command_text
+
+    expanded = expanded_prompt_text(
+        COMMANDS_DIR / "plan-phase.md",
+        src_root=SOURCE_ROOT,
+        path_prefix=PATH_PREFIX,
+    )
+    for late_fragment in (
+        "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md",
+        "Planner prompt:",
+        "Checker prompt:",
+        "Revision prompt:",
+        "Use `templates/planner-subagent-prompt.md` here as the stage-local planner template",
+    ):
+        assert late_fragment not in expanded
 
 
 def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_need_them() -> None:
@@ -45,20 +61,31 @@ def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_
     )
 
     bootstrap = manifest.stages[0]
+    research_routing = manifest.stages[1]
     planner_authoring = manifest.stages[2]
     checker_revision = manifest.stages[3]
 
-    assert bootstrap.loaded_authorities == ("workflows/plan-phase.md",)
+    assert bootstrap.loaded_authorities == ("workflows/plan-phase/phase-bootstrap.md",)
+    assert bootstrap.mode_paths == ("workflows/plan-phase/phase-bootstrap.md",)
+    assert "workflows/plan-phase.md" in bootstrap.must_not_eager_load
+    assert "workflows/plan-phase/research-routing.md" in bootstrap.must_not_eager_load
+    assert "workflows/plan-phase/planner-authoring.md" in bootstrap.must_not_eager_load
+    assert "workflows/plan-phase/checker-revision.md" in bootstrap.must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
     assert "templates/plan-contract-schema.md" in bootstrap.must_not_eager_load
     assert "templates/planner-subagent-prompt.md" in bootstrap.must_not_eager_load
     assert "references/ui/ui-brand.md" in bootstrap.must_not_eager_load
 
+    assert research_routing.loaded_authorities == (
+        "workflows/plan-phase/research-routing.md",
+        "references/orchestration/runtime-delegation-note.md",
+    )
     assert planner_authoring.loaded_authorities == (
-        "workflows/plan-phase.md",
+        "workflows/plan-phase/planner-authoring.md",
         "templates/planner-subagent-prompt.md",
     )
     assert checker_revision.loaded_authorities == (
-        "workflows/plan-phase.md",
+        "workflows/plan-phase/checker-revision.md",
         "templates/planner-subagent-prompt.md",
     )
     assert "reference_artifacts_content" in planner_authoring.required_init_fields
@@ -68,7 +95,7 @@ def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_
 
 
 def test_plan_phase_clean_non_autonomous_planning_reports_green_with_no_checkpoint() -> None:
-    workflow_text = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    workflow_text = (WORKFLOWS_DIR / "plan-phase" / "checker-revision.md").read_text(encoding="utf-8")
 
     assert "Structured final status convention" in workflow_text
     assert "clean bounded non-autonomous planning" in workflow_text

@@ -823,10 +823,11 @@ def test_progress_health_advice_uses_runtime_command_wording() -> None:
 def test_plan_phase_prompt_is_a_thin_dispatch_shell() -> None:
     command = (REPO_ROOT / "src/gpd/commands/plan-phase.md").read_text(encoding="utf-8")
 
-    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase/phase-bootstrap.md" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" not in command
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in command
     assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command
-    assert "Follow the included workflow file exactly." in command
+    assert "staged_loading.eager_authorities" in command
     assert "agent: gpd-planner" in command
     assert "What Makes a Good Physics Plan" not in command
     assert "Common Failure Modes" not in command
@@ -837,7 +838,7 @@ def test_plan_phase_prompt_is_a_thin_dispatch_shell() -> None:
 
 def test_new_milestone_prompt_mentions_planning_commit_docs() -> None:
     command = (REPO_ROOT / "src/gpd/commands/new-milestone.md").read_text(encoding="utf-8")
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-milestone.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     for content in (command, workflow):
         assert "planning.commit_docs" in content
@@ -845,7 +846,7 @@ def test_new_milestone_prompt_mentions_planning_commit_docs() -> None:
 
 
 def test_new_milestone_state_status_literals_are_valid() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-milestone.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     statuses = re.findall(r'"--Status"\s+"([^"]+)"', workflow)
 
@@ -855,7 +856,7 @@ def test_new_milestone_state_status_literals_are_valid() -> None:
 
 
 def test_new_milestone_roadmapper_stage_parse_and_artifact_words_match_payload() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-milestone.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     roadmap_authoring = workflow[workflow.index("ROADMAPPER_INIT=") :]
 
@@ -1250,8 +1251,8 @@ def test_continuation_format_covers_stop_and_checkpoint_routes() -> None:
 
 
 def test_new_project_and_new_milestone_closeouts_include_concrete_next_up_commands() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
-    new_milestone = (WORKFLOWS_DIR / "new-milestone.md").read_text(encoding="utf-8")
+    new_project = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    new_milestone = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
     new_milestone_command = (COMMANDS_DIR / "new-milestone.md").read_text(encoding="utf-8")
 
     assert "Stop after this error with `## > Next Up`" in new_project

@@ -1461,7 +1461,7 @@ def test_respond_to_referees_review_contract_uses_round_suffixed_output_paths() 
         ),
     ]
     respond_command = _read_command("respond-to-referees")
-    respond_workflow = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond_workflow = _read_workflow("respond-to-referees")
     assert "GPD/review/REFEREE_RESPONSE{round_suffix}.md" in respond_command
     assert "GPD/AUTHOR-RESPONSE{round_suffix}.md" in respond_command
     assert "scope_variants:" in respond_command

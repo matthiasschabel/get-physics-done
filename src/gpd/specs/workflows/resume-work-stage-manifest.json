@@ -7,7 +7,7 @@
       "order": 1,
       "purpose": "reentry resolution, canonical resume selection, and immediate recovery summary",
       "mode_paths": [
-        "workflows/resume-work.md"
+        "workflows/resume-work/resume-bootstrap.md"
       ],
       "required_init_fields": [
         "workspace_root",
@@ -64,11 +64,15 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/resume-work.md",
+        "workflows/resume-work/resume-bootstrap.md",
         "references/orchestration/resume-vocabulary.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/resume-work.md",
+        "workflows/resume-work/state-restore.md",
+        "workflows/resume-work/derivation-restore.md",
+        "workflows/resume-work/resume-routing.md",
         "references/orchestration/continuation-format.md",
         "references/orchestration/state-portability.md",
         "templates/state-json-schema.md"
@@ -98,7 +102,7 @@
       "order": 2,
       "purpose": "state authority restoration, contract gate visibility, and blocked-contract routing",
       "mode_paths": [
-        "workflows/resume-work.md"
+        "workflows/resume-work/state-restore.md"
       ],
       "required_init_fields": [
         "state_exists",
@@ -118,10 +122,14 @@
         "project_content"
       ],
       "loaded_authorities": [
+        "workflows/resume-work/state-restore.md",
         "references/orchestration/state-portability.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/resume-work.md",
+        "workflows/resume-work/derivation-restore.md",
+        "workflows/resume-work/resume-routing.md",
         "references/orchestration/continuation-format.md",
         "templates/state-json-schema.md"
       ],
@@ -150,7 +158,7 @@
       "order": 3,
       "purpose": "derivation-history restoration and continuity-anchor recovery",
       "mode_paths": [
-        "workflows/resume-work.md"
+        "workflows/resume-work/derivation-restore.md"
       ],
       "required_init_fields": [
         "derived_convention_lock",
@@ -163,10 +171,13 @@
         "continuity_handoff_content"
       ],
       "loaded_authorities": [
+        "workflows/resume-work/derivation-restore.md",
         "references/orchestration/continuation-format.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/resume-work.md",
+        "workflows/resume-work/resume-routing.md",
         "templates/state-json-schema.md"
       ],
       "allowed_tools": [
@@ -191,7 +202,7 @@
       "order": 4,
       "purpose": "incomplete-work detection, next-step selection, and fail-closed downstream routing",
       "mode_paths": [
-        "workflows/resume-work.md"
+        "workflows/resume-work/resume-routing.md"
       ],
       "required_init_fields": [
         "state_exists",
@@ -216,10 +227,12 @@
         "continuity_handoff_content"
       ],
       "loaded_authorities": [
+        "workflows/resume-work/resume-routing.md",
         "references/orchestration/continuation-format.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/resume-work.md",
         "templates/state-json-schema.md"
       ],
       "allowed_tools": [

@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-WORKFLOW = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "respond-to-referees.md"
+WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+
+
+def _workflow() -> str:
+    return workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
 
 
 def test_respond_to_referees_group_b_completion_requires_fresh_child_files_written_and_rejects_stale_edits() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = _workflow()
 
     assert (
         "Return through the `respond_to_referees_revision_section` child_gate so the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` are all named."
@@ -25,7 +31,7 @@ def test_respond_to_referees_group_b_completion_requires_fresh_child_files_writt
 
 
 def test_respond_to_referees_response_letter_generation_stays_file_backed_and_fresh_return_based() -> None:
-    source = WORKFLOW.read_text(encoding="utf-8")
+    source = _workflow()
 
     assert "aggregate_child_gate:" in source
     assert "id: respond_to_referees_response_pair_current" in source

@@ -657,7 +657,7 @@ class TestSkillsServerIntegration:
         assert result["staged_loading"]["workflow_id"] == "research-phase"
         assert result["staged_loading"]["stages"][0]["id"] == "phase_bootstrap"
         assert result["staged_loading"]["stages"][0]["loaded_authorities"] == [
-            "workflows/research-phase.md",
+            "workflows/research-phase/phase-bootstrap.md",
             "references/orchestration/model-profile-resolution.md",
         ]
         assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"

@@ -3777,7 +3777,8 @@ class TestInitNewMilestone:
         assert ctx["staged_loading"]["workflow_id"] == "new-milestone"
         assert ctx["staged_loading"]["stage_id"] == "survey_objectives"
         assert ctx["staged_loading"]["loaded_authorities"] == [
-            "workflows/new-milestone.md",
+            "workflows/new-milestone/survey-objectives.md",
+            "references/orchestration/runtime-delegation-note.md",
             "references/research/questioning.md",
         ]
         assert ctx["staged_loading"]["writes_allowed"] == [
@@ -3816,7 +3817,8 @@ class TestInitNewMilestone:
         assert ctx["staged_loading"]["workflow_id"] == "new-milestone"
         assert ctx["staged_loading"]["stage_id"] == "roadmap_authoring"
         assert ctx["staged_loading"]["loaded_authorities"] == [
-            "workflows/new-milestone.md",
+            "workflows/new-milestone/roadmap-authoring.md",
+            "references/orchestration/runtime-delegation-note.md",
             "templates/project.md",
             "templates/requirements.md",
         ]
@@ -4729,7 +4731,7 @@ class TestInitVerifyWork:
         manifest = load_workflow_stage_manifest("verify-work")
         inventory_build = manifest.stage("inventory_build")
         assert inventory_build.loaded_authorities == (
-            "workflows/verify-work.md",
+            "workflows/verify-work/inventory-build.md",
             "references/verification/meta/verification-independence.md",
         )
         assert "templates/verification-report.md" not in inventory_build.loaded_authorities

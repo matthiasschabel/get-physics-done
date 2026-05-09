@@ -30,7 +30,13 @@ PEER_REVIEW_STAGE_FILES = (
 
 
 def _workflow_text(name: str) -> str:
-    if name in {"write-paper.md", "peer-review.md"}:
+    if name in {
+        "arxiv-submission.md",
+        "write-paper.md",
+        "peer-review.md",
+        "respond-to-referees.md",
+        "verify-work.md",
+    }:
         return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 

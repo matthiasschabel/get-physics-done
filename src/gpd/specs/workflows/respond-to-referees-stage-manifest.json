@@ -63,17 +63,22 @@
       "order": 1,
       "purpose": "target-aware response-round bootstrap, manuscript routing, report-source policy, and publication root selection",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/bootstrap.md"
       ],
       "required_init_fields": [
         "project_root"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/bootstrap.md",
         "references/publication/publication-bootstrap-preflight.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/report-triage.md",
+        "workflows/respond-to-referees/revision-planning.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "workflows/respond-to-referees/finalize.md",
         "references/publication/publication-response-writer-handoff.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/stage-recovery-gate.md",
@@ -111,16 +116,20 @@
       "order": 2,
       "purpose": "referee report ingestion, latest-round detection, and decision artifact calibration",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/report-triage.md"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/report-triage.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
         "references/publication/stage-recovery-gate.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/revision-planning.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "workflows/respond-to-referees/finalize.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
@@ -155,7 +164,7 @@
       "order": 3,
       "purpose": "claim-level response planning, new-calculation routing, and manuscript-change scope control",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/revision-planning.md"
       ],
       "required_init_fields": [
         "reference_artifact_files",
@@ -171,13 +180,16 @@
         "derived_citation_source_count"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/revision-planning.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
         "references/publication/stage-recovery-gate.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "workflows/respond-to-referees/finalize.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
@@ -212,10 +224,10 @@
       "order": 4,
       "purpose": "author response drafting, referee-facing response drafting, and synchronized manuscript edits",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/response-authoring.md"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/response-authoring.md",
         "references/publication/publication-response-writer-handoff.md",
         "references/publication/stage-recovery-gate.md",
         "templates/paper/referee-response.md",
@@ -264,10 +276,10 @@
       "order": 5,
       "purpose": "response-round closeout, artifact consistency checks, and next-review handoff",
       "mode_paths": [
-        "workflows/respond-to-referees.md"
+        "workflows/respond-to-referees/finalize.md"
       ],
       "loaded_authorities": [
-        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/finalize.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
         "references/publication/stage-recovery-gate.md"

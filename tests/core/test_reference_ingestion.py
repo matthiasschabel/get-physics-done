@@ -18,6 +18,7 @@ from gpd.core.reference_ingestion import (
     ingest_reference_artifacts as _ingest_reference_artifacts,
 )
 from gpd.core.state import default_state_dict
+from tests.workflow_authority_support import workflow_authority_text
 
 
 def _bootstrap_project(tmp_path: Path) -> Path:
@@ -553,7 +554,7 @@ def test_literature_review_surfaces_publish_closed_citation_source_contract() ->
     repo_root = Path(__file__).resolve().parents[2]
     command_doc = (repo_root / "src/gpd/commands/literature-review.md").read_text(encoding="utf-8")
     agent_doc = (repo_root / "src/gpd/agents/gpd-literature-reviewer.md").read_text(encoding="utf-8")
-    workflow_doc = (repo_root / "src/gpd/specs/workflows/literature-review.md").read_text(encoding="utf-8")
+    workflow_doc = workflow_authority_text(repo_root / "src/gpd/specs/workflows", "literature-review")
 
     assert "Run the literature-review workflow as a thin wrapper" in command_doc
     assert "matching `GPD/literature/{slug}-CITATION-SOURCES.json` sidecar" in command_doc
@@ -1008,7 +1009,7 @@ def test_ingest_reference_artifacts_surfaces_explicit_or_derived_must_surface_fl
 
 def test_anchor_registry_templates_document_must_surface_column_and_fallback_heuristic() -> None:
     repo_root = Path(__file__).resolve().parents[2]
-    literature_workflow = (repo_root / "src/gpd/specs/workflows/literature-review.md").read_text(encoding="utf-8")
+    literature_workflow = workflow_authority_text(repo_root / "src/gpd/specs/workflows", "literature-review")
     reference_template = (repo_root / "src/gpd/specs/references/templates/research-mapper/REFERENCES.md").read_text(
         encoding="utf-8"
     )

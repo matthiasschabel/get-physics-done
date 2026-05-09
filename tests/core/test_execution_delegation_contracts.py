@@ -42,7 +42,7 @@ def test_execute_phase_requires_on_disk_artifacts_before_accepting_success() -> 
 
 
 def test_executor_handoff_recovery_treats_commits_as_partial_evidence_only() -> None:
-    quick = (WORKFLOWS_DIR / "quick.md").read_text(encoding="utf-8")
+    quick = workflow_authority_text(WORKFLOWS_DIR, "quick")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     execute_phase = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 

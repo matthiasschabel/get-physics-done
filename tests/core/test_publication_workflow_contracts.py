@@ -67,7 +67,7 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
 
 
 def test_respond_to_referees_balanced_mode_does_not_force_parse_confirmation() -> None:
-    workflow = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
 
     assert "research_mode" in workflow
     assert "RESEARCH_MODE=$(echo \"$INIT\" | gpd json get .research_mode --default balanced)" in workflow

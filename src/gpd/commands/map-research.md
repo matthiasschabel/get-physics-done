@@ -20,7 +20,7 @@ Orchestrator role: validate the focus area, then hand off to the workflow-owned 
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/map-research.md
+@{GPD_INSTALL_DIR}/workflows/map-research/map-bootstrap.md
 </execution_context>
 
 <context>
@@ -30,6 +30,6 @@ Project state is loaded by the workflow from the current workspace or its neares
 </context>
 
 <process>
-Follow the included map-research workflow.
+Follow the included map-research bootstrap authority. After staged reload, follow only `staged_loading.eager_authorities` for mapper authoring and artifact routing.
 Do not duplicate staged init, mapper fanout, or return routing here.
 </process>

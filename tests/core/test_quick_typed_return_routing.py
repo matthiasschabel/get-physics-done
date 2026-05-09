@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-QUICK_WORKFLOW = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "quick.md"
+WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
 
 def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -> None:
-    workflow = QUICK_WORKFLOW.read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "quick")
 
     assert "gpd_return.status" in workflow
     assert "checkpoint" in workflow
@@ -21,6 +23,8 @@ def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -
     assert "reference_context" in workflow
     assert "default small-task path" in workflow
     assert "gpd --raw init quick \"$DESCRIPTION\" --stage reference_context" in workflow
+    assert "workflows/quick/task-bootstrap.md" in workflow
+    assert "workflows/quick/task-authoring.md" in workflow
     assert "tool_requirements" in workflow
     assert "gpd validate plan-preflight" in workflow
     assert "gpd apply-return-updates" in workflow

@@ -2,12 +2,14 @@
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERIFY_WORK = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "verify-work.md"
 
 
 def test_verify_work_routes_on_structured_checker_statuses() -> None:
-    workflow = VERIFY_WORK.read_text(encoding="utf-8")
+    workflow = workflow_authority_text(VERIFY_WORK.parent, "verify-work")
 
     assert "route on `gpd_return.status` and the structured plan lists" in workflow
     assert "- `completed`: treat the fresh fix plans as verified only after the on-disk files still match the planner's `files_written` set." in workflow
@@ -20,7 +22,7 @@ def test_verify_work_routes_on_structured_checker_statuses() -> None:
 
 
 def test_verify_work_references_one_shot_checker_contract_in_the_gap_closure_loop() -> None:
-    workflow = VERIFY_WORK.read_text(encoding="utf-8")
+    workflow = workflow_authority_text(VERIFY_WORK.parent, "verify-work")
 
     assert "Gap plan-checker child artifact gate" in workflow
     assert "checkpoint handling applies `references/orchestration/continuation-boundary.md`" in workflow

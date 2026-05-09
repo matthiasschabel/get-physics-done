@@ -15,6 +15,7 @@ from gpd.core.workflow_staging import (
     load_workflow_stage_manifest,
     validate_workflow_stage_manifest_payload,
 )
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -58,7 +59,7 @@ def test_resume_work_stage_manifest_loads_and_preserves_stage_order() -> None:
     resume_routing = manifest.get_stage("resume_routing")
 
     assert bootstrap.loaded_authorities == (
-        "workflows/resume-work.md",
+        "workflows/resume-work/resume-bootstrap.md",
         "references/orchestration/resume-vocabulary.md",
     )
     assert "templates/state-json-schema.md" in bootstrap.must_not_eager_load
@@ -66,13 +67,19 @@ def test_resume_work_stage_manifest_loads_and_preserves_stage_order() -> None:
     assert "project_contract_gate" not in bootstrap.required_init_fields
     assert "state_json_backup_exists" in bootstrap.required_init_fields
 
-    assert state_restore.loaded_authorities == ("references/orchestration/state-portability.md",)
+    assert state_restore.loaded_authorities == (
+        "workflows/resume-work/state-restore.md",
+        "references/orchestration/state-portability.md",
+    )
     assert "project_contract_gate" in state_restore.required_init_fields
     assert "state_content" in state_restore.required_init_fields
     assert "project_content" in state_restore.required_init_fields
     assert "reference_artifacts_content" not in state_restore.required_init_fields
 
-    assert derivation_restore.loaded_authorities == ("references/orchestration/continuation-format.md",)
+    assert derivation_restore.loaded_authorities == (
+        "workflows/resume-work/derivation-restore.md",
+        "references/orchestration/continuation-format.md",
+    )
     assert derivation_restore.required_init_fields == (
         "derived_convention_lock",
         "derived_convention_lock_count",
@@ -104,7 +111,7 @@ def test_resume_work_stage_manifest_rejects_invalid_field_drift() -> None:
 
 
 def test_resume_work_workflow_uses_public_init_resume_for_staged_payloads() -> None:
-    text = (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
 
     assert "INIT=$(gpd --raw init resume --stage resume_bootstrap)" in text
     assert "STATE_RESTORE_INIT=$(gpd --raw init resume --stage state_restore)" in text
@@ -117,7 +124,7 @@ def test_resume_work_workflow_uses_public_init_resume_for_staged_payloads() -> N
 
 
 def test_resume_work_derivation_restore_does_not_rewrite_derivation_state() -> None:
-    text = (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
     section = _workflow_step(text, "restore_persistent_state")
 
     assert "Do not prune, rewrite, replace, or otherwise modify `GPD/DERIVATION-STATE.md`" in section
@@ -139,14 +146,14 @@ def test_resume_work_derivation_restore_does_not_rewrite_derivation_state() -> N
 
 
 def test_resume_work_transition_reference_uses_installed_workflow_path() -> None:
-    text = (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
 
     assert "- **Transition** -> `{GPD_INSTALL_DIR}/workflows/transition.md`" in text
     assert "- **Transition** -> ./transition.md" not in text
 
 
 def test_resume_work_quick_resume_refuses_auto_selected_recent_projects() -> None:
-    text = (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
     initialize = _workflow_step(text, "initialize")
     quick_resume = _workflow_block(text, "quick_resume")
 
@@ -166,7 +173,7 @@ def test_resume_work_quick_resume_refuses_auto_selected_recent_projects() -> Non
 
 
 def test_resume_work_partial_recoverable_repair_menu_blocks_downstream_actions() -> None:
-    text = (WORKFLOWS_DIR / "resume-work.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
     branch = _workflow_step(text, "determine_next_action")
 
     for command in ("gpd:sync-state", "gpd:health", "gpd:resume-work"):

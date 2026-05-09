@@ -6,6 +6,7 @@ from pathlib import Path
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.frontmatter import extract_frontmatter, validate_frontmatter
 from gpd.core.strict_yaml import load_strict_yaml
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
@@ -27,7 +28,7 @@ def _read_research_verification_template() -> str:
 
 
 def _read_verify_work_template() -> str:
-    return (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    return workflow_authority_text(WORKFLOWS_DIR, "verify-work")
 
 
 def _read_expanded_verifier_prompt() -> str:

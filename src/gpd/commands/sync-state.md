@@ -22,11 +22,11 @@ Reconcile `STATE.md` and `state.json` when they diverge.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/sync-state.md
+@{GPD_INSTALL_DIR}/workflows/sync-state/sync-bootstrap.md
 </execution_context>
 
 <process>
-Follow the included workflow file exactly.
+Read the included sync-state bootstrap authority first. Later recovery, conflict-analysis, and reconcile stages must be loaded only through `staged_loading.eager_authorities`.
 </process>
 
 <success_criteria>

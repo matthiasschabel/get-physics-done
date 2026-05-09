@@ -4,12 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 
 
 def _read(name: str) -> str:
+    if name in {"new-project.md", "new-milestone.md"}:
+        return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 

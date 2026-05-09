@@ -69,7 +69,7 @@
       "order": 1,
       "purpose": "project-aware publication bootstrap, explicit manuscript target resolution, and fail-closed latest-review gating",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/bootstrap.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -82,11 +82,17 @@
         "publication_review_context"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/bootstrap.md",
         "references/publication/publication-bootstrap-preflight.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/manuscript-preflight.md",
+        "workflows/arxiv-submission/review-gate.md",
+        "workflows/arxiv-submission/package.md",
+        "workflows/arxiv-submission/finalize.md",
+        "templates/paper/publication-manuscript-root-preflight.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-reliability.md"
@@ -118,7 +124,7 @@
       "order": 2,
       "purpose": "manuscript-root refresh, bibliography freshness, and compiler smoke-check readiness",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/manuscript-preflight.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -130,11 +136,15 @@
         "publication_review_context"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/manuscript-preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/review-gate.md",
+        "workflows/arxiv-submission/package.md",
+        "workflows/arxiv-submission/finalize.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-reliability.md"
@@ -163,7 +173,7 @@
       "order": 3,
       "purpose": "latest review-round validation and submission clearance",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/review-gate.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -175,12 +185,16 @@
         "publication_review_context"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/review-gate.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/peer-review-reliability.md"
       ],
       "conditional_authorities": [],
-      "must_not_eager_load": [],
+      "must_not_eager_load": [
+        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/package.md",
+        "workflows/arxiv-submission/finalize.md"
+      ],
       "allowed_tools": [
         "file_read",
         "shell",
@@ -204,7 +218,7 @@
       "order": 4,
       "purpose": "submission-tree construction, figure handling, metadata checks, and tarball assembly",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/package.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -214,10 +228,12 @@
         "publication_review_context"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/package.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/arxiv-submission.md",
+        "workflows/arxiv-submission/finalize.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/peer-review-reliability.md"
       ],
@@ -249,7 +265,7 @@
       "order": 5,
       "purpose": "final checklist presentation and submission handoff",
       "mode_paths": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/finalize.md"
       ],
       "required_init_field_groups": [
         "launch_context",
@@ -259,10 +275,12 @@
         "publication_review_context"
       ],
       "loaded_authorities": [
-        "workflows/arxiv-submission.md"
+        "workflows/arxiv-submission/finalize.md"
       ],
       "conditional_authorities": [],
-      "must_not_eager_load": [],
+      "must_not_eager_load": [
+        "workflows/arxiv-submission.md"
+      ],
       "allowed_tools": [
         "file_read",
         "shell",

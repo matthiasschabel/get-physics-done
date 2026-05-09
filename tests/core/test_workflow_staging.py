@@ -274,7 +274,11 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
         "interactive_validation",
         "gap_repair",
     )
-    assert manifest.stages[0].loaded_authorities == ("workflows/verify-work.md",)
+    assert manifest.stages[0].mode_paths == ("workflows/verify-work/session-router.md",)
+    assert manifest.stages[0].loaded_authorities == ("workflows/verify-work/session-router.md",)
+    assert "workflows/verify-work.md" in manifest.stages[0].must_not_eager_load
+    assert "workflows/verify-work/gap-repair.md" in manifest.stages[0].must_not_eager_load
+    assert "references/verification/core/proof-redteam-workflow-gate.md" in manifest.stages[0].must_not_eager_load
     assert "references/verification/core/verification-core.md" in manifest.stages[0].must_not_eager_load
     assert "templates/verification-report.md" in manifest.stages[0].must_not_eager_load
     assert "phase_proof_review_status" in manifest.stages[0].required_init_fields
@@ -284,6 +288,11 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "project_contract_load_info" in manifest.stages[0].required_init_fields
     assert "project_contract_validation" in manifest.stages[0].required_init_fields
     assert "references/verification/core/verification-core.md" in manifest.stages[1].must_not_eager_load
+    assert manifest.stages[1].mode_paths == ("workflows/verify-work/phase-bootstrap.md",)
+    assert manifest.stages[1].loaded_authorities == (
+        "workflows/verify-work/phase-bootstrap.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+    )
     assert "phase_proof_review_status" in manifest.stages[1].required_init_fields
     assert "proof_redteam_finalizer_bridge" in manifest.stages[1].required_init_fields
     assert "proof-bearing work detected" not in manifest.stages[1].checkpoints
@@ -292,9 +301,11 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
         in manifest.stages[1].checkpoints
     )
     assert manifest.stages[2].loaded_authorities == (
-        "workflows/verify-work.md",
+        "workflows/verify-work/inventory-build.md",
         "references/verification/meta/verification-independence.md",
     )
+    assert "templates/verification-report.md" not in manifest.stages[2].eager_authorities()
+    assert "workflows/verify-work/gap-repair.md" in manifest.stages[2].must_not_eager_load
     assert "protocol_bundle_verifier_extensions" in manifest.stages[2].required_init_fields
     assert "active_reference_context" in manifest.stages[2].required_init_fields
     assert "verification_report_finalizer_bridge" in manifest.stages[2].required_init_fields
@@ -322,7 +333,7 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "reference_artifact_files" in manifest.stages[3].required_init_fields
     assert "reference_artifacts_content" not in manifest.stages[3].required_init_fields
     assert manifest.stages[3].loaded_authorities == (
-        "workflows/verify-work.md",
+        "workflows/verify-work/interactive-validation.md",
         "templates/research-verification.md",
         "templates/verification-report.md",
         "templates/contract-results-schema.md",
@@ -353,7 +364,7 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "protocol_bundle_context" in manifest.stages[4].required_init_fields
     assert "protocol_bundle_verifier_extensions" in manifest.stages[4].required_init_fields
     assert manifest.stages[4].loaded_authorities == (
-        "workflows/verify-work.md",
+        "workflows/verify-work/gap-repair.md",
         "templates/research-verification.md",
         "templates/verification-report.md",
         "templates/contract-results-schema.md",
@@ -419,7 +430,7 @@ def test_staged_loading_payload_exposes_eager_authority_metadata() -> None:
     assert payload["loaded_authorities"] == list(stage.loaded_authorities)
     assert payload["eager_authorities"] == list(stage.eager_authorities())
     assert payload["eager_authorities"] == [
-        "workflows/verify-work.md",
+        "workflows/verify-work/inventory-build.md",
         "references/verification/meta/verification-independence.md",
     ]
     assert payload["required_init_fields"] == list(stage.required_init_fields)
@@ -749,15 +760,25 @@ def test_validate_workflow_stage_manifest_payload_loads_plan_phase_manifest() ->
         "planner_authoring",
         "checker_revision",
     )
-    assert manifest.stages[0].loaded_authorities == ("workflows/plan-phase.md",)
+    assert manifest.stages[0].loaded_authorities == ("workflows/plan-phase/phase-bootstrap.md",)
+    assert manifest.stages[0].mode_paths == ("workflows/plan-phase/phase-bootstrap.md",)
+    assert "workflows/plan-phase.md" in manifest.stages[0].must_not_eager_load
+    assert "workflows/plan-phase/research-routing.md" in manifest.stages[0].must_not_eager_load
+    assert "workflows/plan-phase/planner-authoring.md" in manifest.stages[0].must_not_eager_load
+    assert "workflows/plan-phase/checker-revision.md" in manifest.stages[0].must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" in manifest.stages[0].must_not_eager_load
     assert "templates/plan-contract-schema.md" in manifest.stages[0].must_not_eager_load
     assert "templates/planner-subagent-prompt.md" in manifest.stages[0].must_not_eager_load
+    assert manifest.stages[1].loaded_authorities == (
+        "workflows/plan-phase/research-routing.md",
+        "references/orchestration/runtime-delegation-note.md",
+    )
     assert manifest.stages[2].loaded_authorities == (
-        "workflows/plan-phase.md",
+        "workflows/plan-phase/planner-authoring.md",
         "templates/planner-subagent-prompt.md",
     )
     assert manifest.stages[3].loaded_authorities == (
-        "workflows/plan-phase.md",
+        "workflows/plan-phase/checker-revision.md",
         "templates/planner-subagent-prompt.md",
     )
     assert "reference_artifacts_content" in manifest.stages[2].required_init_fields
@@ -801,13 +822,15 @@ def test_validate_workflow_stage_manifest_payload_loads_quick_manifest() -> None
     } == expected_init_spec_ids
 
     assert bootstrap.loaded_authorities == (
-        "workflows/quick.md",
+        "workflows/quick/task-bootstrap.md",
         "references/quick/quick-mode-boundary.md",
         "references/quick/quick-durability-minimum.md",
         "references/quick/quick-reroute-rules.md",
-        "references/orchestration/runtime-delegation-note.md",
     )
     assert bootstrap.next_stages == ("task_authoring", "reference_context")
+    assert "workflows/quick.md" in bootstrap.must_not_eager_load
+    assert "workflows/quick/task-authoring.md" in bootstrap.must_not_eager_load
+    assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
     assert "references/ui/ui-brand.md" in bootstrap.must_not_eager_load
     assert "references/publication/publication-pipeline-modes.md" in bootstrap.must_not_eager_load
     assert "references/verification/core/proof-redteam-workflow-gate.md" in bootstrap.must_not_eager_load
@@ -1035,7 +1058,13 @@ def test_known_init_fields_for_quick_cover_task_bootstrap_and_reference_context(
 
 def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
     manifest = load_workflow_stage_manifest("quick")
-    quick_text = (WORKFLOW_STAGE_MANIFEST_DIR / "quick.md").read_text(encoding="utf-8")
+    quick_text = "\n\n".join(
+        [
+            (WORKFLOW_STAGE_MANIFEST_DIR / "quick.md").read_text(encoding="utf-8"),
+            (WORKFLOW_STAGE_MANIFEST_DIR / "quick" / "task-bootstrap.md").read_text(encoding="utf-8"),
+            (WORKFLOW_STAGE_MANIFEST_DIR / "quick" / "task-authoring.md").read_text(encoding="utf-8"),
+        ]
+    )
 
     bundle_fields = {
         "selected_protocol_bundle_ids",
@@ -1180,16 +1209,18 @@ def test_validate_workflow_stage_manifest_payload_loads_research_phase_manifest(
     assert manifest.workflow_id == "research-phase"
     assert manifest.stage_ids() == ("phase_bootstrap", "research_handoff")
     assert manifest.stage("phase_bootstrap").loaded_authorities == (
-        "workflows/research-phase.md",
+        "workflows/research-phase/phase-bootstrap.md",
         "references/orchestration/model-profile-resolution.md",
     )
+    assert "workflows/research-phase.md" in manifest.stage("phase_bootstrap").must_not_eager_load
+    assert "workflows/research-phase/research-handoff.md" in manifest.stage("phase_bootstrap").must_not_eager_load
     assert (
         "references/orchestration/runtime-delegation-note.md"
-        not in manifest.stage("phase_bootstrap").must_not_eager_load
+        in manifest.stage("phase_bootstrap").must_not_eager_load
     )
     assert "reference_artifacts_content" not in manifest.stage("phase_bootstrap").required_init_fields
     assert manifest.stage("research_handoff").loaded_authorities == (
-        "workflows/research-phase.md",
+        "workflows/research-phase/research-handoff.md",
         "references/orchestration/model-profile-resolution.md",
         "references/orchestration/runtime-delegation-note.md",
     )
@@ -1228,13 +1259,22 @@ def test_validate_workflow_stage_manifest_payload_loads_new_milestone_manifest()
 
     assert manifest.workflow_id == "new-milestone"
     assert manifest.stage_ids() == ("milestone_bootstrap", "survey_objectives", "roadmap_authoring")
-    assert manifest.stage("milestone_bootstrap").loaded_authorities == ("workflows/new-milestone.md",)
+    assert manifest.stage("milestone_bootstrap").loaded_authorities == (
+        "workflows/new-milestone/milestone-bootstrap.md",
+    )
+    assert "workflows/new-milestone/survey-objectives.md" in manifest.stage(
+        "milestone_bootstrap"
+    ).must_not_eager_load
+    assert "workflows/new-milestone/roadmap-authoring.md" in manifest.stage(
+        "milestone_bootstrap"
+    ).must_not_eager_load
     assert "references/research/questioning.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
     assert "templates/project.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
     assert "templates/requirements.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
     assert "roadmapper_model" not in manifest.stage("milestone_bootstrap").required_init_fields
     assert manifest.stage("survey_objectives").loaded_authorities == (
-        "workflows/new-milestone.md",
+        "workflows/new-milestone/survey-objectives.md",
+        "references/orchestration/runtime-delegation-note.md",
         "references/research/questioning.md",
     )
     assert "roadmapper_model" not in manifest.stage("survey_objectives").required_init_fields
@@ -1251,7 +1291,8 @@ def test_validate_workflow_stage_manifest_payload_loads_new_milestone_manifest()
         "survey choice and objective scope captured",
     )
     assert manifest.stage("roadmap_authoring").loaded_authorities == (
-        "workflows/new-milestone.md",
+        "workflows/new-milestone/roadmap-authoring.md",
+        "references/orchestration/runtime-delegation-note.md",
         "templates/project.md",
         "templates/requirements.md",
     )

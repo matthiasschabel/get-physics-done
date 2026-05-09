@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests.prompt_metrics_support import measure_prompt_surface
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
@@ -28,16 +29,17 @@ def test_verify_work_command_only_eagerly_loads_the_workflow() -> None:
 
 
 def test_verify_work_workflow_defers_heavy_authorities_until_later_steps() -> None:
-    workflow_text = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    root_index = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
     overlay_marker = "The verification overlay is written only after authoritative verifier output is available"
     report_owner_marker = "Keep the current check display, summary, and session overlay in sync with the verifier output. The canonical verifier report content remains owned by `gpd-verifier`."
 
-    assert "<template>" not in workflow_text
-    assert "<required_reading>" not in workflow_text
-    assert "research-verification.md" not in workflow_text
-    assert "verification-report.md" not in workflow_text
-    assert "contract-results-schema.md" not in workflow_text
-    assert "error-propagation-protocol.md" not in workflow_text
+    assert "<template>" not in root_index
+    assert "<required_reading>" not in root_index
+    assert "research-verification.md" not in root_index
+    assert "verification-report.md" not in root_index
+    assert "contract-results-schema.md" not in root_index
+    assert "error-propagation-protocol.md" not in root_index
     assert report_owner_marker in workflow_text
     assert overlay_marker in workflow_text
     assert workflow_text.index(report_owner_marker) < workflow_text.index(overlay_marker)

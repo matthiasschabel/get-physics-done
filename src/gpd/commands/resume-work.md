@@ -18,9 +18,9 @@ Resume research from the selected project's canonical state.
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/resume-work.md
+@{GPD_INSTALL_DIR}/workflows/resume-work/resume-bootstrap.md
 </execution_context>
 
 <process>
-Follow the included resume-work workflow.
+Read the included resume-work bootstrap authority first. Later resume stages must be loaded only through `staged_loading.eager_authorities`.
 </process>

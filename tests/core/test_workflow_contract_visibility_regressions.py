@@ -298,7 +298,7 @@ def test_sync_state_keeps_state_json_authority_before_markdown_repair() -> None:
     )
     sync_state_workflow = expand_at_includes(raw_sync_state_workflow, REPO_ROOT / "src/gpd", "/runtime/")
 
-    assert "@{GPD_INSTALL_DIR}/workflows/sync-state.md" in raw_sync_state_command
+    assert "@{GPD_INSTALL_DIR}/workflows/sync-state/sync-bootstrap.md" in raw_sync_state_command
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw_sync_state_command
     assert "{GPD_INSTALL_DIR}/templates/state-json-schema.md" in raw_sync_state_workflow
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw_sync_state_workflow
@@ -309,7 +309,9 @@ def test_sync_state_keeps_state_json_authority_before_markdown_repair() -> None:
         assert "state-json-schema.md" in content
         assert "# state.json Schema" not in content
         assert "Markdown is only used as a recovery source when `state.json` is missing or unreadable." in content
-        assert "do not invent a field-by-field merge" in content
+
+    assert "do not invent a field-by-field merge" not in sync_state_command
+    assert "do not invent a field-by-field merge" in sync_state_workflow
 
 
 def test_resume_workflow_routes_recent_project_ambiguity_before_new_projects_and_state_reconstruction() -> None:

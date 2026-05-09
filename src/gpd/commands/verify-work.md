@@ -49,7 +49,7 @@ Output: `GPD/phases/XX-name/XX-VERIFICATION.md`. This workflow is only valid onc
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/verify-work.md
+@{GPD_INSTALL_DIR}/workflows/verify-work/session-router.md
 </execution_context>
 
 <context>
@@ -62,8 +62,8 @@ Phase: $ARGUMENTS (optional)
 </context>
 
 <process>
-**CRITICAL: First, read the full workflow file using the file_read tool:**
-Follow the included workflow file exactly.
+**CRITICAL: First, read the included session-router stage authority using the file_read tool.**
+Follow the included first-stage authority exactly, then load later stage authorities only through `gpd --raw init verify-work "$PHASE_ARG" --stage <stage_id>`.
 
-The workflow file owns the detailed check taxonomy; this wrapper only bootstraps the canonical verification surfaces and delegates the physics checks.
+The staged workflow authorities own the detailed check taxonomy; this wrapper only bootstraps the canonical verification surface and delegates the physics checks.
   </process>

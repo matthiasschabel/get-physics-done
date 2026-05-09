@@ -1,7 +1,7 @@
 import re
 from pathlib import Path
 
-from tests.workflow_authority_support import workflow_authority_text
+from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 WORKFLOWS_DIR = Path("src/gpd/specs/workflows")
 
@@ -17,7 +17,7 @@ MODE_AWARE_WORKFLOWS = (
 
 
 def _read_workflow(name: str) -> str:
-    if name in {"execute-phase.md", "write-paper.md", "peer-review.md"}:
+    if name.removesuffix(".md") in STAGED_WORKFLOW_AUTHORITY_NAMES:
         return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 

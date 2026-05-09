@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from gpd.registry import _parse_spawn_contracts
-from tests.workflow_authority_support import workflow_authority_text
+from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -38,7 +38,7 @@ UNQUOTED_PLACEHOLDER_PATH_LIST_ITEM_RE = re.compile(r"^[ \t]*-[ \t]+\{[^}\n]+\}/
 
 
 def _read(path: Path) -> str:
-    if path.parent == WORKFLOWS_DIR and path.stem in {"execute-phase", "peer-review", "write-paper"}:
+    if path.parent == WORKFLOWS_DIR and path.stem in STAGED_WORKFLOW_AUTHORITY_NAMES:
         return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
 

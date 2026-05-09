@@ -6,10 +6,27 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLAN_PHASE = REPO_ROOT / "src/gpd/specs/workflows/plan-phase.md"
+PLAN_PHASE_STAGE_DIR = REPO_ROOT / "src/gpd/specs/workflows/plan-phase"
+
+
+def _stage_text(name: str) -> str:
+    return (PLAN_PHASE_STAGE_DIR / name).read_text(encoding="utf-8")
+
+
+def _plan_phase_authority_text() -> str:
+    return "\n\n".join(
+        [
+            PLAN_PHASE.read_text(encoding="utf-8"),
+            _stage_text("phase-bootstrap.md"),
+            _stage_text("research-routing.md"),
+            _stage_text("planner-authoring.md"),
+            _stage_text("checker-revision.md"),
+        ]
+    )
 
 
 def test_plan_phase_separates_planner_checkpoint_handling_from_checker_revision() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _stage_text("planner-authoring.md")
 
     assert "## 9b. Handle Planner Checkpoint" in source
     assert "spawn a fresh `gpd-planner` continuation handoff" in source
@@ -19,7 +36,7 @@ def test_plan_phase_separates_planner_checkpoint_handling_from_checker_revision(
 
 
 def test_plan_phase_routes_checker_statuses_through_structured_fields() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _stage_text("checker-revision.md")
 
     assert "`gpd_return.status: completed`" in source
     assert "`gpd_return.status: checkpoint`" in source
@@ -33,7 +50,7 @@ def test_plan_phase_routes_checker_statuses_through_structured_fields() -> None:
 
 
 def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_success() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _stage_text("checker-revision.md")
 
     assert "`approved_plans` names only readable `*-PLAN.md` artifacts in `FRESH_PLAN_FILES`" in source
     assert "`blocked_plans` is empty" in source
@@ -46,7 +63,7 @@ def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_su
 
 
 def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _plan_phase_authority_text()
 
     assert "bind_plan_phase_init" not in source
     assert "staged_loading.required_init_fields" in source
@@ -87,7 +104,7 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
 
 
 def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _stage_text("planner-authoring.md")
 
     assert "The shared child artifact gate owns the no-synthetic-child-return rule" in source
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in source
@@ -98,7 +115,7 @@ def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None
 
 
 def test_plan_phase_manual_plan_fallback_cannot_skip_fresh_plan_validators() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _plan_phase_authority_text()
 
     assert "Main-context plan or any manual bounded authoring branch" in source
     assert "set `FRESH_PLAN_FILES` to the newly created path(s)" in source
@@ -113,7 +130,7 @@ def test_plan_phase_manual_plan_fallback_cannot_skip_fresh_plan_validators() -> 
 
 
 def test_plan_phase_captures_state_sensitive_spawn_returns() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _plan_phase_authority_text()
 
     assert "PLANNER_RETURN=$(\ntask(" in source
     assert "CHECKER_RETURN=$(\ntask(" in source
@@ -121,7 +138,7 @@ def test_plan_phase_captures_state_sensitive_spawn_returns() -> None:
 
 
 def test_plan_phase_researcher_checkpoint_path_is_a_fresh_continuation_handoff() -> None:
-    source = PLAN_PHASE.read_text(encoding="utf-8")
+    source = _stage_text("research-routing.md")
 
     assert "## 5.1 Handle Researcher Checkpoint" in source
     assert "Continue research as a fresh continuation handoff for Phase {phase_number}: {phase_name}" in source
@@ -138,7 +155,8 @@ def test_plan_phase_researcher_checkpoint_path_is_a_fresh_continuation_handoff()
 def test_plan_phase_wrapper_stays_routing_only() -> None:
     command = (REPO_ROOT / "src/gpd/commands/plan-phase.md").read_text(encoding="utf-8")
 
-    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase/phase-bootstrap.md" in command
+    assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" not in command
     assert (
         "Canonical contract schema and hard validation rules load later at the staged planner and checker handoffs"
         not in command

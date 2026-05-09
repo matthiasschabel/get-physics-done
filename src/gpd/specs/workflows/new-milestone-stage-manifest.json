@@ -7,7 +7,7 @@
       "order": 1,
       "purpose": "milestone lookup, contract gate visibility, and bootstrap routing",
       "mode_paths": [
-        "workflows/new-milestone.md"
+        "workflows/new-milestone/milestone-bootstrap.md"
       ],
       "required_init_fields": [
         "researcher_model",
@@ -28,10 +28,14 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/new-milestone.md"
+        "workflows/new-milestone/milestone-bootstrap.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/new-milestone.md",
+        "workflows/new-milestone/survey-objectives.md",
+        "workflows/new-milestone/roadmap-authoring.md",
+        "references/orchestration/runtime-delegation-note.md",
         "references/research/questioning.md",
         "references/ui/ui-brand.md",
         "templates/project.md",
@@ -62,7 +66,7 @@
       "order": 2,
       "purpose": "milestone survey, objective framing, and research intake",
       "mode_paths": [
-        "workflows/new-milestone.md"
+        "workflows/new-milestone/survey-objectives.md"
       ],
       "required_init_fields": [
         "researcher_model",
@@ -101,11 +105,14 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/new-milestone.md",
+        "workflows/new-milestone/survey-objectives.md",
+        "references/orchestration/runtime-delegation-note.md",
         "references/research/questioning.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/new-milestone.md",
+        "workflows/new-milestone/roadmap-authoring.md",
         "references/ui/ui-brand.md",
         "templates/project.md",
         "templates/requirements.md"
@@ -140,7 +147,7 @@
       "order": 3,
       "purpose": "requirements synthesis, roadmap authoring, and downstream handoff",
       "mode_paths": [
-        "workflows/new-milestone.md"
+        "workflows/new-milestone/roadmap-authoring.md"
       ],
       "required_init_fields": [
         "researcher_model",
@@ -182,12 +189,15 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/new-milestone.md",
+        "workflows/new-milestone/roadmap-authoring.md",
+        "references/orchestration/runtime-delegation-note.md",
         "templates/project.md",
         "templates/requirements.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [
+        "workflows/new-milestone.md",
+        "workflows/new-milestone/survey-objectives.md",
         "references/research/questioning.md",
         "references/ui/ui-brand.md"
       ],

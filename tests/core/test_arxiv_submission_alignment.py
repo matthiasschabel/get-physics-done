@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 from gpd.cli import app
 from gpd.core.arxiv_package import ARXIV_TARBALL_NAME, validate_arxiv_package
 from gpd.core.workflow_staging import resolve_workflow_stage_manifest_path, validate_workflow_stage_manifest_payload
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -57,7 +58,7 @@ def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_m
     assert "GPD/publication/*/manuscript/*.tex" in command
     assert "manuscript-root artifact manifest" in command
     assert "manuscript-root bibliography audit" in command
-    assert "Follow the included arxiv-submission workflow exactly." in command
+    assert "Follow the included arxiv-submission bootstrap authority exactly." in command
     assert "artifact_manifest" in command
     assert "bibliography_audit" in command
     assert "bibliography_audit_clean" in command
@@ -78,7 +79,7 @@ def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_m
 
 
 def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_without_globbing() -> None:
-    workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "arxiv-submission")
 
     assert "gpd --raw init arxiv-submission --stage bootstrap" in workflow
     assert 'gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS"' in workflow
@@ -155,17 +156,26 @@ def test_arxiv_submission_stage_manifest_path_is_resolved_and_loadable() -> None
     )
     for stage_id in manifest.stage_ids():
         assert "arxiv_submission_argument_input" in manifest.stage(stage_id).required_init_fields
+    assert manifest.stage("bootstrap").loaded_authorities[0] == "workflows/arxiv-submission/bootstrap.md"
+    assert "workflows/arxiv-submission.md" in manifest.stage("bootstrap").must_not_eager_load
+    assert "workflows/arxiv-submission/manuscript-preflight.md" in manifest.stage("bootstrap").must_not_eager_load
     assert "references/publication/publication-bootstrap-preflight.md" in manifest.stage("bootstrap").loaded_authorities
     assert "managed publication output root state" in manifest.stage("bootstrap").produced_state
+    assert manifest.stage("manuscript_preflight").loaded_authorities[0] == (
+        "workflows/arxiv-submission/manuscript-preflight.md"
+    )
     assert (
         "references/publication/publication-review-round-artifacts.md"
         in manifest.stage("review_gate").loaded_authorities
     )
+    assert manifest.stage("review_gate").loaded_authorities[0] == "workflows/arxiv-submission/review-gate.md"
     assert "references/publication/peer-review-reliability.md" in manifest.stage("review_gate").loaded_authorities
     assert (
         "references/publication/publication-response-writer-handoff.md"
         not in manifest.stage("review_gate").loaded_authorities
     )
+    assert manifest.stage("package").loaded_authorities == ("workflows/arxiv-submission/package.md",)
+    assert manifest.stage("finalize").loaded_authorities == ("workflows/arxiv-submission/finalize.md",)
     assert manifest.stage("package").writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
     assert manifest.stage("finalize").writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
 

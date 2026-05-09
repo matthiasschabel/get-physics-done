@@ -161,7 +161,7 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
     paper_writer = (AGENTS_DIR / "gpd-paper-writer.md").read_text(encoding="utf-8")
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
     write_paper = _workflow_authority("write-paper")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = _workflow_authority("respond-to-referees")
 
     for source in (paper_writer, referee):
         assert "publication-artifact-gates.md" not in source

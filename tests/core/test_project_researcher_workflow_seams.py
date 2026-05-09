@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.workflow_authority_support import workflow_authority_text
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
@@ -13,7 +15,7 @@ def _read(path: Path) -> str:
 
 
 def test_new_project_project_researcher_scouts_route_on_typed_return_and_reject_stale_results() -> None:
-    workflow = _read(WORKFLOWS_DIR / "new-project.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-project")
 
     assert workflow.count('subagent_type="gpd-project-researcher"') == 4
     assert 'id: "literature_scouts"' in workflow
@@ -26,7 +28,7 @@ def test_new_project_project_researcher_scouts_route_on_typed_return_and_reject_
 
 
 def test_new_milestone_project_researcher_scouts_require_fresh_continuations_and_stale_file_rejection() -> None:
-    workflow = _read(WORKFLOWS_DIR / "new-milestone.md")
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
 
     assert workflow.count("Common structure for all 4 scouts:") == 1
     assert 'id: "milestone_literature_scouts"' in workflow

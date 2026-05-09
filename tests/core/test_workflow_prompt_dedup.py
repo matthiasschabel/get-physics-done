@@ -9,7 +9,11 @@ from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.assertion_taxonomy_support import assert_prompt_contracts, forbidden_duplicate, semantic_anchor
-from tests.workflow_authority_support import workflow_authority_text
+from tests.workflow_authority_support import (
+    STAGED_WORKFLOW_AUTHORITY_NAMES,
+    workflow_authority_paths,
+    workflow_authority_text,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -21,6 +25,8 @@ RESULT_LOOKUP_WORKFLOWS = ("explain.md", "compare-experiment.md", "limiting-case
 
 
 def _read(name: str) -> str:
+    if name.removesuffix(".md") in STAGED_WORKFLOW_AUTHORITY_NAMES:
+        return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 
@@ -30,6 +36,10 @@ def _read_authority(name: str) -> str:
 
 def _expand(name: str) -> str:
     return expand_at_includes(_read(name), REPO_ROOT / "src/gpd", "/runtime/")
+
+
+def _expand_authority(name: str) -> str:
+    return expand_at_includes(_read_authority(name), REPO_ROOT / "src/gpd", "/runtime/")
 
 
 def _between(text: str, start: str, end: str) -> str:
@@ -104,11 +114,11 @@ def test_set_profile_updates_only_model_profile_through_config_cli() -> None:
 def test_planner_workflows_expand_the_shared_planner_template_once_per_route() -> None:
     plan_phase_raw = _read("plan-phase.md")
     quick_raw = _read("quick.md")
-    verify_work_raw = _read("verify-work.md")
+    verify_work_raw = _read_authority("verify-work")
     planner_agent_raw = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
 
     quick = _expand("quick.md")
-    verify_work = _expand("verify-work.md")
+    verify_work = _expand_authority("verify-work")
     planner_template = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
 
     assert "templates/planner-subagent-prompt.md" in plan_phase_raw
@@ -164,7 +174,7 @@ def test_planner_workflows_expand_the_shared_planner_template_once_per_route() -
 def test_planner_workflows_do_not_embed_the_removed_long_policy_blocks() -> None:
     plan_phase = _read("plan-phase.md")
     quick = _read("quick.md")
-    verify_work = _read("verify-work.md")
+    verify_work = _read_authority("verify-work")
 
     for removed_phrase in (
         "Each plan has a complete contract block (claims, deliverables, acceptance tests, forbidden proxies, uncertainty markers, and `references[]` whenever grounding is not already explicit elsewhere in the contract)",
@@ -381,9 +391,12 @@ def test_runtime_delegation_note_is_loaded_once_per_workflow() -> None:
     }
 
     for path in sorted(WORKFLOWS_DIR.glob("*.md")):
-        text = _read_authority(path.stem) if path.stem == "write-paper" else path.read_text(encoding="utf-8")
-        assert text.count(include) <= 1, path.name
+        authority_paths = workflow_authority_paths(WORKFLOWS_DIR, path.stem)
+        for authority_path in authority_paths:
+            text = authority_path.read_text(encoding="utf-8")
+            assert text.count(include) <= 1, authority_path.relative_to(WORKFLOWS_DIR)
         if path.name in workflows_using_short_references:
+            text = _read_authority(path.stem)
             assert text.count(include) == 1, path.name
             assert _has_line_with(text, "runtime delegation convention", "loaded above"), path.name
 

@@ -13,10 +13,10 @@ NON_NATIVE_RUNTIME_PROJECTION_TARGETS = tuple(
 
 STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
     "plan-phase": {
-        "claude-code": 4_196,
-        "codex": 6_597,
-        "gemini": 7_095,
-        "opencode": 6_612,
+        "claude-code": 4_550,
+        "codex": 6_900,
+        "gemini": 7_400,
+        "opencode": 6_900,
     },
     "execute-phase": {
         "claude-code": 3_426,

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from gpd.core.workflow_staging import load_workflow_stage_manifest, validate_workflow_stage_manifest_payload
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -30,7 +31,7 @@ def test_sync_state_stage_manifest_loads_and_preserves_stage_order() -> None:
     conflict = manifest.get_stage("conflict_analysis")
     reconcile = manifest.get_stage("reconcile_and_validate")
 
-    assert bootstrap.loaded_authorities == ("workflows/sync-state.md",)
+    assert bootstrap.loaded_authorities == ("workflows/sync-state/sync-bootstrap.md",)
     assert bootstrap.required_init_fields == (
         "workspace_root",
         "project_root",
@@ -49,16 +50,25 @@ def test_sync_state_stage_manifest_loads_and_preserves_stage_order() -> None:
     )
     assert "templates/state-json-schema.md" in bootstrap.must_not_eager_load
 
-    assert recovery.loaded_authorities == ("templates/state-json-schema.md",)
+    assert recovery.loaded_authorities == (
+        "workflows/sync-state/single-source-recovery.md",
+        "templates/state-json-schema.md",
+    )
     assert "state_md_content" in recovery.required_init_fields
     assert "state_json_content" in recovery.required_init_fields
     assert "project_contract_gate" in recovery.required_init_fields
 
-    assert conflict.loaded_authorities == ("templates/state-json-schema.md",)
+    assert conflict.loaded_authorities == (
+        "workflows/sync-state/conflict-analysis.md",
+        "templates/state-json-schema.md",
+    )
     assert "project_contract_validation" in conflict.required_init_fields
     assert "state_json_backup_content" in conflict.required_init_fields
 
-    assert reconcile.loaded_authorities == ("templates/state-json-schema.md",)
+    assert reconcile.loaded_authorities == (
+        "workflows/sync-state/reconcile-and-validate.md",
+        "templates/state-json-schema.md",
+    )
     assert reconcile.writes_allowed == (
         "GPD/STATE.md",
         "GPD/state.json",
@@ -75,7 +85,7 @@ def test_sync_state_stage_manifest_rejects_invalid_field_drift() -> None:
 
 
 def test_sync_state_workflow_uses_staged_fields_instead_of_manual_state_probing() -> None:
-    text = (WORKFLOWS_DIR / "sync-state.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "sync-state")
 
     assert "SYNC_BOOTSTRAP_INIT=$(gpd --raw init sync-state --stage sync_bootstrap)" in text
     assert "SINGLE_SOURCE_RECOVERY_INIT=$(gpd --raw init sync-state --stage single_source_recovery)" in text
@@ -102,7 +112,7 @@ def test_sync_state_workflow_uses_staged_fields_instead_of_manual_state_probing(
 
 
 def test_sync_state_workflow_has_fail_closed_bad_backup_branch() -> None:
-    text = (WORKFLOWS_DIR / "sync-state.md").read_text(encoding="utf-8")
+    text = workflow_authority_text(WORKFLOWS_DIR, "sync-state")
 
     marker = "corrupt_state_bad_backup"
     assert marker in text

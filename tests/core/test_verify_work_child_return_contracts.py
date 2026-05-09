@@ -9,6 +9,7 @@ from gpd.core.context import (
     _build_verification_report_finalizer_bridge,
     _build_verification_report_skeleton_bridge,
 )
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
@@ -17,6 +18,8 @@ WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 
 
 def _read(path: Path) -> str:
+    if path.parent == WORKFLOWS_DIR and path.stem == "verify-work":
+        return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
 
 

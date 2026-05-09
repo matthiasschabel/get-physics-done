@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gpd.core.return_contract import REQUIRED_RETURN_FIELDS, validate_gpd_return_markdown
+from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -13,7 +14,10 @@ FENCED_YAML_RE = re.compile(r"```ya?ml\s*\n(?P<body>[\s\S]*?)```", re.IGNORECASE
 
 
 def _workflow_gpd_return_blocks(path: Path) -> list[tuple[int, str]]:
-    text = path.read_text(encoding="utf-8")
+    if path.parent == WORKFLOWS_DIR and path.stem in STAGED_WORKFLOW_AUTHORITY_NAMES:
+        text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
+    else:
+        text = path.read_text(encoding="utf-8")
     blocks: list[tuple[int, str]] = []
     for match in FENCED_YAML_RE.finditer(text):
         body = match.group("body")

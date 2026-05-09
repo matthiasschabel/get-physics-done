@@ -2,44 +2,184 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from tests.prompt_metrics_support import measure_prompt_surface
+from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
+from tests.prompt_metrics_support import expanded_prompt_text, measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+RESPOND_STAGE_DIR = WORKFLOWS_DIR / "respond-to-referees"
+BOOTSTRAP_AUTHORITY = RESPOND_STAGE_DIR / "bootstrap.md"
 
 
-def test_respond_to_referees_command_stays_thin_and_only_eagerly_loads_the_workflow() -> None:
+def _manifest() -> object:
+    return validate_workflow_stage_manifest_payload(
+        json.loads((WORKFLOWS_DIR / "respond-to-referees-stage-manifest.json").read_text(encoding="utf-8")),
+        expected_workflow_id="respond-to-referees",
+    )
+
+
+def _expanded_stage_surface(stage: object) -> str:
+    authority_paths = list(dict.fromkeys([*stage.mode_paths, *stage.loaded_authorities]))
+    return "\n\n".join(
+        expanded_prompt_text(
+            SOURCE_ROOT / "specs" / authority,
+            src_root=SOURCE_ROOT,
+            path_prefix=PATH_PREFIX,
+        )
+        for authority in authority_paths
+    )
+
+
+def test_respond_to_referees_command_uses_first_stage_authority_boundary() -> None:
     command_text = (COMMANDS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
     metrics = measure_prompt_surface(
         COMMANDS_DIR / "respond-to-referees.md",
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
-    workflow = measure_prompt_surface(
-        WORKFLOWS_DIR / "respond-to-referees.md",
+    bootstrap = measure_prompt_surface(
+        BOOTSTRAP_AUTHORITY,
+        src_root=SOURCE_ROOT,
+        path_prefix=PATH_PREFIX,
+    )
+    expanded_command = expanded_prompt_text(
+        COMMANDS_DIR / "respond-to-referees.md",
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
 
-    assert metrics.raw_include_count <= 2
-    assert "@{GPD_INSTALL_DIR}/workflows/respond-to-referees.md" in command_text
-    assert "Keep the wrapper focused on referee triage, revision routing, and synchronized response artifacts while the workflow owns the full revision pipeline." in command_text
-    assert "@{GPD_INSTALL_DIR}/references/publication/publication-review-wrapper-guidance.md" in command_text
-    assert "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md" not in command_text
-    assert "@{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md" not in command_text
-    assert "Follow the included respond-to-referees workflow exactly." in command_text
-    assert metrics.expanded_line_count > workflow.expanded_line_count
-    assert metrics.expanded_char_count > workflow.expanded_char_count
-    assert metrics.expanded_line_count < workflow.expanded_line_count + 120
-    assert metrics.expanded_char_count < workflow.expanded_char_count + 7000
+    assert metrics.raw_include_count == 1
+    assert "@{GPD_INSTALL_DIR}/workflows/respond-to-referees/bootstrap.md" in command_text
+    assert "@{GPD_INSTALL_DIR}/workflows/respond-to-referees.md" not in command_text
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-review-wrapper-guidance.md" not in command_text
+    assert "@{GPD_INSTALL_DIR}/templates/paper/referee-response.md" not in command_text
+    assert "@{GPD_INSTALL_DIR}/templates/paper/author-response.md" not in command_text
+    assert "Follow the included first-stage authority exactly." in command_text
+    assert "The workflow resolves the manuscript root, review artifacts, and revision targets." in command_text
+    assert metrics.expanded_line_count > bootstrap.expanded_line_count
+    assert metrics.expanded_char_count > bootstrap.expanded_char_count
+    assert metrics.expanded_line_count < bootstrap.expanded_line_count + 180
+    assert metrics.expanded_char_count < bootstrap.expanded_char_count + 12_000
+    assert metrics.expanded_char_count < 24_000
+
+    for forbidden in (
+        "gpd-paper-writer",
+        "subagent_type=\"gpd-paper-writer\"",
+        "respond_to_referees_revision_section",
+        "aggregate_child_gate",
+        "docs: referee response and manuscript revisions",
+        "<step name=\"commit_and_present\">",
+    ):
+        assert forbidden not in expanded_command
+
+
+def test_respond_to_referees_workflow_defers_stage_authorities_until_the_manifest_stages_need_them() -> None:
+    manifest = _manifest()
+
+    assert manifest.stage_ids() == (
+        "bootstrap",
+        "report_triage",
+        "revision_planning",
+        "response_authoring",
+        "finalize",
+    )
+
+    bootstrap = manifest.stage("bootstrap")
+    report_triage = manifest.stage("report_triage")
+    revision_planning = manifest.stage("revision_planning")
+    response_authoring = manifest.stage("response_authoring")
+    finalize = manifest.stage("finalize")
+
+    assert "workflows/respond-to-referees.md" not in {
+        path for stage in manifest.stages for path in (*stage.mode_paths, *stage.loaded_authorities)
+    }
+    assert bootstrap.mode_paths == ("workflows/respond-to-referees/bootstrap.md",)
+    assert bootstrap.loaded_authorities == (
+        "workflows/respond-to-referees/bootstrap.md",
+        "references/publication/publication-bootstrap-preflight.md",
+    )
+    for deferred in (
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/report-triage.md",
+        "workflows/respond-to-referees/revision-planning.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "workflows/respond-to-referees/finalize.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
+        "templates/paper/referee-response.md",
+        "templates/paper/author-response.md",
+    ):
+        assert deferred in bootstrap.must_not_eager_load
+
+    assert report_triage.loaded_authorities == (
+        "workflows/respond-to-referees/report-triage.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
+    )
+    assert "workflows/respond-to-referees/response-authoring.md" in report_triage.must_not_eager_load
+    assert "workflows/respond-to-referees/finalize.md" in report_triage.must_not_eager_load
+    assert "templates/paper/referee-response.md" in report_triage.must_not_eager_load
+    assert "templates/paper/author-response.md" in report_triage.must_not_eager_load
+
+    assert revision_planning.loaded_authorities == (
+        "workflows/respond-to-referees/revision-planning.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
+    )
+    assert "templates/paper/referee-response.md" in revision_planning.must_not_eager_load
+    assert "templates/paper/author-response.md" in revision_planning.must_not_eager_load
+
+    assert response_authoring.loaded_authorities == (
+        "workflows/respond-to-referees/response-authoring.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
+        "templates/paper/referee-response.md",
+        "templates/paper/author-response.md",
+    )
+    assert finalize.loaded_authorities == (
+        "workflows/respond-to-referees/finalize.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
+    )
+
+
+def test_respond_to_referees_triage_stage_blocks_before_response_authoring_and_finalization() -> None:
+    manifest = _manifest()
+    triage_surface = _expanded_stage_surface(manifest.stage("report_triage"))
+
+    assert "REPORT_TRIAGE_INIT=$(gpd --raw init respond-to-referees --stage report_triage" in triage_surface
+    assert "publication-response-writer-handoff.md" in triage_surface
+    assert "canonical `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md`" in triage_surface
+
+    for forbidden in (
+        "subagent_type=\"gpd-paper-writer\"",
+        "respond_to_referees_revision_section",
+        "aggregate_child_gate",
+        "docs: referee response and manuscript revisions",
+        "<step name=\"commit_and_present\">",
+    ):
+        assert forbidden not in triage_surface
+
+
+def test_respond_to_referees_response_authoring_stage_retains_response_pair_and_writer_contract() -> None:
+    manifest = _manifest()
+    response_surface = _expanded_stage_surface(manifest.stage("response_authoring"))
+
+    assert "{GPD_INSTALL_DIR}/templates/paper/author-response.md" in response_surface
+    assert "{GPD_INSTALL_DIR}/templates/paper/referee-response.md" in response_surface
+    assert "publication-response-writer-handoff.md" in response_surface
+    assert 'subagent_type="gpd-paper-writer"' in response_surface
+    assert 'id: "respond_to_referees_revision_section"' in response_surface
+    assert "aggregate_child_gate:" in response_surface
+    assert "fresh child handoff and named in current-run `files_written` / `gpd_return.files_written`" in response_surface
+    assert "gpd validate handoff-artifacts for revised section plus both response artifacts" in response_surface

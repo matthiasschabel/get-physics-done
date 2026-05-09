@@ -81,6 +81,7 @@ TARGET_FIRST_STAGE_BY_COMMAND = {
     "plan-phase": "phase_bootstrap",
     "execute-phase": "phase_bootstrap",
     "new-project": "scope_intake",
+    "verify-work": "session_router",
     "write-paper": "paper_bootstrap",
 }
 VERIFIER_SCHEMA_INCLUDE_SUFFIXES = (
@@ -94,19 +95,20 @@ VERIFIER_SCHEMA_AUTHORITY_MARKERS = (
     ("references/shared/canonical-schema-discipline.md", "# Canonical Schema Discipline"),
 )
 VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS = (
-    "Every spawned agent is a one-shot delegation",
-    "File-producing handoffs must prove the expected artifact exists before success is accepted.",
-    "For proof-bearing work, require a canonical `*-PROOF-REDTEAM.md` artifact; if missing/stale/malformed/not `passed`, spawn `gpd-check-proof` once",
-    "Route only on canonical verification frontmatter plus `gpd_return.status`",
-    "Do not recompute canonical verification status in this workflow.",
+    "Stage id: `session_router`.",
+    "SESSION_ROUTER_INIT=$(gpd --raw init verify-work",
+    "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`.",
+    "Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here.",
+    "Do not assume reference ledgers, protocol bundles, or report schemas are loaded here.",
+    'gpd validate review-preflight verify-work "${PHASE_ARG}" --strict',
+    "LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate verify-work",
+)
+VERIFY_WORK_LATE_STAGE_FRAGMENTS = (
+    "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md",
     "verification_report_skeleton_bridge",
-    "writer_command",
-    "write body-only evidence",
-    "satisfies bridge `body_contract`",
-    "one fenced executed `python`/`bash` block",
-    "adjacent `**Output:**` plus fenced `output`",
-    "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-    "do not hand-author or reflow frontmatter",
+    "verification_report_finalizer_bridge",
+    "verify_work_gap_planner",
+    "templates/planner-subagent-prompt.md",
 )
 VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES = (
     "$gpd-verify-work",
@@ -507,7 +509,7 @@ def _extract_spawn_contracts(text: str) -> list[dict[str, object]]:
 
 
 def _expected_target_init_command(command_name: str, bridge: str) -> str:
-    if command_name in {"plan-phase", "execute-phase"}:
+    if command_name in {"plan-phase", "execute-phase", "verify-work"}:
         return f'{bridge} --raw init {command_name} "$ARGUMENTS" --stage {TARGET_FIRST_STAGE_BY_COMMAND[command_name]}'
     if command_name == "new-project":
         return f"{bridge} --raw init new-project --stage scope_intake"
@@ -843,18 +845,21 @@ def test_runtime_projected_verify_work_surface_keeps_concise_guidance_visible(ru
     projected = _project_markdown(COMMANDS_DIR / "verify-work.md", runtime, is_agent=False)
     descriptor = get_runtime_descriptor(runtime)
     visible_text = (
-        _project_installed_shared_markdown(WORKFLOWS_DIR / "verify-work.md", runtime)
+        _project_installed_shared_markdown(WORKFLOWS_DIR / "verify-work" / "session-router.md", runtime)
         if descriptor.native_include_support or has_compact_non_native_shim(projected)
         else projected
     )
 
     if descriptor.native_include_support:
-        assert raw_include_count(projected, "workflows/verify-work.md") == 1
+        assert raw_include_count(projected, "workflows/verify-work/session-router.md") == 1
+        assert raw_include_count(projected, "workflows/verify-work.md") == 0
     _assert_fragments_visible(
         visible_text,
         VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS,
         label=f"{runtime} verify-work",
     )
+    for fragment in VERIFY_WORK_LATE_STAGE_FRAGMENTS:
+        assert fragment not in visible_text
 
 
 def test_verify_work_sources_keep_canonical_command_labels_before_projection() -> None:

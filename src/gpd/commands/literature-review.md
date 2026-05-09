@@ -40,7 +40,7 @@ Run the literature-review workflow as a thin wrapper around the staged review pi
 </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/literature-review.md
+@{GPD_INSTALL_DIR}/workflows/literature-review/review-bootstrap.md
 </execution_context>
 
 <context>
@@ -56,6 +56,6 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Follow the included literature-review workflow exactly. The workflow owns staged loading, scope fixing, artifact gating, and citation verification.
+Read the included literature-review bootstrap authority first. The staged workflow owns scope fixing, artifact gating, citation verification, and later authority loading through `staged_loading.eager_authorities`.
 If the invocation is empty in project-backed mode, ask one focused question to set the review topic before handing off. Standalone empty invocations should already have failed preflight.
 </process>

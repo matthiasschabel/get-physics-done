@@ -8,6 +8,7 @@ from gpd.adapters import get_adapter
 from gpd.adapters.install_utils import project_markdown_for_runtime
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.command_labels import validated_public_command_prefix
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -26,7 +27,7 @@ def _read(path: Path) -> str:
 
 
 def _workflow(name: str) -> str:
-    return _read(WORKFLOWS_DIR / f"{name}.md")
+    return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
 def _extract_step(content: str, step_name: str) -> str:

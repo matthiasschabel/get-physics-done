@@ -1915,7 +1915,35 @@ def _command_workflow_metadata_content(command_name: str) -> str:
     workflow_path = _PKG_ROOT / "specs" / "workflows" / f"{workflow_slug}.md"
     if not workflow_path.is_file():
         return ""
-    return _inline_model_visible_includes(workflow_path.read_text(encoding="utf-8"))
+    parts = [_inline_model_visible_includes(workflow_path.read_text(encoding="utf-8"))]
+    parts.extend(_command_staged_workflow_metadata_parts(workflow_slug))
+    return "\n\n".join(part for part in parts if part)
+
+
+def _command_staged_workflow_metadata_parts(workflow_slug: str) -> tuple[str, ...]:
+    """Return staged workflow authority bodies for metadata-only discovery."""
+
+    manifest_path = _PKG_ROOT / "specs" / "workflows" / f"{workflow_slug}-stage-manifest.json"
+    if not manifest_path.is_file():
+        return ()
+
+    try:
+        manifest = load_workflow_stage_manifest_from_path(manifest_path, expected_workflow_id=workflow_slug)
+    except ValueError:
+        return ()
+
+    seen: set[Path] = set()
+    parts: list[str] = []
+    for stage in manifest.stages:
+        for authority in (*stage.mode_paths, *stage.loaded_authorities):
+            if not authority.startswith(f"workflows/{workflow_slug}/") or not authority.endswith(".md"):
+                continue
+            authority_path = _PKG_ROOT / "specs" / authority
+            if authority_path in seen or not authority_path.is_file():
+                continue
+            seen.add(authority_path)
+            parts.append(_inline_model_visible_includes(authority_path.read_text(encoding="utf-8")))
+    return tuple(parts)
 
 
 def _spawn_contract_key(value: object) -> tuple[object, ...]:

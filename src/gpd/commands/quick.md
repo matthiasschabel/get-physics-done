@@ -39,7 +39,7 @@ Typical quick tasks in physics research:
   </objective>
 
 <execution_context>
-@{GPD_INSTALL_DIR}/workflows/quick.md
+@{GPD_INSTALL_DIR}/workflows/quick/task-bootstrap.md
 </execution_context>
 
 <context>
@@ -77,6 +77,6 @@ Quick mode skips research and verification agents, but the physics must still be
 </inline_guidance>
 
 <process>
-Execute the included quick workflow end-to-end.
+Follow the included first-stage quick authority exactly. After each staged reload, follow only `staged_loading.eager_authorities` for the active stage and do not read `staged_loading.must_not_eager_load` or the root workflow index.
 Preserve all workflow gates (validation, task description, staged planner loading, planning, execution, preflight, state updates, commits).
 </process>

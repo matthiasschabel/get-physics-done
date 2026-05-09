@@ -10,8 +10,8 @@ WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
 
 def _workflow(name: str) -> str:
-    if name == "write-paper.md":
-        return workflow_authority_text(WORKFLOWS_DIR, "write-paper")
+    if name in {"write-paper.md", "literature-review.md"}:
+        return workflow_authority_text(WORKFLOWS_DIR, name)
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 

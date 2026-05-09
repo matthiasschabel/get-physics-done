@@ -70,7 +70,7 @@ def test_publication_workflows_and_agents_reference_only_the_canonical_publicati
         WORKFLOWS_DIR / "peer-review.md",
         WORKFLOWS_DIR / "arxiv-submission.md",
     ):
-        if path.parent == WORKFLOWS_DIR and path.stem in {"write-paper", "peer-review"}:
+        if path.parent == WORKFLOWS_DIR and path.stem in {"write-paper", "peer-review", "respond-to-referees"}:
             text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
         else:
             text = path.read_text(encoding="utf-8")
@@ -92,9 +92,9 @@ def test_publication_workflow_prompt_surfaces_surface_the_shared_manuscript_root
     None
 ):
     write_paper = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
-    respond = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
+    respond = workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
     peer_review = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
-    arxiv = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
+    arxiv = workflow_authority_text(WORKFLOWS_DIR, "arxiv-submission")
     bootstrap_include = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
     handoff_include = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 
@@ -105,4 +105,4 @@ def test_publication_workflow_prompt_surfaces_surface_the_shared_manuscript_root
     assert handoff_include in write_paper
     assert handoff_include in respond
     assert "publication-response-artifacts.md" not in peer_review
-    assert "publication-response-artifacts.md" not in arxiv
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md" not in arxiv

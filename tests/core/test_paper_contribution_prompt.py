@@ -11,6 +11,8 @@ WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
 
 def _read(name: str) -> str:
+    if name == "arxiv-submission.md":
+        return workflow_authority_text(WORKFLOWS_DIR, "arxiv-submission")
     if name == "write-paper.md":
         return workflow_authority_text(WORKFLOWS_DIR, "write-paper")
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")

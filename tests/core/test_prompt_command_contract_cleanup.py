@@ -22,7 +22,7 @@ LINUX_DOC = REPO_ROOT / "docs/linux.md"
 
 
 def _read(path: Path) -> str:
-    if path.parent == WORKFLOWS_DIR and path.stem in {"execute-phase", "peer-review", "write-paper"}:
+    if path.parent == WORKFLOWS_DIR and path.stem in {"execute-phase", "peer-review", "respond-to-referees", "write-paper"}:
         return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
 

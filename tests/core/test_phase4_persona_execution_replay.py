@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.phase4_persona.behavior_metrics import score_behavior_metrics
+from tests.helpers.phase4_persona.behavior_metrics import assert_behavior_contract
 from tests.helpers.phase4_persona.execution import (
     ExecutionReplayRow,
     execution_replay_rows,
@@ -97,13 +97,7 @@ def test_phase4_persona_execution_replay(
         assert outcome.state_status_class == row.expected_state_status_class
     if row.expected_next_action_class is not None:
         assert outcome.next_action_class == row.expected_next_action_class
-    assert _smoothness_class(row, outcome) == row.expected_smoothness_class
-    assert _schema_wrestling_class(outcome) == row.expected_schema_wrestling_class
-    if outcome.next_action_class is not None:
-        assert _next_up_specificity_class(outcome.next_action_class) == row.expected_next_up_specificity_class
-    assert _mutation_guard_class(row, outcome) == row.expected_mutation_guard_class
-    _assert_metric_bounds(row, outcome)
-    _assert_behavior_score(row, outcome)
+    assert_behavior_contract(row, outcome)
 
 
 def test_phase4_execution_replay_rows_pin_high_risk_behavior_classes(tmp_path: Path) -> None:
@@ -117,7 +111,7 @@ def test_phase4_execution_replay_rows_pin_high_risk_behavior_classes(tmp_path: P
         "applicator_result_prose_only",
     }:
         outcome = score_execution_replay_row(rows[scenario], tmp_path / scenario)
-        score = score_behavior_metrics(rows[scenario], outcome)
+        score = assert_behavior_contract(rows[scenario], outcome)
 
         assert outcome.accepted is False
         assert outcome.mutated is False
@@ -127,7 +121,7 @@ def test_phase4_execution_replay_rows_pin_high_risk_behavior_classes(tmp_path: P
 
     for scenario in {"stale_artifact", "wrong_sibling_artifact"}:
         outcome = score_execution_replay_row(rows[scenario], tmp_path / scenario)
-        score = score_behavior_metrics(rows[scenario], outcome)
+        score = assert_behavior_contract(rows[scenario], outcome)
 
         assert outcome.accepted is False
         assert outcome.mutated is False
@@ -138,99 +132,7 @@ def test_phase4_execution_replay_rows_pin_high_risk_behavior_classes(tmp_path: P
     assert "structural_verify_phase" in invalid_phase.failure_classes
 
     checkpoint = score_execution_replay_row(rows["checkpoint_missing_bounded_context"], tmp_path / "checkpoint")
-    checkpoint_score = score_behavior_metrics(rows["checkpoint_missing_bounded_context"], checkpoint)
+    checkpoint_score = assert_behavior_contract(rows["checkpoint_missing_bounded_context"], checkpoint)
     assert checkpoint.accepted is False
     assert checkpoint.mutated is False
     assert "bounded_continuation" in checkpoint_score.structured_authority_sources
-
-
-def _smoothness_class(row: ExecutionReplayRow, outcome) -> str:
-    if outcome.mutated and not row.mutation_allowed:
-        return "regressed"
-    if _schema_wrestling_class(outcome) != "none":
-        return "clunky"
-    if outcome.result_class in {"accepted", "checkpoint_recorded"}:
-        return "smooth"
-    if row.scenario in {"invalid_gpd_verify_work_surface", "invalid_gpd_verify_phase_surface"}:
-        return "acceptable"
-    if outcome.result_class == "blocked":
-        return "acceptable"
-    return "smooth"
-
-
-def _schema_wrestling_class(outcome) -> str:
-    classes = set(outcome.failure_classes)
-    classes.add(outcome.finding_id)
-    if {"return_malformed_blocking", "applicator_output_only"}.intersection(classes):
-        return "high"
-    if {"return_missing", "return_malformed_repairable", "unfenced_candidate"}.intersection(classes):
-        return "minor"
-    return "none"
-
-
-def _next_up_specificity_class(next_action_class: str | None) -> str:
-    if next_action_class is None or next_action_class == "unknown":
-        return "none"
-    if next_action_class == "runtime_verify_work":
-        return "runtime_verify_work"
-    if next_action_class == "resume_work":
-        return "bounded_resume"
-    return "concrete_command"
-
-
-def _mutation_guard_class(row: ExecutionReplayRow, outcome) -> str:
-    if outcome.mutated and not row.mutation_allowed:
-        return "unexpected_write"
-    if outcome.mutated:
-        return "expected_write_only"
-    return "no_write"
-
-
-def _assert_metric_bounds(row: ExecutionReplayRow, outcome) -> None:
-    score = score_behavior_metrics(row, outcome)
-    for metric_name, expected_count in row.expected_metric_bounds:
-        observed = _observed_metric_count(metric_name, row, outcome)
-        shared_observed = score.metric_counts[metric_name]
-        if expected_count == 0:
-            assert observed == expected_count
-            assert shared_observed == expected_count
-        else:
-            assert observed >= expected_count
-            assert shared_observed >= expected_count
-
-
-def _assert_behavior_score(row: ExecutionReplayRow, outcome) -> None:
-    score = score_behavior_metrics(row, outcome)
-
-    assert score.row_id == row.row_id
-    assert score.surface == row.surface
-    assert score.scenario == row.scenario
-    assert score.metric_classes["schema_wrestling_class"] == row.expected_schema_wrestling_class
-    assert score.metric_classes["next_up_specificity_class"] == row.expected_next_up_specificity_class
-    assert score.metric_classes["mutation_guard_class"] == row.expected_mutation_guard_class
-    assert all(isinstance(value, int) for value in score.metric_counts.values())
-    assert all(isinstance(value, str) for value in score.metric_classes.values())
-
-
-def _observed_metric_count(metric_name: str, row: ExecutionReplayRow, outcome) -> int:
-    match metric_name:
-        case "invalid_command_suggestion_count":
-            return 0
-        case "prose_claim_mismatch_count":
-            return int(row.scenario in {"prose_success_no_return", "multiple_gpd_returns", "applicator_result_prose_only"})
-        case "schema_repair_loop_count":
-            return int(_schema_wrestling_class(outcome) != "none")
-        case "stale_artifact_trust_count":
-            return 0
-        case "structured_authority_coverage":
-            return int(
-                outcome.accepted
-                or bool(outcome.failure_classes)
-                or bool(outcome.applied_operations)
-                or bool(outcome.checked_artifact_classes)
-            )
-        case "unsupported_completion_claim_count":
-            return int(row.scenario in {"intermediate_plan_cannot_complete_phase", "applicator_result_prose_only"})
-        case "unexpected_write_count":
-            return int(outcome.mutated and not row.mutation_allowed)
-    raise AssertionError(f"unhandled execution behavior metric: {metric_name}")

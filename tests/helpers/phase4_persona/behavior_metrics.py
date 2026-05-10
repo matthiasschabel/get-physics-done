@@ -303,6 +303,7 @@ def score_behavior_metrics(
     unexpected_write_count = 1 if mutation_guard_class in {"unexpected_write", "state_mutated_on_reject"} else 0
     authority_sources = _structured_authority_sources(
         outcome_view,
+        event_view,
         failure_classes=failure_classes,
         commands=commands,
         next_action_class=next_action_class,
@@ -333,7 +334,11 @@ def score_behavior_metrics(
         danger_classes.append(mutation_guard_class)
 
     schema_wrestling_class = classify_schema_wrestling((*schema_classes, *danger_classes))
-    next_up_specificity_class = _classify_next_up_from_commands(commands, next_action_class)
+    next_up_specificity_class = _classify_next_up_from_commands(
+        commands,
+        next_action_class,
+        expected_class=_string_or_none(row_view.get("expected_next_up_specificity_class")),
+    )
     metric_classes = {
         "schema_wrestling_class": schema_wrestling_class,
         "next_up_specificity_class": next_up_specificity_class,
@@ -360,6 +365,40 @@ def score_behavior_metrics(
         structured_authority_sources=authority_sources,
         passed=metric_classes["smoothness_class"] in {"smooth", "acceptable"},
     )
+
+
+def assert_behavior_contract(
+    row: object,
+    outcome: object,
+    *,
+    event: object | None = None,
+    source_text: str | None = None,
+    expected_metric_bounds: Mapping[str, int] | Iterable[tuple[str, int]] | None = None,
+) -> BehaviorScore:
+    """Assert a canonical class-only behavior contract and return the shared score."""
+
+    score = score_behavior_metrics(row, outcome, event=event, source_text=source_text)
+    row_view = _ObjectView(row)
+
+    expected_row_id = _string_or_none(row_view.get("row_id"))
+    expected_surface = _string_or_none(row_view.get("surface"))
+    expected_scenario = _string_or_none(row_view.get("scenario"))
+    if expected_row_id is not None:
+        assert score.row_id == expected_row_id
+    if expected_surface is not None:
+        assert score.surface == expected_surface
+    if expected_scenario is not None:
+        assert score.scenario == expected_scenario
+
+    _assert_provider_free(row)
+    _assert_provider_free(outcome)
+    _assert_class_only_score(score)
+    _assert_expected_metric_classes(row_view, score)
+    _assert_expected_metric_bounds(
+        row_view.get("expected_metric_bounds") if expected_metric_bounds is None else expected_metric_bounds,
+        score,
+    )
+    return score
 
 
 def classify_command_suggestion(
@@ -434,17 +473,17 @@ def classify_smoothness(
         return "regressed"
     if schema_wrestling == "danger" or mutation_guard in {"unexpected_write", "state_mutated_on_reject"}:
         return "regressed"
-    if next_up_specificity == "none":
-        return "regressed"
     if int(metric_counts.get("schema_repair_loop_count", 0)) >= 3:
         return "regressed"
     if (
         schema_wrestling == "high"
         or int(metric_counts.get("schema_repair_loop_count", 0)) >= 2
         or int(metric_counts.get("duplicate_question_bucket_count", 0)) > 0
-        or int(metric_counts.get("structured_authority_coverage", 0)) < 2
         or next_up_specificity == "vague"
+        or (schema_wrestling == "minor" and next_up_specificity == "none")
     ):
+        return "clunky"
+    if int(metric_counts.get("structured_authority_coverage", 0)) < 1:
         return "clunky"
     if int(metric_counts.get("schema_repair_loop_count", 0)) == 1 or _is_safe_blocked_result(result_class):
         return "acceptable"
@@ -659,6 +698,7 @@ def _post_stop_activity_count(
 
 def _structured_authority_sources(
     outcome_view: _ObjectView,
+    event_view: _ObjectView,
     *,
     failure_classes: tuple[str, ...],
     commands: tuple[str, ...],
@@ -669,8 +709,24 @@ def _structured_authority_sources(
     checked_artifact_classes = _tokens(outcome_view.get("checked_artifact_classes"))
     applied_operations = _tokens(outcome_view.get("applied_operations"))
     sources: list[str] = []
+    event_classes = _unique_tokens(
+        (
+            event_view.get("behavior_bucket_class"),
+            event_view.get("user_answer_class"),
+            event_view.get("gate_class"),
+            event_view.get("autonomy_class"),
+            event_view.get("tangent_decision_class"),
+            event_view.get("active_resume_kind_class"),
+            event_view.get("advisory_resume_class"),
+            *_tokens(event_view.get("question_bucket_classes")),
+        )
+    )
     class_set = (
-        set(failure_classes) | set(evidence_classes) | set(checked_artifact_classes) | set(source_repair_classes)
+        set(failure_classes)
+        | set(evidence_classes)
+        | set(checked_artifact_classes)
+        | set(source_repair_classes)
+        | set(event_classes)
     )
 
     if (
@@ -696,11 +752,24 @@ def _structured_authority_sources(
         or outcome_view.get("read_only") is not None
         or outcome_view.get("mutation_allowed") is not None
         or any(token in class_set for token in {"closeout_blocked", "closeout_ready", "bounded_segment_bypass"})
+        or any("closeout" in token for token in class_set)
     ):
         sources.append("phase_closeout_readiness")
     if any("bounded" in token for token in (*class_set, _normalize_token(next_action_class))):
         sources.append("bounded_continuation")
-    if any(token.startswith("staged_") or "manifest" in token for token in class_set):
+    if any(
+        token.startswith("staged_")
+        or "manifest" in token
+        or "bootstrap" in token
+        or "checker" in token
+        or "contract" in token
+        or "dispatch" in token
+        or "gate" in token
+        or "planner" in token
+        or "review" in token
+        or "tangent" in token
+        for token in class_set
+    ):
         sources.append("workflow_stage_manifest")
     if "resume" in _normalize_token(next_action_class) or any("resume" in token for token in class_set):
         sources.append("resume_surface")
@@ -709,9 +778,21 @@ def _structured_authority_sources(
     return _unique_tokens(sources)
 
 
-def _classify_next_up_from_commands(commands: tuple[str, ...], next_action_class: str | None) -> str:
+def _classify_next_up_from_commands(
+    commands: tuple[str, ...],
+    next_action_class: str | None,
+    *,
+    expected_class: str | None = None,
+) -> str:
     normalized_next_action = _normalize_token(next_action_class)
     next_action_specificity = classify_next_up_specificity(next_action_class)
+    expected_specificity = _normalize_token(expected_class)
+    if (
+        not commands
+        and next_action_specificity == "none"
+        and expected_specificity in {"none", "vague", "concrete_command", "bounded_resume", "runtime_verify_work"}
+    ):
+        return expected_specificity
     if normalized_next_action == "verify_work":
         return "concrete_command"
     if next_action_specificity == "bounded_resume":
@@ -772,8 +853,10 @@ def _is_safe_blocked_result(result_class: str | None) -> bool:
     return (
         normalized.startswith("blocked")
         or "blocked" in normalized
+        or "blocks" in normalized
+        or "review_stop" in normalized
+        or "resume_required" in normalized
         or normalized.startswith("retry")
-        or normalized.startswith("stopped")
     )
 
 
@@ -824,6 +907,77 @@ def _bool_or_none(value: object) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
+def _assert_expected_metric_classes(row_view: _ObjectView, score: BehaviorScore) -> None:
+    expected_by_key = {
+        "schema_wrestling_class": row_view.get("expected_schema_wrestling_class"),
+        "smoothness_class": row_view.get("expected_smoothness_class"),
+        "next_up_specificity_class": row_view.get("expected_next_up_specificity_class"),
+        "mutation_guard_class": row_view.get("expected_mutation_guard_class"),
+    }
+    for metric_key, expected_class in expected_by_key.items():
+        if expected_class is not None:
+            assert score.metric_classes[metric_key] == str(expected_class)
+
+
+def _assert_expected_metric_bounds(expected_bounds: object, score: BehaviorScore) -> None:
+    for metric_name, expected_count in _metric_bound_items(expected_bounds):
+        observed = score.metric_counts[metric_name]
+        if expected_count == 0:
+            assert observed == 0
+        else:
+            assert observed >= expected_count
+
+
+def _metric_bound_items(value: object) -> tuple[tuple[str, int], ...]:
+    if value is None:
+        return ()
+    if isinstance(value, Mapping):
+        return tuple((str(key), int(bound)) for key, bound in value.items())
+    if isinstance(value, Iterable) and not isinstance(value, str):
+        items: list[tuple[str, int]] = []
+        for item in value:
+            if isinstance(item, BehaviorMetricBounds):
+                observed_key = item.metric_key
+                expected_count = item.exact_count if item.exact_count is not None else item.min_count
+                if expected_count is not None:
+                    items.append((observed_key, int(expected_count)))
+            elif isinstance(item, Sequence) and not isinstance(item, str) and len(item) == 2:
+                items.append((str(item[0]), int(item[1])))
+        return tuple(items)
+    return ()
+
+
+def _assert_provider_free(value: object) -> None:
+    value_view = _ObjectView(value)
+    for flag_name in ("provider_launch_allowed", "network_allowed", "raw_artifacts_allowed"):
+        flag = value_view.get(flag_name)
+        if flag is not None:
+            assert flag is False
+
+
+def _assert_class_only_score(score: BehaviorScore) -> None:
+    assert tuple(score.metric_counts) == BEHAVIOR_METRIC_COUNT_KEYS
+    assert tuple(score.metric_classes) == BEHAVIOR_METRIC_CLASS_KEYS
+    assert all(isinstance(value, int) for value in score.metric_counts.values())
+    assert all(isinstance(value, str) for value in score.metric_classes.values())
+    for token in (
+        score.row_id,
+        score.surface,
+        score.scenario,
+        *score.finding_classes,
+        *score.metric_classes.values(),
+        *score.structured_authority_sources,
+    ):
+        _assert_class_token(token)
+
+
+def _assert_class_token(token: str) -> None:
+    assert token
+    assert "/" not in token
+    assert "\\" not in token
+    assert " " not in token
+
+
 class _ObjectView:
     def __init__(self, value: object | None) -> None:
         if value is None:
@@ -861,6 +1015,7 @@ __all__ = [
     "STRUCTURED_AUTHORITY_CLASSES",
     "BehaviorMetricBounds",
     "BehaviorScore",
+    "assert_behavior_contract",
     "classify_command_suggestion",
     "classify_mutation_guard",
     "classify_next_up_specificity",

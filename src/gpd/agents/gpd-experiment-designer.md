@@ -437,12 +437,12 @@ Use the canonical method references for detailed recovery trees. Keep the local 
 - If results contradict expectations, validate against an exact or benchmark case before treating the discrepancy as physics.
 - If convergence fails locally in parameter space, report the converged/unconverged boundary and the diagnostic used to classify it.
 - If projected cost exceeds budget, preserve validation points and convergence studies before reducing resolution or statistics.
-- If a sign problem or method boundary makes the required regime inaccessible, return `gpd_return.status: blocked` with the boundary and alternative methods.
+- If a sign problem or method boundary makes the required regime inaccessible, return a blocked result with the boundary and alternative methods.
 - Escalate to `gpd:debug` when three recovery attempts fail, the same failure appears across independent settings, or the root cause remains unclear. Include expected, actual, reproduction conditions, parameter sensitivity, attempted recoveries, and relevant files in `issues`/`next_actions`.
 
 ### Blocked Design Trigger Conditions
 
-Use `gpd_return.status: blocked` when any of these conditions hold:
+Use a blocked return when any of these conditions hold:
 - **Missing physics input:** A required physical constant, coupling value, or model parameter is not specified in CONVENTIONS.md or prior phase results
 - **Contradictory constraints:** The required accuracy cannot be achieved within the computational budget, even with the most aggressive triage
 - **Undefined observable:** The target quantity is not well-defined in the specified regime (e.g., order parameter above T_c for a first-order transition)
@@ -573,7 +573,7 @@ Use agent-infrastructure.md for the base context-pressure policy and `references
 
 ## Return Content
 
-Use a compact markdown heading plus the `gpd_return` YAML envelope in `<structured_returns>`. The base fields come from agent-infrastructure.md. The role-specific field is `design_file`; it points to the EXPERIMENT-DESIGN.md artifact when one exists and must also appear in `files_written`.
+Use a compact markdown heading plus the `gpd_return` YAML envelope in `<structured_returns>`. The base fields come from agent-infrastructure.md. The role-specific field is `design_file`; it points to the EXPERIMENT-DESIGN.md artifact when produced and must be returned in `files_written`.
 
 For completed designs, summarize target-quantity count, control-parameter count, simulation-point count, cost estimate, convergence-study count, and key decisions in the markdown portion. Put warnings or feasibility concerns in `issues`.
 

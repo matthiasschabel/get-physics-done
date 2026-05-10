@@ -10,13 +10,13 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXACTNESS_TOTAL_BUDGETS = {
-    "brittle_prose_assertions": 1_594,
-    "exact_assertion_count": 7_285,
+    "brittle_prose_assertions": 1_541,
+    "exact_assertion_count": 7_192,
 }
 HIGH_SEVERITY_BASELINES = {
-    "tests/core/test_prompt_wiring.py": {"exact": 901, "brittle": 247},
+    "tests/core/test_prompt_wiring.py": {"exact": 409, "brittle": 66},
     "tests/core/test_contract_validation.py": {"exact": 100, "brittle": 69},
-    "tests/test_release_consistency.py": {"exact": 189, "brittle": 50},
+    "tests/test_release_consistency.py": {"exact": 184, "brittle": 49},
     "tests/mcp/test_tool_contract_visibility.py": {"exact": 39, "brittle": 23},
 }
 

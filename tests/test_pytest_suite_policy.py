@@ -17,9 +17,6 @@ from tests.ci_sharding import (
     CI_SHARD_WEIGHT_SPREAD_TOLERANCE,
     actual_ci_shard_matrix,
     all_test_relpaths,
-    assert_ci_workflow_pytest_shard_policy,
-    assert_contributing_documents_current_pytest_commands,
-    assert_tests_readme_documents_ci_shard_policy,
     build_ci_work_units,
     category_for_test_relpath,
     collected_test_inventory,
@@ -499,17 +496,6 @@ def test_ci_shard_target_resolution_collects_only_requested_category(
     assert captured["cwd"] == tmp_path.resolve()
     assert captured["timeout"] == ci_sharding.CI_PYTEST_COLLECTION_TIMEOUT_SECONDS
     assert targets == ("tests/core/test_sample.py",)
-
-
-def test_ci_and_test_readme_document_default_full_suite_and_category_named_runtime_informed_shards() -> None:
-    repo_root = _repo_root()
-    workflow = _workflow_data()
-    pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
-    tests_readme = (repo_root / "tests" / "README.md").read_text(encoding="utf-8")
-    contributing = (repo_root / "CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert_ci_workflow_pytest_shard_policy(workflow, pyproject_text=pyproject)
-    assert_tests_readme_documents_ci_shard_policy(tests_readme)
-    assert_contributing_documents_current_pytest_commands(contributing)
 
 
 def test_hotspot_files_are_split_into_multiple_work_units() -> None:

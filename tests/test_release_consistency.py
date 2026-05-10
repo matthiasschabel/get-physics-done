@@ -29,7 +29,6 @@ from scripts.release_workflow import (
     stamp_publish_date,
     update_readme_version_text,
 )
-from tests.ci_sharding import assert_ci_workflow_pytest_shard_policy
 from tests.helpers.git import (
     git_add,
     git_commit,
@@ -38,7 +37,12 @@ from tests.helpers.git import (
     run_git,
     seed_test_git_repo,
 )
-from tests.helpers.github_actions import load_repo_github_actions_workflow, workflow_step_by_name, workflow_steps_using
+from tests.helpers.github_actions import (
+    load_repo_github_actions_workflow,
+    workflow_job,
+    workflow_step_by_name,
+    workflow_steps_using,
+)
 from tests.helpers.release import (
     EXPECTED_SETUP_UV_VERSION,
     assert_run_step_uses_isolated_uv_build_env,
@@ -678,35 +682,45 @@ def test_public_cli_surface_is_unified() -> None:
 
 def test_merge_gate_workflow_uses_main_branch_pytest_on_python_floor() -> None:
     repo_root = _repo_root()
-    workflow = (repo_root / ".github" / "workflows" / "test.yml").read_text(encoding="utf-8")
     workflow_data = load_repo_github_actions_workflow(repo_root, "test.yml")
     pyproject = (repo_root / "pyproject.toml").read_text(encoding="utf-8")
 
-    assert "name: tests" in workflow
-    assert "pull_request:" in workflow
-    assert "push:" in workflow
-    assert "branches: [main]" in workflow
-    assert "workflow_dispatch:" in workflow
-    assert f"name: pytest ${{{{ matrix.display_name }}}} ({MIN_SUPPORTED_PYTHON_LABEL})" in workflow
-    assert "actions/setup-python@v6" in workflow
-    assert f'python-version: "{MIN_SUPPORTED_PYTHON_LABEL}"' in workflow
-    assert "name: python compatibility (${{ matrix.python-version }})" in workflow
-    assert 'python-version: ["3.12", "3.13"]' in workflow
-    assert "uv run gpd --version" in workflow
-    assert "uv build --wheel --out-dir dist/compat-${{ matrix.python-version }}" in workflow
-    assert "astral-sh/setup-uv@v7" in workflow
-    assert f'version: "{EXPECTED_SETUP_UV_VERSION}"' in workflow
-    assert "Check repo graph generated artifacts" in workflow
-    assert "uv run python scripts/sync_repo_graph_contract.py --check" in workflow
+    triggers = workflow_data["on"]
+    pytest_job = workflow_job(workflow_data, "pytest")
+    compatibility_job = workflow_job(workflow_data, "python-compatibility")
+    ruff_repo_graph_step = workflow_step_by_name(workflow_data, "ruff", "Check repo graph generated artifacts")
+    ruff_public_surface_step = workflow_step_by_name(workflow_data, "ruff", "Check public surface generated artifacts")
+    pytest_python_step = workflow_step_by_name(workflow_data, "pytest", "Set up Python")
+    pytest_uv_step = workflow_step_by_name(workflow_data, "pytest", "Set up uv")
+    compatibility_console_step = workflow_step_by_name(workflow_data, "python-compatibility", "Smoke console script")
+    compatibility_build_step = workflow_step_by_name(workflow_data, "python-compatibility", "Build wheel")
+
+    assert workflow_data["name"] == "tests"
+    assert triggers["pull_request"]["branches"] == ["main"]
+    assert triggers["push"]["branches"] == ["main"]
+    assert "workflow_dispatch" in triggers
+    assert pytest_job["name"] == f"pytest ${{{{ matrix.display_name }}}} ({MIN_SUPPORTED_PYTHON_LABEL})"
+    assert pytest_python_step["uses"] == "actions/setup-python@v6"
+    assert pytest_python_step["with"]["python-version"] == MIN_SUPPORTED_PYTHON_LABEL
+    assert compatibility_job["name"] == "python compatibility (${{ matrix.python-version }})"
+    assert compatibility_job["strategy"]["matrix"]["python-version"] == ["3.12", "3.13"]
+    assert "uv run gpd --version" in compatibility_console_step["run"]
+    assert "uv build --wheel --out-dir dist/compat-${{ matrix.python-version }}" in compatibility_build_step["run"]
+    assert_setup_uv_step_pins_expected_version(pytest_uv_step, context="test.yml pytest Set up uv")
+    assert ruff_repo_graph_step["run"] == "uv run python scripts/sync_repo_graph_contract.py --check"
+    assert ruff_public_surface_step["run"] == "uv run python scripts/render_public_surface.py --check"
     assert 'addopts = "-n auto --dist=worksteal"' in pyproject
-    assert_ci_workflow_pytest_shard_policy(workflow_data, pyproject_text=pyproject)
 
     # Staging rebuild trigger lives in a separate workflow (staging-rebuild.yml)
     # to avoid showing as a skipped check on PRs. It gates on tests via workflow_run.
-    rebuild_workflow = (repo_root / ".github" / "workflows" / "staging-rebuild.yml").read_text(encoding="utf-8")
-    assert 'workflows: ["tests"]' in rebuild_workflow
-    assert "conclusion == 'success'" in rebuild_workflow
-    assert "curl -sf --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 30 -X POST" in rebuild_workflow
+    rebuild_workflow = load_repo_github_actions_workflow(repo_root, "staging-rebuild.yml")
+    rebuild_trigger = rebuild_workflow["on"]["workflow_run"]
+    rebuild_job = workflow_job(rebuild_workflow, "trigger-staging-rebuild")
+    rebuild_step = workflow_step_by_name(rebuild_workflow, "trigger-staging-rebuild", "Dispatch rebuild to gpd-web")
+    assert rebuild_trigger["workflows"] == ["tests"]
+    assert rebuild_trigger["branches"] == ["main"]
+    assert rebuild_job["if"] == "github.event.workflow_run.conclusion == 'success'"
+    assert "curl -sf --retry 3 --retry-delay 5 --connect-timeout 10 --max-time 30 -X POST" in rebuild_step["run"]
 
 
 def test_prepare_release_workflow_creates_release_pr_without_publishing() -> None:

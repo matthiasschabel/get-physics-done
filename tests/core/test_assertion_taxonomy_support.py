@@ -16,6 +16,7 @@ from tests.assertion_taxonomy_support import (
     marker_range,
     public_exact,
     semantic_anchor,
+    semantic_concept,
 )
 
 SAMPLE_TEXT = """# Surface
@@ -133,6 +134,54 @@ def test_match_modes_keep_exact_default_and_allow_explicit_normalization() -> No
         "the lifecycle keeps plan checkpoints",
         match=MatchMode.CASEFOLD_NORMALIZED,
     ).check(text)
+
+
+def test_semantic_concept_groups_required_anchors_and_forbidden_stale_fragments() -> None:
+    assertions = semantic_concept(
+        "machine concept",
+        required=("ALPHA TOKEN", "beta token"),
+        forbidden=("outside-only legacy phrase", "retired stale phrase"),
+        section="Machine Contract",
+        markers=marker_range("BEGIN MACHINE", "END MACHINE"),
+    )
+
+    assert tuple(assertion.kind for assertion in assertions) == (
+        AssertionKind.SEMANTIC_ANCHOR,
+        AssertionKind.FORBIDDEN_DUPLICATE,
+    )
+    assert all(assertion.match is MatchMode.CASEFOLD_NORMALIZED for assertion in assertions)
+    assert_prompt_contracts(SAMPLE_TEXT, *assertions)
+
+
+def test_semantic_concept_failure_preserves_required_and_forbidden_failure_details() -> None:
+    required = semantic_concept("required concept", required="missing semantic anchor")
+    with pytest.raises(AssertionTaxonomyError) as required_exc_info:
+        assert_prompt_contracts(SAMPLE_TEXT, *required)
+
+    required_message = str(required_exc_info.value)
+    assert "kind=semantic_anchor" in required_message
+    assert "label=required concept required anchors" in required_message
+    assert "missing fragment='missing semantic anchor'" in required_message
+
+    forbidden = semantic_concept(
+        "forbidden concept",
+        forbidden="repeat warning",
+        section="Machine Contract",
+        markers=("BEGIN MACHINE", "END MACHINE"),
+    )
+    with pytest.raises(AssertionTaxonomyError) as forbidden_exc_info:
+        assert_prompt_contracts(SAMPLE_TEXT, *forbidden)
+
+    forbidden_message = str(forbidden_exc_info.value)
+    assert "kind=forbidden_duplicate" in forbidden_message
+    assert "label=forbidden concept forbidden stale fragments" in forbidden_message
+    assert "duplicate fragment='repeat warning'" in forbidden_message
+    assert "max_count=0" in forbidden_message
+
+
+def test_semantic_concept_rejects_empty_concepts() -> None:
+    with pytest.raises(ValueError, match="requires at least one required or forbidden fragment"):
+        semantic_concept("empty concept")
 
 
 def test_match_modes_apply_to_ordered_absent_and_count_modes() -> None:

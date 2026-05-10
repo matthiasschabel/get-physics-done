@@ -612,7 +612,7 @@ Orchestrator provides:
 
 Parse and confirm understanding before proceeding. The freshness contract is the markdown trio: if ROADMAP.md, STATE.md, and REQUIREMENTS.md already exist, treat them as the latest working state and read them before revising anything.
 
-If the approved project contract is missing, or it lacks decisive outputs / deliverables plus anchor guidance, stop with `gpd_return.status: blocked`. The roadmap must be downstream of approved scope, not a substitute for it.
+If the approved project contract is missing, or it lacks decisive outputs / deliverables plus anchor guidance, stop with a blocked return. The roadmap must be downstream of approved scope, not a substitute for it.
 
 ## Step 2: Extract Research Objectives
 
@@ -728,7 +728,7 @@ If orchestrator provides revision feedback:
 - The orchestrator presents that feedback through the continuation boundary
 - Update files in place (use `file_edit`, not rewrite from scratch)
 - Re-validate coverage
-- Return `gpd_return.status: completed` with changes made and the updated files in `gpd_return.files_written`
+- Return completed with changes made and `gpd_return.files_written` set to the updated files
 
 </execution_flow>
 

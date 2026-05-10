@@ -12,24 +12,24 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 61_000, "chars": 2_650_000}
+PROMPT_TOTAL_BUDGET = {"lines": 55_000, "chars": 2_340_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 27_000, "chars": 1_100_000},
-    "agent": {"lines": 10_800, "chars": 575_000},
-    "workflow": {"lines": 24_500, "chars": 1_000_000},
+    "command": {"lines": 24_000, "chars": 950_000},
+    "agent": {"lines": 10_500, "chars": 557_000},
+    "workflow": {"lines": 21_000, "chars": 846_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_800, "chars": 185_000}
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_550, "chars": 172_000}
 STAGE_SELECTED_INIT_FIELD_BUDGET = 3_227
 STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 73
 STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 743
 STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 743
 EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_707
-EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 95_000
+EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 16_000
 PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
-    ("write-paper", "publication_review"): 45_000,
-    ("peer-review", "panel_stages"): 70_000,
+    ("write-paper", "publication_review"): 12_000,
+    ("peer-review", "panel_stages"): 40_000,
 }
-PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET = 35_000
+PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET = 5_500
 EXECUTE_PHASE_SPLIT_FAMILY_STAGES = (
     "wave_dispatch",
     "executor_dispatch",
@@ -64,7 +64,7 @@ ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
         "write-paper",
     }
 )
-SHELL_PARSING_LINE_BUDGET = 700
+SHELL_PARSING_LINE_BUDGET = 460
 SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
     {
         ("workflow", "execute-phase"),
@@ -73,14 +73,14 @@ SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
         ("workflow", "write-paper"),
     }
 )
-TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 25
-TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 45
+TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 2
+TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 3
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
-    "status_handling": 113,
-    "files_written_freshness": 28,
-    "stale_artifact_rejection": 33,
-    "fresh_continuation": 38,
-    "heading_prose_non_authority": 20,
+    "status_handling": 108,
+    "files_written_freshness": 26,
+    "stale_artifact_rejection": 30,
+    "fresh_continuation": 34,
+    "heading_prose_non_authority": 19,
     "no_synthesized_child_gpd_return": 3,
 }
 ZERO_SAFETY_TOTAL_FIELDS = (
@@ -106,22 +106,22 @@ FORBIDDEN_MIGRATED_PROMPT_SHELL_FRAGMENTS = {
 
 def _aggregate_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:
     if descriptor.native_include_support:
-        return {"lines": 18_500, "chars": 950_000}
+        return {"lines": 17_700, "chars": 930_000}
     if not descriptor.agent_prompt_uses_dollar_templates:
-        return {"lines": 28_500, "chars": 1_385_000}
+        return {"lines": 27_350, "chars": 1_345_000}
     if descriptor.public_command_surface_prefix.endswith(":"):
-        return {"lines": 28_700, "chars": 1_420_000}
-    return {"lines": 29_000, "chars": 1_390_000}
+        return {"lines": 27_500, "chars": 1_375_000}
+    return {"lines": 27_850, "chars": 1_350_000}
 
 
 def _command_only_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:
     if descriptor.native_include_support:
-        return {"lines": 7_500, "chars": 383_000}
+        return {"lines": 7_400, "chars": 382_000}
     if not descriptor.agent_prompt_uses_dollar_templates:
-        return {"lines": 16_500, "chars": 745_000}
+        return {"lines": 16_300, "chars": 742_000}
     if descriptor.public_command_surface_prefix.endswith(":"):
-        return {"lines": 16_800, "chars": 780_000}
-    return {"lines": 16_700, "chars": 750_000}
+        return {"lines": 16_400, "chars": 772_000}
+    return {"lines": 16_650, "chars": 746_000}
 
 
 def _runtime_projection_budgets(*, command_only: bool) -> dict[str, dict[str, int]]:

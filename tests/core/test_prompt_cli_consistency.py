@@ -25,6 +25,7 @@ from gpd.core.public_surface_contract import (
 from gpd.core.state import VALID_STATUSES
 from gpd.core.workflow_presets import list_workflow_presets
 from gpd.registry import VALID_CONTEXT_MODES, _parse_frontmatter, get_command, list_commands
+from tests.assertion_taxonomy_support import FragmentMode, MatchMode, assert_prompt_contracts, semantic_anchor
 from tests.doc_surface_contracts import (
     DOCTOR_RUNTIME_SCOPE_RE,
     assert_beginner_startup_routing_contract,
@@ -163,6 +164,26 @@ def _assert_ordered_fragments(content: str, fragments: tuple[str, ...]) -> None:
             continue
         cursor = position + len(normalized_fragment)
     assert missing == []
+
+
+def _assert_semantic_fragments(content: str, context: str, fragments: tuple[str, ...]) -> None:
+    assert_prompt_contracts(
+        content,
+        semantic_anchor(context, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=context),
+    )
+
+
+def _assert_semantic_absent(content: str, context: str, fragments: tuple[str, ...]) -> None:
+    assert_prompt_contracts(
+        content,
+        semantic_anchor(
+            context,
+            fragments,
+            mode=FragmentMode.ABSENT,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            context=context,
+        ),
+    )
 
 
 def _typer_command_name(command_info: object) -> str:
@@ -472,8 +493,14 @@ def test_help_prompt_keeps_workflow_preset_readiness_on_local_cli_surface() -> N
     )
 
     assert "## Invocation Surfaces" not in quick_start
-    assert "Exclude the marker comment lines themselves." in quick_start
-    assert "Append this one wrapper-owned line" in quick_start
+    _assert_semantic_fragments(
+        quick_start,
+        "help quick-start wrapper extraction",
+        (
+            "Exclude the marker comment lines themselves.",
+            "Append this one wrapper-owned line",
+        ),
+    )
     assert_help_workflow_runtime_reference_contract(help_workflow)
     optional_addons = _extract_between(help_workflow, "### Optional Local CLI Add-Ons", "Workflow presets are bundles")
     _assert_normalized_fragments(
@@ -564,16 +591,28 @@ def test_tour_prompt_delegates_routing_to_workflow_only() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/tour.md" in tour_command
     assert "@{GPD_INSTALL_DIR}/references/onboarding/beginner-command-taxonomy.md" in tour_command
-    assert "teaching surface, not a chooser" in tour_command
-    assert "safe beginner walkthrough of the core GPD command paths" in tour_command
+    _assert_semantic_fragments(
+        tour_command,
+        "tour command is a teaching surface",
+        (
+            "teaching surface, not a chooser",
+            "safe beginner walkthrough of the core GPD command paths",
+        ),
+    )
     assert "gpd:set-tier-models" in tour_command
     assert "gpd:settings" in tour_command
     assert "gpd:start" in tour_command_expanded
     assert "gpd:resume-work" in tour_command_expanded
     assert_tour_command_surface_contract(tour_workflow)
     assert "$ARGUMENTS" in tour_workflow
-    assert "Do not narrow the command list, select a path, or route based on it." in tour_workflow
-    assert "the runtime, where you use the GPD command prefix provided for that runtime" in tour_workflow
+    _assert_semantic_fragments(
+        tour_workflow,
+        "tour workflow does not route",
+        (
+            "Do not narrow the command list, select a path, or route based on it.",
+            "the runtime, where you use the GPD command prefix provided for that runtime",
+        ),
+    )
     assert "Normal terminal vs runtime" in tour_workflow
 
 
@@ -637,7 +676,11 @@ def test_new_project_minimal_prompt_documents_core_artifacts_not_full_mode_outpu
         "</success_criteria>",
     )
     assert "documented core startup set" in minimal_success
-    assert "Same directory structure and file set as full path" not in minimal_success
+    _assert_semantic_absent(
+        minimal_success,
+        "minimal mode does not promise full-mode file set",
+        ("Same directory structure and file set as full path",),
+    )
     assert "CONVENTIONS.md` created" not in minimal_success
     for stale_fragment in (
         "Ask ONE question, then generate everything",
@@ -730,11 +773,21 @@ def test_progress_prompt_runs_preflight_after_init_context() -> None:
     workflow = (REPO_ROOT / "src/gpd/specs/workflows/progress.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/progress.md" in command
-    assert "Follow the included workflow exactly. Do not duplicate the workflow logic here." in command
+    _assert_semantic_fragments(
+        command,
+        "progress command delegates workflow logic",
+        ("Follow the included workflow exactly. Do not duplicate the workflow logic here.",),
+    )
     assert "INIT=$(gpd --raw init progress --include state,roadmap,project,config,references)" not in command
     assert 'CONTEXT=$(gpd --raw validate command-context progress "$ARGUMENTS")' not in command
-    assert "The recent-project picker is advisory" not in command
-    assert "reloads canonical state for that project" not in command
+    _assert_semantic_absent(
+        command,
+        "progress command excludes resume-recovery branch prose",
+        (
+            "The recent-project picker is advisory",
+            "reloads canonical state for that project",
+        ),
+    )
 
     assert "INIT=$(gpd --raw init progress --include state,roadmap,project,config,references)" in workflow
     assert 'CONTEXT=$(gpd --raw validate command-context progress "$ARGUMENTS")' in workflow
@@ -831,9 +884,15 @@ def test_plan_phase_prompt_is_a_thin_dispatch_shell() -> None:
     assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command
     assert "staged_loading.eager_authorities" in command
     assert "agent: gpd-planner" in command
-    assert "What Makes a Good Physics Plan" not in command
+    _assert_semantic_absent(
+        command,
+        "plan-phase dispatch shell excludes planning-guide prose",
+        (
+            "What Makes a Good Physics Plan",
+            "Quick Checklist Before Approving a Plan",
+        ),
+    )
     assert "Common Failure Modes" not in command
-    assert "Quick Checklist Before Approving a Plan" not in command
     assert "Domain-Aware Planning" not in command
     assert "gpd --raw init plan-phase" not in command
 
@@ -902,7 +961,11 @@ def test_new_project_prompt_uses_stdin_for_contract_validation_and_persistence()
     )
     assert "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -" in workflow
     assert "/tmp/gpd-project-contract.json" not in workflow
-    assert "temporary JSON file if needed" not in workflow
+    _assert_semantic_absent(
+        workflow,
+        "project-contract persistence avoids temporary file fallback",
+        ("temporary JSON file if needed",),
+    )
 
 
 def test_state_json_schema_stays_aligned_with_stdin_contract_persistence_flow() -> None:
@@ -931,17 +994,29 @@ def test_new_project_and_state_schema_surface_contract_id_integrity_rules() -> N
     assert "no invented\nkeys" in workflow
     assert "near-miss enum values" in workflow
     assert "list fields" in workflow
-    assert "Same-kind IDs must be unique within each section." in schema
-    assert "must not match any declared contract ID" in schema
+    _assert_semantic_fragments(
+        schema,
+        "project contract id integrity",
+        (
+            "Same-kind IDs must be unique within each section.",
+            "must not match any declared contract ID",
+        ),
+    )
 
 
 def test_compare_branches_prompt_keeps_branch_summary_extraction_in_memory() -> None:
     workflow = (REPO_ROOT / "src/gpd/specs/workflows/compare-branches.md").read_text(encoding="utf-8")
 
-    assert "Prefer parsing the `git show` output directly in memory." in workflow
-    assert "do not write it to `GPD/tmp/` just to run a path-based extractor." in workflow
-    assert "Keep branch-summary extraction in memory/stdout only" in workflow
-    assert "do not use `GPD/tmp/`, `/tmp`, or another temp root for this step." in workflow
+    _assert_semantic_fragments(
+        workflow,
+        "compare-branches keeps summary extraction in memory",
+        (
+            "Prefer parsing the `git show` output directly in memory.",
+            "Keep branch-summary extraction in memory/stdout only",
+        ),
+    )
+    assert "`GPD/tmp/`" in workflow
+    assert "`/tmp`" in workflow
 
 
 def test_help_prompts_surface_tangent_command_for_side_investigations() -> None:
@@ -960,26 +1035,48 @@ def test_settings_and_research_mode_docs_keep_tangent_branch_taxonomy_strict() -
     preset_labels = _workflow_preset_labels()
 
     assert "Which starting workflow preset should GPD use for `GPD/config.json`?" in new_project
-    assert "First offer a preset choice." in new_project
-    assert "bundles over existing config keys only" in new_project
+    _assert_semantic_fragments(
+        new_project,
+        "new-project preset gate stays explicit",
+        (
+            "First offer a preset choice.",
+            "bundles over existing config keys only",
+            "Do not create, persist, or infer a separate preset block.",
+        ),
+    )
     assert "preview" in new_project
     assert "Before writing `GPD/config.json`" in new_project
-    assert "Do not create, persist, or infer a separate preset block." in new_project
     assert "Core research" in preset_labels
     assert '"Core research (Recommended)"' in new_project
     for label in sorted(preset_labels - {"Core research"}):
         assert f'"{label}"' in new_project
     assert "multiple hypothesis branches" not in settings
     assert "Minimal branching, fast convergence." not in settings
-    assert "auto-switch to exploit once approach is validated" not in settings
-    assert "does **not** by itself authorize git-backed hypothesis branches" in settings
-    assert "surface tangent decisions explicitly" in settings
-    assert "Suppress optional tangents unless the user explicitly requests them" in settings
+    _assert_semantic_absent(
+        settings,
+        "research mode docs avoid automatic exploit switching",
+        ("auto-switch to exploit once approach is validated",),
+    )
+    _assert_semantic_fragments(
+        settings,
+        "settings tangent branch boundary",
+        (
+            "does **not** by itself authorize git-backed hypothesis branches",
+            "surface tangent decisions explicitly",
+            "Suppress optional tangents unless the user explicitly requests them",
+            "explicit apply or customize choice",
+        ),
+    )
     assert "preview" in settings
-    assert "explicit apply or customize choice" in settings
-    assert "do **not** silently create git-backed hypothesis branches" in research_modes
-    assert "only explicit tangent decisions become hypothesis branches or parallel plans" in research_modes
-    assert "Flag complementary approaches as tangent candidates for optional parallel investigation" in research_modes
+    _assert_semantic_fragments(
+        research_modes,
+        "research modes keep tangent decisions explicit",
+        (
+            "do **not** silently create git-backed hypothesis branches",
+            "only explicit tangent decisions become hypothesis branches or parallel plans",
+            "Flag complementary approaches as tangent candidates for optional parallel investigation",
+        ),
+    )
 
 
 def test_new_project_and_help_surface_runtime_default_and_state_backup_gitignore_guidance() -> None:
@@ -988,8 +1085,14 @@ def test_new_project_and_help_surface_runtime_default_and_state_backup_gitignore
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
     planning_config = (REPO_ROOT / "src/gpd/specs/references/planning/planning-config.md").read_text(encoding="utf-8")
 
-    assert "without commentary about the missing override" in new_project
-    assert 'normal "use the runtime default model" path' in new_project
+    _assert_semantic_fragments(
+        new_project,
+        "new-project runtime default model path",
+        (
+            "without commentary about the missing override",
+            'normal "use the runtime default model" path',
+        ),
+    )
     assert "GPD/state.json.bak" in new_project_manifest
     assert "GPD/state.json.lock" in new_project_manifest
     assert "GPD/state.json.bak" in help_workflow
@@ -1073,11 +1176,17 @@ def test_help_prompt_surfaces_workflow_presets_on_the_local_cli_surface() -> Non
 def test_help_prompt_surfaces_bounded_write_paper_external_authoring_lane() -> None:
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
 
-    assert "bounded external-authoring lane driven by an explicit intake manifest only" in help_workflow
+    _assert_semantic_fragments(
+        help_workflow,
+        "write-paper external authoring lane boundary",
+        (
+            "bounded external-authoring lane driven by an explicit intake manifest only",
+            "does not mine arbitrary folders",
+            "embedded external staged-review parity is out of scope",
+        ),
+    )
     assert "GPD-authored outputs live under `GPD/publication/{subject_slug}/...`" in help_workflow
     assert "`GPD/publication/{subject_slug}/intake/`" in help_workflow
-    assert "does not mine arbitrary folders" in help_workflow
-    assert "embedded external staged-review parity is out of scope" in help_workflow
     assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_workflow
 
 
@@ -1094,7 +1203,11 @@ def test_help_prompt_plan_phase_skip_verify_keeps_proof_bearing_exception() -> N
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
 
     assert "`--skip-verify`" in help_workflow
-    assert "proof-bearing plans still require checker review or an equivalent main-context audit" in help_workflow
+    _assert_semantic_fragments(
+        help_workflow,
+        "plan-phase skip-verify proof-bearing exception",
+        ("proof-bearing plans still require checker review or an equivalent main-context audit",),
+    )
 
 
 def test_help_prompt_keeps_cost_surface_on_local_cli_not_runtime_slash_command() -> None:
@@ -1189,8 +1302,14 @@ def test_new_project_prompt_surfaces_discuss_phase_before_planning_in_command_an
 def test_execute_phase_failure_recovery_counts_only_top_level_verification_statuses() -> None:
     workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
-    assert "Count only top-level report status and structured gap ledgers" in workflow
-    assert "do not use unanchored text search over nested `status:` fields" in workflow
+    _assert_semantic_fragments(
+        workflow,
+        "execute-phase failure recovery counts authoritative statuses",
+        (
+            "Count only top-level report status and structured gap ledgers",
+            "do not use unanchored text search over nested `status:` fields",
+        ),
+    )
     assert 'grep -c "status: failed"' not in workflow
     assert 'grep -c "status:"' not in workflow
 
@@ -1227,9 +1346,15 @@ def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None
 def test_command_requirements_force_concrete_next_up_for_stops() -> None:
     note = command_visibility_note()
 
-    assert "completion, checkpoint, blocked return, failed return, retry gate, or stop" in note
-    assert "must end with `## > Next Up`" in note
-    assert "concrete GPD commands" in note
+    _assert_semantic_fragments(
+        note,
+        "command visibility stop closeout",
+        (
+            "completion, checkpoint, blocked return, failed return, retry gate, or stop",
+            "must end with `## > Next Up`",
+            "concrete GPD commands",
+        ),
+    )
     assert "`gpd:suggest-next`" in note
 
 
@@ -1257,7 +1382,11 @@ def test_new_project_and_new_milestone_closeouts_include_concrete_next_up_comman
     new_milestone = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
     new_milestone_command = (COMMANDS_DIR / "new-milestone.md").read_text(encoding="utf-8")
 
-    assert "not available, stop with `## > Next Up`" in new_project
+    _assert_semantic_fragments(
+        new_project,
+        "new-project blocked closeout includes next up",
+        ("not available, stop with `## > Next Up`",),
+    )
     assert "`gpd:discuss-phase 1`" in new_project
     assert "`gpd:plan-phase 1`" in new_project
     assert "`gpd:suggest-next`" in new_project

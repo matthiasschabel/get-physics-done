@@ -58,6 +58,6 @@ def test_gpd_research_synthesizer_prompt_stays_within_expected_budget_and_keeps_
     assert "Append this YAML block after the markdown return." in source
     assert "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields" in source
     assert "This agent writes only `GPD/literature/SUMMARY.md`;" in source
-    assert "files_written` must list only files actually written in this run." in source
+    assert "put it in `files_written` when this run creates or updates it" in source
     assert "If you checkpoint, write a single draft `SUMMARY.md` first, then stop." in source
     assert "Target under 3000 words for `SUMMARY.md`." in source

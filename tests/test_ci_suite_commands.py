@@ -6,7 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import tests.ci_sharding as ci_sharding
-from tests.ci_sharding import assert_ci_workflow_pytest_shard_policy, assert_tests_readme_documents_ci_shard_policy
+from tests.ci_sharding import (
+    assert_ci_workflow_pytest_shard_policy,
+    assert_contributing_documents_current_pytest_commands,
+    assert_tests_readme_documents_ci_shard_policy,
+)
 from tests.helpers.github_actions import (
     github_actions_workflow_paths,
     iter_workflow_steps,
@@ -302,3 +306,9 @@ def test_tests_readme_documents_default_full_suite_and_category_named_runtime_in
     tests_readme = (REPO_ROOT / "tests" / "README.md").read_text(encoding="utf-8")
 
     assert_tests_readme_documents_ci_shard_policy(tests_readme)
+
+
+def test_contributing_documents_current_pytest_commands() -> None:
+    contributing = (REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+
+    assert_contributing_documents_current_pytest_commands(contributing)

@@ -733,7 +733,7 @@ gpd_return:
   focus: "theory"
 ```
 
-`focus` is the agent-specific extended field; `files_written` must name the `GPD/research-map/` documents actually written.
+`focus` is the agent-specific extended field; return the `GPD/research-map/` documents created by the run in `files_written`.
 
 </structured_returns>
 

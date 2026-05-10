@@ -2995,7 +2995,7 @@ class TestPublicAPI:
         assert synthesizer.source_kind == "agent"
         assert synthesizer.path.endswith("gpd-research-synthesizer.md")
         assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer.content
-        assert "files_written` must list only files actually written in this run." in synthesizer.content
+        assert "put it in `files_written` when this run creates or updates it" in synthesizer.content
         assert "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields" in synthesizer.content
         assert "gpd_return:" in synthesizer.content
 

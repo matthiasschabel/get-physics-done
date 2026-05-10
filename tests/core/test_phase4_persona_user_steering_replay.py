@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.phase4_persona.behavior_metrics import assert_behavior_contract
+from tests.helpers.phase4_persona.matrix import load_phase4_rows
 from tests.helpers.phase4_persona.user_steering import (
     REPO_ROOT,
     UserSteeringOutcome,
@@ -36,6 +38,8 @@ EXPECTED_NEXT_ACTION_ANCHORS = {
     "P4-USER-05": "concrete_next_command",
     "P4-USER-06": "bounded_segment_resume",
 }
+
+USER_STEERING_CONTRACT_ROWS = {(row.row_id, row.scenario): row for row in load_phase4_rows("user_steering")}
 
 
 def _assert_class_only(value: object) -> None:
@@ -92,11 +96,10 @@ def test_phase4_user_steering_replay_scores_expected_class(row: UserSteeringRow)
     event = replay_event_for_row(row)
 
     outcome = score_user_steering_row(row, event)
+    contract_row = USER_STEERING_CONTRACT_ROWS[(row.row_id, row.scenario)]
+    score = assert_behavior_contract(contract_row, outcome, event=event)
 
     assert event.behavior_bucket_class == row.expected_behavior_bucket_class
-    assert outcome.provider_launch_allowed is False
-    assert outcome.network_allowed is False
-    assert outcome.raw_artifacts_allowed is False
     assert outcome.mutated is False
     assert outcome.finding_id == row.expected_finding
     assert outcome.behavior_bucket_class == row.expected_behavior_bucket_class
@@ -104,7 +107,7 @@ def test_phase4_user_steering_replay_scores_expected_class(row: UserSteeringRow)
     assert outcome.next_action_class == row.expected_next_action_class
     assert outcome.dispatch_class == row.expected_dispatch_class
     assert outcome.resume_target_class == row.expected_resume_target_class
-    assert outcome.next_up_specificity_class == row.expected_next_up_specificity_class
+    assert score.metric_classes["next_up_specificity_class"] == contract_row.expected_next_up_specificity_class
     assert row.expected_finding in outcome.failure_classes
     _assert_outcome_class_only(outcome)
 

@@ -683,7 +683,7 @@ If the workflow explicitly delegates shared-state ownership, follow that workflo
 
 ### Completion Return Format
 
-Return exactly one typed `gpd_return` object. Markdown headings are presentation only; orchestration routes on typed fields.
+Return exactly one typed `gpd_return` object. Markdown labels are human-facing; orchestration uses typed fields.
 
 Base envelope:
 

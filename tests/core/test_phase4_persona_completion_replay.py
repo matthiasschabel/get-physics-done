@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.phase4_persona.behavior_metrics import score_behavior_metrics
+from tests.helpers.phase4_persona.behavior_metrics import assert_behavior_contract
 from tests.helpers.phase4_persona.completion import (
     SCHEMA_VERSION,
     CompletionReplayRow,
@@ -113,13 +113,7 @@ def test_phase4_persona_completion_replay(
         assert outcome.next_action_class == row.expected_next_action_class
     if row.expect_no_mutation:
         assert outcome.mutated is False
-    assert _smoothness_class(row, outcome) == row.expected_smoothness_class
-    assert _schema_wrestling_class(outcome.failure_classes) == row.expected_schema_wrestling_class
-    if row.expected_next_action_class is not None and row.expected_next_up_specificity_class is not None:
-        assert _next_up_specificity_class(outcome.next_action_class) == row.expected_next_up_specificity_class
-    assert _mutation_guard_class(row, outcome) == row.expected_mutation_guard_class
-    _assert_metric_bounds(row, outcome)
-    _assert_behavior_score(row, outcome)
+    assert_behavior_contract(row, outcome)
 
 
 def test_phase4_completion_runtime_verify_work_row_rejects_structural_verify_phase(
@@ -134,7 +128,7 @@ def test_phase4_completion_runtime_verify_work_row_rejects_structural_verify_pha
     assert all("verify-work" in command for command in outcome.commands)
     assert all("gpd verify phase" not in command for command in outcome.commands)
     assert outcome.failure_classes == ("runtime_verify_work", "no_structural_verify_phase", "read_only")
-    score = score_behavior_metrics(row, outcome)
+    score = assert_behavior_contract(row, outcome)
     assert score.metric_counts["invalid_command_suggestion_count"] == 0
     assert score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
 
@@ -164,7 +158,7 @@ def test_phase4_completion_replay_rows_pin_closeout_stop_classes(
         tmp_path / "missing-verification",
         monkeypatch,
     )
-    missing_score = score_behavior_metrics(rows["missing_verification_blocks_required_closeout"], missing)
+    missing_score = assert_behavior_contract(rows["missing_verification_blocks_required_closeout"], missing)
     assert missing.ready is False
     assert missing.mutated is False
     assert "missing_verification" in missing.failure_classes
@@ -176,7 +170,7 @@ def test_phase4_completion_replay_rows_pin_closeout_stop_classes(
         tmp_path / "proof-redteam",
         monkeypatch,
     )
-    proof_score = score_behavior_metrics(rows["proof_bearing_without_passed_proof_redteam_blocks_closeout"], proof)
+    proof_score = assert_behavior_contract(rows["proof_bearing_without_passed_proof_redteam_blocks_closeout"], proof)
     assert proof.ready is False
     assert proof.mutated is False
     assert {"proof_redteam_missing", "proof_redteam_non_passing", "proof_redteam_not_passed"} <= set(
@@ -189,7 +183,7 @@ def test_phase4_completion_replay_rows_pin_closeout_stop_classes(
         "expert_needed_verification_blocks": "expert_needed_stop",
     }.items():
         outcome = score_completion_replay_row(rows[scenario], tmp_path / scenario, monkeypatch)
-        score = score_behavior_metrics(rows[scenario], outcome)
+        score = assert_behavior_contract(rows[scenario], outcome)
 
         assert outcome.ready is False
         assert outcome.state_status_class == "blocked"
@@ -197,78 +191,3 @@ def test_phase4_completion_replay_rows_pin_closeout_stop_classes(
         assert outcome.next_action_class == "verify_work"
         assert all("phase complete" not in command for command in outcome.commands)
         assert "verification_status" in score.structured_authority_sources
-
-
-def _smoothness_class(row: CompletionReplayRow, outcome) -> str:
-    if outcome.mutated and row.expect_no_mutation:
-        return "regressed"
-    if row.expected_result_class.startswith("blocked"):
-        return "acceptable"
-    return "smooth"
-
-
-def _schema_wrestling_class(failure_classes: tuple[str, ...]) -> str:
-    schema_failures = {
-        "return_missing",
-        "return_malformed_repairable",
-        "return_malformed_blocking",
-        "unfenced_candidate",
-    }
-    return "minor" if schema_failures.intersection(failure_classes) else "none"
-
-
-def _next_up_specificity_class(next_action_class: str | None) -> str:
-    if next_action_class is None or next_action_class == "unknown":
-        return "none"
-    if next_action_class == "runtime_verify_work":
-        return "runtime_verify_work"
-    if next_action_class == "resume_work":
-        return "bounded_resume"
-    return "concrete_command"
-
-
-def _mutation_guard_class(row: CompletionReplayRow, outcome) -> str:
-    if outcome.mutated and row.expect_no_mutation:
-        return "unexpected_write"
-    if outcome.mutated:
-        return "expected_write_only"
-    return "no_write"
-
-
-def _assert_metric_bounds(row: CompletionReplayRow, outcome) -> None:
-    score = score_behavior_metrics(row, outcome)
-    for metric_name, expected_count in row.expected_metric_bounds:
-        observed = _observed_metric_count(metric_name, row, outcome)
-        shared_observed = score.metric_counts[metric_name]
-        if expected_count == 0:
-            assert observed == expected_count
-            assert shared_observed == expected_count
-        else:
-            assert observed >= expected_count
-            assert shared_observed >= expected_count
-
-
-def _assert_behavior_score(row: CompletionReplayRow, outcome) -> None:
-    score = score_behavior_metrics(row, outcome)
-
-    assert score.row_id == row.row_id
-    assert score.surface == row.surface
-    assert score.scenario == row.scenario
-    assert score.metric_classes["schema_wrestling_class"] == row.expected_schema_wrestling_class
-    assert score.metric_classes["next_up_specificity_class"] == row.expected_next_up_specificity_class
-    assert score.metric_classes["mutation_guard_class"] == row.expected_mutation_guard_class
-    assert all(isinstance(value, int) for value in score.metric_counts.values())
-    assert all(isinstance(value, str) for value in score.metric_classes.values())
-
-
-def _observed_metric_count(metric_name: str, row: CompletionReplayRow, outcome) -> int:
-    match metric_name:
-        case "unexpected_write_count":
-            return int(outcome.mutated and row.expect_no_mutation)
-        case "structured_authority_coverage":
-            return int(bool(outcome.failure_classes) or bool(outcome.commands) or outcome.ready is not None)
-        case "unsupported_completion_claim_count":
-            return 0
-        case "invalid_command_suggestion_count":
-            return 0
-    raise AssertionError(f"unhandled completion behavior metric: {metric_name}")

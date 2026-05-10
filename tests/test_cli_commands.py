@@ -35,8 +35,7 @@ from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.state import StateUpdateResult, default_state_dict, generate_state_markdown
 from gpd.registry import _parse_command_file
-from tests.helpers.cli import StableCliRunner
-from tests.helpers.cli import normalize_cli_output as _normalize_cli_output
+from tests.helpers.cli import StableCliRunner, invoke_cli, invoke_help_text, json_output_from_result
 from tests.manuscript_test_support import (
     CANONICAL_MANUSCRIPT_STEM,
     write_proof_review_package,
@@ -52,6 +51,10 @@ from tests.manuscript_test_support import (
 )
 
 runner = StableCliRunner()
+
+
+def _help_text(*args: str, expect_exit: int = 0, **kwargs) -> str:
+    return invoke_help_text(runner, app, args, expect_exit=expect_exit, **kwargs)
 
 
 def test_runtime_command_surface_pattern_does_not_truncate_markdown_filenames() -> None:
@@ -463,9 +466,7 @@ def _chdir(gpd_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _invoke(*args: str, expect_ok: bool = True) -> None:
     """Invoke a gpd CLI command and assert it doesn't crash."""
-    result = runner.invoke(app, list(args), catch_exceptions=False)
-    if expect_ok:
-        assert result.exit_code == 0, f"gpd {' '.join(args)} failed:\n{result.output}"
+    invoke_cli(runner, app, args, expect_exit=0 if expect_ok else None, catch_exceptions=False)
 
 
 def _refresh_artifact_manifest_for_manuscript(
@@ -1384,8 +1385,7 @@ class TestStateCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["updated"] is True
         assert any(
             "references must include at least one must_surface=true anchor" in warning
@@ -1405,8 +1405,7 @@ class TestStateCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("weakest_anchors" in error for error in payload["errors"])
 
@@ -1422,8 +1421,7 @@ class TestStateCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["updated"] is False
         assert (
             payload["reason"]
@@ -1459,8 +1457,7 @@ class TestStateCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["updated"] is False
         assert payload["reason"] == "Backend rejected project contract: missing required anchor"
 
@@ -1490,8 +1487,7 @@ class TestStateCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["updated"] is False
         assert payload["reason"] == "Project contract already matches requested value"
 
@@ -1525,8 +1521,7 @@ class TestStateCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert payload["mode"] == "approved"
         assert any("approved project contract requires" in error for error in payload["errors"])
@@ -1544,8 +1539,7 @@ class TestContractCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["passed"] is True
         assert payload["project_contract_gate"]["authoritative"] is True
         assert payload["project_contract_validation"]["valid"] is True
@@ -1559,8 +1553,7 @@ class TestContractCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
         assert payload["project_contract_load_info"]["status"] == "loaded_with_schema_normalization"
         assert payload["project_contract_validation"]["valid"] is True
@@ -1601,8 +1594,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"] == (
             "Unknown --include value(s) for gpd init progress: bogus. "
             "Allowed values: config, project, protocols, references, roadmap, state."
@@ -1623,8 +1615,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["planning_exists"] is True
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
@@ -1637,8 +1628,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"].startswith("Unknown resume-work stage 'bogus'.")
         assert "Traceback" not in result.output
 
@@ -1649,8 +1639,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"].startswith("phase is required for init verify-work.")
         assert "Traceback" not in result.output
 
@@ -1661,8 +1650,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"].startswith("Unknown verify-work stage 'bogus'.")
         assert "Traceback" not in result.output
 
@@ -1690,8 +1678,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         for key, expected in expected_keys.items():
             assert payload[key] == expected
 
@@ -1710,8 +1697,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
         assert payload["state_exists"] is True
@@ -1731,8 +1717,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["workspace_root"] == nested.resolve().as_posix()
         assert payload["project_root"] == gpd_project.resolve().as_posix()
         assert payload["init_root_policy"] == "project_scoped"
@@ -1755,8 +1740,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["project_exists"] is False
         assert payload["state_exists"] is False
         assert payload["roadmap_exists"] is False
@@ -1781,8 +1765,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["planning_exists"] is True
         assert payload["roadmap_exists"] is True
         assert payload["state_exists"] is True
@@ -1805,8 +1788,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
         assert payload["state_exists"] is True
@@ -1827,8 +1809,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["init_root_policy"] == "project_scoped"
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
@@ -1853,8 +1834,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["topic"] == "Curvature flow bounds"
         assert payload["slug"] == "curvature-flow-bounds"
         assert payload["project_exists"] is True
@@ -1880,8 +1860,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["workspace_root"] == nested.resolve().as_posix()
         assert payload["project_root"] == gpd_project.resolve().as_posix()
         assert payload["project_root_source"] == "workspace"
@@ -1910,8 +1889,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["workspace_root"] == nested.resolve().as_posix()
         assert payload["project_root"] == gpd_project.resolve().as_posix()
         assert payload["project_root_source"] == "workspace"
@@ -1941,8 +1919,7 @@ class TestInitCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["map_focus"] == "Hamiltonian sector"
         assert payload["map_focus_provided"] is True
         assert payload["staged_loading"]["stage_id"] == "map_bootstrap"
@@ -2053,8 +2030,7 @@ review_summary:
         )
 
         result = runner.invoke(app, ["--raw", "init", "plan-phase", "1"], catch_exceptions=False)
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["project_contract"] is None
         assert payload["derived_active_reference_count"] >= 2
@@ -2091,8 +2067,7 @@ review_summary:
         )
 
         result = runner.invoke(app, ["--raw", "init", "new-milestone"], catch_exceptions=False)
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["current_milestone"] == "v1.1"
         assert payload["project_contract"]["references"][0]["id"] == "ref-benchmark"
@@ -2124,8 +2099,7 @@ review_summary:
         (gpd_project / "GPD" / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
         result = runner.invoke(app, ["--raw", "init", "new-milestone"], catch_exceptions=False)
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["project_contract"] is not None
         assert payload["project_contract"]["references"][0]["must_surface"] is False
@@ -2146,8 +2120,7 @@ review_summary:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["has_git"] is False
         assert payload["has_research_files"] is True
         assert payload["needs_research_map"] is True
@@ -2184,8 +2157,7 @@ review_summary:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert resolved_agents == []
         assert "researcher_model" not in payload
         assert "synthesizer_model" not in payload
@@ -2208,8 +2180,7 @@ review_summary:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["init_progress_exists"] is True
         assert payload["init_progress_status"] == "interrupted_init_progress"
         assert payload["init_progress_valid"] is True
@@ -2234,8 +2205,7 @@ review_summary:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["init_progress_exists"] is True
         assert payload["init_progress_status"] == "corrupt_init_progress"
         assert payload["init_progress_valid"] is False
@@ -2255,8 +2225,7 @@ review_summary:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["staged_loading"]["writes_allowed"] == [
             "GPD/state.json",
             "GPD/STATE.md",
@@ -2280,8 +2249,7 @@ review_summary:
             ["--raw", "--cwd", str(gpd_project), "init", "new-project", "--stage", "literature_survey"],
             catch_exceptions=False,
         )
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"]["workflow_id"] == "new-project"
@@ -2337,8 +2305,7 @@ review_summary:
             ["--raw", "init", "quick", "Quick reference check", "--stage", "task_authoring"],
             catch_exceptions=False,
         )
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"]["workflow_id"] == "quick"
@@ -2375,8 +2342,7 @@ review_summary:
             ["--raw", "init", "quick", "Quick reference check", "--stage", "reference_context"],
             catch_exceptions=False,
         )
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"]["workflow_id"] == "quick"
@@ -2406,8 +2372,7 @@ review_summary:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "quick staged init requires an initialized GPD project" in payload["error"]
 
     def test_phase_op_surfaces_contract_load_and_validation_gates(self, gpd_project: Path) -> None:
@@ -2427,8 +2392,7 @@ review_summary:
         (gpd_project / "GPD" / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
         result = runner.invoke(app, ["--raw", "init", "phase-op"], catch_exceptions=False)
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
 
         assert payload["project_contract"] is not None
         assert payload["project_contract"]["references"][0]["must_surface"] is False
@@ -2450,8 +2414,7 @@ review_summary:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["staged_loading"]["workflow_id"] == "write-paper"
         assert payload["staged_loading"]["stage_id"] == "paper_bootstrap"
         assert "reference_artifacts_content" not in payload
@@ -2650,8 +2613,7 @@ class TestReadOnlyCommandRouting:
 
         result = runner.invoke(app, ["--cwd", str(nested), *command_args], catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["cwd"] == str(project_root)
         assert seen["cwd"] == project_root
         if kind == "health":
@@ -2764,8 +2726,7 @@ class TestReadOnlyCommandRouting:
 
         result = runner.invoke(app, ["--cwd", str(gpd_project), "--raw", "health"], catch_exceptions=False)
 
-        assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["overall"] == "fail"
         assert payload["summary"]["fail"] == 1
 
@@ -2826,8 +2787,7 @@ class TestReadOnlyStateBackedLists:
 
         result = runner.invoke(app, ["--cwd", str(nested), *command_args], catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["cwd"] == str(project_root)
         assert payload["kind"] == kind
         assert seen["peek_cwd"] == project_root
@@ -2844,8 +2804,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:write-paper"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "publication"
@@ -2928,8 +2887,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "publication"
@@ -2977,8 +2935,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "review"
@@ -3010,8 +2967,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["review_contract"]["review_mode"] == "publication"
 
@@ -3022,8 +2978,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "publication"
@@ -3130,8 +3085,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:progress"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is False
@@ -3156,8 +3110,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:progress"
         assert payload["context_mode"] == "project-required"
@@ -3176,8 +3129,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:progress"
         assert payload["passed"] is True
@@ -3197,8 +3149,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:progress"
         assert payload["passed"] is False
@@ -3219,8 +3170,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-required"
@@ -3242,8 +3192,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-required"
@@ -3267,8 +3216,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:resume-work"
         assert payload["context_mode"] == "project-required"
@@ -3298,8 +3246,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:literature-review"
         assert payload["context_mode"] == "project-aware"
@@ -3317,8 +3264,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:resume-work"
         assert payload["context_mode"] == "project-required"
@@ -3379,8 +3325,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:plan-milestone-gaps"
         assert payload["context_mode"] == "project-required"
@@ -3401,8 +3346,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:plan-milestone-gaps"
         assert payload["context_mode"] == "project-required"
@@ -3443,8 +3387,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert checks["project_reentry"]["passed"] is True
@@ -3456,8 +3399,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert init_result.exit_code == 0, init_result.output
-        init_payload = json.loads(init_result.output)
+        init_payload = json_output_from_result(init_result)
         assert init_payload["project_root"] == project.resolve().as_posix()
         assert init_payload["project_reentry_mode"] == "auto-recent-project"
 
@@ -3529,8 +3471,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert init_result.exit_code == 0, init_result.output
-        init_payload = json.loads(init_result.output)
+        init_payload = json_output_from_result(init_result)
         assert init_payload["project_root"] == workspace.resolve().as_posix()
         assert init_payload["project_reentry_mode"] == "current-workspace"
         assert (
@@ -3589,8 +3530,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is False
         assert checks["project_reentry"]["passed"] is False
@@ -3636,8 +3576,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is False
         assert checks["project_reentry"]["passed"] is False
@@ -3675,8 +3614,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == context_mode
         assert payload["passed"] is True
@@ -3697,8 +3635,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == command_name
         assert payload["validated_surface"] == "public_runtime_dollar_command"
         assert payload["public_runtime_command_prefix"] == dollar_command_prefix
@@ -3720,8 +3657,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == command_name
         assert payload["validated_surface"] == "public_runtime_slash_command"
         assert payload["public_runtime_command_prefix"] == slash_command_prefix
@@ -3749,8 +3685,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == command_name
         assert payload["validated_surface"] == "public_runtime_command_surface"
         assert payload["public_runtime_command_prefix"] == ""
@@ -3769,8 +3704,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["guided_path"] == (
             f"Use `{dollar_command_prefix}settings` inside the runtime for guided autonomy changes."
         )
@@ -3809,17 +3743,14 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert get_result.exit_code == 0, get_result.output
-        get_payload = json.loads(get_result.output)
+        get_payload = json_output_from_result(get_result)
         assert get_payload == {"key": "parallelization", "value": False, "found": True}
 
-        assert set_result.exit_code == 0, set_result.output
-        set_payload = json.loads(set_result.output)
+        set_payload = json_output_from_result(set_result)
         assert set_payload["canonical_key"] == "research_mode"
         assert set_payload["value"] == "exploit"
 
-        assert ensure_result.exit_code == 0, ensure_result.output
-        ensure_payload = json.loads(ensure_result.output)
+        ensure_payload = json_output_from_result(ensure_result)
         assert ensure_payload == {"created": False, "path": str(config_path)}
 
         written = json.loads(config_path.read_text(encoding="utf-8"))
@@ -3841,8 +3772,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:slides"
         assert payload["context_mode"] == "projectless"
         assert payload["passed"] is True
@@ -3860,8 +3790,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -3878,8 +3807,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["validated_surface"] == "public_runtime_dollar_command"
         assert payload["public_runtime_command_prefix"] == dollar_command_prefix
         assert payload["local_cli_equivalence_guaranteed"] is False
@@ -3933,26 +3861,12 @@ class TestReviewValidationCommands:
         )
 
     def test_validate_review_preflight_help_mentions_manuscript_and_referee_subjects(self) -> None:
-        result = runner.invoke(
-            app,
-            ["validate", "review-preflight", "--help"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        output = _normalize_cli_output(result.output)
+        output = _help_text("validate", "review-preflight", catch_exceptions=False)
         assert "Optional phase number, manuscript target" in output
         assert "referee report source" in output
 
     def test_init_peer_review_help_surfaces_target_argument_and_stage_option(self) -> None:
-        result = runner.invoke(
-            app,
-            ["init", "peer-review", "--help"],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, result.output
-        output = _normalize_cli_output(result.output)
+        output = _help_text("init", "peer-review", catch_exceptions=False)
         assert "[SUBJECT]" in output
         assert "Optional explicit review target path" in output
         assert "--stage" in output
@@ -3970,8 +3884,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["review_target_input"] == external_txt.name
         assert payload["review_target_mode"] == "standalone explicit-artifact review"
         assert "standalone explicit-artifact intake applies" in payload["review_target_mode_reason"]
@@ -4013,8 +3926,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["review_target_input"] == external_txt.name
         assert payload["review_target_mode"] == "standalone explicit-artifact review"
         assert payload["resolved_review_target"] == str(external_txt)
@@ -4056,8 +3968,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["review_target_mode"] == "project-backed manuscript review"
         assert payload["publication_target_mode"] == "project_explicit_manuscript"
         assert payload["publication_target_project_context_role"] == "authoritative"
@@ -4102,8 +4013,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["publication_lane_kind"] == "external_artifact"
         assert payload["managed_publication_root"] == f"GPD/publication/{payload['publication_subject_slug']}"
         assert payload["selected_publication_root"] == payload["managed_publication_root"]
@@ -4128,8 +4038,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         detail = payload["derived_manuscript_proof_review_status"]["detail"]
         assert payload["latest_review_artifacts"] is None
         assert "active manuscript" in detail
@@ -4145,8 +4054,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["resolved_mode"] == "project-backed manuscript review"
         assert payload["effective_required_evidence"] == [
             "existing manuscript or explicit external artifact target",
@@ -4189,8 +4097,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["resolved_mode"] == "standalone explicit-artifact review"
         assert payload["effective_required_evidence"] == [
             "existing manuscript or explicit external artifact target",
@@ -4324,8 +4231,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:custom-publication-review"
         assert payload["context_mode"] == "project-aware"
@@ -4415,8 +4321,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:custom-publication-review"
         assert payload["passed"] is True
@@ -4443,8 +4348,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["validated_surface"] == "public_runtime_command_surface"
         assert payload["public_runtime_command_prefix"] == ""
         assert payload["local_cli_equivalence_guaranteed"] is False
@@ -4486,8 +4390,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
@@ -4534,8 +4437,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
@@ -4598,8 +4500,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -4637,8 +4538,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:parameter-sweep"
         assert payload["context_mode"] == "project-aware"
@@ -4786,8 +4686,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
@@ -4816,8 +4715,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:literature-review"
         assert payload["passed"] is False
@@ -4838,8 +4736,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert payload["project_exists"] is True
@@ -4861,8 +4758,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -4891,8 +4787,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -4925,8 +4820,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -4947,8 +4841,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -4969,8 +4862,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -4991,8 +4883,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -5039,8 +4930,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -5073,8 +4963,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
@@ -5101,8 +4990,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["review_mode"] == "review"
@@ -5138,8 +5026,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is False
         assert checks["knowledge_target"]["passed"] is True
@@ -5171,8 +5058,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["passed"] is False
@@ -5186,8 +5072,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:write-paper"
         assert payload["passed"] is True
         checks = {check["name"]: check for check in payload["checks"]}
@@ -5215,8 +5100,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:write-paper"
         assert payload["passed"] is True
@@ -5239,8 +5123,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is True
         assert (gpd_project / "paper" / "PROOF-REVIEW-MANIFEST.json").exists()
@@ -5257,8 +5140,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is True
         assert not (gpd_project / "paper" / "PROOF-REVIEW-MANIFEST.json").exists()
@@ -5275,8 +5157,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -5321,8 +5202,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["passed"] is True
         assert payload["active_conditional_requirements"] == [PROJECT_BACKED_PEER_REVIEW_CONDITIONAL]
 
@@ -5343,8 +5223,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -5373,8 +5252,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -5407,8 +5285,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -5443,8 +5320,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -5466,8 +5342,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -5490,8 +5365,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is True
 
@@ -5521,8 +5395,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -5539,8 +5412,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:write-paper"
         assert payload["passed"] is True
         assert payload["active_conditional_requirements"] == []
@@ -5573,8 +5445,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
@@ -5617,8 +5488,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
@@ -5637,8 +5507,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert f"paper/{_CANONICAL_MARKDOWN_BASENAME}" in checks["manuscript"]["detail"]
@@ -5689,8 +5558,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert f"{resume_dir_name}/{_CANONICAL_MANUSCRIPT_BASENAME}" in checks["manuscript"]["detail"]
@@ -5722,8 +5590,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert "fresh bootstrap is allowed" in checks["manuscript"]["detail"]
@@ -5738,8 +5605,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:help"
         assert payload["ok"] is True
         assert payload["default_sections"] == ["quick_start_extract", "wrapper_owned_all_hint"]
@@ -5755,8 +5621,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         commands = {entry["command"] for entry in payload["command_index"]}
         assert "gpd:new-project" in commands
         assert "gpd:help" in commands
@@ -5791,8 +5656,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["validated_surface"] == descriptor.validated_command_surface
         assert payload["public_runtime_command_prefix"] == descriptor.public_command_surface_prefix
         assert payload["command_context"]["validated_surface"] == descriptor.validated_command_surface
@@ -5805,8 +5669,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["ok"] is True
         assert payload["canonical_command"] == "gpd:new-project"
         assert payload["context_mode"] == "projectless"
@@ -5819,8 +5682,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["ok"] is True
         assert payload["requested_command"] == "gpd:new-project --minimal"
         assert payload["canonical_command"] == "gpd:new-project"
@@ -5833,8 +5695,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["ok"] is False
         assert payload["error"] == "unknown_command"
         assert payload["canonical_command"] == "gpd:does-not-exist"
@@ -5853,8 +5714,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:discover"
         assert payload["context_mode"] == "project-aware"
@@ -5876,8 +5736,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:quick"
         assert payload["context_mode"] == "project-required"
@@ -5891,8 +5750,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is True
         checks = {check["name"]: check for check in payload["checks"]}
@@ -5921,8 +5779,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is True
         checks = {check["name"]: check for check in payload["checks"]}
@@ -5952,8 +5809,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["state_integrity"]["passed"] is False
 
@@ -5972,8 +5828,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["state_integrity"]["passed"] is False
         assert "project_contract:" in checks["state_integrity"]["detail"]
@@ -5990,8 +5845,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["summary_frontmatter"]["passed"] is False
         assert checks["verification_frontmatter"]["passed"] is False
@@ -6009,8 +5863,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:verify-work"
         assert payload["passed"] is True
         checks = {check["name"]: check for check in payload["checks"]}
@@ -6025,8 +5878,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:verify-work"
         assert payload["passed"] is False
         checks = {check["name"]: check for check in payload["checks"]}
@@ -6046,8 +5898,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["required_state"]["passed"] is False
@@ -6067,8 +5918,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:verify-work"
         assert payload["passed"] is False
         checks = {check["name"]: check for check in payload["checks"]}
@@ -6083,8 +5933,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is True
         checks = {check["name"]: check for check in payload["checks"]}
@@ -6115,8 +5964,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["referee_report_source"]["passed"] is True
         assert "./local-referee-report.md present" in checks["referee_report_source"]["detail"]
@@ -6145,8 +5993,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["referee_report_source"]["passed"] is True
         assert "./flagged-referee-report.md present" in checks["referee_report_source"]["detail"]
@@ -6162,8 +6009,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert f"paper/{_CANONICAL_MARKDOWN_BASENAME}" in checks["manuscript"]["detail"]
@@ -6177,8 +6023,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is False
         checks = {check["name"]: check for check in payload["checks"]}
@@ -6193,8 +6038,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is False
         checks = {check["name"]: check for check in payload["checks"]}
@@ -6216,8 +6060,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["command"] == "gpd:peer-review"
@@ -6253,8 +6096,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["resolved_mode"] == "standalone explicit-artifact review"
@@ -6276,8 +6118,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["artifact_manifest"]["passed"] is False
 
@@ -6291,8 +6132,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert "ARTIFACT-MANIFEST.json is invalid" in checks["manuscript"]["detail"]
@@ -6309,8 +6149,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert "ARTIFACT-MANIFEST.json is invalid" in checks["manuscript"]["detail"]
@@ -6511,8 +6350,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is True
         checks = {check["name"]: check for check in payload["checks"]}
@@ -6548,8 +6386,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["passed"] is True
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
@@ -6586,8 +6423,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["resolved_mode"] == "project-backed manuscript review"
         assert checks["manuscript"]["passed"] is True
@@ -6604,8 +6440,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert "resolved to" in checks["manuscript"]["detail"]
@@ -6665,8 +6500,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert checks["manuscript"]["passed"] is True
@@ -6690,8 +6524,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert "no manuscript entry point found under ./paper" == checks["manuscript"]["detail"]
@@ -6736,8 +6569,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["bibliography_audit_clean"]["passed"] is False
@@ -6782,8 +6614,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["bibliography_audit_clean"]["passed"] is False
         assert "bibliography audit is invalid" in checks["bibliography_audit_clean"]["detail"]
@@ -6814,8 +6645,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["bibliography_audit_clean"]["passed"] is False
@@ -6836,8 +6666,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["reproducibility_manifest"]["passed"] is True
         assert checks["reproducibility_ready"]["passed"] is False
@@ -6871,8 +6700,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["artifact_manifest"]["passed"] is False
         assert checks["bibliography_audit"]["passed"] is True
@@ -6888,8 +6716,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["artifact_manifest"]["passed"] is True
         assert checks["bibliography_audit"]["passed"] is False
@@ -6912,8 +6739,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["artifact_manifest"]["passed"] is True
         assert checks["bibliography_audit"]["passed"] is True
@@ -6940,8 +6766,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is True
         assert checks["manuscript_proof_review"]["blocking"] is False
@@ -6971,8 +6796,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger"]["passed"] is True
         assert checks["referee_decision"]["passed"] is True
@@ -7004,8 +6828,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger"]["passed"] is True
         assert checks["referee_decision"]["passed"] is True
@@ -7037,8 +6860,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger"]["passed"] is True
         assert checks["referee_decision"]["passed"] is True
@@ -7070,8 +6892,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger"]["passed"] is True
         assert checks["referee_decision"]["passed"] is True
@@ -7113,8 +6934,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is True
@@ -7149,8 +6969,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is True
@@ -7181,8 +7000,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert "round 2" in checks["review_ledger"]["detail"]
         assert "round 2" in checks["referee_decision"]["detail"]
@@ -7212,8 +7030,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["referee_decision_valid"]["passed"] is False
         assert (
@@ -7264,8 +7081,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["bibliography_audit_clean"]["passed"] is False
@@ -7284,8 +7100,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["compiled_manuscript"]["passed"] is True
         assert checks["publication_blockers"]["passed"] is False
@@ -7303,8 +7118,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger"]["passed"] is True
         assert checks["referee_decision"]["passed"] is True
@@ -7329,8 +7143,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger_valid"]["passed"] is True
         assert checks["referee_decision_valid"]["passed"] is False
@@ -7349,8 +7162,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert "round 2" in checks["review_ledger"]["detail"]
         assert "round 2" in checks["referee_decision"]["detail"]
@@ -7370,8 +7182,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger"]["passed"] is False
         assert "round 2" in checks["review_ledger"]["detail"]
@@ -7393,8 +7204,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["response_freshness"]["passed"] is False
         assert checks["response_freshness"]["blocking"] is True
@@ -7432,8 +7242,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["publication_subject_slug"] == "curvature-flow"
         assert payload["publication_lane_kind"] == "managed_publication_manuscript"
@@ -7467,8 +7276,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["review_ledger_valid"]["passed"] is False
         assert checks["referee_decision_valid"]["passed"] is False
@@ -7488,8 +7296,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["publication_blockers"]["passed"] is True
         assert checks["review_ledger"]["passed"] is False
@@ -7512,8 +7319,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert (
@@ -7547,8 +7353,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert checks["artifact_manifest"]["passed"] is True
@@ -7595,8 +7400,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert checks["manuscript"]["detail"] == f"{cli_module._format_display_path(manuscript)} present"
@@ -7625,8 +7429,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert payload["preflight_passed"] is True
@@ -7671,8 +7474,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["materialized"] is True
         assert tarball.exists()
@@ -7708,8 +7510,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["tarball_under_managed_arxiv_root"]["passed"] is False
         assert "escapes managed arXiv root" in checks["tarball_under_managed_arxiv_root"]["detail"]
@@ -7743,8 +7544,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["submission_tree_excludes_auxiliary_files"]["passed"] is True
         assert checks["submission_tex_ready"]["passed"] is True
@@ -7774,8 +7574,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["preflight_passed"] is False
         assert payload["checks"][0]["name"] == "strict_review_preflight"
         review_checks = {check["name"]: check for check in payload["review_preflight"]["checks"]}
@@ -7802,8 +7601,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -7847,8 +7645,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -7892,8 +7689,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
@@ -7934,8 +7730,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["selected_publication_root"] == "GPD/publication/curvature-flow"
         assert payload["selected_review_root"] == "GPD/publication/curvature-flow/review"
 
@@ -7967,8 +7762,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["required_outputs"] == [
             "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md",
             "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md",
@@ -7995,8 +7789,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
@@ -8031,8 +7824,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
@@ -8056,8 +7848,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert checks["project_exists"]["blocking"] is False
@@ -8081,8 +7872,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
@@ -8106,8 +7896,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:write-paper"
         assert payload["context_mode"] == "project-aware"
@@ -8137,8 +7926,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:write-paper"
         assert checks["project_exists"]["passed"] is True
@@ -8168,8 +7956,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["command"] == "gpd:write-paper"
@@ -8208,8 +7995,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is False
@@ -8257,8 +8043,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is False
@@ -8285,8 +8070,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is True
@@ -8306,8 +8090,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
@@ -8342,8 +8125,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         resolved_subject = payload["resolved_subject"]
         assert payload["command"] == "gpd:write-paper"
@@ -8571,8 +8353,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert "project_state" not in checks
@@ -8638,8 +8419,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert "project_state" not in checks
@@ -8688,8 +8468,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert checks["manuscript"]["passed"] is True
@@ -8765,8 +8544,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is False
         assert checks["artifact_manifest"]["passed"] is False
@@ -8788,8 +8566,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is True
         assert checks["manuscript"]["passed"] is True
@@ -8837,8 +8614,7 @@ class TestReviewValidationCommands:
             if _original_pypdf is not None:
                 _sys.modules["pypdf"] = _original_pypdf
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is False
         assert checks["manuscript"]["passed"] is False
@@ -8874,8 +8650,7 @@ class TestReviewValidationCommands:
         finally:
             uninstall()
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert payload["passed"] is False
         assert checks["manuscript"]["passed"] is False
@@ -9045,8 +8820,7 @@ class TestReviewValidationCommands:
             if _original_pypdf is not None:
                 _sys.modules["pypdf"] = _original_pypdf
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "pypdf" in payload["error"]
         assert "companion" in payload["error"] or "get-physics-done[paper]" in payload["error"]
         assert "get-physics-done[arxiv]" not in payload["error"]
@@ -9078,8 +8852,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is True
         assert checks["manuscript"]["detail"] == f"{cli_module._format_display_path(manuscript)} present"
@@ -9112,8 +8885,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert (
@@ -9142,8 +8914,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert checks["manuscript"]["detail"] == (
@@ -9175,8 +8946,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert checks["manuscript"]["detail"] == (
@@ -9197,8 +8967,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         checks = {check["name"]: check for check in payload["checks"]}
         assert checks["manuscript"]["passed"] is False
         assert (
@@ -9261,8 +9030,7 @@ class TestReviewValidationCommands:
 
         result = runner.invoke(app, ["--raw", "validate", "paper-quality", str(quality_path)], catch_exceptions=False)
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["ready_for_submission"] is True
         assert payload["journal"] == "prd"
 
@@ -9295,8 +9063,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["ready_for_submission"] is False
 
     def test_validate_paper_quality_command_blocks_invalid_ledger_integrity_flags(self, gpd_project: Path) -> None:
@@ -9323,8 +9090,7 @@ class TestReviewValidationCommands:
 
         result = runner.invoke(app, ["--raw", "validate", "paper-quality", str(quality_path)], catch_exceptions=False)
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         blocker_checks = {issue["check"] for issue in payload["blocking_issues"]}
         assert "contract_results_parse_ok" in blocker_checks
         assert "contract_results_alignment_ok" in blocker_checks
@@ -9361,8 +9127,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         blocker_checks = {issue["check"] for issue in payload["blocking_issues"]}
         assert "decisive_artifacts_with_explicit_verdicts" in blocker_checks
 
@@ -9483,8 +9248,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["journal"] == "jhep"
         assert payload["categories"]["verification"]["checks"]["contract_targets_verified"] > 0
         assert payload["categories"]["results"]["checks"]["comparison_with_prior_work_present"] > 0
@@ -9568,16 +9332,12 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["valid"] is True
         assert payload["most_positive_allowed_recommendation"] == "major_revision"
 
     def test_validate_referee_decision_help_surfaces_strict_policy_semantics(self) -> None:
-        result = runner.invoke(app, ["validate", "referee-decision", "--help"], catch_exceptions=False)
-
-        assert result.exit_code == 0, result.output
-        output = _normalize_cli_output(result.output)
+        output = _help_text("validate", "referee-decision", catch_exceptions=False)
         assert "Require staged peer-review artifact coverage" in output
         assert "recommendation-floor consistency" in output
         assert "policy-driving inputs" in output
@@ -9609,8 +9369,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "Strict referee-decision validation requires --ledger" in payload["error"]
 
     def test_validate_referee_decision_command_accepts_round_suffixed_stage_artifacts(self, gpd_project: Path) -> None:
@@ -9678,8 +9437,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["valid"] is True
 
     def test_validate_referee_decision_command_rejects_wrong_existing_artifact_set(self, gpd_project: Path) -> None:
@@ -9730,8 +9488,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("canonical five specialist stage artifacts" in reason for reason in payload["reasons"])
 
@@ -9777,8 +9534,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("rejects noncanonical stage artifacts" in reason for reason in payload["reasons"])
         assert any("STAGE-meta.json" in reason for reason in payload["reasons"])
@@ -9825,8 +9581,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert payload["most_positive_allowed_recommendation"] == "reject"
 
@@ -9868,8 +9623,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("listed staged review artifacts do not exist" in reason for reason in payload["reasons"])
 
@@ -9933,8 +9687,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("blocking_issue_ids not found in review ledger" in reason for reason in payload["reasons"])
 
@@ -9946,8 +9699,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "Cannot read both referee-decision and review-ledger from stdin" in payload["error"]
 
     def test_validate_referee_decision_command_rejects_omitted_unresolved_blocking_ledger_issues(
@@ -10009,8 +9761,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any(
             "unresolved blocking review-ledger issues missing from blocking_issue_ids" in reason
@@ -10042,8 +9793,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "paper-quality input.equations must be an object, not str" in payload["error"]
 
     def test_validate_paper_quality_command_rejects_unknown_fields_without_traceback(self, gpd_project: Path) -> None:
@@ -10071,8 +9821,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "paper-quality input.verification.report_exists: Extra inputs are not permitted" in payload["error"]
         assert "templates/paper/paper-quality-input-schema.md" in payload["error"]
 
@@ -10096,8 +9845,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "referee-decision.stage_artifacts must be an array, not str" in payload["error"]
 
     def test_validate_review_ledger_command_accepts_valid_ledger(self, gpd_project: Path) -> None:
@@ -10131,8 +9879,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["issues"][0]["issue_id"] == "REF-001"
 
     def test_validate_review_ledger_command_reports_shape_errors_without_traceback(self, gpd_project: Path) -> None:
@@ -10155,8 +9902,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "review-ledger.issues must be an array, not str" in payload["error"]
 
     def test_validate_plan_contract_command_accepts_valid_plan(self, gpd_project: Path) -> None:
@@ -10174,8 +9920,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["valid"] is True
 
     def test_validate_plan_contract_command_rejects_ambiguous_contract_target_ids(self, gpd_project: Path) -> None:
@@ -10201,8 +9946,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any(
             "contract: contract id claim-benchmark is reused across claim, deliverable; "
@@ -10289,8 +10033,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         serialized = json.dumps(payload)
         assert "${" not in serialized
         assert "test-secret" not in serialized
@@ -10330,8 +10073,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload[WOLFRAM_MANAGED_SERVER_KEY] == {
             "command": "/opt/gpd",
             "args": ["mcp-serve", "wolfram"],
@@ -10359,8 +10101,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert any("Unknown claim contract_results entry: claim-unknown" in error for error in payload["errors"])
 
     def test_validate_summary_contract_command_reports_unresolved_plan_contract_ref(self, gpd_project: Path) -> None:
@@ -10378,8 +10119,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "plan_contract_ref: could not resolve matching plan contract" in payload["errors"]
 
     def test_validate_verification_contract_command_requires_contract_results(self, gpd_project: Path) -> None:
@@ -10408,8 +10148,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert "contract_results: required for contract-backed plan" in payload["errors"]
 
     def test_validate_reproducibility_manifest_strict_command(self, gpd_project: Path) -> None:
@@ -10465,8 +10204,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["valid"] is True
         assert payload["reproducibility_ready"] is True
         assert "ready_for_review" not in payload
@@ -10484,8 +10222,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert payload["schema_reference"].endswith("paper/reproducibility-manifest.md")
         assert any(
@@ -10523,8 +10260,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is True
         assert payload["reproducibility_ready"] is False
         assert payload["schema_reference"].endswith("paper/reproducibility-manifest.md")
@@ -10568,8 +10304,7 @@ class TestReviewValidationCommands:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result)
         assert payload["validation"]["valid"] is True
         assert payload["validation"]["reproducibility_ready"] is True
         assert "ready_for_review" not in payload["validation"]
@@ -10629,8 +10364,7 @@ def test_install_command_smoke_error_paths_without_traceback(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "Runtime catalog unavailable during install: catalog offline"
     assert "Traceback" not in result.output
 
@@ -10638,8 +10372,7 @@ def test_install_command_smoke_error_paths_without_traceback(
         if setup is not None:
             setup()
         result = runner.invoke(app, ["--raw", "--cwd", str(gpd_project), *argv], catch_exceptions=False)
-        assert result.exit_code == 1, result.output
-        payload = json.loads(result.output)
+        payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"] == expected_error
         assert "Traceback" not in result.output
 
@@ -10677,8 +10410,7 @@ def test_cli_uninstall_and_resolution_paths(monkeypatch: pytest.MonkeyPatch, gpd
         ["--raw", "--cwd", str(gpd_project), "uninstall", _PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name],
         catch_exceptions=False,
     )
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "Raw uninstall requires --local, --global, or --target-dir"
     assert "Traceback" not in result.output
 
@@ -10700,8 +10432,7 @@ def test_cli_uninstall_and_resolution_paths(monkeypatch: pytest.MonkeyPatch, gpd
         ],
         catch_exceptions=False,
     )
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert (
         payload["error"]
         == f"Runtime adapter unavailable for '{_PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name}' during uninstall: adapter offline"
@@ -10767,8 +10498,7 @@ def test_resolve_model_explain_surfaces_runtime_default_reason(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["agent_name"] == "gpd-referee"
     assert payload["tier"] == "tier-1"
     assert payload["runtime"] == _PRIMARY_RAW_RUNTIME_DESCRIPTOR.runtime_name
@@ -10809,10 +10539,7 @@ def test_resolve_model_keeps_blank_stdout_by_default_when_no_override(
     ["new-project", "verify-work", "plan-phase", "quick", "execute-phase"],
 )
 def test_init_help_surfaces_stage_option(command_name: str) -> None:
-    result = runner.invoke(app, ["init", command_name, "--help"])
-    output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
+    output = _help_text("init", command_name)
     assert "--stage" in output
     assert f"Load the staged {command_name} context for a specific" in output
     assert "stage id." in output

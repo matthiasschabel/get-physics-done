@@ -511,7 +511,7 @@ done
 ```
 
 **If a file is missing or empty:**
-- DO NOT synthesize without it. Return `gpd_return.status: blocked` with the missing file listed.
+- DO NOT synthesize without it. Return blocked with the missing file listed in `issues`.
 - The orchestrator will re-run the failed researcher or provide the file.
 
 **If a file is suspiciously short** (< 20 lines):
@@ -587,7 +587,7 @@ For each research file, verify:
 - [ ] File contains substantive content (not just headers with empty sections)
 - [ ] Confidence levels are stated (HIGH/MEDIUM/LOW markers present)
 
-If any file fails quality check, return `gpd_return.status: blocked`. Do not synthesize incomplete inputs.
+If any file fails quality check, return blocked. Do not synthesize incomplete inputs.
 
 Parse each file to extract:
 
@@ -920,7 +920,7 @@ Append this YAML block after the markdown return. Required per agent-infrastruct
 
 If you checkpoint, write a single draft `SUMMARY.md` first, then stop. Do not continue into a second synthesis pass in the same run.
 
-This agent writes only `GPD/literature/SUMMARY.md`; `files_written` must list only files actually written in this run. Do not include files you only read.
+This agent writes only `GPD/literature/SUMMARY.md`; put it in `files_written` when this run creates or updates it. Do not include files you only read.
 
 ```yaml
 gpd_return:

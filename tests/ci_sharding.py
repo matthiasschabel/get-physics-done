@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -245,59 +246,125 @@ def assert_ci_workflow_pytest_shard_policy(workflow: dict[str, object], *, pypro
 
 
 def assert_tests_readme_documents_ci_shard_policy(tests_readme: str) -> None:
-    assert "Default `uv run pytest` runs the full checked-in suite" in tests_readme
-    assert "`uv run pytest -q` does the same with quieter output" in tests_readme
-    assert "Both inherit `-n auto --dist=worksteal` from `pyproject.toml`" in tests_readme
-    assert "raises xdist auto-worker selection toward the current CI shard fanout" in tests_readme
-    assert "override that default explicitly with `uv run pytest -n 0`" in tests_readme
-    assert "The 180 second full-suite shard budget is enforced per CI pytest shard" in tests_readme
-    assert "10 minute job timeout remains the outer failure boundary" in tests_readme
-    assert "Shard target resolution has its own 3 minute timeout and logs elapsed seconds" in tests_readme
-    assert "git inventory calls have a 30 second timeout" in tests_readme
-    assert "collect-only subprocess has a 150 second timeout" in tests_readme
-    assert "Shard target resolution collects only the requested category" in tests_readme
-    assert "In-process repeated resolutions reuse the same immutable collection result" in tests_readme
-    assert "CI matrix jobs stay isolated and do not share collection state across jobs" in tests_readme
-    assert (
-        "uv run pytest -n 0 tests/test_runtime_abstraction_boundaries.py "
-        "tests/core/test_contract_schema_prompt_parity.py"
-    ) in tests_readme
+    code_spans = _markdown_code_spans(tests_readme)
+    required_code_spans = {
+        "uv run pytest",
+        "uv run pytest -q",
+        "-n auto --dist=worksteal",
+        "pyproject.toml",
+        "tests/conftest.py",
+        "uv run pytest -n 0",
+        "tests/ci_sharding.py",
+    }
+    assert required_code_spans <= code_spans
+    assert any(
+        command.startswith("uv run pytest -n 0 ")
+        and "tests/test_runtime_abstraction_boundaries.py" in command
+        and "tests/core/test_contract_schema_prompt_parity.py" in command
+        for command in code_spans
+    )
+    _assert_numeric_policy(
+        tests_readme,
+        value=CI_FULL_SUITE_SHARD_BUDGET_SECONDS,
+        unit="second",
+        required_terms=("full-suite shard budget", "CI pytest shard"),
+    )
+    _assert_numeric_policy(
+        tests_readme,
+        value=CI_PYTEST_SHARD_TIMEOUT_MINUTES,
+        unit="minute",
+        required_terms=("job timeout", "outer failure boundary"),
+    )
+    _assert_numeric_policy(
+        tests_readme,
+        value=CI_PYTEST_SHARD_RESOLUTION_TIMEOUT_MINUTES,
+        unit="minute",
+        required_terms=("Shard target resolution", "timeout"),
+    )
+    _assert_numeric_policy(
+        tests_readme,
+        value=CI_GIT_INVENTORY_TIMEOUT_SECONDS,
+        unit="second",
+        required_terms=("git inventory", "timeout"),
+    )
+    _assert_numeric_policy(
+        tests_readme,
+        value=CI_PYTEST_COLLECTION_TIMEOUT_SECONDS,
+        unit="second",
+        required_terms=("collect-only", "timeout"),
+    )
     assert "advisory full-suite wall-clock target" not in tests_readme
-    assert "GitHub Actions workflow runs that same full suite as category-named runtime-informed shards" in tests_readme
-    assert (
-        "`root 1/9` through `root 9/9`, `adapters 1/2` through `adapters 2/2`, "
-        "`hooks 1/2` through `hooks 2/2`, `mcp 1/2` through `mcp 2/2`, "
-        "and `core 1/5` through `core 5/5`"
-    ) in tests_readme
-    assert "boosts root modules that have been slow on GitHub Actions" in tests_readme
-    assert (
-        "splits known hotspot modules such as `tests/test_runtime_cli.py`, `tests/test_registry.py`, "
-        "`tests/test_update_workflow.py`, `tests/hooks/test_runtime_detect.py`, and "
-        "`tests/mcp/test_verification_contract_server_regressions.py`"
-    ) in tests_readme
-    assert "greedily rebalances those work units inside each category" in tests_readme
+    assert "--full-suite" not in tests_readme
+    for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
+        assert f"{category} 1/{shard_total}" in code_spans
+        assert f"{category} {shard_total}/{shard_total}" in code_spans
+    for relpath in (
+        "test_runtime_cli.py",
+        "test_registry.py",
+        "test_update_workflow.py",
+        "hooks/test_runtime_detect.py",
+        "mcp/test_verification_contract_server_regressions.py",
+    ):
+        assert relpath in CI_HOT_TEST_FILE_SPLITS
+        assert f"tests/{relpath}" in code_spans
 
 
 def assert_contributing_documents_current_pytest_commands(contributing: str) -> None:
-    assert "uv run python scripts/sync_repo_graph_contract.py --check" in contributing
-    assert "If the repo graph check reports generated-artifact drift" in contributing
-    assert "`uv run python scripts/sync_repo_graph_contract.py`" in contributing
-    assert "uv run pytest -n 0 tests/test_metadata_consistency.py -v" in contributing
-    assert "uv run pytest -n 0 tests/test_release_consistency.py -v" in contributing
+    shell_commands = _markdown_shell_commands(contributing)
+    required_shell_commands = {
+        "uv run python scripts/sync_repo_graph_contract.py --check",
+        "uv run python scripts/render_public_surface.py --check",
+        "uv run pytest -n 0 tests/test_metadata_consistency.py -v",
+        "uv run pytest -n 0 tests/test_release_consistency.py -v",
+        "uv run pytest -n 0 tests/adapters/test_registry.py tests/adapters/test_install_roundtrip.py -v",
+        "uv run pytest -n 0 tests/core/test_cli.py -v",
+        "uv run pytest tests/ -q",
+    }
+    code_spans = _markdown_code_spans(contributing)
+    assert required_shell_commands <= set(shell_commands)
+    assert "uv run python scripts/sync_repo_graph_contract.py" in code_spans
+    assert "uv run python scripts/render_public_surface.py" in code_spans
+    assert "-n 0" in code_spans
+    assert "uv run pytest tests/ -q" in code_spans
+    assert "tests/ci_sharding.py" in code_spans
+    assert f"{CI_FULL_SUITE_SHARD_BUDGET_SECONDS} second per-shard budget" in contributing
     assert (
-        "uv run pytest -n 0 tests/adapters/test_registry.py tests/adapters/test_install_roundtrip.py -v" in contributing
+        'uv run pytest -q --durations=20 --durations-min=1.0 "${PYTEST_TARGETS[@]}"'
+        in contributing
     )
-    assert "uv run pytest -n 0 tests/core/test_cli.py -v" in contributing
-    assert "uv run pytest tests/ -q" in contributing
-    assert "`uv run pytest tests/ -q` is the fast local full checked-in suite" in contributing
-    assert "Focused single-file and small targeted checks use `-n 0`" in contributing
-    assert "tests/ci_sharding.py" in contributing
-    assert 'uv run pytest -q --durations=20 --durations-min=1.0 "${PYTEST_TARGETS[@]}"' in contributing
-    assert "180 second per-shard budget" in contributing
     assert "complementary_heavy_suite_ignore_args" not in contributing
     assert "HEAVY_SUITE_IGNORE_ARGS" not in contributing
     assert "--full-suite" not in contributing
     assert "GPD_TEST_FULL" not in contributing
+
+
+def _markdown_code_spans(markdown: str) -> set[str]:
+    return {match.group(1).strip() for match in re.finditer(r"`([^`\n]+)`", markdown)}
+
+
+def _markdown_shell_commands(markdown: str) -> tuple[str, ...]:
+    commands: list[str] = []
+    in_shell_fence = False
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            info_parts = stripped[3:].strip().split(maxsplit=1)
+            info = info_parts[0] if info_parts else ""
+            in_shell_fence = not in_shell_fence if in_shell_fence else info in {"bash", "sh", "shell", "zsh"}
+            continue
+        if not in_shell_fence or not stripped or stripped.startswith("#"):
+            continue
+        commands.append(stripped)
+    return tuple(commands)
+
+
+def _assert_numeric_policy(text: str, *, value: int, unit: str, required_terms: tuple[str, ...]) -> None:
+    matching_sentences = [
+        sentence
+        for sentence in re.split(r"(?<=[.!?])\s+", text)
+        if re.search(rf"\b{value}\s+{re.escape(unit)}s?\b", sentence)
+    ]
+    assert any(all(term in sentence for term in required_terms) for sentence in matching_sentences)
 
 
 def _test_relpaths_from_git_lines(lines: tuple[str, ...]) -> tuple[str, ...]:

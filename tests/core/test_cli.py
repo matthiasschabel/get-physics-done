@@ -58,6 +58,8 @@ from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown, save_state_json, save_state_markdown
 from tests.helpers.cli import (
     StableCliRunner,
+    invoke_help_text,
+    json_output_from_result,
 )
 from tests.helpers.cli import (
     assert_no_top_level_resume_aliases as _assert_no_top_level_resume_aliases,
@@ -76,6 +78,10 @@ from tests.runtime_test_support import (
 )
 
 runner = StableCliRunner()
+
+
+def _help_text(*args: str, expect_exit: int = 0, **kwargs) -> str:
+    return invoke_help_text(runner, app, args, expect_exit=expect_exit, **kwargs)
 
 
 def _has_warning_with_fragments(warnings: list[str], *fragments: str) -> bool:
@@ -380,18 +386,13 @@ def test_help_surfaces_core_and_auxiliary_commands() -> None:
 
 
 def test_install_help_uses_public_surface_examples() -> None:
-    result = runner.invoke(app, ["install", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("install")
     assert local_cli_install_local_example_command() in normalized_output
     assert "gpd install <runtime> # single runtime, local" not in normalized_output
 
 
 def test_workflow_presets_help_surfaces_apply_command() -> None:
-    result = runner.invoke(app, ["presets", "apply", "--help"])
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("presets", "apply")
     assert "--dry-run" in normalized_output
     assert "Show a diff-oriented preview without writing it" in normalized_output
 
@@ -410,8 +411,7 @@ def test_integrations_status_reports_effective_project_local_state_and_plan_read
     (project_root / "GPD").mkdir()
 
     result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "status", "wolfram"])
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["integration"] == "wolfram"
     assert payload["configured"] is False
     assert payload["enabled"] is True
@@ -430,8 +430,7 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
     (project_root / "GPD").mkdir()
 
     enable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "enable", "wolfram"])
-    assert enable_result.exit_code == 0
-    enable_payload = json.loads(enable_result.output)
+    enable_payload = json_output_from_result(enable_result)
     assert enable_payload["enabled"] is True
     assert enable_payload["scope"] == "project-local"
 
@@ -441,13 +440,11 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
     assert saved["wolfram"] == {"enabled": True}
 
     disable_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "disable", "wolfram"])
-    assert disable_result.exit_code == 0
-    disable_payload = json.loads(disable_result.output)
+    disable_payload = json_output_from_result(disable_result)
     assert disable_payload["enabled"] is False
 
     status_result = runner.invoke(app, ["--cwd", str(project_root), "--raw", "integrations", "status", "wolfram"])
-    assert status_result.exit_code == 0
-    status_payload = json.loads(status_result.output)
+    status_payload = json_output_from_result(status_result)
     assert status_payload["enabled"] is False
     assert status_payload["state"] == "disabled"
     saved = json.loads(config_path.read_text(encoding="utf-8"))
@@ -458,8 +455,7 @@ def test_integrations_enable_and_disable_wolfram_persist_project_local_config(tm
 def test_integrations_commands_fail_outside_real_project(tmp_path: Path, command: str) -> None:
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", command, "wolfram"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert "real GPD project root" in payload["error"]
     assert not (tmp_path / "GPD").exists()
 
@@ -474,8 +470,7 @@ def test_integrations_commands_use_project_root_config_from_nested_workspace(tmp
 
     status_result = runner.invoke(app, ["--cwd", str(nested_workspace), "--raw", "integrations", "status", "wolfram"])
 
-    assert status_result.exit_code == 0
-    status_payload = json.loads(status_result.output)
+    status_payload = json_output_from_result(status_result)
     assert status_payload["enabled"] is False
     assert status_payload["config_path"] == str(config_path)
 
@@ -519,8 +514,7 @@ def test_integrations_status_fails_closed_for_invalid_project_config(
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", "status", "wolfram"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert expected_error in payload["error"]
 
 
@@ -533,16 +527,14 @@ def test_integrations_toggle_fails_closed_for_invalid_project_config(tmp_path: P
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "integrations", command, "wolfram"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "integrations.wolfram.enabled must be a boolean"
     assert config_path.read_text(encoding="utf-8") == before
 
 
 def test_workflow_preset_show_raw_outputs_central_contract() -> None:
     result = runner.invoke(app, ["--raw", "presets", "show", "core-research"])
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["id"] == "core-research"
     assert payload["label"] == "Core research"
     assert payload["required_checks"] == []
@@ -571,8 +563,7 @@ def test_workflow_preset_apply_dry_run_previews_changed_knobs(tmp_path: Path) ->
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "presets", "apply", "core-research", "--dry-run"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["preset"] == "core-research"
     assert payload["label"] == "Core research"
     assert payload["dry_run"] is True
@@ -645,8 +636,7 @@ def test_workflow_preset_apply_writes_merged_config(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "presets", "apply", "publication-manuscript"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["preset"] == "publication-manuscript"
     assert payload["dry_run"] is False
     assert payload["updated"] is True
@@ -716,8 +706,7 @@ def test_workflow_preset_apply_uses_ancestor_config_from_nested_workspace(tmp_pa
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == str(config_path)
     written = json.loads(config_path.read_text(encoding="utf-8"))
     assert written["research_mode"] == "exploit"
@@ -818,9 +807,7 @@ def _assert_cost_posture_semantics(output: str) -> None:
 
 
 def test_cost_help_surfaces_machine_local_advisory_role() -> None:
-    result = runner.invoke(app, ["cost", "--help"])
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("cost")
     assert "Show machine-local usage and cost summaries" in normalized_output
     assert "--last-sessions" in normalized_output
     assert "Show the most recent N recorded usage" in normalized_output
@@ -833,9 +820,8 @@ def test_cost_raw_outputs_summary_payload(tmp_path: Path) -> None:
     with patch("gpd.core.costs.build_cost_summary", return_value=summary) as mock_build:
         result = runner.invoke(app, ["--cwd", str(tmp_path), "--raw", "cost", "--last-sessions", "2"])
 
-    assert result.exit_code == 0
+    payload = json_output_from_result(result)
     mock_build.assert_called_once_with(tmp_path, last_sessions=2)
-    payload = json.loads(result.output)
     assert payload["project_root"] == str(tmp_path)
     assert "workspace_root" not in payload
     assert payload["active_runtime"] == _COST_TEST_RUNTIME
@@ -921,8 +907,7 @@ def test_permissions_status_raw_includes_runtime_capabilities(tmp_path: Path) ->
             ["--raw", "permissions", "status", "--runtime", runtime, "--autonomy", "yolo"],
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["readiness"] == "relaunch-required"
     assert payload["capabilities"]["permissions_surface"] == "launch-wrapper"
     assert payload["capabilities"]["statusline_surface"] == "explicit"
@@ -930,48 +915,33 @@ def test_permissions_status_raw_includes_runtime_capabilities(tmp_path: Path) ->
 
 
 def test_observe_help_surfaces_read_only_execution_snapshot_command() -> None:
-    result = runner.invoke(app, ["observe", "execution", "--help"])
-    assert result.exit_code == 0
-    assert "Show the current local execution status without modifying project state." in _normalize_cli_output(
-        result.output
-    )
+    normalized_output = _help_text("observe", "execution")
+    assert "Show the current local execution status without modifying project state." in normalized_output
 
 
 def test_observe_and_trace_help_label_read_only_and_writing_subcommands() -> None:
-    observe_help = runner.invoke(app, ["observe", "--help"])
-    assert observe_help.exit_code == 0
-    observe_output = _normalize_cli_output(observe_help.output)
+    observe_output = _help_text("observe")
     assert "event/export are the subcommands that write files" in observe_output
 
-    observe_event_help = runner.invoke(app, ["observe", "event", "--help"])
-    assert observe_event_help.exit_code == 0
-    assert "Record one local observability event (writes session logs)." in observe_event_help.output
+    observe_event_output = _help_text("observe", "event")
+    assert "Record one local observability event (writes session logs)." in observe_event_output
 
-    observe_show_help = runner.invoke(app, ["observe", "show", "--help"])
-    assert observe_show_help.exit_code == 0
-    assert "without modifying project state" in _normalize_cli_output(observe_show_help.output)
+    observe_show_output = _help_text("observe", "show")
+    assert "without modifying project state" in observe_show_output
 
-    trace_help = runner.invoke(app, ["trace", "--help"])
-    assert trace_help.exit_code == 0
-    trace_output = _normalize_cli_output(trace_help.output)
+    trace_output = _help_text("trace")
     assert "show is read-only" in trace_output
     assert "start/log/stop write trace state" in trace_output
 
-    trace_show_help = runner.invoke(app, ["trace", "show", "--help"])
-    assert trace_show_help.exit_code == 0
-    assert "Inspect trace events with optional filters without modifying project state." in _normalize_cli_output(
-        trace_show_help.output
-    )
+    trace_show_output = _help_text("trace", "show")
+    assert "Inspect trace events with optional filters without modifying project state." in trace_show_output
 
-    trace_stop_help = runner.invoke(app, ["trace", "stop", "--help"])
-    assert trace_stop_help.exit_code == 0
-    assert "writes trace and observability state" in _normalize_cli_output(trace_stop_help.output)
+    trace_stop_output = _help_text("trace", "stop")
+    assert "writes trace and observability state" in trace_stop_output
 
 
 def test_doctor_help_surfaces_runtime_readiness_mode() -> None:
-    result = runner.invoke(app, ["doctor", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
+    normalized_output = _help_text("doctor")
     assert "Check GPD installation and environment health" in normalized_output
     assert "inspect runtime readiness" in normalized_output
     assert "--live-executable-probes" in normalized_output
@@ -982,19 +952,16 @@ def test_doctor_help_surfaces_runtime_readiness_mode() -> None:
 
 
 def test_permissions_help_surfaces_status_and_sync_roles() -> None:
-    result = runner.invoke(app, ["permissions", "--help"])
-    assert result.exit_code == 0
-    assert "Runtime permission readiness and sync" in result.output
-    assert "status" in result.output
-    assert "ready for unattended use" in result.output
-    assert "sync" in result.output
-    assert "active runtime's `settings` command" in result.output
+    normalized_output = _help_text("permissions")
+    assert "Runtime permission readiness and sync" in normalized_output
+    assert "status" in normalized_output
+    assert "ready for unattended use" in normalized_output
+    assert "sync" in normalized_output
+    assert "active runtime's `settings` command" in normalized_output
 
 
 def test_permissions_status_help_surfaces_readiness_options() -> None:
-    result = runner.invoke(app, ["permissions", "status", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
+    normalized_output = _help_text("permissions", "status")
     assert "ready for unattended use" in normalized_output
     assert "requested autonomy" in normalized_output
     assert "--runtime" in normalized_output
@@ -1003,9 +970,7 @@ def test_permissions_status_help_surfaces_readiness_options() -> None:
 
 
 def test_permissions_sync_help_surfaces_guided_runtime_changes() -> None:
-    result = runner.invoke(app, ["permissions", "sync", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
+    normalized_output = _help_text("permissions", "sync")
     assert "persist runtime-owned permission settings" in normalized_output
     assert "active runtime's `settings` command" in normalized_output
     assert "--runtime" in normalized_output
@@ -1014,10 +979,7 @@ def test_permissions_sync_help_surfaces_guided_runtime_changes() -> None:
 
 
 def test_config_set_tier_models_help_surfaces_targeted_runtime_options() -> None:
-    result = runner.invoke(app, ["config", "set-tier-models", "--help"])
-    normalized_output = _normalize_cli_output(result.output)
-
-    assert result.exit_code == 0
+    normalized_output = _help_text("config", "set-tier-models")
     assert "Update model_overrides for one runtime" in normalized_output
     assert "--runtime" in normalized_output
     assert "--tier-1" in normalized_output
@@ -1083,8 +1045,7 @@ def test_permissions_status_surfaces_runtime_capabilities_and_config_scope() -> 
     ):
         result = runner.invoke(app, ["--raw", "permissions", "status", "--runtime", runtime, "--autonomy", "balanced"])
 
-    assert result.exit_code == 0
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
     assert parsed["capabilities"]["contract_source"] == "runtime-catalog"
     assert parsed["capabilities"]["permissions_surface"] == "config-file"
     assert parsed["requested_surface"] == "ordinary-unattended"
@@ -1124,8 +1085,7 @@ def test_permissions_status_marks_known_more_permissive_runtime_not_ready() -> N
             ["--raw", "permissions", "status", "--runtime", runtime, "--autonomy", "balanced"],
         )
 
-    assert result.exit_code == 0
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result)
     assert parsed["capabilities"]["permissions_surface"] == "config-file"
     assert parsed["more_permissive_than_requested"] is True
     assert parsed["readiness"] == "not-ready"
@@ -1257,8 +1217,7 @@ def test_permissions_status_reports_incomplete_owned_install_instead_of_generic_
             app, ["--raw", "permissions", "status", "--runtime", PRIMARY_RUNTIME, "--autonomy", "balanced"]
         )
 
-    assert result.exit_code == 1
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result, expect_exit=1)
     assert "incomplete GPD install" in parsed["error"]
     assert "Missing artifacts:" in parsed["error"]
     assert "No GPD install found" not in parsed["error"]
@@ -1289,8 +1248,7 @@ def test_permissions_status_reports_foreign_install_explicitly(tmp_path: Path) -
             ],
         )
 
-    assert result.exit_code == 1
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result, expect_exit=1)
     assert f"belongs to runtime '{FOREIGN_RUNTIME}'" in parsed["error"]
     assert "No GPD install found" not in parsed["error"]
 
@@ -1320,26 +1278,22 @@ def test_permissions_sync_reports_untrusted_manifest_explicitly(tmp_path: Path) 
             ],
         )
 
-    assert result.exit_code == 1
-    parsed = json.loads(result.output)
+    parsed = json_output_from_result(result, expect_exit=1)
     assert "manifest state is 'corrupt'" in parsed["error"]
     assert "No GPD install found" not in parsed["error"]
 
 
 def test_init_help_surfaces_local_onboarding_entrypoints() -> None:
-    result = runner.invoke(app, ["init", "--help"])
-    assert result.exit_code == 0
-    assert "Assemble context for AI agent workflows" in result.output
-    assert "new-project" in result.output
-    assert "resume" in result.output
-    assert "map-research" in result.output
-    assert "verify-work" in result.output
+    normalized_output = _help_text("init")
+    assert "Assemble context for AI agent workflows" in normalized_output
+    assert "new-project" in normalized_output
+    assert "resume" in normalized_output
+    assert "map-research" in normalized_output
+    assert "verify-work" in normalized_output
 
 
 def test_resume_help_surfaces_read_only_local_recovery_role() -> None:
-    result = runner.invoke(app, ["resume", "--help"])
-    assert result.exit_code == 0
-    normalized = _normalize_cli_output(result.output)
+    normalized = _help_text("resume")
     assert "--recent" in normalized
     assert "Summarize local recovery state or list machine-local recent projects." in normalized
 
@@ -1989,8 +1943,7 @@ def test_resume_recent_surfaces_recovery_error_annotation_when_introspection_fai
 
     result = runner.invoke(app, ["--raw", "resume", "--recent"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     project = payload["projects"][0]
     assert project["recovery_status"] == "recovery-error"
     assert project["recovery_status_label"] == "Recovery error"
@@ -2584,8 +2537,7 @@ def test_resume_raw_adds_canonical_recovery_projection_fields(tmp_path: Path, mo
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["recovery_advice"]["resume_surface_schema_version"] == 1
     assert "resume_surface" not in payload["recovery_advice"]
@@ -2651,8 +2603,7 @@ def test_resume_raw_keeps_derived_execution_head_origin_when_only_live_snapshot_
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["active_resume_kind"] == "bounded_segment"
     assert payload["active_resume_origin"] == "derived_execution_head"
@@ -2712,8 +2663,7 @@ def test_resume_raw_keeps_derived_execution_head_origin_when_active_bounded_segm
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["active_resume_origin"] == "derived_execution_head"
     assert payload["resume_candidates"][0]["origin"] == "derived_execution_head"
@@ -2758,8 +2708,7 @@ def test_resume_raw_drops_malformed_resume_candidates_from_public_output(tmp_pat
 
     result = runner.invoke(app, ["--raw", "resume"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     _assert_no_top_level_resume_aliases(payload)
     assert payload["resume_candidates"] == [
         {
@@ -2814,47 +2763,36 @@ def test_command_supports_project_reentry_requires_explicit_positive_metadata() 
 
 
 def test_observe_execution_help_surfaces_read_only_local_status_role() -> None:
-    result = runner.invoke(app, ["observe", "execution", "--help"])
-    assert result.exit_code == 0
-    assert "Show the current local execution status without modifying project state." in result.output
-    assert "possibly stalled" not in result.output.lower()
+    normalized_output = _help_text("observe", "execution")
+    assert "Show the current local execution status without modifying project state." in normalized_output
+    assert "possibly stalled" not in normalized_output.lower()
 
 
 def test_validate_help_surfaces_command_context_preflight_entrypoint() -> None:
-    result = runner.invoke(app, ["validate", "--help"])
-    assert result.exit_code == 0
-    assert "Validation checks" in result.output
-    assert "command-context" in result.output
-    assert "plan-preflight" in result.output
-    assert "review-preflight" in result.output
-    assert "project-contract" in result.output
-    assert "proof-redteam" in result.output
+    normalized_output = _help_text("validate")
+    assert "Validation checks" in normalized_output
+    assert "command-context" in normalized_output
+    assert "plan-preflight" in normalized_output
+    assert "review-preflight" in normalized_output
+    assert "project-contract" in normalized_output
+    assert "proof-redteam" in normalized_output
 
 
 def test_validate_project_contract_help_surfaces_proof_obligation_visibility() -> None:
-    result = runner.invoke(app, ["validate", "project-contract", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("validate", "project-contract")
     assert "Validate a project-scoping contract before downstream artifact generation" in normalized_output
     assert "proof-obligation observables" in normalized_output
 
 
 def test_validate_verification_contract_help_surfaces_stale_proof_gate_visibility() -> None:
-    result = runner.invoke(app, ["validate", "verification-contract", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("validate", "verification-contract")
     assert "Validate VERIFICATION frontmatter and contract-result alignment" in normalized_output
     assert "stale proof-audit blockers when recorded" in normalized_output
     assert "oracle evidence" in normalized_output
 
 
 def test_validate_comparison_contract_help_surfaces_verdict_ledger_visibility() -> None:
-    result = runner.invoke(app, ["validate", "comparison-contract", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("validate", "comparison-contract")
     assert "Validate standalone comparison artifact frontmatter and comparison_verdicts" in normalized_output
     assert "GPD/comparisons/*-COMPARISON.md" in normalized_output
 
@@ -3545,8 +3483,7 @@ def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     frontmatter = payload["frontmatter"]
     references = frontmatter["contract_results"]["references"]
     assert payload["plan_path"] == str(plan_path)
@@ -3609,8 +3546,7 @@ def test_verification_report_skeleton_uses_project_local_ref_when_outer_director
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
     assert payload["frontmatter"]["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
     assert payload["validation_commands"] == [
@@ -3666,8 +3602,7 @@ def test_verification_report_skeleton_raw_uses_real_builder(tmp_path: Path) -> N
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     frontmatter = payload["frontmatter"]
     assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
     assert payload["target_report_path"] == str(phase_dir / "01-VERIFICATION.md")
@@ -3773,8 +3708,7 @@ def test_verification_report_skeleton_fallback_validation_commands_quote_report_
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["validation_commands"] == [
         "gpd frontmatter validate 'GPD/phases/01 with space/01-VERIFICATION.md' --schema verification",
         "gpd validate verification-contract 'GPD/phases/01 with space/01-VERIFICATION.md'",
@@ -3859,8 +3793,7 @@ def test_verification_report_skeleton_format_json_outputs_json_without_raw(tmp_p
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["frontmatter"]["status"] == "gaps_found"
     assert payload["target_status"] == "gaps_found"
     assert "frontmatter_yaml" in payload
@@ -4604,8 +4537,7 @@ def test_validate_verification_contract_accepts_explicit_missing_reference_gap(t
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["valid"] is True
     assert payload["errors"] == []
 
@@ -4631,8 +4563,7 @@ def test_validate_verification_contract_rejects_live_row_mistakes_from_product_v
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["valid"] is False
     assert payload["missing"] == schema_result.missing
     assert payload["present"] == schema_result.present
@@ -4651,10 +4582,9 @@ def test_validate_verification_contract_rejects_live_row_mistakes_from_product_v
 
 
 def test_validate_command_context_help_surfaces_registry_argument_name() -> None:
-    result = runner.invoke(app, ["validate", "command-context", "--help"])
-    assert result.exit_code == 0
-    assert "Run centralized command-context preflight based on command metadata." in result.output
-    assert "Command registry key or gpd:name" in result.output
+    normalized_output = _help_text("validate", "command-context")
+    assert "Run centralized command-context preflight based on command metadata." in normalized_output
+    assert "Command registry key or gpd:name" in normalized_output
 
 
 def test_validate_command_context_unknown_command_surfaces_user_facing_error(tmp_path: Path) -> None:
@@ -4760,8 +4690,7 @@ def test_validate_project_contract_accepts_proof_obligation_observable_fixture(t
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["valid"] is True
     assert payload["question"] == contract["scope"]["question"]
     assert payload["mode"] == "approved"
@@ -4785,8 +4714,7 @@ def test_validate_project_contract_raw_failure_surfaces_schema_reference(tmp_pat
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["valid"] is False
     assert payload["schema_reference"].endswith("project-contract-schema.md")
     assert any(
@@ -4848,8 +4776,7 @@ def test_validate_plan_preflight_passes_when_no_specialized_tools_are_declared(t
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert payload["requirements"] == []
     assert payload["guidance"] == "No machine-checkable specialized tool requirements declared."
@@ -4885,8 +4812,7 @@ def test_validate_plan_preflight_rejects_invalid_frontmatter_before_tool_checks(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["validation_passed"] is False
     assert payload["passed"] is False
     assert payload["requirements"] == []
@@ -4913,8 +4839,7 @@ def test_validate_plan_preflight_blocks_on_missing_required_wolfram(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["requirements"][0]["tool"] == "wolfram"
     assert payload["requirements"][0]["blocking"] is True
@@ -4941,8 +4866,7 @@ def test_validate_plan_preflight_allows_missing_optional_wolfram_with_fallback(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert payload["requirements"][0]["tool"] == "wolfram"
     assert payload["requirements"][0]["blocking"] is False
@@ -4962,8 +4886,7 @@ def test_validate_plan_preflight_warns_on_missing_knowledge_dependency(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["knowledge_gate"] == "warn"
     assert payload["passed"] is True
     assert payload["knowledge_dependency_checks"][0]["status"] == "missing"
@@ -4984,8 +4907,7 @@ def test_validate_plan_preflight_blocks_on_missing_knowledge_dependency(
 
     result = runner.invoke(app, ["--raw", "validate", "plan-preflight", str(plan_path)])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["knowledge_gate"] == "block"
     assert payload["passed"] is False
     assert payload["knowledge_dependency_checks"][0]["status"] == "missing"
@@ -4993,27 +4915,21 @@ def test_validate_plan_preflight_blocks_on_missing_knowledge_dependency(
 
 
 def test_resolve_model_help_lists_supported_runtime_ids():
-    result = runner.invoke(app, ["resolve-model", "--help"])
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("resolve-model")
     assert "--explain" in normalized_output
     for runtime_name in list_runtimes():
         assert runtime_name in normalized_output
 
 
 def test_state_help():
-    result = runner.invoke(app, ["state", "--help"])
-    assert result.exit_code == 0
-    output = _normalize_cli_output(result.output)
+    output = _help_text("state")
     assert "load" in output
     assert "get" in output
     assert "update" in output
 
 
 def test_phase_help():
-    result = runner.invoke(app, ["phase", "--help"])
-    assert result.exit_code == 0
-    output = _normalize_cli_output(result.output)
+    output = _help_text("phase")
     assert "list" in output
     assert "add" in output
     assert "complete" in output
@@ -5096,8 +5012,7 @@ def test_state_get_include_returns_structured_sections_from_canonical_state(tmp_
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["position"]["current_phase"] == "03"
     assert payload["session"]["hostname"] == "workstation"
     assert payload["session"]["resume_file"] == "NEXT.md"
@@ -5141,8 +5056,7 @@ def test_state_active_hypothesis(mock_get):
 
     result = runner.invoke(app, ["--raw", "state", "active-hypothesis"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload == {
         "found": True,
         "branch": "hypothesis/alt-method",
@@ -5160,8 +5074,7 @@ def test_state_active_hypothesis_missing_section(mock_get):
 
     result = runner.invoke(app, ["--raw", "state", "active-hypothesis"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["found"] is False
     assert payload["branch"] is None
     assert payload["branch_slug"] is None
@@ -5773,8 +5686,7 @@ def test_validate_command_context_accepts_tokenized_standalone_arguments(tmp_pat
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:discover"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -5797,8 +5709,7 @@ def test_validate_command_context_accepts_inline_arguments_in_command_label(tmp_
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:discover"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -5815,8 +5726,7 @@ def test_validate_command_context_normalizes_inline_new_project_labels(label: st
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:new-project"
     assert payload["context_mode"] == "projectless"
 
@@ -5879,8 +5789,7 @@ def test_validate_command_context_sync_state_accepts_partial_state_workspace(tmp
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:sync-state"
     assert payload["passed"] is True
     assert payload["project_exists"] is False
@@ -5915,8 +5824,7 @@ def test_validate_command_context_sync_state_does_not_auto_select_recent_project
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert not any("auto-selected recoverable recent project" in check["detail"] for check in payload["checks"])
     assert any(
@@ -5937,8 +5845,7 @@ def test_validate_command_context_resume_work_accepts_partial_roadmap_workspace(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:resume-work"
     assert payload["passed"] is True
     assert payload["project_exists"] is False
@@ -5964,8 +5871,7 @@ def test_validate_command_context_accepts_tokenized_explain_arguments(tmp_path: 
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:explain"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -5993,8 +5899,7 @@ def test_validate_command_context_accepts_negative_parameter_sweep_range(tmp_pat
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["command"] == "gpd:parameter-sweep"
     assert payload["context_mode"] == "project-aware"
     assert payload["passed"] is True
@@ -6011,8 +5916,7 @@ def test_pre_commit_check_recurses_into_directory_inputs(tmp_path: Path) -> None
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert payload["files_checked"] == 1
     assert payload["details"][0]["file"].endswith("docs/state.md")
@@ -6029,8 +5933,7 @@ def test_pre_commit_check_fails_for_unreadable_inputs(tmp_path: Path) -> None:
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["details"][0]["readable"] is False
 
@@ -6151,8 +6054,7 @@ def test_result_search_raw_outputs_json_list(mock_search):
         ["--raw", "result", "search", "--text", "derived", "--unverified"],
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload == {
         "matches": [
             {
@@ -6173,10 +6075,7 @@ def test_result_search_raw_outputs_json_list(mock_search):
 
 
 def test_result_help_surfaces_show_command_and_dependency_chain() -> None:
-    result = runner.invoke(app, ["result", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = " ".join(result.output.split())
+    normalized_output = _help_text("result")
     assert "show" in normalized_output
     assert "downstream" in normalized_output
     assert "Show a canonical result" in normalized_output
@@ -6184,20 +6083,14 @@ def test_result_help_surfaces_show_command_and_dependency_chain() -> None:
 
 
 def test_result_show_help_surfaces_required_result_id_argument() -> None:
-    result = runner.invoke(app, ["result", "show", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("result", "show")
     assert "Show a canonical result and its direct/transitive dependency chain." in normalized_output
     assert "RESULT_ID" in normalized_output
     assert "Canonical result ID [required]" in normalized_output
 
 
 def test_result_downstream_help_surfaces_required_result_id_argument() -> None:
-    result = runner.invoke(app, ["result", "downstream", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("result", "downstream")
     assert "Show the direct and transitive dependents of a canonical result." in normalized_output
     assert "RESULT_ID" in normalized_output
     assert "Canonical result ID [required]" in normalized_output
@@ -6409,8 +6302,7 @@ def test_result_upsert_projects_execution_visibility_after_save(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["updated_fields"] == ["description"]
     assert payload["result"]["id"] == "R-02"
@@ -6473,8 +6365,7 @@ def test_result_upsert_continues_when_visibility_projection_fails(
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["action"] == "updated"
     assert payload["result"]["id"] == "R-02"
     assert payload["result"]["description"] == "Canonical quantity"
@@ -6664,8 +6555,7 @@ def test_result_persist_derived_auto_seeds_continuity_anchor_from_actual_result_
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["requested_result_id"] == "R-02-effective-mass"
     assert payload["result_id"] == "R-01"
     assert payload["requested_result_redirected"] is True
@@ -7004,8 +6894,7 @@ def test_result_update_projects_execution_visibility_after_save(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     mock_result_update.assert_called_once()
     assert payload["id"] == "R-02"
     assert payload["description"] == "Updated quantity"
@@ -7046,8 +6935,7 @@ def test_result_persist_derived_raw_skips_cleanly_without_project_state(tmp_path
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status"] == "skipped"
     assert payload["reason"] == "no_recoverable_project_state"
     assert payload["state_exists"] is False
@@ -7906,8 +7794,7 @@ def test_observe_sessions_reads_local_metadata(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "sessions"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["count"] >= 1
     assert any(session["session_id"] == "cli-session-1" for session in payload["sessions"])
     assert any(session.get("command") == "timestamp" for session in payload["sessions"])
@@ -7932,8 +7819,7 @@ def test_observe_execution_raw_reads_local_visibility_snapshot(tmp_path: Path) -
 
     result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "execution"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["found"] is True
     assert payload["status_classification"] == "active"
     assert payload["assessment"] == "possibly stalled"
@@ -7978,8 +7864,7 @@ def test_observe_execution_raw_prefers_lineage_head_over_stale_current_execution
     with patch("gpd.core.observability.get_current_execution", return_value=head_snapshot):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "execution"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status_classification"] == "blocked"
     assert payload["current_task"] == "Lineage head task"
     assert payload["current_execution"]["current_task"] == "Lineage head task"
@@ -8061,8 +7946,7 @@ def test_observe_execution_raw_surfaces_tangent_proposal_without_replacing_prima
 
     result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "observe", "execution"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status_classification"] == "waiting"
     assert payload["tangent_summary"] == "Check whether the 2D case is degenerate"
     assert payload["tangent_decision"] == "branch_later"
@@ -8148,8 +8032,7 @@ def test_observe_show_filters_events(tmp_path: Path) -> None:
         ["--raw", "--cwd", str(tmp_path), "observe", "show", "--category", "cli", "--command", "timestamp"],
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["count"] == 1
     assert payload["events"][0]["category"] == "cli"
     assert payload["events"][0]["command"] == "timestamp"
@@ -8245,8 +8128,7 @@ def test_observe_event_appends_event(tmp_path: Path) -> None:
         ],
     )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["category"] == "workflow"
     assert payload["name"] == "wave-start"
     assert payload["data"]["wave"] == 2
@@ -8409,8 +8291,7 @@ def test_init_execute_phase_forwards_stage_option(mock_init):
 def test_init_execute_phase_raw_invalid_stage_reports_clean_json_error(mock_init):
     result = runner.invoke(app, ["--raw", "init", "execute-phase", "42", "--stage", "bad"])
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["error"] == "Unknown execute-phase stage 'bad'."
     assert "Traceback" not in result.output
     mock_init.assert_called_once()
@@ -8575,10 +8456,7 @@ def test_init_plan_phase_rejects_invalid_stage(monkeypatch: pytest.MonkeyPatch) 
 
 
 def test_init_resume_help_surfaces_recovery_snapshot_entrypoint() -> None:
-    result = runner.invoke(app, ["init", "resume", "--help"])
-
-    assert result.exit_code == 0
-    normalized_output = _normalize_cli_output(result.output)
+    normalized_output = _help_text("init", "resume")
     assert "Usage: gpd init resume" in normalized_output
     assert "Assemble context for resuming previous work." in normalized_output
 
@@ -8678,8 +8556,7 @@ def test_paper_build_uses_default_config_surface(tmp_path: Path):
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "../paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "../paper"
     assert payload["tex_path"] == "../paper/configured_paper.tex"
@@ -8735,8 +8612,7 @@ def test_paper_build_bare_discovers_unique_managed_publication_config(tmp_path: 
     with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build:
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "./GPD/publication/curvature-flow/manuscript/PAPER-CONFIG.json"
     assert payload["output_dir"] == "./GPD/publication/curvature-flow/manuscript"
     assert payload["tex_path"] == "./GPD/publication/curvature-flow/manuscript/managed_manuscript.tex"
@@ -8777,8 +8653,7 @@ def test_paper_build_emits_manifest_and_audit_sidecars_by_default(tmp_path: Path
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["manifest_path"] == "./paper/ARTIFACT-MANIFEST.json"
     assert payload["bibliography_audit_path"] == "./paper/BIBLIOGRAPHY-AUDIT.json"
     assert payload["mode"] == {"minimal": False, "sidecar_root": None}
@@ -8824,8 +8699,7 @@ def test_paper_build_minimal_suppresses_manifest_and_audit_sidecars(tmp_path: Pa
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["manifest_path"] == ""
     assert payload["bibliography_audit_path"] == ""
     assert payload["mode"]["minimal"] is True
@@ -8850,10 +8724,7 @@ def test_paper_build_rejects_legacy_sidecar_flags(legacy_flag: str, tmp_path: Pa
 
 
 def test_paper_build_help_omits_legacy_sidecar_flags() -> None:
-    result = runner.invoke(app, ["paper-build", "--help"])
-
-    normalized_output = _normalize_cli_output(result.output)
-    assert result.exit_code == 0
+    normalized_output = _help_text("paper-build")
     assert "--minimal" in normalized_output
     assert "--with-provenance" not in normalized_output
     assert "--with-audits" not in normalized_output
@@ -9103,8 +8974,7 @@ def test_validate_reproducibility_manifest_check_paths_uses_manifest_file_root(t
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["valid"] is True
     assert payload["reproducibility_ready"] is True
 
@@ -9198,8 +9068,7 @@ def test_paper_build_allows_explicit_legacy_hidden_paper_config_as_normal_path(t
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "./.gpd/paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "./.gpd/paper"
     assert any("custom project directory" in warning for warning in payload["warnings"])
@@ -9247,8 +9116,7 @@ def test_paper_build_preserves_explicit_relative_config_path_from_nested_cwd(tmp
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["config_path"] == "../paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "../paper"
     assert mock_build.await_args.args[1] == paper_dir.resolve(strict=False)
@@ -9302,8 +9170,7 @@ def test_paper_build_prefers_config_dir_bibliography_before_output_and_reference
             catch_exceptions=False,
         )
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["bibliography_source"] == "./paper/references.bib"
     assert payload["bibliography_audit_path"] == "./output/BIBLIOGRAPHY-AUDIT.json"
     assert "configsource" in mock_build.await_args.kwargs["bib_data"].entries
@@ -9553,8 +9420,7 @@ def test_review_preflight_respond_to_referees_accepts_explicit_manuscript_and_re
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["manuscript"]["passed"] is True
     assert "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex" in checks["manuscript"]["detail"]
@@ -9606,8 +9472,7 @@ def test_review_preflight_arxiv_submission_rejects_review_ledger_round_mismatch(
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 1, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     checks = {check["name"]: check for check in payload["checks"]}
     assert checks["review_ledger"]["passed"] is True
     assert checks["review_ledger_valid"]["passed"] is False
@@ -9636,8 +9501,7 @@ def test_validate_review_preflight_accepts_inline_peer_review_subject(tmp_path: 
         catch_exceptions=False,
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     checks = {check["name"]: check for check in payload["checks"]}
     assert payload["command"] == "gpd:peer-review"
     assert payload["passed"] is True
@@ -10016,8 +9880,7 @@ def test_paper_build_without_bibliography_does_not_import_pybtex(tmp_path: Path,
     with patch("gpd.mcp.paper.compiler.build_paper", new=AsyncMock(return_value=result_payload)) as mock_build:
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["bibliography_source"] == ""
     assert payload["reference_bibtex_bridge"] == []
     assert mock_build.await_args.kwargs["bib_data"] is None
@@ -10072,8 +9935,7 @@ def test_paper_build_auto_discovers_bound_literature_citation_sources_sidecar(tm
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["bibliography_source"] == ""
     assert payload["citation_sources_path"] == "../GPD/literature/configured_paper-CITATION-SOURCES.json"
     assert any("temporary directory" in warning for warning in payload["warnings"])
@@ -10130,8 +9992,7 @@ def test_paper_build_ignores_unbound_single_literature_citation_sources_sidecar(
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["citation_sources_path"] == ""
     assert any(
         "Ignoring unbound literature-review citation-source sidecar" in warning for warning in payload["warnings"]
@@ -10190,8 +10051,7 @@ def test_paper_build_ignores_research_citation_sources_sidecar_when_literature_i
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(nested_cwd), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["citation_sources_path"] == ""
     assert any("temporary directory" in warning for warning in payload["warnings"])
     assert mock_build.await_args.kwargs["citation_sources"] is None
@@ -10244,8 +10104,7 @@ def test_paper_build_warns_when_multiple_literature_citation_sidecars_exist(tmp_
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["citation_sources_path"] == ""
     assert any(
         "Multiple literature-review citation-source sidecars found" in warning for warning in payload["warnings"]
@@ -10392,8 +10251,7 @@ def test_paper_build_surfaces_toolchain_failure_details(tmp_path: Path) -> None:
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["success"] is False
     assert payload["errors"] == ["Compiler 'pdflatex' not found."]
     assert payload["toolchain"]["available"] is False
@@ -10449,8 +10307,7 @@ def test_paper_build_surfaces_partial_toolchain_warnings(tmp_path: Path) -> None
     ):
         result = runner.invoke(app, ["--raw", "--cwd", str(tmp_path), "paper-build"], catch_exceptions=False)
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["toolchain"]["paper_build_ready"] is True
     assert payload["toolchain"]["arxiv_submission_ready"] is False
     toolchain_warnings = payload["toolchain"]["warnings"]
@@ -10599,8 +10456,7 @@ def test_return_skeleton_json_format_outputs_payload() -> None:
         ["return", "skeleton", "--role", "verifier", "--status", "blocked", "--format", "json"],
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["profile_id"] == "verifier"
     assert payload["status"] == "blocked"
     assert payload["envelope"]["status"] == "blocked"
@@ -10611,8 +10467,7 @@ def test_return_skeleton_json_format_outputs_payload() -> None:
 def test_return_skeleton_raw_outputs_payload() -> None:
     result = runner.invoke(app, ["--raw", "return", "skeleton", "--role", "researcher", "--status", "failed"])
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["profile_id"] == "researcher"
     assert payload["status"] == "failed"
     assert payload["envelope"]["status"] == "failed"
@@ -10642,8 +10497,7 @@ def test_return_skeleton_checkpoint_intent_flags_render_child_owned_intent() -> 
         ],
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["status"] == "checkpoint"
     assert payload["applicator_ready"] is False
     assert payload["envelope"]["checkpoint_intent"] == {
@@ -10659,8 +10513,7 @@ def test_return_skeleton_checkpoint_intent_flags_render_child_owned_intent() -> 
 def test_return_profiles_raw_lists_role_metadata() -> None:
     result = runner.invoke(app, ["--raw", "return", "profiles"])
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["mutated"] is False
     profile_ids = {profile["profile_id"] for profile in payload["profiles"]}
     assert {"executor", "planner", "checker", "verifier", "referee", "researcher"} <= profile_ids
@@ -10672,8 +10525,7 @@ def test_return_profiles_raw_lists_role_metadata() -> None:
 def test_return_profiles_raw_filters_role_and_status() -> None:
     result = runner.invoke(app, ["--raw", "return", "profiles", "--role", "executor", "--status", "checkpoint"])
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert [profile["profile_id"] for profile in payload["profiles"]] == ["executor"]
     assert set(payload["profiles"][0]["statuses"]) == {"checkpoint"}
     assert "blockers" in payload["profiles"][0]["statuses"]["checkpoint"]["role_fields"]
@@ -10682,8 +10534,7 @@ def test_return_profiles_raw_filters_role_and_status() -> None:
 def test_return_classify_raw_stdin_reports_missing_return_without_mutation() -> None:
     result = runner.invoke(app, ["--raw", "return", "classify", "-"], input="# Report\n\nNo return block here.\n")
 
-    assert result.exit_code == 1
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result, expect_exit=1)
     assert payload["passed"] is False
     assert payload["mutated"] is False
     assert any(token in json.dumps(payload) for token in ("return_missing", "missing_block", "missing_gpd_return"))
@@ -10693,8 +10544,7 @@ def test_return_classify_raw_stdin_reports_missing_return_without_mutation() -> 
 def test_return_classify_default_accepts_checkpoint_status_without_required_gate() -> None:
     result = runner.invoke(app, ["--raw", "return", "classify", "-"], input=_valid_checkpoint_return_markdown())
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["passed"] is True
     assert payload["accepted_for_success"] is True
     assert payload["status"] == "checkpoint"
@@ -10709,8 +10559,7 @@ def test_return_classify_require_status_checkpoint_accepts_checkpoint_status() -
         input=_valid_checkpoint_return_markdown(),
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["accepted_for_success"] is True
     assert payload["status"] == "checkpoint"
     assert payload["required_status"] == "checkpoint"
@@ -10723,8 +10572,7 @@ def test_return_classify_require_status_any_maps_to_no_required_status() -> None
         input=_valid_checkpoint_return_markdown(),
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json_output_from_result(result)
     assert payload["accepted_for_success"] is True
     assert payload["status"] == "checkpoint"
     assert payload["required_status"] is None

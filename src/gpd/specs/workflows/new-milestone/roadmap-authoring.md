@@ -28,7 +28,7 @@ fi
 
 Use `gpd --raw stage field-access new-milestone --stage roadmap_authoring --style instruction` to confirm the manifest-selected roadmapping fields. Read only those keys from `ROADMAPPER_INIT`; `ROADMAPPER_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
-Use the bootstrap init for milestone identity and contract gating. Use this late-stage init for the final handoff and do not reuse stale roadmapping inputs from the survey/objective loop.
+Use the bootstrap init for milestone identity and contract gating. Use this late-stage init for the final handoff and do not reuse earlier roadmapping inputs from the survey/objective loop.
 
 Apply the canonical runtime delegation convention already loaded above.
 

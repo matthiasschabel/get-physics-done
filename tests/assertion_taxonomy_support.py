@@ -28,6 +28,7 @@ __all__ = [
     "marker_range",
     "public_exact",
     "semantic_anchor",
+    "semantic_concept",
 ]
 
 
@@ -217,6 +218,56 @@ def semantic_anchor(
     )
 
 
+def semantic_concept(
+    label: str,
+    *,
+    required: FragmentInput | None = None,
+    forbidden: FragmentInput | None = None,
+    match: MatchMode | str = MatchMode.CASEFOLD_NORMALIZED,
+    section: str | None = None,
+    markers: MarkerInput | None = None,
+    context: str | None = None,
+) -> tuple[FragmentAssertion, ...]:
+    """Build grouped semantic assertions with required anchors and stale negatives."""
+
+    if not label.strip():
+        raise ValueError("Semantic concept label must be non-empty")
+
+    required_fragments = _normalize_optional_fragments(required)
+    forbidden_fragments = _normalize_optional_fragments(forbidden)
+    if not required_fragments and not forbidden_fragments:
+        raise ValueError("Semantic concept requires at least one required or forbidden fragment")
+
+    assertions: list[FragmentAssertion] = []
+    if required_fragments:
+        assertions.append(
+            _fragment_assertion(
+                AssertionKind.SEMANTIC_ANCHOR,
+                f"{label} required anchors",
+                required_fragments,
+                match=match,
+                section=section,
+                markers=markers,
+                context=context,
+            )
+        )
+    if forbidden_fragments:
+        assertions.append(
+            _fragment_assertion(
+                AssertionKind.FORBIDDEN_DUPLICATE,
+                f"{label} forbidden stale fragments",
+                forbidden_fragments,
+                mode=FragmentMode.COUNT,
+                match=match,
+                max_count=0,
+                section=section,
+                markers=markers,
+                context=context,
+            )
+        )
+    return tuple(assertions)
+
+
 def fragment_count(
     label: str,
     fragments: FragmentInput,
@@ -403,6 +454,12 @@ def _normalize_fragments(fragments: FragmentInput) -> tuple[str, ...]:
     if isinstance(fragments, str):
         return (fragments,)
     return tuple(fragments)
+
+
+def _normalize_optional_fragments(fragments: FragmentInput | None) -> tuple[str, ...]:
+    if fragments is None:
+        return ()
+    return _normalize_fragments(fragments)
 
 
 def _coerce_marker_scope(markers: MarkerInput | None) -> MarkerScope | None:

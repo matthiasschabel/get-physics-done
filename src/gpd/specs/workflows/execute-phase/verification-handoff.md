@@ -134,7 +134,7 @@ child_gate:
   failure_route: "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_gpd_verify_work"
 ```
 
-Spawn errors, missing `files_written`, stale reports, failed validators, malformed returns, or proof-redteam blockers all fail closed. Do not synthesize a verifier return, patch report frontmatter, or mark the phase complete from this parent stage.
+Spawn errors, missing `files_written`, stale reports, failed validators, malformed returns, or proof-redteam blockers all fail closed. Verifier return authorship and report frontmatter stay child/helper-owned; this parent stage may not mark the phase complete.
 </step>
 
 <step name="canonical_status_route">

@@ -4447,7 +4447,7 @@ def doctor(
 diagnostics_app = typer.Typer(help="Read-only source and prompt diagnostics")
 app.add_typer(diagnostics_app, name="diagnostics")
 
-_PROMPT_DIAGNOSTIC_FORMATS = frozenset({"table", "markdown", "json"})
+_PROMPT_DIAGNOSTIC_FORMATS = frozenset({"table", "markdown", "dashboard", "json"})
 _PROMPT_DIAGNOSTIC_SURFACES = ("command", "agent", "workflow")
 
 
@@ -4512,7 +4512,7 @@ def diagnostics_prompt_surface(
     output_format: str = typer.Option(
         "table",
         "--format",
-        help="Output format for non-raw display: table, markdown, or json.",
+        help="Output format for non-raw display: table, markdown, dashboard, or json.",
     ),
     surface: str = typer.Option(
         "all",
@@ -4563,6 +4563,11 @@ def diagnostics_prompt_surface(
         return
     if normalized_format == "json":
         _emit_raw_json(payload)
+        return
+    if normalized_format == "dashboard":
+        from gpd.core import prompt_surface_dashboard
+
+        _print_prompt_diagnostic_rendered(prompt_surface_dashboard.render_prompt_surface_dashboard(report, top))
         return
     if normalized_format == "markdown":
         _print_prompt_diagnostic_rendered(prompt_diagnostics.render_prompt_surface_markdown(report, top))

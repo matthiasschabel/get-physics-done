@@ -44,6 +44,17 @@ def _tree_snapshot(root: Path) -> tuple[tuple[str, bool, bytes], ...]:
     )
 
 
+def _assert_no_dashboard_keys(value: object) -> None:
+    if isinstance(value, dict):
+        assert all("dashboard" not in key for key in value)
+        for child in value.values():
+            _assert_no_dashboard_keys(child)
+        return
+    if isinstance(value, list):
+        for child in value:
+            _assert_no_dashboard_keys(child)
+
+
 def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     result = runner.invoke(
         app,
@@ -68,6 +79,62 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert isinstance(payload["semantic_duplicate_invariants"], list)
     assert len(payload["semantic_duplicate_invariants"]) <= 3
     assert all(len(group["examples"]) <= 3 for group in payload["semantic_duplicate_invariants"])
+
+
+def test_prompt_surface_diagnostics_dashboard_cli_smoke() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "diagnostics",
+            "prompt-surface",
+            "--format",
+            "dashboard",
+            "--top",
+            "3",
+            "--include-tests",
+            "--no-runtime-projections",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not result.output.lstrip().startswith("{")
+    output = result.output.casefold()
+    for label in ("prompt surface", "prompt totals", "safety floors", "validation timing"):
+        assert label in output
+
+
+def test_prompt_surface_diagnostics_raw_dashboard_format_preserves_json_shape() -> None:
+    base_result = runner.invoke(
+        app,
+        ["--raw", "diagnostics", "prompt-surface", "--top", "3", "--no-runtime-projections"],
+        catch_exceptions=False,
+    )
+    dashboard_result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "diagnostics",
+            "prompt-surface",
+            "--format",
+            "dashboard",
+            "--top",
+            "3",
+            "--no-runtime-projections",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert base_result.exit_code == 0, base_result.output
+    assert dashboard_result.exit_code == 0, dashboard_result.output
+    base_payload = json.loads(base_result.output)
+    dashboard_payload = json.loads(dashboard_result.output)
+
+    assert dashboard_payload.keys() == base_payload.keys()
+    assert dashboard_payload["items"][0].keys() == base_payload["items"][0].keys()
+    assert dashboard_payload["stage_diagnostics"][0].keys() == base_payload["stage_diagnostics"][0].keys()
+    assert dashboard_payload["runtime_top_prompts"] == {}
+    _assert_no_dashboard_keys(dashboard_payload)
 
 
 def test_prompt_surface_diagnostics_stage_authority_and_init_pressure_raw_shape() -> None:

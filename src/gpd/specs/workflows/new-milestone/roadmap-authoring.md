@@ -134,8 +134,9 @@ child_gate:
   failure_route: "ask retry or stop | repair prompt once | stop roadmapper path | request fresh continuation | repair path once | fail closed | ..."
 ```
 
-Route `checkpoint` -> fresh roadmapper continuation, `blocked` -> resolve then
-fresh continuation, `failed` -> ask retry or stop; Next Up primary
+Route `checkpoint` through `references/orchestration/continuation-boundary.md`,
+`blocked` after resolution through the same boundary, and `failed` to ask retry
+or stop; Next Up primary
 `gpd:new-milestone [milestone name]`, also `gpd:suggest-next`. Only after the
 artifact gate passes, apply accepted state changes in the main workflow with
 `gpd state patch` / `gpd state add-decision`; a direct roadmapper edit to
@@ -189,7 +190,7 @@ Apply the canonical runtime delegation convention already loaded above.
 
   Read the existing roadmap and requirements before editing.
   Edit files in place.
-  Return a fresh typed `gpd_return` envelope with `status` and `files_written`.
+  Return a typed `gpd_return` envelope with status and updated roadmap artifacts.
   </continuation>
 
   <shallow_mode>false</shallow_mode>

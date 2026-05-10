@@ -265,21 +265,17 @@ task(
 
 **If the reviewer agent fails to spawn or returns an error:** Report the failure and stop. Offer: 1) Retry with the same scope, 2) Execute the review in the main context, 3) Abort.
 
-**If the reviewer reports `gpd_return.status: completed`:**
-- Verify `GPD/literature/{slug}-REVIEW.md` and `GPD/literature/{slug}-CITATION-SOURCES.json` are readable
-- Verify both files are named in `gpd_return.files_written`
-- Do not trust the runtime handoff status by itself. Require the files on disk and the file list to agree before advancing.
-- Treat the handoff as incomplete if either file is missing, unreadable, or unnamed
+**If the reviewer reports completed:** apply the review artifact gate for
+`GPD/literature/{slug}-REVIEW.md` and
+`GPD/literature/{slug}-CITATION-SOURCES.json`; if either artifact fails, keep
+the handoff incomplete.
 
-**If the reviewer reports `gpd_return.status: checkpoint`:**
-- Present the checkpoint to the user
-- Collect the response
-- Spawn a fresh continuation handoff with the updated scope and checkpoint response
-- Re-run the same `gpd_return.files_written` and on-disk artifact gate before advancing
+**If the reviewer checkpoints:** collect the response, use
+`references/orchestration/continuation-boundary.md`, and rerun the review gate
+before advancing.
 
-**If the reviewer reports `gpd_return.status: blocked` or `failed`:**
-- Surface the blocker
-- Offer: 1) Add context, 2) Narrow scope, 3) Abort
+**If the reviewer blocks or fails:** surface the blocker and offer: 1) Add
+context, 2) Narrow scope, 3) Abort.
 
 </step>
 

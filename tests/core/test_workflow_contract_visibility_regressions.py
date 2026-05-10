@@ -14,6 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 ORCHESTRATION_REFS_DIR = REPO_ROOT / "src/gpd/specs/references/orchestration"
+BLOCKED_LIFECYCLE_STOP_PROHIBITION = (
+    "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents"
+)
 
 
 def _workflow_text(name: str) -> str:
@@ -28,6 +31,31 @@ def test_contract_authority_gate_reference_defines_shared_boundary() -> None:
     assert "obey the lifecycle preflight and stop fail-closed" in reference
     assert "do not infer approved scope from roadmap, state, manuscript, reference context, or user prose" in reference
     assert "The local workflow still owns its subject, artifacts, validators, and failure route." in reference
+    assert "## Blocked Lifecycle Stop Phrase" in reference
+    assert BLOCKED_LIFECYCLE_STOP_PROHIBITION in reference
+    assert "references/orchestration/stage-stop-envelope.md" in reference
+    assert "the owning workflow rerun command after repair" in reference
+
+
+def _assert_contract_gate_stop_tuple(
+    workflow: str,
+    *,
+    workflow_id: str,
+    stage_id: str,
+    after_repair: str,
+    triggers: tuple[str, ...],
+) -> None:
+    assert "contract_gate_stop:" in workflow
+    assert "ref=contract-authority-gate#blocked-lifecycle-stop-phrase" in workflow
+    assert f"workflow={workflow_id}" in workflow
+    assert f"stage={stage_id}" in workflow
+    assert "status=blocked" in workflow
+    assert "checkpoint=contract_gate" in workflow
+    assert "primary=gpd:sync-state|gpd:new-project" in workflow
+    assert f"rerun={after_repair}" in workflow
+    assert "secondary=gpd:suggest-next" in workflow
+    for trigger in triggers:
+        assert trigger in workflow
 
 
 def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -> None:
@@ -47,7 +75,7 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
     ("workflow_name", "surface_marker", "expected_token"),
     [
         ("plan-phase.md", "Parse only the fields named by", "project_contract_gate"),
-        ("execute-phase.md", "**If `project_contract_gate.authoritative` is not true", "project_contract_gate"),
+        ("execute-phase.md", "project_contract_gate.authoritative is not true", "project_contract_gate"),
         ("execute-plan.md", "Extract from init JSON:", "project_contract_gate"),
         ("compare-experiment.md", "Parse JSON for:", "project_contract_gate"),
         ("compare-results.md", "Parse JSON for:", "project_contract_gate"),
@@ -114,27 +142,79 @@ def test_literature_review_workflow_surfaces_contract_gate_before_deferred_refer
 
 
 @pytest.mark.parametrize(
-    ("workflow_name", "gate_command", "first_forbidden_marker"),
+    (
+        "workflow_name",
+        "workflow_id",
+        "stage_id",
+        "after_repair",
+        "triggers",
+        "gate_command",
+        "first_forbidden_marker",
+    ),
     [
-        ("plan-phase.md", "gpd --raw validate lifecycle-contract-gate plan-phase", "### Spawn gpd-phase-researcher"),
+        (
+            "plan-phase.md",
+            "plan-phase",
+            "phase_bootstrap",
+            "gpd:plan-phase {PHASE}",
+            (
+                "project_contract_load_info.status starts with blocked",
+                "project_contract is empty or null",
+                "project_contract_validation.valid is false",
+                "project_contract_gate.authoritative is not true",
+            ),
+            "gpd --raw validate lifecycle-contract-gate plan-phase",
+            "### Spawn gpd-phase-researcher",
+        ),
         (
             "execute-phase.md",
+            "execute-phase",
+            "phase_bootstrap",
+            "gpd:execute-phase ${PHASE_ARG}",
+            (
+                "project_contract_load_info.status starts with blocked",
+                "project_contract_validation.valid is false",
+                "project_contract_gate.authoritative is not true",
+            ),
             "gpd --raw validate lifecycle-contract-gate execute-phase",
             '<step name="handle_branching">',
         ),
-        ("verify-work.md", "gpd --raw validate lifecycle-contract-gate verify-work", "gpd-check-proof"),
+        (
+            "verify-work.md",
+            "verify-work",
+            "session_router",
+            "gpd:verify-work ${PHASE_ARG}",
+            (
+                "project_contract_load_info.status starts with blocked",
+                "project_contract_validation.valid is false",
+                "project_contract_gate.authoritative is not true",
+            ),
+            "gpd --raw validate lifecycle-contract-gate verify-work",
+            "gpd-check-proof",
+        ),
     ],
 )
 def test_lifecycle_workflows_stop_on_non_authoritative_project_contract_gate(
     workflow_name: str,
+    workflow_id: str,
+    stage_id: str,
+    after_repair: str,
+    triggers: tuple[str, ...],
     gate_command: str,
     first_forbidden_marker: str,
 ) -> None:
     workflow = _workflow_text(workflow_name)
-    stop_line = "**If `project_contract_gate.authoritative` is not true"
+    stop_line = "project_contract_gate.authoritative is not true"
 
     assert stop_line in workflow
-    assert "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents" in workflow
+    assert BLOCKED_LIFECYCLE_STOP_PROHIBITION not in workflow
+    _assert_contract_gate_stop_tuple(
+        workflow,
+        workflow_id=workflow_id,
+        stage_id=stage_id,
+        after_repair=after_repair,
+        triggers=triggers,
+    )
     assert gate_command in workflow
     assert workflow.index(stop_line) < workflow.index(first_forbidden_marker)
     assert workflow.index(gate_command) < workflow.index(first_forbidden_marker)
@@ -175,8 +255,19 @@ def test_plan_phase_missing_contract_gate_blocks_scope_substitution_and_authorin
 
     assert "Planning requires an approved scoping contract in `GPD/state.json`" in workflow
     assert "do not infer phase scope from `ROADMAP.md` or `REQUIREMENTS.md` alone" in workflow
-    assert "a visible-but-blocked contract is not an approved planning contract" in workflow
-    assert "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents" in workflow
+    _assert_contract_gate_stop_tuple(
+        workflow,
+        workflow_id="plan-phase",
+        stage_id="phase_bootstrap",
+        after_repair="gpd:plan-phase {PHASE}",
+        triggers=(
+            "project_contract_load_info.status starts with blocked",
+            "project_contract is empty or null",
+            "project_contract_validation.valid is false",
+            "project_contract_gate.authoritative is not true",
+        ),
+    )
+    assert BLOCKED_LIFECYCLE_STOP_PROHIBITION not in workflow
     assert missing_contract_stop < authoritative_gate_stop < lifecycle_gate < first_authoring_reload
 
 

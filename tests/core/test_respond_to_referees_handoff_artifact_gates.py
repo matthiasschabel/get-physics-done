@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from gpd.core.child_handoff import ChildGateTuple, child_gate_tuple_from_payload
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -47,13 +48,25 @@ def _artifact_paths(gate: ChildGateTuple) -> tuple[str, ...]:
     return tuple(artifact.path for artifact in gate.expected_artifacts)
 
 
+def _assert_semantic(source: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(
+        source,
+        semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
+
+
 def test_respond_to_referees_group_b_completion_requires_fresh_child_files_written_and_rejects_stale_edits() -> None:
     source = _workflow()
     gate = _child_gate(source, "respond_to_referees_revision_section")
 
-    assert (
-        "Return through the `respond_to_referees_revision_section` child_gate so the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` are all named."
-        in source
+    _assert_semantic(
+        source,
+        "respond-to-referees revision section return gate",
+        "respond_to_referees_revision_section",
+        "child_gate",
+        "revised section file",
+        "RESPONSE_AUTHOR_PATH",
+        "RESPONSE_REFEREE_PATH",
     )
     assert gate.role == "gpd-paper-writer"
     assert gate.required_status == "completed"
@@ -67,25 +80,52 @@ def test_respond_to_referees_group_b_completion_requires_fresh_child_files_writt
     assert gate.freshness.marker == "$REVISION_SECTION_HANDOFF_STARTED_AT"
     assert "gpd validate handoff-artifacts for revised section plus both response artifacts" in gate.validators
     assert "publication-response-writer-handoff.md frontmatter, round, and manuscript binding" in source
-    assert "target section has expected revision markers or substantive edits" in source
-    assert "Re-apply the `respond_to_referees_revision_section` tuple first." in source
+    _assert_semantic(
+        source,
+        "respond-to-referees section revision evidence",
+        "target section",
+        "revision markers",
+        "substantive edits",
+    )
+    _assert_semantic(
+        source,
+        "respond-to-referees revision tuple reapplied first",
+        "respond_to_referees_revision_section",
+        "tuple first",
+    )
     assert "stage-recovery-gate.md" in source
-    assert "If the section file changed but the response trackers did not, or vice versa, treat that section as failed" in source
+    _assert_semantic(
+        source,
+        "respond-to-referees mirrored section response failure",
+        "section file changed",
+        "response trackers",
+        "failed",
+    )
 
 
 def test_respond_to_referees_response_letter_generation_stays_file_backed_and_fresh_return_based() -> None:
     source = _workflow()
     gate = _aggregate_gate(source, "respond_to_referees_response_pair_current")
 
-    assert gate["required_child_gates"] == [
-        "respond_to_referees_revision_section for every launched Group B section"
-    ]
+    assert gate["required_child_gates"] == ["respond_to_referees_revision_section for every launched Group B section"]
     assert gate["expected_artifacts"] == [
         "every required revised section under ${PAPER_DIR}",
         "${RESPONSE_AUTHOR_PATH}",
         "${RESPONSE_REFEREE_PATH}",
     ]
-    assert "expected mirrored artifacts exist on disk" in gate["validators"]
-    assert "response frontmatter binds to the active manuscript path and review round when the subject is explicit" in source
-    assert "Those two GPD-owned response artifacts stay canonical even when the manuscript subject is explicit or external." in source
-    assert "If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots" in source
+    assert any(
+        all(fragment in validator for fragment in ("expected mirrored artifacts", "disk"))
+        for validator in gate["validators"]
+    )
+    assert (
+        "response frontmatter binds to the active manuscript path and review round when the subject is explicit"
+        in source
+    )
+    assert (
+        "Those two GPD-owned response artifacts stay canonical even when the manuscript subject is explicit or external."
+        in source
+    )
+    assert (
+        "If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots"
+        in source
+    )

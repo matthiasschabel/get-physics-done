@@ -18,8 +18,8 @@ from gpd.core.handoff_artifacts import (
     HandoffFailureClass,
     validate_handoff_artifacts_markdown,
 )
-from gpd.core.return_contract import validate_gpd_return_markdown
-from gpd.core.return_skeleton import RETURN_STATUS_ORDER, list_gpd_return_profiles, normalize_return_profile_id
+from gpd.core.return_contract import RETURN_STATUS_ORDER, normalize_return_status, validate_gpd_return_markdown
+from gpd.core.return_skeleton import list_gpd_return_profiles, normalize_return_profile_id
 
 SafeChildHandoffValidatorId = Literal[
     "readable",
@@ -210,7 +210,7 @@ class ChildGateTuple(BaseModel):
     @field_validator("required_status", mode="before")
     @classmethod
     def _normalize_required_status(cls, value: object) -> str:
-        return _normalize_status(value, field_name="required_status")
+        return normalize_return_status(value, field_name="required_status")
 
     @field_validator("allowed_roots", "validators", mode="before")
     @classmethod
@@ -262,7 +262,7 @@ class ChildGateTuple(BaseModel):
             raise ValueError("status_route must be a mapping")
         normalized: dict[str, str] = {}
         for raw_key, raw_value in value.items():
-            status = _normalize_status(raw_key, field_name="status_route key")
+            status = normalize_return_status(raw_key, field_name="status_route key")
             normalized[status] = _normalize_text(raw_value, field_name=f"status_route.{raw_key}")
         return normalized
 
@@ -1049,14 +1049,6 @@ def _normalize_text(value: object, *, field_name: str) -> str:
     normalized = value.strip()
     if not normalized:
         raise ValueError(f"{field_name} must be a non-empty string")
-    return normalized
-
-
-def _normalize_status(value: object, *, field_name: str) -> str:
-    normalized = _normalize_text(value, field_name=field_name).lower()
-    if normalized not in RETURN_STATUS_ORDER:
-        statuses = ", ".join(RETURN_STATUS_ORDER)
-        raise ValueError(f"unknown gpd_return status '{value}'. Must be one of: {statuses}")
     return normalized
 
 

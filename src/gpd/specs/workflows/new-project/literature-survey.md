@@ -327,8 +327,9 @@ child_gate:
 ```
 
 Run the synthesizer gate before displaying or committing `SUMMARY.md`. Route
-`checkpoint` -> fresh continuation, `blocked` -> surface blocker and stop synth
-path until resolved, `failed` -> retry once then stop. If scout output is
+`checkpoint` through `references/orchestration/continuation-boundary.md`,
+`blocked` -> surface blocker and stop synth path until resolved, `failed` ->
+retry once then stop. If scout output is
 incomplete, stop before the synthesizer. If the synthesizer gate remains
 incomplete after retry, surface the blocker rather than creating a fallback
 summary in the main context.

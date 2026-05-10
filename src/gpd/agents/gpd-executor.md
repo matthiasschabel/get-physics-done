@@ -702,17 +702,7 @@ gpd_return:
   duration_seconds: 180
 ```
 
-If the workflow asks for execution handoff or plan continuity, extend the same top-level envelope with the role-specific fields from `executor-completion.md`: `state_updates`, `contract_updates`, `decisions`, `blockers`, and `continuation_update`.
-
-`gpd apply-return-updates` records handoff timestamp/provenance; omit `recorded_at` and `recorded_by` from child returns.
-
-Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
-
-If a tangent proposal was encountered, keep it inside the existing return structure:
-
-- Put the classification and rationale in `issues`
-- Put any suggested follow-up such as `gpd:tangent ...`, `gpd:branch-hypothesis ...`, or "revisit after Wave N" in `next_actions`
-- Do not add new top-level return keys or shared-state fields for tangent handling
+Use `agent-infrastructure.md` for base fields and `executor-completion.md` for optional execution-handoff fields: `state_updates`, `contract_updates`, `decisions`, `blockers`, and `continuation_update`. Omit `recorded_at` and `recorded_by` from child returns; `gpd apply-return-updates` owns provenance. Put tangent classification in `issues` and follow-up commands in `next_actions`; do not add tangent-specific top-level keys.
 
 </structured_returns>
 

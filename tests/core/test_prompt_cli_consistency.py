@@ -351,8 +351,7 @@ def test_agent_infrastructure_distinguishes_structural_phase_verify_from_verify_
     assert "These terminal `gpd verify ...` commands are structural checks." in text
     assert "They do not" in text
     assert "replace the runtime `gpd:verify-work <phase>` workflow" in text
-    assert "# Structural completeness only: all plans have `*-SUMMARY.md`" in text
-    assert "gpd verify phase <phase-number>" in text
+    assert "gpd verify phase" in text
 
 
 def test_command_looking_fences_are_explicitly_labeled() -> None:

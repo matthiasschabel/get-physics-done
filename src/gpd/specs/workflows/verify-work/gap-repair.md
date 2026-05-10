@@ -50,7 +50,7 @@ If a diagnosed gap is specifically an uncertainty or error-propagation gap, load
 
 Set `GAP_PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+Run this `child_gate`; shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -98,7 +98,7 @@ Spawn `gpd-plan-checker` as a fresh one-shot delegation.
 
 Set `GAP_CHECKER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+Run this `child_gate`; shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -120,7 +120,7 @@ child_gate:
     failed: "retry or manual revision"
 ```
 
-Route non-completed statuses through `status_route`.
+Non-completed: use `status_route`.
 
 Gap-checker stops render through `references/orchestration/stage-stop-envelope.md`: checkpoint stops use primary `gpd:resume-work`; blocked or failed stops use primary `gpd:plan-phase ${phase_number} --gaps`; keep `gpd:suggest-next` secondary.
 

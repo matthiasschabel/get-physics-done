@@ -561,11 +561,10 @@ For long-running simulations (> 1 hour wall time):
 
 Use agent-infrastructure.md for the base context-pressure policy and `references/orchestration/context-pressure-thresholds.md` for this agent's numeric thresholds. Agent-specific pressure controls:
 
-1. **Summarize prior results:** When reading SUMMARY.md from previous phases, extract only: achieved tolerances, parameter ranges explored, key lessons. Do not copy raw data.
-2. **Compact parameter tables:** Use tabular format for parameter specifications; do not write prose for each parameter.
-3. **Reference, don't repeat:** Point to CONVENTIONS.md and RESEARCH.md rather than restating their content.
-4. **Progressive detail:** Start with the overall design structure, then fill in details. If context becomes tight, prioritize: (a) parameter ranges and sampling, (b) convergence criteria, (c) statistical plan, (d) cost estimates.
-5. **Early write:** Write EXPERIMENT-DESIGN.md to disk as soon as the structure is clear; refine in subsequent passes rather than holding everything in context.
+- Extract only tolerances, parameter ranges, and lessons from prior SUMMARY.md files.
+- Prefer parameter tables; reference CONVENTIONS.md/RESEARCH.md instead of restating them.
+- If context tightens, prioritize parameter ranges, convergence criteria, statistics, and costs.
+- Write EXPERIMENT-DESIGN.md as soon as the structure is clear; refine on disk.
 
 </context_pressure>
 
@@ -583,23 +582,11 @@ For blocked or failed designs, set the base `status` accordingly, put missing in
 
 <critical_rules>
 
-**Design for the physics, not for computational convenience.** Grid spacing, system sizes, and parameter ranges must be chosen based on the physical scales of the problem (correlation length, Debye length, mean free path), not arbitrary round numbers.
-
-**Every numerical parameter gets a convergence study.** No exceptions. If you cannot afford the convergence study, you cannot afford to trust the result.
-
-**Include validation points.** Every experiment design must include parameter values where the answer is known (exact solutions, textbook limits, published benchmarks). These are not optional --- they are the calibration of the entire experiment.
-
-**Estimate before computing.** Use dimensional analysis, scaling arguments, and pilot runs to estimate expected results and computational cost BEFORE committing to the full parameter sweep.
-
-**Design for monotonic convergence.** If a numerical parameter does not show monotonic convergence, something is wrong (bug, insufficient statistics, wrong convergence order). The design should include enough points to detect non-monotonic behavior.
-
-**Account for autocorrelations.** In stochastic methods, the effective number of independent samples is N_total / (2*tau_auto), not N_total. Failing to account for this underestimates error bars, potentially by orders of magnitude near phase transitions.
-
-**Document all choices.** Every parameter range, grid spacing, and sample size must have a documented rationale in EXPERIMENT-DESIGN.md. "Standard choice" is not a rationale --- cite the physical scale or prior result that motivates the choice.
-
-**Design the experiment before running it.** Write EXPERIMENT-DESIGN.md, return it to the orchestrator for commit, and only then execute any production simulation. Post-hoc experimental design is not experimental design --- it is rationalization.
-
-**Budget for the unexpected.** Reserve 15-20% of the computational budget for adaptive refinement, additional convergence checks, and diagnosing surprises. A budget with zero margin is a budget that will be exceeded.
+- Pick grids, system sizes, and parameter ranges from physical scales, not round numbers.
+- Every numerical parameter needs convergence coverage and known-answer validation points.
+- Estimate cost and scaling before a production sweep; reserve 15-20% for surprises.
+- Design enough points to detect non-monotonic convergence and stochastic autocorrelation effects.
+- Document every parameter rationale in EXPERIMENT-DESIGN.md before production execution.
 
 </critical_rules>
 

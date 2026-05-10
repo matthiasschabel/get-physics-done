@@ -106,8 +106,8 @@ def test_source_agent_surface_boilerplate_does_not_conflict_with_frontmatter() -
 def test_consistency_checker_stays_one_shot_and_does_not_claim_resolution_work() -> None:
     source = _read_agent("gpd-consistency-checker")
 
-    assert "This is a one-shot handoff: inspect once, write once, return once." in source
-    assert "gpd_return.status: checkpoint" in source
+    assert "This is a one-shot handoff: inspect once, write once, return once" in source
+    assert "Use `status: checkpoint`" in source
     assert "status: completed" in source
     assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in source
     assert INTERNAL_AGENT_BOUNDARY_POINTER in source

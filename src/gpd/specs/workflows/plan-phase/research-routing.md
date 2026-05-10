@@ -129,7 +129,7 @@ task(
 
 ### Handle Researcher Return
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+Run this `child_gate`; shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -153,7 +153,7 @@ child_gate:
     failed: "ask for context, skip, or abort"
 ```
 
-Route non-completed statuses through `status_route`; completed returns must pass the tuple before step 6.
+Non-completed: use `status_route`; completed must pass the tuple before step 6.
 
 **Verify RESEARCH.md was written (guard against silent researcher failure):**
 
@@ -161,7 +161,7 @@ Use the `phase_researcher_context_refresh` child_gate tuple above as the only re
 
 ## 5.1 Handle Researcher Checkpoint
 
-If the researcher returns `gpd_return.status: checkpoint`, present the checkpoint to the user and spawn a fresh continuation handoff:
+If the researcher checkpoints, present it to the user and use the continuation handoff:
 
 ```markdown
 <objective>

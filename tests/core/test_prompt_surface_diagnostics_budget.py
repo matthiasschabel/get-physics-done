@@ -19,6 +19,11 @@ PROMPT_KIND_BUDGETS = {
     "workflow": {"lines": 21_000, "chars": 846_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_500, "chars": 171_390}
+# Phase 4 scaffolding guard. Aggregate prompt caps are intentionally not
+# ratcheted here because this worker measured no integrated prompt-size cut in
+# the current workspace; this only prevents moving more active content into first
+# turn.
+STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_500, "chars": 141_500}
 STAGE_SELECTED_INIT_FIELD_BUDGET = 2_937
 STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 58
 REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 15
@@ -86,12 +91,22 @@ SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
 TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 2
 TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 3
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
-    "status_handling": 108,
-    "files_written_freshness": 26,
-    "stale_artifact_rejection": 30,
-    "fresh_continuation": 34,
-    "heading_prose_non_authority": 19,
-    "no_synthesized_child_gpd_return": 3,
+    "status_handling": 100,
+    "files_written_freshness": 22,
+    "stale_artifact_rejection": 25,
+    "fresh_continuation": 28,
+    "heading_prose_non_authority": 16,
+    "no_synthesized_child_gpd_return": 2,
+}
+# Future Phase 4 ratchet targets. These are asserted as exposed diagnostics only
+# until prompt cuts are integrated and measured in the current workspace.
+PHASE4_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS = {
+    "status_handling": 100,
+    "fresh_continuation": 28,
+    "files_written_freshness": 22,
+    "stale_artifact_rejection": 25,
+    "heading_prose_non_authority": 16,
+    "no_synthesized_child_gpd_return": 2,
 }
 ZERO_SAFETY_TOTAL_FIELDS = (
     "unresolved_include_count",
@@ -258,6 +273,16 @@ def _stage_init_field_rows(payload: dict[str, object]) -> list[dict[str, object]
     return [row for row in rows if isinstance(row, dict)]
 
 
+def _semantic_duplicate_groups_by_category(payload: dict[str, object]) -> dict[str, dict[str, object]]:
+    groups = payload["semantic_duplicate_invariants"]
+    assert isinstance(groups, list)
+    return {
+        group["category"]: group
+        for group in groups
+        if isinstance(group, dict) and isinstance(group.get("category"), str)
+    }
+
+
 def test_prompt_surface_aggregate_budgets_stay_under_ceilings() -> None:
     payload = _prompt_surface_payload(("all",), (), False)
     totals = payload["totals"]
@@ -350,8 +375,12 @@ def test_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings() -> No
     assert isinstance(stage_diagnostics, dict)
     first_turn_lines = stage_diagnostics["first_turn_line_count"]
     first_turn_chars = stage_diagnostics["first_turn_char_count"]
+    first_turn_active_lines = stage_diagnostics["first_turn_active_line_count"]
+    first_turn_active_chars = stage_diagnostics["first_turn_active_char_count"]
     assert isinstance(first_turn_lines, int)
     assert isinstance(first_turn_chars, int)
+    assert isinstance(first_turn_active_lines, int)
+    assert isinstance(first_turn_active_chars, int)
     assert first_turn_lines <= STAGE_FIRST_TURN_BUDGET["lines"], (
         "stage_diagnostics first-turn line budget exceeded: "
         f"observed={first_turn_lines} max={STAGE_FIRST_TURN_BUDGET['lines']}"
@@ -359,6 +388,14 @@ def test_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings() -> No
     assert first_turn_chars <= STAGE_FIRST_TURN_BUDGET["chars"], (
         "stage_diagnostics first-turn char budget exceeded: "
         f"observed={first_turn_chars} max={STAGE_FIRST_TURN_BUDGET['chars']}"
+    )
+    assert first_turn_active_lines <= STAGE_FIRST_TURN_ACTIVE_BUDGET["lines"], (
+        "stage_diagnostics first-turn active line budget exceeded: "
+        f"observed={first_turn_active_lines} max={STAGE_FIRST_TURN_ACTIVE_BUDGET['lines']}"
+    )
+    assert first_turn_active_chars <= STAGE_FIRST_TURN_ACTIVE_BUDGET["chars"], (
+        "stage_diagnostics first-turn active char budget exceeded: "
+        f"observed={first_turn_active_chars} max={STAGE_FIRST_TURN_ACTIVE_BUDGET['chars']}"
     )
 
 
@@ -489,13 +526,7 @@ def test_migrated_workflows_do_not_reintroduce_old_shell_fragments() -> None:
 
 def test_non_reference_semantic_duplicate_budgets_stay_under_caps() -> None:
     payload = _prompt_surface_payload(("all",), (), False)
-    groups = payload["semantic_duplicate_invariants"]
-    assert isinstance(groups, list)
-    groups_by_category = {
-        group["category"]: group
-        for group in groups
-        if isinstance(group, dict) and isinstance(group.get("category"), str)
-    }
+    groups_by_category = _semantic_duplicate_groups_by_category(payload)
 
     missing_categories = sorted(set(NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS) - set(groups_by_category))
     assert missing_categories == []
@@ -514,6 +545,27 @@ def test_non_reference_semantic_duplicate_budgets_stay_under_caps() -> None:
             f"{category} non-reference semantic duplicate budget exceeded: "
             f"observed={observed} max={budget}; move generic invariant prose to shared references"
         )
+
+
+def test_phase4_duplicate_category_targets_are_exposed_for_future_ratchet() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    groups_by_category = _semantic_duplicate_groups_by_category(payload)
+
+    assert set(PHASE4_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS) <= set(NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS)
+    missing_categories = sorted(set(PHASE4_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS) - set(groups_by_category))
+    assert missing_categories == []
+
+    for category, target in PHASE4_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS.items():
+        group = groups_by_category[category]
+        observed = group["non_reference_occurrence_count"]
+        occurrence_count = group["occurrence_count"]
+        canonical_references = group["canonical_references"]
+        assert isinstance(target, int)
+        assert isinstance(observed, int)
+        assert isinstance(occurrence_count, int)
+        assert isinstance(canonical_references, list)
+        assert canonical_references
+        assert observed <= occurrence_count
 
 
 def test_runtime_projection_aggregate_budgets_stay_under_ceilings() -> None:

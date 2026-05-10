@@ -138,8 +138,9 @@ child_gate:
 ```
 
 Run the child gate before displaying, approving, or committing the roadmap.
-Route `checkpoint` -> fresh continuation, `blocked` -> resolve then fresh
-continuation, `failed` -> retry once then stop. Headings such as
+Route `checkpoint` through `references/orchestration/continuation-boundary.md`,
+`blocked` after resolution through the same continuation boundary, and `failed`
+to retry once then stop. Headings such as
 `## ROADMAP CREATED` or `## ROADMAP BLOCKED` are not authority; the tuple and
 shared gate are.
 
@@ -171,7 +172,7 @@ Read `GPD/ROADMAP.md` for the current roadmap.
 Shallow mode: keep Phase 1 fully detailed (Goal, Depends on, Requirements, Contract Coverage, 2-5 Success Criteria, placeholder plans) and Phases 2+ as compact stubs only (title + one-line Goal + objective IDs + compact contract/anchor/proxy labels + `**Plans:** 0 plans` + a single `- [ ] TBD (run plan-phase N to break down)` entry). Do not promote Phases 2+ to full detail during revision unless the user's feedback explicitly requests it.
 
 Update the roadmap based on feedback. Edit files in place.
-Return `gpd_return.status: completed` with changes made and fresh `gpd_return.files_written` entries for updated roadmap artifacts.
+Return completed with changes made and updated roadmap artifacts in the typed return.
 </revision>
 ", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Revise roadmap")
 ```

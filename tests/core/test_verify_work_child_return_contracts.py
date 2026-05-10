@@ -11,6 +11,12 @@ from gpd.core.context import (
     _build_verification_report_finalizer_bridge,
     _build_verification_report_skeleton_bridge,
 )
+from tests.assertion_taxonomy_support import (
+    MatchMode,
+    assert_prompt_contracts,
+    semantic_anchor,
+    semantic_concept,
+)
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -37,6 +43,20 @@ def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
     raise AssertionError(f"missing child_gate {gate_id}")
 
 
+def _assert_semantic(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(
+        text,
+        semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
+
+
+def _assert_absent(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(label, forbidden=fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
+
+
 def test_verify_work_inventory_bridge_exposes_writer_command_and_preview_command(tmp_path: Path) -> None:
     phase_info = {
         "directory": "GPD/phases/01-setup",
@@ -60,15 +80,30 @@ def test_verify_work_inventory_bridge_exposes_writer_command_and_preview_command
     assert "gap-report-only" in str(bridge["status_policy"])
     body_contract = bridge["body_contract"]
     assert "`BODY.md` is body-only Markdown" in str(body_contract)
-    assert "one fenced executed `python`/`bash` block" in str(body_contract)
-    assert "adjacent `**Output:**` plus fenced `output` block" in str(body_contract)
-    assert "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict line" in str(body_contract)
-    assert "prose bullets alone are invalid" in str(body_contract)
+    _assert_semantic(
+        str(body_contract),
+        "verify-work body evidence execution transcript contract",
+        "fenced executed",
+        "python",
+        "bash",
+        "output",
+        "PASS",
+        "FAIL",
+        "INCONCLUSIVE",
+    )
+    _assert_semantic(
+        str(body_contract), "verify-work body evidence rejects prose-only bullets", "prose bullets", "invalid"
+    )
     assert "--raw" not in str(bridge["skeleton_command"])
     assert "run writer_command" in str(bridge["fallback_rule"])
     assert "body-only evidence" in str(bridge["fallback_rule"])
     assert "satisfies body_contract" in str(bridge["fallback_rule"])
-    assert "Use skeleton_command as preview context only" in str(bridge["fallback_rule"])
+    _assert_semantic(
+        str(bridge["fallback_rule"]),
+        "verify-work skeleton command is preview only",
+        "skeleton_command",
+        "preview context only",
+    )
     assert "hand-author or reflow VERIFICATION.md frontmatter" in str(bridge["fallback_rule"])
     assert "use the generated frontmatter as the starting YAML" not in str(bridge["fallback_rule"])
 
@@ -100,9 +135,9 @@ def test_verify_work_finalizer_bridges_expose_helper_commands(tmp_path: Path) ->
 
     assert proof_bridge["command_name"] == "gpd proof-redteam finalize"
     assert proof_bridge["supported_statuses"] == ["passed"]
-    assert proof_bridge["expected_proof_redteam_path"] == (
-        tmp_path / "GPD/phases/01-setup/01-PROOF-REDTEAM.md"
-    ).as_posix()
+    assert (
+        proof_bridge["expected_proof_redteam_path"] == (tmp_path / "GPD/phases/01-setup/01-PROOF-REDTEAM.md").as_posix()
+    )
     assert "gpd proof-redteam finalize" in str(proof_bridge["writer_command_template"])
 
 
@@ -113,17 +148,28 @@ def test_verify_work_verifier_handoff_stays_one_shot_and_routes_on_typed_status(
     assert 'subagent_type="gpd-verifier"' in workflow
     assert "<spawn_contract>" in workflow
     assert 'id: "verify_work_verifier_report"' in workflow
-    assert "Verifier presentation headings are non-authority" in workflow
+    _assert_semantic(workflow, "verify-work verifier heading non-authority", "presentation headings", "non-authority")
     assert "Verifier checkpoints use `references/orchestration/continuation-boundary.md`" in workflow
     assert "Missing/unreadable/unnamed/invalid artifacts use the tuple failure route" in workflow
-    assert "Do not recompute canonical verification status in this workflow." in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work wrapper does not recompute canonical status",
+        "do not recompute",
+        "canonical verification status",
+    )
 
 
 def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_routing() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
     gate = _child_gate(workflow, "verify_work_verifier_report")
 
-    assert "Apply the `verify_work_verifier_report` child_gate before downstream routing." in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work verifier child gate before routing",
+        "verify_work_verifier_report",
+        "child_gate",
+        "before downstream routing",
+    )
     assert [artifact.path for artifact in gate.expected_artifacts] == [
         "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"
     ]
@@ -144,8 +190,13 @@ def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_rout
         in workflow
     )
     assert "Missing/unreadable/unnamed/invalid artifacts use the tuple failure route" in workflow
-    assert "Do not recompute canonical verification status in this workflow." in workflow
-    assert "preexisting reports are not authority" in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work verifier sync keeps status canonical",
+        "do not recompute",
+        "canonical verification status",
+    )
+    _assert_semantic(workflow, "verify-work preexisting reports non-authority", "preexisting reports", "not authority")
     assert (
         "If a canonical verification file already exists, preserve its authoritative frontmatter and append only the session-local overlay here."
         in workflow
@@ -162,7 +213,9 @@ def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_rout
         == 1
     )
     assert 'failure_route: "fail_closed -> gpd:verify-work ${phase_number}' in workflow
-    assert "preexisting reports are not authority" in workflow
+    _assert_semantic(
+        workflow, "verify-work preexisting reports still non-authority", "preexisting reports", "not authority"
+    )
 
 
 def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
@@ -224,7 +277,14 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
     gate = _child_gate(workflow, "verify_work_gap_plan_checker")
 
     assert 'gpd --raw init verify-work "${PHASE_ARG}" --stage gap_repair' in workflow
-    assert "staged payload as the source of truth for planner and checker routing" in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap repair staged payload routing",
+        "staged payload",
+        "source of truth",
+        "planner",
+        "checker routing",
+    )
     assert (
         "If the checker returns a structured `gpd_return`, route on `gpd_return.status` and the structured plan lists, not on presentation text:"
         in workflow
@@ -233,16 +293,38 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
         "- `completed`: treat the fresh fix plans as verified only after the on-disk files still match the planner's `files_written` set."
         in workflow
     )
-    assert (
-        "- `checkpoint`: some plans are approved and others need revision; record `approved_plans` and `blocked_plans`, then send only the blocked plans back through the revision loop. If stopping for user input, use the gap-checker checkpoint stop route."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap checker checkpoint route",
+        "checkpoint",
+        "approved_plans",
+        "blocked_plans",
+        "revision loop",
+        "checkpoint stop route",
     )
-    assert (
-        "- `blocked`: nothing is approved; feed the checker issues and blocked plan IDs back into the revision loop without rewriting approved plans. If stopping, use the gap-checker blocked stop route."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap checker blocked route",
+        "blocked",
+        "nothing is approved",
+        "blocked plan IDs",
+        "without rewriting approved plans",
     )
-    assert "- `failed`: present the issues and offer retry or manual revision. If stopping, use the gap-checker failed stop route." in workflow
-    assert "Use the structured fields, not the human-readable approval table, as the source of truth." in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap checker failed route",
+        "failed",
+        "retry",
+        "manual revision",
+        "failed stop route",
+    )
+    _assert_semantic(
+        workflow,
+        "verify-work gap checker structured fields authority",
+        "structured fields",
+        "human-readable approval table",
+        "source of truth",
+    )
     assert gate.status_route == {
         "checkpoint": "record approved/blocked plans for gap revision",
         "blocked": "gpd:plan-phase ${phase_number} --gaps",
@@ -283,11 +365,19 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
     }
     assert 'id: "verify_work_gap_plan_checker"' in workflow
     assert "fresh planner PLAN.md artifacts remain readable and named in planner files_written" in workflow
-    assert (
-        "If the checker fails to spawn or returns an error, proceed without plan verification but note that the plans were not verified."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap checker spawn failure policy",
+        "checker fails to spawn",
+        "without plan verification",
+        "not verified",
     )
-    assert "Do not rewrite approved plans during the revision round." in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work approved plans are not rewritten",
+        "do not rewrite approved plans",
+        "revision round",
+    )
     assert "Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone." in workflow
 
     assert "Planner runs must return a structured `gpd_return` envelope." in planner_prompt
@@ -306,17 +396,39 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
     gate = _child_gate(workflow, "verify_work_proof_critic")
 
-    assert "Use `phase_proof_review_status` as the proof-review freshness summary." in workflow
-    assert "Use `proof_redteam_finalizer_bridge` as the helper-owned passed-audit bridge." in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work proof-review freshness summary",
+        "phase_proof_review_status",
+        "proof-review freshness summary",
+    )
+    _assert_semantic(
+        workflow,
+        "verify-work proof redteam finalizer bridge",
+        "proof_redteam_finalizer_bridge",
+        "helper-owned",
+        "passed-audit bridge",
+    )
     assert "Use `gpd proof-redteam skeleton` for non-passing helper-owned proof-redteam frontmatter" in workflow
     assert "gpd proof-redteam finalize" in workflow
     assert "before `gpd validate proof-redteam`" in workflow
     assert "`staged_loading.checkpoints` is not a proof classifier" in workflow
     assert "ignore `phase_proof_review_status.state=not_reviewed|fresh` alone" in workflow
-    assert "Classify proof-bearing only from research artifacts" in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work proof-bearing classification source",
+        "proof-bearing",
+        "research artifacts",
+    )
     assert "exclude installed runtime/config/skills trees" in workflow
     assert 'id: "verify_work_proof_critic"' in workflow
-    assert "Apply the canonical runtime delegation convention above; this proof handoff uses the tuple below" in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work proof handoff uses runtime delegation tuple",
+        "runtime delegation convention",
+        "proof handoff",
+        "tuple",
+    )
     assert [artifact.path for artifact in gate.expected_artifacts] == [
         "${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md"
     ]
@@ -328,10 +440,21 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
         "blocked": "fresh proof continuation or fail closed",
         "failed": "fresh proof continuation or fail closed",
     }
-    assert "Return `status: checkpoint` instead of waiting for user input inside this run." not in workflow
-    assert (
-        "Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation."
-        in workflow
+    _assert_absent(
+        workflow,
+        "verify-work stale inline checkpoint wording",
+        "Return `status: checkpoint` instead of waiting for user input inside this run.",
+    )
+    _assert_semantic(
+        workflow,
+        "verify-work proof return text alone is insufficient",
+        "never trust the return text alone",
+        "missing",
+        "stale",
+        "malformed",
+        "not passed",
+        "fail-closed",
+        "fresh proof continuation",
     )
     assert (
         "After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` after a successful `gpd proof-redteam finalize ...` and `gpd validate proof-redteam` run before finalizing the gap ledger."
@@ -341,32 +464,63 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
         "If `gpd-check-proof` still cannot produce a passed audit, keep the verification status fail-closed."
         in workflow
     )
-    assert "File-producing handoffs must prove the expected artifact exists before success is accepted." in workflow
-    assert "never send more input to closed child" in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work file-producing handoff proves expected artifact",
+        "file-producing handoffs",
+        "expected artifact",
+        "success",
+    )
+    _assert_semantic(workflow, "verify-work closed child is one-shot", "never send more input", "closed child")
 
 
 def test_verify_work_acknowledgement_is_routing_only_not_status_upgrade() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     assert "Accept as-is" not in workflow
-    assert "- Acknowledge limitation; verification status remains non-passed" in workflow
-    assert "Acknowledgement is routing only, not verification evidence." in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work acknowledgement keeps verification non-passed",
+        "acknowledge limitation",
+        "verification status remains non-passed",
+    )
+    _assert_semantic(
+        workflow,
+        "verify-work acknowledgement is routing only",
+        "acknowledgement",
+        "routing only",
+        "not verification evidence",
+    )
     assert "cannot upgrade non-passed verifier/frontmatter/proof/check status to `passed`" in workflow
     assert "preserve verifier-owned status" in workflow
-    assert "route to gap planning or follow-up" in workflow
+    _assert_semantic(workflow, "verify-work acknowledgement route", "gap planning", "follow-up")
 
 
 def test_verify_work_record_verification_state_closeout_is_sequential() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     assert 'gpd --raw state record-verification --phase "${phase_number}"' in workflow
-    assert (
-        "`record-verification` uses the canonical verification-status reader (`passed` -> `Verified`; canonical non-passed -> `Blocked`; missing, unparseable, or unknown status fails closed without changing state)."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work record-verification canonical reader",
+        "record-verification",
+        "canonical verification-status reader",
+        "passed",
+        "Verified",
+        "canonical non-passed",
+        "Blocked",
+        "fails closed",
+        "without changing state",
     )
     assert "Do not pass `--status` here or for acknowledgement" in workflow
     assert "legacy/admin overrides require no verifier frontmatter" in workflow
-    assert "cannot turn limitations into passes" in workflow
+    _assert_semantic(workflow, "verify-work limitations cannot pass", "limitations", "passes")
     assert "--status passed|failed" not in workflow
     assert "Barrier: wait before state get/validate/repair" in workflow
-    assert "never parallelize state mutation with validation." in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work state mutation validation is sequential",
+        "never parallelize",
+        "state mutation",
+        "validation",
+    )

@@ -24,9 +24,15 @@ def test_bibliographer_balanced_mode_adds_verified_citations_without_approval_lo
     source = _read_agent("gpd-bibliographer.md")
 
     assert "Present a batch for approval" not in source
-    assert "Add verified citations automatically; pause only for uncertain matches, borderline relevance, or citation-scope changes." in source
+    assert (
+        "Add verified citations automatically; pause only for uncertain matches, borderline relevance, or citation-scope changes."
+        in source
+    )
     assert "| Citation addition |" in source
-    assert "Use agent-infrastructure.md for checkpoint ownership, return-envelope base fields, and one-shot handoff semantics." in source
+    assert (
+        "Use agent-infrastructure.md for checkpoint ownership, return-envelope base fields, and one-shot handoff semantics."
+        in source
+    )
     assert "Checkpoint ownership is orchestrator-side" not in source
 
 
@@ -54,5 +60,11 @@ def test_peer_review_and_referee_skill_surfaces_keep_lifecycle_cleanup_boundary(
     assert peer_review["staged_loading"]["workflow_id"] == "peer-review"
     assert "Checkpoint ownership is orchestrator-side" in referee_content
     assert "owns the fresh continuation handoff" in referee_content
-    assert "Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run." in referee_content
-    assert "For all statuses, `files_written` must list only files actually written in this run from the Stage 6 allowlist." in referee_content
+    assert (
+        "Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run."
+        in referee_content
+    )
+    assert (
+        "For all statuses, `files_written` lists only files written in this run from the Stage 6 allowlist."
+        in referee_content
+    )

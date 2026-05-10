@@ -103,11 +103,13 @@ fi
 
 If review preflight exits nonzero, stop and show its blocking issues before any delegation.
 
-If `project_contract_load_info.status` starts with `blocked`, stop and show the surfaced `project_contract_load_info.errors` / `warnings` before delegation.
+`contract_gate_stop:` ref=contract-authority-gate#blocked-lifecycle-stop-phrase; workflow=verify-work; stage=session_router; status=blocked; checkpoint=contract_gate; triggers=project_contract_load_info.status starts with blocked | project_contract_validation.valid is false | project_contract_gate.authoritative is not true; primary=gpd:sync-state|gpd:new-project; rerun=gpd:verify-work ${PHASE_ARG}; secondary=gpd:suggest-next.
 
-If `project_contract_validation.valid` is false, stop and show `project_contract_validation.errors` before delegation.
+If `project_contract_load_info.status` starts with `blocked`, stop and show the surfaced `project_contract_load_info.errors` / `warnings` before delegation. Use `contract_gate_stop`.
 
-**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint. Show gate/load/validation errors. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until repaired. Render the blocked stop through `references/orchestration/stage-stop-envelope.md`: primary `gpd:sync-state` or `gpd:new-project`, then `gpd:verify-work ${PHASE_ARG}` after repair, plus `gpd:suggest-next`.
+If `project_contract_validation.valid` is false, stop and show `project_contract_validation.errors` before delegation. Use `contract_gate_stop`.
+
+**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint. Show gate/load/validation errors. Use `contract_gate_stop`.
 
 Run the executable lifecycle authority gate before proof repair, inventory building, contract checks, or verifier delegation:
 

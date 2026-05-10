@@ -112,7 +112,7 @@ task(
 )
 ```
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+Run this `child_gate`; shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -134,7 +134,7 @@ child_gate:
     failed: "revision loop or manual review"
 ```
 
-Route non-completed statuses through `status_route`.
+Non-completed: use `status_route`.
 
 ## 11. Handle Checker Return
 
@@ -168,7 +168,7 @@ Checker presentation headings are non-authority; route through the checker tuple
      Partial approval (attempt {iteration_count}/3): {N_approved} plans approved, {N_blocked} need revision
      ```
 
-  5. Send ONLY the blocked plans from the fresh returned plan set to the revision loop (step 12). Pass the checker's blocker details as `{structured_issues_from_checker}`. Do NOT re-check already-approved plans unless their inputs change during revision, and do not treat preexisting blocked-plan files as revised unless the fresh planner return names them in `gpd_return.files_written`.
+  5. Send ONLY the blocked plans from the fresh returned plan set to the revision loop (step 12). Pass the checker's blocker details as `{structured_issues_from_checker}`. Do NOT re-check already-approved plans unless their inputs change during revision, and do not treat preexisting blocked-plan files as revised unless `planner_revision` passes.
   6. After revision + re-check cycle, if the re-check returns `gpd_return.status: completed` for the revised plans, merge approved sets and proceed to step 13. If it returns `gpd_return.status: checkpoint` again, repeat. If `gpd_return.status: failed`, enter standard revision loop for remaining plans.
   7. Approved plans from partial approval are final only after the plan-ID reconciliation checks pass.
 
@@ -240,7 +240,7 @@ task(
 )
 ```
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+Run this `child_gate`; shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -266,9 +266,9 @@ child_gate:
     failed: "retry, manual revision, or force decision"
 ```
 
-Route non-completed statuses through `status_route`.
+Non-completed: use `status_route`.
 
-**If the revision planner agent fails to spawn or returns an error:** Do not proceed to re-check just because revised `PLAN.md` files exist on disk. Treat any such files as incomplete until a fresh typed planner return explicitly names them in `gpd_return.files_written`. If no fresh revision return is available, keep the loop fail-closed and offer: 1) Retry revision planner, 2) Apply revisions manually in the main context using checker feedback, 3) Force proceed with current plans despite checker issues.
+**If the revision planner agent fails to spawn or returns an error:** Do not proceed to re-check just because revised `PLAN.md` files exist on disk. Treat them as incomplete until `planner_revision` passes. If no accepted revision return is available, keep the loop fail-closed and offer: 1) Retry revision planner, 2) Apply revisions manually in the main context using checker feedback, 3) Force proceed with current plans despite checker issues.
 
 After planner returns -> spawn checker again (step 10), increment iteration_count. If revising from PARTIAL APPROVAL, only pass the revised plans (not already-approved plans) to the checker.
 

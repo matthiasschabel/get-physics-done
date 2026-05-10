@@ -208,10 +208,10 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
         "and `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md` as read-only upstream artifacts during Stage 6."
     ) in reliability
     assert "Never create, rewrite, patch, rename, backfill, or list in `files_written`:" in boundary
-    assert (
-        "Never modify upstream staged-review inputs such as `${selected_review_root}/CLAIMS{round_suffix}.json`, "
-        "any `${selected_review_root}/STAGE-*.json`, or `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md`."
-    ) in referee
+    assert "Never modify upstream staged-review inputs" in referee
+    assert "CLAIMS{round_suffix}.json" in referee
+    assert "STAGE-*.json" in referee
+    assert "PROOF-REDTEAM{round_suffix}.md" in referee
 
     assert "return `gpd_return.status: blocked`" in workflow
     assert "route the inconsistency back to the earliest failing upstream stage" in panel

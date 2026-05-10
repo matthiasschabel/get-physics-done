@@ -13,17 +13,20 @@ from gpd.cli import app
 from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.return_contract import (
     ALLOWED_RETURN_EXTENSION_FIELDS,
+    KNOWN_RETURN_FIELD_NAMES,
     REQUIRED_RETURN_FIELDS,
-    RETURN_ENVELOPE_STATUS_CONTRACTS,
+    RETURN_STATUS_ORDER,
     VALID_RETURN_STATUSES,
     GpdReturnEnvelope,
+    normalize_return_status,
+    return_field_allowed_for_status,
+    return_field_allowed_source,
+    return_fields_allowed_for_status,
     validate_gpd_return_markdown,
 )
 from gpd.core.return_skeleton import (
     APPLICATOR_OWNED_METADATA_FIELDS,
     GPD_RETURN_ROLE_PROFILES,
-    KNOWN_RETURN_FIELD_NAMES,
-    RETURN_STATUS_ORDER,
     build_gpd_return_skeleton,
     list_gpd_return_profiles,
     render_gpd_return_markdown,
@@ -50,6 +53,9 @@ def test_return_profiles_cover_core_roles() -> None:
 def test_return_profile_fields_are_allowed_by_return_contract() -> None:
     known_fields = set(GpdReturnEnvelope.model_fields) | set(ALLOWED_RETURN_EXTENSION_FIELDS)
     assert KNOWN_RETURN_FIELD_NAMES == known_fields
+    assert return_field_allowed_source("status") == "base"
+    assert return_field_allowed_source("confidence") == "extension"
+    assert return_field_allowed_source("statuss") == "unknown"
 
     for profile in GPD_RETURN_ROLE_PROFILES.values():
         assert profile.required_fields == REQUIRED_RETURN_FIELDS
@@ -60,21 +66,25 @@ def test_return_profile_fields_are_allowed_by_return_contract() -> None:
 
 
 def test_return_profile_status_fields_obey_status_contract() -> None:
-    status_restricted_fields = {
-        field_name
-        for contract in RETURN_ENVELOPE_STATUS_CONTRACTS.values()
-        for field_name in contract.structured_fields
-    }
-
     for profile in GPD_RETURN_ROLE_PROFILES.values():
         for status, fields in profile.role_fields_by_status.items():
-            allowed_structured = set(RETURN_ENVELOPE_STATUS_CONTRACTS[status].structured_fields)
-            disallowed = sorted(set(fields).intersection(status_restricted_fields) - allowed_structured)
+            disallowed = sorted(
+                field_name for field_name in fields if not return_field_allowed_for_status(field_name, status)
+            )
             assert disallowed == []
 
     executor = GPD_RETURN_ROLE_PROFILES["executor"]
     assert "blockers" not in executor.role_fields_by_status["completed"]
     assert "blockers" in executor.role_fields_by_status["checkpoint"]
+    assert "checkpoint_intent" not in return_fields_allowed_for_status("completed")
+    assert "checkpoint_intent" in return_fields_allowed_for_status("checkpoint")
+
+
+def test_return_status_helper_normalizes_callsite_status_selectors() -> None:
+    assert normalize_return_status(" CHECKPOINT ") == "checkpoint"
+
+    with pytest.raises(ValueError, match="unknown gpd_return status"):
+        normalize_return_status("waiting")
 
 
 def test_list_gpd_return_profiles_matches_profile_registry_and_filters() -> None:

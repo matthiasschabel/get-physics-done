@@ -61,8 +61,8 @@ from gpd.core.prompt_stage_diagnostics import (
     top_stage_diagnostics as _top_stage_diagnostics,
 )
 from gpd.core.return_contract import (
-    ALLOWED_RETURN_EXTENSION_FIELDS,
-    GpdReturnEnvelope,
+    KNOWN_RETURN_FIELD_NAMES,
+    return_field_allowed_source,
     validate_gpd_return_markdown,
 )
 
@@ -1355,7 +1355,16 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
     lines.extend(
         _fixed_table_section_lines(
             "staged-init field pressure",
-            ("workflow", "stage", "required_fields", "likely_bulky", "field_name", "field_kind", "pressure", "selections"),
+            (
+                "workflow",
+                "stage",
+                "required_fields",
+                "likely_bulky",
+                "field_name",
+                "field_kind",
+                "pressure",
+                "selections",
+            ),
             init_field_rows,
         )
     )
@@ -1899,7 +1908,7 @@ def _build_return_field_mention(
     ],
     snippet: str,
 ) -> PromptReturnFieldMention:
-    allowed_source = _return_field_allowed_source(field)
+    allowed_source = return_field_allowed_source(field)
     allowed = allowed_source != "unknown"
     polarity: Literal["positive", "negative"] = "negative" if _RETURN_FIELD_NEGATION_RE.search(snippet) else "positive"
     severity: Literal["info", "warn", "error"] = "info"
@@ -1919,20 +1928,8 @@ def _build_return_field_mention(
     )
 
 
-def _allowed_return_fields() -> frozenset[str]:
-    return frozenset(GpdReturnEnvelope.model_fields) | frozenset(ALLOWED_RETURN_EXTENSION_FIELDS)
-
-
-def _return_field_allowed_source(field: str) -> Literal["base", "extension", "unknown"]:
-    if field in GpdReturnEnvelope.model_fields:
-        return "base"
-    if field in ALLOWED_RETURN_EXTENSION_FIELDS:
-        return "extension"
-    return "unknown"
-
-
 def _return_field_suggestion(field: str) -> str | None:
-    matches = difflib.get_close_matches(field, sorted(_allowed_return_fields()), n=1)
+    matches = difflib.get_close_matches(field, sorted(KNOWN_RETURN_FIELD_NAMES), n=1)
     return matches[0] if matches else None
 
 

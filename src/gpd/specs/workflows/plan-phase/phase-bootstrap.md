@@ -49,15 +49,15 @@ If the project worktree is dirty, halt before planning. Show the dirty paths and
 
 **If `planning_exists` is false:** Error -- run `gpd:new-project` first.
 
-Contract-stop closeout: render blocked stops through `references/orchestration/stage-stop-envelope.md` with `workflow: plan-phase`, `stage: phase_bootstrap`, `status: blocked`, and `checkpoint: contract_gate`. Use one public primary command: `gpd:sync-state` for load/validation/gate repair, `gpd:new-project` for a missing setup contract; after repair, continue with `gpd:plan-phase {PHASE}` and keep `gpd:suggest-next` secondary.
+`contract_gate_stop:` ref=contract-authority-gate#blocked-lifecycle-stop-phrase; workflow=plan-phase; stage=phase_bootstrap; status=blocked; checkpoint=contract_gate; triggers=project_contract_load_info.status starts with blocked | project_contract is empty or null | project_contract_validation.valid is false | project_contract_gate.authoritative is not true; primary=gpd:sync-state|gpd:new-project; rerun=gpd:plan-phase {PHASE}; secondary=gpd:suggest-next.
 
-**If `project_contract_load_info.status` starts with `blocked`:** STOP and checkpoint with the user. Show the specific `project_contract_load_info.errors` / `warnings`; do not silently continue from `ROADMAP.md` or `REQUIREMENTS.md` alone when the stored contract could not even be loaded cleanly. Use the contract-stop closeout.
+**If `project_contract_load_info.status` starts with `blocked`:** STOP and checkpoint with the user. Show the specific `project_contract_load_info.errors` / `warnings`; do not silently continue from `ROADMAP.md` or `REQUIREMENTS.md` alone when the stored contract could not even be loaded cleanly. Use `contract_gate_stop`.
 
-**If `project_contract` is empty or null:** STOP and checkpoint with the user. Planning requires an approved scoping contract in `GPD/state.json`; do not infer phase scope from `ROADMAP.md` or `REQUIREMENTS.md` alone. Use the contract-stop closeout, choosing `gpd:new-project` as primary unless state exists but drifted.
+**If `project_contract` is empty or null:** STOP and checkpoint with the user. Planning requires an approved scoping contract in `GPD/state.json`; do not infer phase scope from `ROADMAP.md` or `REQUIREMENTS.md` alone. Use `contract_gate_stop`, choosing `gpd:new-project` as primary unless state exists but drifted.
 
-**If `project_contract_validation.valid` is false:** STOP and checkpoint with the user. Quote the `project_contract_validation.errors` explicitly and repair the contract before planning; a visible-but-blocked contract is not an approved planning contract. Use the contract-stop closeout.
+**If `project_contract_validation.valid` is false:** STOP and checkpoint with the user. Quote the `project_contract_validation.errors` explicitly and repair the contract before planning. Use `contract_gate_stop`.
 
-**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint with the user. Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. Show `project_contract_gate`, load errors/warnings, and validation errors. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until the gate is authoritative. Use the contract-stop closeout.
+**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint with the user. Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. Show `project_contract_gate`, load errors/warnings, and validation errors. Use `contract_gate_stop`.
 Run the executable lifecycle authority gate before any research, planning, checker, fingerprint, or alignment step:
 
 ```bash

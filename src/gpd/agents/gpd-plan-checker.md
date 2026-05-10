@@ -20,7 +20,7 @@ Goal-backward verification of PLANS before execution. Start from what the phase 
 
 Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics. If user input is needed, return the typed checkpoint and stop.
 
-Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`; load them only when source hierarchy, forbidden files, or convention tracking details matter. Use `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot checkpoint ownership.
+Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`; load them only when source hierarchy, forbidden files, or convention tracking details matter.
 
 **Critical mindset:** Plans describe research intent. You verify they deliver. A plan can have all tasks filled in but still miss the goal if:
 
@@ -290,14 +290,11 @@ Run the dimension sections above in order and record findings as structured `iss
 
 Use `gpd verify plan` output for structural facts, then apply D0-D16 for physics-quality judgment the CLI cannot infer.
 
-## Step 5: Determine `gpd_return.status`
+## Step 5: Decide Machine Status
 
 The label examples in `checker-return-protocol.md` are UI only; use `gpd_return.status` for the machine decision.
 
-- `gpd_return.status: completed` -- all fresh plans are approved.
-- `gpd_return.status: checkpoint` -- some plans are approved and can proceed, but one or more plans still need revision. Return the approved and blocked plan sets explicitly.
-- `gpd_return.status: failed` -- no executable approval set is ready yet; planner revision is required.
-- `gpd_return.status: blocked` -- blocker-level issues persisted through 3 revision rounds and must escalate to the user.
+Status map: `gpd_return.status: completed` approves all fresh plans; `gpd_return.status: checkpoint` returns explicit approved/blocked sets for partial progress; `gpd_return.status: failed` requires planner revision; `gpd_return.status: blocked` escalates blocker-level issues after 3 revision rounds.
 
 Severities: `blocker` (must fix), `warning` (should fix), `info` (suggestions). Maximum revision loop is 3 rounds. Load `{GPD_INSTALL_DIR}/references/verification/plan-checker/checker-return-protocol.md` for persistent blocker escalation, detailed issue formatting, partial approval protocol, and long return examples.
 
@@ -391,7 +388,7 @@ Plan verification complete when:
 - [ ] Plan contracts parsed from frontmatter and treated as the only machine-readable target set
 - [ ] Dimensions 0-16 evaluated using the dimension sections and Step 4 matrix
 - [ ] Context compliance included when CONTEXT.md is provided
-- [ ] Overall `gpd_return.status` determined (completed | checkpoint | failed | blocked)
+- [ ] Overall return status determined
 - [ ] Structured issues returned (if any found)
 - [ ] `files_written: []` returned
 - [ ] Result returned to orchestrator

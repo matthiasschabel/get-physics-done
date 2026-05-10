@@ -2471,8 +2471,8 @@ def test_planning_and_phase_templates_surface_active_reference_context() -> None
     _assert_semantic_fragments(
         workflow_text,
         "project_contract_gate.authoritative",
-        "visible-but-blocked contract",
-        "not an approved planning contract",
+        "Use `contract_gate_stop`",
+        "Planning requires an approved scoping contract in `GPD/state.json`",
         "**Anchor coverage:**",
         "Required references",
         context="plan-phase active reference context",
@@ -4005,7 +4005,14 @@ def test_execute_phase_workflow_surfaces_project_contract_validation_gate() -> N
 
     assert "project_contract_validation" in execute_workflow
     assert "project_contract_load_info" in execute_workflow
-    assert "visible-but-blocked contract as an approved execution contract" in execute_workflow
+    _assert_machine_fragments(
+        execute_workflow,
+        "contract_gate_stop:",
+        "ref=contract-authority-gate#blocked-lifecycle-stop-phrase",
+        "primary=gpd:sync-state|gpd:new-project",
+        "rerun=gpd:execute-phase ${PHASE_ARG}",
+        context="execute-phase contract gate stop tuple",
+    )
 
     # The claim<->deliverable alignment precheck is wired into execute-phase.md
     # and references the helpers/CLI provided by the contract alignment layer.

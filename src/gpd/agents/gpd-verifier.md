@@ -277,7 +277,7 @@ Return message format:
 ```markdown
 ## Verification Complete
 
-**Return Status:** {completed | checkpoint | blocked | failed}
+**Return Status:** {status}
 **Verification Status:** {passed | gaps_found | expert_needed | human_needed}
 **Score:** {N}/{M} contract targets verified
 **Consistency:** {N}/{M} physics checks passed ({K}/{M} independently confirmed)
@@ -380,5 +380,5 @@ Load deeper fallback detail from `references/verification/core/computational-ver
 - [ ] Re-verification metadata included (if previous existed)
 - [ ] VERIFICATION.md created with complete report including all computational verification details
 - [ ] **Computational oracle gate passed:** At least one executed code block with actual output present in VERIFICATION.md
-- [ ] Results returned to orchestrator with standardized status (completed|checkpoint|blocked|failed)
+- [ ] Results returned to orchestrator with standardized status
 </success_criteria>

@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +31,13 @@ def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
     raise AssertionError(f"missing child_gate {gate_id}")
 
 
+def _assert_semantic(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(
+        text,
+        semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
+
+
 def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
     plan_phase = _read("plan-phase.md")
     gate = _child_gate(plan_phase, "planner_initial_plan")
@@ -48,8 +56,12 @@ def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
     assert "gpd validate plan-preflight <each fresh plan>" in gate.validators
     assert gate.applicator.command == "none"
     assert gate.status_route["checkpoint"] == "fresh planner continuation after user response"
-    assert "The shared child artifact gate owns the no-synthetic-child-return rule" in plan_phase
-    assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in plan_phase
+    _assert_semantic(
+        plan_phase,
+        "plan-phase orchestrator return handoff",
+        "MAIN_CONTEXT_PLAN_RETURN",
+        "fenced YAML",
+    )
 
 
 def test_execute_phase_wave_return_artifacts_surface_only_after_executor_gate() -> None:
@@ -62,33 +74,81 @@ def test_execute_phase_wave_return_artifacts_surface_only_after_executor_gate() 
     assert gate.freshness.marker == "$EXECUTOR_HANDOFF_STARTED_AT"
     assert any("--require-files-written" in validator for validator in gate.validators)
     assert any('--fresh-after "$EXECUTOR_HANDOFF_STARTED_AT"' in validator for validator in gate.validators)
-    assert "proof-redteam artifact exists and reports status: passed when proof-bearing" in gate.validators
+    assert any(
+        all(fragment in validator for fragment in ("proof-redteam artifact", "status: passed", "proof-bearing"))
+        for validator in gate.validators
+    )
     assert gate.applicator.command == "gpd --raw apply-return-updates ${SUMMARY_FILE}"
     assert gate.applicator.require_passed_true is True
 
     gate_idx = wave_return.index('id: "wave_executor_plan_result"')
     artifact_idx = wave_return.index("## Artifacts: Wave {N}")
     assert gate_idx < artifact_idx
-    assert "Surface artifacts only after the executor gate and applicator have passed." in wave_return
-    assert "artifact-surfacing.md` for artifact class definitions and review priority rules." in wave_return
-    assert "contract deliverable that is the `subject` of an acceptance test" in wave_return
+    _assert_semantic(
+        wave_return,
+        "execute-phase artifact surfacing order",
+        "artifacts only after",
+        "executor gate",
+        "applicator",
+    )
+    _assert_semantic(
+        wave_return,
+        "execute-phase artifact surfacing authority",
+        "artifact-surfacing.md",
+        "artifact class",
+        "review priority",
+    )
+    _assert_semantic(
+        wave_return,
+        "execute-phase acceptance-test subject artifact",
+        "contract deliverable",
+        "subject",
+        "acceptance test",
+    )
 
 
 def test_verify_work_rechecks_proof_redteam_artifact_after_repair() -> None:
     verify_work = _read("verify-work.md")
+    gate = _child_gate(verify_work, "verify_work_proof_critic")
 
-    assert "After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk" in verify_work
-    assert "confirm the artifact exists and is `passed` after a successful `gpd proof-redteam finalize ...`" in verify_work
-    assert "start a fresh proof continuation" in verify_work
+    assert gate.expected_artifacts[0].path == "${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md"
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$PROOF_HANDOFF_STARTED_AT"
+    assert gate.status_route["blocked"] == "fresh proof continuation or fail closed"
+    assert {
+        "gpd proof-redteam finalize ... when producing passed audits",
+        "gpd validate proof-redteam ${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md",
+        "frontmatter status: passed before finalizing the gap ledger",
+    }.issubset(set(gate.validators))
+    _assert_semantic(
+        verify_work,
+        "verify-work proof artifact reopening",
+        "${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md",
+        "gpd proof-redteam finalize",
+        "gpd validate proof-redteam",
+    )
+    _assert_semantic(verify_work, "verify-work fresh proof continuation", "fresh proof continuation")
 
 
 def test_validate_conventions_requires_artifact_and_lock_before_success() -> None:
     validate_conventions = _read("validate-conventions.md")
 
-    assert "Runtime delegation rule: this is a one-shot handoff." in validate_conventions
+    _assert_semantic(validate_conventions, "validate-conventions one-shot delegation", "one-shot handoff")
     assert "gpd_return.status: completed" in validate_conventions
     assert "gpd_return.files_written" in validate_conventions
-    assert "expected artifact exists on disk" in validate_conventions
-    assert "Verify that `GPD/CONVENTIONS.md` exists and that `gpd convention list` reflects the resolved fields before accepting the update." in validate_conventions
-    assert "Convention artifact and lock re-verified after notation resolution before success is accepted" in validate_conventions
-    assert "Present options, checkpoint, and return." in validate_conventions
+    _assert_semantic(validate_conventions, "validate-conventions disk artifact gate", "expected artifact", "disk")
+    _assert_semantic(
+        validate_conventions,
+        "validate-conventions convention artifact and lock",
+        "GPD/CONVENTIONS.md",
+        "gpd convention list",
+        "accepting the update",
+    )
+    _assert_semantic(
+        validate_conventions,
+        "validate-conventions artifact and lock verification",
+        "Convention artifact",
+        "lock",
+        "before success",
+    )
+    _assert_semantic(validate_conventions, "validate-conventions checkpoint return", "options", "checkpoint", "return")

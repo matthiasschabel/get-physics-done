@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,13 @@ from gpd.core.handoff_artifacts import HandoffFailureClass
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
+
+
+@dataclass(frozen=True)
+class WorkflowChildGate:
+    source: str
+    line: int
+    gate: ChildGateTuple
 
 
 def _planner_gate() -> ChildGateTuple:
@@ -54,15 +62,58 @@ def _gate_markdown(gate: ChildGateTuple) -> str:
 
 
 def _workflow_child_gate(relative_path: str, gate_id: str) -> ChildGateTuple:
-    text = (WORKFLOWS_DIR / relative_path).read_text(encoding="utf-8")
-    for match in _YAML_BLOCK_RE.finditer(text):
-        body = match.group("body")
-        if "child_gate:" not in body:
-            continue
-        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
-        if gate.id == gate_id:
-            return gate
+    for item in _workflow_child_gates():
+        if item.source == relative_path and item.gate.id == gate_id:
+            return item.gate
     raise AssertionError(f"missing child_gate {gate_id} in {relative_path}")
+
+
+def _workflow_child_gates() -> tuple[WorkflowChildGate, ...]:
+    gates: list[WorkflowChildGate] = []
+    errors: list[str] = []
+
+    for path in sorted(WORKFLOWS_DIR.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        for match in _YAML_BLOCK_RE.finditer(text):
+            body = match.group("body")
+            if "child_gate" not in body:
+                continue
+            line = text[: match.start()].count("\n") + 1
+            source = str(path.relative_to(WORKFLOWS_DIR))
+            try:
+                payload = yaml.safe_load(body)
+            except Exception as exc:
+                if re.search(r"(?m)^child_gates?\s*:", body):
+                    errors.append(f"{path.relative_to(REPO_ROOT)}:{line}: {exc}")
+                continue
+            if not isinstance(payload, dict):
+                if re.search(r"(?m)^child_gates?\s*:", body):
+                    errors.append(f"{path.relative_to(REPO_ROOT)}:{line}: child_gate payload must be a mapping")
+                continue
+
+            try:
+                if "child_gate" in payload:
+                    gates.append(
+                        WorkflowChildGate(
+                            source=source,
+                            line=line,
+                            gate=parse_child_gate_markdown(f"```yaml\n{body}\n```"),
+                        )
+                    )
+                if isinstance(payload.get("child_gates"), list):
+                    for gate_payload in payload["child_gates"]:
+                        gates.append(
+                            WorkflowChildGate(
+                                source=source,
+                                line=line,
+                                gate=child_gate_tuple_from_payload(gate_payload),
+                            )
+                        )
+            except Exception as exc:  # pragma: no cover - assertion reports exact prompt location
+                errors.append(f"{path.relative_to(REPO_ROOT)}:{line}: {exc}")
+
+    assert errors == []
+    return tuple(gates)
 
 
 def _renderer_gate() -> ChildGateTuple:
@@ -95,6 +146,278 @@ def _renderer_gate() -> ChildGateTuple:
             "blocked": "surface_blocker",
         },
     )
+
+
+_EXPECTED_WORKFLOW_CHILD_GATE_SOURCES = {
+    "gap_closure_reverification": "execute-phase/gap-reverification.md",
+    "literature_scouts": "new-project/literature-survey.md",
+    "literature_synthesizer": "new-project/literature-survey.md",
+    "milestone_literature_scouts": "new-milestone/survey-objectives.md",
+    "milestone_literature_synthesizer": "new-milestone/survey-objectives.md",
+    "milestone_roadmapper": "new-milestone/roadmap-authoring.md",
+    "notation_conventions": "new-project/conventions-handoff.md",
+    "peer_review_stage6_referee": "peer-review/final-adjudication.md",
+    "phase_researcher_context_refresh": "plan-phase/research-routing.md",
+    "plan_checker_review": "plan-phase/checker-revision.md",
+    "planner_initial_plan": "plan-phase/planner-authoring.md",
+    "planner_revision": "plan-phase/checker-revision.md",
+    "post_execution_verifier": "execute-phase/verification-handoff.md",
+    "project_roadmapper": "new-project/roadmap-authoring.md",
+    "proof_critic_wave_audit": "execute-phase/proof-critic-dispatch.md",
+    "quick_executor_summary": "quick/task-authoring.md",
+    "quick_planner_plan": "quick/task-authoring.md",
+    "rapid_consistency_check": "execute-phase/consistency-check.md",
+    "respond_to_referees_revision_section": "respond-to-referees/response-authoring.md",
+    "verify_work_gap_plan_checker": "verify-work/gap-repair.md",
+    "verify_work_gap_planner": "verify-work/gap-repair.md",
+    "verify_work_proof_critic": "verify-work/phase-bootstrap.md",
+    "verify_work_verifier_report": "verify-work/inventory-build.md",
+    "wave_executor_plan_result": "execute-phase/wave-return-checkpoint.md",
+    "write_paper_bibliographer": "write-paper/consistency-references.md",
+    "write_paper_response_pair": "write-paper/publication-review-finalization.md",
+    "write_paper_section_writer": "write-paper/authoring.md",
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_ROLE_PROFILE = {
+    "gap_closure_reverification": ("gpd-verifier", "verifier"),
+    "literature_scouts": ("gpd-project-researcher", "researcher"),
+    "literature_synthesizer": ("gpd-research-synthesizer", "synthesizer"),
+    "milestone_literature_scouts": ("gpd-project-researcher", "researcher"),
+    "milestone_literature_synthesizer": ("gpd-research-synthesizer", "synthesizer"),
+    "milestone_roadmapper": ("gpd-roadmapper", "roadmapper"),
+    "notation_conventions": ("gpd-notation-coordinator", "roadmapper"),
+    "peer_review_stage6_referee": ("gpd-referee", "referee"),
+    "phase_researcher_context_refresh": ("gpd-phase-researcher", "researcher"),
+    "plan_checker_review": ("gpd-plan-checker", "checker"),
+    "planner_initial_plan": ("gpd-planner", "planner"),
+    "planner_revision": ("gpd-planner", "planner"),
+    "post_execution_verifier": ("gpd-verifier", "verifier"),
+    "project_roadmapper": ("gpd-roadmapper", "roadmapper"),
+    "proof_critic_wave_audit": ("gpd-check-proof", "verifier"),
+    "quick_executor_summary": ("gpd-executor", "executor"),
+    "quick_planner_plan": ("gpd-planner", "planner"),
+    "rapid_consistency_check": ("gpd-consistency-checker", "checker"),
+    "respond_to_referees_revision_section": ("gpd-paper-writer", "executor"),
+    "verify_work_gap_plan_checker": ("gpd-plan-checker", "checker"),
+    "verify_work_gap_planner": ("gpd-planner", "planner"),
+    "verify_work_proof_critic": ("gpd-check-proof", "verifier"),
+    "verify_work_verifier_report": ("gpd-verifier", "verifier"),
+    "wave_executor_plan_result": ("gpd-executor", "executor"),
+    "write_paper_bibliographer": ("gpd-bibliographer", "researcher"),
+    "write_paper_response_pair": ("gpd-paper-writer", "executor"),
+    "write_paper_section_writer": ("gpd-paper-writer", "executor"),
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_ARTIFACTS = {
+    "gap_closure_reverification": (("{phase_dir}/{phase_number}-VERIFICATION.md", "path", True, True),),
+    "literature_scouts": (
+        ("GPD/literature/PRIOR-WORK.md", "path", True, True),
+        ("GPD/literature/METHODS.md", "path", True, True),
+        ("GPD/literature/COMPUTATIONAL.md", "path", True, True),
+        ("GPD/literature/PITFALLS.md", "path", True, True),
+    ),
+    "literature_synthesizer": (("GPD/literature/SUMMARY.md", "path", True, True),),
+    "milestone_literature_scouts": (
+        ("GPD/literature/PRIOR-WORK.md", "path", True, True),
+        ("GPD/literature/METHODS.md", "path", True, True),
+        ("GPD/literature/COMPUTATIONAL.md", "path", True, True),
+        ("GPD/literature/PITFALLS.md", "path", True, True),
+    ),
+    "milestone_literature_synthesizer": (("GPD/literature/SUMMARY.md", "path", True, True),),
+    "milestone_roadmapper": (("GPD/ROADMAP.md", "path", True, True), ("GPD/REQUIREMENTS.md", "path", True, True)),
+    "notation_conventions": (("GPD/CONVENTIONS.md", "path", True, True),),
+    "peer_review_stage6_referee": (
+        ("${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md", "path", True, True),
+        ("${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex", "path", True, True),
+        ("${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json", "path", True, True),
+        ("${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json", "path", True, True),
+        ("${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md when produced", "path", True, True),
+    ),
+    "phase_researcher_context_refresh": (("${PHASE_DIR}/${PHASE_NUMBER}-RESEARCH.md", "path", True, True),),
+    "plan_checker_review": (),
+    "planner_initial_plan": (("${PHASE_DIR}/*-PLAN.md", "glob", True, True),),
+    "planner_revision": (("${PHASE_DIR}/*-PLAN.md", "glob", True, True),),
+    "post_execution_verifier": (("{phase_dir}/{phase_number}-VERIFICATION.md", "path", True, True),),
+    "project_roadmapper": (
+        ("GPD/ROADMAP.md", "path", True, True),
+        ("GPD/STATE.md", "path", True, True),
+        ("GPD/REQUIREMENTS.md", "path", True, True),
+    ),
+    "proof_critic_wave_audit": (("{phase_dir}/{plan_id}-PROOF-REDTEAM.md", "path", True, True),),
+    "quick_executor_summary": (("${QUICK_DIR}/${next_num}-SUMMARY.md", "path", True, True),),
+    "quick_planner_plan": (("${QUICK_DIR}/${next_num}-PLAN.md", "path", True, True),),
+    "rapid_consistency_check": (("{phase_dir}/CONSISTENCY-CHECK.md", "path", True, True),),
+    "respond_to_referees_revision_section": (
+        ("${PAPER_DIR}/{resolved_section_file}", "path", True, True),
+        ("${RESPONSE_AUTHOR_PATH}", "path", True, True),
+        ("${RESPONSE_REFEREE_PATH}", "path", True, True),
+    ),
+    "verify_work_gap_plan_checker": (),
+    "verify_work_gap_planner": (("${PHASE_DIR_ABS}/*-PLAN.md", "glob", True, True),),
+    "verify_work_proof_critic": (("${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md", "path", True, True),),
+    "verify_work_verifier_report": (("${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md", "path", True, True),),
+    "wave_executor_plan_result": (("${SUMMARY_FILE}", "path", True, True),),
+    "write_paper_bibliographer": (
+        ("${PAPER_DIR}/CITATION-AUDIT.md", "path", True, True),
+        ("GPD/references-status.json", "path", True, True),
+        ("{ACTIVE_BIBLIOGRAPHY_PATH} only when changed", "path", True, True),
+        ("${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json after paper-build refresh", "path", True, True),
+    ),
+    "write_paper_response_pair": (
+        ("${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md", "path", True, True),
+        ("${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md", "path", True, True),
+    ),
+    "write_paper_section_writer": (("${PAPER_DIR}/{section_path}.tex", "path", True, True),),
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_ROOTS = {
+    "gap_closure_reverification": ("{phase_dir}",),
+    "literature_scouts": ("GPD/literature",),
+    "literature_synthesizer": ("GPD/literature",),
+    "milestone_literature_scouts": ("GPD/literature",),
+    "milestone_literature_synthesizer": ("GPD/literature",),
+    "milestone_roadmapper": ("GPD",),
+    "notation_conventions": ("GPD",),
+    "peer_review_stage6_referee": (),
+    "phase_researcher_context_refresh": ("${PHASE_DIR}",),
+    "plan_checker_review": (),
+    "planner_initial_plan": ("${PHASE_DIR}",),
+    "planner_revision": ("${PHASE_DIR}",),
+    "post_execution_verifier": ("{phase_dir}",),
+    "project_roadmapper": ("GPD",),
+    "proof_critic_wave_audit": ("{phase_dir}",),
+    "quick_executor_summary": ("${QUICK_DIR}",),
+    "quick_planner_plan": ("${QUICK_DIR}",),
+    "rapid_consistency_check": ("{phase_dir}",),
+    "respond_to_referees_revision_section": ("${PAPER_DIR}", "${selected_publication_root}", "${selected_review_root}"),
+    "verify_work_gap_plan_checker": (),
+    "verify_work_gap_planner": ("${PHASE_DIR_ABS}",),
+    "verify_work_proof_critic": ("${PHASE_DIR_ABS}",),
+    "verify_work_verifier_report": ("${PHASE_DIR_ABS}",),
+    "wave_executor_plan_result": ("{phase_dir}",),
+    "write_paper_bibliographer": ("${PAPER_DIR}", "GPD"),
+    "write_paper_response_pair": ("${selected_publication_root}", "${selected_review_root}"),
+    "write_paper_section_writer": ("${PAPER_DIR}",),
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_FRESHNESS_MARKERS = {
+    "gap_closure_reverification": "$REVERIFY_HANDOFF_STARTED_AT",
+    "literature_scouts": "$SCOUT_HANDOFF_STARTED_AT per scout",
+    "literature_synthesizer": "$SYNTHESIZER_HANDOFF_STARTED_AT",
+    "milestone_literature_scouts": "$SCOUT_HANDOFF_STARTED_AT per scout",
+    "milestone_literature_synthesizer": "$SYNTHESIZER_HANDOFF_STARTED_AT",
+    "milestone_roadmapper": "$MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT",
+    "notation_conventions": "$NOTATION_HANDOFF_STARTED_AT",
+    "peer_review_stage6_referee": None,
+    "phase_researcher_context_refresh": "$RESEARCH_HANDOFF_STARTED_AT",
+    "plan_checker_review": None,
+    "planner_initial_plan": "$PLANNER_HANDOFF_STARTED_AT",
+    "planner_revision": "$PLANNER_HANDOFF_STARTED_AT",
+    "post_execution_verifier": "$VERIFIER_HANDOFF_STARTED_AT",
+    "project_roadmapper": "$ROADMAPPER_HANDOFF_STARTED_AT",
+    "proof_critic_wave_audit": "$PROOF_HANDOFF_STARTED_AT",
+    "quick_executor_summary": "$QUICK_EXECUTOR_HANDOFF_STARTED_AT",
+    "quick_planner_plan": "$QUICK_PLANNER_HANDOFF_STARTED_AT",
+    "rapid_consistency_check": "$CONSISTENCY_HANDOFF_STARTED_AT",
+    "respond_to_referees_revision_section": "$REVISION_SECTION_HANDOFF_STARTED_AT",
+    "verify_work_gap_plan_checker": None,
+    "verify_work_gap_planner": "$GAP_PLANNER_HANDOFF_STARTED_AT",
+    "verify_work_proof_critic": "$PROOF_HANDOFF_STARTED_AT",
+    "verify_work_verifier_report": "$VERIFIER_HANDOFF_STARTED_AT",
+    "wave_executor_plan_result": "$EXECUTOR_HANDOFF_STARTED_AT",
+    "write_paper_bibliographer": "$BIBLIO_HANDOFF_STARTED_AT",
+    "write_paper_response_pair": "$RESPONSE_HANDOFF_STARTED_AT",
+    "write_paper_section_writer": "$SECTION_WRITER_HANDOFF_STARTED_AT",
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_VALIDATOR_COUNTS = {
+    "gap_closure_reverification": 4,
+    "literature_scouts": 2,
+    "literature_synthesizer": 2,
+    "milestone_literature_scouts": 2,
+    "milestone_literature_synthesizer": 2,
+    "milestone_roadmapper": 2,
+    "notation_conventions": 3,
+    "peer_review_stage6_referee": 2,
+    "phase_researcher_context_refresh": 2,
+    "plan_checker_review": 3,
+    "planner_initial_plan": 3,
+    "planner_revision": 3,
+    "post_execution_verifier": 4,
+    "project_roadmapper": 3,
+    "proof_critic_wave_audit": 3,
+    "quick_executor_summary": 1,
+    "quick_planner_plan": 2,
+    "rapid_consistency_check": 2,
+    "respond_to_referees_revision_section": 4,
+    "verify_work_gap_plan_checker": 3,
+    "verify_work_gap_planner": 3,
+    "verify_work_proof_critic": 3,
+    "verify_work_verifier_report": 4,
+    "wave_executor_plan_result": 4,
+    "write_paper_bibliographer": 3,
+    "write_paper_response_pair": 2,
+    "write_paper_section_writer": 3,
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_APPLICATORS = {
+    "gap_closure_reverification": (
+        "none; closeout/update_roadmap is allowed only after re-verifier and consistency gates pass",
+        False,
+    ),
+    "literature_scouts": ("none", False),
+    "literature_synthesizer": ("none", False),
+    "milestone_literature_scouts": ("none", False),
+    "milestone_literature_synthesizer": ("none", False),
+    "milestone_roadmapper": (
+        "main workflow applies accepted state changes with gpd state patch / gpd state add-decision after the artifact gate",
+        False,
+    ),
+    "notation_conventions": ("child direct gpd convention set in auto/approved continuation", False),
+    "peer_review_stage6_referee": ("none", False),
+    "phase_researcher_context_refresh": ("none", False),
+    "plan_checker_review": ("none", False),
+    "planner_initial_plan": ("none", False),
+    "planner_revision": ("none", False),
+    "post_execution_verifier": (
+        "none; closeout/update_roadmap is allowed only after verifier and consistency gates pass",
+        False,
+    ),
+    "project_roadmapper": ("shared_state_policy=direct for this legacy init handoff", False),
+    "proof_critic_wave_audit": ("none", False),
+    "quick_executor_summary": ('gpd apply-return-updates "${QUICK_DIR}/${next_num}-SUMMARY.md"', True),
+    "quick_planner_plan": ("none", False),
+    "rapid_consistency_check": ("none", False),
+    "respond_to_referees_revision_section": ("none", False),
+    "verify_work_gap_plan_checker": ("none", False),
+    "verify_work_gap_planner": ("none", False),
+    "verify_work_proof_critic": ("none", False),
+    "verify_work_verifier_report": ("sync_verifier_output only after tuple passes", False),
+    "wave_executor_plan_result": ("gpd --raw apply-return-updates ${SUMMARY_FILE}", True),
+    "write_paper_bibliographer": ("none", False),
+    "write_paper_response_pair": ("none", False),
+    "write_paper_section_writer": ("none", False),
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_WRITE_ALLOWLIST = {
+    "proof_critic_wave_audit": ("{phase_dir}/{plan_id}-PROOF-REDTEAM.md",),
+    "wave_executor_plan_result": ("${SUMMARY_FILE}", "{phase_dir}/**"),
+}
+
+_EXPECTED_WORKFLOW_CHILD_GATE_STATUS_ROUTE_KEYS = {
+    "phase_researcher_context_refresh": ("checkpoint", "blocked", "failed"),
+    "plan_checker_review": ("checkpoint", "blocked", "failed"),
+    "planner_initial_plan": ("checkpoint", "blocked", "failed"),
+    "planner_revision": ("checkpoint", "blocked", "failed"),
+    "proof_critic_wave_audit": ("checkpoint", "blocked", "failed"),
+    "quick_executor_summary": ("checkpoint", "blocked", "failed"),
+    "quick_planner_plan": ("checkpoint", "blocked", "failed"),
+    "verify_work_gap_plan_checker": ("checkpoint", "blocked", "failed"),
+    "verify_work_gap_planner": ("checkpoint", "blocked", "failed"),
+    "verify_work_proof_critic": ("checkpoint", "blocked", "failed"),
+    "verify_work_verifier_report": ("checkpoint", "blocked", "failed"),
+    "wave_executor_plan_result": ("checkpoint", "blocked", "failed"),
+}
 
 
 def test_child_gate_tuple_renders_compact_yaml_with_inferred_return_profile() -> None:
@@ -279,29 +602,47 @@ def test_child_gate_tuple_rejects_unknown_profile_status_route_and_invalid_fresh
 
 
 def test_workflow_child_gate_yaml_blocks_parse_as_child_gate_tuples() -> None:
-    parsed = 0
-    errors: list[str] = []
+    gates = _workflow_child_gates()
 
-    for path in sorted(WORKFLOWS_DIR.rglob("*.md")):
-        text = path.read_text(encoding="utf-8")
-        offset = 0
-        for block in text.split("```yaml")[1:]:
-            start = text.index("```yaml" + block, offset)
-            offset = start + 1
-            yaml_text = block.split("```", 1)[0]
-            if "child_gate" not in yaml_text:
-                continue
-            parsed += 1
-            try:
-                payload = yaml.safe_load(yaml_text)
-                if isinstance(payload, dict) and "child_gate" in payload:
-                    child_gate_tuple_from_payload(payload)
-                if isinstance(payload, dict) and isinstance(payload.get("child_gates"), list):
-                    for gate_payload in payload["child_gates"]:
-                        child_gate_tuple_from_payload(gate_payload)
-            except Exception as exc:  # pragma: no cover - assertion reports exact prompt location
-                line = text[:start].count("\n") + 1
-                errors.append(f"{path.relative_to(REPO_ROOT)}:{line}: {exc}")
+    assert len(gates) == len(_EXPECTED_WORKFLOW_CHILD_GATE_SOURCES)
+    assert sorted(item.gate.id for item in gates) == sorted(_EXPECTED_WORKFLOW_CHILD_GATE_SOURCES)
 
-    assert errors == []
-    assert parsed >= 20
+
+def test_workflow_child_gate_inventory_preserves_tuple_contract_fields() -> None:
+    gates = _workflow_child_gates()
+    by_id = {item.gate.id: item for item in gates}
+
+    assert len(by_id) == len(gates)
+    for gate_id, item in by_id.items():
+        gate = item.gate
+        expected_role, expected_profile = _EXPECTED_WORKFLOW_CHILD_GATE_ROLE_PROFILE[gate_id]
+        expected_marker = _EXPECTED_WORKFLOW_CHILD_GATE_FRESHNESS_MARKERS[gate_id]
+        expected_applicator = _EXPECTED_WORKFLOW_CHILD_GATE_APPLICATORS[gate_id]
+
+        assert item.source == _EXPECTED_WORKFLOW_CHILD_GATE_SOURCES[gate_id]
+        assert gate.role == expected_role
+        assert gate.return_profile == expected_profile
+        assert gate.required_status == "completed"
+        assert (
+            tuple(
+                (artifact.path, artifact.kind, artifact.required, artifact.must_be_named_in_files_written)
+                for artifact in gate.expected_artifacts
+            )
+            == _EXPECTED_WORKFLOW_CHILD_GATE_ARTIFACTS[gate_id]
+        )
+        assert gate.allowed_roots == _EXPECTED_WORKFLOW_CHILD_GATE_ROOTS[gate_id]
+        if expected_marker is None:
+            assert gate.freshness is None
+        else:
+            assert gate.freshness is not None
+            assert gate.freshness.marker == expected_marker
+            assert gate.freshness.require_mtime_at_or_after_marker is True
+            assert gate.freshness.preexisting_artifacts == "recovery_evidence_only"
+        assert len(gate.validators) == _EXPECTED_WORKFLOW_CHILD_GATE_VALIDATOR_COUNTS[gate_id]
+        assert all(validator.strip() for validator in gate.validators)
+        assert (gate.applicator.command, gate.applicator.require_passed_true) == expected_applicator
+        assert gate.write_allowlist == _EXPECTED_WORKFLOW_CHILD_GATE_WRITE_ALLOWLIST.get(gate_id, ())
+        assert tuple(gate.status_route) == _EXPECTED_WORKFLOW_CHILD_GATE_STATUS_ROUTE_KEYS.get(gate_id, ())
+        assert set(gate.failure_route) == set(HandoffFailureClass)
+        assert all(route.strip() for route in gate.failure_route.values())
+        assert all(route.strip() for route in gate.status_route.values())

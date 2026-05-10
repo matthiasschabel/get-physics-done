@@ -98,7 +98,7 @@ If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append 
 
 <output>
 Write plan to: ${QUICK_DIR}/${next_num}-PLAN.md
-Return a structured `gpd_return` envelope. Local completed output is `${QUICK_DIR}/${next_num}-PLAN.md` named in `gpd_return.files_written`; use checkpoint when user input or a contract block prevents drafting.
+Return structured `gpd_return`; completed output is `${QUICK_DIR}/${next_num}-PLAN.md` and it must appear in `files_written`. Use checkpoint when user input or a contract block prevents drafting.
 </output>
 ",
   subagent_type="gpd-planner",
@@ -108,7 +108,7 @@ Return a structured `gpd_return` envelope. Local completed output is `${QUICK_DI
 )
 ```
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+Run this `child_gate`; shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -138,13 +138,13 @@ Tuple summary: role=`gpd-planner`; expected=`${QUICK_DIR}/${next_num}-PLAN.md`.
 
 After planner returns:
 
-1. Apply the planner gate tuple above: completed requires a fresh readable `${QUICK_DIR}/${next_num}-PLAN.md` named in `gpd_return.files_written`.
-2. For checkpoint, present the checkpoint and continue only through a fresh continuation handoff under `references/orchestration/continuation-boundary.md`.
+1. Apply `quick_planner_plan`: completed passes only through the tuple.
+2. For checkpoint, use `status_route` plus `references/orchestration/continuation-boundary.md`.
 3. For blocked or failed, offer retry, main-context planning, or abort.
 4. Extract plan count (typically 1 for quick tasks).
 5. Report: "Plan created: ${QUICK_DIR}/${next_num}-PLAN.md"
 
-If the plan file is missing, unreadable, stale, or absent from `gpd_return.files_written`, error: "Planner failed to create ${next_num}-PLAN.md"
+If `quick_planner_plan` fails, error: "Planner failed to create ${next_num}-PLAN.md"
 
 If the plan declares specialized `tool_requirements`, run `gpd validate plan-preflight <PLAN.md>` before spawning the executor:
 
@@ -212,7 +212,7 @@ Reference artifacts: {reference_artifacts_content}
 )
 ```
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+Run this `child_gate`; shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:

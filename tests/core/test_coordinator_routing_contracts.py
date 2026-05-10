@@ -64,7 +64,10 @@ def test_new_project_and_new_milestone_route_roadmaps_on_typed_status() -> None:
     assert "Project contract load info: {project_contract_load_info}" in new_milestone
     assert "Project contract validation: {project_contract_validation}" in new_milestone
     assert "request fresh continuation" in new_milestone
-    assert "main workflow applies accepted state changes with gpd state patch / gpd state add-decision after the artifact gate" in new_milestone
+    assert (
+        "main workflow applies accepted state changes with gpd state patch / gpd state add-decision after the artifact gate"
+        in new_milestone
+    )
 
 
 def test_parameter_sweep_balanced_mode_is_not_unconditionally_paused() -> None:
@@ -83,9 +86,12 @@ def test_audit_milestone_consumes_a_typed_consistency_checker_return_without_rou
 
     assert workflow.count('subagent_type="gpd-consistency-checker"') == 1
     assert "gpd-notation-coordinator" not in workflow
-    assert "Consistency checker's report (notation conflicts, parameter mismatches, broken reasoning chains) — or note \"skipped\" if agent failed" in workflow
+    assert (
+        'Consistency checker\'s report (notation conflicts, parameter mismatches, broken reasoning chains) — or note "skipped" if agent failed'
+        in workflow
+    )
     assert "If the consistency checker agent fails to spawn or returns an error:" in workflow
     assert "status: completed" in checker
     assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in checker
-    assert "This is a one-shot handoff: inspect once, write once, return once." in checker
+    assert "This is a one-shot handoff: inspect once, write once, return once" in checker
     assert "Human-readable headings in the report are presentation only; route on `gpd_return.status`." in checker

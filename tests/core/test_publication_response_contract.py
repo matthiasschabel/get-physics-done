@@ -61,8 +61,8 @@ def test_publication_review_round_artifacts_define_canonical_round_family() -> N
     source = (REFERENCES_DIR / "publication-review-round-artifacts.md").read_text(encoding="utf-8")
 
     assert "Canonical round-suffix and sibling-artifact contract for publication review rounds." in source
-    assert "Round 1 uses `round_suffix=\"\"`." in source
-    assert "Round `N` for `N >= 2` uses `round_suffix=\"-R{N}\"`." in source
+    assert 'Round 1 uses `round_suffix=""`.' in source
+    assert 'Round `N` for `N >= 2` uses `round_suffix="-R{N}"`.' in source
     assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in source
     assert "${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in source
     assert "${selected_review_root}/REFEREE-DECISION{round_suffix}.json" in source
@@ -213,7 +213,9 @@ def test_peer_review_parallel_wave_stops_terminal_children_before_stage_4() -> N
         r"If the proof-redteam artifact is missing, malformed,[\s\S]{0,90}retry `gpd-check-proof` once with the same inputs",
         workflow,
     )
-    assert re.search(r"If the retry also fails, STOP the pipeline[\s\S]{0,80}proof review could not\s+be completed", workflow)
+    assert re.search(
+        r"If the retry also fails, STOP the pipeline[\s\S]{0,80}proof review could not\s+be completed", workflow
+    )
 
 
 def test_peer_review_later_stages_restart_from_fresh_context_and_written_artifacts() -> None:
@@ -233,12 +235,15 @@ def test_peer_review_later_stages_restart_from_fresh_context_and_written_artifac
 def test_referee_stage_six_files_written_must_be_fresh_current_run_outputs() -> None:
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
 
-    assert "Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run." in referee
-    assert "For all statuses, `files_written` must list only files actually written in this run from the Stage 6 allowlist." in referee
     assert (
-        "For `blocked` returns caused by upstream staged-review artifact failures, keep `files_written` empty "
-        "unless you wrote only `${selected_publication_root}/CONSISTENCY-REPORT.md`."
-    ) in referee
+        "Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run."
+        in referee
+    )
+    assert (
+        "For all statuses, `files_written` lists only files written in this run from the Stage 6 allowlist." in referee
+    )
+    assert "For upstream-artifact `blocked` returns, keep it empty" in referee
+    assert "unless only `${selected_publication_root}/CONSISTENCY-REPORT.md` was written" in referee
 
 
 def test_referee_stage_six_write_allowlist_stops_before_upstream_repairs() -> None:
@@ -263,18 +268,19 @@ def test_stage_six_handoff_closure_and_retry_freshness_remain_explicit() -> None
     workflow = _workflow_authority("peer-review")
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
 
-    assert "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree." in workflow
+    assert (
+        "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree."
+        in workflow
+    )
     assert "gpd_return.files_written stays within Stage 6 write_allowlist" in workflow
     assert "Only retry Stage 6 for Stage 6-owned artifact failures" in workflow
     assert "Do not retry Stage 6 as an upstream repair step." in workflow
     assert "If the eligible Stage 6 retry also fails" in workflow
     assert "do not proceed to report summarization" in workflow
-    assert "Checkpoint ownership is orchestrator-side: when you stop, the orchestrator presents the issue and owns the fresh continuation handoff." in referee
     assert (
-        "`gpd_return.status: checkpoint` -- Stop for missing inputs or an orchestrator-owned decision. Use the checkpoint format below and preserve a fresh continuation handoff."
+        "Checkpoint ownership is orchestrator-side: when you stop, the orchestrator presents the issue and owns the fresh continuation handoff."
         in referee
     )
-    assert (
-        "`gpd_return.status: completed` -- Final review finished. Write the full report plus any decision/ledger artifacts produced in this run, and treat completion as valid only when the fresh `gpd_return.files_written` names only Stage 6-owned artifacts from this run and they exist on disk."
-        in referee
-    )
+    assert "checkpoint = missing input or orchestrator-owned decision" in referee
+    assert "fresh continuation handoff" in referee
+    assert "completed = final report plus fresh Stage 6 artifacts" in referee

@@ -19,7 +19,8 @@ def test_paper_writer_prompt_keeps_contract_evidence_as_writing_block() -> None:
     assert "comparison_verdicts" in source
     assert "any decisive `comparison_verdicts` entry with an evidence path" not in source
     assert "any decisive `comparison_verdicts` entry when the manuscript claim depends on that comparison" in source
-    assert "the research is not paper-ready. Return `gpd_return.status: blocked`" in source
+    assert "the research is not paper-ready. Block with the `## WRITING BLOCKED` label." in source
+    assert "The control surface is `gpd_return.status`." in source
 
 
 def test_paper_writer_prompt_treats_missing_confidence_tags_as_calibration_warning() -> None:
@@ -40,6 +41,7 @@ def test_paper_writer_prompt_surfaces_builder_journal_boundary() -> None:
     assert "style-only calibration for prose and structure" in source
     assert "Do not write unsupported journal labels into machine-readable builder artifacts." in source
 
+
 def test_paper_writer_prompt_keeps_lazy_authoring_contract_paths_visible() -> None:
     source = _read_paper_writer()
 
@@ -56,6 +58,7 @@ def test_paper_writer_prompt_keeps_lazy_authoring_contract_paths_visible() -> No
     assert "@{GPD_INSTALL_DIR}/templates/notation-glossary.md" not in source
     assert "@{GPD_INSTALL_DIR}/templates/latex-preamble.md" not in source
     assert "@{GPD_INSTALL_DIR}/templates/paper/author-response.md" not in source
+
 
 def test_paper_writer_prompt_keeps_required_gpd_acknowledgment_visible() -> None:
     source = _read_paper_writer()

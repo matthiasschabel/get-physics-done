@@ -24,8 +24,13 @@ def test_write_paper_bibliographer_step_routes_on_typed_return_contract() -> Non
     assert "strict review" in workflow
     assert "reproducibility-manifest generation" in workflow
     assert "Bibliography: `{ACTIVE_BIBLIOGRAPHY_PATH}`" in workflow
-    assert "Always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`" in workflow
-    assert re.search(r"If the bibliographer completed with issues recorded[\s\S]{0,80}`GPD/references-status.json`", workflow)
+    assert (
+        "Always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`"
+        in workflow
+    )
+    assert re.search(
+        r"If the bibliographer completed with issues recorded[\s\S]{0,80}`GPD/references-status.json`", workflow
+    )
     assert re.search(r"If the\s+bibliographer completed cleanly with no remaining citation issues", workflow)
 
 
@@ -36,7 +41,8 @@ def test_literature_review_bibliographer_step_routes_on_typed_return_contract() 
     assert "Return a typed `gpd_return` envelope." in workflow
     assert "Use `status: completed` when the bibliography task finished" in workflow
     assert "**If the bibliographer completed with issues recorded in the audit report:**" in workflow
-    assert "Proceed only after the fresh citation-audit gate passes." in workflow
+    assert "apply the citation-audit artifact" in workflow
+    assert "before continuing" in workflow
     assert "**If BIBLIOGRAPHY UPDATED:**" not in workflow
 
 

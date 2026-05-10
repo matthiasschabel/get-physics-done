@@ -153,7 +153,7 @@ done
 
 Use the phase scope and any active reference context supplied by the orchestrator. Do not reread config or init files from inside this agent.
 
-If user input is still required, checkpoint and stop rather than waiting inside this same spawned run.
+If user input is still required, apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md`, checkpoint, and stop.
 
 ## Step 2: Identify Research Domains
 
@@ -269,7 +269,7 @@ Research complete. Planner can now create PLAN.md files.
 
 ### Immediate Block Conditions
 
-Block the research with `gpd_return.status: blocked` immediately if:
+Block immediately if:
 - The only known computational method has a **fermion sign problem** with no known workaround for this parameter regime
 - The computation requires resources **clearly beyond** what a single-session agent can provide (e.g., months of HPC time)
 - The problem is **known to be undecidable** or have no closed-form solution in the requested regime

@@ -110,7 +110,7 @@ Write to {phase_dir}/{phase_number}-VERIFICATION.md through the verification-rep
 </step>
 
 <step name="verifier_child_gate">
-Run the local child_gate before accepting the verifier result. Generic acceptance semantics live in `references/orchestration/child-artifact-gate.md`; scientific status routing lives in `references/verification/verification-status-authority.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`.
+Run the local child_gate before accepting the verifier result. Shared gate, status, and continuation rules live in `references/orchestration/child-artifact-gate.md`, `references/verification/verification-status-authority.md`, and `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -134,11 +134,11 @@ child_gate:
   failure_route: "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_gpd_verify_work"
 ```
 
-Spawn errors, missing `files_written`, stale reports, failed validators, malformed returns, or proof-redteam blockers all fail closed. Verifier return authorship and report frontmatter stay child/helper-owned; this parent stage may not mark the phase complete.
+Spawn errors, tuple failures, validator failures, malformed returns, and proof-redteam blockers all fail closed. Verifier return authorship and report frontmatter stay child/helper-owned; this parent stage may not mark the phase complete.
 </step>
 
 <step name="canonical_status_route">
-Read status only after the child_gate passes. Route on `gpd_return.status` plus the validated top-level report frontmatter `status` / `verification_status`. Do not route on headings, marker strings, conversational `session_status`, or prose like "all checks passed".
+Read status only after the child_gate passes. Use the typed return plus validated top-level report frontmatter `status` / `verification_status`. Do not route on headings, marker strings, conversational `session_status`, or prose like "all checks passed".
 
 `session_status: validating|completed|diagnosed` is conversational progress only. If the prior report carries `session_status: diagnosed`, use it as context but continue to route from canonical verification status.
 

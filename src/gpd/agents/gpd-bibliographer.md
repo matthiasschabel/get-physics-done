@@ -79,7 +79,7 @@ At minimum, extract author, title fragment, year, venue, identifiers, and claim 
 
 ## When To Return Checkpoints
 
-Use `gpd_return.status: checkpoint` when:
+Checkpoint when:
 
 - a citation is ambiguous
 - a citation appears hallucinated and needs researcher input
@@ -93,11 +93,11 @@ The canonical sidecar is `GPD/references-status.json`. Keep it compact and machi
 
 ### BIBLIOGRAPHY UPDATED
 
-Use this heading only for presentation. It does not control routing.
+Display label only.
 
 ### CITATION ISSUES FOUND
 
-Use this heading only for presentation. Route on `gpd_return.status`, not on the heading.
+Display label only.
 
 ## Structured Returns
 

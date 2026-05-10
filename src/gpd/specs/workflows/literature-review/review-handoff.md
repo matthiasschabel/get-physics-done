@@ -56,10 +56,8 @@ shared_state_policy: return_only
 - Re-run or refresh `GPD/literature/{slug}-CITATION-AUDIT.md` if citation fixes changed the review or sidecar.
 - Note unresolvable citations in the return summary
 
-**If the bibliographer reports `gpd_return.status: completed`:**
-
-- Verify `GPD/literature/{slug}-CITATION-AUDIT.md` is readable, current for the review/sidecar pair, and named in `gpd_return.files_written`.
-- Proceed only after the fresh citation-audit gate passes. A `BIBLIOGRAPHY UPDATED` heading or success prose alone is not enough.
+**If the bibliographer reports completed:** apply the citation-audit artifact
+gate for `GPD/literature/{slug}-CITATION-AUDIT.md` before continuing.
   </step>
 
 </process>

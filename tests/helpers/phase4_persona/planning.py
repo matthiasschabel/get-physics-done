@@ -26,8 +26,14 @@ GPD_DIRNAME = "GPD"
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "stage0"
 PLAN_PHASE_COMMAND = REPO_ROOT / "src" / "gpd" / "commands" / "plan-phase.md"
 PLAN_PHASE_STAGE_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "plan-phase"
+CONTRACT_AUTHORITY_GATE = (
+    REPO_ROOT / "src" / "gpd" / "specs" / "references" / "orchestration" / "contract-authority-gate.md"
+)
 PLAN_CHECKER_PROMPT = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-plan-checker.md"
 PLANNER_TEMPLATE = REPO_ROOT / "src" / "gpd" / "specs" / "templates" / "planner-subagent-prompt.md"
+BLOCKED_LIFECYCLE_STOP_PROHIBITION = (
+    "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents"
+)
 PLANNING_SOURCE_OWNERS = (
     "src/gpd/core/context.py",
     "src/gpd/core/workflow_staging.py",
@@ -523,6 +529,7 @@ def _score_project_contract_authority_block(root: Path) -> PlanningReplayOutcome
     gate = payload["project_contract_gate"]
     validation = payload["project_contract_validation"]
     bootstrap_text = _read_stage("phase-bootstrap.md")
+    contract_authority_gate = CONTRACT_AUTHORITY_GATE.read_text(encoding="utf-8")
 
     assert isinstance(gate, dict)
     assert isinstance(validation, dict)
@@ -535,7 +542,12 @@ def _score_project_contract_authority_block(root: Path) -> PlanningReplayOutcome
     assert bootstrap_text.index("project_contract_gate.authoritative") < bootstrap_text.index(
         "LIFECYCLE_CONTRACT_GATE="
     )
-    assert "Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents" in bootstrap_text
+    assert BLOCKED_LIFECYCLE_STOP_PROHIBITION in contract_authority_gate
+    assert BLOCKED_LIFECYCLE_STOP_PROHIBITION not in bootstrap_text
+    assert "contract_gate_stop:" in bootstrap_text
+    assert "ref=contract-authority-gate#blocked-lifecycle-stop-phrase" in bootstrap_text
+    assert "rerun=gpd:plan-phase {PHASE}" in bootstrap_text
+    assert "primary=gpd:sync-state|gpd:new-project" in bootstrap_text
 
     return PlanningReplayOutcome(
         finding_id="project_contract_authority_block",

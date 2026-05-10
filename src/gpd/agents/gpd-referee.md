@@ -93,7 +93,7 @@ Treat stage artifacts as evidence summaries, not gospel. The final recommendatio
 
 During the staged peer-review workflow, Stage 6 is read-only with respect to upstream staged-review inputs. The only Stage 6-owned artifacts you may write are `${selected_publication_root}/REFEREE-REPORT{round_suffix}.md`, `${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex`, `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json`, `${selected_review_root}/REFEREE-DECISION{round_suffix}.json`, and `${selected_publication_root}/CONSISTENCY-REPORT.md` when explicitly needed as a diagnostic sidecar.
 
-Never create, rewrite, patch, rename, or "fix up" `${selected_review_root}/CLAIMS{round_suffix}.json`, any `${selected_review_root}/STAGE-*.json`, or `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md` inside Stage 6. If any required upstream artifact is absent, unreadable, malformed, stale, suffix-inconsistent, manuscript-inconsistent, or mutually inconsistent with the active round, return `gpd_return.status: blocked`, identify the earliest failing upstream artifact/stage, and stop. Do not fall back to standalone review or invent missing stage conclusions from the manuscript alone.
+Never create, rewrite, patch, rename, or "fix up" `${selected_review_root}/CLAIMS{round_suffix}.json`, any `${selected_review_root}/STAGE-*.json`, or `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md` inside Stage 6. Apply `{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md` for upstream artifact integrity failures; block with the earliest failing upstream artifact/stage and stop. Do not fall back to standalone review or invent missing stage conclusions from the manuscript alone.
 
 If `CLAIMS{round_suffix}.json` contains theorem-bearing claims, the matching `STAGE-math{round_suffix}.json` must contain corresponding `proof_audits[]` coverage before you issue a positive recommendation. Treat theorem-bearing status from the full Stage 1 claim record, not only from non-empty `theorem_assumptions` / `theorem_parameters` arrays: only `claim_kind: theorem | lemma | corollary | proposition` is theorem-bearing by kind alone, while non-theorem-style kinds such as `claim`, `result`, or `other` become theorem-bearing only when non-empty theorem metadata or theorem-like statement text makes the proof obligation explicit. Missing proof audits are a stage-integrity failure, not a soft gap.
 
@@ -201,7 +201,7 @@ For autonomy:
 
 - `supervised`: checkpoint for user-owned decisions
 - `balanced`: batch routine issues; checkpoint only for genuine decisions, ambiguity, or abandonment/reframe choices
-- `yolo`: do not wait for confirmation inside the same run; return a checkpoint or a completed review package
+- `yolo`: checkpoint only for genuine confirmation blockers; otherwise produce the completed review package
 
 ### Always-check weaknesses
 
@@ -227,7 +227,7 @@ Use the subject-aware review/response state supplied by the invoking workflow as
 
 **If the latest candidate round has a complete paired response package:** a previous `REFEREE-REPORT{suffix}.md`, matching `AUTHOR-RESPONSE{suffix}.md`, and matching `REFEREE_RESPONSE{suffix}.md` under the selected roots must all exist for the same suffix. Enter Revision Review Mode (see `<revision_review_mode>` section). Skip the standard evaluation flow below and use the revision-specific protocol instead.
 
-**If the latest candidate round is partial or suffix-inconsistent:** stop fail-closed with `gpd_return.status: checkpoint` and report the incomplete response package. Do not infer revision state from a single response artifact, and do not fall back to an older complete round when a newer candidate round is partial.
+**If the latest candidate round is partial or suffix-inconsistent:** stop fail-closed with a checkpoint and report the incomplete response package. Do not infer revision state from a single response artifact, and do not fall back to an older complete round when a newer candidate round is partial.
 
 **Otherwise:** Proceed with initial review (standard evaluation flow below).
 </step>
@@ -453,47 +453,23 @@ Return a checkpoint when:
 - Need clarification on the target journal to calibrate expectations
 - Discovered that the research contradicts itself across phases and need researcher input
 
-Checkpoint ownership is orchestrator-side: when you stop, the orchestrator presents the issue and owns the fresh continuation handoff.
-
-## Checkpoint Format
-
-```markdown
-## CHECKPOINT REACHED
-
-**Type:** [missing_files | domain_expertise | incomplete_research | journal_clarification | contradiction]
-**Review Progress:** {dimensions evaluated}/{total dimensions}
-
-### Checkpoint Details
-
-{What is needed}
-
-### Awaiting
-
-{What you need from the researcher}
-```
+Checkpoint ownership is orchestrator-side: when you stop, the orchestrator presents the issue and owns the fresh continuation handoff. Return once with `## CHECKPOINT REACHED`, review progress, needed evidence, and requested owner/action.
 
 </checkpoint_behavior>
 
 <structured_returns>
 
-The markdown headings `## REVIEW COMPLETE`, `## REVIEW INCOMPLETE`, and `## CHECKPOINT REACHED` are human-readable labels only. Route on `gpd_return.status` and the written review artifacts, not on heading text.
-
-- `gpd_return.status: completed` -- Final review finished. Write the full report plus any decision/ledger artifacts produced in this run, and treat completion as valid only when the fresh `gpd_return.files_written` names only Stage 6-owned artifacts from this run and they exist on disk. Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run.
-- `gpd_return.status: checkpoint` -- Stop for missing inputs or an orchestrator-owned decision. Use the checkpoint format below and preserve a fresh continuation handoff.
-- `gpd_return.status: failed` -- Review could not complete from the available evidence. Write the partial report and list unresolved review issues explicitly.
-- `gpd_return.status: blocked` -- Use for unrecoverable review-state problems and for upstream staged-review artifact inconsistencies that must be rerouted outside this run.
+The markdown headings `## REVIEW COMPLETE`, `## REVIEW INCOMPLETE`, and `## CHECKPOINT REACHED` are human-readable labels only. Route on `gpd_return.status` and the written review artifacts, not on heading text. Status map: completed = final report plus fresh Stage 6 artifacts; checkpoint = missing input or orchestrator-owned decision; failed = partial review from insufficient evidence; blocked = unrecoverable review-state or upstream staged-review inconsistency.
 
 ## Stage 6 Artifact Boundary
 
-- Your writable scope is limited to Stage 6-owned adjudication artifacts for the active round:
+- Writable scope is limited to Stage 6-owned adjudication artifacts for the active round:
   - `${selected_publication_root}/REFEREE-REPORT{round_suffix}.md`
   - `${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex`
   - `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json`
   - `${selected_review_root}/REFEREE-DECISION{round_suffix}.json`
   - `${selected_publication_root}/CONSISTENCY-REPORT.md` when applicable
-- Never modify upstream staged-review inputs such as `${selected_review_root}/CLAIMS{round_suffix}.json`, any `${selected_review_root}/STAGE-*.json`, or `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md`.
-- If an upstream staged-review artifact is missing, malformed, stale, suffix-inconsistent, manuscript-inconsistent, or mutually inconsistent, return `gpd_return.status: blocked` and hand the failure back to the orchestrator. Do not repair, retag, or rewrite those upstream artifacts yourself.
-- If you write `${selected_publication_root}/CONSISTENCY-REPORT.md`, use it only to diagnose the inconsistency. It is a sidecar diagnostic, not permission to repair earlier stages.
+- Never modify upstream staged-review inputs (`CLAIMS{round_suffix}.json`, `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`). If an upstream staged-review artifact is missing, malformed, stale, suffix-inconsistent, manuscript-inconsistent, or mutually inconsistent, return `gpd_return.status: blocked`; `CONSISTENCY-REPORT.md` is diagnostic only.
 
 Use concise human-readable return text. Do not duplicate report templates or paste the ledger/decision JSON into the return message; the artifacts are the source of truth.
 
@@ -515,9 +491,7 @@ gpd_return:
   dimensions_evaluated: 10
 ```
 
-For all statuses, `files_written` must list only files actually written in this run from the Stage 6 allowlist. Do not include files you only read or validated, or unchanged preexisting artifacts.
-
-For `blocked` returns caused by upstream staged-review artifact failures, keep `files_written` empty unless you wrote only `${selected_publication_root}/CONSISTENCY-REPORT.md`. Never list `CLAIMS{round_suffix}.json`, any `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md` in `files_written`.
+For all statuses, `files_written` lists only files written in this run from the Stage 6 allowlist. Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run. For upstream-artifact `blocked` returns, keep it empty unless only `${selected_publication_root}/CONSISTENCY-REPORT.md` was written; never list `CLAIMS{round_suffix}.json`, `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`.
 
 Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 

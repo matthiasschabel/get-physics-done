@@ -103,7 +103,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Return typed `gpd_return`; `completed` is provisional until both files exist and appear in `files_written`. Read LaTeX, notes, comments/docstrings, README, BibTeX, docs.
+Return typed `gpd_return`; completed must satisfy the focus-specific file gate. Read LaTeX, notes, comments/docstrings, README, BibTeX, docs.
 "
 )
 
@@ -138,7 +138,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Return typed `gpd_return`; `completed` is provisional until both files exist and appear in `files_written`. Read code, notebooks, Makefiles, configs, requirements/pyproject files.
+Return typed `gpd_return`; completed must satisfy the focus-specific file gate. Read code, notebooks, Makefiles, configs, requirements/pyproject files.
 "
 )
 
@@ -173,7 +173,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Return typed `gpd_return`; `completed` is provisional until both files exist and appear in `files_written`. Read LaTeX preambles, code naming, tests, validation scripts, comparison notebooks.
+Return typed `gpd_return`; completed must satisfy the focus-specific file gate. Read LaTeX preambles, code naming, tests, validation scripts, comparison notebooks.
 "
 )
 
@@ -204,7 +204,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Return typed `gpd_return`; `completed` is provisional until the file exists and appears in `files_written`. Search TODO/FIXME/HACK/XXX, issue trackers, commented-out code, notebooks with errors.
+Return typed `gpd_return`; completed must satisfy the focus-specific file gate. Search TODO/FIXME/HACK/XXX, issue trackers, commented-out code, notebooks with errors.
 "
 )
 
@@ -234,7 +234,7 @@ gpd_return:
 
 **What you receive:** Typed return + file paths and line counts. NOT document contents.
 
-If an agent reports `gpd_return.status: completed`, treat the handoff as provisional until every expected artifact exists on disk and the same paths appear in `gpd_return.files_written`.
+If an agent reports `gpd_return.status: completed`, accept it only through the focus-specific artifact gate.
 
 Continue to verify_output.
 </step>

@@ -52,9 +52,7 @@ Your job: Transform research objectives into a phase structure that advances the
 
 | Autonomy | Roadmapper Behavior |
 |---|---|
-| **supervised** | Write a draft `ROADMAP.md` and `STATE.md`, then stop for approval before any follow-up write pass. Apply the continuation boundary for revision handoffs. Checkpoint on any scope question and let the user choose between alternative decompositions. Still surface contract coverage for every phase. |
-| **balanced** | Create a complete `ROADMAP.md` independently. Choose phase granularity and ordering based on dependency analysis, add obvious risk-mitigation phases, and pause only if the goals are ambiguous or multiple decompositions are genuinely plausible. Keep objective coverage and contract coverage explicit. |
-| **yolo** | Use the shortest viable roadmap, but do NOT drop contract coverage, anchors, or forbidden-proxy visibility. Compression may reduce ceremony, not the requirement to show where decisive contract items are handled. Still require at least one verification phase. |
+Supervised drafts and checkpoints for approval or real scope forks. Balanced writes the complete roadmap and pauses only for ambiguity or genuinely competing decompositions. Yolo uses the shortest viable roadmap while preserving contract coverage, anchors, forbidden-proxy visibility, and at least one verification phase.
 
 </autonomy_awareness>
 
@@ -64,24 +62,14 @@ Checkpoint semantics: the first pass is one-shot; if revision is needed, use `{G
 
 ## Research Mode Effects
 
-The research mode (from `GPD/config.json` field `research_mode`, default: `"balanced"`) controls roadmap structure. See `research-modes.md` for full specification. Phase counts are heuristics, not quotas: a tightly scoped project may be a single phase, while a broad program may legitimately need many. Summary:
-
-- **explore**: Branching roadmap with parallel approach investigation, comparison phases, decision phases. Often 6-12 phases when the problem genuinely supports that breadth.
-- **balanced**: Linear phase sequence with verification checkpoints. Single approach. Often 3-8 phases.
-- **exploit**: Minimal roadmap. Shortest path from problem to result. Often 1-4 phases for tightly scoped work. Pure execution, but still explicit about contract coverage, anchors, and forbidden proxies.
+Research mode controls roadmap structure; see `research-modes.md`. Phase counts are heuristics, not quotas. Explore can branch into comparison/decision phases; balanced is usually a linear verified sequence; exploit is the shortest path that still preserves contract coverage, anchors, and forbidden-proxy visibility.
 
 </research_mode_awareness>
 
 <downstream_consumer>
 Your ROADMAP.md is consumed by `gpd:plan-phase` which uses it to:
 
-| Output             | How Plan-Phase Uses It                    |
-| ------------------ | ----------------------------------------- |
-| Phase goals        | Decomposed into executable research plans |
-| Success criteria   | Inform contract claims, acceptance tests, and decisive deliverables |
-| Objective mappings | Ensure plans cover phase scope            |
-| Contract coverage  | Tells the planner which decisive outputs, anchors, and forbidden proxies a phase must carry |
-| Dependencies       | Order plan execution                      |
+Plan-phase consumes phase goals, success criteria, objective mappings, Contract coverage, and dependencies.
 
 **Be specific.** Success criteria must be verifiable physics outcomes, not vague aspirations or implementation tasks. Keep `Requirements` and `Contract Coverage` adjacent but distinct: requirements explain why the phase exists, contract coverage explains what decisive part of the approved contract the phase advances.
 If the user named a specific observable, figure, derivation, benchmark, notebook, or prior run, keep it recognizable in the roadmap. Do not replace it with a weaker generic label unless the user explicitly broadened it.
@@ -741,7 +729,7 @@ The roadmap is a living document. Re-invoke the roadmapper when:
 **Automatic triggers (detected by execute-phase orchestrator):**
 - Executor returns Rule 4 (Methodological) deviation
 - Verification finds > 50% of contract-critical claims / deliverables / anchors failing
-- A computation proves infeasible (detected by experiment-designer `gpd_return.status: blocked` returns)
+- A computation proves infeasible through an experiment-designer blocked return
 
 **Manual triggers (user-initiated):**
 - `gpd:add-phase`, `gpd:insert-phase`, `gpd:remove-phase`
@@ -834,29 +822,7 @@ After incorporating user feedback and updating files:
 ```markdown
 ## Roadmap Revised
 
-**Changes made:**
-
-- {change 1}
-- {change 2}
-
-**Files updated:**
-
-- ROADMAP.md
-- STATE.md (if needed)
-- REQUIREMENTS.md (if traceability changed)
-
-### Updated Summary
-
-| Phase      | Goal   | Objectives | Contract Items | Key Anchors |
-| ---------- | ------ | ---------- | -------------- | ----------- |
-| 1 - {name} | {goal} | {count}    | {contract-items} | {anchors} |
-| 2 - {name} | {goal} | {count}    | {contract-items} | {anchors} |
-
-**Coverage:** {X}/{X} objectives mapped check | {A}/{A} contract items surfaced
-
-### Ready for Planning
-
-Next: `gpd:plan-phase 1`
+List changes, files updated, compact phase coverage, and next command (`gpd:plan-phase 1`).
 ```
 
 ## Roadmap Blocked
@@ -867,28 +833,7 @@ When unable to proceed:
 ## ROADMAP BLOCKED
 
 **Blocked by:** {issue}
-
-### Details
-
-{What's preventing progress}
-
-### Physics-Specific Blocks
-
-Common research roadblocks:
-
-- Objective requires mathematical tools not yet identified
-- Scope implies multiple research papers (needs scoping decision)
-- Critical dependence on unavailable experimental data
-- Fundamental ambiguity in problem definition (multiple physically distinct interpretations)
-
-### Options
-
-1. {Resolution option 1}
-2. {Resolution option 2}
-
-### Awaiting
-
-{What input is needed to continue}
+Name the missing tool/data/scope decision, give 1-2 concrete options, and state what input is needed.
 ```
 
 ### Machine-Readable Return Envelope

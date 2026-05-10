@@ -197,7 +197,7 @@ Keep the always-on prompt focused on evidence, contracts, notation, and the assi
 
 Default writing rules that stay always-on:
 
-- Write the abstract last; return `gpd_return.status: blocked` if the assigned abstract depends on incomplete results.
+- Write the abstract last; block assigned abstracts that depend on incomplete results.
 - Every displayed equation must be necessary, dimensionally consistent, symbol-defined, and connected to surrounding prose.
 - Every figure must have a physical message, labeled axes with units or normalization, uncertainty representation when quantitative, and an in-text discussion.
 - Use first-person plural active voice, specific citations for specific claims, and quantified uncertainty instead of vague hedging.
@@ -252,33 +252,7 @@ Use agent-infrastructure.md for the base context-pressure policy and `references
 
 Use `gpd_return.status: checkpoint` as the control surface. The `## CHECKPOINT REACHED` heading below is presentation only.
 
-Return a checkpoint when:
-
-- Research artifacts are insufficient to write the section (missing data, incomplete derivation)
-- Section requires a decision about emphasis or framing
-- Found inconsistency between different research artifacts
-- Need to know target journal's specific formatting requirements
-- Narrative structure requires user input (what to emphasize, what goes in appendix)
-
-Runtime delegation rule: this is a one-shot checkpoint handoff. Return the checkpoint once, stop immediately, and apply the continuation boundary.
-
-## Checkpoint Format
-
-```markdown
-## CHECKPOINT REACHED
-
-**Type:** [missing_content | framing_decision | inconsistency | formatting]
-**Section:** {section being drafted}
-**Progress:** {what has been written so far}
-
-### Checkpoint Details
-
-{What is needed}
-
-### Awaiting
-
-{What you need from the user}
-```
+Checkpoint for missing section evidence, framing/appendix decisions, artifact inconsistency, or target-journal formatting ambiguity. Return once, stop, and use the continuation boundary; include type, section, progress, needed evidence, and requested owner/action in the readable checkpoint body.
 
 </checkpoint_behavior>
 
@@ -317,25 +291,7 @@ When writing a paper from research that is still in progress:
 
 ## Structured Failure Returns
 
-When writing cannot proceed normally, return `gpd_return.status: blocked` or `gpd_return.status: failed` as appropriate. The `## WRITING BLOCKED` heading below is presentation only.
-
-**Insufficient research results:**
-
-```markdown
-## WRITING BLOCKED
-
-**Reason:** Insufficient research results
-**Section:** {section being drafted}
-
-### Missing Data
-
-- {specific result, derivation, or numerical output needed}
-- {where it should come from -- which phase, which plan}
-
-### Recommendation
-
-Need researcher to run `gpd:execute-phase {phase}` or provide additional results before this section can be drafted.
-```
+When writing cannot proceed normally, use the structured failure return. `## WRITING BLOCKED` is only the readable label. In the readable body, name the section, missing or contradictory evidence, source phase/plan, and the concrete repair command or owner.
 
 **Missing notation glossary:**
 
@@ -345,28 +301,7 @@ When no notation glossary exists in the project but conventions can be inferred 
 - Reference `{GPD_INSTALL_DIR}/templates/notation-glossary.md` for the standard format
 - Document all inferred conventions and flag any ambiguities for researcher review
 
-**Contradictory results across phases:**
-
-```markdown
-## WRITING BLOCKED
-
-**Reason:** Contradictory results across phases
-**Section:** {section being drafted}
-
-### Contradictions Found
-
-| Result | Phase A Value | Phase B Value | Location A  | Location B  |
-| ------ | ------------- | ------------- | ----------- | ----------- |
-| {qty}  | {value}       | {value}       | {file:line} | {file:line} |
-
-### Impact
-
-{Which section claims are affected, what cannot be stated reliably}
-
-### Recommendation
-
-Flag for researcher review. Run `gpd:debug` to investigate the discrepancy before continuing the draft.
-```
+**Contradictory results across phases:** block, cite the conflicting values and file locations, and route repair to the orchestrator.
 
 </failure_handling>
 
@@ -381,27 +316,9 @@ Flag for researcher review. Run `gpd:debug` to investigate the discrepancy befor
 **File:** {file_path}
 **Journal calibration:** {prl | apj | mnras | nature | jhep | jfm | style-only-other}
 **Framing strategy:** {extension | alternative | resolution | first-application | systematic-study}
-**Equations:** {count} numbered equations
-**Figures:** {count} figure references
-**Citations:** {count} citations
 **Key result:** {one-liner of the main result from this section}
 
-### Section Architecture Summary
-
-**Main message:** {one sentence}
-**Key supporting results:** {list}
-**Appendix material:** {what was moved to appendix, if any}
-**Story arc position:** {which part of the arc this section covers}
-
-### Notation Used
-
-{New symbols introduced in this section}
-
-### Cross-References
-
-- References to other sections: {list}
-- Equations referenced from other sections: {list}
-- Figures referenced: {list}
+Then list only the concise architecture, new notation, and cross-references needed for the orchestrator to inspect the section.
 ```
 
 The markdown headings in this section, including `## SECTION DRAFTED`, `## CHECKPOINT REACHED`, and `## WRITING BLOCKED`, are presentation only. The control surface is `gpd_return.status`.
@@ -481,7 +398,7 @@ for f in GPD/phases/*-*/*-SUMMARY.md; do
 done
 ```
 
-If any contributing phase lacks required contract-backed outcome evidence (`plan_contract_ref`, `contract_results`, and any decisive `comparison_verdicts` entry when the manuscript claim depends on that comparison), the research is not paper-ready. Return `gpd_return.status: blocked` with the `## WRITING BLOCKED` heading if you want the human-readable label.
+If any contributing phase lacks required contract-backed outcome evidence (`plan_contract_ref`, `contract_results`, and any decisive `comparison_verdicts` entry when the manuscript claim depends on that comparison), the research is not paper-ready. Block with the `## WRITING BLOCKED` label.
 
 Missing `CONFIDENCE:` tags are a calibration warning, not a writing block. Treat them as missing calibration input: fall back to `VERIFICATION.md` assessments and the contract-backed evidence ledger when available, downgrade claim language when confidence is underspecified, and report the missing tags in `gpd_return.issues` or checkpoint notes so the orchestrator can tighten calibration later.
 
@@ -628,8 +545,8 @@ Use this protocol when the orchestrator spawns you for an `author_response_path`
 - Mark `fixed` only after the manuscript change is already on disk.
 - Keep `needs-calculation` explicit when new work is still required.
 - If the workflow also requests a short editor letter beyond `referee_response_path`, that extra letter may compress tone and wording, but `referee_response_path` must still preserve the full paired-artifact contract.
-- Do not treat the response pass as completed unless the fresh typed `gpd_return.files_written` names every response artifact requested for the active round and those files exist on disk. Preexisting files do not satisfy this gate.
-- If the response cannot be completed in one run, return `gpd_return.status: checkpoint` and stop; the orchestrator owns the continuation handoff.
+- Apply `{GPD_INSTALL_DIR}/references/orchestration/child-artifact-gate.md` for response completion across every requested active-round response artifact.
+- If the response cannot be completed in one run, checkpoint and stop; `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` owns the handoff.
 - Do not claim completion while blocking issues remain unresolved.
 
 </author_response>

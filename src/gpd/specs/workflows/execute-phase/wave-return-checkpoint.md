@@ -76,19 +76,11 @@ child_gate:
     applicator_failed: "fail_closed_with_mutation_report"
 ```
 
-Completed executor returns are accepted only after all of the following are true:
-
-- `gpd_return.status` is `completed`.
-- `gpd_return.files_written` is non-empty and names `${SUMMARY_FILE}`.
-- `${SUMMARY_FILE}` is inside `{phase_dir}`, has suffix `-SUMMARY.md`, and is fresh after `$EXECUTOR_HANDOFF_STARTED_AT`.
-- Required or final deliverables named in `key-files.created` / `key-files.modified` exist on disk.
-- `Self-Check: FAILED` and `Validation: FAILED` markers are absent.
-- Proof-bearing plans have sibling `{plan_id}-PROOF-REDTEAM.md` from `proof_critic_dispatch` with `status: passed`.
-- `gpd --raw apply-return-updates ${SUMMARY_FILE}` returns `passed: true`.
+Completed executor returns are accepted only after `wave_executor_plan_result` passes, including the local SUMMARY, deliverable, self-check, proof-redteam from `proof_critic_dispatch`, and applicator validators.
 
 Executor subagents MUST NOT write STATE.md directly. Executor subagents must not write `GPD/STATE.md` directly. The SUMMARY applicator is the only durable state-update path for accepted executor returns, and it runs exactly once per accepted SUMMARY. The orchestrator applies them through `gpd apply-return-updates` after each agent completes. The concrete helper call is `gpd --raw apply-return-updates ${SUMMARY_FILE}`.
 
-If `gpd_return.status` is `checkpoint`, stop acceptance for that child and route to `checkpoint_resume`; do not run artifact validators or the applicator for the checkpoint route. Other non-completed statuses route to `wave_failure_menu`.
+Checkpoint returns go to `checkpoint_resume` without artifact validators or the applicator. Other non-completed statuses route to `wave_failure_menu`.
 </step>
 
 <step name="spot_check_and_report_wave">

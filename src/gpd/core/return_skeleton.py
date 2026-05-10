@@ -9,11 +9,12 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from gpd.core.return_contract import (
-    ALLOWED_RETURN_EXTENSION_FIELDS,
+    KNOWN_RETURN_FIELD_NAMES,
     REQUIRED_RETURN_FIELDS,
-    RETURN_ENVELOPE_STATUS_CONTRACTS,
-    VALID_RETURN_STATUSES,
-    GpdReturnEnvelope,
+    RETURN_STATUS_ORDER,
+    normalize_return_status,
+    return_field_allowed_for_status,
+    return_fields_allowed_for_status,
     validate_gpd_return_markdown,
 )
 
@@ -36,18 +37,6 @@ __all__ = [
 APPLICATOR_OWNED_METADATA_FIELDS: frozenset[str] = frozenset({"recorded_at", "recorded_by", "updated_at"})
 """Metadata assigned by the applicator/state layer, never by generated returns."""
 
-KNOWN_RETURN_FIELD_NAMES: frozenset[str] = frozenset(GpdReturnEnvelope.model_fields) | ALLOWED_RETURN_EXTENSION_FIELDS
-"""All top-level fields known to the canonical return contract."""
-
-_STATUS_ORDER_SEED = ("completed", "checkpoint", "blocked", "failed")
-RETURN_STATUS_ORDER: tuple[str, ...] = tuple(
-    status for status in _STATUS_ORDER_SEED if status in VALID_RETURN_STATUSES
-) + tuple(sorted(VALID_RETURN_STATUSES - set(_STATUS_ORDER_SEED)))
-"""Stable display/test order for statuses, derived from the canonical status set."""
-
-_STATUS_RESTRICTED_FIELDS: frozenset[str] = frozenset(
-    field_name for contract in RETURN_ENVELOPE_STATUS_CONTRACTS.values() for field_name in contract.structured_fields
-)
 _CHECKPOINT_RESUME_FILE_REQUIRED = (
     "checkpoint applicator skeletons require resume_file with an existing continuation target supplied by the callsite"
 )
@@ -134,7 +123,7 @@ def build_gpd_return_skeleton(
     """
 
     profile = _profile_for_role(role)
-    normalized_status = _normalize_status(status)
+    normalized_status = normalize_return_status(status)
     normalized_phase = _normalize_optional_text(phase, field_name="phase")
     normalized_plan = _normalize_optional_text(plan, field_name="plan")
 
@@ -211,7 +200,7 @@ def build_gpd_return_skeleton(
         markdown=markdown,
         required_fields=list(REQUIRED_RETURN_FIELDS),
         role_fields=list(profile.role_fields_by_status[normalized_status]),
-        status_allowed_fields=list(_fields_allowed_for_status(normalized_status)),
+        status_allowed_fields=list(return_fields_allowed_for_status(normalized_status)),
         validation_commands=_validation_commands(applicator_ready=applicator_ready),
         authoring_rules=_authoring_rules(),
         warnings=warnings,
@@ -236,7 +225,7 @@ def list_gpd_return_profiles(*, role: str | None = None, status: str | None = No
 
     normalized_role = normalize_return_profile_id(role) if role is not None else None
 
-    normalized_status = _normalize_status(status) if status is not None else None
+    normalized_status = normalize_return_status(status) if status is not None else None
     selected_statuses = [normalized_status] if normalized_status is not None else list(RETURN_STATUS_ORDER)
 
     profiles: list[dict[str, object]] = []
@@ -299,24 +288,6 @@ def normalize_return_profile_id(value: str | None, *, field_name: str = "role") 
 
     roles = ", ".join(sorted(GPD_RETURN_ROLE_PROFILES))
     raise ValueError(f"unknown gpd_return role profile '{value}'. Must be one of: {roles}")
-
-
-def _normalize_status(status: str) -> str:
-    candidate = _normalize_identifier(status, field_name="status")
-    try:
-        return str(
-            _validate_and_dump_envelope(
-                {
-                    "status": candidate,
-                    "files_written": [],
-                    "issues": [],
-                    "next_actions": [],
-                }
-            )["status"]
-        )
-    except ValueError as exc:
-        statuses = ", ".join(RETURN_STATUS_ORDER)
-        raise ValueError(f"unknown gpd_return status '{status}'. Must be one of: {statuses}") from exc
 
 
 def _normalize_identifier(value: str, *, field_name: str) -> str:
@@ -426,29 +397,8 @@ def _dump_gpd_return_yaml(envelope: Mapping[str, object]) -> str:
     )
 
 
-def _fields_allowed_for_status(status: str) -> tuple[str, ...]:
-    allowed_fields: list[str] = []
-    for field_name in GpdReturnEnvelope.model_fields:
-        if _field_allowed_for_status(field_name, status):
-            allowed_fields.append(field_name)
-    for field_name in sorted(ALLOWED_RETURN_EXTENSION_FIELDS):
-        if _field_allowed_for_status(field_name, status):
-            allowed_fields.append(field_name)
-    return tuple(allowed_fields)
-
-
-def _field_allowed_for_status(field_name: str, status: str) -> bool:
-    if field_name not in KNOWN_RETURN_FIELD_NAMES:
-        return False
-    if field_name == _CHECKPOINT_INTENT_FIELD and status != "checkpoint":
-        return False
-    if field_name in _STATUS_RESTRICTED_FIELDS:
-        return field_name in RETURN_ENVELOPE_STATUS_CONTRACTS[status].structured_fields
-    return True
-
-
 def _contract_supports_checkpoint_intent() -> bool:
-    return _field_allowed_for_status(_CHECKPOINT_INTENT_FIELD, "checkpoint")
+    return return_field_allowed_for_status(_CHECKPOINT_INTENT_FIELD, "checkpoint")
 
 
 def _default_value_for_field(field_name: str, *, phase: str | None, plan: str | None) -> object:
@@ -520,7 +470,7 @@ def _assert_known_profile_fields(fields: Iterable[str]) -> None:
 
 
 def _filter_fields_for_status(fields: Iterable[str], status: str) -> tuple[str, ...]:
-    return tuple(field_name for field_name in _dedupe(fields) if _field_allowed_for_status(field_name, status))
+    return tuple(field_name for field_name in _dedupe(fields) if return_field_allowed_for_status(field_name, status))
 
 
 def _with_status_default_additions(fields: tuple[str, ...], status: str) -> tuple[str, ...]:

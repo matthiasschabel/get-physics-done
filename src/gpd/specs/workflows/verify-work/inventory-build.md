@@ -108,7 +108,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; scientific status routing is owned by `references/verification/verification-status-authority.md`.
+Run this `child_gate`; shared gate/continuation rules live in `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; scientific routing lives in `references/verification/verification-status-authority.md`.
 
 ```yaml
 child_gate:

@@ -2,49 +2,28 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from gpd.core.return_contract import REQUIRED_RETURN_FIELDS, validate_gpd_return_markdown
+from tests.return_example_support import GpdReturnExample, extract_gpd_return_examples, validate_gpd_return_examples
 from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
-FENCED_YAML_RE = re.compile(r"```ya?ml\s*\n(?P<body>[\s\S]*?)```", re.IGNORECASE)
 
 
-def _workflow_gpd_return_blocks(path: Path) -> list[tuple[int, str]]:
+def _workflow_gpd_return_examples(path: Path) -> list[GpdReturnExample]:
     if path.parent == WORKFLOWS_DIR and path.stem in STAGED_WORKFLOW_AUTHORITY_NAMES:
         text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
     else:
         text = path.read_text(encoding="utf-8")
-    blocks: list[tuple[int, str]] = []
-    for match in FENCED_YAML_RE.finditer(text):
-        body = match.group("body")
-        if "gpd_return:" not in body:
-            continue
-        line_number = text[: match.start()].count("\n") + 1
-        blocks.append((line_number, f"```yaml\n{body.rstrip()}\n```"))
-    return blocks
+    return extract_gpd_return_examples(text, source_name=path.name)
 
 
 def _validated_workflow_return_examples(path: Path, *, expected_count: int) -> list[dict[str, object]]:
-    blocks = _workflow_gpd_return_blocks(path)
-    assert len(blocks) == expected_count
+    examples = _workflow_gpd_return_examples(path)
+    assert len(examples) == expected_count
 
-    envelopes: list[dict[str, object]] = []
-    failures: list[str] = []
-    for line_number, block in blocks:
-        result = validate_gpd_return_markdown(block)
-        if not result.passed:
-            failures.append(f"{path.name}:{line_number}: {'; '.join(result.errors)}")
-            continue
-        missing_fields = sorted(set(REQUIRED_RETURN_FIELDS) - set(result.fields))
-        if missing_fields:
-            failures.append(f"{path.name}:{line_number}: missing required field(s): {', '.join(missing_fields)}")
-            continue
-        envelopes.append(result.fields)
-
+    envelopes, failures = validate_gpd_return_examples(examples, require_required_fields=True)
     assert failures == []
     return envelopes
 

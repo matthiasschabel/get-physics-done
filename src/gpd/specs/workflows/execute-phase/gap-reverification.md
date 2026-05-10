@@ -96,12 +96,12 @@ task(
 
 Use {GPD_INSTALL_DIR}/templates/debug-subagent-prompt.md as the one-shot debug contract. Populate it from the failed verification file, the gap-closure summary, and the original summary. Set goal: find_root_cause_only, symptoms_prefilled: true, and Create: GPD/debug/{FAILED_PLAN}.md.
 
-Return exactly one typed gpd_return envelope with status: completed | checkpoint | blocked | failed, include files_written, and stop. Do not continue the investigation interactively inside the child.",
+Return exactly one typed gpd_return envelope with status, include files_written, then stop. Do not continue the investigation interactively inside the child.",
   description="Diagnose persistent verification gap"
 )
 ```
 
-If debugger output is missing, stale, malformed, blocked, or failed, stop. Do not run a second automated gap closure without a readable diagnosis.
+If debugger output fails its artifact/readability gate, stop. Do not run a second automated gap closure without a readable diagnosis.
 </step>
 
 <step name="circuit_breaker">
@@ -174,7 +174,7 @@ child_gate:
   failure_route: "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_verify_work"
 ```
 
-Route only on `gpd_return.status` and canonical verification_status:
+Apply `gap_closure_reverification`, then route on canonical verification_status:
 
 - `completed` + `passed`: continue to `consistency_check`
 - `completed` + non-passing verification_status: stop without auto-looping

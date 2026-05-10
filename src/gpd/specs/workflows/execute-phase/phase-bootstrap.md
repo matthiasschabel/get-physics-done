@@ -55,9 +55,9 @@ Use `gpd --raw stage field-access execute-phase --stage phase_bootstrap --style 
 **If `plan_count` is 0:** Error -- no plans found in phase.
 **If `state_exists` is false but `GPD/` exists:** Offer reconstruct or continue.
 
-If `project_contract_load_info.status` starts with `blocked`, STOP and show `project_contract_load_info.errors` / `warnings`. If `project_contract_validation.valid` is false, STOP and show `project_contract_validation.errors`. Never treat a visible-but-blocked contract as an approved execution contract.
+`contract_gate_stop:` ref=contract-authority-gate#blocked-lifecycle-stop-phrase; workflow=execute-phase; stage=phase_bootstrap; status=blocked; checkpoint=contract_gate; triggers=project_contract_load_info.status starts with blocked | project_contract_validation.valid is false | project_contract_gate.authoritative is not true; primary=gpd:sync-state|gpd:new-project; rerun=gpd:execute-phase ${PHASE_ARG}; secondary=gpd:suggest-next.
 
-**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint with the user. Show `project_contract_gate`, `project_contract_load_info.errors`, `project_contract_load_info.warnings`, and `project_contract_validation.errors` if present. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until the gate is authoritative. End with `## > Next Up`: primary `gpd:sync-state` or `gpd:new-project` as appropriate, then `gpd:execute-phase ${PHASE_ARG}` after repair, plus `gpd:suggest-next`.
+For blocked contract load, invalid contract validation, or non-authoritative `project_contract_gate`, STOP, show the gate/load/validation errors, and use `contract_gate_stop`.
 
 Run the executable lifecycle authority gate before branch handling, plan preflight, wave planning, contract fingerprinting, alignment rendering, or any later-stage delegation:
 

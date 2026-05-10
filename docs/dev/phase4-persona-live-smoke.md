@@ -14,10 +14,11 @@ checks. It is not a CI runner.
   transcripts, argv/env captures, auth/account material, command files, hashes,
   token material, absolute local paths, and provider output out of tracked files.
 - Public review may include only a sanitized class-only summary. The summary may
-  contain row ids, class fields, aggregate counts, redaction status, and finding
-  classes. It must not contain raw prompts, provider replies, stdout/stderr,
-  transcripts, argv/env values, auth/account data, absolute paths, hashes,
-  provider secret env names, command lines, or token-like values.
+  contain row ids, class fields, behavior classes, aggregate or behavior counts,
+  redaction status, and finding classes. It must not contain raw prompts,
+  provider replies, stdout/stderr, transcripts, argv/env values, auth/account
+  data, absolute paths, hashes, provider secret env names, command lines, or
+  token-like values.
 - CI may validate an already-produced sanitized summary with
   `scripts/validate_phase4_persona_summary.py`. CI must not create live provider
   artifacts or execute a provider launcher.
@@ -54,5 +55,7 @@ Required top-level policy fields:
 - `ci_provider_launch_allowed`: `false`
 
 Rows may include `row_id`, runtime/persona/workflow/gate/result/next-action
-classes, write class, redaction status class, finding classes, and event class
-counts. Count maps should use class tokens as keys and integers as values.
+classes, write class, behavior classes, behavior metric counts, redaction status
+class, finding classes, and event class counts. Count maps should use class
+tokens as keys and integers as values. Scalar count fields should be
+non-negative integers.

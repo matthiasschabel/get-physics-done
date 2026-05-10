@@ -32,6 +32,12 @@ VALID_PUBLIC_SUMMARY: dict[str, object] = {
     "allowed_trigger_classes": ["operator_local_manual"],
     "row_count": 2,
     "aggregate_class_counts": {"blocked_before_execution": 1, "stopped_before_dispatch": 1},
+    "behavior_class_counts": {"smooth": 1, "acceptable": 1},
+    "behavior_metric_counts": {
+        "invalid_command_suggestion_count": 0,
+        "schema_repair_loop_count": 0,
+        "unexpected_write_count": 0,
+    },
     "redaction_scan": {
         "status_class": "pass",
         "finding_count": 0,
@@ -47,6 +53,11 @@ VALID_PUBLIC_SUMMARY: dict[str, object] = {
             "result_class": "blocked_before_execution",
             "next_action_class": "gpd:execute-phase",
             "write_class": "no_write",
+            "smoothness_class": "smooth",
+            "schema_wrestling_class": "none",
+            "next_up_specificity_class": "concrete_command",
+            "mutation_guard_class": "no_write",
+            "invalid_command_suggestion_count": 0,
             "redaction_status_class": "pass",
             "finding_classes": ["alignment_answer_required"],
             "event_class_counts": {"ask_user_missing": 1, "dispatch_blocked": 1},
@@ -60,6 +71,11 @@ VALID_PUBLIC_SUMMARY: dict[str, object] = {
             "result_class": "stopped_before_dispatch",
             "next_action_class": "gpd:execute-phase",
             "write_class": "no_write",
+            "smoothness_class": "acceptable",
+            "schema_wrestling_class": "none",
+            "next_up_specificity_class": "bounded_resume",
+            "mutation_guard_class": "no_write",
+            "invalid_command_suggestion_count": 0,
             "redaction_status_class": "pass",
             "finding_classes": ["user_abort_stops_dispatch"],
             "event_class_counts": {"abort_selected": 1, "dispatch_blocked": 1},
@@ -173,6 +189,16 @@ def test_phase4_public_summary_validator_accepts_sanitized_class_only_summary() 
         "command_line",
         "provider_output",
         "note",
+        "raw_prompt_class",
+        "provider_reply_class",
+        "command_line_class",
+        "auth_path_class",
+        "file_hash_class",
+        "stdout_count",
+        "stderr_counts",
+        "argv_class",
+        "env_counts",
+        "secret_classes",
     ],
 )
 def test_phase4_public_summary_validator_rejects_raw_keys(raw_key: str) -> None:
@@ -192,8 +218,14 @@ def test_phase4_public_summary_validator_rejects_raw_keys(raw_key: str) -> None:
     "raw_value",
     [
         "Prompt text: run the whole phase and tell me the answer",
+        "raw prompt: run the whole phase and tell me the answer",
         "raw provider reply: the derivation is complete",
         "provider_reply:accepted",
+        "stdout",
+        "stderr",
+        "argv",
+        "env",
+        "command line: gpd progress --raw",
         "stdout.jsonl",
         "stderr.txt",
         "transcript excerpt from provider",
@@ -220,6 +252,30 @@ def test_phase4_public_summary_validator_rejects_raw_values(raw_value: str) -> N
     result = validate_summary(summary)
 
     assert any(finding.startswith("raw_value:") for finding in result.findings)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value", "expected_finding_prefix"),
+    [
+        ("invalid_command_suggestion_count", -1, "invalid_count_value:"),
+        ("schema_repair_loop_count", True, "invalid_count_value:"),
+        ("behavior_metric_counts", {"invalid_command_suggestion_count": "0"}, "invalid_count_value:"),
+        ("behavior_metric_counts", {"stdout": 1}, "raw_value:"),
+    ],
+)
+def test_phase4_public_summary_validator_rejects_invalid_behavior_counts(
+    field_name: str, field_value: object, expected_finding_prefix: str
+) -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    rows = summary["rows"]
+    assert isinstance(rows, list)
+    row = rows[0]
+    assert isinstance(row, dict)
+    row[field_name] = field_value
+
+    result = validate_summary(summary)
+
+    assert any(finding.startswith(expected_finding_prefix) for finding in result.findings)
 
 
 def test_phase4_public_summary_validator_cli_accepts_and_rejects(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

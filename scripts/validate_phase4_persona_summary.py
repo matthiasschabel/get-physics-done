@@ -24,6 +24,8 @@ SAFE_LITERAL_KEYS = {
     "finding_count",
     "ci_provider_launch_allowed",
     "manual_provider_launch_allowed",
+    "raw_artifact_retention_class",
+    "provider_launch_source_class",
 }
 SAFE_CONTAINER_KEYS = {
     "aggregate_class_counts",
@@ -33,6 +35,26 @@ SAFE_CONTAINER_KEYS = {
     "rows",
     "allowed_trigger_classes",
 }
+RAW_KEY_FRAGMENTS = (
+    "account",
+    "argv",
+    "auth",
+    "command_line",
+    "credential",
+    "env",
+    "hash",
+    "path",
+    "prompt",
+    "provider_output",
+    "provider_reply",
+    "raw_prompt",
+    "reply",
+    "secret",
+    "stderr",
+    "stdout",
+    "token",
+    "transcript",
+)
 CLASS_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 
 
@@ -82,8 +104,10 @@ RAW_VALUE_PATTERNS = {
         r"command)\.(?:txt|md|json|jsonl|log)\b",
         re.IGNORECASE,
     ),
+    "raw_stream_or_capture": re.compile(r"\b(?:stdout|stderr|argv|env)\b", re.IGNORECASE),
     "provider_prompt_or_reply": re.compile(
-        r"\b(?:provider prompt|raw provider reply|provider reply|provider[_-](?:prompt|reply|output)|"
+        r"\b(?:raw[_ -]?prompt|provider prompt|raw provider reply|provider reply|"
+        r"provider[_-](?:prompt|reply|output)|"
         r"final answer text|assistant replied|prompt text|prompt:|transcript excerpt)\b",
         re.IGNORECASE,
     ),
@@ -108,6 +132,8 @@ def _path_label(path: tuple[str, ...]) -> str:
 def _key_is_class_only_or_policy_safe(key: str) -> bool:
     if key in SAFE_LITERAL_KEYS or key in SAFE_CONTAINER_KEYS:
         return True
+    if any(fragment in key.lower() for fragment in RAW_KEY_FRAGMENTS):
+        return False
     if key.endswith(("_class", "_classes", "_count", "_counts")):
         return True
     return False
@@ -169,8 +195,15 @@ def _validate_count_map(value: object, path: tuple[str, ...], findings: list[str
     for key, count in value.items():
         if not isinstance(key, str) or not CLASS_TOKEN_RE.fullmatch(key):
             findings.append(f"invalid_count_key:{_path_label(path)}")
+        elif any(pattern.search(key) for pattern in RAW_VALUE_PATTERNS.values()):
+            findings.append(f"raw_value:count_key:{_path_label((*path, key))}")
         if not isinstance(count, int) or isinstance(count, bool) or count < 0:
             findings.append(f"invalid_count_value:{_path_label((*path, str(key)))}")
+
+
+def _validate_count_value(value: object, path: tuple[str, ...], findings: list[str]) -> None:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        findings.append(f"invalid_count_value:{_path_label(path)}")
 
 
 def _summary_policy_findings(value: object, path: tuple[str, ...] = ()) -> list[str]:
@@ -185,6 +218,9 @@ def _summary_policy_findings(value: object, path: tuple[str, ...] = ()) -> list[
                 findings.append(f"forbidden_key:{_path_label(child_path)}")
             if key.endswith("_counts"):
                 _validate_count_map(child, child_path, findings)
+                continue
+            if key.endswith("_count"):
+                _validate_count_value(child, child_path, findings)
                 continue
             findings.extend(_summary_policy_findings(child, child_path))
         return findings

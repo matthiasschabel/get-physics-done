@@ -12,6 +12,13 @@ from tests.helpers.phase4_persona.completion import (
     completion_replay_rows,
     score_completion_replay_row,
 )
+from tests.helpers.phase4_persona.matrix import (
+    NEXT_UP_SPECIFICITY_CLASSES,
+    PERSONA_CLASSES,
+    PHASE4_PERSONA_SCHEMA_VERSION,
+    SCHEMA_WRESTLING_CLASSES,
+    SMOOTHNESS_CLASSES,
+)
 
 
 def test_phase4_completion_replay_rows_are_provider_free_and_owned() -> None:
@@ -30,11 +37,21 @@ def test_phase4_completion_replay_rows_are_provider_free_and_owned() -> None:
         "P4-COMP-09",
     }
     assert all(row.schema_version == SCHEMA_VERSION for row in rows)
+    assert SCHEMA_VERSION == PHASE4_PERSONA_SCHEMA_VERSION
     assert all(row.surface == "completion" for row in rows)
-    assert all(row.runtime_scope == "provider_free" for row in rows)
+    assert all(row.fixture_family.endswith("_class") for row in rows)
+    assert all(row.runtime_scope == ("provider_free",) for row in rows)
+    assert {row.persona_class for row in rows} <= set(PERSONA_CLASSES)
+    assert all(row.prompt_variant_class for row in rows)
+    assert all(row.metadata_source in {"canonical_fixture", "compatibility_adapter"} for row in rows)
     assert all(row.provider_launch_allowed is False for row in rows)
     assert all(row.network_allowed is False for row in rows)
     assert all(row.raw_artifacts_allowed is False for row in rows)
+    assert all(row.behavior_contract_id for row in rows)
+    assert {row.expected_smoothness_class for row in rows} <= set(SMOOTHNESS_CLASSES)
+    assert {row.expected_schema_wrestling_class for row in rows} <= set(SCHEMA_WRESTLING_CLASSES)
+    assert {row.expected_next_up_specificity_class for row in rows} <= set(NEXT_UP_SPECIFICITY_CLASSES) | {None}
+    assert {row.expected_mutation_guard_class for row in rows} <= {"no_write", "expected_write_only"}
 
     repo_root = Path(__file__).resolve().parents[2]
     for row in rows:
@@ -81,6 +98,12 @@ def test_phase4_persona_completion_replay(
         assert outcome.next_action_class == row.expected_next_action_class
     if row.expect_no_mutation:
         assert outcome.mutated is False
+    assert _smoothness_class(row, outcome) == row.expected_smoothness_class
+    assert _schema_wrestling_class(outcome.failure_classes) == row.expected_schema_wrestling_class
+    if row.expected_next_action_class is not None and row.expected_next_up_specificity_class is not None:
+        assert _next_up_specificity_class(outcome.next_action_class) == row.expected_next_up_specificity_class
+    assert _mutation_guard_class(row, outcome) == row.expected_mutation_guard_class
+    _assert_metric_bounds(row, outcome)
 
 
 def test_phase4_completion_runtime_verify_work_row_rejects_structural_verify_phase(
@@ -109,3 +132,57 @@ def test_phase4_completion_readiness_row_does_not_mutate_state_roadmap_or_checkp
     assert outcome.mutated is False
     assert outcome.result_class == "read_only_ready_closeout"
     assert outcome.next_action_class == "phase_complete"
+
+
+def _smoothness_class(row: CompletionReplayRow, outcome) -> str:
+    if outcome.mutated and row.expect_no_mutation:
+        return "regressed"
+    if row.expected_result_class.startswith("blocked"):
+        return "acceptable"
+    return "smooth"
+
+
+def _schema_wrestling_class(failure_classes: tuple[str, ...]) -> str:
+    schema_failures = {
+        "return_missing",
+        "return_malformed_repairable",
+        "return_malformed_blocking",
+        "unfenced_candidate",
+    }
+    return "minor" if schema_failures.intersection(failure_classes) else "none"
+
+
+def _next_up_specificity_class(next_action_class: str | None) -> str:
+    if next_action_class is None or next_action_class == "unknown":
+        return "none"
+    if next_action_class == "runtime_verify_work":
+        return "runtime_verify_work"
+    if next_action_class == "resume_work":
+        return "bounded_resume"
+    return "concrete_command"
+
+
+def _mutation_guard_class(row: CompletionReplayRow, outcome) -> str:
+    if outcome.mutated and row.expect_no_mutation:
+        return "unexpected_write"
+    if outcome.mutated:
+        return "expected_write_only"
+    return "no_write"
+
+
+def _assert_metric_bounds(row: CompletionReplayRow, outcome) -> None:
+    for metric_name, expected_count in row.expected_metric_bounds:
+        assert _observed_metric_count(metric_name, row, outcome) == expected_count
+
+
+def _observed_metric_count(metric_name: str, row: CompletionReplayRow, outcome) -> int:
+    match metric_name:
+        case "unexpected_write_count":
+            return int(outcome.mutated and row.expect_no_mutation)
+        case "structured_authority_coverage":
+            return int(bool(outcome.failure_classes) or bool(outcome.commands) or outcome.ready is not None)
+        case "unsupported_completion_claim_count":
+            return 0
+        case "invalid_command_suggestion_count":
+            return 0
+    raise AssertionError(f"unhandled completion behavior metric: {metric_name}")

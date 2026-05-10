@@ -19,6 +19,24 @@ from tests.helpers.phase4_persona.user_steering import (
 
 CLASS_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]*$")
 
+EXPECTED_BEHAVIOR_BUCKETS = {
+    "P4-USER-01": "ask_user_required",
+    "P4-USER-02": "abort_blocks_dispatch",
+    "P4-USER-03": "tangent_review_stop",
+    "P4-USER-04": "bounded_resume_primary",
+    "P4-USER-05": "supervised_closeout_concrete_next_up",
+    "P4-USER-06": "canonical_bounded_segment_preference",
+}
+
+EXPECTED_NEXT_ACTION_ANCHORS = {
+    "P4-USER-01": "gpd:execute-phase",
+    "P4-USER-02": "gpd:execute-phase",
+    "P4-USER-03": "review_stop",
+    "P4-USER-04": "gpd:resume-work",
+    "P4-USER-05": "concrete_next_command",
+    "P4-USER-06": "bounded_segment_resume",
+}
+
 
 def _assert_class_only(value: object) -> None:
     if isinstance(value, str):
@@ -55,6 +73,8 @@ def test_phase4_user_steering_rows_are_provider_free_and_owned() -> None:
     assert all(row.network_allowed is False for row in rows)
     assert all(row.raw_artifacts_allowed is False for row in rows)
     assert all(row.mutation_allowed is False for row in rows)
+    assert {row.row_id: row.expected_behavior_bucket_class for row in rows} == EXPECTED_BEHAVIOR_BUCKETS
+    assert {row.row_id: row.expected_next_action_class for row in rows} == EXPECTED_NEXT_ACTION_ANCHORS
 
     source_files = {source_file for row in rows for source_file in row.source_files}
     assert source_files == {
@@ -73,13 +93,18 @@ def test_phase4_user_steering_replay_scores_expected_class(row: UserSteeringRow)
 
     outcome = score_user_steering_row(row, event)
 
+    assert event.behavior_bucket_class == row.expected_behavior_bucket_class
     assert outcome.provider_launch_allowed is False
     assert outcome.network_allowed is False
     assert outcome.raw_artifacts_allowed is False
     assert outcome.mutated is False
     assert outcome.finding_id == row.expected_finding
+    assert outcome.behavior_bucket_class == row.expected_behavior_bucket_class
     assert outcome.result_class == row.expected_result_class
     assert outcome.next_action_class == row.expected_next_action_class
+    assert outcome.dispatch_class == row.expected_dispatch_class
+    assert outcome.resume_target_class == row.expected_resume_target_class
+    assert outcome.next_up_specificity_class == row.expected_next_up_specificity_class
     assert row.expected_finding in outcome.failure_classes
     _assert_outcome_class_only(outcome)
 

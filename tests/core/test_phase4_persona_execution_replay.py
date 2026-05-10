@@ -11,6 +11,13 @@ from tests.helpers.phase4_persona.execution import (
     execution_replay_rows,
     score_execution_replay_row,
 )
+from tests.helpers.phase4_persona.matrix import (
+    NEXT_UP_SPECIFICITY_CLASSES,
+    PERSONA_CLASSES,
+    PHASE4_PERSONA_SCHEMA_VERSION,
+    SCHEMA_WRESTLING_CLASSES,
+    SMOOTHNESS_CLASSES,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -20,6 +27,13 @@ def test_phase4_execution_replay_rows_are_provider_free_and_owned() -> None:
 
     assert len(rows) == 14
     assert len({row.row_id for row in rows}) == len(rows)
+    assert all(row.schema_version == PHASE4_PERSONA_SCHEMA_VERSION for row in rows)
+    assert all(row.surface == "execution" for row in rows)
+    assert all(row.fixture_family.endswith("_class") for row in rows)
+    assert all(row.runtime_scope == ("provider_free",) for row in rows)
+    assert {row.persona_class for row in rows} <= set(PERSONA_CLASSES)
+    assert all(row.prompt_variant_class for row in rows)
+    assert all(row.metadata_source in {"canonical_fixture", "compatibility_adapter"} for row in rows)
     assert {row.scenario for row in rows} == {
         "valid_final_plan_ready_to_execute",
         "invalid_gpd_verify_work_surface",
@@ -39,6 +53,11 @@ def test_phase4_execution_replay_rows_are_provider_free_and_owned() -> None:
     assert all(row.provider_launch_allowed is False for row in rows)
     assert all(row.network_allowed is False for row in rows)
     assert all(row.raw_artifacts_allowed is False for row in rows)
+    assert all(row.behavior_contract_id for row in rows)
+    assert {row.expected_smoothness_class for row in rows} <= set(SMOOTHNESS_CLASSES)
+    assert {row.expected_schema_wrestling_class for row in rows} <= set(SCHEMA_WRESTLING_CLASSES)
+    assert {row.expected_next_up_specificity_class for row in rows} <= set(NEXT_UP_SPECIFICITY_CLASSES)
+    assert {row.expected_mutation_guard_class for row in rows} <= {"no_write", "expected_write_only"}
     for row in rows:
         assert all((REPO_ROOT / owner).exists() for owner in row.source_owners)
         assert all((REPO_ROOT / owner).exists() for owner in row.test_owners)
@@ -70,3 +89,80 @@ def test_phase4_persona_execution_replay(
         assert outcome.state_status_class == row.expected_state_status_class
     if row.expected_next_action_class is not None:
         assert outcome.next_action_class == row.expected_next_action_class
+    assert _smoothness_class(row, outcome) == row.expected_smoothness_class
+    assert _schema_wrestling_class(outcome) == row.expected_schema_wrestling_class
+    if outcome.next_action_class is not None:
+        assert _next_up_specificity_class(outcome.next_action_class) == row.expected_next_up_specificity_class
+    assert _mutation_guard_class(row, outcome) == row.expected_mutation_guard_class
+    _assert_metric_bounds(row, outcome)
+
+
+def _smoothness_class(row: ExecutionReplayRow, outcome) -> str:
+    if outcome.mutated and not row.mutation_allowed:
+        return "regressed"
+    if _schema_wrestling_class(outcome) != "none":
+        return "clunky"
+    if outcome.result_class in {"accepted", "checkpoint_recorded"}:
+        return "smooth"
+    if row.scenario in {"invalid_gpd_verify_work_surface", "invalid_gpd_verify_phase_surface"}:
+        return "acceptable"
+    if outcome.result_class == "blocked":
+        return "acceptable"
+    return "smooth"
+
+
+def _schema_wrestling_class(outcome) -> str:
+    classes = set(outcome.failure_classes)
+    classes.add(outcome.finding_id)
+    if {"return_malformed_blocking", "applicator_output_only"}.intersection(classes):
+        return "high"
+    if {"return_missing", "return_malformed_repairable", "unfenced_candidate"}.intersection(classes):
+        return "minor"
+    return "none"
+
+
+def _next_up_specificity_class(next_action_class: str | None) -> str:
+    if next_action_class is None or next_action_class == "unknown":
+        return "none"
+    if next_action_class == "runtime_verify_work":
+        return "runtime_verify_work"
+    if next_action_class == "resume_work":
+        return "bounded_resume"
+    return "concrete_command"
+
+
+def _mutation_guard_class(row: ExecutionReplayRow, outcome) -> str:
+    if outcome.mutated and not row.mutation_allowed:
+        return "unexpected_write"
+    if outcome.mutated:
+        return "expected_write_only"
+    return "no_write"
+
+
+def _assert_metric_bounds(row: ExecutionReplayRow, outcome) -> None:
+    for metric_name, expected_count in row.expected_metric_bounds:
+        assert _observed_metric_count(metric_name, row, outcome) == expected_count
+
+
+def _observed_metric_count(metric_name: str, row: ExecutionReplayRow, outcome) -> int:
+    match metric_name:
+        case "invalid_command_suggestion_count":
+            return 0
+        case "prose_claim_mismatch_count":
+            return int(row.scenario in {"prose_success_no_return", "multiple_gpd_returns", "applicator_result_prose_only"})
+        case "schema_repair_loop_count":
+            return int(_schema_wrestling_class(outcome) != "none")
+        case "stale_artifact_trust_count":
+            return 0
+        case "structured_authority_coverage":
+            return int(
+                outcome.accepted
+                or bool(outcome.failure_classes)
+                or bool(outcome.applied_operations)
+                or bool(outcome.checked_artifact_classes)
+            )
+        case "unsupported_completion_claim_count":
+            return int(row.scenario in {"intermediate_plan_cannot_complete_phase", "applicator_result_prose_only"})
+        case "unexpected_write_count":
+            return int(outcome.mutated and not row.mutation_allowed)
+    raise AssertionError(f"unhandled execution behavior metric: {metric_name}")

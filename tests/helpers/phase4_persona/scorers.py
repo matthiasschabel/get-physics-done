@@ -5,12 +5,15 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from gpd.command_labels import runtime_public_command_prefixes
 from gpd.core.command_run_hints import build_command_run_hint
 from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
 from gpd.core.phase_closeout import phase_closeout_readiness
+from tests.helpers.phase4_persona.completion import completion_replay_rows, score_completion_replay_row
+from tests.helpers.phase4_persona.execution import execution_replay_rows, score_execution_replay_row
 from tests.helpers.phase4_persona.project_fixtures import (
     FINAL_SUMMARY_REL,
     PHASE_DIR_REL,
@@ -20,7 +23,15 @@ from tests.helpers.phase4_persona.project_fixtures import (
     write_replay_report,
 )
 
-PersonaScorer = Callable[[Path], "PersonaOutcome"]
+
+class _PersonaRowLike(Protocol):
+    scenario: str
+    expected_finding: str
+    expected_result_class: str
+
+
+PersonaScorer = Callable[[_PersonaRowLike, Path], "PersonaOutcome"]
+PathPersonaScorer = Callable[[Path], "PersonaOutcome"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +71,14 @@ def _outcome(
         failure_classes=ordered_failures,
         evidence_classes=tuple(dict.fromkeys(evidence_classes)),
     )
+
+
+def _path_only(scorer: PathPersonaScorer) -> PersonaScorer:
+    def _score(row: _PersonaRowLike, root: Path) -> PersonaOutcome:
+        del row
+        return scorer(root)
+
+    return _score
 
 
 def _public_runtime_verify_work(command: str) -> bool:
@@ -283,27 +302,108 @@ def score_passed_verification_closeout_readiness_read_only(root: Path) -> Person
     )
 
 
+_EXECUTION_ROWS_BY_SCENARIO = {row.scenario: row for row in execution_replay_rows()}
+_COMPLETION_ROWS_BY_SCENARIO = {row.scenario: row for row in completion_replay_rows()}
+
+
+def _matches_execution_replay_contract(row: _PersonaRowLike, scenario: str) -> bool:
+    replay_row = _EXECUTION_ROWS_BY_SCENARIO[scenario]
+    return (
+        row.expected_finding == replay_row.expected_finding
+        and row.expected_result_class == replay_row.expected_result_class
+    )
+
+
+def _provider_free_outcome(outcome: object) -> None:
+    if (
+        getattr(outcome, "provider_launch_allowed", False)
+        or getattr(outcome, "network_allowed", False)
+        or getattr(outcome, "raw_artifacts_allowed", False)
+    ):
+        raise AssertionError("Phase 4 persona replay outcomes must stay provider-free and class-only")
+
+
+def _score_execution_replay_scenario(row: _PersonaRowLike, root: Path) -> PersonaOutcome:
+    outcome = score_execution_replay_row(_EXECUTION_ROWS_BY_SCENARIO[row.scenario], root)
+    _provider_free_outcome(outcome)
+    return _outcome(
+        finding_id=str(outcome.finding_id),
+        result_class=str(outcome.result_class),
+        accepted=outcome.accepted,
+        mutated=outcome.mutated,
+        state_status_class=outcome.state_status_class,
+        next_action_class=outcome.next_action_class,
+        failure_classes=tuple(str(failure_class) for failure_class in outcome.failure_classes),
+        evidence_classes=tuple(
+            str(evidence_class)
+            for evidence_class in (*outcome.applied_operations, *outcome.checked_artifact_classes)
+        ),
+    )
+
+
+def _score_completion_replay_scenario(row: _PersonaRowLike, root: Path) -> PersonaOutcome:
+    outcome = score_completion_replay_row(_COMPLETION_ROWS_BY_SCENARIO[row.scenario], root)
+    _provider_free_outcome(outcome)
+    return _outcome(
+        finding_id=str(outcome.finding_id),
+        result_class=str(outcome.result_class),
+        accepted=outcome.ready is True,
+        mutated=outcome.mutated,
+        state_status_class=outcome.state_status_class,
+        next_action_class=outcome.next_action_class,
+        failure_classes=tuple(str(failure_class) for failure_class in outcome.failure_classes),
+    )
+
+
+def _score_prose_success_no_return(row: _PersonaRowLike, root: Path) -> PersonaOutcome:
+    if _matches_execution_replay_contract(row, "prose_success_no_return"):
+        return _score_execution_replay_scenario(row, root)
+    return score_prose_success_no_return(root)
+
+
+def _score_checkpoint_missing_bounded_context(row: _PersonaRowLike, root: Path) -> PersonaOutcome:
+    if _matches_execution_replay_contract(row, "checkpoint_missing_bounded_context"):
+        return _score_execution_replay_scenario(row, root)
+    return score_checkpoint_missing_bounded_context(root)
+
+
+def _score_intermediate_plan_cannot_complete_phase(row: _PersonaRowLike, root: Path) -> PersonaOutcome:
+    if _matches_execution_replay_contract(row, "intermediate_plan_cannot_complete_phase"):
+        return _score_execution_replay_scenario(row, root)
+    return score_intermediate_plan_cannot_complete_phase(root)
+
+
 SCORERS: dict[str, PersonaScorer] = {
-    "invalid_verify_command_surface": score_invalid_verify_command_surface,
-    "prose_success_no_return": score_prose_success_no_return,
-    "stale_files_written": score_stale_files_written,
-    "checkpoint_missing_bounded_context": score_checkpoint_missing_bounded_context,
-    "bounded_segment_bypass": score_bounded_segment_bypass,
-    "intermediate_plan_cannot_complete_phase": score_intermediate_plan_cannot_complete_phase,
-    "missing_verification_blocks_closeout": score_missing_verification_blocks_closeout,
-    "non_passing_verification_records_blocked": score_non_passing_verification_records_blocked,
-    "active_bounded_segment_routes_resume_work": score_active_bounded_segment_routes_resume_work,
-    "passed_verification_closeout_readiness_read_only": score_passed_verification_closeout_readiness_read_only,
+    **dict.fromkeys(_EXECUTION_ROWS_BY_SCENARIO, _score_execution_replay_scenario),
+    **dict.fromkeys(_COMPLETION_ROWS_BY_SCENARIO, _score_completion_replay_scenario),
+    "invalid_verify_command_surface": _path_only(score_invalid_verify_command_surface),
+    "prose_success_no_return": _score_prose_success_no_return,
+    "stale_files_written": _path_only(score_stale_files_written),
+    "checkpoint_missing_bounded_context": _score_checkpoint_missing_bounded_context,
+    "intermediate_plan_cannot_complete_phase": _score_intermediate_plan_cannot_complete_phase,
+    "missing_verification_blocks_closeout": _path_only(score_missing_verification_blocks_closeout),
+    "non_passing_verification_records_blocked": _path_only(score_non_passing_verification_records_blocked),
+    "active_bounded_segment_routes_resume_work": _path_only(score_active_bounded_segment_routes_resume_work),
+    "passed_verification_closeout_readiness_read_only": _path_only(
+        score_passed_verification_closeout_readiness_read_only
+    ),
 }
 
 
-def registered_scenarios() -> frozenset[str]:
+def registered_phase4_scenarios() -> frozenset[str]:
+    """Return canonical fixture scenario ids with executable shared scorers."""
+
     return frozenset(SCORERS)
+
+
+def registered_scenarios() -> frozenset[str]:
+    return registered_phase4_scenarios()
 
 
 __all__ = [
     "PersonaOutcome",
     "SCORERS",
+    "registered_phase4_scenarios",
     "registered_scenarios",
     "score_bounded_segment_bypass",
     "score_checkpoint_missing_bounded_context",

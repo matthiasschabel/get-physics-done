@@ -2,14 +2,30 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Protocol
 
-from tests.helpers.phase4_persona.scorers import SCORERS, PersonaOutcome
+from tests.helpers.phase4_persona.matrix import (
+    PHASE4_PERSONA_SCHEMA_VERSION,
+    SURFACES,
+    PersonaMatrixRow,
+    fixture_path_for_surface,
+)
+from tests.helpers.phase4_persona.matrix import (
+    load_phase4_rows as load_phase4_matrix_rows,
+)
+from tests.helpers.phase4_persona.scorers import (
+    SCORERS,
+    PersonaOutcome,
+)
+from tests.helpers.phase4_persona.scorers import (
+    registered_phase4_scenarios as registered_phase4_scorer_scenarios,
+)
 
-SCHEMA_VERSION = "phase4.persona_lifecycle_matrix.v1"
+SCHEMA_VERSION = PHASE4_PERSONA_SCHEMA_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,55 +52,6 @@ class _MonkeyPatchLike(Protocol):
     def setenv(self, name: str, value: str) -> None: ...
 
 
-_SEED_ROWS: tuple[PersonaRow, ...] = (
-    PersonaRow(
-        row_id="P4-S-01",
-        surface="completion",
-        scenario="invalid_verify_command_surface",
-        expected_finding="invalid_verify_command_surface",
-        expected_result_class="blocked_no_mutation",
-        expected_state_status_class="unchanged",
-        expected_next_action_class="active_runtime_verify_work",
-    ),
-    PersonaRow(
-        row_id="P4-S-02",
-        surface="execution",
-        scenario="prose_success_no_return",
-        expected_finding="return_missing",
-        expected_result_class="blocked_no_mutation",
-        expected_state_status_class="unchanged",
-        expected_next_action_class="retry_child_return",
-    ),
-    PersonaRow(
-        row_id="P4-S-03",
-        surface="execution",
-        scenario="stale_files_written",
-        expected_finding="artifact_stale",
-        expected_result_class="blocked_no_mutation",
-        expected_state_status_class="unchanged",
-        expected_next_action_class="retry_fresh_artifact",
-    ),
-    PersonaRow(
-        row_id="P4-S-04",
-        surface="execution",
-        scenario="checkpoint_missing_bounded_context",
-        expected_finding="checkpoint_missing_bounded_segment",
-        expected_result_class="blocked_no_mutation",
-        expected_state_status_class="unchanged",
-        expected_next_action_class="create_bounded_resume_context",
-    ),
-    PersonaRow(
-        row_id="P4-S-05",
-        surface="completion",
-        scenario="bounded_segment_bypass",
-        expected_finding="closeout_authority_blocks_premature_completion",
-        expected_result_class="blocked_no_mutation",
-        expected_state_status_class="unchanged",
-        expected_next_action_class="gpd_resume_work",
-    ),
-)
-
-
 def _validate_rows(rows: tuple[PersonaRow, ...]) -> None:
     row_ids = [row.row_id for row in rows]
     if len(row_ids) != len(set(row_ids)):
@@ -99,11 +66,94 @@ def _validate_rows(rows: tuple[PersonaRow, ...]) -> None:
 
 
 def load_phase4_rows(surface: str | None = None) -> tuple[PersonaRow, ...]:
-    """Return provider-free replay rows, optionally filtered by behavior surface."""
+    """Return executable provider-free replay rows from the canonical fixture matrix."""
 
-    rows = _SEED_ROWS if surface is None else tuple(row for row in _SEED_ROWS if row.surface == surface)
+    return load_phase4_replay_rows(surface)
+
+
+def load_phase4_replay_rows(surface: str | None = None) -> tuple[PersonaRow, ...]:
+    """Load canonical matrix rows that have executable shared scorers."""
+
+    rows = tuple(persona_row_from_matrix_row(row) for row in executable_phase4_matrix_rows(surface))
     _validate_rows(rows)
     return rows
+
+
+def executable_phase4_matrix_rows(surface: str | None = None) -> tuple[PersonaMatrixRow | PersonaRow, ...]:
+    """Return canonical matrix rows covered by the shared replay scorer registry."""
+
+    scenarios = registered_phase4_scorer_scenarios()
+    return tuple(row for row in _load_matrix_like_rows(surface) if persona_row_from_matrix_row(row).scenario in scenarios)
+
+
+def registered_phase4_scenarios(surface: str | None = None) -> frozenset[str]:
+    """Return executable scenario ids present in the currently loadable matrix rows."""
+
+    return frozenset(persona_row_from_matrix_row(row).scenario for row in executable_phase4_matrix_rows(surface))
+
+
+def persona_row_from_matrix_row(row: PersonaRow | PersonaMatrixRow | Mapping[str, object] | object) -> PersonaRow:
+    """Coerce a canonical matrix row into the shared executable row model."""
+
+    if isinstance(row, PersonaRow):
+        return row
+    if isinstance(row, Mapping):
+        return persona_row_from_mapping(row)
+    if is_dataclass(row):
+        return persona_row_from_mapping(asdict(row))
+    return persona_row_from_mapping(
+        {
+            "row_id": _required_attr(row, "row_id"),
+            "surface": _required_attr(row, "surface"),
+            "scenario": _required_attr(row, "scenario"),
+            "expected_finding": _required_attr(row, "expected_finding"),
+            "expected_result_class": _required_attr(row, "expected_result_class"),
+            "provider_launch_allowed": _optional_attr(row, "provider_launch_allowed", False),
+            "network_allowed": _optional_attr(row, "network_allowed", False),
+            "raw_artifacts_allowed": _optional_attr(row, "raw_artifacts_allowed", False),
+            "mutation_allowed": _optional_attr(row, "mutation_allowed", False),
+            "expected_state_status_class": _optional_attr(row, "expected_state_status_class", None),
+            "expected_next_action_class": _optional_attr(row, "expected_next_action_class", None),
+            "fixture_family": _optional_attr(row, "fixture_family", "phase4_persona_replay"),
+            "runtime_scope": _optional_attr(row, "runtime_scope", ("provider_free",)),
+            "schema_version": _optional_attr(row, "schema_version", SCHEMA_VERSION),
+        }
+    )
+
+
+def _load_matrix_like_rows(surface: str | None = None) -> tuple[PersonaMatrixRow | PersonaRow, ...]:
+    try:
+        return load_phase4_matrix_rows(surface)
+    except (TypeError, ValueError) as exc:
+        if not _can_fallback_to_fixture_rows(exc):
+            raise
+        return _load_fixture_replay_rows(surface)
+
+
+def _can_fallback_to_fixture_rows(exc: Exception) -> bool:
+    message = str(exc)
+    return (
+        "behavior_contract_id" in message
+        or "expected_metric_bounds" in message
+        or "unknown scenario" in message
+    )
+
+
+def _load_fixture_replay_rows(surface: str | None = None) -> tuple[PersonaRow, ...]:
+    surfaces = (surface,) if surface is not None else SURFACES
+    rows: list[PersonaRow] = []
+    for selected_surface in surfaces:
+        payload = json.loads(fixture_path_for_surface(selected_surface).read_text(encoding="utf-8"))
+        if payload.get("surface") != selected_surface:
+            raise ValueError(f"{selected_surface!r} fixture declares surface {payload.get('surface')!r}")
+        raw_rows = payload.get("rows")
+        if not isinstance(raw_rows, list):
+            raise TypeError(f"{selected_surface!r} fixture rows must be a list")
+        for raw_row in raw_rows:
+            if not isinstance(raw_row, dict):
+                raise TypeError(f"{selected_surface!r} fixture contains a non-object row: {raw_row!r}")
+            rows.append(persona_row_from_mapping(raw_row))
+    return tuple(rows)
 
 
 def persona_row_from_mapping(data: Mapping[str, object]) -> PersonaRow:
@@ -126,7 +176,7 @@ def persona_row_from_mapping(data: Mapping[str, object]) -> PersonaRow:
         provider_launch_allowed=bool(data.get("provider_launch_allowed", False)),
         network_allowed=bool(data.get("network_allowed", False)),
         raw_artifacts_allowed=bool(data.get("raw_artifacts_allowed", False)),
-        mutation_allowed=bool(data.get("mutation_allowed", False)),
+        mutation_allowed=bool(data.get("mutation_allowed") or False),
         expected_state_status_class=(
             None if data.get("expected_state_status_class") is None else str(data["expected_state_status_class"])
         ),
@@ -185,14 +235,18 @@ def score_phase4_row(
     _validate_rows((replay_row,))
     if monkeypatch is not None:
         monkeypatch.setenv("GPD_DATA_DIR", str(tmp_path / ".gpd-data"))
-    return SCORERS[replay_row.scenario](tmp_path)
+    return SCORERS[replay_row.scenario](replay_row, tmp_path)
 
 
 __all__ = [
     "PersonaOutcome",
     "PersonaRow",
     "SCHEMA_VERSION",
+    "executable_phase4_matrix_rows",
     "load_phase4_rows",
+    "load_phase4_replay_rows",
     "persona_row_from_mapping",
+    "persona_row_from_matrix_row",
+    "registered_phase4_scenarios",
     "score_phase4_row",
 ]

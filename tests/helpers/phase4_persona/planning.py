@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from gpd.core.context import init_plan_phase
@@ -11,6 +11,13 @@ from gpd.core.errors import ValidationError
 from gpd.core.state import default_state_dict, save_state_json, state_set_project_contract
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.helpers.git import git_add, git_commit, init_test_git_repo, run_git, seed_test_git_repo
+from tests.helpers.phase4_persona.matrix import (
+    PHASE4_PERSONA_SCHEMA_VERSION,
+    PersonaMatrixRow,
+)
+from tests.helpers.phase4_persona.matrix import (
+    load_phase4_rows as load_phase4_matrix_rows,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GPD_DIRNAME = "GPD"
@@ -19,6 +26,15 @@ PLAN_PHASE_COMMAND = REPO_ROOT / "src" / "gpd" / "commands" / "plan-phase.md"
 PLAN_PHASE_STAGE_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "plan-phase"
 PLAN_CHECKER_PROMPT = REPO_ROOT / "src" / "gpd" / "agents" / "gpd-plan-checker.md"
 PLANNER_TEMPLATE = REPO_ROOT / "src" / "gpd" / "specs" / "templates" / "planner-subagent-prompt.md"
+PLANNING_SOURCE_OWNERS = (
+    "src/gpd/core/context.py",
+    "src/gpd/core/workflow_staging.py",
+    "src/gpd/specs/workflows/plan-phase/phase-bootstrap.md",
+)
+PLANNING_TEST_OWNERS = (
+    "tests/helpers/phase4_persona/planning.py",
+    "tests/core/test_phase4_persona_planning_replay.py",
+)
 
 
 @dataclass(frozen=True)
@@ -27,10 +43,28 @@ class PlanningReplayRow:
     scenario: str
     expected_finding: str
     expected_result_class: str
+    schema_version: str = PHASE4_PERSONA_SCHEMA_VERSION
+    surface: str = "planning"
+    fixture_family: str = "planning_replay_class"
+    runtime_scope: tuple[str, ...] = ("provider_free",)
+    source_owners: tuple[str, ...] = PLANNING_SOURCE_OWNERS
+    test_owners: tuple[str, ...] = PLANNING_TEST_OWNERS
     provider_launch_allowed: bool = False
     network_allowed: bool = False
     raw_artifacts_allowed: bool = False
     expected_mutated: bool = False
+    behavior_contract_id: str | None = None
+    persona_class: str = "planner"
+    prompt_variant_class: str = "workflow_stage_replay"
+    expected_smoothness_class: str = "smooth"
+    expected_schema_wrestling_class: str = "none"
+    expected_next_up_specificity_class: str = "none"
+    expected_mutation_guard_class: str = "no_write"
+    expected_metric_bounds: tuple[tuple[str, int], ...] = (
+        ("schema_repair_loop_count", 0),
+        ("unexpected_write_count", 0),
+    )
+    metadata_source: str = "compatibility_adapter"
 
 
 @dataclass(frozen=True)
@@ -80,7 +114,95 @@ PLANNING_REPLAY_ROWS = (
 def load_planning_replay_rows() -> tuple[PlanningReplayRow, ...]:
     """Return the class-only provider-free planning replay rows."""
 
-    return PLANNING_REPLAY_ROWS
+    canonical_rows = _canonical_rows_by_exact_contract()
+    return tuple(_with_canonical_metadata(row, canonical_rows) for row in PLANNING_REPLAY_ROWS)
+
+
+def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
+    try:
+        return {
+            (row.row_id, row.scenario, row.expected_finding, row.expected_result_class): row
+            for row in load_phase4_matrix_rows("planning")
+        }
+    except (FileNotFoundError, KeyError, TypeError, ValueError):
+        return {}
+
+
+def _with_canonical_metadata(
+    row: PlanningReplayRow,
+    canonical_rows: dict[tuple[str, str, str, str], PersonaMatrixRow],
+) -> PlanningReplayRow:
+    row = _with_behavior_contract_defaults(row)
+    canonical = canonical_rows.get((row.row_id, row.scenario, row.expected_finding, row.expected_result_class))
+    if canonical is None:
+        return row
+
+    return replace(
+        row,
+        schema_version=canonical.schema_version,
+        fixture_family=canonical.fixture_family,
+        runtime_scope=canonical.runtime_scope,
+        source_owners=canonical.source_owners,
+        test_owners=canonical.test_owners,
+        provider_launch_allowed=canonical.provider_launch_allowed,
+        network_allowed=canonical.network_allowed,
+        raw_artifacts_allowed=canonical.raw_artifacts_allowed,
+        behavior_contract_id=getattr(canonical, "behavior_contract_id", row.behavior_contract_id),
+        persona_class=getattr(canonical, "persona_class", row.persona_class),
+        prompt_variant_class=getattr(canonical, "prompt_variant_class", row.prompt_variant_class),
+        expected_smoothness_class=getattr(
+            canonical,
+            "expected_smoothness_class",
+            row.expected_smoothness_class,
+        ),
+        expected_schema_wrestling_class=getattr(
+            canonical,
+            "expected_schema_wrestling_class",
+            row.expected_schema_wrestling_class,
+        ),
+        expected_next_up_specificity_class=getattr(
+            canonical,
+            "expected_next_up_specificity_class",
+            row.expected_next_up_specificity_class,
+        ),
+        expected_mutation_guard_class=getattr(
+            canonical,
+            "expected_mutation_guard_class",
+            row.expected_mutation_guard_class,
+        ),
+        expected_metric_bounds=_normalize_metric_bounds(
+            getattr(canonical, "expected_metric_bounds", row.expected_metric_bounds)
+        ),
+        metadata_source="canonical_fixture",
+    )
+
+
+def _with_behavior_contract_defaults(row: PlanningReplayRow) -> PlanningReplayRow:
+    expected_smoothness_class = "smooth"
+    if row.scenario in {
+        "missing_phase_no_target_invention",
+        "project_contract_authority_block",
+        "dirty_worktree_hard_stop",
+    }:
+        expected_smoothness_class = "acceptable"
+    return replace(
+        row,
+        behavior_contract_id=row.behavior_contract_id or f"phase4.planning.{row.scenario}",
+        expected_smoothness_class=expected_smoothness_class,
+    )
+
+
+def _normalize_metric_bounds(value: object) -> tuple[tuple[str, int], ...]:
+    if isinstance(value, dict):
+        return tuple(sorted((str(key), int(bound)) for key, bound in value.items()))
+    if isinstance(value, (list, tuple)):
+        normalized: list[tuple[str, int]] = []
+        for item in value:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                normalized.append((str(item[0]), int(item[1])))
+        if normalized:
+            return tuple(normalized)
+    return ()
 
 
 def score_planning_replay_row(row: PlanningReplayRow, tmp_path: Path) -> PlanningReplayOutcome:

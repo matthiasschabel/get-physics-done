@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -14,6 +14,13 @@ from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
 from gpd.core.return_repair_classifier import classify_gpd_return_repair
 from gpd.core.state import default_state_dict, generate_state_markdown
+from tests.helpers.phase4_persona.matrix import (
+    PHASE4_PERSONA_SCHEMA_VERSION,
+    PersonaMatrixRow,
+)
+from tests.helpers.phase4_persona.matrix import (
+    load_phase4_rows as load_phase4_matrix_rows,
+)
 
 PHASE = "02"
 PLAN = "02"
@@ -30,11 +37,22 @@ class ExecutionReplayRow:
     fixture_family: str
     expected_finding: str
     expected_result_class: str
+    schema_version: str = PHASE4_PERSONA_SCHEMA_VERSION
+    surface: str = "execution"
+    runtime_scope: tuple[str, ...] = ("provider_free",)
     expected_accepted: bool = False
     expected_mutated: bool = False
     mutation_allowed: bool = False
     expected_state_status_class: str | None = None
     expected_next_action_class: str | None = None
+    behavior_contract_id: str | None = None
+    persona_class: str = "executor"
+    prompt_variant_class: str = "child_return_replay"
+    expected_smoothness_class: str | None = None
+    expected_schema_wrestling_class: str | None = None
+    expected_next_up_specificity_class: str | None = None
+    expected_mutation_guard_class: str | None = None
+    expected_metric_bounds: tuple[tuple[str, int], ...] = ()
     provider_launch_allowed: bool = False
     network_allowed: bool = False
     raw_artifacts_allowed: bool = False
@@ -43,6 +61,7 @@ class ExecutionReplayRow:
         "tests/helpers/phase4_persona/execution.py",
         "tests/core/test_phase4_persona_execution_replay.py",
     )
+    metadata_source: str = "compatibility_adapter"
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,7 +208,152 @@ _EXECUTION_ROWS = (
 
 
 def execution_replay_rows() -> tuple[ExecutionReplayRow, ...]:
-    return _EXECUTION_ROWS
+    canonical_rows = _canonical_rows_by_exact_contract()
+    return tuple(_with_canonical_metadata(row, canonical_rows) for row in _EXECUTION_ROWS)
+
+
+def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
+    try:
+        return {
+            (row.row_id, row.scenario, row.expected_finding, row.expected_result_class): row
+            for row in load_phase4_matrix_rows("execution")
+        }
+    except (FileNotFoundError, KeyError, TypeError, ValueError):
+        return {}
+
+
+def _with_canonical_metadata(
+    row: ExecutionReplayRow,
+    canonical_rows: dict[tuple[str, str, str, str], PersonaMatrixRow],
+) -> ExecutionReplayRow:
+    row = _with_behavior_contract_defaults(row)
+    canonical = canonical_rows.get((row.row_id, row.scenario, row.expected_finding, row.expected_result_class))
+    if canonical is None:
+        return row
+
+    return replace(
+        row,
+        schema_version=canonical.schema_version,
+        fixture_family=canonical.fixture_family,
+        runtime_scope=canonical.runtime_scope,
+        source_owners=canonical.source_owners,
+        test_owners=canonical.test_owners,
+        provider_launch_allowed=canonical.provider_launch_allowed,
+        network_allowed=canonical.network_allowed,
+        raw_artifacts_allowed=canonical.raw_artifacts_allowed,
+        behavior_contract_id=getattr(canonical, "behavior_contract_id", row.behavior_contract_id),
+        persona_class=getattr(canonical, "persona_class", row.persona_class),
+        prompt_variant_class=getattr(canonical, "prompt_variant_class", row.prompt_variant_class),
+        expected_smoothness_class=getattr(
+            canonical,
+            "expected_smoothness_class",
+            row.expected_smoothness_class,
+        ),
+        expected_schema_wrestling_class=getattr(
+            canonical,
+            "expected_schema_wrestling_class",
+            row.expected_schema_wrestling_class,
+        ),
+        expected_next_up_specificity_class=getattr(
+            canonical,
+            "expected_next_up_specificity_class",
+            row.expected_next_up_specificity_class,
+        ),
+        expected_mutation_guard_class=getattr(
+            canonical,
+            "expected_mutation_guard_class",
+            row.expected_mutation_guard_class,
+        ),
+        expected_metric_bounds=_normalize_metric_bounds(
+            getattr(canonical, "expected_metric_bounds", row.expected_metric_bounds)
+        ),
+        metadata_source="canonical_fixture",
+    )
+
+
+def _with_behavior_contract_defaults(row: ExecutionReplayRow) -> ExecutionReplayRow:
+    expected_schema_wrestling_class = row.expected_schema_wrestling_class or _schema_wrestling_class(row.scenario)
+    expected_mutation_guard_class = row.expected_mutation_guard_class or _mutation_guard_class(row)
+    return replace(
+        row,
+        fixture_family=_class_fixture_family(row.fixture_family),
+        behavior_contract_id=row.behavior_contract_id or f"phase4.execution.{row.scenario}",
+        expected_smoothness_class=row.expected_smoothness_class or _smoothness_class(row),
+        expected_schema_wrestling_class=expected_schema_wrestling_class,
+        expected_next_up_specificity_class=(
+            row.expected_next_up_specificity_class or _next_up_specificity_class(row.expected_next_action_class)
+        ),
+        expected_mutation_guard_class=expected_mutation_guard_class,
+        expected_metric_bounds=row.expected_metric_bounds or _metric_bounds(row, expected_schema_wrestling_class),
+    )
+
+
+def _class_fixture_family(fixture_family: str) -> str:
+    return fixture_family if fixture_family.endswith("_class") else f"{fixture_family}_class"
+
+
+def _schema_wrestling_class(scenario: str) -> str:
+    if scenario in {"multiple_gpd_returns", "applicator_result_prose_only"}:
+        return "high"
+    if scenario in {"prose_success_no_return", "unfenced_raw_return_candidate", "omitted_files_written_field"}:
+        return "minor"
+    return "none"
+
+
+def _smoothness_class(row: ExecutionReplayRow) -> str:
+    if _schema_wrestling_class(row.scenario) != "none":
+        return "clunky"
+    if row.expected_result_class in {"accepted", "checkpoint_recorded"}:
+        return "smooth"
+    if row.expected_result_class == "blocked":
+        return "acceptable"
+    return "smooth"
+
+
+def _next_up_specificity_class(expected_next_action_class: str | None) -> str:
+    if expected_next_action_class is None:
+        return "none"
+    if expected_next_action_class == "runtime_verify_work":
+        return "runtime_verify_work"
+    if expected_next_action_class == "resume_work":
+        return "bounded_resume"
+    return "concrete_command"
+
+
+def _mutation_guard_class(row: ExecutionReplayRow) -> str:
+    if row.expected_mutated and row.mutation_allowed:
+        return "expected_write_only"
+    if row.expected_mutated:
+        return "unexpected_write"
+    return "no_write"
+
+
+def _metric_bounds(row: ExecutionReplayRow, schema_wrestling_class: str) -> tuple[tuple[str, int], ...]:
+    bounds = [("structured_authority_coverage", 1), ("unexpected_write_count", 0)]
+    if row.scenario in {"invalid_gpd_verify_work_surface", "invalid_gpd_verify_phase_surface"}:
+        bounds.append(("invalid_command_suggestion_count", 0))
+    if row.scenario in {"prose_success_no_return", "multiple_gpd_returns", "applicator_result_prose_only"}:
+        bounds.append(("prose_claim_mismatch_count", 1))
+    if schema_wrestling_class != "none":
+        bounds.append(("schema_repair_loop_count", 1))
+    if row.scenario == "stale_artifact":
+        bounds.append(("stale_artifact_trust_count", 0))
+    if row.scenario in {"intermediate_plan_cannot_complete_phase", "applicator_result_prose_only"}:
+        bounds.append(("unsupported_completion_claim_count", 1))
+    return tuple(bounds)
+
+
+def _normalize_metric_bounds(value: object) -> tuple[tuple[str, int], ...]:
+    if isinstance(value, dict):
+        return tuple(sorted((str(key), int(bound)) for key, bound in value.items()))
+    if isinstance(value, (list, tuple)):
+        normalized: list[tuple[str, int]] = []
+        for item in value:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                normalized.append((str(item[0]), int(item[1])))
+        if normalized:
+            return tuple(normalized)
+    return ()
 
 
 def score_execution_replay_row(row: ExecutionReplayRow, root: Path) -> ExecutionReplayOutcome:

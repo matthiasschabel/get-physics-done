@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -18,9 +18,16 @@ from gpd.core.state import (
     state_record_verification,
 )
 from gpd.core.suggest import suggest_next
+from tests.helpers.phase4_persona.matrix import (
+    PHASE4_PERSONA_SCHEMA_VERSION,
+    PersonaMatrixRow,
+)
+from tests.helpers.phase4_persona.matrix import (
+    load_phase4_rows as load_phase4_matrix_rows,
+)
 from tests.runtime_install_helpers import seed_complete_runtime_install
 
-SCHEMA_VERSION = "phase4.persona_completion_replay.v1"
+SCHEMA_VERSION = PHASE4_PERSONA_SCHEMA_VERSION
 PHASE = "02"
 PHASE_NAME = "analysis"
 PHASE_READY_STATUS = "Phase complete \u2014 ready for verification"
@@ -43,10 +50,18 @@ class CompletionReplayRow:
     expected_state_status_class: str | None = None
     expected_next_action_class: str | None = None
     expect_no_mutation: bool = True
+    behavior_contract_id: str | None = None
+    persona_class: str = "closer"
+    prompt_variant_class: str = "completion_verification_replay"
+    expected_smoothness_class: str | None = None
+    expected_schema_wrestling_class: str = "none"
+    expected_next_up_specificity_class: str | None = None
+    expected_mutation_guard_class: str | None = None
+    expected_metric_bounds: tuple[tuple[str, int], ...] = ()
     schema_version: str = SCHEMA_VERSION
     surface: str = "completion"
     fixture_family: str = "completion_verification_replay"
-    runtime_scope: str = "provider_free"
+    runtime_scope: tuple[str, ...] = ("provider_free",)
     provider_launch_allowed: bool = False
     network_allowed: bool = False
     raw_artifacts_allowed: bool = False
@@ -59,6 +74,7 @@ class CompletionReplayRow:
         "tests/helpers/phase4_persona/completion.py",
         "tests/core/test_phase4_persona_completion_replay.py",
     )
+    metadata_source: str = "compatibility_adapter"
 
 
 @dataclass(frozen=True)
@@ -163,7 +179,123 @@ _ROWS = (
 def completion_replay_rows() -> tuple[CompletionReplayRow, ...]:
     """Return the provider-free Phase 4 completion replay matrix."""
 
-    return _ROWS
+    canonical_rows = _canonical_rows_by_exact_contract()
+    return tuple(_with_canonical_metadata(row, canonical_rows) for row in _ROWS)
+
+
+def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
+    try:
+        return {
+            (row.row_id, row.scenario, row.expected_finding, row.expected_result_class): row
+            for row in load_phase4_matrix_rows("completion")
+        }
+    except (FileNotFoundError, KeyError, TypeError, ValueError):
+        return {}
+
+
+def _with_canonical_metadata(
+    row: CompletionReplayRow,
+    canonical_rows: dict[tuple[str, str, str, str], PersonaMatrixRow],
+) -> CompletionReplayRow:
+    row = _with_behavior_contract_defaults(row)
+    canonical = canonical_rows.get((row.row_id, row.scenario, row.expected_finding, row.expected_result_class))
+    if canonical is None:
+        return row
+
+    return replace(
+        row,
+        schema_version=canonical.schema_version,
+        fixture_family=canonical.fixture_family,
+        runtime_scope=canonical.runtime_scope,
+        source_owners=canonical.source_owners,
+        test_owners=canonical.test_owners,
+        provider_launch_allowed=canonical.provider_launch_allowed,
+        network_allowed=canonical.network_allowed,
+        raw_artifacts_allowed=canonical.raw_artifacts_allowed,
+        behavior_contract_id=getattr(canonical, "behavior_contract_id", row.behavior_contract_id),
+        persona_class=getattr(canonical, "persona_class", row.persona_class),
+        prompt_variant_class=getattr(canonical, "prompt_variant_class", row.prompt_variant_class),
+        expected_smoothness_class=getattr(
+            canonical,
+            "expected_smoothness_class",
+            row.expected_smoothness_class,
+        ),
+        expected_schema_wrestling_class=getattr(
+            canonical,
+            "expected_schema_wrestling_class",
+            row.expected_schema_wrestling_class,
+        ),
+        expected_next_up_specificity_class=getattr(
+            canonical,
+            "expected_next_up_specificity_class",
+            row.expected_next_up_specificity_class,
+        ),
+        expected_mutation_guard_class=getattr(
+            canonical,
+            "expected_mutation_guard_class",
+            row.expected_mutation_guard_class,
+        ),
+        expected_metric_bounds=_normalize_metric_bounds(
+            getattr(canonical, "expected_metric_bounds", row.expected_metric_bounds)
+        ),
+        metadata_source="canonical_fixture",
+    )
+
+
+def _with_behavior_contract_defaults(row: CompletionReplayRow) -> CompletionReplayRow:
+    return replace(
+        row,
+        fixture_family=_class_fixture_family(row.fixture_family),
+        behavior_contract_id=row.behavior_contract_id or f"phase4.completion.{row.scenario}",
+        expected_smoothness_class=row.expected_smoothness_class or _smoothness_class(row),
+        expected_next_up_specificity_class=(
+            row.expected_next_up_specificity_class
+            or (
+                _next_up_specificity_class(row.expected_next_action_class)
+                if row.expected_next_action_class is not None
+                else None
+            )
+        ),
+        expected_mutation_guard_class=row.expected_mutation_guard_class or _mutation_guard_class(row),
+        expected_metric_bounds=row.expected_metric_bounds or (("unexpected_write_count", 0),),
+    )
+
+
+def _class_fixture_family(fixture_family: str) -> str:
+    return fixture_family if fixture_family.endswith("_class") else f"{fixture_family}_class"
+
+
+def _smoothness_class(row: CompletionReplayRow) -> str:
+    if row.expected_result_class.startswith("blocked"):
+        return "acceptable"
+    return "smooth"
+
+
+def _next_up_specificity_class(expected_next_action_class: str | None) -> str:
+    if expected_next_action_class is None:
+        return "none"
+    if expected_next_action_class == "runtime_verify_work":
+        return "runtime_verify_work"
+    if expected_next_action_class == "resume_work":
+        return "bounded_resume"
+    return "concrete_command"
+
+
+def _mutation_guard_class(row: CompletionReplayRow) -> str:
+    return "no_write" if row.expect_no_mutation else "expected_write_only"
+
+
+def _normalize_metric_bounds(value: object) -> tuple[tuple[str, int], ...]:
+    if isinstance(value, dict):
+        return tuple(sorted((str(key), int(bound)) for key, bound in value.items()))
+    if isinstance(value, (list, tuple)):
+        normalized: list[tuple[str, int]] = []
+        for item in value:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                normalized.append((str(item[0]), int(item[1])))
+        if normalized:
+            return tuple(normalized)
+    return ()
 
 
 def score_completion_replay_row(

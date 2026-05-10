@@ -1,0 +1,818 @@
+"""Class-only behavior metrics for provider-free Phase 4 persona rows."""
+
+from __future__ import annotations
+
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass, is_dataclass
+from types import MappingProxyType
+
+from gpd.core.command_run_hints import (
+    KIND_LOCAL_CLI_FINALIZER_COMMAND,
+    KIND_LOCAL_CLI_VALIDATION_COMMAND,
+    KIND_RUNTIME_COMMAND_LABEL,
+    KIND_UNKNOWN_DISPLAY_ONLY,
+    build_command_run_hint,
+)
+from gpd.core.return_repair_classifier import REPAIRABLE_RETURN_CLASSES, classify_gpd_return_repair
+
+BEHAVIOR_METRIC_COUNT_KEYS: tuple[str, ...] = (
+    "invalid_command_suggestion_count",
+    "schema_repair_loop_count",
+    "structured_authority_coverage",
+    "prose_claim_mismatch_count",
+    "stale_artifact_trust_count",
+    "duplicate_question_bucket_count",
+    "question_before_action_count",
+    "post_stop_activity_count",
+    "unexpected_write_count",
+    "unsupported_completion_claim_count",
+)
+
+BEHAVIOR_METRIC_CLASS_KEYS: tuple[str, ...] = (
+    "schema_wrestling_class",
+    "smoothness_class",
+    "next_up_specificity_class",
+    "mutation_guard_class",
+)
+
+STRUCTURED_AUTHORITY_CLASSES: tuple[str, ...] = (
+    "command_hint",
+    "return_envelope",
+    "return_repair_classifier",
+    "artifact_gate",
+    "child_return_applicator",
+    "state_json",
+    "verification_status",
+    "phase_closeout_readiness",
+    "bounded_continuation",
+    "workflow_stage_manifest",
+    "resume_surface",
+    "prompt_diagnostics",
+)
+
+_SCHEMA_NONE_CLASSES = frozenset({"valid", "valid_non_completed"})
+_SCHEMA_MINOR_CLASSES = frozenset(
+    {
+        "return_missing",
+        "missing_block",
+        "unfenced_candidate",
+        "wrong_fence_language",
+        "yaml_parse_error",
+        "top_level_shape_error",
+        "invalid_status",
+        "scalar_list_drift",
+        "field_shape_error",
+        "return_malformed_repairable",
+        *REPAIRABLE_RETURN_CLASSES,
+    }
+)
+_SCHEMA_HIGH_CLASSES = frozenset(
+    {
+        "ambiguous_multiple_returns",
+        "applicator_output_only",
+        "applicator_owned_metadata",
+        "continuation_schema_error",
+        "missing_required_fields",
+        "return_malformed_blocking",
+        "status_field_forbidden",
+        "transport_payload_in_return",
+        "unknown_field",
+    }
+)
+_SCHEMA_DANGER_CLASSES = frozenset(
+    {
+        "closeout_bypass",
+        "provider_raw_exposure",
+        "prose_state_mismatch",
+        "stale_artifact_trust",
+        "state_mutated_on_reject",
+        "unexpected_write",
+        "unsupported_completion_claim",
+    }
+)
+_ARTIFACT_STALE_OR_MISSING_CLASSES = frozenset(
+    {
+        "artifact_missing",
+        "artifact_stale",
+        "expected_artifact_omitted",
+        "files_written_empty",
+        "missing_required_field",
+        "wrong_sibling",
+    }
+)
+_UNSUPPORTED_COMPLETION_CLASSES = frozenset(
+    {
+        "canonical_verification_missing",
+        "closeout_authority_blocks_premature_completion",
+        "missing_verification",
+        "non_passing_verification",
+        "proof_redteam_not_passed",
+        "prose_success_no_return",
+        "return_missing",
+        "verification_missing",
+        "verification_non_passing",
+    }
+)
+_QUESTION_CLASSES = frozenset(
+    {
+        "alignment_answer_required",
+        "ask_user",
+        "ask_user_answer_missing",
+        "ask_user_alignment",
+        "closeout_offer_next",
+        "schema_repair_request",
+    }
+)
+_STOP_CLASSES = frozenset({"abort", "review_stop", "stop", "stopped_before_dispatch", "user_abort_stops_dispatch"})
+_VAGUE_NEXT_ACTION_CLASSES = frozenset(
+    {"class_only", "continue", "continue_work", "ready", "ready_to_continue", "vague"}
+)
+_NONE_NEXT_ACTION_CLASSES = frozenset({"", "none", "no_action", "unknown"})
+_RUNTIME_VERIFY_NEXT_ACTION_CLASSES = frozenset(
+    {
+        "active_runtime_verify_work",
+        "run_verify_work",
+        "runtime_verify_work",
+        "verify_work",
+    }
+)
+_BOUNDED_RESUME_NEXT_ACTION_CLASSES = frozenset(
+    {
+        "bounded_segment_resume",
+        "create_bounded_resume_context",
+        "gpd_resume_work",
+        "resume_work",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class BehaviorMetricBounds:
+    """Optional class-only expectation for a behavior metric."""
+
+    metric_key: str
+    min_count: int | None = None
+    max_count: int | None = None
+    exact_count: int | None = None
+    allowed_classes: tuple[str, ...] = ()
+
+    def allows_count(self, count: int) -> bool:
+        if self.exact_count is not None and count != self.exact_count:
+            return False
+        if self.min_count is not None and count < self.min_count:
+            return False
+        if self.max_count is not None and count > self.max_count:
+            return False
+        return True
+
+    def allows_class(self, metric_class: str | None) -> bool:
+        return not self.allowed_classes or metric_class in self.allowed_classes
+
+
+@dataclass(frozen=True, slots=True)
+class BehaviorScore:
+    """Sanitized behavior score; values are class tokens, counts, and booleans."""
+
+    row_id: str
+    surface: str
+    scenario: str
+    finding_classes: tuple[str, ...]
+    metric_counts: Mapping[str, int]
+    metric_classes: Mapping[str, str]
+    structured_authority_sources: tuple[str, ...]
+    passed: bool
+
+    def __post_init__(self) -> None:
+        counts = {key: int(self.metric_counts.get(key, 0)) for key in BEHAVIOR_METRIC_COUNT_KEYS}
+        classes = {key: str(self.metric_classes[key]) for key in BEHAVIOR_METRIC_CLASS_KEYS}
+        object.__setattr__(self, "finding_classes", _unique_tokens(self.finding_classes))
+        object.__setattr__(self, "metric_counts", MappingProxyType(counts))
+        object.__setattr__(self, "metric_classes", MappingProxyType(classes))
+        object.__setattr__(
+            self,
+            "structured_authority_sources",
+            tuple(
+                source
+                for source in _unique_tokens(self.structured_authority_sources)
+                if source in STRUCTURED_AUTHORITY_CLASSES
+            ),
+        )
+
+
+def score_behavior_metrics(
+    row: object,
+    outcome: object,
+    *,
+    event: object | None = None,
+    source_text: str | None = None,
+) -> BehaviorScore:
+    """Score provider-free behavior using only sanitized classes and core classifiers."""
+
+    row_view = _ObjectView(row)
+    outcome_view = _ObjectView(outcome)
+    event_view = _ObjectView(event)
+
+    failure_classes = _unique_tokens(
+        (
+            _string_or_none(outcome_view.get("finding_id")),
+            *_tokens(outcome_view.get("failure_classes")),
+            *_tokens(outcome_view.get("evidence_classes")),
+            *_tokens(outcome_view.get("checked_artifact_classes")),
+        )
+    )
+    source_repair_classes = _source_repair_classes(source_text)
+    schema_classes = _unique_tokens((*failure_classes, *source_repair_classes))
+
+    commands = _tokens(outcome_view.get("commands"))
+    next_action_class = _string_or_none(outcome_view.get("next_action_class")) or _string_or_none(
+        row_view.get("expected_next_action_class")
+    )
+    result_class = (
+        _string_or_none(outcome_view.get("result_class"))
+        or _string_or_none(row_view.get("expected_result_class"))
+        or ""
+    )
+    accepted = _bool_or_none(outcome_view.get("accepted"))
+    ready = _bool_or_none(outcome_view.get("ready"))
+    mutated = bool(outcome_view.get("mutated", False))
+    mutation_allowed = bool(
+        row_view.get("mutation_allowed", False)
+        or outcome_view.get("mutation_allowed", False)
+        or (row_view.get("expect_no_mutation") is False)
+    )
+
+    mutation_guard_class = classify_mutation_guard(
+        mutated,
+        mutation_allowed,
+        accepted=accepted,
+        ready=ready,
+        result_class=result_class,
+    )
+    invalid_command_count = _invalid_command_suggestion_count(commands, failure_classes, next_action_class)
+    schema_loop_count = _schema_repair_loop_count(
+        schema_classes,
+        accepted=accepted,
+        ready=ready,
+        mutated=mutated,
+    )
+    stale_trust_count = _stale_artifact_trust_count(failure_classes, accepted=accepted, ready=ready, mutated=mutated)
+    prose_mismatch_count = _prose_state_mismatch_count(
+        failure_classes,
+        result_class=result_class,
+        accepted=accepted,
+        ready=ready,
+        state_status_class=_string_or_none(outcome_view.get("state_status_class")),
+    )
+    unsupported_completion_count = _unsupported_completion_claim_count(
+        failure_classes,
+        result_class=result_class,
+        accepted=accepted,
+        ready=ready,
+    )
+    duplicate_question_count = _duplicate_question_bucket_count(event_view)
+    question_before_action_count = _question_before_action_count(failure_classes, event_view)
+    post_stop_activity_count = _post_stop_activity_count(
+        failure_classes,
+        result_class=result_class,
+        next_action_class=next_action_class,
+        mutated=mutated,
+        accepted=accepted,
+        applied_operations=_tokens(outcome_view.get("applied_operations")),
+    )
+    unexpected_write_count = 1 if mutation_guard_class in {"unexpected_write", "state_mutated_on_reject"} else 0
+    authority_sources = _structured_authority_sources(
+        outcome_view,
+        failure_classes=failure_classes,
+        commands=commands,
+        next_action_class=next_action_class,
+        source_repair_classes=source_repair_classes,
+    )
+
+    metric_counts = {
+        "invalid_command_suggestion_count": invalid_command_count,
+        "schema_repair_loop_count": schema_loop_count,
+        "structured_authority_coverage": len(authority_sources),
+        "prose_claim_mismatch_count": prose_mismatch_count,
+        "stale_artifact_trust_count": stale_trust_count,
+        "duplicate_question_bucket_count": duplicate_question_count,
+        "question_before_action_count": question_before_action_count,
+        "post_stop_activity_count": post_stop_activity_count,
+        "unexpected_write_count": unexpected_write_count,
+        "unsupported_completion_claim_count": unsupported_completion_count,
+    }
+    danger_classes = []
+    if stale_trust_count:
+        danger_classes.append("stale_artifact_trust")
+    if prose_mismatch_count:
+        danger_classes.append("prose_state_mismatch")
+    if unsupported_completion_count:
+        danger_classes.append("unsupported_completion_claim")
+    if unexpected_write_count:
+        danger_classes.append(mutation_guard_class)
+
+    schema_wrestling_class = classify_schema_wrestling((*schema_classes, *danger_classes))
+    next_up_specificity_class = _classify_next_up_from_commands(commands, next_action_class)
+    metric_classes = {
+        "schema_wrestling_class": schema_wrestling_class,
+        "next_up_specificity_class": next_up_specificity_class,
+        "mutation_guard_class": mutation_guard_class,
+        "smoothness_class": classify_smoothness(
+            metric_counts,
+            result_class=result_class,
+            next_action_class=next_action_class,
+            metric_classes={
+                "schema_wrestling_class": schema_wrestling_class,
+                "next_up_specificity_class": next_up_specificity_class,
+                "mutation_guard_class": mutation_guard_class,
+            },
+        ),
+    }
+
+    return BehaviorScore(
+        row_id=str(row_view.get("row_id", "unknown")),
+        surface=str(row_view.get("surface", "unknown")),
+        scenario=str(row_view.get("scenario", "unknown")),
+        finding_classes=failure_classes,
+        metric_counts=metric_counts,
+        metric_classes=metric_classes,
+        structured_authority_sources=authority_sources,
+        passed=metric_classes["smoothness_class"] in {"smooth", "acceptable"},
+    )
+
+
+def classify_command_suggestion(
+    command: str | None, *, expected_action: str | None = None, phase: str | None = None
+) -> str:
+    """Classify a command-looking next step without executing it."""
+
+    if not isinstance(command, str) or not command.strip():
+        return "none"
+    normalized = command.strip()
+    if expected_action == "verify-work" and normalized.startswith("gpd verify phase"):
+        return "structural_verify_phase"
+    hint = build_command_run_hint(
+        command=normalized,
+        source="phase4-persona-behavior-metrics",
+        action=expected_action,
+        phase=phase,
+    )
+    if hint is None:
+        return "none"
+    kind = str(hint.get("kind") or KIND_UNKNOWN_DISPLAY_ONLY)
+    if kind in {
+        KIND_RUNTIME_COMMAND_LABEL,
+        KIND_LOCAL_CLI_VALIDATION_COMMAND,
+        KIND_LOCAL_CLI_FINALIZER_COMMAND,
+        KIND_UNKNOWN_DISPLAY_ONLY,
+    }:
+        return kind
+    return KIND_UNKNOWN_DISPLAY_ONLY
+
+
+def classify_schema_wrestling(repair_classes: Iterable[str]) -> str:
+    """Classify how much visible schema friction is present."""
+
+    classes = set(_tokens(repair_classes))
+    if not classes or classes <= _SCHEMA_NONE_CLASSES:
+        return "none"
+    if classes & _SCHEMA_DANGER_CLASSES:
+        return "danger"
+    if classes & _SCHEMA_HIGH_CLASSES:
+        return "high"
+    schema_related = classes & (_SCHEMA_MINOR_CLASSES | _SCHEMA_HIGH_CLASSES)
+    if len(schema_related) > 1:
+        return "high"
+    if schema_related:
+        return "minor"
+    return "none"
+
+
+def classify_smoothness(
+    metric_counts: Mapping[str, int],
+    *,
+    result_class: str,
+    next_action_class: str | None,
+    metric_classes: Mapping[str, str] | None = None,
+) -> str:
+    """Aggregate count and class signals into a user-facing behavior class."""
+
+    metric_classes = metric_classes or {}
+    next_up_specificity = metric_classes.get("next_up_specificity_class") or classify_next_up_specificity(
+        next_action_class
+    )
+    schema_wrestling = metric_classes.get("schema_wrestling_class", "none")
+    mutation_guard = metric_classes.get("mutation_guard_class", "no_write")
+    hard_regression_keys = (
+        "invalid_command_suggestion_count",
+        "prose_claim_mismatch_count",
+        "stale_artifact_trust_count",
+        "post_stop_activity_count",
+        "unexpected_write_count",
+        "unsupported_completion_claim_count",
+    )
+    if any(int(metric_counts.get(key, 0)) > 0 for key in hard_regression_keys):
+        return "regressed"
+    if schema_wrestling == "danger" or mutation_guard in {"unexpected_write", "state_mutated_on_reject"}:
+        return "regressed"
+    if next_up_specificity == "none":
+        return "regressed"
+    if int(metric_counts.get("schema_repair_loop_count", 0)) >= 3:
+        return "regressed"
+    if (
+        schema_wrestling == "high"
+        or int(metric_counts.get("schema_repair_loop_count", 0)) >= 2
+        or int(metric_counts.get("duplicate_question_bucket_count", 0)) > 0
+        or int(metric_counts.get("structured_authority_coverage", 0)) < 2
+        or next_up_specificity == "vague"
+    ):
+        return "clunky"
+    if int(metric_counts.get("schema_repair_loop_count", 0)) == 1 or _is_safe_blocked_result(result_class):
+        return "acceptable"
+    return "smooth"
+
+
+def classify_next_up_specificity(next_action_class: str | None) -> str:
+    """Classify whether a next-up route is actionable without storing raw commands."""
+
+    normalized = _normalize_token(next_action_class)
+    if normalized in _NONE_NEXT_ACTION_CLASSES:
+        return "none"
+    if normalized in _VAGUE_NEXT_ACTION_CLASSES:
+        return "vague"
+    if normalized in _RUNTIME_VERIFY_NEXT_ACTION_CLASSES:
+        return "runtime_verify_work"
+    if normalized in _BOUNDED_RESUME_NEXT_ACTION_CLASSES:
+        return "bounded_resume"
+    return "concrete_command"
+
+
+def classify_mutation_guard(
+    mutated: bool,
+    mutation_allowed: bool,
+    *,
+    accepted: bool | None = None,
+    ready: bool | None = None,
+    result_class: str | None = None,
+) -> str:
+    """Classify whether durable writes matched the row contract."""
+
+    if not mutated:
+        return "no_write"
+    if mutation_allowed:
+        return "expected_write_only"
+    if accepted is False or ready is False or _is_safe_blocked_result(result_class):
+        return "state_mutated_on_reject"
+    return "unexpected_write"
+
+
+def merge_behavior_scores(*scores: BehaviorScore) -> BehaviorScore:
+    """Merge sanitized behavior scores without introducing raw evidence."""
+
+    if not scores:
+        raise ValueError("at least one behavior score is required")
+    merged_counts = {key: sum(score.metric_counts[key] for score in scores) for key in BEHAVIOR_METRIC_COUNT_KEYS}
+    schema_class = _worst_class((score.metric_classes["schema_wrestling_class"] for score in scores), _SCHEMA_ORDER)
+    smoothness_class = _worst_class((score.metric_classes["smoothness_class"] for score in scores), _SMOOTHNESS_ORDER)
+    next_up_class = _worst_class(
+        (score.metric_classes["next_up_specificity_class"] for score in scores), _NEXT_UP_ORDER
+    )
+    mutation_class = _worst_class((score.metric_classes["mutation_guard_class"] for score in scores), _MUTATION_ORDER)
+    first = scores[0]
+    return BehaviorScore(
+        row_id=first.row_id if len({score.row_id for score in scores}) == 1 else "merged",
+        surface=first.surface if len({score.surface for score in scores}) == 1 else "mixed",
+        scenario=first.scenario if len({score.scenario for score in scores}) == 1 else "mixed",
+        finding_classes=_unique_tokens(token for score in scores for token in score.finding_classes),
+        metric_counts=merged_counts,
+        metric_classes={
+            "schema_wrestling_class": schema_class,
+            "smoothness_class": smoothness_class,
+            "next_up_specificity_class": next_up_class,
+            "mutation_guard_class": mutation_class,
+        },
+        structured_authority_sources=_unique_tokens(
+            source for score in scores for source in score.structured_authority_sources
+        ),
+        passed=all(score.passed for score in scores) and smoothness_class != "regressed",
+    )
+
+
+def _invalid_command_suggestion_count(
+    commands: tuple[str, ...],
+    failure_classes: tuple[str, ...],
+    next_action_class: str | None,
+) -> int:
+    expected_action = _expected_command_action(next_action_class)
+    count = 0
+    for command in commands:
+        command_class = classify_command_suggestion(command, expected_action=expected_action, phase=None)
+        if command_class in {KIND_UNKNOWN_DISPLAY_ONLY, "structural_verify_phase"} and _expects_command_route(
+            next_action_class
+        ):
+            count += 1
+    runtime_failures = {
+        failure
+        for failure in failure_classes
+        if failure.endswith("_unexpected_runtime_command")
+        or failure.endswith("_structural_verify_phase")
+        or failure.endswith("_missing_verify_work_token")
+    }
+    return count + len(runtime_failures)
+
+
+def _schema_repair_loop_count(
+    repair_classes: Iterable[str],
+    *,
+    accepted: bool | None,
+    ready: bool | None,
+    mutated: bool,
+) -> int:
+    wrestling_class = classify_schema_wrestling(repair_classes)
+    if wrestling_class == "none":
+        return 0
+    if mutated or accepted is True or ready is True:
+        return 3
+    if wrestling_class == "minor":
+        return 1
+    if wrestling_class == "high":
+        return 2
+    return 3
+
+
+def _stale_artifact_trust_count(
+    failure_classes: tuple[str, ...],
+    *,
+    accepted: bool | None,
+    ready: bool | None,
+    mutated: bool,
+) -> int:
+    if not (accepted is True or ready is True or mutated):
+        return 0
+    return 1 if set(failure_classes) & _ARTIFACT_STALE_OR_MISSING_CLASSES else 0
+
+
+def _prose_state_mismatch_count(
+    failure_classes: tuple[str, ...],
+    *,
+    result_class: str,
+    accepted: bool | None,
+    ready: bool | None,
+    state_status_class: str | None,
+) -> int:
+    if not (accepted is True or ready is True or _is_ready_or_accepted_result(result_class)):
+        return 0
+    if set(failure_classes) & (_UNSUPPORTED_COMPLETION_CLASSES | _ARTIFACT_STALE_OR_MISSING_CLASSES):
+        return 1
+    if state_status_class in {"blocked", "unchanged"} and _is_ready_or_accepted_result(result_class):
+        return 1
+    return 0
+
+
+def _unsupported_completion_claim_count(
+    failure_classes: tuple[str, ...],
+    *,
+    result_class: str,
+    accepted: bool | None,
+    ready: bool | None,
+) -> int:
+    if not (accepted is True or ready is True or _is_ready_or_accepted_result(result_class)):
+        return 0
+    return 1 if set(failure_classes) & _UNSUPPORTED_COMPLETION_CLASSES else 0
+
+
+def _duplicate_question_bucket_count(event_view: _ObjectView) -> int:
+    raw_counts = event_view.get("event_class_counts")
+    if isinstance(raw_counts, Mapping):
+        return sum(
+            max(0, int(value) - 1)
+            for key, value in raw_counts.items()
+            if "question" in str(key) or "ask_user" in str(key)
+        )
+    buckets = _tokens(event_view.get("question_bucket_classes"))
+    if not buckets:
+        return 0
+    counts = Counter(buckets)
+    return sum(count - 1 for count in counts.values() if count > 1)
+
+
+def _question_before_action_count(failure_classes: tuple[str, ...], event_view: _ObjectView) -> int:
+    event_classes = {
+        _normalize_token(event_view.get("user_answer_class")),
+        _normalize_token(event_view.get("gate_class")),
+        *_tokens(event_view.get("question_bucket_classes")),
+    }
+    return 1 if (set(failure_classes) | event_classes) & _QUESTION_CLASSES else 0
+
+
+def _post_stop_activity_count(
+    failure_classes: tuple[str, ...],
+    *,
+    result_class: str,
+    next_action_class: str | None,
+    mutated: bool,
+    accepted: bool | None,
+    applied_operations: tuple[str, ...],
+) -> int:
+    stopped = (
+        set(failure_classes) & _STOP_CLASSES
+        or _normalize_token(result_class) in _STOP_CLASSES
+        or _normalize_token(next_action_class) in {"review_stop", "stop"}
+    )
+    if not stopped:
+        return 1 if "post_stop_activity" in failure_classes else 0
+    return 1 if mutated or accepted is True or applied_operations or "post_stop_activity" in failure_classes else 0
+
+
+def _structured_authority_sources(
+    outcome_view: _ObjectView,
+    *,
+    failure_classes: tuple[str, ...],
+    commands: tuple[str, ...],
+    next_action_class: str | None,
+    source_repair_classes: tuple[str, ...],
+) -> tuple[str, ...]:
+    evidence_classes = _tokens(outcome_view.get("evidence_classes"))
+    checked_artifact_classes = _tokens(outcome_view.get("checked_artifact_classes"))
+    applied_operations = _tokens(outcome_view.get("applied_operations"))
+    sources: list[str] = []
+    class_set = (
+        set(failure_classes) | set(evidence_classes) | set(checked_artifact_classes) | set(source_repair_classes)
+    )
+
+    if (
+        commands
+        or any(token.startswith("run_hint:") for token in class_set)
+        or "invalid_verify_command_surface" in class_set
+    ):
+        sources.append("command_hint")
+    if any("return" in token or token in {"missing_block", "unfenced_candidate"} for token in class_set):
+        sources.append("return_envelope")
+    if source_repair_classes or class_set & (_SCHEMA_MINOR_CLASSES | _SCHEMA_HIGH_CLASSES):
+        sources.append("return_repair_classifier")
+    if class_set & _ARTIFACT_STALE_OR_MISSING_CLASSES:
+        sources.append("artifact_gate")
+    if applied_operations or any(token.startswith("applicator") or "checkpoint" in token for token in class_set):
+        sources.append("child_return_applicator")
+    if outcome_view.get("state_status_class") is not None:
+        sources.append("state_json")
+    if any("verification" in token for token in class_set):
+        sources.append("verification_status")
+    if (
+        outcome_view.get("ready") is not None
+        or outcome_view.get("read_only") is not None
+        or outcome_view.get("mutation_allowed") is not None
+        or any(token in class_set for token in {"closeout_blocked", "closeout_ready", "bounded_segment_bypass"})
+    ):
+        sources.append("phase_closeout_readiness")
+    if any("bounded" in token for token in (*class_set, _normalize_token(next_action_class))):
+        sources.append("bounded_continuation")
+    if any(token.startswith("staged_") or "manifest" in token for token in class_set):
+        sources.append("workflow_stage_manifest")
+    if "resume" in _normalize_token(next_action_class) or any("resume" in token for token in class_set):
+        sources.append("resume_surface")
+    if any("prompt_diagnostics" in token for token in class_set):
+        sources.append("prompt_diagnostics")
+    return _unique_tokens(sources)
+
+
+def _classify_next_up_from_commands(commands: tuple[str, ...], next_action_class: str | None) -> str:
+    if commands:
+        command_classes = tuple(
+            classify_command_suggestion(command, expected_action=_expected_command_action(next_action_class))
+            for command in commands
+        )
+        if any(command_class == KIND_RUNTIME_COMMAND_LABEL for command_class in command_classes):
+            return (
+                "runtime_verify_work"
+                if _expected_command_action(next_action_class) == "verify-work"
+                else "concrete_command"
+            )
+        if any(
+            command_class in {KIND_LOCAL_CLI_VALIDATION_COMMAND, KIND_LOCAL_CLI_FINALIZER_COMMAND}
+            for command_class in command_classes
+        ):
+            return "concrete_command"
+        if all(
+            command_class in {KIND_UNKNOWN_DISPLAY_ONLY, "structural_verify_phase", "none"}
+            for command_class in command_classes
+        ):
+            return "none"
+    return classify_next_up_specificity(next_action_class)
+
+
+def _source_repair_classes(source_text: str | None) -> tuple[str, ...]:
+    if source_text is None:
+        return ()
+    repair = classify_gpd_return_repair(source_text)
+    classes = tuple(str(item) for item in repair.failure_classes)
+    return _unique_tokens((str(repair.primary_class), *classes))
+
+
+def _expected_command_action(next_action_class: str | None) -> str | None:
+    normalized = _normalize_token(next_action_class)
+    if normalized in _RUNTIME_VERIFY_NEXT_ACTION_CLASSES:
+        return "verify-work"
+    if "resume" in normalized:
+        return "resume-work"
+    return None
+
+
+def _expects_command_route(next_action_class: str | None) -> bool:
+    specificity = classify_next_up_specificity(next_action_class)
+    return specificity in {"concrete_command", "runtime_verify_work", "bounded_resume"}
+
+
+def _is_ready_or_accepted_result(result_class: str | None) -> bool:
+    normalized = _normalize_token(result_class)
+    return "accepted" in normalized or "ready" in normalized or "closeout_ready" in normalized
+
+
+def _is_safe_blocked_result(result_class: str | None) -> bool:
+    normalized = _normalize_token(result_class)
+    return (
+        normalized.startswith("blocked")
+        or "blocked" in normalized
+        or normalized.startswith("retry")
+        or normalized.startswith("stopped")
+    )
+
+
+def _tokens(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (_normalize_token(value),) if value else ()
+    if isinstance(value, Mapping):
+        return tuple(_normalize_token(key) for key in value)
+    if isinstance(value, Iterable):
+        return tuple(_normalize_token(item) for item in value if _normalize_token(item))
+    return (_normalize_token(value),)
+
+
+def _unique_tokens(values: Iterable[object]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(token for value in values for token in _tokens(value)))
+
+
+def _normalize_token(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().replace("-", "_").replace(":", "_")
+
+
+def _string_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
+
+
+def _bool_or_none(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+class _ObjectView:
+    def __init__(self, value: object | None) -> None:
+        if value is None:
+            self._mapping: Mapping[str, object] = {}
+        elif isinstance(value, Mapping):
+            self._mapping = value
+        elif is_dataclass(value):
+            self._mapping = asdict(value)
+        else:
+            self._mapping = {}
+            self._value = value
+            return
+        self._value = None
+
+    def get(self, name: str, default: object | None = None) -> object:
+        if self._mapping:
+            return self._mapping.get(name, default)
+        return getattr(self._value, name, default)
+
+
+_SCHEMA_ORDER = ("none", "minor", "high", "danger")
+_SMOOTHNESS_ORDER = ("smooth", "acceptable", "clunky", "regressed")
+_NEXT_UP_ORDER = ("runtime_verify_work", "bounded_resume", "concrete_command", "vague", "none")
+_MUTATION_ORDER = ("no_write", "expected_write_only", "unexpected_write", "state_mutated_on_reject")
+
+
+def _worst_class(values: Iterable[str], order: Sequence[str]) -> str:
+    index_by_value = {value: index for index, value in enumerate(order)}
+    return max(values, key=lambda value: index_by_value.get(value, len(order)))
+
+
+__all__ = [
+    "BEHAVIOR_METRIC_CLASS_KEYS",
+    "BEHAVIOR_METRIC_COUNT_KEYS",
+    "STRUCTURED_AUTHORITY_CLASSES",
+    "BehaviorMetricBounds",
+    "BehaviorScore",
+    "classify_command_suggestion",
+    "classify_mutation_guard",
+    "classify_next_up_specificity",
+    "classify_schema_wrestling",
+    "classify_smoothness",
+    "merge_behavior_scores",
+    "score_behavior_metrics",
+]

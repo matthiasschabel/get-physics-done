@@ -8,10 +8,15 @@ import subprocess
 from pathlib import Path
 
 from gpd.registry import LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS
+from scripts.generated_region_support import marker_start_counts
 from scripts.repo_graph_contract import (
     EXCLUDED_GRAPH_DIRS,
     GENERATED_ON_END,
     GENERATED_ON_START,
+    GRAPH_SCOPE_LABELS,
+    GRAPH_SCOPE_SPECS,
+    REPO_GRAPH_BLOCK_IDS,
+    REPO_GRAPH_REGION_SPEC,
     REPO_ROOT,
     SAME_STEM_COMMAND_WORKFLOW_END,
     SAME_STEM_COMMAND_WORKFLOW_START,
@@ -19,8 +24,8 @@ from scripts.repo_graph_contract import (
     SCOPE_START,
     _is_excluded_path,
     build_contract,
+    canonical_scope_label,
     expected_scope_counts,
-    extract_marked_block,
     graph_has_edge,
     graph_has_edge_containing,
     iter_runtime_descriptors,
@@ -31,7 +36,6 @@ from scripts.repo_graph_contract import (
     render_generated_on_block,
     render_same_stem_command_workflow_block,
     render_scope_block,
-    replace_marked_block,
     sync_readme_text,
     untracked_graph_scope_files,
 )
@@ -278,14 +282,18 @@ def test_graph_contract_scope_counts_match_live_inventory() -> None:
 
     assert not mismatches, "Graph scope counts are stale:\n" + "\n".join(mismatches)
     assert load_contract()["scope_counts"] == expected
+    assert GRAPH_SCOPE_LABELS == tuple(spec.label for spec in GRAPH_SCOPE_SPECS)
+    for label in GRAPH_SCOPE_LABELS:
+        assert canonical_scope_label(label) == label
+        assert canonical_scope_label(label.strip("`")) == label
 
 
 def test_graph_readme_generated_blocks_match_contract() -> None:
     contract = load_contract()
     graph_text = read_graph_text()
 
-    assert extract_marked_block(graph_text, GENERATED_ON_START, GENERATED_ON_END) == render_generated_on_block(contract)
-    assert extract_marked_block(graph_text, SCOPE_START, SCOPE_END) == render_scope_block(contract)
+    assert marker_start_counts(graph_text, spec=REPO_GRAPH_REGION_SPEC) == dict.fromkeys(REPO_GRAPH_BLOCK_IDS, 1)
+    assert sync_readme_text(graph_text, contract) == graph_text
 
 
 def test_graph_check_detects_stale_generated_contract_without_mutation(tmp_path: Path) -> None:
@@ -361,22 +369,18 @@ def test_graph_sync_repairs_stale_marked_blocks() -> None:
     stale_contract = dict(contract)
     stale_contract["scope_counts"] = {label: int(value) + 1 for label, value in contract["scope_counts"].items()}
 
-    stale = replace_marked_block(
-        original,
-        GENERATED_ON_START,
-        GENERATED_ON_END,
+    stale = original.replace(
+        render_generated_on_block(contract),
         "\n".join((GENERATED_ON_START, "Generated from an outdated contract.", GENERATED_ON_END)),
+        1,
     )
-    stale = replace_marked_block(
-        stale,
-        SCOPE_START,
-        SCOPE_END,
+    stale = stale.replace(
+        render_scope_block(contract),
         render_scope_block(stale_contract),
+        1,
     )
-    stale = replace_marked_block(
-        stale,
-        SAME_STEM_COMMAND_WORKFLOW_START,
-        SAME_STEM_COMMAND_WORKFLOW_END,
+    stale = stale.replace(
+        render_same_stem_command_workflow_block(),
         "\n".join(
             (
                 SAME_STEM_COMMAND_WORKFLOW_START,
@@ -384,6 +388,7 @@ def test_graph_sync_repairs_stale_marked_blocks() -> None:
                 SAME_STEM_COMMAND_WORKFLOW_END,
             )
         ),
+        1,
     )
 
     repaired = sync_readme_text(stale, contract)

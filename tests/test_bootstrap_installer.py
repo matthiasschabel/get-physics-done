@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -13,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-import gpd.core.public_surface_contract as public_surface_contract_module
 from gpd.adapters import get_adapter, iter_runtime_descriptors
 from gpd.core.public_surface_contract import beginner_onboarding_hub_url
 from gpd.core.surface_phrases import recovery_ladder_note
+from scripts.render_bootstrap_installer_metadata import build_installer_metadata
 from tests.doc_surface_contracts import (
     assert_install_summary_runtime_follow_up_contract,
     assert_recovery_ladder_contract,
@@ -40,7 +39,9 @@ MAIN_ARCHIVE_SPEC = f"{REPO_BASE_URL}/archive/refs/heads/main.tar.gz"
 TAG_HTTPS_GIT_SPEC = f"git+{REPO_GIT_URL}@v{PYTHON_PACKAGE_VERSION}"
 MAIN_HTTPS_GIT_SPEC = f"git+{REPO_GIT_URL}@main"
 _RUNTIME_DESCRIPTORS = iter_runtime_descriptors()
-_RUNTIME_ADAPTERS = {descriptor.runtime_name: get_adapter(descriptor.runtime_name) for descriptor in _RUNTIME_DESCRIPTORS}
+_RUNTIME_ADAPTERS = {
+    descriptor.runtime_name: get_adapter(descriptor.runtime_name) for descriptor in _RUNTIME_DESCRIPTORS
+}
 _RUNTIME_NAMES = tuple(descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS)
 _RUNTIME_INSTALL_FLAGS = tuple(descriptor.install_flag for descriptor in _RUNTIME_DESCRIPTORS)
 _RUNTIME_DISPLAY_NAMES = {name: adapter.display_name for name, adapter in _RUNTIME_ADAPTERS.items()}
@@ -50,18 +51,22 @@ _RUNTIME_HELP_COMMANDS = {name: adapter.help_command for name, adapter in _RUNTI
 _RUNTIME_START_COMMANDS = {name: adapter.format_command("start") for name, adapter in _RUNTIME_ADAPTERS.items()}
 _RUNTIME_TOUR_COMMANDS = {name: adapter.format_command("tour") for name, adapter in _RUNTIME_ADAPTERS.items()}
 _RUNTIME_MAP_RESEARCH_COMMANDS = {name: adapter.map_research_command for name, adapter in _RUNTIME_ADAPTERS.items()}
-_RUNTIME_RESUME_WORK_COMMANDS = {name: adapter.format_command("resume-work") for name, adapter in _RUNTIME_ADAPTERS.items()}
-_RUNTIME_SUGGEST_NEXT_COMMANDS = {name: adapter.format_command("suggest-next") for name, adapter in _RUNTIME_ADAPTERS.items()}
-_RUNTIME_PAUSE_WORK_COMMANDS = {name: adapter.format_command("pause-work") for name, adapter in _RUNTIME_ADAPTERS.items()}
+_RUNTIME_RESUME_WORK_COMMANDS = {
+    name: adapter.format_command("resume-work") for name, adapter in _RUNTIME_ADAPTERS.items()
+}
+_RUNTIME_SUGGEST_NEXT_COMMANDS = {
+    name: adapter.format_command("suggest-next") for name, adapter in _RUNTIME_ADAPTERS.items()
+}
+_RUNTIME_PAUSE_WORK_COMMANDS = {
+    name: adapter.format_command("pause-work") for name, adapter in _RUNTIME_ADAPTERS.items()
+}
 _RUNTIME_HELP_EXAMPLE_DESCRIPTORS = tuple(
     descriptor for descriptor in _RUNTIME_DESCRIPTORS if descriptor.installer_help_example_scope is not None
 )
 _RUNTIME_DESCRIPTORS_WITH_GLOBAL_ENV_OVERRIDE = tuple(
     descriptor
     for descriptor in _RUNTIME_DESCRIPTORS
-    if descriptor.global_config.env_var
-    or descriptor.global_config.env_dir_var
-    or descriptor.global_config.env_file_var
+    if descriptor.global_config.env_var or descriptor.global_config.env_dir_var or descriptor.global_config.env_file_var
 )
 _CODEX_RUNTIME_NAME = PRIMARY_RUNTIME
 _CLAUDE_RUNTIME_NAME, _CLAUDE_RUNTIME_ALIAS = runtime_with_multiword_alias(exclude=(_CODEX_RUNTIME_NAME,))
@@ -69,7 +74,6 @@ _OPENCODE_RUNTIME_NAME, _OPENCODE_RUNTIME_ALIAS = runtime_with_multiword_alias(
     exclude=(_CODEX_RUNTIME_NAME, _CLAUDE_RUNTIME_NAME)
 )
 _BEGINNER_ONBOARDING_HUB_URL = beginner_onboarding_hub_url()
-_LOCAL_CLI_BRIDGE_NOTE = public_surface_contract_module.local_cli_bridge_note()
 _CODEX_INSTALL_FLAG = runtime_install_flag(_CODEX_RUNTIME_NAME)
 _CLAUDE_INSTALL_FLAG = runtime_install_flag(_CLAUDE_RUNTIME_NAME)
 _RUNTIME_RECOVERY_LADDER_TEMPLATE = recovery_ladder_note(
@@ -79,127 +83,7 @@ _RUNTIME_RECOVERY_LADDER_TEMPLATE = recovery_ladder_note(
 )
 _BOOTSTRAP_INSTALLER_METADATA_JSON_ENV = "GPD_BOOTSTRAP_TEST_INSTALLER_METADATA_JSON"
 MANAGED_HOME_DIRNAME = ".gpd"
-
-
-def _source_sha256(relative_path: str) -> str:
-    return hashlib.sha256((REPO_ROOT / relative_path).read_bytes()).hexdigest()
-
-
-def _runtime_global_config_metadata(descriptor) -> dict[str, str]:
-    global_config = descriptor.global_config
-    if global_config.strategy == "env_or_home":
-        assert global_config.env_var is not None
-        return {
-            "strategy": global_config.strategy,
-            "env_var": global_config.env_var,
-            "home_subpath": global_config.home_subpath,
-        }
-    if global_config.strategy == "xdg_app":
-        assert global_config.env_dir_var is not None
-        assert global_config.env_file_var is not None
-        assert global_config.xdg_subdir is not None
-        return {
-            "strategy": global_config.strategy,
-            "env_dir_var": global_config.env_dir_var,
-            "env_file_var": global_config.env_file_var,
-            "xdg_subdir": global_config.xdg_subdir,
-            "home_subpath": global_config.home_subpath,
-        }
-    raise AssertionError(f"unexpected global config strategy: {global_config.strategy}")
-
-
-def _runtime_installer_metadata_record(descriptor) -> dict[str, object]:
-    return {
-        "runtime_name": descriptor.runtime_name,
-        "display_name": descriptor.display_name,
-        "priority": descriptor.priority,
-        "config_dir_name": descriptor.config_dir_name,
-        "install_flag": descriptor.install_flag,
-        "launch_command": descriptor.launch_command,
-        "selection_flags": list(descriptor.selection_flags),
-        "selection_aliases": list(descriptor.selection_aliases),
-        "command_prefix": descriptor.command_prefix,
-        "public_command_surface_prefix": descriptor.public_command_surface_prefix,
-        "installer_help_example_scope": descriptor.installer_help_example_scope,
-        "global_config": _runtime_global_config_metadata(descriptor),
-    }
-
-
-def _shared_public_surface_text_metadata() -> dict[str, object]:
-    contract = public_surface_contract_module.load_public_surface_contract()
-    beginner = contract.beginner_onboarding
-    bridge = contract.local_cli_bridge
-    named = bridge.named_commands
-    resume = contract.resume_authority
-    recovery = contract.recovery_ladder
-    return {
-        "schemaVersion": 1,
-        "beginnerHubUrl": beginner.hub_url,
-        "beginnerPreflightRequirements": list(beginner.preflight_requirements),
-        "beginnerCaveats": list(beginner.caveats),
-        "beginnerStartupLadder": list(beginner.startup_ladder),
-        "localCliBridgeCommands": list(bridge.commands),
-        "localCliBridge": {
-            "doctorCommand": named.doctor,
-            "helpCommand": named.help,
-            "permissionsStatusCommand": named.permissions_status,
-            "permissionsSyncCommand": named.permissions_sync,
-            "resumeCommand": named.resume,
-            "resumeRecentCommand": named.resume_recent,
-            "observeExecutionCommand": named.observe_execution,
-            "costCommand": named.cost,
-            "presetsListCommand": named.presets_list,
-            "planPreflightCommand": named.plan_preflight,
-            "integrationsStatusWolframCommand": named.integrations_status_wolfram,
-            "terminalPhrase": bridge.terminal_phrase,
-            "purposePhrase": bridge.purpose_phrase,
-            "installLocalExample": bridge.install_local_example,
-            "doctorLocalCommand": bridge.doctor_local_command,
-            "doctorGlobalCommand": bridge.doctor_global_command,
-            "validateCommandContextCommand": bridge.validate_command_context_command,
-            "unattendedReadinessCommand": named.unattended_readiness,
-        },
-        "resumeAuthority": {
-            "durableAuthorityPhrase": resume.durable_authority_phrase,
-            "publicVocabularyIntro": resume.public_vocabulary_intro,
-            "publicFields": list(resume.public_fields),
-        },
-        "recoveryLadder": {
-            "title": recovery.title,
-            "localSnapshotCommand": recovery.local_snapshot_command,
-            "localSnapshotPhrase": recovery.local_snapshot_phrase,
-            "crossWorkspaceCommand": recovery.cross_workspace_command,
-            "crossWorkspacePhrase": recovery.cross_workspace_phrase,
-            "resumePhrase": recovery.resume_phrase,
-            "nextPhrase": recovery.next_phrase,
-            "pausePhrase": recovery.pause_phrase,
-        },
-        "settingsCommandSentence": contract.post_start_settings.primary_sentence,
-        "settingsRecommendationSentence": contract.post_start_settings.default_sentence,
-    }
-
-
-def _build_bootstrap_installer_metadata_payload() -> dict[str, object]:
-    return {
-        "schema_version": 1,
-        "source_hashes": {
-            "src/gpd/adapters/runtime_catalog.json": _source_sha256("src/gpd/adapters/runtime_catalog.json"),
-            "src/gpd/adapters/runtime_catalog_schema.json": _source_sha256(
-                "src/gpd/adapters/runtime_catalog_schema.json"
-            ),
-            "src/gpd/core/public_surface_contract.json": _source_sha256(
-                "src/gpd/core/public_surface_contract.json"
-            ),
-            "src/gpd/core/public_surface_contract_schema.json": _source_sha256(
-                "src/gpd/core/public_surface_contract_schema.json"
-            ),
-        },
-        "runtimes": [_runtime_installer_metadata_record(descriptor) for descriptor in _RUNTIME_DESCRIPTORS],
-        "shared_public_surface_text": _shared_public_surface_text_metadata(),
-    }
-
-
-_BOOTSTRAP_INSTALLER_METADATA_PAYLOAD = _build_bootstrap_installer_metadata_payload()
+_BOOTSTRAP_INSTALLER_METADATA_PAYLOAD = build_installer_metadata()
 _BOOTSTRAP_INSTALLER_METADATA_ENV = {
     _BOOTSTRAP_INSTALLER_METADATA_JSON_ENV: json.dumps(
         _BOOTSTRAP_INSTALLER_METADATA_PAYLOAD,
@@ -221,7 +105,9 @@ def _assert_single_runtime_next_steps(output: str, runtime: str) -> None:
     ordered_patterns = (
         re.escape("After install"),
         re.escape(f"Docs hub: {_BEGINNER_ONBOARDING_HUB_URL}"),
-        re.escape(f"Next: open {_RUNTIME_DISPLAY_NAMES[runtime]} in this folder, then run {_RUNTIME_START_COMMANDS[runtime]}."),
+        re.escape(
+            f"Next: open {_RUNTIME_DISPLAY_NAMES[runtime]} in this folder, then run {_RUNTIME_START_COMMANDS[runtime]}."
+        ),
         re.escape("Diagnostics: use gpd --help for local diagnostics and later setup."),
     )
     cursor = 0
@@ -285,10 +171,7 @@ def _assert_single_runtime_bootstrap_concise_line(output: str, runtime: str) -> 
 def _assert_multi_runtime_bootstrap_concise_lines(output: str, runtimes: tuple[str, ...]) -> None:
     assert "Next: choose a runtime and run its GPD start command:" in output
     for runtime in runtimes:
-        assert (
-            f"- {_RUNTIME_DISPLAY_NAMES[runtime]}: "
-            f"{_RUNTIME_START_COMMANDS[runtime]}"
-        ) in output
+        assert (f"- {_RUNTIME_DISPLAY_NAMES[runtime]}: {_RUNTIME_START_COMMANDS[runtime]}") in output
 
 
 def _assert_in_order(content: str, fragments: tuple[str, ...]) -> None:
@@ -773,11 +656,7 @@ def _run_bootstrap_with_fake_python(
         for name in ("python", "python3"):
             _write_fake_python(managed_bin / name, log_path, precreate_managed_version)
 
-    env = {
-        key: value
-        for key, value in os.environ.items()
-        if not key.startswith("FAKE_PIP_")
-    }
+    env = {key: value for key, value in os.environ.items() if not key.startswith("FAKE_PIP_")}
     env["HOME"] = str(home)
     env.pop("GPD_HOME", None)
     env["GPD_BOOTSTRAP_DISABLE_NETWORK_PROBES"] = "1"
@@ -833,14 +712,20 @@ def test_bootstrap_installer_consumes_generated_metadata_without_python() -> Non
     runtime_names = [descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS]
     runtime_labels = [descriptor.display_name for descriptor in _RUNTIME_DESCRIPTORS]
     first_alias = next(alias for descriptor in _RUNTIME_DESCRIPTORS for alias in descriptor.selection_aliases)
-    alias_runtime = next(descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS if first_alias in descriptor.selection_aliases)
+    alias_runtime = next(
+        descriptor.runtime_name for descriptor in _RUNTIME_DESCRIPTORS if first_alias in descriptor.selection_aliases
+    )
+    shared_text = _BOOTSTRAP_INSTALLER_METADATA_PAYLOAD["shared_public_surface_text"]
+    assert isinstance(shared_text, dict)
+    local_cli_bridge = shared_text["localCliBridge"]
+    assert isinstance(local_cli_bridge, dict)
     result = _run_node_contract_validation(
         f"""
 const assert = require("node:assert/strict");
 const installer = require("./bin/install.js");
 
 const sharedText = installer.loadSharedPublicSurfaceText();
-assert.equal(sharedText.localCliBridge.helpCommand, {_shared_public_surface_text_metadata()["localCliBridge"]["helpCommand"]!r});
+assert.equal(sharedText.localCliBridge.helpCommand, {local_cli_bridge["helpCommand"]!r});
 assert.equal(sharedText.beginnerHubUrl, {_BEGINNER_ONBOARDING_HUB_URL!r});
 
 const menu = installer.runtimeSelectionMenuEntries({{ allowAll: false }});
@@ -1081,9 +966,7 @@ def test_bootstrap_help_uses_catalog_driven_example_runtimes() -> None:
 
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
     for descriptor in _RUNTIME_HELP_EXAMPLE_DESCRIPTORS:
-        assert (
-            f"# Install for {descriptor.display_name} {descriptor.installer_help_example_scope}" in result.stdout
-        )
+        assert f"# Install for {descriptor.display_name} {descriptor.installer_help_example_scope}" in result.stdout
     _assert_in_order(
         result.stdout,
         (
@@ -1107,7 +990,7 @@ def test_bootstrap_help_uses_catalog_driven_example_runtimes() -> None:
     assert "Workflow presets:" not in result.stdout
     assert "Recommended unattended default: Balanced" not in result.stdout
     assert "matching tagged GitHub source" not in result.stdout
-    assert "startsWith(\"$\")" not in result.stdout
+    assert 'startsWith("$")' not in result.stdout
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for bootstrap installer tests")
@@ -1159,7 +1042,8 @@ def test_bootstrap_uses_managed_virtualenv_and_skips_host_pip(tmp_path: Path) ->
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "install",
@@ -1172,19 +1056,22 @@ def test_bootstrap_uses_managed_virtualenv_and_skips_host_pip(tmp_path: Path) ->
     managed_runtime_doctor = [
         entry
         for entry in entries
-        if entry["managed"] and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
+        if entry["managed"]
+        and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
     ]
     assert len(managed_runtime_doctor) == 1
     doctor_index = next(
         index
         for index, entry in enumerate(entries)
-        if entry["managed"] and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
+        if entry["managed"]
+        and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
     )
     install_index = next(
         index
         for index, entry in enumerate(entries)
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "install",
@@ -1202,7 +1089,9 @@ def test_bootstrap_uses_managed_virtualenv_and_skips_host_pip(tmp_path: Path) ->
     assert "readiness check skipped" not in result.stdout
     assert f"Installing GPD (local) for: {_RUNTIME_DISPLAY_NAMES[_CODEX_RUNTIME_NAME]}" in result.stdout
     assert "Runtime launcher/target preflight" in result.stdout
-    assert f"Runtime launcher/target preflight passed for {_RUNTIME_DISPLAY_NAMES[_CODEX_RUNTIME_NAME]}" in result.stdout
+    assert (
+        f"Runtime launcher/target preflight passed for {_RUNTIME_DISPLAY_NAMES[_CODEX_RUNTIME_NAME]}" in result.stdout
+    )
     assert "GPD does not verify provider credentials automatically" in result.stdout
     combined_output = result.stdout + result.stderr
     assert f"`gpd doctor --runtime {_CODEX_RUNTIME_NAME} --local`" in combined_output
@@ -1260,8 +1149,7 @@ def test_bootstrap_uninstall_routes_to_runtime_uninstall(tmp_path: Path) -> None
     managed_runtime_uninstalls = [
         entry
         for entry in entries
-        if entry["managed"]
-        and entry["argv"] == ["-m", "gpd.cli", "uninstall", _CODEX_RUNTIME_NAME, "--local", "--yes"]
+        if entry["managed"] and entry["argv"] == ["-m", "gpd.cli", "uninstall", _CODEX_RUNTIME_NAME, "--local", "--yes"]
     ]
     assert len(managed_runtime_uninstalls) == 1
     managed_runtime_doctor = [
@@ -1270,7 +1158,10 @@ def test_bootstrap_uninstall_routes_to_runtime_uninstall(tmp_path: Path) -> None
     assert managed_runtime_doctor == []
 
     assert (home / MANAGED_HOME_DIRNAME / "venv" / "bin" / "python").exists()
-    assert f"Preparing managed GPD CLI from PyPI (get-physics-done=={PYTHON_PACKAGE_VERSION}) into the managed environment..." in result.stdout
+    assert (
+        f"Preparing managed GPD CLI from PyPI (get-physics-done=={PYTHON_PACKAGE_VERSION}) into the managed environment..."
+        in result.stdout
+    )
     assert "Runtime launcher/target preflight" not in result.stdout
     assert f"Uninstalling GPD from {_RUNTIME_DISPLAY_NAMES[_CODEX_RUNTIME_NAME]} (local)..." in result.stdout
     assert "runtime uninstall ok" in result.stdout
@@ -1294,10 +1185,11 @@ def test_bootstrap_uninstall_reuses_existing_managed_cli_without_package_install
     managed_runtime_uninstalls = [
         entry
         for entry in entries
-        if entry["managed"]
-        and entry["argv"] == ["-m", "gpd.cli", "uninstall", _CODEX_RUNTIME_NAME, "--local", "--yes"]
+        if entry["managed"] and entry["argv"] == ["-m", "gpd.cli", "uninstall", _CODEX_RUNTIME_NAME, "--local", "--yes"]
     ]
-    venv_creates = [entry for entry in entries if entry["argv"][:2] == ["-m", "venv"] and entry["argv"] != ["-m", "venv", "--help"]]
+    venv_creates = [
+        entry for entry in entries if entry["argv"][:2] == ["-m", "venv"] and entry["argv"] != ["-m", "venv", "--help"]
+    ]
 
     assert managed_pip_installs == []
     assert len(managed_runtime_uninstalls) == 1
@@ -1401,7 +1293,8 @@ def test_bootstrap_install_blocks_when_selected_runtime_launcher_is_missing(tmp_
     managed_runtime_doctor = [
         entry
         for entry in entries
-        if entry["managed"] and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
+        if entry["managed"]
+        and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
     ]
     assert len(managed_runtime_doctor) == 1
     managed_runtime_installs = [
@@ -1445,7 +1338,8 @@ def test_bootstrap_install_blocks_when_target_dir_is_not_writable(tmp_path: Path
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "--raw",
@@ -1481,7 +1375,8 @@ def test_bootstrap_install_repairs_selected_runtime_incomplete_target(tmp_path: 
     managed_runtime_doctor = [
         entry
         for entry in entries
-        if entry["managed"] and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
+        if entry["managed"]
+        and entry["argv"] == ["-m", "gpd.cli", "--raw", "doctor", "--runtime", _CODEX_RUNTIME_NAME, "--local"]
     ]
     managed_runtime_installs = [
         entry for entry in entries if entry["managed"] and entry["argv"][:3] == ["-m", "gpd.cli", "install"]
@@ -1490,7 +1385,9 @@ def test_bootstrap_install_repairs_selected_runtime_incomplete_target(tmp_path: 
     assert len(managed_runtime_installs) == 1
     combined_output = result.stdout + result.stderr
     assert "Runtime launcher/target preflight failed." not in combined_output
-    assert f"Runtime launcher/target preflight passed for {_RUNTIME_DISPLAY_NAMES[_CODEX_RUNTIME_NAME]}" in combined_output
+    assert (
+        f"Runtime launcher/target preflight passed for {_RUNTIME_DISPLAY_NAMES[_CODEX_RUNTIME_NAME]}" in combined_output
+    )
     assert "launcher/target preflight passed with advisories" not in combined_output
     assert "incomplete owned GPD install" in combined_output
 
@@ -1574,7 +1471,8 @@ def test_bootstrap_does_not_add_after_install_guidance_when_python_install_fails
     managed_runtime_installs = [
         entry
         for entry in entries
-        if entry["managed"] and entry["argv"] == ["-m", "gpd.cli", "install", "--all", "--global", "--skip-readiness-check"]
+        if entry["managed"]
+        and entry["argv"] == ["-m", "gpd.cli", "install", "--all", "--global", "--skip-readiness-check"]
     ]
     assert len(managed_runtime_installs) == 1
     assert "Install failures:" in result.stdout
@@ -1601,7 +1499,8 @@ def test_bootstrap_forwards_target_dir_to_runtime_install(tmp_path: Path) -> Non
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "install",
@@ -1617,7 +1516,8 @@ def test_bootstrap_forwards_target_dir_to_runtime_install(tmp_path: Path) -> Non
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "--raw",
@@ -1649,7 +1549,8 @@ def test_bootstrap_preserves_global_scope_for_canonical_global_target_dir(tmp_pa
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "install",
@@ -1666,7 +1567,8 @@ def test_bootstrap_preserves_global_scope_for_canonical_global_target_dir(tmp_pa
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "--raw",
@@ -1716,7 +1618,8 @@ def test_bootstrap_preserves_global_scope_for_home_target_when_runtime_env_point
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "install",
@@ -1732,7 +1635,8 @@ def test_bootstrap_preserves_global_scope_for_home_target_when_runtime_env_point
         entry
         for entry in entries
         if entry["managed"]
-        and entry["argv"] == [
+        and entry["argv"]
+        == [
             "-m",
             "gpd.cli",
             "--raw",
@@ -1798,7 +1702,10 @@ def test_bootstrap_reinstall_force_reinstalls_matching_release(tmp_path: Path) -
     assert len(managed_pip_installs) == 1
     assert "--force-reinstall" in managed_pip_installs[0]["argv"]
     assert managed_pip_installs[0]["argv"][-1] == PYPI_SPEC
-    assert f"Reinstalling GPD from PyPI (get-physics-done=={PYTHON_PACKAGE_VERSION}) into the managed environment..." in result.stdout
+    assert (
+        f"Reinstalling GPD from PyPI (get-physics-done=={PYTHON_PACKAGE_VERSION}) into the managed environment..."
+        in result.stdout
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -1836,7 +1743,9 @@ def test_bootstrap_upgrade_falls_back_to_main_git_checkout(tmp_path: Path) -> No
 
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     managed_pip_targets = [
-        entry["argv"][-1] for entry in entries if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
+        entry["argv"][-1]
+        for entry in entries
+        if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
     ]
 
     assert managed_pip_targets == [
@@ -1872,14 +1781,18 @@ def test_bootstrap_upgrade_prefers_preflighted_git_checkout_when_archive_is_inac
 
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     managed_pip_targets = [
-        entry["argv"][-1] for entry in entries if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
+        entry["argv"][-1]
+        for entry in entries
+        if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
     ]
 
     assert managed_pip_targets == [MAIN_HTTPS_GIT_SPEC]
     assert "Detected that current main branch source archive is unavailable: HTTP 404." in result.stdout
     assert "Using HTTPS git checkout of main for the main-branch upgrade." in result.stdout
     assert "HTTP error 404 while getting branch archive" not in result.stderr
-    assert "current main branch source archive failed. Falling back to HTTPS git checkout of main..." not in result.stdout
+    assert (
+        "current main branch source archive failed. Falling back to HTTPS git checkout of main..." not in result.stdout
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -1898,7 +1811,9 @@ def test_bootstrap_upgrade_fails_closed_without_falling_back_to_release_sources(
 
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     managed_pip_targets = [
-        entry["argv"][-1] for entry in entries if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
+        entry["argv"][-1]
+        for entry in entries
+        if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
     ]
     managed_runtime_installs = [
         entry for entry in entries if entry["managed"] and entry["argv"][:3] == ["-m", "gpd.cli", "install"]
@@ -1912,7 +1827,10 @@ def test_bootstrap_upgrade_fails_closed_without_falling_back_to_release_sources(
     assert TAG_HTTPS_GIT_SPEC not in managed_pip_targets
     assert managed_runtime_installs == []
     assert "git checkout could not resolve branch main" in result.stderr
-    assert f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the latest unreleased GitHub main source." in result.stderr
+    assert (
+        f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the latest unreleased GitHub main source."
+        in result.stderr
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -1956,7 +1874,9 @@ def test_bootstrap_falls_back_to_tag_git_when_tag_archive_install_fails(tmp_path
 
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     managed_pip_targets = [
-        entry["argv"][-1] for entry in entries if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
+        entry["argv"][-1]
+        for entry in entries
+        if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
     ]
 
     assert managed_pip_targets == [
@@ -1997,14 +1917,22 @@ def test_bootstrap_prefers_preflighted_tag_git_candidate_when_tag_archive_is_ina
 
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     managed_pip_targets = [
-        entry["argv"][-1] for entry in entries if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
+        entry["argv"][-1]
+        for entry in entries
+        if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
     ]
 
     assert managed_pip_targets == [PYPI_SPEC, TAG_HTTPS_GIT_SPEC]
     combined_output = result.stdout + result.stderr
     assert "PyPI install failed. Falling back to GitHub source..." in combined_output
-    assert f"Detected that GitHub source archive for v{PYTHON_PACKAGE_VERSION} is unavailable: HTTP 404." in combined_output
-    assert f"Installing GPD from HTTPS git checkout for v{PYTHON_PACKAGE_VERSION} into the managed environment..." in combined_output
+    assert (
+        f"Detected that GitHub source archive for v{PYTHON_PACKAGE_VERSION} is unavailable: HTTP 404."
+        in combined_output
+    )
+    assert (
+        f"Installing GPD from HTTPS git checkout for v{PYTHON_PACKAGE_VERSION} into the managed environment..."
+        in combined_output
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -2043,7 +1971,10 @@ def test_bootstrap_release_install_fails_closed_without_falling_back_to_main_sou
     ]
 
     assert managed_pip_targets == [PYPI_SPEC]
-    assert f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the PyPI pinned release or tagged GitHub release sources." in result.stderr
+    assert (
+        f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the PyPI pinned release or tagged GitHub release sources."
+        in result.stderr
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -2101,7 +2032,9 @@ def test_bootstrap_fails_closed_when_all_release_sources_fail(tmp_path: Path) ->
 
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     managed_pip_targets = [
-        entry["argv"][-1] for entry in entries if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
+        entry["argv"][-1]
+        for entry in entries
+        if entry["managed"] and entry["argv"][:4] == ["-m", "pip", "install", "--upgrade"]
     ]
 
     assert managed_pip_targets == [
@@ -2110,7 +2043,10 @@ def test_bootstrap_fails_closed_when_all_release_sources_fail(tmp_path: Path) ->
         TAG_HTTPS_GIT_SPEC,
     ]
     assert "current main branch source archive" not in result.stdout
-    assert f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the PyPI pinned release or tagged GitHub release sources." in result.stderr
+    assert (
+        f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the PyPI pinned release or tagged GitHub release sources."
+        in result.stderr
+    )
     assert "Could not find a version that satisfies the requirement" not in result.stderr
 
 

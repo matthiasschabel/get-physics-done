@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd import registry
+from tests.agent_policy_test_support import assert_agent_role_kit_policy, assert_agent_role_kit_section
 from tests.assertion_taxonomy_support import (
     FragmentMode,
     MatchMode,
     assert_prompt_contracts,
-    fragment_count,
     machine_exact,
     semantic_anchor,
     semantic_concept,
@@ -70,13 +70,20 @@ def test_gpd_project_researcher_prompt_stays_within_expected_budget_and_keeps_on
         ),
     )
 
-    generated_prompt = registry.get_agent("gpd-project-researcher").system_prompt
+    agent = registry.get_agent("gpd-project-researcher")
+    generated_prompt = agent.system_prompt
+    assert_agent_role_kit_policy(
+        agent,
+        (
+            "status-routing",
+            "fresh-continuation",
+            "files-written-freshness",
+            "context-pressure",
+        ),
+    )
+    assert_agent_role_kit_section(agent)
     assert_prompt_contracts(
         generated_prompt,
-        fragment_count(
-            "project researcher requirements section renders once", "## Agent Requirements", expected_count=1
-        ),
-        fragment_count("project researcher role-kit section renders once", "## Agent Role Kits", expected_count=1),
         machine_exact(
             "project researcher generated authority fields",
             (
@@ -85,12 +92,6 @@ def test_gpd_project_researcher_prompt_stays_within_expected_budget_and_keeps_on
                 "### Fresh Continuation (`fresh-continuation`)",
             ),
         ),
-    )
-    assert registry.get_agent("gpd-project-researcher").role_kits == (
-        "status-routing",
-        "fresh-continuation",
-        "files-written-freshness",
-        "context-pressure",
     )
 
     for phrase in (

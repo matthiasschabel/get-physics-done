@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd import registry
+from tests.agent_policy_test_support import assert_agent_role_kit_policy, assert_agent_role_kit_section
 from tests.assertion_taxonomy_support import (
     MatchMode,
     assert_prompt_contracts,
-    fragment_count,
     machine_exact,
     semantic_anchor,
     semantic_concept,
@@ -61,13 +61,16 @@ def test_roadmapper_makes_checkpoint_revision_flow_explicit() -> None:
     content = _read_agent("gpd-roadmapper")
     agent = registry.get_agent("gpd-roadmapper")
 
-    assert_prompt_contracts(
-        agent.system_prompt,
-        machine_exact(
-            "roadmapper generated role kit carries continuation path",
-            ("## Agent Role Kits", "references/orchestration/continuation-boundary.md"),
+    assert_agent_role_kit_policy(
+        agent,
+        (
+            "status-routing",
+            "fresh-continuation",
+            "files-written-freshness",
+            "context-pressure",
         ),
     )
+    assert_agent_role_kit_section(agent)
     assert_prompt_contracts(
         content,
         machine_exact("roadmapper revision heading", "### Revision Prompt"),
@@ -84,16 +87,16 @@ def test_experiment_designer_supervised_mode_mentions_fresh_continuation() -> No
     content = _read_agent("gpd-experiment-designer")
     agent = registry.get_agent("gpd-experiment-designer")
 
-    assert agent.role_kits == (
-        "status-routing",
-        "fresh-continuation",
-        "files-written-freshness",
-        "context-pressure",
+    assert_agent_role_kit_policy(
+        agent,
+        (
+            "status-routing",
+            "fresh-continuation",
+            "files-written-freshness",
+            "context-pressure",
+        ),
     )
-    assert_prompt_contracts(
-        agent.system_prompt,
-        fragment_count("experiment designer role-kit section renders once", "## Agent Role Kits", expected_count=1),
-    )
+    assert_agent_role_kit_section(agent)
     assert_prompt_contracts(
         content,
         semantic_anchor(

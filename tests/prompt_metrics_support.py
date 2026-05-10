@@ -11,6 +11,7 @@ from pathlib import Path
 
 from gpd.adapters import get_adapter
 from gpd.adapters.install_utils import expand_at_includes, parse_at_include_path, project_markdown_for_runtime
+from gpd.core import prompt_markdown_scan as _prompt_markdown_scan
 from gpd.core.model_visible_text import command_visibility_note
 
 DEFAULT_PROMPT_BUDGET_MARGIN = 0.03
@@ -37,6 +38,8 @@ __all__ = [
     "runtime_command_visibility_note",
 ]
 
+MarkdownFence = _prompt_markdown_scan.MarkdownFence
+
 
 @dataclass(frozen=True, slots=True)
 class PromptSurfaceMetrics:
@@ -48,16 +51,6 @@ class PromptSurfaceMetrics:
     expanded_char_count: int
     first_question_line: int | None = None
     first_question_marker: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class MarkdownFence:
-    """One fenced code block with source line metadata."""
-
-    info: str
-    body: str
-    start_line: int
-    end_line: int
 
 
 def _prompt_diagnostics_module() -> object | None:
@@ -157,56 +150,6 @@ def projected_prompt_text(
     )
 
 
-def _markdown_fence_marker(stripped_line: str) -> str | None:
-    if stripped_line.startswith("```"):
-        return "```"
-    if stripped_line.startswith("~~~"):
-        return "~~~"
-    return None
-
-
-def _local_iter_markdown_fences(text: str) -> tuple[MarkdownFence, ...]:
-    fences: list[MarkdownFence] = []
-    active_fence_marker: str | None = None
-    active_info = ""
-    active_start_line = 0
-    active_body: list[str] = []
-
-    for line_number, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        fence_marker = _markdown_fence_marker(stripped)
-        if fence_marker is None:
-            if active_fence_marker is not None:
-                active_body.append(line)
-            continue
-
-        if active_fence_marker is None:
-            active_fence_marker = fence_marker
-            active_info = stripped[len(fence_marker) :].strip()
-            active_start_line = line_number
-            active_body = []
-            continue
-
-        if fence_marker == active_fence_marker:
-            fences.append(
-                MarkdownFence(
-                    info=active_info,
-                    body="\n".join(active_body),
-                    start_line=active_start_line,
-                    end_line=line_number,
-                )
-            )
-            active_fence_marker = None
-            active_info = ""
-            active_start_line = 0
-            active_body = []
-            continue
-
-        active_body.append(line)
-
-    return tuple(fences)
-
-
 def _coerce_markdown_fence(fence: object) -> MarkdownFence:
     if isinstance(fence, MarkdownFence):
         return fence
@@ -224,27 +167,7 @@ def iter_markdown_fences(text: str) -> Sequence[MarkdownFence]:
     diagnostics_iter = _diagnostics_callable("iter_markdown_fences")
     if diagnostics_iter is not None:
         return tuple(_coerce_markdown_fence(fence) for fence in diagnostics_iter(text))
-    return _local_iter_markdown_fences(text)
-
-
-def _local_count_raw_includes(text: str) -> int:
-    include_count = 0
-    active_fence_marker: str | None = None
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        fence_marker = _markdown_fence_marker(stripped)
-        if fence_marker is not None:
-            if active_fence_marker is None:
-                active_fence_marker = fence_marker
-            elif fence_marker == active_fence_marker:
-                active_fence_marker = None
-            continue
-        if active_fence_marker is not None:
-            continue
-        if parse_at_include_path(stripped) is not None:
-            include_count += 1
-    return include_count
+    return _prompt_markdown_scan.iter_markdown_fences(text)
 
 
 def count_raw_includes(text: str) -> int:
@@ -253,7 +176,7 @@ def count_raw_includes(text: str) -> int:
     diagnostics_counter = _diagnostics_callable("count_raw_includes", "_count_raw_includes")
     if diagnostics_counter is not None:
         return int(diagnostics_counter(text))
-    return _local_count_raw_includes(text)
+    return _prompt_markdown_scan.count_raw_includes(text)
 
 
 def expanded_include_markers(text: str) -> tuple[str, ...]:
@@ -265,23 +188,10 @@ def expanded_include_markers(text: str) -> tuple[str, ...]:
     return tuple(re.findall(r"<!-- \[included: ([^\]]+)\] -->", text))
 
 
-def _local_iter_unfenced_lines(text: str) -> tuple[str, ...]:
-    lines: list[str] = []
-    active_fence_marker: str | None = None
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        fence_marker = _markdown_fence_marker(stripped)
-        if fence_marker is not None:
-            if active_fence_marker is None:
-                active_fence_marker = fence_marker
-            elif fence_marker == active_fence_marker:
-                active_fence_marker = None
-            continue
-        if active_fence_marker is not None:
-            continue
-        lines.append(line)
-    return tuple(lines)
+def _coerce_unfenced_line(line: object) -> str:
+    if isinstance(line, tuple) and len(line) == 2:
+        return str(line[1])
+    return str(line)
 
 
 def iter_unfenced_lines(text: str) -> Sequence[str]:
@@ -289,8 +199,8 @@ def iter_unfenced_lines(text: str) -> Sequence[str]:
 
     diagnostics_iter = _diagnostics_callable("iter_unfenced_lines")
     if diagnostics_iter is not None:
-        return tuple(str(line) for line in diagnostics_iter(text))
-    return _local_iter_unfenced_lines(text)
+        return tuple(_coerce_unfenced_line(line) for line in diagnostics_iter(text))
+    return tuple(line for _line_number, line in _prompt_markdown_scan.iter_unfenced_lines(text))
 
 
 def count_unfenced_heading(text: str, heading: str) -> int:

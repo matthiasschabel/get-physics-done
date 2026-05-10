@@ -2,6 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    MatchMode,
+    assert_prompt_contracts,
+    machine_exact,
+    semantic_anchor,
+    semantic_concept,
+)
+from tests.markdown_test_support import yaml_fence_bodies
 from tests.prompt_metrics_support import count_unfenced_heading
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,36 +25,61 @@ def _read_agent(name: str) -> str:
 def test_referee_routes_on_status_and_shows_base_return_fields_first() -> None:
     source = _read_agent("gpd-referee.md")
 
-    assert (
-        "The markdown headings `## REVIEW COMPLETE`, `## REVIEW INCOMPLETE`, and `## CHECKPOINT REACHED` are human-readable labels only."
-        in source
+    assert_prompt_contracts(
+        source,
+        semantic_anchor(
+            "referee completion headings are labels only",
+            (
+                "The markdown headings `## REVIEW COMPLETE`, `## REVIEW INCOMPLETE`, and `## CHECKPOINT REACHED` are human-readable labels only.",
+                "Route on `gpd_return.status` and the written review artifacts, not on heading text.",
+            ),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
     )
-    assert "Route on `gpd_return.status` and the written review artifacts, not on heading text." in source
     assert count_unfenced_heading(source, "## REVIEW COMPLETE") == 0
     assert count_unfenced_heading(source, "## REVIEW INCOMPLETE") == 0
     assert count_unfenced_heading(source, "## CHECKPOINT REACHED") == 0
 
-    status_idx = source.index("  status: completed")
-    files_idx = source.index("  files_written:")
-    recommendation_idx = source.index('  recommendation: "minor_revision"')
-
-    assert status_idx < files_idx < recommendation_idx
+    return_example = next(block for block in yaml_fence_bodies(source) if 'recommendation: "minor_revision"' in block)
+    assert_prompt_contracts(
+        return_example,
+        machine_exact(
+            "referee return example keeps base fields before review extensions",
+            ("  status: completed", "  files_written:", '  recommendation: "minor_revision"'),
+            mode=FragmentMode.ORDERED,
+        ),
+    )
 
 
 def test_project_researcher_uses_presentation_only_heading_mapping_and_base_fields_first() -> None:
     source = _read_agent("gpd-project-researcher.md")
 
-    assert "gpd_return:" in source
-    assert "status: completed" in source
-    assert "files_written:\n    - GPD/literature/SUMMARY.md" in source
-    assert "confidence: HIGH" in source
-    assert "Mapping: RESEARCH COMPLETE → completed, RESEARCH BLOCKED → blocked" not in source
-    assert "Route on `gpd_return.status` per the status-routing role kit." in source
-
-    next_actions_idx = source.index("  next_actions:")
-    confidence_idx = source.index("  confidence: HIGH")
-
-    assert next_actions_idx < confidence_idx
+    assert_prompt_contracts(
+        source,
+        machine_exact(
+            "project researcher return fields",
+            (
+                "gpd_return:",
+                "status: completed",
+                "files_written:\n    - GPD/literature/SUMMARY.md",
+                "confidence: HIGH",
+            ),
+        ),
+        *semantic_concept(
+            "project researcher typed status routing",
+            required="Route on `gpd_return.status` per the status-routing role kit.",
+            forbidden="Mapping: RESEARCH COMPLETE → completed, RESEARCH BLOCKED → blocked",
+        ),
+    )
+    return_example = next(block for block in yaml_fence_bodies(source) if "  confidence: HIGH" in block)
+    assert_prompt_contracts(
+        return_example,
+        machine_exact(
+            "project researcher base fields precede confidence extension",
+            ("  next_actions:", "  confidence: HIGH"),
+            mode=FragmentMode.ORDERED,
+        ),
+    )
 
 
 def test_plan_checker_uses_typed_status_and_drops_nested_return_payload_examples() -> None:
@@ -54,25 +88,56 @@ def test_plan_checker_uses_typed_status_and_drops_nested_return_payload_examples
         encoding="utf-8"
     )
 
-    assert (
-        "The label examples in `checker-return-protocol.md` are UI only; use `gpd_return.status` for the machine decision."
-        in source
+    assert_prompt_contracts(
+        source,
+        semantic_anchor(
+            "plan checker status routing uses gpd_return",
+            (
+                "The label examples in `checker-return-protocol.md` are UI only; use `gpd_return.status` for the machine decision.",
+                "the machine decision comes from `gpd_return.status`",
+            ),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+        machine_exact(
+            "plan checker recognized typed statuses",
+            (
+                "`gpd_return.status: completed`",
+                "`gpd_return.status: checkpoint`",
+                "`gpd_return.status: failed`",
+                "`gpd_return.status: blocked`",
+            ),
+        ),
     )
-    assert "the machine decision comes from `gpd_return.status`" in source
-    assert "Headings above are presentation only. Route on `gpd_return.status`" in return_protocol
-    assert "`gpd_return.status: completed`" in source
-    assert "`gpd_return.status: checkpoint`" in source
-    assert "`gpd_return.status: failed`" in source
-    assert "`gpd_return.status: blocked`" in source
+    assert_prompt_contracts(
+        return_protocol,
+        semantic_anchor(
+            "plan checker protocol headings are presentation only",
+            "Headings above are presentation only. Route on `gpd_return.status`",
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+    )
     assert count_unfenced_heading(source, "## VERIFICATION PASSED") == 0
     assert count_unfenced_heading(source, "## ISSUES FOUND") == 0
 
-    status_idx = source.index("  status: completed")
-    files_idx = source.index("  files_written: []")
-    approved_idx = source.index("  approved_plans:")
-
-    assert status_idx < files_idx < approved_idx
-    assert "contract_gate_summary:" not in source
-    assert "issues_found:" not in source
-    assert "escalation: null | {pattern, options}" not in source
-    assert "# Mapping: all_approved" not in source
+    return_example = next(block for block in yaml_fence_bodies(source) if "  approved_plans:" in block)
+    assert_prompt_contracts(
+        return_example,
+        machine_exact(
+            "plan checker base return fields precede approval extensions",
+            ("  status: completed", "  files_written: []", "  approved_plans:"),
+            mode=FragmentMode.ORDERED,
+        ),
+    )
+    assert_prompt_contracts(
+        source,
+        machine_exact(
+            "plan checker stale nested payload examples absent",
+            (
+                "contract_gate_summary:",
+                "issues_found:",
+                "escalation: null | {pattern, options}",
+                "# Mapping: all_approved",
+            ),
+            mode=FragmentMode.ABSENT,
+        ),
+    )

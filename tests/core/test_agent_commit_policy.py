@@ -10,6 +10,7 @@ import pytest
 from gpd import registry
 from gpd.adapters.install_utils import _inject_command_visibility_sections_from_frontmatter
 from gpd.core.model_visible_text import AGENT_FRONTMATTER_AUTHORITY_POINTER
+from tests.agent_policy_test_support import assert_role_kit_section_in_prompt
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
@@ -88,12 +89,9 @@ def test_agent_role_kit_install_projection_is_generated_once_after_requirements(
         "Body.\n"
     )
 
-    assert projected.count("## Agent Requirements") == 1
-    assert projected.count("## Agent Role Kits") == 1
     assert "stale generated requirements" not in projected
     assert "stale generated role kits" not in projected
-    assert projected.index("## Agent Requirements") < projected.index("## Agent Role Kits")
-    assert projected.index("## Agent Role Kits") < projected.index("## Existing Body")
+    assert_role_kit_section_in_prompt(projected, ("status-routing",), before="## Existing Body")
     assert "Body." in projected
 
 

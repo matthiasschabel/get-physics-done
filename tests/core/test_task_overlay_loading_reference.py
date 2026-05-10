@@ -92,6 +92,11 @@ def test_task_overlay_reference_defines_spawn_first_metadata_only_contract() -> 
     for fragment in required_fragments:
         assert fragment in normalized_text
 
+    duplicated_registry_ids = sorted(
+        overlay.overlay_id for overlay in list_task_overlays() if overlay.overlay_id in text
+    )
+    assert duplicated_registry_ids == []
+
 
 def test_task_overlay_registry_is_metadata_only_and_role_compatible() -> None:
     overlays = list_task_overlays()

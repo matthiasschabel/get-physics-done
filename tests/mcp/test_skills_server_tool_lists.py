@@ -313,6 +313,111 @@ def test_get_skill_command_surfaces_staged_loading_sidecar() -> None:
     assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"
 
 
+def test_staged_authority_seeds_are_metadata_only_and_scanned_transitively(tmp_path: Path) -> None:
+    from gpd.mcp.servers import skills_server
+
+    fixtures = {
+        "stage-authority.md": "Stage authority references @{GPD_INSTALL_DIR}/templates/staged-schema.md.\n",
+        "staged-schema.md": "---\ntype: schema\n---\n# Staged Schema\nDefault payload omits this body.\n",
+        "conditional-authority.md": "# Conditional Authority\n",
+        "lazy-schema.md": (
+            "---\ntype: schema\n---\n# Lazy Schema\n"
+            "This lazy body mentions @{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md.\n"
+        ),
+        "lazy-nested-schema.md": "---\ntype: schema\n---\n# Lazy Nested Schema\n",
+    }
+    fixture_paths = {name: tmp_path / name for name in fixtures}
+    for name, body in fixtures.items():
+        fixture_paths[name].write_text(body, encoding="utf-8")
+
+    staged_loading = WorkflowStageManifest(
+        schema_version=1,
+        workflow_id="debug",
+        stages=(
+            WorkflowStage(
+                id="bootstrap",
+                order=1,
+                purpose="debug bootstrap",
+                mode_paths=(),
+                required_init_fields=(),
+                loaded_authorities=("workflows/stage-authority.md",),
+                conditional_authorities=(
+                    WorkflowStageConditionalAuthority(
+                        when="needs_extra_context",
+                        authorities=("workflows/conditional-authority.md",),
+                    ),
+                ),
+                must_not_eager_load=("templates/lazy-schema.md",),
+                allowed_tools=("file_read",),
+                writes_allowed=(),
+                produced_state=(),
+                next_stages=(),
+                checkpoints=(),
+            ),
+        ),
+    )
+    portable_paths = {
+        "workflows/stage-authority.md": (
+            "@{GPD_INSTALL_DIR}/workflows/stage-authority.md",
+            fixture_paths["stage-authority.md"],
+        ),
+        "workflows/conditional-authority.md": (
+            "@{GPD_INSTALL_DIR}/workflows/conditional-authority.md",
+            fixture_paths["conditional-authority.md"],
+        ),
+        "templates/lazy-schema.md": ("@{GPD_INSTALL_DIR}/templates/lazy-schema.md", fixture_paths["lazy-schema.md"]),
+        "@{GPD_INSTALL_DIR}/templates/staged-schema.md": (
+            "@{GPD_INSTALL_DIR}/templates/staged-schema.md",
+            fixture_paths["staged-schema.md"],
+        ),
+        "@{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md": (
+            "@{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md",
+            fixture_paths["lazy-nested-schema.md"],
+        ),
+    }
+    original_portable_reference_path = skills_server._portable_reference_path
+
+    def _patched_portable_reference_path(raw_path: str, *, base_path: Path | None = None):
+        if raw_path in portable_paths:
+            return portable_paths[raw_path]
+        return original_portable_reference_path(raw_path, base_path=base_path)
+
+    with patch("gpd.mcp.servers.skills_server._portable_reference_path", side_effect=_patched_portable_reference_path):
+        referenced_files, transitive_referenced_files = skills_server._build_skill_reference_lists(
+            "Command body.",
+            source_path=tmp_path / "gpd-debug.md",
+            staged_loading=staged_loading,
+            read_transitive_reference_bodies=False,
+        )
+
+    direct_by_name = {Path(entry["path"]).name: entry for entry in referenced_files}
+    transitive_paths = {entry["path"] for entry in transitive_referenced_files}
+    assert direct_by_name["stage-authority.md"] == {
+        "path": "@{GPD_INSTALL_DIR}/workflows/stage-authority.md",
+        "kind": "workflow",
+        "source": "staged_loading",
+        "stage": "bootstrap",
+        "relationship": "stage_eager",
+    }
+    assert direct_by_name["conditional-authority.md"] == {
+        "path": "@{GPD_INSTALL_DIR}/workflows/conditional-authority.md",
+        "kind": "workflow",
+        "source": "staged_loading",
+        "stage": "bootstrap",
+        "relationship": "stage_conditional",
+        "conditional_when": "needs_extra_context",
+    }
+    assert direct_by_name["lazy-schema.md"] == {
+        "path": "@{GPD_INSTALL_DIR}/templates/lazy-schema.md",
+        "kind": "template",
+        "source": "staged_loading",
+        "stage": "bootstrap",
+        "relationship": "stage_lazy_declared",
+    }
+    assert "@{GPD_INSTALL_DIR}/templates/staged-schema.md" in transitive_paths
+    assert "@{GPD_INSTALL_DIR}/templates/lazy-nested-schema.md" not in transitive_paths
+
+
 def test_get_skill_plan_phase_surfaces_staged_loading_sidecar() -> None:
     from gpd.mcp.servers.skills_server import get_skill
 

@@ -8,9 +8,15 @@ from pathlib import Path
 import pytest
 
 from gpd.adapters.install_utils import parse_at_include_path
-from scripts.render_help_surface import check_help_surface_text, replace_help_surface_text
+from scripts.render_help_surface import (
+    check_help_surface_text,
+    extract_help_surface_region,
+    help_surface_block_ids,
+    help_surface_markers,
+    replace_help_surface_text,
+)
 
-_HELP_MARKERS = ("quick-start", "command-index", "detailed-command-reference")
+_HELP_MARKERS = help_surface_block_ids()
 
 
 def _repo_root() -> Path:
@@ -23,23 +29,6 @@ def _read_workflow_help() -> str:
 
 def _read_command_help() -> str:
     return (_repo_root() / "src/gpd/commands/help.md").read_text(encoding="utf-8")
-
-
-def _range(content: str, start_marker: str, end_marker: str) -> str:
-    start = content.index(start_marker) + len(start_marker)
-    end = content.index(end_marker, start)
-    return content[start:end]
-
-
-def _help_marker_pair(marker_name: str) -> tuple[str, str]:
-    start_marker = f"<!-- gpd-help:{marker_name}:start -->"
-    end_marker = f"<!-- gpd-help:{marker_name}:end -->"
-    return start_marker, end_marker
-
-
-def _help_marker_range(content: str, marker_name: str) -> str:
-    start_marker, end_marker = _help_marker_pair(marker_name)
-    return _range(content, start_marker, end_marker)
 
 
 def _normalized_block(text: str) -> str:
@@ -124,7 +113,7 @@ def test_help_marker_comments_are_unique_ordered_extraction_anchors() -> None:
     positions: list[int] = []
 
     for marker_name in _HELP_MARKERS:
-        start_marker, end_marker = _help_marker_pair(marker_name)
+        start_marker, end_marker = help_surface_markers(marker_name)
         assert workflow_help.count(start_marker) == 1
         assert workflow_help.count(end_marker) == 1
 
@@ -139,15 +128,17 @@ def test_help_marker_comments_are_unique_ordered_extraction_anchors() -> None:
 def test_help_wrapper_extraction_contract_uses_exact_marker_anchors() -> None:
     help_command = _read_command_help()
 
-    marker_pairs = tuple("`" + start + "` / `" + end + "`" for start, end in map(_help_marker_pair, _HELP_MARKERS))
+    marker_pairs = tuple("`" + start + "` / `" + end + "`" for start, end in map(help_surface_markers, _HELP_MARKERS))
     for marker_pair in marker_pairs:
         assert marker_pair in help_command
 
+    quick_start_start, quick_start_end = help_surface_markers("quick-start")
+    _, command_index_end = help_surface_markers("command-index")
     extraction_rules = (
         "Return marker contents only; never print the HTML marker comments themselves.",
         "Visible headings inside marker ranges are output labels only.",
-        "Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:quick-start:end -->`.",
-        "Extract from `<!-- gpd-help:quick-start:start -->` through `<!-- gpd-help:command-index:end -->`.",
+        f"Extract from `{quick_start_start}` through `{quick_start_end}`.",
+        f"Extract from `{quick_start_start}` through `{command_index_end}`.",
         "whose visible heading is `## Detailed Command Reference`.",
     )
     for extraction_rule in extraction_rules:
@@ -173,7 +164,7 @@ def test_help_quick_start_marker_matches_renderer_output() -> None:
     renderer = _help_renderer()
     workflow_help = _read_workflow_help()
 
-    checked_in_quick_start = _normalized_block(_help_marker_range(workflow_help, "quick-start"))
+    checked_in_quick_start = _normalized_block(extract_help_surface_region(workflow_help, "quick-start"))
     assert checked_in_quick_start == _render_quick_start(renderer)
 
 
@@ -181,7 +172,7 @@ def test_help_command_index_marker_matches_renderer_output() -> None:
     renderer = _help_renderer()
     workflow_help = _read_workflow_help()
 
-    checked_in_command_index = _normalized_block(_help_marker_range(workflow_help, "command-index"))
+    checked_in_command_index = _normalized_block(extract_help_surface_region(workflow_help, "command-index"))
     assert checked_in_command_index == _render_command_index(renderer)
 
 
@@ -189,7 +180,9 @@ def test_help_detailed_reference_marker_matches_renderer_output() -> None:
     renderer = _help_renderer()
     workflow_help = _read_workflow_help()
 
-    checked_in_detailed_reference = _normalized_block(_help_marker_range(workflow_help, "detailed-command-reference"))
+    checked_in_detailed_reference = _normalized_block(
+        extract_help_surface_region(workflow_help, "detailed-command-reference")
+    )
     assert checked_in_detailed_reference == _render_detailed_command_reference(renderer)
 
 

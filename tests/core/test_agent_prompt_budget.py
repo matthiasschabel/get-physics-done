@@ -14,6 +14,7 @@ from tests.assertion_taxonomy_support import (
     machine_exact,
     semantic_anchor,
 )
+from tests.markdown_test_support import markdown_table_blocks
 from tests.prompt_metrics_support import (
     budget_from_baseline,
     expanded_include_markers,
@@ -128,22 +129,7 @@ def test_agent_prompt_budget_table_covers_registered_agents() -> None:
     assert set(AGENT_BASELINES) == set(registry.list_agents())
 
 
-def _markdown_table_blocks(text: str) -> list[list[str]]:
-    blocks: list[list[str]] = []
-    current: list[str] = []
-    for line in text.splitlines():
-        if line.lstrip().startswith("|"):
-            current.append(line)
-            continue
-        if current:
-            blocks.append(current)
-            current = []
-    if current:
-        blocks.append(current)
-    return blocks
-
-
-def _is_full_mode_boilerplate_table(table: list[str]) -> bool:
+def _is_full_mode_boilerplate_table(table: tuple[str, ...]) -> bool:
     table_text = "\n".join(table).lower()
     max_column_count = max(line.count("|") - 1 for line in table)
     has_autonomy_modes = all(mode in table_text for mode in ("supervised", "balanced", "yolo"))
@@ -191,7 +177,7 @@ def test_full_autonomy_and_research_mode_tables_stay_on_allowlisted_agents() -> 
         if agent_name in MODE_TABLE_ALLOWLIST:
             continue
         raw_text = agent_path.read_text(encoding="utf-8")
-        if any(_is_full_mode_boilerplate_table(table) for table in _markdown_table_blocks(raw_text)):
+        if any(_is_full_mode_boilerplate_table(table) for table in markdown_table_blocks(raw_text)):
             offenders.append(agent_name)
 
     assert offenders == []

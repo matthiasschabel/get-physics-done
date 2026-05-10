@@ -7,6 +7,7 @@ from collections import Counter
 
 from gpd import registry as content_registry
 from gpd.core import help_renderer
+from scripts.render_help_surface import extract_help_surface_region, help_surface_markers
 from tests.assertion_taxonomy_support import FragmentMode, fragment_count, semantic_anchor
 from tests.doc_surface_contracts import assert_publication_lane_boundary_contract
 
@@ -27,12 +28,6 @@ def _range(content: str, start_marker: str, end_marker: str) -> str:
     return content[start:end]
 
 
-def _help_marker_range(content: str, marker_name: str) -> str:
-    start_marker = f"<!-- gpd-help:{marker_name}:start -->"
-    end_marker = f"<!-- gpd-help:{marker_name}:end -->"
-    return _range(content, start_marker, end_marker)
-
-
 def _rendered_detailed_reference() -> str:
     return help_renderer.render_detailed_command_reference_markdown()
 
@@ -44,8 +39,9 @@ def _rendered_command_index_rows() -> dict[str, str]:
 
 
 def _detailed_command_block(content: str, command_heading: str, next_command_heading: str | None = None) -> str:
-    if "<!-- gpd-help:detailed-command-reference:start -->" in content:
-        detailed_reference = _help_marker_range(content, "detailed-command-reference")
+    detailed_start_marker, _ = help_surface_markers("detailed-command-reference")
+    if detailed_start_marker in content:
+        detailed_reference = extract_help_surface_region(content, "detailed-command-reference")
     else:
         detailed_reference = content
     start = detailed_reference.index(command_heading)
@@ -68,15 +64,16 @@ def _help_command_inventory(*contents: str) -> set[str]:
 
 
 def _detailed_command_headings(content: str) -> list[str]:
-    if "<!-- gpd-help:detailed-command-reference:start -->" in content:
-        detailed_reference = _help_marker_range(content, "detailed-command-reference")
+    detailed_start_marker, _ = help_surface_markers("detailed-command-reference")
+    if detailed_start_marker in content:
+        detailed_reference = extract_help_surface_region(content, "detailed-command-reference")
     else:
         detailed_reference = content
     return re.findall(r"(?m)^\*\*`gpd:([a-z0-9-]+)\b", detailed_reference)
 
 
 def _command_index_rows(content: str) -> dict[str, str]:
-    command_index = _help_marker_range(content, "command-index")
+    command_index = extract_help_surface_region(content, "command-index")
     rows = re.findall(r"(?m)^- `([^`]+)` - (.+)$", command_index)
     assert len(rows) == len({command for command, _description in rows})
     return dict(rows)
@@ -172,7 +169,7 @@ def test_help_wrapper_documents_inline_argument_command_lookup_normalization() -
 
 def test_help_workflow_removes_unreachable_contextual_help_variant() -> None:
     help_workflow = _read("src/gpd/specs/workflows/help.md")
-    quick_start = _help_marker_range(help_workflow, "quick-start")
+    quick_start = extract_help_surface_region(help_workflow, "quick-start")
 
     assert '<step name="contextual_help">' not in help_workflow
     assert "## Contextual Help (State-Aware Variant)" not in help_workflow

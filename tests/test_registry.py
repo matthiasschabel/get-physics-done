@@ -9,7 +9,6 @@ import pytest
 
 from gpd import cli as cli_module
 from gpd import registry
-from gpd.core.agent_role_kits import render_agent_role_kits_section, role_kit_authority_paths
 from gpd.core.model_visible_text import (
     COMMAND_POLICY_PROMPT_WRAPPER_KEY,
     agent_visibility_note,
@@ -34,6 +33,11 @@ from gpd.registry import (
     render_command_visibility_sections_from_frontmatter,
 )
 from gpd.specs import SPECS_DIR as CANONICAL_SPECS_DIR
+from tests.agent_policy_test_support import (
+    assert_agent_role_kit_policy,
+    assert_agent_role_kit_section,
+    assert_role_kit_section_in_prompt,
+)
 
 NEW_PROJECT_COMMAND_PATH = Path(__file__).resolve().parents[1] / "src" / "gpd" / "commands" / "new-project.md"
 RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT = {
@@ -246,19 +250,10 @@ class TestParseAgentFile:
         )
 
         agent = _parse_agent_file(f, source="agents")
-        rendered_role_kits = render_agent_role_kits_section(agent.role_kits)
 
-        assert agent.role_kits == ("status-routing", "fresh-continuation")
         assert agent.system_prompt.count("## Agent Requirements") == 1
-        assert agent.system_prompt.count("## Agent Role Kits") == 1
-        assert rendered_role_kits in agent.system_prompt
-        assert agent.system_prompt.index("## Agent Requirements") < agent.system_prompt.index("## Agent Role Kits")
-        assert agent.system_prompt.index("## Agent Role Kits") < agent.system_prompt.index(
-            "## Scientific Rigor Guardrails"
-        )
-        assert "{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" in role_kit_authority_paths(
-            agent.role_kits
-        )
+        assert_agent_role_kit_policy(agent, ("status-routing", "fresh-continuation"))
+        assert_agent_role_kit_section(agent, before="## Scientific Rigor Guardrails")
         assert agent.system_prompt.endswith("System prompt.")
 
     def test_agent_file_rejects_unknown_role_kit(self, tmp_path: Path) -> None:
@@ -284,10 +279,7 @@ class TestParseAgentFile:
             agent_name="role-kit-agent",
         )
 
-        assert rendered.count("## Agent Requirements") == 1
-        assert rendered.count("## Agent Role Kits") == 1
-        assert rendered.index("## Agent Requirements") < rendered.index("## Agent Role Kits")
-        assert "Route lifecycle state from `gpd_return.status`" in rendered
+        assert_role_kit_section_in_prompt(rendered, ("status-routing",), context="role-kit-agent frontmatter")
 
     def test_agent_file_no_frontmatter_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "bare-agent.md"

@@ -25,12 +25,14 @@ class GeneratedRegionSpec:
     block_label: str
     block_id_pattern: str = r"[a-z0-9][a-z0-9-]*"
     invalid_block_id_message: str = "Generated block ids must be kebab-case: {block_id!r}"
+    marker_prefix_separator: str = ":"
 
 
 def marker_pair(spec: GeneratedRegionSpec, block_id: str) -> tuple[str, str]:
     if re.fullmatch(spec.block_id_pattern, block_id) is None:
         raise ValueError(spec.invalid_block_id_message.format(block_id=block_id))
-    return f"<!-- {spec.marker_prefix}:{block_id}:start -->", f"<!-- {spec.marker_prefix}:{block_id}:end -->"
+    marker_base = f"{spec.marker_prefix}{spec.marker_prefix_separator}{block_id}"
+    return f"<!-- {marker_base}:start -->", f"<!-- {marker_base}:end -->"
 
 
 def render_region(spec: GeneratedRegionSpec, block_id: str, body: str) -> str:
@@ -110,7 +112,8 @@ def write_stale_check_result(diffs: Sequence[GeneratedRegionDiff], *, heading: s
 
 def _marker_regexes(spec: GeneratedRegionSpec) -> tuple[re.Pattern[str], re.Pattern[str]]:
     escaped_prefix = re.escape(spec.marker_prefix)
+    escaped_separator = re.escape(spec.marker_prefix_separator)
     return (
-        re.compile(rf"<!-- {escaped_prefix}:(?P<block_id>{spec.block_id_pattern}):start -->"),
-        re.compile(rf"<!-- {escaped_prefix}:(?P<block_id>{spec.block_id_pattern}):end -->"),
+        re.compile(rf"<!-- {escaped_prefix}{escaped_separator}(?P<block_id>{spec.block_id_pattern}):start -->"),
+        re.compile(rf"<!-- {escaped_prefix}{escaped_separator}(?P<block_id>{spec.block_id_pattern}):end -->"),
     )

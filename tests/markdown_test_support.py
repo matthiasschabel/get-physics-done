@@ -23,21 +23,28 @@ __all__ = [
     "assert_required_fragments",
     "extract_marker_range",
     "extract_markdown_section",
+    "has_line_with_terms",
     "iter_markdown_sections",
     "markdown_fence_bodies",
     "markdown_section",
     "markdown_sections",
+    "markdown_table_blocks",
     "normalize_text",
     "parse_frontmatter_mapping",
     "parse_markdown_links",
     "parse_markdown_table",
     "parse_yaml_fences",
     "require_mapping",
+    "tag_blocks",
+    "yaml_fence_bodies",
 ]
 
 _YAML_FENCE_LANGUAGES = {"yaml", "yml"}
 _TABLE_SEPARATOR_RE = re.compile(r":?-{3,}:?")
 _INLINE_LINK_RE = re.compile(r"(?<!!)\[([^\]\n]+)]\(([^)\n]+)\)")
+_YAML_FENCE_RE = re.compile(
+    r"(?ms)^[ \t]*(?P<marker>`{3,}|~{3,})(?P<info>[^\n]*)\n(?P<body>.*?)^[ \t]*(?P=marker)[ \t]*$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +65,7 @@ class ParsedYamlFence:
     """A parsed YAML code fence with source line metadata."""
 
     info: str
+    body: str
     data: object
     start_line: int
     end_line: int
@@ -155,10 +163,64 @@ def markdown_fence_bodies(text: str, *, info: str | None = None) -> tuple[str, .
     """Return stripped fenced-code bodies, optionally filtered by exact info string."""
 
     return tuple(
-        fence.body.strip()
-        for fence in iter_markdown_fences(text)
-        if info is None or fence.info.strip() == info
+        fence.body.strip() for fence in iter_markdown_fences(text) if info is None or fence.info.strip() == info
     )
+
+
+def yaml_fence_bodies(text: str, *, info: str | None = None) -> tuple[str, ...]:
+    """Return stripped YAML fenced-code bodies."""
+
+    requested_language = info.lower() if info is not None else None
+    bodies: list[str] = []
+    for match in _YAML_FENCE_RE.finditer(text):
+        fence_info = match.group("info").strip()
+        language = _fence_language(fence_info)
+        if requested_language is None:
+            if language not in _YAML_FENCE_LANGUAGES:
+                continue
+        elif fence_info != info and language != requested_language:
+            continue
+        bodies.append(match.group("body").strip())
+    return tuple(bodies)
+
+
+def has_line_with_terms(text: str, *terms: str, casefold: bool = False) -> bool:
+    """Return whether one line contains all terms."""
+
+    if not terms:
+        raise ValueError("at least one term is required")
+    needles = tuple(term.casefold() for term in terms) if casefold else terms
+    for line in text.splitlines():
+        haystack = line.casefold() if casefold else line
+        if all(needle in haystack for needle in needles):
+            return True
+    return False
+
+
+def tag_blocks(text: str, tag: str) -> tuple[str, ...]:
+    """Return bodies for repeated simple XML-style markdown prompt tags."""
+
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", tag):
+        raise ValueError(f"unsupported tag name: {tag!r}")
+    pattern = re.compile(rf"<{re.escape(tag)}(?:\s[^>]*)?>(.*?)</{re.escape(tag)}>", re.DOTALL)
+    return tuple(match.group(1).strip("\n") for match in pattern.finditer(text))
+
+
+def markdown_table_blocks(text: str) -> tuple[tuple[str, ...], ...]:
+    """Return contiguous pipe-table line blocks."""
+
+    blocks: list[tuple[str, ...]] = []
+    current: list[str] = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("|"):
+            current.append(line)
+            continue
+        if current:
+            blocks.append(tuple(current))
+            current = []
+    if current:
+        blocks.append(tuple(current))
+    return tuple(blocks)
 
 
 def _coerce_fragments(fragments: Iterable[str] | str) -> tuple[str, ...]:
@@ -471,6 +533,7 @@ def parse_yaml_fences(
         parsed.append(
             ParsedYamlFence(
                 info=fence.info,
+                body=fence.body.strip(),
                 data=data,
                 start_line=fence.start_line,
                 end_line=fence.end_line,

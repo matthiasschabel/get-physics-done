@@ -7,6 +7,7 @@ from pathlib import Path
 
 from gpd.adapters.install_utils import parse_at_include_path
 from gpd.core.frontmatter import validate_frontmatter
+from scripts.render_help_surface import help_surface_markers
 from tests.core.test_spawn_contracts import _find_single_task
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -101,8 +102,7 @@ def test_help_wrapper_uses_stable_section_markers_for_extracts() -> None:
         ("detailed-command-reference", "## Detailed Command Reference"),
     )
     for marker_name, heading in marker_pairs:
-        start_marker = f"<!-- gpd-help:{marker_name}:start -->"
-        end_marker = f"<!-- gpd-help:{marker_name}:end -->"
+        start_marker, end_marker = help_surface_markers(marker_name)
         assert start_marker in help_workflow
         assert end_marker in help_workflow
         assert help_workflow.index(start_marker) < help_workflow.index(heading) < help_workflow.index(end_marker)

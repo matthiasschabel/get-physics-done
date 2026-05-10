@@ -7,35 +7,74 @@ import json
 import re
 import subprocess
 import sys
+from collections import Counter
+from dataclasses import dataclass
 from functools import cache, lru_cache
 from pathlib import Path
+
+from scripts.generated_region_support import GeneratedRegionSpec, marker_pair, render_region, replace_regions
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GRAPH_PATH = REPO_ROOT / "tests" / "README.md"
 CONTRACT_PATH = REPO_ROOT / "tests" / "repo_graph_contract.json"
 SCHEMA_VERSION = 1
 
-GENERATED_ON_START = "<!-- repo-graph-generated-on:start -->"
-GENERATED_ON_END = "<!-- repo-graph-generated-on:end -->"
-SCOPE_START = "<!-- repo-graph-scope:start -->"
-SCOPE_END = "<!-- repo-graph-scope:end -->"
-SAME_STEM_COMMAND_WORKFLOW_START = "<!-- repo-graph-same-stem-command-workflow:start -->"
-SAME_STEM_COMMAND_WORKFLOW_END = "<!-- repo-graph-same-stem-command-workflow:end -->"
-
-GRAPH_SCOPE_LABELS = (
-    "`src/gpd/commands/*.md`",
-    "`src/gpd/agents/*.md`",
-    "`src/gpd/specs/workflows/*.md`",
-    "`src/gpd/specs/templates/**/*.md`",
-    "`src/gpd/specs/references/**/*.md`",
-    "`src/gpd/adapters/*.py`",
-    "`src/gpd/hooks/*.py`",
-    "`src/gpd/mcp/*.py`",
-    "`src/gpd/mcp/integrations/*.py`",
-    "`src/gpd/mcp/servers/*.py`",
-    "`infra/gpd-*.json`",
+GENERATED_ON_BLOCK_ID = "generated-on"
+SCOPE_BLOCK_ID = "scope"
+SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID = "same-stem-command-workflow"
+REPO_GRAPH_BLOCK_IDS = (
+    GENERATED_ON_BLOCK_ID,
+    SCOPE_BLOCK_ID,
+    SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID,
 )
 
+REPO_GRAPH_REGION_SPEC = GeneratedRegionSpec(
+    marker_prefix="repo-graph",
+    known_block_ids=lambda: REPO_GRAPH_BLOCK_IDS,
+    block_label="repo graph generated block",
+    marker_prefix_separator="-",
+)
+
+GENERATED_ON_START, GENERATED_ON_END = marker_pair(REPO_GRAPH_REGION_SPEC, GENERATED_ON_BLOCK_ID)
+SCOPE_START, SCOPE_END = marker_pair(REPO_GRAPH_REGION_SPEC, SCOPE_BLOCK_ID)
+SAME_STEM_COMMAND_WORKFLOW_START, SAME_STEM_COMMAND_WORKFLOW_END = marker_pair(
+    REPO_GRAPH_REGION_SPEC, SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID
+)
+
+
+@dataclass(frozen=True, slots=True)
+class GraphScopeSpec:
+    label: str
+    parent_parts: tuple[str, ...]
+    suffix: str
+    recursive: bool = False
+    name_prefix: str = ""
+
+    def matches_path(self, path: Path) -> bool:
+        if path.suffix != self.suffix:
+            return False
+        if self.name_prefix and not path.name.startswith(self.name_prefix):
+            return False
+        if self.recursive:
+            return _is_under(path, *self.parent_parts)
+        return _has_parent(path, *self.parent_parts)
+
+
+GRAPH_SCOPE_SPECS = (
+    GraphScopeSpec("`src/gpd/commands/*.md`", ("src", "gpd", "commands"), ".md"),
+    GraphScopeSpec("`src/gpd/agents/*.md`", ("src", "gpd", "agents"), ".md"),
+    GraphScopeSpec("`src/gpd/specs/workflows/*.md`", ("src", "gpd", "specs", "workflows"), ".md"),
+    GraphScopeSpec("`src/gpd/specs/templates/**/*.md`", ("src", "gpd", "specs", "templates"), ".md", recursive=True),
+    GraphScopeSpec("`src/gpd/specs/references/**/*.md`", ("src", "gpd", "specs", "references"), ".md", recursive=True),
+    GraphScopeSpec("`src/gpd/adapters/*.py`", ("src", "gpd", "adapters"), ".py"),
+    GraphScopeSpec("`src/gpd/hooks/*.py`", ("src", "gpd", "hooks"), ".py"),
+    GraphScopeSpec("`src/gpd/mcp/*.py`", ("src", "gpd", "mcp"), ".py"),
+    GraphScopeSpec("`src/gpd/mcp/integrations/*.py`", ("src", "gpd", "mcp", "integrations"), ".py"),
+    GraphScopeSpec("`src/gpd/mcp/servers/*.py`", ("src", "gpd", "mcp", "servers"), ".py"),
+    GraphScopeSpec("`infra/gpd-*.json`", ("infra",), ".json", name_prefix="gpd-"),
+)
+
+GRAPH_SCOPE_LABELS = tuple(spec.label for spec in GRAPH_SCOPE_SPECS)
 _NORMALIZED_SCOPE_LABELS = {
     label[1:-1] if label.startswith("`") and label.endswith("`") else label: label for label in GRAPH_SCOPE_LABELS
 }
@@ -179,19 +218,7 @@ def _repo_files_in_scope(repo_root: Path) -> list[Path]:
 
 
 def _is_graph_scope_path(path: Path) -> bool:
-    return (
-        (_has_parent(path, "src", "gpd", "commands") and path.suffix == ".md")
-        or (_has_parent(path, "src", "gpd", "agents") and path.suffix == ".md")
-        or (_has_parent(path, "src", "gpd", "specs", "workflows") and path.suffix == ".md")
-        or (_is_under(path, "src", "gpd", "specs", "templates") and path.suffix == ".md")
-        or (_is_under(path, "src", "gpd", "specs", "references") and path.suffix == ".md")
-        or (_has_parent(path, "src", "gpd", "adapters") and path.suffix == ".py")
-        or (_has_parent(path, "src", "gpd", "hooks") and path.suffix == ".py")
-        or (_has_parent(path, "src", "gpd", "mcp") and path.suffix == ".py")
-        or (_has_parent(path, "src", "gpd", "mcp", "integrations") and path.suffix == ".py")
-        or (_has_parent(path, "src", "gpd", "mcp", "servers") and path.suffix == ".py")
-        or (_has_parent(path, "infra") and path.suffix == ".json" and path.name.startswith("gpd-"))
-    )
+    return any(spec.matches_path(path) for spec in GRAPH_SCOPE_SPECS)
 
 
 def untracked_graph_scope_files(repo_root: Path = REPO_ROOT) -> tuple[Path, ...]:
@@ -241,43 +268,7 @@ def live_repo_file_count(repo_root: Path = REPO_ROOT) -> int:
 def expected_scope_counts(repo_root: Path = REPO_ROOT) -> dict[str, int]:
     repo_files = _repo_files_in_scope(repo_root)
 
-    return {
-        "`src/gpd/commands/*.md`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "commands") and path.suffix == ".md"
-        ),
-        "`src/gpd/agents/*.md`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "agents") and path.suffix == ".md"
-        ),
-        "`src/gpd/specs/workflows/*.md`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "specs", "workflows") and path.suffix == ".md"
-        ),
-        "`src/gpd/specs/templates/**/*.md`": sum(
-            1 for path in repo_files if _is_under(path, "src", "gpd", "specs", "templates") and path.suffix == ".md"
-        ),
-        "`src/gpd/specs/references/**/*.md`": sum(
-            1 for path in repo_files if _is_under(path, "src", "gpd", "specs", "references") and path.suffix == ".md"
-        ),
-        "`src/gpd/adapters/*.py`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "adapters") and path.suffix == ".py"
-        ),
-        "`src/gpd/hooks/*.py`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "hooks") and path.suffix == ".py"
-        ),
-        "`src/gpd/mcp/*.py`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "mcp") and path.suffix == ".py"
-        ),
-        "`src/gpd/mcp/integrations/*.py`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "mcp", "integrations") and path.suffix == ".py"
-        ),
-        "`src/gpd/mcp/servers/*.py`": sum(
-            1 for path in repo_files if _has_parent(path, "src", "gpd", "mcp", "servers") and path.suffix == ".py"
-        ),
-        "`infra/gpd-*.json`": sum(
-            1
-            for path in repo_files
-            if _has_parent(path, "infra") and path.suffix == ".json" and path.name.startswith("gpd-")
-        ),
-    }
+    return {spec.label: sum(1 for path in repo_files if spec.matches_path(path)) for spec in GRAPH_SCOPE_SPECS}
 
 
 def build_contract(
@@ -301,23 +292,17 @@ def _excluded_dir_readme_pattern(path_name: str) -> str:
     return path_name if path_name == ".mcp.json" else f"{path_name}/**"
 
 
-def render_generated_on_block(_contract: dict[str, object]) -> str:
-    return "\n".join(
-        (
-            GENERATED_ON_START,
-            "Only marked repo-graph blocks are generated from the current worktree via `uv run python scripts/sync_repo_graph_contract.py`.",
-            GENERATED_ON_END,
-        )
-    )
+def _render_generated_on_body(_contract: dict[str, object]) -> str:
+    return "Only marked repo-graph blocks are generated from the current worktree via `uv run python scripts/sync_repo_graph_contract.py`."
 
 
-def render_scope_block(contract: dict[str, object]) -> str:
+def _render_scope_body(contract: dict[str, object]) -> str:
     scope_counts = contract["scope_counts"]
     excluded_dirs = contract["excluded_graph_dirs"]
     assert isinstance(scope_counts, dict), "scope_counts must be a mapping"
     assert isinstance(excluded_dirs, list), "excluded_graph_dirs must be a list"
 
-    lines = [SCOPE_START, ""]
+    lines = [""]
     for label in GRAPH_SCOPE_LABELS:
         value = scope_counts.get(label)
         assert isinstance(value, int), f"Missing scope count for {label}"
@@ -331,11 +316,10 @@ def render_scope_block(contract: dict[str, object]) -> str:
         )
     )
     lines.extend(f"- `{_excluded_dir_readme_pattern(path_name)}`" for path_name in excluded_dirs)
-    lines.append(SCOPE_END)
     return "\n".join(lines)
 
 
-def render_same_stem_command_workflow_block(repo_root: Path = REPO_ROOT) -> str:
+def _render_same_stem_command_workflow_body(repo_root: Path = REPO_ROOT) -> str:
     repo_files = _repo_files_in_scope(repo_root)
     command_stems = {
         path.stem for path in repo_files if _has_parent(path, "src", "gpd", "commands") and path.suffix == ".md"
@@ -347,38 +331,53 @@ def render_same_stem_command_workflow_block(repo_root: Path = REPO_ROOT) -> str:
     }
     same_stems = ",".join(sorted(command_stems & workflow_stems))
 
-    return "\n".join(
-        (
-            SAME_STEM_COMMAND_WORKFLOW_START,
-            f"- `src/gpd/commands/{{{same_stems}}}.md -> src/gpd/specs/workflows/{{same stems}}.md`",
-            SAME_STEM_COMMAND_WORKFLOW_END,
-        )
+    return f"- `src/gpd/commands/{{{same_stems}}}.md -> src/gpd/specs/workflows/{{same stems}}.md`"
+
+
+def _render_repo_graph_region_body(
+    block_id: str,
+    contract: dict[str, object],
+    repo_root: Path = REPO_ROOT,
+) -> str:
+    if block_id == GENERATED_ON_BLOCK_ID:
+        return _render_generated_on_body(contract)
+    if block_id == SCOPE_BLOCK_ID:
+        return _render_scope_body(contract)
+    if block_id == SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID:
+        return _render_same_stem_command_workflow_body(repo_root)
+    raise ValueError(f"Unknown repo graph generated block {block_id!r}")
+
+
+def render_generated_on_block(contract: dict[str, object]) -> str:
+    return render_region(REPO_GRAPH_REGION_SPEC, GENERATED_ON_BLOCK_ID, _render_generated_on_body(contract))
+
+
+def render_scope_block(contract: dict[str, object]) -> str:
+    return render_region(REPO_GRAPH_REGION_SPEC, SCOPE_BLOCK_ID, _render_scope_body(contract))
+
+
+def render_same_stem_command_workflow_block(repo_root: Path = REPO_ROOT) -> str:
+    return render_region(
+        REPO_GRAPH_REGION_SPEC,
+        SAME_STEM_COMMAND_WORKFLOW_BLOCK_ID,
+        _render_same_stem_command_workflow_body(repo_root),
     )
-
-
-def extract_marked_block(text: str, start_marker: str, end_marker: str) -> str:
-    start = text.index(start_marker)
-    end = text.index(end_marker, start) + len(end_marker)
-    return text[start:end]
-
-
-def replace_marked_block(text: str, start_marker: str, end_marker: str, replacement: str) -> str:
-    start = text.index(start_marker)
-    end = text.index(end_marker, start) + len(end_marker)
-    return text[:start] + replacement + text[end:]
 
 
 def sync_readme_text(readme_text: str, contract: dict[str, object], repo_root: Path = REPO_ROOT) -> str:
-    synced = replace_marked_block(
+    synced, block_ids = replace_regions(
         readme_text,
-        GENERATED_ON_START,
-        GENERATED_ON_END,
-        render_generated_on_block(contract),
+        spec=REPO_GRAPH_REGION_SPEC,
+        render_body=lambda block_id: _render_repo_graph_region_body(block_id, contract, repo_root),
+        path=GRAPH_PATH,
     )
-    synced = replace_marked_block(synced, SCOPE_START, SCOPE_END, render_scope_block(contract))
-    return replace_marked_block(
-        synced,
-        SAME_STEM_COMMAND_WORKFLOW_START,
-        SAME_STEM_COMMAND_WORKFLOW_END,
-        render_same_stem_command_workflow_block(repo_root),
-    )
+    block_counts = Counter(block_ids)
+    missing_block_ids = tuple(block_id for block_id in REPO_GRAPH_BLOCK_IDS if block_counts[block_id] == 0)
+    duplicate_block_ids = tuple(block_id for block_id, count in block_counts.items() if count > 1)
+    if missing_block_ids:
+        missing = ", ".join(repr(block_id) for block_id in missing_block_ids)
+        raise ValueError(f"Missing repo graph generated marker(s): {missing}")
+    if duplicate_block_ids:
+        duplicate = ", ".join(repr(block_id) for block_id in duplicate_block_ids)
+        raise ValueError(f"Duplicate repo graph generated marker(s): {duplicate}")
+    return synced

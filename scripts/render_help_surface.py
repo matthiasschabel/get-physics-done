@@ -57,6 +57,13 @@ def help_surface_markers(block_id: str) -> tuple[str, str]:
     return marker_pair(_HELP_REGION_SPEC, block_id)
 
 
+def extract_help_surface_region(text: str, block_id: str) -> str:
+    start_marker, end_marker = help_surface_markers(block_id)
+    start = text.index(start_marker) + len(start_marker)
+    end = text.index(end_marker, start)
+    return text[start:end]
+
+
 def render_help_surface_region(block_id: str) -> str:
     if block_id not in _HELP_BLOCK_RENDERERS:
         raise ValueError(f"Unknown help surface block {block_id!r}")

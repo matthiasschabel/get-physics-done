@@ -36,6 +36,25 @@ def test_marker_pair_and_render_region_normalize_generated_body() -> None:
     )
 
 
+def test_marker_prefix_separator_supports_existing_fixed_marker_shape() -> None:
+    spec = GeneratedRegionSpec(
+        marker_prefix="repo-graph",
+        known_block_ids=lambda: ("scope",),
+        block_label="repo graph block",
+        marker_prefix_separator="-",
+    )
+    stale = "<!-- repo-graph-scope:start -->\nstale\n<!-- repo-graph-scope:end -->"
+
+    updated, block_ids = replace_regions(stale, spec=spec, render_body=lambda block_id: f"{block_id} body")
+
+    assert marker_pair(spec, "scope") == (
+        "<!-- repo-graph-scope:start -->",
+        "<!-- repo-graph-scope:end -->",
+    )
+    assert block_ids == ("scope",)
+    assert updated == "<!-- repo-graph-scope:start -->\nscope body\n<!-- repo-graph-scope:end -->"
+
+
 def test_replace_regions_preserves_order_and_reports_replaced_block_ids() -> None:
     spec = _region_spec()
     text = "before\n" + render_region(spec, "alpha", "old") + "\n" + render_region(spec, "beta", "old") + "\nafter\n"

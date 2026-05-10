@@ -13,6 +13,7 @@ from tests.assertion_taxonomy_support import (
     semantic_concept,
 )
 from tests.core.test_spawn_contracts import _find_single_task
+from tests.markdown_test_support import yaml_fence_bodies
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -26,26 +27,23 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _yaml_envelope(text: str) -> str:
-    return text.split("```yaml\n", 1)[1].split("```", 1)[0]
-
-
 def test_roadmapper_prompt_example_includes_complete_base_return_fields() -> None:
     roadmapper = _read(ROADMAPPER)
-    envelope = _yaml_envelope(roadmapper)
+    envelope = yaml_fence_bodies(roadmapper)[0]
 
-    assert envelope.startswith("gpd_return:\n")
     assert_prompt_contracts(
         envelope,
         machine_exact(
             "roadmapper base return fields and extensions",
             (
+                "gpd_return:",
                 "status: completed",
                 "files_written:\n    - GPD/ROADMAP.md\n    - GPD/STATE.md\n    - GPD/REQUIREMENTS.md",
                 "issues: []",
                 'next_actions:\n    - "gpd:plan-phase 01"',
                 "phases_created: 4",
             ),
+            mode=FragmentMode.ORDERED,
         ),
     )
 

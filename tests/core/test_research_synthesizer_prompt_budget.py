@@ -5,11 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd import registry
+from tests.agent_policy_test_support import assert_agent_role_kit_policy, assert_agent_role_kit_section
 from tests.assertion_taxonomy_support import (
     FragmentMode,
     MatchMode,
     assert_prompt_contracts,
-    fragment_count,
     machine_exact,
     semantic_anchor,
 )
@@ -86,32 +86,16 @@ def test_gpd_research_synthesizer_prompt_stays_within_expected_budget_and_keeps_
 
     agent = registry.get_agent("gpd-research-synthesizer")
     assert_prompt_contracts(source, machine_exact("research synthesizer source declares role kits", "role_kits:"))
-    assert agent.role_kits == (
-        "status-routing",
-        "fresh-continuation",
-        "files-written-freshness",
-        "context-pressure",
-    )
-    assert_prompt_contracts(
-        agent.system_prompt,
-        fragment_count("research synthesizer role-kit section renders once", "## Agent Role Kits", expected_count=1),
-        semantic_anchor(
-            "research synthesizer generated role-kit provenance",
-            "Generated from `role_kits` frontmatter.",
-            match=MatchMode.CASEFOLD_NORMALIZED,
-        ),
-        machine_exact(
-            "research synthesizer generated role-kit ids and authority paths",
-            (
-                "`status-routing`",
-                "`fresh-continuation`",
-                "`files-written-freshness`",
-                "`context-pressure`",
-                "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md",
-                "{GPD_INSTALL_DIR}/references/orchestration/context-pressure-thresholds.md",
-            ),
+    assert_agent_role_kit_policy(
+        agent,
+        (
+            "status-routing",
+            "fresh-continuation",
+            "files-written-freshness",
+            "context-pressure",
         ),
     )
+    assert_agent_role_kit_section(agent)
     assert_prompt_contracts(
         source,
         semantic_anchor(

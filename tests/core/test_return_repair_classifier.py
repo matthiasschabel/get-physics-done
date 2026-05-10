@@ -17,6 +17,8 @@ from gpd.core.return_repair_classifier import (
 from gpd.core.state import default_state_dict, generate_state_markdown
 from tests.return_skeleton_support import render_gpd_return_block
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _wrap_return_block(yaml_body: str) -> str:
     return f"# Child output\n\n```yaml\ngpd_return:\n{yaml_body}```\n"
@@ -343,3 +345,58 @@ def test_classifier_does_not_write_state_files(tmp_path: Path) -> None:
 def test_invalid_required_status_is_rejected_before_classification() -> None:
     with pytest.raises(ValueError, match="required status"):
         classify_gpd_return_repair(_valid_completed_return(), require_status="done")
+
+
+def test_repairable_return_route_is_single_fenced_yaml_retry_with_no_mutation() -> None:
+    result = classify_gpd_return_repair(
+        "gpd_return:\n  status: completed\n  files_written: []\n  issues: []\n  next_actions: []\n"
+    )
+
+    assert result.primary_class == "unfenced_candidate"
+    assert result.recovery_route == "retry_child"
+    assert result.repair_hint.count("Retry") == 1
+    assert "canonical ```yaml gpd_return block" in result.repair_hint
+    assert result.safe_to_apply is False
+    assert result.mutated is False
+    assert result.may_patch_child_return is False
+
+
+def test_blocking_return_route_stops_instead_of_repair_loop_or_state_patch() -> None:
+    result = classify_gpd_return_repair(
+        _wrap_return_block(
+            "  status: checkpoint\n"
+            "  files_written: []\n"
+            "  issues: []\n"
+            "  next_actions: []\n"
+            "  continuation_update:\n"
+            "    bounded_segment:\n"
+            "      resume_file: GPD/phases/01-test/.continue-here.md\n"
+            "      segment_status: paused\n"
+            "      recorded_by: execute-plan\n"
+        )
+    )
+
+    assert result.primary_class == "applicator_owned_metadata"
+    assert result.recovery_route == "block_and_surface_errors"
+    assert result.repair_hint.startswith("Stop and surface")
+    assert "Retry" not in result.repair_hint
+    assert result.safe_to_apply is False
+    assert result.mutated is False
+
+
+def test_executor_completion_routes_shared_state_through_applicator_only() -> None:
+    section = _executor_completion_state_update_section()
+
+    assert 'gpd apply-return-updates "${SUMMARY_FILE}"' in section
+    assert "retry once only" in section
+    assert "fenced `gpd_return` YAML" in section
+    assert "do not patch `STATE.md` or `state.json` manually" in section
+    assert "gpd state advance" not in section
+    assert "state add-decision" not in section
+    assert "gpd state add-blocker" not in section
+    assert "cat GPD/STATE.md" not in section
+
+
+def _executor_completion_state_update_section() -> str:
+    text = (REPO_ROOT / "src/gpd/specs/references/execution/executor-completion.md").read_text(encoding="utf-8")
+    return text.split("## State Updates", maxsplit=1)[1].split("## Completion Format", maxsplit=1)[0]

@@ -139,6 +139,22 @@ def test_command_suggestion_classifier_uses_core_hint_classes() -> None:
     assert classify_command_suggestion("python -m gpd.cli suggest | tee out.txt") == KIND_UNKNOWN_DISPLAY_ONLY
 
 
+def test_verify_work_session_router_no_phase_routes_are_runtime_only() -> None:
+    router = (Path(__file__).resolve().parents[2] / "src/gpd/specs/workflows/verify-work/session-router.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "No-phase routing is choice-only:" in router
+    assert "active sessions present: ask the user to choose one numbered session" in router
+    assert "no active sessions present: ask for a phase and show the runtime route `gpd:verify-work <phase>`" in router
+    assert "Never shell-loop over `GPD/phases`" in router
+    assert "never render `gpd verify phase` or bare `gpd-verify-work`" in router
+    assert 'PHASE_INFO=$(gpd --raw roadmap get-phase "${PHASE_ARG}")' in router
+    assert '"${phase_number}"' not in router
+    for forbidden_discovery in ("ls GPD/phases", "find GPD/phases", "for phase in GPD/phases"):
+        assert forbidden_discovery not in router
+
+
 def test_invalid_final_command_counts_regression_but_corrected_block_does_not() -> None:
     bad_final = score_behavior_metrics(
         SyntheticRow(expected_next_action_class="runtime_verify_work"),

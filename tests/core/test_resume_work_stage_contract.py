@@ -193,6 +193,34 @@ def test_resume_work_partial_recoverable_repair_menu_blocks_downstream_actions()
     assert _command_is_explicitly_excluded(branch, "gpd:new-project")
 
 
+def test_resume_routing_status_presentation_uses_three_lanes() -> None:
+    text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
+    section = _workflow_step(text, "present_status")
+
+    assert "exactly three visible lanes" in section
+    for lane in ("Selected project", "Primary resume target", "Blocker / next command"):
+        assert lane in section
+
+    assert '`active_resume_kind="bounded_segment"`' in section
+    assert "outranks" in section
+    assert "advisory `derived_execution_head`" in section
+    assert "`missing_continuity_handoff_file` is a repair blocker" in section
+    assert "disables quick resume" in section
+    assert "separate candidate" in section
+    assert "recovery ladder" in section
+
+
+def test_resume_routing_next_up_examples_have_one_primary() -> None:
+    text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
+    blocks = re.findall(r"## > Next Up(?P<body>.*?)(?=\n\s*---\n\s*```|\Z)", text, flags=re.S)
+
+    assert blocks
+    for block in blocks:
+        assert len(re.findall(r"^\s*Primary\s+\w+:", block, flags=re.M)) == 1
+        assert "Primary runtime:" in block
+        assert "`gpd:execute-phase" in block or "`gpd:plan-phase" in block
+
+
 def test_init_resume_invokes_resume_context(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str | None] = []
 

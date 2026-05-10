@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import inspect
+import json
+from dataclasses import fields
 
 from tests.helpers import phase7_live_like
 from tests.helpers.phase7_live_like import (
     LP_JIT_ROW_IDS,
+    PHASE7_LIVE_PERSONA_MATRIX_PATH,
+    Phase7LiveLikeRow,
     load_phase7_live_like_rows,
     score_phase7_live_like_rows,
 )
@@ -18,6 +22,32 @@ def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
     assert {row.row_id for row in rows} >= {"LP01-START-PROJECTLESS-READONLY", "LP12-GEMINI-POLICY-DENIAL"}
     assert all(row.provider_launch_allowed is False for row in rows)
     assert all(row.network_allowed is False for row in rows)
+
+
+def test_phase7_live_like_matrix_has_no_raw_transcripts_or_provider_launch_fields() -> None:
+    payload = json.loads(PHASE7_LIVE_PERSONA_MATRIX_PATH.read_text(encoding="utf-8"))
+    forbidden_keys = {
+        "raw_prompt",
+        "raw_reply",
+        "raw_transcript",
+        "provider_stdout",
+        "provider_stderr",
+        "provider_argv",
+        "provider_env",
+        "provider_path",
+        "provider_account",
+        "api_key",
+        "token",
+        "secret",
+    }
+    row_fields = {field.name for field in fields(Phase7LiveLikeRow)}
+
+    assert forbidden_keys.isdisjoint(row_fields)
+    for row in payload["rows"]:
+        assert forbidden_keys.isdisjoint(row)
+        assert row.get("provider_launch_allowed", False) is False
+        assert row.get("network_allowed", False) is False
+        assert row.get("raw_artifacts_allowed", False) is False
 
 
 def test_phase7_live_like_scores_lp_jit_rows_with_hard_budgets() -> None:

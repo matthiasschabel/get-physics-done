@@ -224,39 +224,35 @@ The canonical applicator owns plan advance, progress recompute, metric recording
 
 **gpd CLI error handling:**
 
-gpd CLI commands can fail. Handle errors explicitly:
+The applicator command can fail. Handle errors explicitly and keep durable state changes inside the return envelope:
 
 ```bash
-# CORRECT — check exit code and handle failure
-if ! gpd state advance; then
-  echo "ERROR: state advance failed. Check STATE.md format."
-  # Read STATE.md to diagnose
-  cat GPD/STATE.md
-  # Retry once after diagnosis, or flag for human review
+# CORRECT - check exit code and handle applicator failure
+if ! gpd apply-return-updates "${SUMMARY_FILE}"; then
+  echo "ERROR: apply-return-updates failed. Keep shared-state repair in the return envelope."
+  # Capture stderr, inspect the SUMMARY/return envelope, and retry once only
+  # with a corrected fenced gpd_return block if the failure is repairable.
 fi
 
 # WRONG — ignoring exit codes
-gpd state advance  # might silently fail
+gpd apply-return-updates "${SUMMARY_FILE}"  # might silently fail
 ```
 
 **Common gpd CLI failure modes:**
 
 | Failure | Cause | Fix |
 |---------|-------|-----|
-| `ENOENT` | STATE.md or target file missing | Verify `GPD/STATE.md` exists before calling |
-| `Parse error` | Malformed frontmatter or markdown | Read file, fix formatting, retry |
-| `No phase/plan found` | STATE.md has unexpected structure | Check Current Phase/Plan fields in STATE.md |
+| `ENOENT` | SUMMARY, returned artifact, or project state file missing | Verify the referenced SUMMARY/artifact path; do not hand-edit shared state |
+| `Parse error` | Malformed SUMMARY frontmatter or fenced `gpd_return` YAML | Fix the SUMMARY/return envelope and retry once if repairable |
+| `No phase/plan found` | Return phase/plan does not match the roadmap/state contract | Correct the return envelope or escalate to the orchestrator |
 | Non-zero exit with no output | Python crash or missing dependency | Check `python --version`, verify gpd CLI path |
 
 **Recovery protocol:** If a gpd CLI command fails twice, do not patch `STATE.md` or `state.json` manually. Capture the failing command and stderr in the return envelope or plan SUMMARY, run `gpd state validate` if the failure looks state-related, and escalate to `gpd:sync-state` or the orchestrator instead of editing shared state files directly.
 
-**Extract decisions from SUMMARY.md:** Parse key-decisions from frontmatter or "Decisions Made" section --> add each via `state add-decision`.
+**Decisions from SUMMARY.md:** Put executor-owned decisions in SUMMARY frontmatter and/or `gpd_return.decisions`. The canonical applicator records accepted decisions; do not add them with direct `gpd state ...` commands in the spawned-agent completion path.
 
-**For blockers found during execution:**
+**For blockers found during execution:** Put blocker entries in `gpd_return.blockers` and set the typed return status/next action accordingly. The canonical applicator records accepted blockers; if the applicator rejects them, stop with the applicator failure instead of patching shared state.
 
-```bash
-gpd state add-blocker --text "Blocker description"
-```
 
 ## Completion Format
 

@@ -40,6 +40,12 @@ fi
 ```
 
 The readiness helper is read-only. If it reports missing summaries, missing/malformed/non-passing verification, active bounded segments, proof-redteam blockers, recovery preservation, or any other blocker, stop and surface its next action. Do not repair blockers, update roadmap/state, or clean checkpoints from this stage.
+
+Readiness next-action ownership:
+
+- Blocked closeout keeps a public runtime primary, such as `gpd:verify-work ${phase_number}`, `gpd:resume-work`, or `gpd:execute-phase ${phase_number}`.
+- Ready closeout labels `gpd phase complete "${phase_number}"` as `Primary local transition`, not a runtime workflow.
+- Checkpoint cleanup is a secondary local helper. It never competes with the primary transition and never appears in `stage_stop.next_runtime_command` or `stage_stop.also_available`.
 </step>
 
 <step name="complete_phase">
@@ -49,7 +55,7 @@ Only after the gates above pass:
 gpd phase complete "${phase_number}"
 ```
 
-The completion helper owns the roadmap/state transition. Load broader transition policy references only after readiness is green and only if the helper reports a transition ambiguity that needs policy interpretation.
+The completion helper owns the roadmap/state transition. Treat it as a local transition command, not a public runtime workflow. Load broader transition policy references only after readiness is green and only if the helper reports a transition ambiguity that needs policy interpretation.
 </step>
 
 <step name="cleanup_phase_checkpoints">
@@ -59,7 +65,7 @@ After successful phase completion, ask the helper to remove only helper-owned ch
 gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace phase --policy successful-closeout
 ```
 
-If cleanup exits nonzero, print the helper JSON and stop. Keep checkpoint tags when closeout readiness reported blockers, recovery artifacts, failed/skipped/rolled-back plans, verification gaps, or preservation policy.
+If cleanup exits nonzero, print the helper JSON and stop. Keep checkpoint tags when closeout readiness reported blockers, recovery artifacts, failed/skipped/rolled-back plans, verification gaps, or preservation policy. Cleanup is secondary local helper work after the transition; do not render it as the primary next action.
 
 | Condition | Action |
 | --- | --- |
@@ -73,19 +79,19 @@ Never end with only "ready to plan/continue" prose. After successful closeout, c
 
 If the next phase has no context, choose `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:discuss-phase {X+1}` and list `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:plan-phase {X+1}` as the direct-plan alternative. If the next phase already has context, choose `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`. Always list `gpd:suggest-next` as the recovery/confirmation command.
 
-For more phases:
+If the next phase has no context:
 
 ```yaml
 stage_stop:
   workflow: execute-phase
   stage: closeout
   status: completed
-  reason: next_phase_available
+  reason: next_phase_needs_context
   checkpoint: none
   user_decision_needed: false
-  next_runtime_command: "{chosen primary command}"
+  next_runtime_command: "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}"
   also_available:
-    - "{secondary command}"
+    - "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}"
     - "gpd:suggest-next"
 ```
 
@@ -93,10 +99,38 @@ stage_stop:
 
 **Phase {PHASE_NUMBER_PLUS_ONE}: {Name}** -- {Goal}
 
-Primary: `{chosen primary command}`
+Primary: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`
 
 **Also available:**
-- `{secondary command}` -- when relevant
+- `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}` -- plan directly if context is already clear
+- `gpd:suggest-next` -- confirm the next action
+
+<sub>Start a fresh context window, then run the primary command above.</sub>
+
+If the next phase already has context:
+
+```yaml
+stage_stop:
+  workflow: execute-phase
+  stage: closeout
+  status: completed
+  reason: next_phase_context_ready
+  checkpoint: none
+  user_decision_needed: false
+  next_runtime_command: "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}"
+  also_available:
+    - "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}"
+    - "gpd:suggest-next"
+```
+
+## > Next Up
+
+**Phase {PHASE_NUMBER_PLUS_ONE}: {Name}** -- {Goal}
+
+Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`
+
+**Also available:**
+- `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}` -- revise context first
 - `gpd:suggest-next` -- confirm the next action
 
 <sub>Start a fresh context window, then run the primary command above.</sub>

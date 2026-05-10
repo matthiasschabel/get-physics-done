@@ -15,8 +15,14 @@ from pathlib import Path
 
 from pydantic import ValidationError as PydanticValidationError
 
-from gpd.command_labels import canonical_command_label
+from gpd.command_labels import canonical_command_label, parse_command_label, runtime_public_command_prefixes
 from gpd.contracts import ConventionLock
+from gpd.core.command_run_hints import (
+    NEXT_COMMAND_SURFACE_CONTEXT_ACTIVE_RUNTIME,
+    NEXT_COMMAND_SURFACE_CONTEXT_SHARED_NEXT_UP,
+    NextCommand,
+    classify_next_command,
+)
 from gpd.core.constants import (
     LITERATURE_DIR_NAME,
     PHASES_DIR_NAME,
@@ -73,6 +79,7 @@ from gpd.mcp.paper.models import ArtifactManifest
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "NextCommand",
     "Recommendation",
     "SuggestContext",
     "SuggestResult",
@@ -96,6 +103,7 @@ class Recommendation:
     reason: str
     command: str
     phase: str | None = None
+    next_command: NextCommand | None = None
 
 
 @dataclass(slots=True)
@@ -107,6 +115,7 @@ class _MutableRecommendation:
     reason: str
     command: str
     phase: str | None = None
+    next_command: NextCommand | None = None
 
     def freeze(self) -> Recommendation:
         return Recommendation(
@@ -115,6 +124,13 @@ class _MutableRecommendation:
             reason=self.reason,
             command=self.command,
             phase=self.phase,
+            next_command=self.next_command
+            or _build_next_command_decision(
+                action=self.action,
+                command=self.command,
+                phase=self.phase,
+                reason=self.reason,
+            ),
         )
 
 
@@ -206,7 +222,15 @@ def _phase_verification_status(phase_path: Path, files: list[str]) -> str:
         payload = read_verification_status(phase_path / filename)
         statuses.append(payload.routing_status)
 
-    blocking = {"unreadable", "unparseable", "missing_status", "unknown_status", "gaps_found", "human_needed", "expert_needed"}
+    blocking = {
+        "unreadable",
+        "unparseable",
+        "missing_status",
+        "unknown_status",
+        "gaps_found",
+        "human_needed",
+        "expert_needed",
+    }
     for status in statuses:
         if status in blocking:
             return status
@@ -254,9 +278,13 @@ _LOCAL_CLI_PUBLIC_COMMANDS: dict[str, str] = {
     "progress": "gpd progress",
 }
 
+_RUNTIME_LABEL_FALLBACK_ACTIONS = frozenset({"verify-work"})
+
 
 def _format_local_cli_command(action: str) -> str:
     """Format the best available local CLI equivalent for a workflow action."""
+    if action in _RUNTIME_LABEL_FALLBACK_ACTIONS:
+        return canonical_command_label(action)
     public_command = _LOCAL_CLI_PUBLIC_COMMANDS.get(action)
     if public_command is not None:
         return public_command
@@ -273,6 +301,64 @@ def _format_command(action: str, *, cwd: Path | None = None) -> str:
     except Exception:
         formatted = None
     return formatted if formatted is not None else _format_local_cli_command(action)
+
+
+def _build_recommendation(
+    *,
+    action: str,
+    priority: int,
+    reason: str,
+    command: str,
+    phase: str | None = None,
+) -> Recommendation:
+    return Recommendation(
+        action=action,
+        priority=priority,
+        reason=reason,
+        command=command,
+        phase=phase,
+        next_command=_build_next_command_decision(action=action, command=command, phase=phase, reason=reason),
+    )
+
+
+def _display_action_from_command(command: str, fallback: str) -> str:
+    parsed = parse_command_label(command)
+    if parsed.prefix and parsed.slug:
+        return parsed.slug
+    if command.startswith("gpd init "):
+        parts = command.split()
+        if len(parts) >= 3:
+            return parts[2]
+    return fallback
+
+
+def _active_runtime_public_prefix_for_command(command: str) -> str | None:
+    parsed = parse_command_label(command)
+    if parsed.prefix and parsed.prefix in runtime_public_command_prefixes():
+        return parsed.prefix
+    return None
+
+
+def _build_next_command_decision(
+    *,
+    action: str,
+    command: str,
+    phase: str | None = None,
+    reason: str | None = None,
+) -> NextCommand | None:
+    normalized_command = command.strip()
+    command_action = _display_action_from_command(normalized_command, action)
+    active_runtime_public_prefix = _active_runtime_public_prefix_for_command(normalized_command)
+    return classify_next_command(
+        command=normalized_command,
+        action=command_action,
+        phase=phase,
+        reason=reason,
+        surface_context=NEXT_COMMAND_SURFACE_CONTEXT_ACTIVE_RUNTIME
+        if active_runtime_public_prefix is not None
+        else NEXT_COMMAND_SURFACE_CONTEXT_SHARED_NEXT_UP,
+        active_runtime_public_prefix=active_runtime_public_prefix,
+    )
 
 
 def _scan_phases(cwd: Path) -> list[_PhaseAnalysis]:
@@ -760,7 +846,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
     if not project_exists and manuscript_entrypoint is None:
         reentry = resolve_project_reentry(cwd)
         if reentry.has_recoverable_current_workspace:
-            only = Recommendation(
+            only = _build_recommendation(
                 action="resume-work",
                 priority=1,
                 command=format_command("resume-work"),
@@ -780,7 +866,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         ]
         if recoverable_recent:
             count = len(recoverable_recent)
-            only = Recommendation(
+            only = _build_recommendation(
                 action="resume-recent",
                 priority=1,
                 command=recovery_cross_workspace_command(),
@@ -797,7 +883,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
                 top_action=only,
                 context=SuggestContext(),
             )
-        only = Recommendation(
+        only = _build_recommendation(
             action="new-project",
             priority=1,
             command=format_command("new-project"),
@@ -1032,8 +1118,8 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         )
 
     # ── 12. All phases complete → milestone audit ───────────────────────
-    all_complete_verified = all_complete and phase_analysis and all(
-        phase.verification_status == "passed" for phase in phase_analysis
+    all_complete_verified = (
+        all_complete and phase_analysis and all(phase.verification_status == "passed" for phase in phase_analysis)
     )
     if all_complete_verified:
         suggestions.append(

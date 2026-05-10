@@ -25,6 +25,12 @@ _PROOF_REQUIRED_RE = re.compile(
     re.IGNORECASE,
 )
 
+OWNER_RUNTIME = "runtime"
+OWNER_LOCAL_TRANSITION = "local_transition"
+OWNER_LOCAL_HELPER = "local_helper"
+ROLE_PRIMARY = "primary"
+ROLE_SECONDARY = "secondary"
+
 
 class PhaseCloseoutReadiness(BaseModel):
     """Read-only decision payload for whether a phase may be closed out."""
@@ -99,8 +105,11 @@ def _proof_redteam_status(project_root: Path, phase_dir: Path) -> tuple[bool, bo
     artifact_refs = [_relative(project_root, artifact) or artifact.as_posix() for artifact in artifacts]
     required = _phase_requires_proof_redteam(phase_dir)
     if not artifacts:
-        return required, not required, artifact_refs, (
-            ["proof-bearing work requires a passed proof-redteam artifact"] if required else []
+        return (
+            required,
+            not required,
+            artifact_refs,
+            (["proof-bearing work requires a passed proof-redteam artifact"] if required else []),
         )
 
     from gpd.core.proof_redteam import validate_proof_redteam_artifact
@@ -112,9 +121,7 @@ def _proof_redteam_status(project_root: Path, phase_dir: Path) -> tuple[bool, bo
             errors.extend(f"{_relative(project_root, artifact)}: {error}" for error in result.errors)
             continue
         if result.status != "passed":
-            errors.append(
-                f"{_relative(project_root, artifact)} reports status {result.status!r}; expected 'passed'"
-            )
+            errors.append(f"{_relative(project_root, artifact)} reports status {result.status!r}; expected 'passed'")
     return required or bool(artifacts), not errors, artifact_refs, errors
 
 
@@ -138,13 +145,7 @@ def _phase_recovery_artifacts(project_root: Path, phase_dir: Path) -> list[str]:
     artifacts: list[Path] = []
     for pattern in ("*RECOVERY*.md", "*recovery*.md"):
         artifacts.extend(phase_dir.glob(pattern))
-    return sorted(
-        {
-            ref
-            for artifact in artifacts
-            if (ref := _relative(project_root, artifact)) is not None
-        }
-    )
+    return sorted({ref for artifact in artifacts if (ref := _relative(project_root, artifact)) is not None})
 
 
 def _checkpoint_tags(project_root: Path, phase: str) -> tuple[list[str], list[str]]:
@@ -157,21 +158,49 @@ def _checkpoint_tags(project_root: Path, phase: str) -> tuple[list[str], list[st
     return result.tags, result.errors
 
 
-def _hint(command: str | None, *, action: str | None, phase: str) -> dict[str, object] | None:
+def _with_ordered_notes(notes: object, *extra_notes: str) -> list[str]:
+    values = [str(note) for note in notes] if isinstance(notes, list) else []
+    for note in extra_notes:
+        if note not in values:
+            values.append(note)
+    return values
+
+
+def _hint(
+    command: str | None,
+    *,
+    action: str | None,
+    phase: str,
+    owner: str | None = None,
+    role: str | None = None,
+) -> dict[str, object] | None:
     hint = build_command_run_hint(command=command, source="phase-closeout-readiness", action=action, phase=phase)
     if hint is not None:
-        return hint
-    if not command:
+        payload = dict(hint)
+    elif not command:
         return None
-    return {
-        "source": "phase-closeout-readiness",
-        "kind": "unknown_display_only",
-        "command": command,
-        "action": action,
-        "phase": phase,
-        "execution": "not_executed",
-        "notes": ["display_only"],
-    }
+    else:
+        payload = {
+            "source": "phase-closeout-readiness",
+            "kind": "unknown_display_only",
+            "command": command,
+            "action": action,
+            "phase": phase,
+            "execution": "not_executed",
+            "notes": ["display_only"],
+        }
+
+    if owner is not None:
+        payload["owner"] = owner
+        payload["notes"] = _with_ordered_notes(payload.get("notes"), owner)
+    if role is not None:
+        payload["role"] = role
+        payload["notes"] = _with_ordered_notes(payload.get("notes"), f"{role}_next_up")
+    if owner in {OWNER_LOCAL_TRANSITION, OWNER_LOCAL_HELPER}:
+        payload["requires_user_initiated_runtime_command"] = False
+        payload["fresh_context_recommended"] = False
+        payload["notes"] = _with_ordered_notes(payload.get("notes"), "display_copy_safe")
+    return payload
 
 
 def _next_up_payload(
@@ -183,13 +212,32 @@ def _next_up_payload(
     blockers: list[str],
 ) -> dict[str, object]:
     if ready and closeout_command is not None:
-        commands = [closeout_command]
+        primary_hint = _hint(
+            closeout_command,
+            action="phase-complete",
+            phase=phase,
+            owner=OWNER_LOCAL_TRANSITION,
+            role=ROLE_PRIMARY,
+        )
+        secondary_commands: list[dict[str, object]] = []
         if cleanup_command is not None:
-            commands.append(cleanup_command)
+            cleanup_hint = _hint(
+                cleanup_command,
+                action="checkpoint-cleanup",
+                phase=phase,
+                owner=OWNER_LOCAL_HELPER,
+                role=ROLE_SECONDARY,
+            )
+            if cleanup_hint is not None:
+                secondary_commands.append(cleanup_hint)
+        commands = [hint for hint in (primary_hint, *secondary_commands) if hint is not None]
         return {
             "status": "ready",
             "primary": closeout_command,
-            "commands": [_hint(command, action="closeout", phase=phase) for command in commands],
+            "primary_owner": OWNER_LOCAL_TRANSITION,
+            "primary_label": "Primary local transition",
+            "secondary": secondary_commands,
+            "commands": commands,
         }
 
     if any("verification" in blocker for blocker in blockers):
@@ -205,7 +253,9 @@ def _next_up_payload(
     return {
         "status": "blocked",
         "primary": primary,
-        "commands": [_hint(primary, action=action, phase=phase)],
+        "primary_owner": OWNER_RUNTIME,
+        "primary_label": "Primary",
+        "commands": [_hint(primary, action=action, phase=phase, owner=OWNER_RUNTIME, role=ROLE_PRIMARY)],
         "blockers": blockers,
     }
 
@@ -356,8 +406,20 @@ def phase_closeout_readiness(
         warnings=warnings,
         closeout_command=closeout_command,
         cleanup_command=cleanup_command,
-        closeout_command_hint=_hint(closeout_command, action="phase-complete", phase=phase_info.phase_number),
-        cleanup_command_hint=_hint(cleanup_command, action="checkpoint-cleanup", phase=phase_info.phase_number),
+        closeout_command_hint=_hint(
+            closeout_command,
+            action="phase-complete",
+            phase=phase_info.phase_number,
+            owner=OWNER_LOCAL_TRANSITION,
+            role=ROLE_PRIMARY,
+        ),
+        cleanup_command_hint=_hint(
+            cleanup_command,
+            action="checkpoint-cleanup",
+            phase=phase_info.phase_number,
+            owner=OWNER_LOCAL_HELPER,
+            role=ROLE_SECONDARY,
+        ),
         next_up=next_up,
     )
 

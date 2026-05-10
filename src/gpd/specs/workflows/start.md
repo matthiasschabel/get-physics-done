@@ -145,37 +145,54 @@ Normalize the reply to one stable `option_id`; labels are aliases only.
 
 For every start-routed path, the start-menu choice authorizes only the route into that command. If the selected downstream workflow is write-capable, state the route boundary visibly and stop at its first downstream write-capable gate unless that downstream workflow obtains its own separate explicit approval after the handoff.
 
+When a write-capable route below includes a `route_boundary` envelope, render it as the visible handoff before following the downstream workflow. `route_allowed=true` means only the route may proceed, `downstream_write_approved=false` means no downstream write is approved by `gpd:start`, and `next_user_decision` names the downstream approval gate required before any write.
+
 **If the researcher chooses option_id `resume_work` (`Resume this project (recommended)`, `Continue where I left off`, `Inspect recovery state (recommended)`, or `Inspect recovery state`):**
 
 - Read `{GPD_INSTALL_DIR}/workflows/resume-work.md` with the file-read tool.
 - Use `gpd:resume-work` as the selected runtime command label while following that workflow.
 
 **If the researcher chooses option_id `sync_state` (`Reconcile state files`):**
-- Say exactly: "I will route to `gpd:sync-state` now and stop after its recovery diagnosis/instruction gate; no state repair or state rewrite is approved by this start choice."
+- Say the route and write boundary briefly.
+```text
+route_boundary: option_id=sync_state; selected_command=gpd:sync-state; route_allowed=true; downstream_write_approved=false; next_user_decision=sync_repair_confirmation
+```
 - Read `{GPD_INSTALL_DIR}/workflows/sync-state.md` with the file-read tool.
 - Use `gpd:sync-state` as the selected runtime command label while following that workflow.
 - In one-shot or headless runtime prompts, do not continue through the sync-state shell repair workflow from `gpd:start`; stop after the route-boundary/recovery instruction gate is visible.
 - Route boundary for `sync_state`: do not run `gpd state repair-sync`, promote backups, rewrite `GPD/STATE.md`, or rewrite `GPD/state.json` unless the user gives a separate exact sync/repair confirmation inside `gpd:sync-state` or invokes that command directly with explicit repair intent.
 
 **If the researcher chooses option_id `progress` (`Review the project status first`, `Review project status first`, or `Review visible progress`):**
-- Say exactly: "I will route to `gpd:progress` now in default/report mode only; no reconcile, state write, compaction, or next-action execution is approved by this start choice."
+- Say the route and write boundary briefly.
+```text
+route_boundary: option_id=progress; selected_command=gpd:progress; route_allowed=true; downstream_write_approved=false; next_user_decision=progress_reconcile_confirmation
+```
 - Read `{GPD_INSTALL_DIR}/workflows/progress.md` with the file-read tool.
 - Use `gpd:progress` as the selected runtime command label while following that workflow.
 - Route boundary for `progress`: use default/report mode only. Do not switch to `--reconcile`, execute the recommended next action, update state, compact state, or write progress/state files from this start-routed status check.
 
 **If the researcher chooses option_id `map_research` (`Map this folder first (recommended)` or `Refresh the research map`):**
-- Say exactly: "I will route to `gpd:map-research` now and stop at its first map-research decision/write gate; no research-map files, mapper agents, archives, or summaries are approved by this start choice."
+- Say the route and write boundary briefly.
+```text
+route_boundary: option_id=map_research; selected_command=gpd:map-research; route_allowed=true; downstream_write_approved=false; next_user_decision=map_research_durable_write_confirmation
+```
 - Read `{GPD_INSTALL_DIR}/workflows/map-research.md` with the file-read tool.
 - Use `gpd:map-research` as the selected runtime command label while following that workflow.
 - Route boundary for `map_research`: stop before creating, archiving, or updating `GPD/research-map/`, before spawning mapper agents, and before writing summaries unless the downstream map workflow obtains an explicit durable-write confirmation after the route handoff.
 
 **If the researcher chooses option_id `new_project_minimal` (`Fast start (recommended)`, `Fast start`, or `Start a brand-new GPD project anyway`):**
-- Say exactly: "I will route to `gpd:new-project --minimal` now and stop at its first downstream intake or scope-approval gate; no project, git, state, or progress files are approved by this start choice."
+- Say the route and write boundary briefly.
+```text
+route_boundary: option_id=new_project_minimal; selected_command=gpd:new-project --minimal; route_allowed=true; downstream_write_approved=false; next_user_decision=new_project_minimal_scope_approval
+```
 - Use `gpd:new-project --minimal` as the selected runtime command label and follow its installed command contract directly.
 - Route boundary for `new_project_minimal`: do not create `GPD/`, initialize git, write state, write progress files, or create project artifacts unless `gpd:new-project --minimal` obtains its own explicit downstream intake/scope approval after this start route.
 
 **If the researcher chooses option_id `new_project_full` (`Full guided setup`, `Turn this into a full GPD project (recommended)`, or `Turn this into a full GPD project`):**
-- Say exactly: "I will route to `gpd:new-project` now and stop at its first downstream intake or scope-approval gate; no project, git, state, or progress files are approved by this start choice."
+- Say the route and write boundary briefly.
+```text
+route_boundary: option_id=new_project_full; selected_command=gpd:new-project; route_allowed=true; downstream_write_approved=false; next_user_decision=new_project_full_scope_approval
+```
 - Use `gpd:new-project` as the selected runtime command label and follow its installed command contract directly.
 - Route boundary for `new_project_full`: do not create `GPD/`, initialize git, write state, write progress files, or create project artifacts unless `gpd:new-project` obtains its own explicit downstream intake/scope approval after this start route.
 

@@ -51,11 +51,7 @@ def _write_phase_project(
         (phase_dir / "02-VERIFICATION.md").write_text("---\nstatus: [\n---\n\n# Bad\n", encoding="utf-8")
     elif verification_status is not None:
         (phase_dir / "02-VERIFICATION.md").write_text(
-            "---\n"
-            f"status: {verification_status}\n"
-            "score: closeout test\n"
-            "---\n\n"
-            "# Verification\n",
+            f"---\nstatus: {verification_status}\nscore: closeout test\n---\n\n# Verification\n",
             encoding="utf-8",
         )
     if recovery:
@@ -93,7 +89,28 @@ def test_closeout_readiness_all_summaries_and_passed_verification_is_ready(tmp_p
     assert result.summary_count == 2
     assert result.verification_status == "passed"
     assert result.closeout_command == "gpd phase complete 02"
+    assert (
+        result.cleanup_command
+        == "gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout"
+    )
     assert result.next_up["status"] == "ready"
+    assert result.next_up["primary"] == "gpd phase complete 02"
+    assert result.next_up["primary_owner"] == "local_transition"
+    commands = result.next_up["commands"]
+    assert isinstance(commands, list)
+    assert commands[0]["command"] == "gpd phase complete 02"
+    assert commands[0]["owner"] == "local_transition"
+    assert commands[0]["role"] == "primary"
+    assert commands[0]["requires_user_initiated_runtime_command"] is False
+    secondary = result.next_up["secondary"]
+    assert isinstance(secondary, list)
+    assert secondary[0]["command"] == result.cleanup_command
+    assert secondary[0]["owner"] == "local_helper"
+    assert secondary[0]["role"] == "secondary"
+    assert result.closeout_command_hint is not None
+    assert result.closeout_command_hint["owner"] == "local_transition"
+    assert result.cleanup_command_hint is not None
+    assert result.cleanup_command_hint["owner"] == "local_helper"
     assert (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
     assert (tmp_path / "GPD" / "state.json").read_text(encoding="utf-8") == before_state
 
@@ -119,6 +136,12 @@ def test_closeout_readiness_missing_verification_blocks_required_closeout(tmp_pa
     assert result.ready is False
     assert result.verification_routing_status == "missing"
     assert "canonical verification report missing" in result.blockers
+    assert result.next_up["primary"] == "gpd:verify-work 02"
+    assert result.next_up["primary_owner"] == "runtime"
+    commands = result.next_up["commands"]
+    assert isinstance(commands, list)
+    assert commands[0]["owner"] == "runtime"
+    assert commands[0]["role"] == "primary"
 
 
 @pytest.mark.parametrize("status", ["gaps_found", "human_needed", "expert_needed"])
@@ -177,6 +200,7 @@ def test_closeout_readiness_active_bounded_segment_blocks_closeout(tmp_path: Pat
     assert result.active_bounded_segment is True
     assert any("active bounded segment" in blocker for blocker in result.blockers)
     assert result.next_up["primary"] == "gpd:resume-work"
+    assert result.next_up["primary_owner"] == "runtime"
 
 
 def test_closeout_readiness_preserves_checkpoint_tags_when_recovery_artifacts_exist(tmp_path: Path) -> None:
@@ -187,6 +211,8 @@ def test_closeout_readiness_preserves_checkpoint_tags_when_recovery_artifacts_ex
     assert result.ready is True
     assert result.preserve_checkpoint_tags is True
     assert result.cleanup_command is None
+    assert result.next_up["primary_owner"] == "local_transition"
+    assert result.next_up["secondary"] == []
     assert result.recovery_artifacts == ["GPD/phases/02-analysis/RECOVERY-02.md"]
 
 
@@ -254,7 +280,9 @@ def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
     workflow = (EXECUTE_PHASE_STAGE_DIR / "closeout.md").read_text(encoding="utf-8")
 
     assert "does not spawn verifiers, close gaps, run consistency checks, or decide scientific status" in workflow
-    assert "`verification_handoff` or `gap_reverification` produced a validated canonical verification report" in workflow
+    assert (
+        "`verification_handoff` or `gap_reverification` produced a validated canonical verification report" in workflow
+    )
     assert "`consistency_check` completed through its child_gate" in workflow
     assert "gpd --raw phase closeout-readiness" in workflow
     assert "--require-verification" in workflow

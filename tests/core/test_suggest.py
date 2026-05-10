@@ -114,11 +114,7 @@ def _create_phase(
         (phase_dir / "RESEARCH.md").write_text("Research\n", encoding="utf-8")
     if verification:
         (phase_dir / "01-VERIFICATION.md").write_text(
-            "---\n"
-            "status: passed\n"
-            'score: "1/1 checks verified"\n'
-            "---\n\n"
-            "# Verification\n",
+            '---\nstatus: passed\nscore: "1/1 checks verified"\n---\n\n# Verification\n',
             encoding="utf-8",
         )
     return phase_dir
@@ -813,6 +809,37 @@ def test_complete_unverified_suggests_verify(tmp_path: Path) -> None:
     result = suggest_next(root)
     actions = [s.action for s in result.suggestions]
     assert "verify-work" in actions
+    verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert verify.command == "gpd:verify-work 01"
+    assert "gpd verify phase" not in verify.command
+    assert not verify.command.startswith("gpd-")
+    assert verify.next_command is not None
+    assert verify.next_command.label == verify.command
+    assert verify.next_command.action == "verify-work"
+    assert verify.next_command.owner == "runtime"
+    assert verify.next_command.phase == "01"
+    assert verify.next_command.fresh_context_recommended is True
+    assert verify.next_command.reason == verify.reason
+
+
+def test_complete_unverified_runtime_install_exposes_next_command_decision(tmp_path: Path) -> None:
+    """Installed runtime labels should be preserved while exposing command ownership."""
+    runtime = _RUNTIME_NAMES[0]
+    adapter = get_adapter(runtime)
+    seed_complete_runtime_install(tmp_path / adapter.local_config_dir_name, runtime=runtime)
+    root = _setup_project(tmp_path)
+    _create_roadmap(root)
+    _create_phase(root, "01-setup", plans=1, summaries=1)
+
+    result = suggest_next(root)
+
+    verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert verify.command == f"{adapter.format_command('verify-work')} 01"
+    assert verify.next_command is not None
+    assert verify.next_command.label == verify.command
+    assert verify.next_command.action == "verify-work"
+    assert verify.next_command.owner == "runtime"
+    assert verify.next_command.reason == verify.reason
 
 
 def test_unknown_verification_status_blocks_audit_and_paper_suggestions(tmp_path: Path) -> None:
@@ -821,10 +848,7 @@ def test_unknown_verification_status_blocks_audit_and_paper_suggestions(tmp_path
     _create_roadmap(root)
     phase_dir = _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
     (phase_dir / "01-VERIFICATION.md").write_text(
-        "---\n"
-        "status: stale\n"
-        "---\n\n"
-        "# Verification\n",
+        "---\nstatus: stale\n---\n\n# Verification\n",
         encoding="utf-8",
     )
 
@@ -835,7 +859,9 @@ def test_unknown_verification_status_blocks_audit_and_paper_suggestions(tmp_path
     assert "audit-milestone" not in actions
     assert "write-paper" not in actions
     verify = next(s for s in result.suggestions if s.action == "verify-work")
-    assert verify.command == "gpd init verify-work 01"
+    assert verify.command == "gpd:verify-work 01"
+    assert verify.next_command is not None
+    assert verify.next_command.owner == "runtime"
     assert "unknown_status" in verify.reason
 
 
@@ -855,6 +881,9 @@ def test_verification_without_frontmatter_status_fails_closed(tmp_path: Path) ->
     assert "verify-work" in actions
     assert "audit-milestone" not in actions
     verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert verify.command == "gpd:verify-work 01"
+    assert verify.next_command is not None
+    assert verify.next_command.owner == "runtime"
     assert "missing_status" in verify.reason
 
 
@@ -929,7 +958,10 @@ def test_unverified_results_suggest_verification(tmp_path: Path) -> None:
     result = suggest_next(root)
     verify_results = next((s for s in result.suggestions if s.action == "verify-results"), None)
     assert verify_results is not None
-    assert verify_results.command == "gpd init verify-work 01"
+    assert verify_results.command == "gpd:verify-work 01"
+    assert verify_results.next_command is not None
+    assert verify_results.next_command.action == "verify-work"
+    assert verify_results.next_command.owner == "runtime"
     assert verify_results.phase == "01"
     assert result.context.unverified_results == 1
 

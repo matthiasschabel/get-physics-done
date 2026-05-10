@@ -51,102 +51,42 @@ When resuming from `first_result` or skeptical state, ask one concrete question 
   </step>
 
 <step name="present_status">
-Present complete research project status to user:
+Present the resume status as exactly three visible lanes. Use the detailed
+routing payload to fill the lanes, but do not render a separate candidate
+table, recovery ladder, or live-snapshot section unless the user explicitly asks
+for diagnostics.
 
 ```
-+================================================+
-|  RESEARCH PROJECT STATUS                       |
-+================================================+
-|  Investigating:                                |
-|  [one-liner from PROJECT.md "What This Is"]    |
-|                                                |
-|  Phase: [X] of [Y] - [Phase name]              |
-|  Plan:  [A] of [B] - [Status]                  |
-|  Progress: [||||||....] XX%                    |
-|                                                |
-|  Last activity: [date] - [what happened]       |
-+================================================+
+Resume Summary
+Read-only local recovery snapshot for this workspace.
 
-[If DERIVATION-STATE.md found:]
->> Persistent derivation history restored:
-    - Equations: [X] across [N] sessions
-    - Conventions: [Y] locked
-    - Intermediate results: [Z] recorded
-    - Approximations: [W] catalogued
+Selected project
+  [project_root or "No project selected"; include workspace_root only when it differs]
+  [if auto-selected recent project: "auto-selected recent project; reopen or confirm before writes"]
 
-[If `active_resume_kind` is `bounded_segment` and `active_bounded_segment` has a resume file:]
->> Research checkpoint detected:
-    - Resume artifact: [resume_file]
-    - Derivation state: [brief summary from the active execution snapshot]
-    - Parameters in scope: [key parameter values]
-    - Last result obtained: [most recent intermediate result]
-    - Next planned step: [what was planned before pausing]
+Primary resume target
+  [bounded segment with active_resume_pointer, OR recorded handoff, OR interrupted-agent marker, OR missing handoff repair target, OR advisory live snapshot]
+  [include active_resume_result if present]
+  [include candidate family only as a compact note: bounded_segment, continuity_handoff, interrupted_agent]
 
-[If `continuity_handoff_file` exists and `execution_resumable` is false:]
->> Recorded handoff available:
-    - Resume artifact: [continuity_handoff_file]
-    - Status: recoverable recorded handoff; no resumable live execution snapshot is currently active
-    - Note: this can coexist with an advisory live execution snapshot
-
-[If `missing_continuity_handoff_file` exists:]
->> Recorded handoff artifact is missing:
-    - Resume artifact: [missing_continuity_handoff_file]
-    - Status: continuity metadata exists, but the recorded handoff file is missing from this workspace
-    - Action: repair or recreate the handoff target before treating it as a resumable local target
-
-[If `derived_execution_head` exists and `execution_resumable` is false:]
->> Live execution snapshot detected:
-    - Status: advisory only; no bounded resume segment is currently active
-    - [If `active_resume_pointer` is empty, non-project, or missing on disk:] the stored resume pointer is not portable or no longer resolves
-    - Use: recover context about the last gate or paused task, but do not treat it as a resumable bounded segment
-
-[If machine_change_detected is true:]
->> Machine change detected:
-    - Last active on: [session_hostname] ([session_platform])
-    - Current machine: [current_hostname] ([current_platform])
-    - Action: rerun the installer if runtime-local config may be stale
-
-[If `project_contract_gate.authoritative` is false:]
->> Contract repair required:
-    - Load status: [project_contract_load_info.status]
-    - Blocking detail: [first blocker or validation error]
-    - Action: repair the contract/state integrity issue before planning or execution
-    - Note: the structured contract stays visible for context, but it is not approved execution scope
-
-[If `active_bounded_segment` is waiting on review:]
->> Live execution gate detected:
-    - Gate: [checkpoint_reason]
-    - First result ready: [yes/no]
-    - Downstream fanout locked: [yes/no]
-    - Review accepted but unlock still pending: [yes/no from pre_fanout_review_cleared && downstream_locked]
-    - Skeptical re-questioning required: [yes/no]
-    - Why the gate fired: [skeptical_requestioning_summary if present]
-    - Weakest unchecked anchor: [if present]
-    - Fastest disconfirming observation: [if present]
-
-[If incomplete work found:]
->> Incomplete work detected:
-    - [active execution gate or incomplete plan]
-
-[If interrupted agent found:]
->> Interrupted agent detected:
-    Agent ID: [id]
-    Task: [task description from agent-history.json]
-    Interrupted: [timestamp]
-
-    Continue with: a fresh handoff built from the interrupted-agent record, or the canonical bounded segment if one has been recorded
-
-[If pending todos exist:]
-[N] pending todos -- gpd:check-todos to review
-
-[If blockers exist:]
->> Carried concerns:
-    - [blocker 1]
-    - [blocker 2]
-
-[If alignment is not checked:]
->> Brief alignment: [status] - [assessment]
+Blocker / next command
+  [blocking repair or selection gate, otherwise one next command]
 ```
+
+Lane rules:
+
+- `active_resume_kind="bounded_segment"` with `active_resume_pointer` outranks
+  any advisory `derived_execution_head`, even if the live snapshot is newer.
+- `derived_execution_head` is advisory unless the canonical active resume fields
+  identify a bounded segment with a usable pointer.
+- `missing_continuity_handoff_file` is a repair blocker, not a local recovery
+  target.
+- `project_root_auto_selected=true` or `project_root_source="recent_project"`
+  disables quick resume; show the selected project path and require explicit
+  confirmation or reopening the folder before any write-capable continuation.
+- Contract/state repair, convention mismatches, machine-change notices,
+  pending todos, and carried concerns belong in the blocker lane unless they are
+  only supporting context for the primary target.
 
 </step>
 
@@ -154,6 +94,7 @@ Present complete research project status to user:
 Based on project state, determine the most logical next action:
 
 **If partial/recoverable state or `project_contract_gate.repair_required` needs repair:**
+-> Contract repair required: surface the blocked contract or state-integrity issue before planning or execution.
 -> Stop before planning, mutation, execution, reconstruction, or continuation update; writes none; next `gpd:sync-state`
 -> Choices exactly: `gpd:sync-state`, `gpd:health`, `gpd:resume-work` after repair; exclude `gpd:progress` and `gpd:new-project`
 -> This gate overrides quick-resume auto-execution; show only repair choices.
@@ -173,7 +114,7 @@ Based on project state, determine the most logical next action:
 -> Option: Inspect the live gate state without claiming the bounded segment is directly resumable
 
 **If interrupted agent exists:**
--> Primary: Recreate the interrupted work as a fresh handoff, or continue the canonical bounded segment when one exists
+-> Primary: Recreate the interrupted work as a fresh handoff built from the interrupted-agent record, or continue the canonical bounded segment when one exists
 -> Option: Start fresh (abandon agent work)
 
 **If `continuity_handoff_file` exists and `execution_resumable` is false and no interrupted agent exists:**
@@ -254,7 +195,7 @@ Based on user selection, route to appropriate workflow:
 
   **{phase}-{plan}: [Plan Name]** -- [objective from PLAN.md]
 
-  `gpd:execute-phase {phase}`
+  Primary runtime: `gpd:execute-phase {phase}`
 
   <sub>Start a fresh context window, then run `gpd:execute-phase {phase}`</sub>
 
@@ -270,7 +211,7 @@ Based on user selection, route to appropriate workflow:
 
   **Phase [N]: [Name]** -- [Goal from ROADMAP.md]
 
-  `gpd:plan-phase [phase-number]`
+  Primary runtime: `gpd:plan-phase [phase-number]`
 
   <sub>Start a fresh context window, then run `gpd:plan-phase [phase-number]`</sub>
 

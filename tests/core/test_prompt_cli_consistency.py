@@ -923,7 +923,9 @@ def test_new_milestone_roadmapper_stage_parse_and_artifact_words_match_payload()
 
     assert "`planning_exists`" not in roadmap_authoring.split("Use the bootstrap init", maxsplit=1)[0]
     assert "fresh `SUMMARY.md` proof" not in roadmap_authoring
-    assert "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md" in roadmap_authoring
+    assert (
+        "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md" in roadmap_authoring
+    )
     assert "shared_state_policy: return_only" in roadmap_authoring
     assert "direct roadmapper edit to\n`GPD/STATE.md` is not success proof." in roadmap_authoring
 
@@ -1322,15 +1324,16 @@ def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None
     _assert_normalized_fragments(
         offer_next,
         (
-                "stage_stop.next_runtime_command",
-                "one matching variant",
-                "exactly one `Primary:` line",
-                "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}",
-                "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}",
-                "gpd:suggest-next",
-                "Primary: `{chosen primary command}`",
-                "gpd:complete-milestone",
-                "- `gpd:suggest-next` -- confirm the next action",
+            "stage_stop.next_runtime_command",
+            "one matching variant",
+            "exactly one `Primary:` line",
+            "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}",
+            "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}",
+            "gpd:suggest-next",
+            "Primary: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`",
+            "Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`",
+            "gpd:complete-milestone",
+            "- `gpd:suggest-next` -- confirm the next action",
         ),
     )
     _assert_normalized_absent(

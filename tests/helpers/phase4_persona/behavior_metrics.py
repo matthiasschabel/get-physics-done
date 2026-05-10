@@ -8,11 +8,14 @@ from dataclasses import asdict, dataclass, is_dataclass
 from types import MappingProxyType
 
 import tests.helpers.phase4_persona.interaction_events as trace_events
+from gpd.command_labels import parse_command_label, runtime_public_command_prefixes
 from gpd.core.command_run_hints import (
     KIND_LOCAL_CLI_FINALIZER_COMMAND,
     KIND_LOCAL_CLI_VALIDATION_COMMAND,
     KIND_RUNTIME_COMMAND_LABEL,
     KIND_UNKNOWN_DISPLAY_ONLY,
+    NEXT_COMMAND_SURFACE_CONTEXT_ACTIVE_RUNTIME,
+    NEXT_COMMAND_SURFACE_CONTEXT_SHARED_NEXT_UP,
     build_command_run_hint,
 )
 from gpd.core.return_repair_classifier import REPAIRABLE_RETURN_CLASSES, classify_gpd_return_repair
@@ -476,11 +479,16 @@ def classify_command_suggestion(
     normalized = command.strip()
     if expected_action == "verify-work" and normalized.startswith("gpd verify phase"):
         return "structural_verify_phase"
+    active_runtime_public_prefix = _active_runtime_public_prefix(normalized)
     hint = build_command_run_hint(
         command=normalized,
         source="phase4-persona-behavior-metrics",
         action=expected_action,
         phase=phase,
+        surface_context=NEXT_COMMAND_SURFACE_CONTEXT_ACTIVE_RUNTIME
+        if active_runtime_public_prefix is not None
+        else NEXT_COMMAND_SURFACE_CONTEXT_SHARED_NEXT_UP,
+        active_runtime_public_prefix=active_runtime_public_prefix,
     )
     if hint is None:
         return "none"
@@ -493,6 +501,11 @@ def classify_command_suggestion(
     }:
         return kind
     return KIND_UNKNOWN_DISPLAY_ONLY
+
+
+def _active_runtime_public_prefix(command: str) -> str | None:
+    parsed = parse_command_label(command)
+    return parsed.prefix if parsed.prefix in runtime_public_command_prefixes() else None
 
 
 def classify_schema_wrestling(repair_classes: Iterable[str]) -> str:

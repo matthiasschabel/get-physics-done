@@ -56,6 +56,12 @@ Read `active_verification_sessions` from `SESSION_ROUTER_INIT`. This payload is 
 
 Active sessions are payload entries with `session_status` of `validating` or `diagnosed`. Route on each entry's canonical `status` / `routing_status` and keep `session_status` conversational only; never let `session_status` overwrite `status`.
 
+No-phase routing is choice-only:
+
+- active sessions present: ask the user to choose one numbered session or provide a phase number; do not delegate yet;
+- no active sessions present: ask for a phase and show the runtime route `gpd:verify-work <phase>`;
+- never render `gpd verify phase` or bare `gpd-verify-work` as the visible verification workflow action.
+
 If active sessions exist, display:
 
 ```
@@ -66,7 +72,7 @@ If active sessions exist, display:
 Reply with a number to resume, or provide a phase number.
 ```
 
-Wait for user response; load phase-only stages only after `PHASE_ARG` is set. If none exist, stop with: `No active verification sessions. Provide a phase number (e.g., gpd:verify-work 4)`.
+Wait for user response; load phase-only stages only after `PHASE_ARG` is set. If none exist, stop with: `No active verification sessions. Provide a phase number (e.g., gpd:verify-work <phase>)`.
 
 **If non-empty `${PHASE_ARG}` is not found:**
 
@@ -116,7 +122,7 @@ fi
 Use canonical artifact discovery helpers during bootstrap. `verification_report_status_payload` is the fail-closed status surface for the current phase; if it reports `missing`, `missing_status`, `unparseable`, or `unknown_status`, treat that as pending verification rather than a pass.
 
 ```bash
-PHASE_INFO=$(gpd --raw roadmap get-phase "${phase_number}")
+PHASE_INFO=$(gpd --raw roadmap get-phase "${PHASE_ARG}")
 ```
 
 Use `phase_dir_abs` for shell/file IO; `phase_dir` stays the project-relative label. Read all PLAN.md files in `${PHASE_DIR_ABS}/` using the file_read tool.

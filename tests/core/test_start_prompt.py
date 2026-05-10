@@ -59,6 +59,25 @@ def _route_for_option(workflow: str, option_id: str) -> str:
     return route_step[start : start + 1 + next_route.start()]
 
 
+def _route_boundary_envelope(route: str) -> dict[str, str | bool]:
+    match = re.search(r"```text\nroute_boundary:(?P<body>.*?)\n```", route, flags=re.DOTALL)
+    assert match is not None, route
+    envelope: dict[str, str | bool] = {}
+    body = match.group("body").strip()
+    if "\n" in body:
+        pairs = [line.strip().split(": ", 1) for line in body.splitlines()]
+    else:
+        pairs = [part.strip().split("=", 1) for part in body.split(";")]
+    for key, value in pairs:
+        if value == "true":
+            envelope[key] = True
+        elif value == "false":
+            envelope[key] = False
+        else:
+            envelope[key] = value
+    return envelope
+
+
 def _numbered_choices(section: str) -> list[str]:
     return [line.strip() for line in section.splitlines() if re.match(r"\s*\d+\.\s+", line)]
 
@@ -316,73 +335,95 @@ def test_start_workflow_route_choice_has_general_downstream_write_gate_boundary(
 
     _assert_anchor(
         route_step,
-        "start route choice has downstream write gate",
+        "start route choice has typed downstream write gate",
         (
             "start-menu choice authorizes only the route into that command",
             "state the route boundary visibly",
             "first downstream write-capable gate",
             "separate explicit approval",
+            "route_boundary",
+            "route_allowed=true",
+            "downstream_write_approved=false",
+            "next_user_decision",
         ),
     )
 
 
-def test_start_workflow_new_project_routes_stop_before_project_writes() -> None:
+def test_start_workflow_write_capable_routes_render_route_boundary_envelopes() -> None:
     workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
+    expectations = {
+        "new_project_minimal": {
+            "selected_command": "gpd:new-project --minimal",
+            "next_user_decision": "new_project_minimal_scope_approval",
+            "boundary": (
+                "Route boundary for `new_project_minimal`",
+                "do not create `GPD/`",
+                "initialize git",
+                "write state",
+                "write progress files",
+                "explicit downstream intake/scope approval after this start route",
+            ),
+        },
+        "new_project_full": {
+            "selected_command": "gpd:new-project",
+            "next_user_decision": "new_project_full_scope_approval",
+            "boundary": (
+                "Route boundary for `new_project_full`",
+                "do not create `GPD/`",
+                "initialize git",
+                "write state",
+                "write progress files",
+                "explicit downstream intake/scope approval after this start route",
+            ),
+        },
+        "map_research": {
+            "selected_command": "gpd:map-research",
+            "next_user_decision": "map_research_durable_write_confirmation",
+            "boundary": (
+                "Route boundary for `map_research`",
+                "creating, archiving, or updating `GPD/research-map/`",
+                "spawning mapper agents",
+                "writing summaries",
+                "explicit durable-write confirmation after the route handoff",
+            ),
+        },
+        "sync_state": {
+            "selected_command": "gpd:sync-state",
+            "next_user_decision": "sync_repair_confirmation",
+            "boundary": (
+                "Route boundary for `sync_state`",
+                "do not run `gpd state repair-sync`",
+                "promote backups",
+                "rewrite `GPD/STATE.md`",
+                "rewrite `GPD/state.json`",
+                "separate exact sync/repair confirmation inside `gpd:sync-state`",
+            ),
+        },
+        "progress": {
+            "selected_command": "gpd:progress",
+            "next_user_decision": "progress_reconcile_confirmation",
+            "boundary": (
+                "Route boundary for `progress`",
+                "default/report mode only",
+                "Do not switch to `--reconcile`",
+                "execute the recommended next action",
+                "compact state",
+                "write progress/state files",
+            ),
+        },
+    }
 
-    for option_id, command in (
-        ("new_project_minimal", "gpd:new-project --minimal"),
-        ("new_project_full", "gpd:new-project"),
-    ):
+    for option_id, expectation in expectations.items():
         route = _route_for_option(workflow, option_id)
-        assert (
-            f"I will route to `{command}` now and stop at its first downstream intake or scope-approval gate" in route
+        assert _route_boundary_envelope(route) == {
+            "option_id": option_id,
+            "selected_command": expectation["selected_command"],
+            "route_allowed": True,
+            "downstream_write_approved": False,
+            "next_user_decision": expectation["next_user_decision"],
+        }
+        _assert_anchor(
+            route,
+            f"{option_id} route denies downstream writes until named decision",
+            expectation["boundary"],
         )
-        assert "no project, git, state, or progress files are approved by this start choice" in route
-        assert f"Route boundary for `{option_id}`" in route
-        assert "do not create `GPD/`" in route
-        assert "initialize git" in route
-        assert "write state" in route
-        assert "write progress files" in route
-        assert "explicit downstream intake/scope approval after this start route" in route
-
-
-def test_start_workflow_map_route_stops_before_research_map_writes() -> None:
-    workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
-    route = _route_for_option(workflow, "map_research")
-
-    assert "I will route to `gpd:map-research` now and stop at its first map-research decision/write gate" in route
-    assert "no research-map files, mapper agents, archives, or summaries are approved by this start choice" in route
-    assert "Route boundary for `map_research`" in route
-    assert "stop before creating, archiving, or updating `GPD/research-map/`" in route
-    assert "before spawning mapper agents" in route
-    assert "before writing summaries" in route
-    assert "explicit durable-write confirmation after the route handoff" in route
-
-
-def test_start_workflow_sync_route_stops_before_state_repair_writes() -> None:
-    workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
-    route = _route_for_option(workflow, "sync_state")
-
-    assert "I will route to `gpd:sync-state` now and stop after its recovery diagnosis/instruction gate" in route
-    assert "no state repair or state rewrite is approved by this start choice" in route
-    assert "do not continue through the sync-state shell repair workflow from `gpd:start`" in route
-    assert "Route boundary for `sync_state`" in route
-    assert "do not run `gpd state repair-sync`" in route
-    assert "promote backups" in route
-    assert "rewrite `GPD/STATE.md`" in route
-    assert "rewrite `GPD/state.json`" in route
-    assert "separate exact sync/repair confirmation inside `gpd:sync-state`" in route
-
-
-def test_start_workflow_progress_route_is_default_report_only() -> None:
-    workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
-    route = _route_for_option(workflow, "progress")
-
-    assert "I will route to `gpd:progress` now in default/report mode only" in route
-    assert "no reconcile, state write, compaction, or next-action execution is approved by this start choice" in route
-    assert "Route boundary for `progress`" in route
-    assert "use default/report mode only" in route
-    assert "Do not switch to `--reconcile`" in route
-    assert "execute the recommended next action" in route
-    assert "compact state" in route
-    assert "write progress/state files" in route

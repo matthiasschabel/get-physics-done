@@ -40,6 +40,26 @@ stage_stop:
 If no domain-specific route is clear, set `next_runtime_command` to
 `gpd:suggest-next`.
 
+## Owner Labels
+
+Use owner labels when a stop surface also mentions local helper commands:
+
+- `runtime`: public runtime commands rendered from `next_runtime_command` or
+  `also_available`.
+- `local_transition`: local state transitions such as
+  `gpd phase complete N`. These can be the primary only for readiness-gated
+  local transition surfaces, not for blocked/checkpoint runtime stops.
+- `local_helper`: secondary local helper work such as helper-owned checkpoint
+  cleanup. Keep these out of `next_runtime_command` and `also_available`.
+- `local_finalizer`: secondary local finalizer commands that produce or apply a
+  concrete artifact.
+- `display_only`: explanatory paths or examples that are not commands to run.
+
+Blocked, checkpoint, failed, and post-completion runtime stops keep
+`next_runtime_command` as the primary runtime route. A ready local transition
+may render `Primary local transition: ...`, but the next runtime command after
+that transition must be rendered separately under `**After this completes:**`.
+
 ## Render Rule
 
 Every user-facing stop renders from the envelope into this shape:
@@ -59,6 +79,21 @@ A rendered `## > Next Up` block contains exactly one `Primary:` line, and
 that line contains a public `gpd:` command. Put secondary commands only
 under `**Also available:**`, `**After this completes:**`, or another clearly
 secondary label.
+
+For readiness-gated local transitions, the one primary line may use the owner
+label:
+
+```markdown
+## > Next Up
+
+Primary local transition: `gpd phase complete N`
+
+**After this completes:**
+- `gpd:plan-phase N+1` -- continue with the next runtime workflow
+
+**Secondary local helper:**
+- `gpd --raw phase checkpoint cleanup --phase N --namespace phase --policy successful-closeout` -- remove helper-owned checkpoint tags after success
+```
 
 ## Raw-Init Boundary
 

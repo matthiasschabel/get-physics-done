@@ -3287,7 +3287,7 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
     )
     _assert_machine_fragments(
         _workflow_authority_text("verify-work"),
-        'gpd --raw roadmap get-phase "${phase_number}"',
+        'gpd --raw roadmap get-phase "${PHASE_ARG}"',
         context="verify-work raw json plumbing",
     )
 

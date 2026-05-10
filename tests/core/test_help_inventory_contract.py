@@ -161,11 +161,10 @@ def test_help_wrapper_documents_inline_argument_command_lookup_normalization() -
         "inline command lookup normalization",
         (
             "gpd:new-project --minimal",
-            "new-project --minimal",
             "current runtime",
             "native command label",
             "inline flags or arguments",
-            "base command block",
+            "base command",
         ),
         section="## Step 4: Single Command Detail Extract (--command <name>)",
     ).check(help_command)
@@ -387,12 +386,12 @@ def test_help_command_uses_one_shared_extract_warning() -> None:
 
     fragment_count(
         "one shared help extract warning",
-        "Shared wrapper rule for every extract below",
+        "Shared wrapper rule:",
         expected_count=1,
     ).check(help_command)
     fragment_count(
         "one shared no-rewrite warning",
-        "without rewriting, summarizing, or inventing alternate wording",
+        "without rewriting or invented wording",
         expected_count=1,
     ).check(help_command)
 
@@ -402,7 +401,7 @@ def test_help_command_keeps_one_shared_workflow_authority_note() -> None:
 
     fragment_count(
         "one shared workflow authority note",
-        "the loaded workflow help file is the authority",
+        "fallback extracts preserve workflow marker text",
         expected_count=1,
     ).check(help_command)
     _assert_absent(

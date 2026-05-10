@@ -9,15 +9,14 @@ context_mode: global
 <objective>
 Display GPD help by delegating to the renderer-backed local CLI help bridge, with the workflow-owned help surface as the marker fallback.
 
-Return only reference content. Do not add project-specific analysis, git status,
-next-step suggestions, or commentary beyond the requested reference extract.
+Return only reference content. Do not add project analysis, git status, next steps, or commentary.
 </objective>
 
-Shared wrapper rule for every extract below: the loaded workflow help file is the authority only when the local CLI bridge is unavailable. Use the bridge first, and use the workflow-owned reference fallback without rewriting, summarizing, or inventing alternate wording.
+Shared wrapper rule: use the bridge first; fallback extracts preserve workflow marker text without rewriting or invented wording.
 
-Bridge command rule: run the local CLI raw help bridge for the requested mode, parse the JSON, and return the referenced markdown or compact fields as human-readable help. The bridge is provider-free and renderer-backed.
+Bridge command rule: run local CLI raw help for the requested mode, parse JSON, and return renderer-backed markdown/fields.
 
-- `@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path. This inline path documents the workflow-owned help surface without eagerly inlining the detailed reference into this command prompt.
+- `@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path; do not inline it here.
 
 Use the workflow-owned stable markers as the extraction boundaries for fallback mode:
 
@@ -83,9 +82,9 @@ Then STOP.
 
 ## Step 4: Single Command Detail Extract (--command <name>)
 
-- Parse the command name from `$ARGUMENTS` after `--command`.
-- Accept either a bare command name such as `plan-phase`, a canonical runtime command such as `gpd:plan-phase`, or the current runtime's native command label.
-- If the lookup includes inline flags or arguments such as `gpd:new-project --minimal` or `new-project --minimal`, parse the inline arguments separately and normalize the lookup to the base command block that documents those flags or arguments.
+- Parse the command name after `--command`.
+- Accept bare names, canonical runtime commands, and the current runtime's native command label.
+- If lookup includes inline flags or arguments such as `gpd:new-project --minimal`, split them and normalize to the base command block.
 
 Preferred bridge path:
 
@@ -101,7 +100,7 @@ gpd --raw help --command <name>
 
 Workflow-owned reference fallback:
 
-- Normalize the lookup to the matching canonical runtime command inside the workflow-owned detailed-command marker range (`<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`), whose visible heading is `## Detailed Command Reference`.
+- Normalize to the matching canonical command inside the detailed-command marker range (`<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`), whose visible heading is `## Detailed Command Reference`.
 - Output ONLY the smallest matching detailed command block.
 - Include the nearest containing section heading (for example `### Phase Planning`) plus the matching command block.
 - Include matching `Flags:`, `Usage:`, and `Result:` lines that belong to that command when present.

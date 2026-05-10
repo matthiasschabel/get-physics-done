@@ -1,6 +1,6 @@
 ---
 name: gpd:autonomous
-description: Run all remaining phases autonomously — discuss→plan→execute→verify per phase
+description: Run remaining phases through staged discuss→plan→execute→verify
 argument-hint: "[--from N]"
 context_mode: project-required
 requires:
@@ -15,9 +15,8 @@ allowed-tools:
 ---
 
 <objective>
-Execute remaining milestone phases through the staged autonomous orchestrator:
-discover -> discuss -> plan -> execute -> verify -> closeout. Child commands
-own roadmap/state updates and phase artifacts.
+Run remaining phases through staged autonomous orchestration. Child commands own
+state updates and phase artifacts.
 </objective>
 
 <execution_context>
@@ -25,11 +24,10 @@ own roadmap/state updates and phase artifacts.
 </execution_context>
 
 <context>
-Optional flag: `--from N` starts from phase N. Project context and routing state
-come from staged init; do not preload extra context.
+`--from N` starts from phase N. Staged init resolves project context.
 </context>
 
 <process>
-Read the included first-stage authority, then follow its staged loading rule
-until the workflow stops, blocks, checkpoints, or closes the milestone.
+Follow the included first-stage authority until stop, block, checkpoint, or
+milestone closeout.
 </process>

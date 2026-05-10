@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, is_dataclass
 from types import MappingProxyType
 
+import tests.helpers.phase4_persona.interaction_events as trace_events
 from gpd.core.command_run_hints import (
     KIND_LOCAL_CLI_FINALIZER_COMMAND,
     KIND_LOCAL_CLI_VALIDATION_COMMAND,
@@ -27,6 +28,11 @@ BEHAVIOR_METRIC_COUNT_KEYS: tuple[str, ...] = (
     "post_stop_activity_count",
     "unexpected_write_count",
     "unsupported_completion_claim_count",
+    "physics_progress_count",
+    "schema_surface_count",
+    "conversation_turn_count",
+    "raw_reload_leakage_count",
+    "content_hydration_before_selection_count",
 )
 
 BEHAVIOR_METRIC_CLASS_KEYS: tuple[str, ...] = (
@@ -34,6 +40,15 @@ BEHAVIOR_METRIC_CLASS_KEYS: tuple[str, ...] = (
     "smoothness_class",
     "next_up_specificity_class",
     "mutation_guard_class",
+    "first_useful_action_class",
+    "stop_integrity_class",
+    "physics_to_schema_ratio_class",
+    "artifact_handle_first_class",
+)
+
+BEHAVIOR_METRIC_COUNT_MAP_KEYS: tuple[str, ...] = (
+    "question_bucket_counts",
+    "event_class_counts",
 )
 
 STRUCTURED_AUTHORITY_CLASSES: tuple[str, ...] = (
@@ -201,13 +216,22 @@ class BehaviorScore:
     metric_classes: Mapping[str, str]
     structured_authority_sources: tuple[str, ...]
     passed: bool
+    metric_count_maps: Mapping[str, Mapping[str, int]] | None = None
 
     def __post_init__(self) -> None:
         counts = {key: int(self.metric_counts.get(key, 0)) for key in BEHAVIOR_METRIC_COUNT_KEYS}
-        classes = {key: str(self.metric_classes[key]) for key in BEHAVIOR_METRIC_CLASS_KEYS}
+        classes = {
+            key: str(self.metric_classes.get(key, _default_metric_class(key))) for key in BEHAVIOR_METRIC_CLASS_KEYS
+        }
+        raw_count_maps = self.metric_count_maps or {}
+        count_maps = {
+            key: MappingProxyType(_sanitized_count_map(raw_count_maps.get(key, {})))
+            for key in BEHAVIOR_METRIC_COUNT_MAP_KEYS
+        }
         object.__setattr__(self, "finding_classes", _unique_tokens(self.finding_classes))
         object.__setattr__(self, "metric_counts", MappingProxyType(counts))
         object.__setattr__(self, "metric_classes", MappingProxyType(classes))
+        object.__setattr__(self, "metric_count_maps", MappingProxyType(count_maps))
         object.__setattr__(
             self,
             "structured_authority_sources",
@@ -290,8 +314,20 @@ def score_behavior_metrics(
         accepted=accepted,
         ready=ready,
     )
-    duplicate_question_count = _duplicate_question_bucket_count(event_view)
-    question_before_action_count = _question_before_action_count(failure_classes, event_view)
+    question_bucket_count_map = dict(trace_events.question_bucket_counts(event))
+    event_class_count_map = dict(trace_events.event_class_counts(event))
+    first_useful_action_class = trace_events.first_useful_action_class(event)
+    duplicate_question_count = _duplicate_question_bucket_count(
+        event_view,
+        question_bucket_counts=question_bucket_count_map,
+        event_class_counts=event_class_count_map,
+    )
+    question_before_action_count = _question_before_action_count(
+        failure_classes,
+        event_view,
+        first_useful_action_class=first_useful_action_class,
+    )
+    trace_stop_integrity = trace_events.stop_integrity_class(event)
     post_stop_activity_count = _post_stop_activity_count(
         failure_classes,
         result_class=result_class,
@@ -300,6 +336,15 @@ def score_behavior_metrics(
         accepted=accepted,
         applied_operations=_tokens(outcome_view.get("applied_operations")),
     )
+    if trace_stop_integrity == "post_stop_activity":
+        post_stop_activity_count = max(1, post_stop_activity_count)
+    physics_progress_count = trace_events.physics_progress_count(event)
+    schema_surface_count = trace_events.schema_surface_count(event)
+    conversation_turn_count = trace_events.conversation_turn_count(event)
+    raw_reload_leakage_count = trace_events.raw_reload_leakage_count(event) + _source_raw_reload_leakage_count(
+        source_text
+    )
+    content_hydration_before_selection_count = trace_events.content_hydration_before_selection_count(event)
     unexpected_write_count = 1 if mutation_guard_class in {"unexpected_write", "state_mutated_on_reject"} else 0
     authority_sources = _structured_authority_sources(
         outcome_view,
@@ -308,6 +353,7 @@ def score_behavior_metrics(
         commands=commands,
         next_action_class=next_action_class,
         source_repair_classes=source_repair_classes,
+        event_class_counts=event_class_count_map,
     )
 
     metric_counts = {
@@ -321,6 +367,11 @@ def score_behavior_metrics(
         "post_stop_activity_count": post_stop_activity_count,
         "unexpected_write_count": unexpected_write_count,
         "unsupported_completion_claim_count": unsupported_completion_count,
+        "physics_progress_count": physics_progress_count,
+        "schema_surface_count": schema_surface_count,
+        "conversation_turn_count": conversation_turn_count,
+        "raw_reload_leakage_count": raw_reload_leakage_count,
+        "content_hydration_before_selection_count": content_hydration_before_selection_count,
     }
     danger_classes = []
     if stale_trust_count:
@@ -339,19 +390,29 @@ def score_behavior_metrics(
         next_action_class,
         expected_class=_string_or_none(row_view.get("expected_next_up_specificity_class")),
     )
+    stop_integrity_class = _stop_integrity_class(
+        trace_stop_integrity,
+        failure_classes=failure_classes,
+        result_class=result_class,
+        next_action_class=next_action_class,
+        post_stop_activity_count=post_stop_activity_count,
+    )
     metric_classes = {
         "schema_wrestling_class": schema_wrestling_class,
         "next_up_specificity_class": next_up_specificity_class,
         "mutation_guard_class": mutation_guard_class,
+        "first_useful_action_class": first_useful_action_class,
+        "stop_integrity_class": stop_integrity_class,
+        "physics_to_schema_ratio_class": trace_events.physics_to_schema_ratio_class(event),
+        "artifact_handle_first_class": trace_events.artifact_handle_first_class(event),
+    }
+    metric_classes = {
+        **metric_classes,
         "smoothness_class": classify_smoothness(
             metric_counts,
             result_class=result_class,
             next_action_class=next_action_class,
-            metric_classes={
-                "schema_wrestling_class": schema_wrestling_class,
-                "next_up_specificity_class": next_up_specificity_class,
-                "mutation_guard_class": mutation_guard_class,
-            },
+            metric_classes=metric_classes,
         ),
     }
 
@@ -364,6 +425,10 @@ def score_behavior_metrics(
         metric_classes=metric_classes,
         structured_authority_sources=authority_sources,
         passed=metric_classes["smoothness_class"] in {"smooth", "acceptable"},
+        metric_count_maps={
+            "question_bucket_counts": question_bucket_count_map,
+            "event_class_counts": event_class_count_map,
+        },
     )
 
 
@@ -463,15 +528,24 @@ def classify_smoothness(
     )
     schema_wrestling = metric_classes.get("schema_wrestling_class", "none")
     mutation_guard = metric_classes.get("mutation_guard_class", "no_write")
+    first_useful_action = metric_classes.get("first_useful_action_class", "not_applicable")
+    stop_integrity = metric_classes.get("stop_integrity_class", "not_applicable")
+    physics_to_schema_ratio = metric_classes.get("physics_to_schema_ratio_class", "not_applicable")
+    artifact_handle_first = metric_classes.get("artifact_handle_first_class", "not_applicable")
     hard_regression_keys = (
         "invalid_command_suggestion_count",
         "stale_artifact_trust_count",
         "post_stop_activity_count",
         "unexpected_write_count",
+        "raw_reload_leakage_count",
     )
     if any(int(metric_counts.get(key, 0)) > 0 for key in hard_regression_keys):
         return "regressed"
-    if schema_wrestling == "danger" or mutation_guard in {"unexpected_write", "state_mutated_on_reject"}:
+    if (
+        schema_wrestling == "danger"
+        or mutation_guard in {"unexpected_write", "state_mutated_on_reject"}
+        or stop_integrity == "post_stop_activity"
+    ):
         return "regressed"
     if int(metric_counts.get("schema_repair_loop_count", 0)) >= 3:
         return "regressed"
@@ -479,7 +553,15 @@ def classify_smoothness(
         schema_wrestling == "high"
         or int(metric_counts.get("schema_repair_loop_count", 0)) >= 2
         or int(metric_counts.get("duplicate_question_bucket_count", 0)) > 0
+        or int(metric_counts.get("content_hydration_before_selection_count", 0)) > 0
         or next_up_specificity == "vague"
+        or first_useful_action in {"delayed", "missing"}
+        or stop_integrity == "ambiguous_stop"
+        or (
+            physics_to_schema_ratio in {"schema_dominant", "no_progress"}
+            and int(metric_counts.get("conversation_turn_count", 0)) > 0
+        )
+        or artifact_handle_first in {"content_before_handle", "missing_handle"}
         or (schema_wrestling == "minor" and next_up_specificity == "none")
     ):
         return "clunky"
@@ -530,12 +612,32 @@ def merge_behavior_scores(*scores: BehaviorScore) -> BehaviorScore:
     if not scores:
         raise ValueError("at least one behavior score is required")
     merged_counts = {key: sum(score.metric_counts[key] for score in scores) for key in BEHAVIOR_METRIC_COUNT_KEYS}
+    merged_count_maps = {
+        key: _merge_count_maps(*(score.metric_count_maps[key] for score in scores))
+        for key in BEHAVIOR_METRIC_COUNT_MAP_KEYS
+    }
     schema_class = _worst_class((score.metric_classes["schema_wrestling_class"] for score in scores), _SCHEMA_ORDER)
     smoothness_class = _worst_class((score.metric_classes["smoothness_class"] for score in scores), _SMOOTHNESS_ORDER)
     next_up_class = _worst_class(
         (score.metric_classes["next_up_specificity_class"] for score in scores), _NEXT_UP_ORDER
     )
     mutation_class = _worst_class((score.metric_classes["mutation_guard_class"] for score in scores), _MUTATION_ORDER)
+    first_useful_action_class = _worst_class(
+        (score.metric_classes["first_useful_action_class"] for score in scores),
+        _FIRST_USEFUL_ACTION_ORDER,
+    )
+    stop_integrity_class = _worst_class(
+        (score.metric_classes["stop_integrity_class"] for score in scores),
+        _STOP_INTEGRITY_ORDER,
+    )
+    physics_to_schema_ratio_class = _worst_class(
+        (score.metric_classes["physics_to_schema_ratio_class"] for score in scores),
+        _PHYSICS_TO_SCHEMA_ORDER,
+    )
+    artifact_handle_first_class = _worst_class(
+        (score.metric_classes["artifact_handle_first_class"] for score in scores),
+        _ARTIFACT_HANDLE_ORDER,
+    )
     first = scores[0]
     return BehaviorScore(
         row_id=first.row_id if len({score.row_id for score in scores}) == 1 else "merged",
@@ -548,11 +650,16 @@ def merge_behavior_scores(*scores: BehaviorScore) -> BehaviorScore:
             "smoothness_class": smoothness_class,
             "next_up_specificity_class": next_up_class,
             "mutation_guard_class": mutation_class,
+            "first_useful_action_class": first_useful_action_class,
+            "stop_integrity_class": stop_integrity_class,
+            "physics_to_schema_ratio_class": physics_to_schema_ratio_class,
+            "artifact_handle_first_class": artifact_handle_first_class,
         },
         structured_authority_sources=_unique_tokens(
             source for score in scores for source in score.structured_authority_sources
         ),
         passed=all(score.passed for score in scores) and smoothness_class != "regressed",
+        metric_count_maps=merged_count_maps,
     )
 
 
@@ -653,7 +760,20 @@ def _unsupported_completion_claim_count(
     return 1 if set(failure_classes) & _UNSUPPORTED_COMPLETION_CLASSES else 0
 
 
-def _duplicate_question_bucket_count(event_view: _ObjectView) -> int:
+def _duplicate_question_bucket_count(
+    event_view: _ObjectView,
+    *,
+    question_bucket_counts: Mapping[str, int],
+    event_class_counts: Mapping[str, int],
+) -> int:
+    if question_bucket_counts:
+        return sum(max(0, int(value) - 1) for value in question_bucket_counts.values())
+    if event_class_counts:
+        return sum(
+            max(0, int(value) - 1)
+            for key, value in event_class_counts.items()
+            if "question" in str(key) or "ask_user" in str(key)
+        )
     raw_counts = event_view.get("event_class_counts")
     if isinstance(raw_counts, Mapping):
         return sum(
@@ -668,12 +788,19 @@ def _duplicate_question_bucket_count(event_view: _ObjectView) -> int:
     return sum(count - 1 for count in counts.values() if count > 1)
 
 
-def _question_before_action_count(failure_classes: tuple[str, ...], event_view: _ObjectView) -> int:
+def _question_before_action_count(
+    failure_classes: tuple[str, ...],
+    event_view: _ObjectView,
+    *,
+    first_useful_action_class: str,
+) -> int:
     event_classes = {
         _normalize_token(event_view.get("user_answer_class")),
         _normalize_token(event_view.get("gate_class")),
         *_tokens(event_view.get("question_bucket_classes")),
     }
+    if first_useful_action_class == "single_question":
+        return 1
     return 1 if (set(failure_classes) | event_classes) & _QUESTION_CLASSES else 0
 
 
@@ -704,6 +831,7 @@ def _structured_authority_sources(
     commands: tuple[str, ...],
     next_action_class: str | None,
     source_repair_classes: tuple[str, ...],
+    event_class_counts: Mapping[str, int],
 ) -> tuple[str, ...]:
     evidence_classes = _tokens(outcome_view.get("evidence_classes"))
     checked_artifact_classes = _tokens(outcome_view.get("checked_artifact_classes"))
@@ -719,6 +847,7 @@ def _structured_authority_sources(
             event_view.get("active_resume_kind_class"),
             event_view.get("advisory_resume_class"),
             *_tokens(event_view.get("question_bucket_classes")),
+            *_tokens(event_class_counts),
         )
     )
     class_set = (
@@ -829,6 +958,38 @@ def _source_repair_classes(source_text: str | None) -> tuple[str, ...]:
     return _unique_tokens((str(repair.primary_class), *classes))
 
 
+def _source_raw_reload_leakage_count(source_text: str | None) -> int:
+    if not source_text:
+        return 0
+    lowered = source_text.lower()
+    count = 0
+    if "gpd --raw init" in lowered or "--raw init" in lowered:
+        count += 1
+    if "gpd --raw stage field-access" in lowered or "--raw stage field-access" in lowered:
+        count += 1
+    return count
+
+
+def _stop_integrity_class(
+    trace_class: str,
+    *,
+    failure_classes: tuple[str, ...],
+    result_class: str,
+    next_action_class: str | None,
+    post_stop_activity_count: int,
+) -> str:
+    if post_stop_activity_count > 0:
+        return "post_stop_activity"
+    if trace_class != "not_applicable":
+        return trace_class
+    stopped = (
+        set(failure_classes) & _STOP_CLASSES
+        or _normalize_token(result_class) in _STOP_CLASSES
+        or _normalize_token(next_action_class) in {"review_stop", "stop"}
+    )
+    return "stopped_cleanly" if stopped else "not_applicable"
+
+
 def _expected_command_action(next_action_class: str | None) -> str | None:
     normalized = _normalize_token(next_action_class)
     if normalized in _RUNTIME_VERIFY_NEXT_ACTION_CLASSES:
@@ -890,6 +1051,37 @@ def _unique_tokens(values: Iterable[object]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(token for value in values for token in _tokens(value)))
 
 
+def _sanitized_count_map(value: object) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        token: max(0, int(count))
+        for raw_token, count in value.items()
+        if (token := _normalize_token(raw_token)) and token not in {"none", "not_applicable", "unknown"}
+    }
+
+
+def _merge_count_maps(*maps: Mapping[str, int]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for count_map in maps:
+        for token, count in _sanitized_count_map(count_map).items():
+            counts[token] += count
+    return dict(sorted(counts.items()))
+
+
+def _default_metric_class(metric_key: str) -> str:
+    return {
+        "schema_wrestling_class": "none",
+        "smoothness_class": "smooth",
+        "next_up_specificity_class": "none",
+        "mutation_guard_class": "no_write",
+        "first_useful_action_class": "not_applicable",
+        "stop_integrity_class": "not_applicable",
+        "physics_to_schema_ratio_class": "not_applicable",
+        "artifact_handle_first_class": "not_applicable",
+    }.get(metric_key, "not_applicable")
+
+
 def _normalize_token(value: object) -> str:
     if value is None:
         return ""
@@ -913,6 +1105,10 @@ def _assert_expected_metric_classes(row_view: _ObjectView, score: BehaviorScore)
         "smoothness_class": row_view.get("expected_smoothness_class"),
         "next_up_specificity_class": row_view.get("expected_next_up_specificity_class"),
         "mutation_guard_class": row_view.get("expected_mutation_guard_class"),
+        "first_useful_action_class": row_view.get("expected_first_useful_action_class"),
+        "stop_integrity_class": row_view.get("expected_stop_integrity_class"),
+        "physics_to_schema_ratio_class": row_view.get("expected_physics_to_schema_ratio_class"),
+        "artifact_handle_first_class": row_view.get("expected_artifact_handle_first_class"),
     }
     for metric_key, expected_class in expected_by_key.items():
         if expected_class is not None:
@@ -958,8 +1154,13 @@ def _assert_provider_free(value: object) -> None:
 def _assert_class_only_score(score: BehaviorScore) -> None:
     assert tuple(score.metric_counts) == BEHAVIOR_METRIC_COUNT_KEYS
     assert tuple(score.metric_classes) == BEHAVIOR_METRIC_CLASS_KEYS
+    assert tuple(score.metric_count_maps) == BEHAVIOR_METRIC_COUNT_MAP_KEYS
     assert all(isinstance(value, int) for value in score.metric_counts.values())
     assert all(isinstance(value, str) for value in score.metric_classes.values())
+    for count_map in score.metric_count_maps.values():
+        assert all(isinstance(value, int) for value in count_map.values())
+        for token in count_map:
+            _assert_class_token(token)
     for token in (
         score.row_id,
         score.surface,
@@ -1002,6 +1203,29 @@ _SCHEMA_ORDER = ("none", "minor", "high", "danger")
 _SMOOTHNESS_ORDER = ("smooth", "acceptable", "clunky", "regressed")
 _NEXT_UP_ORDER = ("runtime_verify_work", "bounded_resume", "concrete_command", "vague", "none")
 _MUTATION_ORDER = ("no_write", "expected_write_only", "unexpected_write", "state_mutated_on_reject")
+_FIRST_USEFUL_ACTION_ORDER = (
+    "not_applicable",
+    "immediate_command",
+    "bounded_resume",
+    "safe_stop",
+    "single_question",
+    "delayed",
+    "missing",
+)
+_STOP_INTEGRITY_ORDER = ("not_applicable", "stopped_cleanly", "ambiguous_stop", "post_stop_activity")
+_PHYSICS_TO_SCHEMA_ORDER = (
+    "not_applicable",
+    "progress_dominant",
+    "balanced",
+    "no_progress",
+    "schema_dominant",
+)
+_ARTIFACT_HANDLE_ORDER = (
+    "not_applicable",
+    "handle_before_content",
+    "missing_handle",
+    "content_before_handle",
+)
 
 
 def _worst_class(values: Iterable[str], order: Sequence[str]) -> str:
@@ -1011,6 +1235,7 @@ def _worst_class(values: Iterable[str], order: Sequence[str]) -> str:
 
 __all__ = [
     "BEHAVIOR_METRIC_CLASS_KEYS",
+    "BEHAVIOR_METRIC_COUNT_MAP_KEYS",
     "BEHAVIOR_METRIC_COUNT_KEYS",
     "STRUCTURED_AUTHORITY_CLASSES",
     "BehaviorMetricBounds",

@@ -2,170 +2,39 @@
 
 from __future__ import annotations
 
-import re
-from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
+from tests.helpers.persona_summary import (
+    assert_persona_summary_valid,
+    make_phase7_live_canary_summary,
+    phase7_live_canary_policy,
+    validate_persona_summary,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUNBOOK_PATH = REPO_ROOT / "docs" / "dev" / "phase7-live-persona-canary.md"
 GITIGNORE_PATH = REPO_ROOT / ".gitignore"
 
-SAFE_LITERAL_KEYS = {
-    "schema_version",
-    "report_id",
-    "row_id",
-    "row_count",
-    "finding_count",
-    "release_publish_provider_launch_allowed",
-}
-SAFE_CONTAINER_KEYS = {
-    "aggregate_class_counts",
-    "event_class_counts",
-    "finding_classes",
-    "nightly_allowed_triggers",
-    "redaction_scan",
-    "rows",
-}
-SAFE_NIGHTLY_TRIGGERS = {"workflow_dispatch", "schedule"}
-RAW_KEY_FRAGMENTS = (
-    "account",
-    "argv",
-    "auth",
-    "command",
-    "content",
-    "diff",
-    "env",
-    "hash",
-    "home",
-    "path",
-    "prompt",
-    "provider",
-    "reply",
-    "session",
-    "stderr",
-    "stdout",
-    "token",
-    "transcript",
-)
-RAW_VALUE_PATTERNS = {
-    "local_path": re.compile(r"(?:^|[\s`'\"])(?:/Users/|/home/|/private/|[A-Za-z]:\\Users\\)"),
-    "parent_traversal": re.compile(r"(?:^|/)\.\.(?:/|$)"),
-    "secret_value": re.compile(
-        r"(?:Bearer\s+|sk-[A-Za-z0-9]|ghp_[A-Za-z0-9]|"
-        r"(?:OPENAI|ANTHROPIC|CLAUDE|GEMINI|GOOGLE|CODEX|OPENCODE)_"
-        r"(?:API_KEY|AUTH_TOKEN|OAUTH_TOKEN|ACCESS_TOKEN|SECRET|TOKEN|CREDENTIALS))"
-    ),
-    "private_key": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-    "account_identifier": re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
-    "raw_artifact_file": re.compile(
-        r"\b(?:prompt\.txt|command\.json|env\.json|stdout\.jsonl|stderr\.txt|transcript\.md|"
-        r"provider[-_]output\.txt|provider[-_]reply\.txt)\b"
-    ),
-    "provider_output": re.compile(r"\b(?:raw provider reply|final answer text|transcript excerpt)\b", re.I),
-}
-
-VALID_PUBLIC_SUMMARY: dict[str, object] = {
-    "schema_version": "phase7.live-persona-canary-summary.v1",
-    "report_id": "phase7-manual-canary-summary-fixture",
-    "execution_mode_class": "manual_opt_in",
-    "trigger_class": "operator_local_manual",
-    "raw_artifact_retention_class": "operator_local_ignored_tmp",
-    "public_artifact_class": "sanitized_class_only_summary",
-    "provider_launch_source_class": "manual_operator",
-    "release_publish_provider_launch_allowed": False,
-    "nightly_status_class": "deferred",
-    "nightly_allowed_triggers": ["workflow_dispatch", "schedule"],
-    "row_count": 1,
-    "aggregate_class_counts": {"blocked": 1, "no_write": 1},
-    "redaction_scan": {
-        "status_class": "pass",
-        "finding_count": 0,
-        "finding_classes": [],
-    },
-    "rows": [
-        {
-            "row_id": "LP-RO-RUNTIME",
-            "runtime_class": "runtime_catalog_member",
-            "persona_class": "zero_coder_recovery",
-            "workflow_class": "read_only_setup_recovery",
-            "launch_policy_class": "manual_opt_in",
-            "write_class": "no_write",
-            "result_class": "blocked",
-            "next_step_class": "operator_review",
-            "artifact_retention_class": "operator_local_ignored_tmp",
-            "redaction_status_class": "pass",
-            "finding_classes": ["provider_auth_unknown"],
-            "event_class_counts": {"setup_refusal": 1, "redaction_pass": 1},
-        }
-    ],
-}
+VALID_PUBLIC_SUMMARY = make_phase7_live_canary_summary()
 
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _key_is_class_only_or_policy_safe(key: str) -> bool:
-    if key in SAFE_LITERAL_KEYS or key in SAFE_CONTAINER_KEYS:
-        return True
-    if key.endswith(("_class", "_classes")):
-        return True
-    if key.endswith(("_count", "_counts")):
-        return True
-    return not any(fragment in key.lower() for fragment in RAW_KEY_FRAGMENTS)
+def _first_row(summary: dict[str, object]) -> dict[str, object]:
+    rows = summary["rows"]
+    assert isinstance(rows, list)
+    row = rows[0]
+    assert isinstance(row, dict)
+    return row
 
 
-def _record_string_findings(value: str, path: tuple[str, ...], findings: list[str]) -> None:
-    for finding_class, pattern in RAW_VALUE_PATTERNS.items():
-        if pattern.search(value):
-            findings.append(f"raw_value:{finding_class}:{'.'.join(path)}")
-
-
-def _public_summary_policy_findings(value: object, path: tuple[str, ...] = ()) -> list[str]:
-    findings: list[str] = []
-    if isinstance(value, Mapping):
-        for key, child in value.items():
-            if not isinstance(key, str):
-                findings.append(f"non_string_key:{'.'.join(path)}")
-                continue
-            child_path = (*path, key)
-            if not _key_is_class_only_or_policy_safe(key):
-                findings.append(f"forbidden_key:{'.'.join(child_path)}")
-            if key.endswith("_counts"):
-                if not isinstance(child, Mapping) or not all(
-                    isinstance(count_key, str) and isinstance(count_value, int)
-                    for count_key, count_value in child.items()
-                ):
-                    findings.append(f"invalid_count_map:{'.'.join(child_path)}")
-                continue
-            findings.extend(_public_summary_policy_findings(child, child_path))
-        return findings
-    if isinstance(value, list):
-        for index, child in enumerate(value):
-            findings.extend(_public_summary_policy_findings(child, (*path, str(index))))
-        return findings
-    if isinstance(value, str):
-        _record_string_findings(value, path, findings)
-        return findings
-    if value is None or isinstance(value, bool | int):
-        return findings
-    findings.append(f"unsupported_value_type:{'.'.join(path)}:{type(value).__name__}")
-    return findings
-
-
-def _assert_required_manual_policy(summary: Mapping[str, object]) -> None:
-    assert summary["schema_version"] == "phase7.live-persona-canary-summary.v1"
-    assert summary["execution_mode_class"] == "manual_opt_in"
-    assert summary["trigger_class"] == "operator_local_manual"
-    assert summary["raw_artifact_retention_class"] == "operator_local_ignored_tmp"
-    assert summary["public_artifact_class"] == "sanitized_class_only_summary"
-    assert summary["provider_launch_source_class"] == "manual_operator"
-    assert summary["release_publish_provider_launch_allowed"] is False
-    assert summary["nightly_status_class"] == "deferred"
-    assert set(summary["nightly_allowed_triggers"]) <= SAFE_NIGHTLY_TRIGGERS
+def _has_finding(findings: tuple[str, ...], prefix: str, suffix: str = "") -> bool:
+    return any(finding.startswith(prefix) and finding.endswith(suffix) for finding in findings)
 
 
 def test_phase7_manual_live_canary_runbook_documents_the_policy_shape() -> None:
@@ -180,14 +49,13 @@ def test_phase7_manual_live_canary_runbook_documents_the_policy_shape() -> None:
         "`workflow_dispatch`",
         "`schedule`",
         "phase7.live-persona-canary-summary.v1",
+        "tests.helpers.persona_summary",
     ):
         assert required_fragment in runbook
 
 
 def test_phase7_manual_public_summary_shape_is_class_only_and_opt_in() -> None:
-    _assert_required_manual_policy(VALID_PUBLIC_SUMMARY)
-
-    assert _public_summary_policy_findings(VALID_PUBLIC_SUMMARY) == []
+    assert_persona_summary_valid(VALID_PUBLIC_SUMMARY, phase7_live_canary_policy())
 
 
 @pytest.mark.parametrize(
@@ -207,13 +75,23 @@ def test_phase7_manual_public_summary_shape_is_class_only_and_opt_in() -> None:
         "file_hash",
         "session_id",
         "home_path",
+        "raw_prompt_class",
+        "provider_reply_class",
+        "command_line_class",
+        "auth_path_class",
+        "file_hash_class",
+        "stdout_count",
+        "stderr_counts",
+        "argv_class",
+        "env_counts",
+        "secret_classes",
     ],
 )
 def test_phase7_manual_public_summary_rejects_raw_public_keys(raw_key: str) -> None:
     summary = deepcopy(VALID_PUBLIC_SUMMARY)
-    summary["rows"][0][raw_key] = "redacted"
+    _first_row(summary)[raw_key] = "redacted"
 
-    findings = _public_summary_policy_findings(summary)
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
 
     assert any(finding.startswith("forbidden_key:") for finding in findings)
 
@@ -221,25 +99,168 @@ def test_phase7_manual_public_summary_rejects_raw_public_keys(raw_key: str) -> N
 @pytest.mark.parametrize(
     "raw_value",
     [
+        "Prompt text: run the whole phase and tell me the answer",
+        "raw prompt: run the whole phase and tell me the answer",
+        "raw provider reply: the derivation is complete",
+        "provider_reply:accepted",
+        "stdout",
+        "stderr",
+        "argv",
+        "env",
+        "command line: gpd progress --raw",
+        "stdout.jsonl",
+        "stderr.txt",
+        "transcript excerpt from provider",
+        "codex exec --json -o output.json -",
         "/Users/example/.codex/auth.json",
         r"C:\Users\example\.gemini",
         "../outside/transcript.md",
-        "Bearer sk-test-secret",
-        "-----BEGIN PRIVATE KEY-----",
         "researcher@example.com",
-        "tmp/live-audit-v3/stdout.jsonl",
-        "tmp/live-audit-v3/provider-output.txt",
-        "OPENAI_API_KEY=redacted",
-        "raw provider reply: hello",
+        "0123456789abcdef0123456789abcdef01234567",
+        "OPENAI_API_KEY",
+        "Bearer sk-test-secret",
+        "ghp_0123456789abcdef0123456789abcdef",
+        "a" * 48,
     ],
 )
 def test_phase7_manual_public_summary_rejects_raw_public_values(raw_value: str) -> None:
     summary = deepcopy(VALID_PUBLIC_SUMMARY)
-    summary["rows"][0]["finding_classes"] = [raw_value]
+    _first_row(summary)["finding_classes"] = [raw_value]
 
-    findings = _public_summary_policy_findings(summary)
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
 
     assert any(finding.startswith("raw_value:") for finding in findings)
+
+
+def test_phase7_manual_public_summary_rejects_raw_values_under_class_count_and_counts() -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    row = _first_row(summary)
+    row["runtime_class"] = "stdout"
+    row["leak_count"] = "raw provider reply: hello"
+    row["event_class_counts"] = {"env": 1}
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert _has_finding(findings, "raw_value:raw_stream_or_capture:", ".runtime_class")
+    assert _has_finding(findings, "raw_value:provider_prompt_or_reply:", ".leak_count")
+    assert _has_finding(findings, "invalid_count_value:", ".leak_count")
+    assert _has_finding(findings, "raw_value:count_key:", ".env")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_finding"),
+    [
+        (True, "invalid_count_value:row_count"),
+        (-1, "invalid_count_value:row_count"),
+        ("1", "invalid_count_value:row_count"),
+        (1.5, "invalid_count_value:row_count"),
+    ],
+)
+def test_phase7_manual_public_summary_rejects_invalid_scalar_counts(value: object, expected_finding: str) -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    summary["row_count"] = value
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert expected_finding in findings
+
+
+def test_phase7_manual_public_summary_rejects_missing_required_scalar_count() -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    del summary["row_count"]
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert "required_policy:row_count" in findings
+
+
+@pytest.mark.parametrize(
+    ("count_map", "expected_finding_prefix"),
+    [
+        ({"redaction_pass": True}, "invalid_count_value:"),
+        ({"redaction_pass": -1}, "invalid_count_value:"),
+        ({"redaction_pass": "1"}, "invalid_count_value:"),
+        ({"redaction_pass": 1.5}, "invalid_count_value:"),
+        ({"stdout": 1}, "raw_value:count_key:"),
+    ],
+)
+def test_phase7_manual_public_summary_rejects_invalid_count_maps(
+    count_map: dict[str, object], expected_finding_prefix: str
+) -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    _first_row(summary)["event_class_counts"] = count_map
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert any(finding.startswith(expected_finding_prefix) for finding in findings)
+
+
+def test_phase7_manual_public_summary_rejects_row_count_mismatch() -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    summary["row_count"] = 2
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert "required_policy:row_count" in findings
+
+
+def test_phase7_manual_public_summary_rejects_non_list_rows() -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    summary["rows"] = {"row_id": "LP-RO-RUNTIME"}
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert "required_policy:rows" in findings
+
+
+def test_phase7_manual_public_summary_rejects_failing_redaction_scan() -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    redaction_scan = summary["redaction_scan"]
+    assert isinstance(redaction_scan, dict)
+    redaction_scan["status_class"] = "fail"
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert _has_finding(findings, "required_policy:", "redaction_scan.status_class")
+
+
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    [
+        ("release_publish_provider_launch_allowed", True),
+        ("nightly_status_class", "enabled"),
+        ("nightly_allowed_triggers", ["pull_request"]),
+        ("public_artifact_class", "raw_transcript"),
+    ],
+)
+def test_phase7_manual_public_summary_rejects_incorrect_required_policy_fields(
+    field_name: str, field_value: object
+) -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    summary[field_name] = field_value
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert any(finding.startswith(f"required_policy:{field_name}") for finding in findings)
+
+
+@pytest.mark.parametrize(
+    "command_line",
+    [
+        "codex exec --json -o output.json -",
+        "env FOO=bar uv run codex exec -",
+        "command claude --print hello",
+        "npx opencode run",
+        "npm exec gemini -- --prompt hello",
+    ],
+)
+def test_phase7_manual_public_summary_rejects_provider_command_lines(command_line: str) -> None:
+    summary = deepcopy(VALID_PUBLIC_SUMMARY)
+    _first_row(summary)["next_step_class"] = command_line
+
+    findings = validate_persona_summary(summary, phase7_live_canary_policy()).findings
+
+    assert any(finding.startswith("raw_value:provider_command_line:") for finding in findings)
 
 
 def test_phase7_raw_live_artifacts_remain_operator_local_under_ignored_tmp() -> None:

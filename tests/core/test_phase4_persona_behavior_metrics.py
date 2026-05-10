@@ -7,12 +7,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from gpd.command_labels import runtime_public_command_prefixes
 from gpd.core.command_run_hints import KIND_RUNTIME_COMMAND_LABEL, KIND_UNKNOWN_DISPLAY_ONLY
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
 from tests.helpers.phase4_persona.behavior_metrics import (
     BEHAVIOR_METRIC_CLASS_KEYS,
     BEHAVIOR_METRIC_COUNT_KEYS,
+    BEHAVIOR_METRIC_COUNT_MAP_KEYS,
     BehaviorMetricBounds,
     classify_command_suggestion,
     classify_mutation_guard,
@@ -21,6 +24,7 @@ from tests.helpers.phase4_persona.behavior_metrics import (
     merge_behavior_scores,
     score_behavior_metrics,
 )
+from tests.helpers.phase4_persona.interaction_events import FakePersonaTrace, FakePersonaTurn
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +61,14 @@ class SyntheticEvent:
     gate_class: str = "not_applicable"
 
 
+def _assert_metric_counts(score: object, expected: dict[str, int]) -> None:
+    assert {key: score.metric_counts[key] for key in expected} == expected
+
+
+def _assert_metric_classes(score: object, expected: dict[str, str]) -> None:
+    assert {key: score.metric_classes[key] for key in expected} == expected
+
+
 def _runtime_command(slug: str, *args: str) -> str:
     prefix = runtime_public_command_prefixes()[0]
     suffix = f" {' '.join(args)}" if args else ""
@@ -88,13 +100,32 @@ def test_behavior_score_shape_is_class_only_with_expected_keys() -> None:
 
     assert tuple(score.metric_counts) == BEHAVIOR_METRIC_COUNT_KEYS
     assert tuple(score.metric_classes) == BEHAVIOR_METRIC_CLASS_KEYS
+    assert tuple(score.metric_count_maps) == BEHAVIOR_METRIC_COUNT_MAP_KEYS
     assert score.metric_counts["schema_repair_loop_count"] == 1
+    _assert_metric_counts(
+        score,
+        {
+            "physics_progress_count": 0,
+            "schema_surface_count": 0,
+            "conversation_turn_count": 0,
+        },
+    )
     assert score.metric_classes["schema_wrestling_class"] == "minor"
     assert score.metric_classes["smoothness_class"] == "acceptable"
     assert score.metric_classes["next_up_specificity_class"] == "concrete_command"
+    _assert_metric_classes(
+        score,
+        {
+            "first_useful_action_class": "not_applicable",
+            "stop_integrity_class": "not_applicable",
+            "physics_to_schema_ratio_class": "not_applicable",
+            "artifact_handle_first_class": "not_applicable",
+        },
+    )
     assert set(score.structured_authority_sources) >= {"return_envelope", "return_repair_classifier"}
     assert all(isinstance(value, int) for value in score.metric_counts.values())
     assert all(isinstance(value, str) for value in score.metric_classes.values())
+    assert all(isinstance(value, int) for count_map in score.metric_count_maps.values() for value in count_map.values())
 
 
 def test_command_suggestion_classifier_uses_core_hint_classes() -> None:
@@ -298,3 +329,266 @@ def test_metric_bounds_and_score_merge_are_class_only() -> None:
     assert merged.metric_counts["invalid_command_suggestion_count"] == 1
     assert merged.metric_classes["smoothness_class"] == "regressed"
     assert merged.passed is False
+
+
+def test_fake_persona_trace_counts_progress_schema_turns_and_event_maps() -> None:
+    trace = FakePersonaTrace(
+        row_id="SYN_TRACE_01",
+        persona_class="executor",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="phase_scoping",
+                action_class="runtime_command",
+                physics_progress_class="phase_scoped",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="contract_check",
+                action_class="concrete_command",
+                schema_surface_class="yaml_return_requested",
+            ),
+            FakePersonaTurn(
+                turn_index=2,
+                speaker_class="assistant",
+                intent_class="artifact_check",
+                action_class="runtime_command",
+                physics_progress_class="artifact_verified",
+            ),
+        ),
+    )
+
+    score = score_behavior_metrics(
+        SyntheticRow(expected_next_action_class="runtime_verify_work"),
+        SyntheticOutcome(
+            finding_id="phase_scoped",
+            result_class="ready_for_runtime_verification",
+            next_action_class="runtime_verify_work",
+            evidence_classes=("workflow_stage_manifest",),
+            commands=(_runtime_command("verify-work", "02"),),
+        ),
+        event=trace,
+    )
+    merged = merge_behavior_scores(score, score)
+
+    _assert_metric_counts(
+        score,
+        {
+            "physics_progress_count": 2,
+            "schema_surface_count": 1,
+            "conversation_turn_count": 3,
+        },
+    )
+    _assert_metric_classes(
+        score,
+        {
+            "first_useful_action_class": "immediate_command",
+            "physics_to_schema_ratio_class": "progress_dominant",
+        },
+    )
+    assert score.metric_count_maps["event_class_counts"]["phase_scoped"] == 1
+    assert score.metric_count_maps["event_class_counts"]["yaml_return_requested"] == 1
+    assert score.metric_count_maps["question_bucket_counts"] == {}
+    assert score.metric_classes["smoothness_class"] == "smooth"
+    assert merged.metric_counts["physics_progress_count"] == 4
+    assert merged.metric_count_maps["event_class_counts"]["phase_scoped"] == 2
+
+
+def test_fake_persona_trace_question_buckets_remain_class_only() -> None:
+    trace = FakePersonaTrace(
+        row_id="SYN_TRACE_QUESTION",
+        persona_class="user_steering",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="alignment_check",
+                action_class="ask_user",
+                question_bucket_class="ask_user_alignment",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="alignment_check",
+                action_class="ask_user",
+                question_bucket_class="ask_user_alignment",
+            ),
+        ),
+    )
+
+    score = score_behavior_metrics(
+        SyntheticRow(surface="user_steering", expected_next_action_class="gpd_execute_phase"),
+        SyntheticOutcome(
+            finding_id="alignment_answer_required",
+            result_class="blocked_before_execution",
+            failure_classes=("alignment_answer_required", "ask_user_answer_missing"),
+            next_action_class="gpd_execute_phase",
+        ),
+        event=trace,
+    )
+
+    assert score.metric_count_maps["question_bucket_counts"] == {"ask_user_alignment": 2}
+    _assert_metric_counts(score, {"duplicate_question_bucket_count": 1, "question_before_action_count": 1})
+    _assert_metric_classes(score, {"first_useful_action_class": "missing", "smoothness_class": "clunky"})
+
+
+def test_fake_persona_trace_stop_integrity_scores_clean_and_post_stop_activity() -> None:
+    clean_stop = FakePersonaTrace(
+        row_id="SYN_TRACE_STOP",
+        persona_class="user_steering",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="abort_acknowledged",
+                action_class="stop",
+                stop_class="user_abort_stops_dispatch",
+            ),
+        ),
+    )
+    post_stop = FakePersonaTrace(
+        row_id="SYN_TRACE_STOP_BAD",
+        persona_class="user_steering",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="abort_acknowledged",
+                action_class="stop",
+                stop_class="user_abort_stops_dispatch",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="kept_working",
+                action_class="runtime_command",
+                physics_progress_class="phase_scoped",
+            ),
+        ),
+    )
+    outcome = SyntheticOutcome(
+        finding_id="user_abort_stops_dispatch",
+        result_class="stopped_before_dispatch",
+        failure_classes=("user_abort_stops_dispatch", "executor_dispatch_blocked"),
+        next_action_class="stop",
+    )
+
+    clean_score = score_behavior_metrics(SyntheticRow(surface="user_steering"), outcome, event=clean_stop)
+    post_stop_score = score_behavior_metrics(SyntheticRow(surface="user_steering"), outcome, event=post_stop)
+
+    _assert_metric_counts(clean_score, {"post_stop_activity_count": 0})
+    _assert_metric_classes(
+        clean_score,
+        {"stop_integrity_class": "stopped_cleanly", "first_useful_action_class": "safe_stop"},
+    )
+    _assert_metric_counts(post_stop_score, {"post_stop_activity_count": 1})
+    _assert_metric_classes(
+        post_stop_score,
+        {"stop_integrity_class": "post_stop_activity", "smoothness_class": "regressed"},
+    )
+
+
+def test_fake_persona_trace_scores_reload_hydration_and_handle_first_behavior() -> None:
+    base_row = SyntheticRow(expected_next_action_class="runtime_verify_work")
+    base_outcome = SyntheticOutcome(
+        finding_id="workflow_stage_manifest",
+        result_class="ready_for_runtime_verification",
+        next_action_class="runtime_verify_work",
+        evidence_classes=("workflow_stage_manifest",),
+        commands=(_runtime_command("verify-work", "02"),),
+    )
+    raw_reload_trace = FakePersonaTrace(
+        row_id="SYN_TRACE_RAW_RELOAD",
+        persona_class="planner",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="reload_guidance",
+                action_class="next_up_command",
+                reload_surface_class="raw_reload_instruction_visible",
+            ),
+        ),
+    )
+    content_first_trace = FakePersonaTrace(
+        row_id="SYN_TRACE_CONTENT_FIRST",
+        persona_class="planner",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="reference_review",
+                action_class="concrete_command",
+                physics_progress_class="artifact_verified",
+                content_hydration_class="content_loaded",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="reference_choice",
+                action_class="select_reference",
+                artifact_handle_class="handle_selected",
+            ),
+        ),
+    )
+    handle_first_trace = FakePersonaTrace(
+        row_id="SYN_TRACE_HANDLE_FIRST",
+        persona_class="planner",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="reference_choice",
+                action_class="select_reference",
+                artifact_handle_class="handle_selected",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="reference_review",
+                action_class="concrete_command",
+                physics_progress_class="artifact_verified",
+                content_hydration_class="content_loaded",
+            ),
+        ),
+    )
+
+    raw_reload_score = score_behavior_metrics(base_row, base_outcome, event=raw_reload_trace)
+    content_first_score = score_behavior_metrics(base_row, base_outcome, event=content_first_trace)
+    handle_first_score = score_behavior_metrics(base_row, base_outcome, event=handle_first_trace)
+
+    _assert_metric_counts(raw_reload_score, {"raw_reload_leakage_count": 1})
+    _assert_metric_classes(raw_reload_score, {"smoothness_class": "regressed"})
+    _assert_metric_counts(content_first_score, {"content_hydration_before_selection_count": 1})
+    _assert_metric_classes(
+        content_first_score,
+        {"artifact_handle_first_class": "content_before_handle", "smoothness_class": "clunky"},
+    )
+    _assert_metric_counts(handle_first_score, {"content_hydration_before_selection_count": 0})
+    _assert_metric_classes(handle_first_score, {"artifact_handle_first_class": "handle_before_content"})
+
+
+def test_fake_persona_turn_rejects_raw_text_and_paths() -> None:
+    with pytest.raises(ValueError):
+        FakePersonaTurn(
+            turn_index=0,
+            speaker_class="assistant",
+            intent_class="bad token",
+            action_class="runtime_command",
+        )
+    with pytest.raises(ValueError):
+        FakePersonaTrace(
+            row_id="tmp/not-class-token.txt",
+            persona_class="planner",
+            prompt_variant_class="provider_free_canary",
+            turns=(),
+        )

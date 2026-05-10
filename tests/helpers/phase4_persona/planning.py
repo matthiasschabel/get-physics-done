@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from gpd.core.errors import ValidationError
 from gpd.core.state import default_state_dict, save_state_json, state_set_project_contract
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.helpers.git import git_add, git_commit, init_test_git_repo, run_git, seed_test_git_repo
+from tests.helpers.phase4_persona.interaction_events import FakePersonaTurn
 from tests.helpers.phase4_persona.matrix import (
     PHASE4_PERSONA_SCHEMA_VERSION,
     PersonaMatrixRow,
@@ -35,6 +37,27 @@ PLANNING_TEST_OWNERS = (
     "tests/helpers/phase4_persona/planning.py",
     "tests/core/test_phase4_persona_planning_replay.py",
 )
+
+PlanningReplayTurn = FakePersonaTurn
+
+
+@dataclass(frozen=True)
+class PlanningReplayTrace:
+    row_id: str
+    persona_class: str
+    prompt_variant_class: str
+    turns: tuple[PlanningReplayTurn, ...]
+    behavior_bucket_class: str
+    gate_class: str
+    user_answer_class: str = "not_applicable"
+    event_class_counts: dict[str, int] | None = None
+    question_bucket_classes: tuple[str, ...] = ()
+    physics_progress_count: int = 0
+    schema_surface_count: int = 0
+    first_useful_action_class: str = "missing"
+    stop_integrity_class: str = "not_applicable"
+    physics_to_schema_ratio_class: str = "no_progress"
+    artifact_handle_first_class: str = "not_applicable"
 
 
 @dataclass(frozen=True)
@@ -116,6 +139,173 @@ def load_planning_replay_rows() -> tuple[PlanningReplayRow, ...]:
 
     canonical_rows = _canonical_rows_by_exact_contract()
     return tuple(_with_canonical_metadata(row, canonical_rows) for row in PLANNING_REPLAY_ROWS)
+
+
+def planning_trace_for_row(row: PlanningReplayRow) -> PlanningReplayTrace:
+    match row.scenario:
+        case "plan_phase_bootstrap_lazy_loading":
+            return _planning_trace(
+                row,
+                behavior_bucket_class="lazy_loading_handle_first",
+                gate_class="phase_bootstrap_manifest",
+                first_useful_action_class="immediate_command",
+                physics_to_schema_ratio_class="progress_dominant",
+                artifact_handle_first_class="handle_before_content",
+                turns=(
+                    PlanningReplayTurn(
+                        1,
+                        "assistant",
+                        "plan_phase_bootstrap",
+                        "load_stage_handles",
+                        physics_progress_class="phase_scoped",
+                        artifact_handle_class="handle_before_content",
+                    ),
+                ),
+            )
+        case "missing_phase_no_target_invention":
+            return _planning_trace(
+                row,
+                behavior_bucket_class="missing_target_single_question",
+                gate_class="phase_target_gate",
+                user_answer_class="missing",
+                first_useful_action_class="immediate_command",
+                physics_to_schema_ratio_class="progress_dominant",
+                turns=(
+                    PlanningReplayTurn(
+                        1,
+                        "assistant",
+                        "missing_phase_target",
+                        "ask_for_target_phase",
+                        question_bucket_class="ask_user",
+                        physics_progress_class="target_gap_identified",
+                    ),
+                ),
+            )
+        case "project_contract_authority_block":
+            return _planning_trace(
+                row,
+                behavior_bucket_class="contract_authority_stop",
+                gate_class="project_contract_gate",
+                first_useful_action_class="safe_stop",
+                stop_integrity_class="stopped_cleanly",
+                physics_to_schema_ratio_class="balanced",
+                turns=(
+                    PlanningReplayTurn(
+                        1,
+                        "assistant",
+                        "contract_authority_check",
+                        "block_planning_until_contract",
+                        schema_surface_class="contract_gate_visible",
+                        physics_progress_class="contract_gap_identified",
+                        stop_class="stop",
+                    ),
+                ),
+            )
+        case "dirty_worktree_hard_stop":
+            return _planning_trace(
+                row,
+                behavior_bucket_class="dirty_worktree_safety_stop",
+                gate_class="dirty_worktree_gate",
+                first_useful_action_class="safe_stop",
+                stop_integrity_class="stopped_cleanly",
+                physics_to_schema_ratio_class="progress_dominant",
+                turns=(
+                    PlanningReplayTurn(
+                        1,
+                        "assistant",
+                        "dirty_worktree_detected",
+                        "stop_before_write_stage",
+                        physics_progress_class="safety_gap_identified",
+                        stop_class="stop",
+                    ),
+                ),
+            )
+        case "proof_bearing_checker_audit_visibility":
+            return _planning_trace(
+                row,
+                behavior_bucket_class="proof_audit_pressure",
+                gate_class="proof_checker_gate",
+                first_useful_action_class="immediate_command",
+                physics_to_schema_ratio_class="progress_dominant",
+                turns=(
+                    PlanningReplayTurn(
+                        1,
+                        "assistant",
+                        "proof_bearing_plan_detected",
+                        "require_checker_audit",
+                        schema_surface_class="proof_audit_gate_visible",
+                        physics_progress_class="proof_gap_identified",
+                    ),
+                    PlanningReplayTurn(
+                        2,
+                        "assistant",
+                        "proof_audit_route",
+                        "surface_checker_review",
+                        physics_progress_class="verification_gap_identified",
+                    ),
+                ),
+            )
+    raise AssertionError(f"unhandled planning replay trace scenario: {row.scenario}")
+
+
+def _planning_trace(
+    row: PlanningReplayRow,
+    *,
+    behavior_bucket_class: str,
+    gate_class: str,
+    turns: tuple[PlanningReplayTurn, ...],
+    user_answer_class: str = "not_applicable",
+    first_useful_action_class: str,
+    stop_integrity_class: str = "not_applicable",
+    physics_to_schema_ratio_class: str,
+    artifact_handle_first_class: str = "not_applicable",
+) -> PlanningReplayTrace:
+    counts = _event_counts(turns)
+    question_buckets = tuple(
+        turn.question_bucket_class for turn in turns if turn.question_bucket_class not in {"", "none"}
+    )
+    physics_progress_count = sum(
+        1 for turn in turns if turn.physics_progress_class not in {"", "none", "not_applicable"}
+    )
+    schema_surface_count = sum(1 for turn in turns if turn.schema_surface_class not in {"", "none"})
+    return PlanningReplayTrace(
+        row_id=row.row_id,
+        persona_class=row.persona_class,
+        prompt_variant_class=row.prompt_variant_class,
+        turns=turns,
+        behavior_bucket_class=behavior_bucket_class,
+        gate_class=gate_class,
+        user_answer_class=user_answer_class,
+        event_class_counts=dict(sorted(counts.items())),
+        question_bucket_classes=question_buckets,
+        physics_progress_count=physics_progress_count,
+        schema_surface_count=schema_surface_count,
+        first_useful_action_class=first_useful_action_class,
+        stop_integrity_class=stop_integrity_class,
+        physics_to_schema_ratio_class=physics_to_schema_ratio_class,
+        artifact_handle_first_class=artifact_handle_first_class,
+    )
+
+
+def _event_counts(turns: tuple[PlanningReplayTurn, ...]) -> Counter[str]:
+    counts: Counter[str] = Counter({"conversation_turn": len(turns)})
+    for turn in turns:
+        counts[f"speaker:{turn.speaker_class}"] += 1
+        counts[f"intent:{turn.intent_class}"] += 1
+        counts[f"action:{turn.action_class}"] += 1
+        if turn.question_bucket_class not in {"", "none"}:
+            counts[f"question_bucket:{turn.question_bucket_class}"] += 1
+        if turn.schema_surface_class not in {"", "none"}:
+            counts[f"schema_surface:{turn.schema_surface_class}"] += 1
+        if turn.physics_progress_class not in {"", "none", "not_applicable"}:
+            counts[f"physics_progress:{turn.physics_progress_class}"] += 1
+        if turn.stop_class not in {"", "not_applicable"}:
+            counts[f"stop:{turn.stop_class}"] += 1
+        if turn.reload_surface_class not in {"", "none"}:
+            counts[f"reload_surface:{turn.reload_surface_class}"] += 1
+        if turn.artifact_handle_class not in {"", "none", "not_applicable"}:
+            counts[f"artifact_handle:{turn.artifact_handle_class}"] += 1
+    return counts
 
 
 def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
@@ -341,9 +531,7 @@ def _score_project_contract_authority_block(root: Path) -> PlanningReplayOutcome
     assert gate["approval_blocked"] is True
     assert gate["authoritative"] is False
     assert validation["valid"] is False
-    assert bootstrap_text.index("project_contract_validation.valid") < bootstrap_text.index(
-        "LIFECYCLE_CONTRACT_GATE="
-    )
+    assert bootstrap_text.index("project_contract_validation.valid") < bootstrap_text.index("LIFECYCLE_CONTRACT_GATE=")
     assert bootstrap_text.index("project_contract_gate.authoritative") < bootstrap_text.index(
         "LIFECYCLE_CONTRACT_GATE="
     )
@@ -410,7 +598,9 @@ def _score_proof_bearing_checker_audit_visibility() -> PlanningReplayOutcome:
     assert "sibling `{plan_id}-PROOF-REDTEAM.md` review artifact" in checker
     assert "Anti-bypass language" in checker
     assert "If any plan is proof-bearing, do NOT waive this gate" in checker
-    assert "Proof-bearing plans keep proof artifacts and sibling `*-PROOF-REDTEAM.md` audits explicit" in planner_template
+    assert (
+        "Proof-bearing plans keep proof artifacts and sibling `*-PROOF-REDTEAM.md` audits explicit" in planner_template
+    )
     assert "Proof-bearing plans always require theorem text" in checker_prompt
     assert "proof audit path" in checker_prompt
 

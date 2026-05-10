@@ -60,3 +60,7 @@ step classes, redaction status class, finding classes, and event class counts.
 Do not include prompt text, final answer text, stdout/stderr, transcripts,
 argv/env values, auth paths, account data, absolute paths, hashes, or provider
 session identifiers.
+
+Policy tests validate this shape through `tests.helpers.persona_summary`, which
+also shares the class-only negative cases with the Phase 4 live-smoke summary
+tests. The helper is test-only; scripts and product code must not import it.

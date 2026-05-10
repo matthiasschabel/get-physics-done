@@ -12,17 +12,15 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 52_500, "chars": 2_260_000}
+PROMPT_TOTAL_BUDGET = {"lines": 52_500, "chars": 2_259_999}
 PROMPT_KIND_BUDGETS = {
     "command": {"lines": 22_700, "chars": 900_000},
-    "agent": {"lines": 10_200, "chars": 545_000},
+    "agent": {"lines": 10_200, "chars": 499_999},
     "workflow": {"lines": 19_700, "chars": 815_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_500, "chars": 171_390}
-# Phase 4 scaffolding guard. Aggregate prompt caps are intentionally not
-# ratcheted here because this worker measured no integrated prompt-size cut in
-# the current workspace; this only prevents moving more active content into first
-# turn.
+# Phase 4 scaffolding guard. Keep first-turn active content flat while Phase 6
+# ratchets the integrated agent aggregate separately.
 STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_500, "chars": 141_500}
 STAGE_SELECTED_INIT_FIELD_BUDGET = 2_937
 STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 58

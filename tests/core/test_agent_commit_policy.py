@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from gpd import registry
+from gpd.adapters.install_utils import _inject_command_visibility_sections_from_frontmatter
 from gpd.core.model_visible_text import AGENT_FRONTMATTER_AUTHORITY_POINTER
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +70,31 @@ def test_agent_prompts_use_generated_agent_requirements_as_single_authority_surf
         assert f"artifact_write_authority: {agent.artifact_write_authority}" in agent.system_prompt, path.name
         assert f"shared_state_authority: {agent.shared_state_authority}" in agent.system_prompt, path.name
         assert not re.search(r"^Commit authority:", content, re.MULTILINE), path.name
+
+
+def test_agent_role_kit_install_projection_is_generated_once_after_requirements() -> None:
+    projected = _inject_command_visibility_sections_from_frontmatter(
+        "---\n"
+        "name: role-kit-agent\n"
+        "tools: file_read\n"
+        "role_kits:\n"
+        "  - status-routing\n"
+        "---\n"
+        "## Agent Requirements\n\n"
+        "stale generated requirements\n\n"
+        "## Agent Role Kits\n\n"
+        "stale generated role kits\n\n"
+        "## Existing Body\n\n"
+        "Body.\n"
+    )
+
+    assert projected.count("## Agent Requirements") == 1
+    assert projected.count("## Agent Role Kits") == 1
+    assert "stale generated requirements" not in projected
+    assert "stale generated role kits" not in projected
+    assert projected.index("## Agent Requirements") < projected.index("## Agent Role Kits")
+    assert projected.index("## Agent Role Kits") < projected.index("## Existing Body")
+    assert "Body." in projected
 
 
 def test_agents_do_not_duplicate_stale_commit_ownership_blocks() -> None:

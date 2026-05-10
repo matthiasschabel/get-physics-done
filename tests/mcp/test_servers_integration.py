@@ -224,7 +224,11 @@ class TestStateServerIntegration:
     def test_get_state_surfaces_canonical_project_contract_metadata(self, tmp_path: Path) -> None:
         from gpd.mcp.servers.state_server import get_state
 
-        contract = json.loads((Path(__file__).resolve().parents[1] / "fixtures" / "stage0" / "project_contract.json").read_text(encoding="utf-8"))
+        contract = json.loads(
+            (Path(__file__).resolve().parents[1] / "fixtures" / "stage0" / "project_contract.json").read_text(
+                encoding="utf-8"
+            )
+        )
         project_root = _write_state_with_project_contract(tmp_path, contract)
 
         result = get_state(str(project_root))
@@ -547,8 +551,7 @@ class TestSkillsServerIntegration:
         ]
         assert result["review_contract"]["conditional_requirements"][0]["when"] == "project-backed manuscript review"
         assert any(
-            variant["scope"] == "explicit_artifact"
-            for variant in result["review_contract"].get("scope_variants", [])
+            variant["scope"] == "explicit_artifact" for variant in result["review_contract"].get("scope_variants", [])
         )
         assert result["review_contract"]["conditional_requirements"] == [
             {
@@ -602,7 +605,7 @@ class TestSkillsServerIntegration:
                 "preflight_checks": [],
                 "blocking_preflight_checks": [],
                 "stage_artifacts": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-            }
+            },
         ]
         assert result["context_mode"] == "project-aware"
         assert result["project_reentry_capable"] is False
@@ -680,9 +683,12 @@ class TestSkillsServerIntegration:
         assert "literature-review" in reviewer["content"]
 
     def test_get_skill_project_researcher_surfaces_one_shot_handoff_contract(self):
+        from gpd import registry
+        from gpd.core.agent_role_kits import role_kit_authority_paths
         from gpd.mcp.servers.skills_server import get_skill
 
         result = get_skill("gpd-project-researcher")
+        agent = registry.get_agent("gpd-project-researcher")
 
         assert "error" not in result
         assert result["name"] == "gpd-project-researcher"
@@ -692,6 +698,8 @@ class TestSkillsServerIntegration:
         assert result["structured_metadata_authority"]["content"] == "canonical"
         assert result["structured_metadata_authority"]["allowed_tools"] == "mirrored"
         assert result["structured_metadata_authority"]["agent_policy"] == "mirrored"
+        assert result["agent_policy"]["role_kits"] == list(agent.role_kits)
+        assert result["agent_policy"]["role_kit_authorities"] == list(role_kit_authority_paths(agent.role_kits))
         assert "Checkpoint after the initial survey with scope confirmation." in result["content"]
         assert "gpd_return:" in result["content"]
         assert "status: completed" in result["content"]
@@ -725,15 +733,17 @@ class TestSkillsServerIntegration:
             "allowed_tools": "mirrored",
             "agent_policy": "mirrored",
         }
-        assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer["content"]
-        assert "put it in `files_written` when this run creates or updates it" in synthesizer["content"]
+        assert "`files-written-freshness`" in synthesizer["content"]
+        assert "Use the role-kit return envelope." in synthesizer["content"]
         assert (
-            "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields"
+            "record `GPD/literature/SUMMARY.md` as the sole written artifact when this run creates or updates it"
             in synthesizer["content"]
         )
         assert "gpd_return:" in synthesizer["content"]
 
-        expected_project_spawn_contracts = [dict(contract) for contract in registry.get_command("gpd:new-project").spawn_contracts]
+        expected_project_spawn_contracts = [
+            dict(contract) for contract in registry.get_command("gpd:new-project").spawn_contracts
+        ]
         expected_project_interactive_spawn_contracts = [
             dict(contract) for contract in registry.get_command("gpd:new-project").interactive_spawn_contracts
         ]

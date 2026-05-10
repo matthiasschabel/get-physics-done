@@ -258,7 +258,11 @@ def test_new_project_workflow_keeps_contract_preservation_rules_single_sourced()
         assert fragment in scope_intake
     assert _has_line_with(scope_approval, "approval", "contract", "schema")
     assert not _has_line_with(scope_intake + scope_approval, "preserve any init-surfaced", "fresh work", "continuation")
-    for fragment in ("`schema_version` must be the integer `1`", "`references[]`", "`must_surface` is a boolean scalar"):
+    for fragment in (
+        "`schema_version` must be the integer `1`",
+        "`references[]`",
+        "`must_surface` is a boolean scalar",
+    ):
         assert fragment in contract_schema
     for fragment in ("`context_intake`", "`uncertainty_markers`", "`project_contract`"):
         assert fragment in scope_approval
@@ -429,7 +433,8 @@ def test_experiment_designer_uses_external_ising_example_as_single_source() -> N
     )
 
     assert "## Worked Example: 2D Ising Model Phase Diagram via Monte Carlo" not in designer
-    assert designer.count("@{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md") == 1
+    assert "@{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md" not in designer
+    assert "{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md" in designer
     assert "This gives 15 critical-region temperatures" in example
     assert "This gives 14 temperatures" not in example
 

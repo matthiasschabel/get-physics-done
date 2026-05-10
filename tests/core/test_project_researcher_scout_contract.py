@@ -42,9 +42,12 @@ def _artifact_paths(gate: ChildGateTuple) -> tuple[str, ...]:
 def test_project_researcher_uses_staged_mode_and_one_shot_checkpoint_language() -> None:
     source = _read_agent("gpd-project-researcher.md")
 
-    assert "one-shot handoff and fresh-continuation semantics" in source
+    assert "role_kits:" in source
+    assert "  - fresh-continuation" in source
     assert "return the typed checkpoint and stop" in source
     assert "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in source
+    assert "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" not in source
+    assert "@{GPD_INSTALL_DIR}/references/research/researcher-shared.md" not in source
     assert "Do not wait inside the same spawned run." not in source
     assert "Do not query config or reread init JSON inside this agent." in source
     assert "Write only the assigned `write_scope.allowed_paths`" in source

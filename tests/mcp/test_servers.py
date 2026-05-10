@@ -298,8 +298,7 @@ class TestBuiltinServerDescriptors:
         assert python_module["command"] == "${GPD_PYTHON}"
         assert isinstance(python_module["command"], str)
         assert (
-            python_module["notes"]
-            == "Replace `${GPD_PYTHON}` with a Python >=3.11 interpreter that has GPD installed."
+            python_module["notes"] == "Replace `${GPD_PYTHON}` with a Python >=3.11 interpreter that has GPD installed."
         )
 
     def test_state_public_descriptor_lists_only_live_tools(self):
@@ -379,11 +378,7 @@ class TestBuiltinServerDescriptors:
             result = await mcp.call_tool(str(health_check["tool"]), dict(health_check["input"]))
             if isinstance(result, dict):
                 return result
-            if (
-                isinstance(result, tuple)
-                and len(result) == 2
-                and isinstance(result[1], dict)
-            ):
+            if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
                 return result[1]
             if (
                 isinstance(result, list)
@@ -501,6 +496,7 @@ class TestMcpServerRunner:
 
         assert mcp.settings.port == 0
         assert calls == ["sse"]
+
 
 # ---------------------------------------------------------------------------
 # 1. Conventions server
@@ -780,7 +776,6 @@ class TestConventionsServer:
         assert "error" in result
         assert "Custom convention keys" in result["error"]
 
-
     def test_load_lock_non_dict_state_json_fails_closed(self, tmp_path):
         """If state exists but is unrecoverable, the helper should fail closed."""
         from gpd.mcp.servers.conventions_server import _load_lock_from_project
@@ -945,6 +940,7 @@ class TestConventionsServer:
 
         result = convention_lock_status(str(tmp_path))
         assert "error" in result
+
 
 # ---------------------------------------------------------------------------
 # 2. Errors MCP server
@@ -1321,7 +1317,7 @@ class TestSkillsServer:
             "name: gpd:execute-phase\n"
             "description: Execute all plans in a phase.\n"
             "requires:\n"
-            "  files: [\"GPD/ROADMAP.md\"]\n"
+            '  files: ["GPD/ROADMAP.md"]\n'
             "---\n"
             "\n"
             "Canonical execute command.\n",
@@ -1367,7 +1363,7 @@ class TestSkillsServer:
             "description: Conduct standalone peer review.\n"
             "context_mode: project-required\n"
             "requires:\n"
-            "  files: [\"paper/*.tex\", \"paper/*.md\", \"manuscript/*.tex\", \"manuscript/*.md\", \"draft/*.tex\", \"draft/*.md\"]\n"
+            '  files: ["paper/*.tex", "paper/*.md", "manuscript/*.tex", "manuscript/*.md", "draft/*.tex", "draft/*.md"]\n'
             "review-contract:\n"
             "  review_mode: publication\n"
             "  schema_version: 1\n"
@@ -1390,12 +1386,7 @@ class TestSkillsServer:
             encoding="utf-8",
         )
         (agents_dir / "gpd-debugger.md").write_text(
-            "---\n"
-            "name: gpd-debugger\n"
-            "description: Canonical debugger agent.\n"
-            "---\n"
-            "\n"
-            "Primary debugger agent.\n",
+            "---\nname: gpd-debugger\ndescription: Canonical debugger agent.\n---\n\nPrimary debugger agent.\n",
             encoding="utf-8",
         )
         (agents_dir / "gpd-check-proof.md").write_text(
@@ -1529,7 +1520,9 @@ class TestSkillsServer:
         monkeypatch.setattr(
             content_registry,
             "resolve_workflow_stage_manifest_path",
-            lambda workflow_id: manifest_path if workflow_id == "plan-phase" else original_resolve_manifest_path(workflow_id),
+            lambda workflow_id: (
+                manifest_path if workflow_id == "plan-phase" else original_resolve_manifest_path(workflow_id)
+            ),
         )
         content_registry.invalidate_cache()
 
@@ -1541,7 +1534,9 @@ class TestSkillsServer:
         assert result["staged_loading"]["workflow_id"] == "plan-phase"
         assert result["staged_loading"]["stages"][0]["id"] == "phase_bootstrap"
 
-    def test_get_skill_surfaces_plan_phase_staged_loading_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_get_skill_surfaces_plan_phase_staged_loading_sidecar(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         from gpd import registry as content_registry
         from gpd.mcp.servers.skills_server import get_skill
 
@@ -1591,7 +1586,9 @@ class TestSkillsServer:
         monkeypatch.setattr(
             content_registry,
             "resolve_workflow_stage_manifest_path",
-            lambda workflow_id: manifest_path if workflow_id == "plan-phase" else original_resolve_manifest_path(workflow_id),
+            lambda workflow_id: (
+                manifest_path if workflow_id == "plan-phase" else original_resolve_manifest_path(workflow_id)
+            ),
         )
         content_registry.invalidate_cache()
 
@@ -1602,7 +1599,9 @@ class TestSkillsServer:
         assert result["staged_loading"]["stages"][0]["loaded_authorities"] == ["workflows/plan-phase.md"]
         assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"
 
-    def test_get_skill_surfaces_execute_phase_staged_loading_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_get_skill_surfaces_execute_phase_staged_loading_sidecar(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         from gpd import registry as content_registry
         from gpd.mcp.servers.skills_server import get_skill
 
@@ -1652,7 +1651,9 @@ class TestSkillsServer:
         monkeypatch.setattr(
             content_registry,
             "resolve_workflow_stage_manifest_path",
-            lambda workflow_id: manifest_path if workflow_id == "execute-phase" else original_resolve_manifest_path(workflow_id),
+            lambda workflow_id: (
+                manifest_path if workflow_id == "execute-phase" else original_resolve_manifest_path(workflow_id)
+            ),
         )
         content_registry.invalidate_cache()
 
@@ -1713,7 +1714,9 @@ class TestSkillsServer:
         monkeypatch.setattr(
             content_registry,
             "resolve_workflow_stage_manifest_path",
-            lambda workflow_id: manifest_path if workflow_id == "plan-phase" else original_resolve_manifest_path(workflow_id),
+            lambda workflow_id: (
+                manifest_path if workflow_id == "plan-phase" else original_resolve_manifest_path(workflow_id)
+            ),
         )
         content_registry.invalidate_cache()
 
@@ -1725,6 +1728,7 @@ class TestSkillsServer:
 
     def test_get_skill_consistency_checker_surfaces_agent_metadata(self):
         from gpd import registry as content_registry
+        from gpd.core.agent_role_kits import role_kit_authority_paths
         from gpd.mcp.servers.skills_server import get_skill
 
         repo_root = Path(__file__).resolve().parents[2]
@@ -1733,6 +1737,7 @@ class TestSkillsServer:
             patch("gpd.registry.AGENTS_DIR", repo_root / "src" / "gpd" / "agents"),
         ):
             content_registry.invalidate_cache()
+            agent = content_registry.get_agent("gpd-consistency-checker")
             result = get_skill("gpd-consistency-checker")
             content_registry.invalidate_cache()
 
@@ -1749,6 +1754,8 @@ class TestSkillsServer:
             "role_family": "verification",
             "artifact_write_authority": "scoped_write",
             "shared_state_authority": "return_only",
+            "role_kits": list(agent.role_kits),
+            "role_kit_authorities": list(role_kit_authority_paths(agent.role_kits)),
             "tools": ["file_read", "file_write", "shell", "search_files", "find_files"],
         }
         assert result["structured_metadata_authority"] == {
@@ -1819,6 +1826,38 @@ class TestSkillsServer:
         assert "review-contract:" not in result["content"]
         assert all(not entry["path"].startswith("/") for entry in result["schema_documents"])
         assert all(not entry["path"].startswith("/") for entry in result["contract_documents"])
+
+    def test_get_skill_agent_policy_exposes_role_kit_metadata(self, tmp_path: Path):
+        from gpd import registry as content_registry
+        from gpd.mcp.servers.skills_server import get_skill
+
+        agent_path = tmp_path / "agents" / "gpd-role-kit-agent.md"
+        agent_path.write_text(
+            "---\n"
+            "name: gpd-role-kit-agent\n"
+            "description: Role kit metadata fixture.\n"
+            "tools: file_read\n"
+            "role_kits:\n"
+            "  - status-routing\n"
+            "  - fresh-continuation\n"
+            "---\n"
+            "Fixture body.\n",
+            encoding="utf-8",
+        )
+        content_registry.invalidate_cache()
+
+        result = get_skill("gpd-role-kit-agent")
+        direct_paths = {entry["path"] for entry in result["referenced_files"]}
+
+        assert "error" not in result
+        assert result["agent_policy"]["role_kits"] == ["status-routing", "fresh-continuation"]
+        assert result["agent_policy"]["role_kit_authorities"] == [
+            "{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md",
+            "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md",
+        ]
+        assert "## Agent Role Kits" in result["content"]
+        assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" in direct_paths
+        assert "@{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in direct_paths
 
     def test_get_skill_surfaces_direct_plan_checker_schema_reference(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1987,7 +2026,9 @@ class TestSkillsServer:
         ]
         assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"
 
-    def test_get_skill_new_milestone_surfaces_staged_loading_sidecar(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_get_skill_new_milestone_surfaces_staged_loading_sidecar(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
         from gpd import registry
         from gpd.mcp.servers.skills_server import get_skill
 
@@ -2023,9 +2064,9 @@ class TestSkillsServer:
         monkeypatch.setattr(
             registry,
             "resolve_workflow_stage_manifest_path",
-            lambda workflow_id: manifest_path
-            if workflow_id == "new-milestone"
-            else original_resolve_manifest_path(workflow_id),
+            lambda workflow_id: (
+                manifest_path if workflow_id == "new-milestone" else original_resolve_manifest_path(workflow_id)
+            ),
         )
         repo_root = Path(__file__).resolve().parents[2]
         with (
@@ -2057,6 +2098,7 @@ class TestSkillsServer:
 
     def test_get_skill_agent_uses_primary_agent_content(self):
         from gpd import registry
+        from gpd.core.agent_role_kits import role_kit_authority_paths
         from gpd.mcp.servers.skills_server import get_skill
 
         result = get_skill("gpd-debugger")
@@ -2082,9 +2124,10 @@ class TestSkillsServer:
             "role_family": agent.role_family,
             "artifact_write_authority": agent.artifact_write_authority,
             "shared_state_authority": agent.shared_state_authority,
+            "role_kits": list(agent.role_kits),
+            "role_kit_authorities": list(role_kit_authority_paths(agent.role_kits)),
             "tools": agent.tools,
         }
-
 
     def test_get_skill_debug_command_surfaces_debugger_seam_and_has_no_direct_schema_dependencies(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2116,7 +2159,6 @@ class TestSkillsServer:
         assert result["contract_documents"] == []
         assert "gpd-debugger" in result["content"]
         assert 'subagent_type="gpd-debugger"' in result["content"]
-
 
     def test_get_skill_executor_agent_defers_completion_only_materials_until_summary_creation(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2189,9 +2231,10 @@ class TestSkillsServer:
         assert result["schema_documents"] == []
         assert result["contract_documents"] == []
         assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
-        assert "schema_documents and contract_documents mirror loaded schema and contract markdown bodies." not in result[
-            "loading_hint"
-        ]
+        assert (
+            "schema_documents and contract_documents mirror loaded schema and contract markdown bodies."
+            not in result["loading_hint"]
+        )
 
     def test_get_skill_canonicalizes_runtime_command_examples(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -3299,7 +3342,10 @@ class TestVerificationServer:
 
         assert result["status"] == "insufficient_evidence"
         assert "metadata.source_reference_id" in result["missing_inputs"]
-        assert any("binding contexts disagree on benchmark reference candidates" in issue for issue in result["automated_issues"])
+        assert any(
+            "binding contexts disagree on benchmark reference candidates" in issue
+            for issue in result["automated_issues"]
+        )
 
     def test_run_contract_check_rejects_explicit_benchmark_anchor_against_single_contract_default_without_binding(self):
         from gpd.mcp.servers.verification_server import run_contract_check
@@ -3388,7 +3434,9 @@ class TestVerificationServer:
 
         assert result["status"] == "insufficient_evidence"
         assert "metadata.regime_label" in result["missing_inputs"]
-        assert any("binding contexts disagree on limit regime candidates" in issue for issue in result["automated_issues"])
+        assert any(
+            "binding contexts disagree on limit regime candidates" in issue for issue in result["automated_issues"]
+        )
 
     def test_run_contract_check_rejects_explicit_regime_label_against_single_contract_default_without_binding(self):
         from gpd.mcp.servers.verification_server import run_contract_check
@@ -3603,7 +3651,9 @@ class TestVerificationServer:
 
         assert "contract.benchmark_reproduction" in suggested
         assert "contract.direct_proxy_consistency" in suggested
-        benchmark = next(entry for entry in result["suggested_checks"] if entry["check_key"] == "contract.benchmark_reproduction")
+        benchmark = next(
+            entry for entry in result["suggested_checks"] if entry["check_key"] == "contract.benchmark_reproduction"
+        )
         assert benchmark["check"] == benchmark["check_key"]
         assert benchmark["binding_targets"] == ["claim", "deliverable", "acceptance_test", "reference"]
         assert benchmark["required_request_fields"] == [
@@ -3624,7 +3674,9 @@ class TestVerificationServer:
         assert "contract.proof_parameter_coverage" in suggested
         assert "contract.claim_to_proof_alignment" in suggested
         assert "contract.counterexample_search" in suggested
-        parameter = next(entry for entry in result["suggested_checks"] if entry["check_key"] == "contract.proof_parameter_coverage")
+        parameter = next(
+            entry for entry in result["suggested_checks"] if entry["check_key"] == "contract.proof_parameter_coverage"
+        )
         assert parameter["check"] == parameter["check_key"]
         assert parameter["binding_targets"] == ["observable", "claim", "deliverable", "acceptance_test"]
         assert parameter["request_template"]["binding"]["claim_ids"] == ["claim-theorem"]
@@ -3641,11 +3693,15 @@ class TestVerificationServer:
         contract = json.loads(fixture.read_text(encoding="utf-8"))
 
         first = suggest_contract_checks(contract)
-        benchmark = next(entry for entry in first["suggested_checks"] if entry["check_key"] == "contract.benchmark_reproduction")
+        benchmark = next(
+            entry for entry in first["suggested_checks"] if entry["check_key"] == "contract.benchmark_reproduction"
+        )
         benchmark["request_template"]["metadata"]["source_reference_id"] = "poisoned"
 
         second = suggest_contract_checks(contract)
-        fresh = next(entry for entry in second["suggested_checks"] if entry["check_key"] == "contract.benchmark_reproduction")
+        fresh = next(
+            entry for entry in second["suggested_checks"] if entry["check_key"] == "contract.benchmark_reproduction"
+        )
 
         assert fresh["request_template"]["metadata"]["source_reference_id"] == "ref-benchmark"
 
@@ -3683,7 +3739,9 @@ class TestVerificationServer:
         assert result["universal_check_count"] == 24
         assert result["universal_checks"][0]["check_id"] == "5.1"
         assert "evidence_kind" in result["universal_checks"][0]
-        contract_check = next(entry for entry in result["universal_checks"] if entry["check_key"] == "contract.limit_recovery")
+        contract_check = next(
+            entry for entry in result["universal_checks"] if entry["check_key"] == "contract.limit_recovery"
+        )
         assert contract_check["required_request_fields"] == ["metadata.regime_label", "metadata.expected_behavior"]
         assert contract_check["request_template"]["metadata"]["regime_label"] is None
         assert contract_check["request_template"]["metadata"]["expected_behavior"] is None
@@ -3842,7 +3900,6 @@ class TestVerificationServer:
         assert result["coverage_percent"] == 100.0
         assert result["recommendation"] == "Full coverage"
 
-
     # --- _parse_dimensions helper ---
 
     def test_parse_dimensions(self):
@@ -3976,7 +4033,9 @@ Not a checkpoint.
         assert domains["general-relativity"] == "gr_cosmology"
         assert domains["reproducibility"] == "general"
 
-    def test_protocol_store_rejects_missing_domain_metadata(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_protocol_store_rejects_missing_domain_metadata(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from gpd.mcp.servers.protocols_server import ProtocolStore
 
         protocols_dir = tmp_path / "protocols"

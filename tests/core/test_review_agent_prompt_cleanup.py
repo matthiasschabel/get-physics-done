@@ -40,7 +40,7 @@ def test_project_researcher_uses_presentation_only_heading_mapping_and_base_fiel
     assert "files_written:\n    - GPD/literature/SUMMARY.md" in source
     assert "confidence: HIGH" in source
     assert "Mapping: RESEARCH COMPLETE → completed, RESEARCH BLOCKED → blocked" not in source
-    assert "Headings above are presentation only; route on gpd_return.status." in source
+    assert "Route on `gpd_return.status` per the status-routing role kit." in source
 
     next_actions_idx = source.index("  next_actions:")
     confidence_idx = source.index("  confidence: HIGH")

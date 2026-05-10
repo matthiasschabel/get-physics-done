@@ -9,6 +9,7 @@ import pytest
 
 from gpd import cli as cli_module
 from gpd import registry
+from gpd.core.agent_role_kits import render_agent_role_kits_section, role_kit_authority_paths
 from gpd.core.model_visible_text import (
     COMMAND_POLICY_PROMPT_WRAPPER_KEY,
     agent_visibility_note,
@@ -29,6 +30,7 @@ from gpd.registry import (
     _parse_tools,
     _RegistryCache,
     load_agents_from_dir,
+    render_agent_visibility_sections_from_frontmatter,
     render_command_visibility_sections_from_frontmatter,
 )
 from gpd.specs import SPECS_DIR as CANONICAL_SPECS_DIR
@@ -229,6 +231,64 @@ class TestParseAgentFile:
         assert agent.system_prompt.endswith("System prompt.")
         assert agent.source == "agents"
 
+    def test_agent_file_parses_role_kits_and_renders_section(self, tmp_path: Path) -> None:
+        f = tmp_path / "role-kit-agent.md"
+        f.write_text(
+            "---\n"
+            "name: role-kit-agent\n"
+            "tools: file_read\n"
+            "role_kits:\n"
+            "  - status-routing\n"
+            "  - fresh-continuation\n"
+            "---\n"
+            "System prompt.",
+            encoding="utf-8",
+        )
+
+        agent = _parse_agent_file(f, source="agents")
+        rendered_role_kits = render_agent_role_kits_section(agent.role_kits)
+
+        assert agent.role_kits == ("status-routing", "fresh-continuation")
+        assert agent.system_prompt.count("## Agent Requirements") == 1
+        assert agent.system_prompt.count("## Agent Role Kits") == 1
+        assert rendered_role_kits in agent.system_prompt
+        assert agent.system_prompt.index("## Agent Requirements") < agent.system_prompt.index("## Agent Role Kits")
+        assert agent.system_prompt.index("## Agent Role Kits") < agent.system_prompt.index(
+            "## Scientific Rigor Guardrails"
+        )
+        assert "{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" in role_kit_authority_paths(
+            agent.role_kits
+        )
+        assert agent.system_prompt.endswith("System prompt.")
+
+    def test_agent_file_rejects_unknown_role_kit(self, tmp_path: Path) -> None:
+        f = tmp_path / "bad-role-kit.md"
+        f.write_text("---\nname: bad\nrole_kits:\n  - missing-kit\n---\nPrompt.", encoding="utf-8")
+
+        with pytest.raises(ValueError, match="Unknown role_kit 'missing-kit' for bad"):
+            _parse_agent_file(f, source="agents")
+
+    def test_agent_file_rejects_duplicate_role_kits(self, tmp_path: Path) -> None:
+        f = tmp_path / "duplicate-role-kit.md"
+        f.write_text(
+            "---\nname: bad\nrole_kits: status-routing, status-routing\n---\nPrompt.",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(ValueError, match="role_kits for bad must not contain duplicate id 'status-routing'"):
+            _parse_agent_file(f, source="agents")
+
+    def test_render_agent_visibility_sections_from_frontmatter_includes_role_kits(self) -> None:
+        rendered = render_agent_visibility_sections_from_frontmatter(
+            "name: role-kit-agent\nrole_kits:\n  - status-routing\n",
+            agent_name="role-kit-agent",
+        )
+
+        assert rendered.count("## Agent Requirements") == 1
+        assert rendered.count("## Agent Role Kits") == 1
+        assert rendered.index("## Agent Requirements") < rendered.index("## Agent Role Kits")
+        assert "Route lifecycle state from `gpd_return.status`" in rendered
+
     def test_agent_file_no_frontmatter_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "bare-agent.md"
         f.write_text("Just a body, no frontmatter.", encoding="utf-8")
@@ -248,6 +308,7 @@ class TestParseAgentFile:
         assert agent.role_family == "analysis"
         assert agent.artifact_write_authority == "scoped_write"
         assert agent.shared_state_authority == "return_only"
+        assert agent.role_kits == ()
         assert agent.color == ""
         assert agent.source == "agents"
         assert agent.system_prompt.startswith("## Agent Requirements\n")
@@ -2994,10 +3055,10 @@ class TestPublicAPI:
 
         assert synthesizer.source_kind == "agent"
         assert synthesizer.path.endswith("gpd-research-synthesizer.md")
-        assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer.content
-        assert "put it in `files_written` when this run creates or updates it" in synthesizer.content
+        assert "`files-written-freshness`" in synthesizer.content
+        assert "Use the role-kit return envelope." in synthesizer.content
         assert (
-            "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields"
+            "record `GPD/literature/SUMMARY.md` as the sole written artifact when this run creates or updates it"
             in synthesizer.content
         )
         assert "gpd_return:" in synthesizer.content

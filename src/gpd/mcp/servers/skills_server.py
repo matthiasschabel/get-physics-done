@@ -29,6 +29,7 @@ from gpd.command_labels import (
     runtime_command_prefixes,
     runtime_command_surface_is_path_like_context,
 )
+from gpd.core.agent_role_kits import role_kit_authority_paths
 from gpd.core.errors import GPDError
 from gpd.core.observability import gpd_span
 from gpd.core.review_contract_prompt import review_contract_payload
@@ -319,6 +320,8 @@ def _agent_policy_payload(agent: content_registry.AgentDef) -> dict[str, object]
         "role_family": agent.role_family,
         "artifact_write_authority": agent.artifact_write_authority,
         "shared_state_authority": agent.shared_state_authority,
+        "role_kits": list(agent.role_kits),
+        "role_kit_authorities": list(role_kit_authority_paths(agent.role_kits)),
         "tools": list(agent.tools),
     }
 
@@ -601,13 +604,13 @@ def _extract_referenced_files(
                 _record(direct_references, direct_seen, path=path, raw_path=raw_path, depth=None)
             else:
                 _record(transitive_references, transitive_seen, path=path, raw_path=raw_path, depth=depth)
-            if path in visited_docs:
-                continue
-            visited_docs.add(path)
             if referenced_path is None or referenced_path.suffix != ".md" or not referenced_path.exists():
                 continue
             if depth > 0 and not read_transitive_reference_bodies:
                 continue
+            if path in visited_docs:
+                continue
+            visited_docs.add(path)
             try:
                 nested = _portable_skill_content(referenced_path.read_text(encoding="utf-8"))
             except OSError:

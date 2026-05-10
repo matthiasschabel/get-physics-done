@@ -1204,7 +1204,7 @@ def _split_leading_model_visible_sections(body: str) -> tuple[str, str]:
 
     working = body.lstrip("\r\n")
     prefixes: list[str] = []
-    allowed_headings = ("Agent Requirements", "Command Requirements", "Review Contract")
+    allowed_headings = ("Agent Requirements", "Agent Role Kits", "Command Requirements", "Review Contract")
 
     while True:
         heading = next((candidate for candidate in allowed_headings if working.startswith(f"## {candidate}")), None)
@@ -1261,6 +1261,7 @@ def _inject_command_visibility_sections_from_frontmatter(content: str) -> str:
             r"^artifact_write_authority:\s*(?:.*)$",
             r"^shared_state_authority:\s*(?:.*)$",
             r"^commit_authority:\s*(?:.*)$",
+            r"^role_kits:\s*(?:.*)$",
         )
     )
     has_command_only_frontmatter = any(
@@ -1297,6 +1298,10 @@ def _inject_command_visibility_sections_from_frontmatter(content: str) -> str:
             heading="Command Requirements",
         )
     else:
+        body_without_constraints = _strip_top_level_markdown_section(
+            body_without_constraints,
+            heading="Agent Role Kits",
+        )
         body_without_constraints = _strip_top_level_markdown_section(
             body_without_constraints,
             heading="Agent Requirements",
@@ -1723,6 +1728,8 @@ def compile_markdown_for_runtime(
             install_scope=install_scope,
         )
 
+    content = _inject_command_visibility_sections_from_frontmatter(content)
+
     content = replace_placeholders(
         content,
         path_prefix,
@@ -1743,7 +1750,6 @@ def compile_markdown_for_runtime(
             explicit_target=explicit_target,
         )
 
-    content = _inject_command_visibility_sections_from_frontmatter(content)
     if inject_skeptical_rigor_guardrails:
         content = _inject_skeptical_rigor_guardrails_section(content)
     return content
@@ -2142,6 +2148,7 @@ def _copy_dir_contents(
             )
         elif entry.suffix == ".md":
             content = entry.read_text(encoding="utf-8")
+            content = _inject_command_visibility_sections_from_frontmatter(content)
             active_transform = markdown_transform or _default_markdown_transform(runtime)
             content = active_transform(content, path_prefix, install_scope=install_scope)
             if workflow_paths:
@@ -2152,7 +2159,6 @@ def _copy_dir_contents(
                     install_scope=install_scope,
                     explicit_target=explicit_target,
                 )
-            content = _inject_command_visibility_sections_from_frontmatter(content)
             if inject_skeptical_rigor_guardrails:
                 content = _inject_skeptical_rigor_guardrails_section(content)
             dest.write_text(content, encoding="utf-8")

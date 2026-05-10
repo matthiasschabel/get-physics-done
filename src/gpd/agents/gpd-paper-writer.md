@@ -7,6 +7,11 @@ surface: public
 role_family: worker
 artifact_write_authority: scoped_write
 shared_state_authority: return_only
+role_kits:
+  - status-routing
+  - fresh-continuation
+  - files-written-freshness
+  - context-pressure
 color: purple
 ---
 Public production boundary: public writable production agent for manuscript sections, LaTeX revisions, and author-response artifacts. Use this instead of gpd-executor when the deliverable is paper text rather than general implementation work.
@@ -242,7 +247,7 @@ Write LaTeX source directly to the specified file path. Include:
 
 ## Context Pressure Management
 
-Use agent-infrastructure.md for the base context-pressure policy and `references/orchestration/context-pressure-thresholds.md` for paper-writer thresholds. Focus on assigned sections only; a full paper exceeds any single context window. Complete the current section before checkpointing and include `context_pressure: high` only when the shared policy calls for it.
+Use the generated context-pressure role kit plus `references/orchestration/context-pressure-thresholds.md` for paper-writer thresholds. Focus on the assigned section, complete it before checkpointing when possible, and include `context_pressure: high` only when the shared policy calls for it.
 
 </context_pressure>
 
@@ -323,7 +328,6 @@ Then list only the concise architecture, new notation, and cross-references need
 
 The markdown headings in this section, including `## SECTION DRAFTED`, `## CHECKPOINT REACHED`, and `## WRITING BLOCKED`, are presentation only. The control surface is `gpd_return.status`.
 
-Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 Report section outputs against the resolved manuscript root rather than a hardcoded `paper/` subtree.
 
 ```yaml

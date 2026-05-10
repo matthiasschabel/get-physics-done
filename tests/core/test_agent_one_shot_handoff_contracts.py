@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gpd import registry
+from tests.assertion_taxonomy_support import (
+    MatchMode,
+    assert_prompt_contracts,
+    fragment_count,
+    machine_exact,
+    semantic_anchor,
+    semantic_concept,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 
@@ -15,35 +25,84 @@ def _read_agent(name: str) -> str:
 def test_notation_coordinator_requires_checkpoint_and_fresh_continuation_for_write_approval() -> None:
     content = _read_agent("gpd-notation-coordinator")
 
-    assert "references/orchestration/continuation-boundary.md" in content
-    assert "Wait for user decision" not in content
-    assert "Wait for user decision before proceeding" not in content
-    assert "Return a checkpoint with the options and stop" in content
-    assert "files_written: []" in content
+    assert_prompt_contracts(
+        content,
+        machine_exact(
+            "notation coordinator continuation path and empty write list",
+            ("references/orchestration/continuation-boundary.md", "files_written: []"),
+        ),
+        *semantic_concept(
+            "notation coordinator checkpoint stop semantics",
+            required="Return a checkpoint with the options and stop",
+            forbidden=("Wait for user decision", "Wait for user decision before proceeding"),
+        ),
+    )
 
 
 def test_debugger_uses_one_shot_checkpoint_handoff_instead_of_in_run_waiting() -> None:
     content = _read_agent("gpd-debugger")
 
-    assert "one-shot handoff" in content
-    assert "references/orchestration/continuation-boundary.md" in content
-    assert "### Fresh Continuation" in content
-    assert "You are not resumed in the same run." in content
-    assert "active sessions" not in content
+    assert_prompt_contracts(
+        content,
+        machine_exact(
+            "debugger continuation path and heading",
+            ("references/orchestration/continuation-boundary.md", "### Fresh Continuation"),
+        ),
+        *semantic_concept(
+            "debugger one-shot checkpoint semantics",
+            required=("one-shot handoff", "You are not resumed in the same run."),
+            forbidden="active sessions",
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+    )
 
 
 def test_roadmapper_makes_checkpoint_revision_flow_explicit() -> None:
     content = _read_agent("gpd-roadmapper")
+    agent = registry.get_agent("gpd-roadmapper")
 
-    assert "references/orchestration/continuation-boundary.md" in content
-    assert "### Revision Prompt" in content
-    assert "Approve roadmap or provide feedback; revision uses the continuation boundary." in content
-    assert "same-run wait" not in content
+    assert_prompt_contracts(
+        agent.system_prompt,
+        machine_exact(
+            "roadmapper generated role kit carries continuation path",
+            ("## Agent Role Kits", "references/orchestration/continuation-boundary.md"),
+        ),
+    )
+    assert_prompt_contracts(
+        content,
+        machine_exact("roadmapper revision heading", "### Revision Prompt"),
+        *semantic_concept(
+            "roadmapper checkpoint revision flow",
+            required="Approve roadmap or provide feedback; revision is a fresh roadmapper invocation.",
+            forbidden="same-run wait",
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+    )
 
 
 def test_experiment_designer_supervised_mode_mentions_fresh_continuation() -> None:
     content = _read_agent("gpd-experiment-designer")
+    agent = registry.get_agent("gpd-experiment-designer")
 
-    assert "fresh continuation" in content
-    assert "Return a checkpoint with the cost estimate for user approval before writing" in content
-    assert "spawns a fresh continuation for the write pass" in content
+    assert agent.role_kits == (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    )
+    assert_prompt_contracts(
+        agent.system_prompt,
+        fragment_count("experiment designer role-kit section renders once", "## Agent Role Kits", expected_count=1),
+    )
+    assert_prompt_contracts(
+        content,
+        semantic_anchor(
+            "experiment designer fresh-continuation approval flow",
+            (
+                "fresh continuation",
+                "Return a checkpoint with the cost estimate for user approval before writing",
+                "spawns a fresh continuation for the write pass",
+            ),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+    )

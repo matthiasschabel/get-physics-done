@@ -956,7 +956,10 @@ def test_workflows_reference_expected_spawn_agents() -> None:
 
 def test_agents_reference_expected_shared_specs() -> None:
     for agent_name, reference_tokens in AGENT_REFERENCE_TOKENS.items():
-        _assert_contains_tokens(AGENTS_DIR / agent_name, reference_tokens)
+        agent = registry.get_agent(Path(agent_name).stem)
+        source_and_generated = f"{(AGENTS_DIR / agent_name).read_text(encoding='utf-8')}\n{agent.system_prompt}"
+        missing = [token for token in reference_tokens if token not in source_and_generated]
+        assert missing == [], f"src/gpd/agents/{agent_name} missing {missing}"
 
 
 def test_consistency_checker_prompt_keeps_the_canonical_contract_and_stays_least_privileged() -> None:
@@ -2743,7 +2746,7 @@ def test_plan_checker_requires_contract_gate_and_reference_artifacts() -> None:
 def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> None:
     roadmap_template = (TEMPLATES_DIR / "roadmap.md").read_text(encoding="utf-8")
     state_template = (TEMPLATES_DIR / "state.md").read_text(encoding="utf-8")
-    roadmapper_agent = (AGENTS_DIR / "gpd-roadmapper.md").read_text(encoding="utf-8")
+    roadmapper_agent = registry.get_agent("gpd-roadmapper").system_prompt
     new_project = _workflow_authority_text("new-project")
     new_milestone = _workflow_authority_text("new-milestone")
     new_project_roadmapper = _find_single_task(WORKFLOWS_DIR / "new-project.md", "gpd-roadmapper").text
@@ -2829,7 +2832,7 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
             "approved project contract is missing",
             "decisive outputs / deliverables plus anchor guidance",
             "stop with a blocked return",
-            "return skeleton/profile reference for status vocabulary",
+            "status-routing",
         ),
         context="roadmapper blocked return status",
     )

@@ -5,6 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd import registry
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    MatchMode,
+    assert_prompt_contracts,
+    fragment_count,
+    machine_exact,
+    semantic_anchor,
+    semantic_concept,
+)
 from tests.prompt_metrics_support import expanded_prompt_text, measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -19,25 +28,70 @@ def test_gpd_project_researcher_prompt_stays_within_expected_budget_and_keeps_on
     metrics = measure_prompt_surface(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
     expanded = expanded_prompt_text(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
 
-    assert metrics.raw_include_count == 2
-    assert metrics.expanded_line_count < 2_250
-    assert metrics.expanded_char_count < 115_000
+    assert metrics.raw_include_count == 0
+    assert metrics.expanded_line_count < 500
+    assert metrics.expanded_char_count < 50_000
 
-    assert "one-shot handoff and fresh-continuation semantics" in source
-    assert "return the typed checkpoint and stop" in source
-    assert "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in source
-    assert "fresh-continuation" in source
-    assert "Do not wait inside the same spawned run." not in source
-    assert "Structured return provided to orchestrator" in source
-    assert "status: completed" in source
-    assert "files_written:\n    - GPD/literature/SUMMARY.md" in source
-    assert "confidence: HIGH" in source
-    assert "Authority: use the frontmatter-derived Agent Requirements block" not in source
+    assert_prompt_contracts(
+        source,
+        machine_exact(
+            "project researcher role-kit and return markers",
+            (
+                "role_kits:",
+                "  - fresh-continuation",
+                "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md",
+                "fresh-continuation",
+                "status: completed",
+                "files_written:\n    - GPD/literature/SUMMARY.md",
+                "confidence: HIGH",
+            ),
+        ),
+        semantic_anchor(
+            "project researcher checkpoint stop semantics",
+            "return the typed checkpoint and stop",
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+        *semantic_concept(
+            "project researcher orchestration boundary",
+            required="Structured return provided to orchestrator",
+            forbidden=(
+                "Do not wait inside the same spawned run.",
+                "Authority: use the frontmatter-derived Agent Requirements block",
+            ),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+        machine_exact(
+            "project researcher avoids eager shared includes",
+            (
+                "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
+                "@{GPD_INSTALL_DIR}/references/research/researcher-shared.md",
+            ),
+            mode=FragmentMode.ABSENT,
+        ),
+    )
 
     generated_prompt = registry.get_agent("gpd-project-researcher").system_prompt
-    assert generated_prompt.count("## Agent Requirements") == 1
-    assert "artifact_write_authority: scoped_write" in generated_prompt
-    assert "shared_state_authority: return_only" in generated_prompt
+    assert_prompt_contracts(
+        generated_prompt,
+        fragment_count(
+            "project researcher requirements section renders once", "## Agent Requirements", expected_count=1
+        ),
+        fragment_count("project researcher role-kit section renders once", "## Agent Role Kits", expected_count=1),
+        machine_exact(
+            "project researcher generated authority fields",
+            (
+                "artifact_write_authority: scoped_write",
+                "shared_state_authority: return_only",
+                "### Fresh Continuation (`fresh-continuation`)",
+            ),
+        ),
+    )
+    assert registry.get_agent("gpd-project-researcher").role_kits == (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    )
 
     for phrase in (
         "wait for user confirmation",

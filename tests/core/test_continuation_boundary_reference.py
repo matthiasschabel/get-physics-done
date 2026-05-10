@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gpd import registry
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REFERENCE = REPO_ROOT / "src/gpd/specs/references/orchestration/continuation-boundary.md"
 OWNED_SURFACES = [
@@ -51,6 +53,10 @@ def test_owned_continuation_surfaces_reference_the_boundary_without_eager_includ
     eager_include = f"@{{GPD_INSTALL_DIR}}/{token}"
 
     for path in OWNED_SURFACES:
-        content = path.read_text(encoding="utf-8")
+        content = (
+            registry.get_agent(path.stem).system_prompt
+            if path.parent == REPO_ROOT / "src/gpd/agents"
+            else path.read_text(encoding="utf-8")
+        )
         assert token in content, path.relative_to(REPO_ROOT)
         assert eager_include not in content, path.relative_to(REPO_ROOT)

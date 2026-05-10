@@ -1268,7 +1268,7 @@ class TestCopyWithPathReplacement:
         content = (dest / "workflow.md").read_text(encoding="utf-8")
         assert f'{adapter.translate_tool_name("AskUserQuestion")}([{{"label": "Yes"}}])' in content
         assert f'{adapter.translate_tool_name("Task")}(prompt="Run it")' in content
-        assert f'{adapter.translate_tool_name("WebSearch")} then {adapter.translate_tool_name("WebFetch")}' in content
+        assert f"{adapter.translate_tool_name('WebSearch')} then {adapter.translate_tool_name('WebFetch')}" in content
         assert f"{adapter.public_command_surface_prefix}plan-phase 3" in content
         assert "ask_user(" not in content
         assert "web_search" not in content
@@ -1626,9 +1626,7 @@ class TestInstallBackupSafety:
         pre_install_cleanup(config_dir)
 
         patches_dir = config_dir / "gpd-local-patches"
-        assert '"backup_mode": "fallback-snapshot"' in (patches_dir / "backup-meta.json").read_text(
-            encoding="utf-8"
-        )
+        assert '"backup_mode": "fallback-snapshot"' in (patches_dir / "backup-meta.json").read_text(encoding="utf-8")
         for path in managed_files:
             backup_path = patches_dir / path.relative_to(config_dir)
             assert backup_path.read_text(encoding="utf-8") == path.read_text(encoding="utf-8")

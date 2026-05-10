@@ -7,6 +7,10 @@ surface: internal
 role_family: review
 artifact_write_authority: scoped_write
 shared_state_authority: return_only
+role_kits:
+  - status-routing
+  - fresh-continuation
+  - files-written-freshness
 color: red
 ---
 Internal specialist boundary: stay inside assigned scoped artifacts and the return envelope; do not act as the default writable implementation agent.
@@ -492,8 +496,6 @@ gpd_return:
 ```
 
 For all statuses, `files_written` lists only files written in this run from the Stage 6 allowlist. Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run. For upstream-artifact `blocked` returns, keep it empty unless only `${selected_publication_root}/CONSISTENCY-REPORT.md` was written; never list `CLAIMS{round_suffix}.json`, `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`.
-
-Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 </structured_returns>
 

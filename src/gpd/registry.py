@@ -26,6 +26,11 @@ from gpd.command_labels import (
     command_slug_from_label,
     parse_command_label,
 )
+from gpd.core.agent_role_kits import (
+    AGENT_ROLE_KITS_FRONTMATTER_KEY,
+    parse_agent_role_kit_ids,
+    render_agent_role_kits_section,
+)
 from gpd.core.model_visible_sections import render_model_visible_yaml_section
 from gpd.core.model_visible_text import (
     AGENT_ARTIFACT_WRITE_AUTHORITIES,
@@ -114,6 +119,7 @@ _AGENT_FRONTMATTER_KEYS = frozenset(
         "role_family",
         "artifact_write_authority",
         "shared_state_authority",
+        AGENT_ROLE_KITS_FRONTMATTER_KEY,
         "color",
     }
 )
@@ -161,9 +167,7 @@ _WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_OUTPUTS = (
 _WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_EVIDENCE = (
     "validated external authoring intake manifest with explicit claim-to-evidence bindings",
 )
-_WRITE_PAPER_EXTERNAL_AUTHORING_BLOCKING_CONDITIONS = (
-    "invalid or incomplete external authoring intake manifest",
-)
+_WRITE_PAPER_EXTERNAL_AUTHORING_BLOCKING_CONDITIONS = ("invalid or incomplete external authoring intake manifest",)
 _WRITE_PAPER_EXTERNAL_AUTHORING_RELAXED_PREFLIGHT_CHECKS = (
     "project_state",
     "roadmap",
@@ -284,6 +288,7 @@ class AgentDef:
     role_family: str = "analysis"
     artifact_write_authority: str = "scoped_write"
     shared_state_authority: str = "return_only"
+    role_kits: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1475,38 +1480,45 @@ def render_agent_visibility_sections_from_frontmatter(frontmatter: str, *, agent
         _parse_tools(meta.get("tools"), owner_name=agent_name),
         _parse_tools(meta.get("allowed-tools"), field_name="allowed-tools", owner_name=agent_name),
     )
-    return render_agent_requirements_section(
-        tools=tools,
-        commit_authority=_parse_commit_authority(meta.get("commit_authority"), agent_name=agent_name),
-        surface=_parse_agent_metadata_enum(
-            meta.get("surface"),
-            field_name="surface",
-            agent_name=agent_name,
-            valid_values=AGENT_SURFACES,
-            default="internal",
-        ),
-        role_family=_parse_agent_metadata_enum(
-            meta.get("role_family"),
-            field_name="role_family",
-            agent_name=agent_name,
-            valid_values=AGENT_ROLE_FAMILIES,
-            default="analysis",
-        ),
-        artifact_write_authority=_parse_agent_metadata_enum(
-            meta.get("artifact_write_authority"),
-            field_name="artifact_write_authority",
-            agent_name=agent_name,
-            valid_values=AGENT_ARTIFACT_WRITE_AUTHORITIES,
-            default="scoped_write",
-        ),
-        shared_state_authority=_parse_agent_metadata_enum(
-            meta.get("shared_state_authority"),
-            field_name="shared_state_authority",
-            agent_name=agent_name,
-            valid_values=AGENT_SHARED_STATE_AUTHORITIES,
-            default="return_only",
-        ),
-    )
+    role_kits = parse_agent_role_kit_ids(meta.get(AGENT_ROLE_KITS_FRONTMATTER_KEY), agent_name=agent_name)
+    sections = [
+        render_agent_requirements_section(
+            tools=tools,
+            commit_authority=_parse_commit_authority(meta.get("commit_authority"), agent_name=agent_name),
+            surface=_parse_agent_metadata_enum(
+                meta.get("surface"),
+                field_name="surface",
+                agent_name=agent_name,
+                valid_values=AGENT_SURFACES,
+                default="internal",
+            ),
+            role_family=_parse_agent_metadata_enum(
+                meta.get("role_family"),
+                field_name="role_family",
+                agent_name=agent_name,
+                valid_values=AGENT_ROLE_FAMILIES,
+                default="analysis",
+            ),
+            artifact_write_authority=_parse_agent_metadata_enum(
+                meta.get("artifact_write_authority"),
+                field_name="artifact_write_authority",
+                agent_name=agent_name,
+                valid_values=AGENT_ARTIFACT_WRITE_AUTHORITIES,
+                default="scoped_write",
+            ),
+            shared_state_authority=_parse_agent_metadata_enum(
+                meta.get("shared_state_authority"),
+                field_name="shared_state_authority",
+                agent_name=agent_name,
+                valid_values=AGENT_SHARED_STATE_AUTHORITIES,
+                default="return_only",
+            ),
+        )
+    ]
+    role_kit_section = render_agent_role_kits_section(role_kits)
+    if role_kit_section:
+        sections.append(role_kit_section)
+    return "\n\n".join(sections)
 
 
 def _command_visibility_payload(
@@ -1677,6 +1689,7 @@ def _agent_model_content(
     role_family: str,
     artifact_write_authority: str,
     shared_state_authority: str,
+    role_kits: tuple[str, ...] = (),
 ) -> str:
     """Return the model-visible agent body, including enforced agent constraints."""
 
@@ -1690,8 +1703,11 @@ def _agent_model_content(
             artifact_write_authority=artifact_write_authority,
             shared_state_authority=shared_state_authority,
         ),
-        skeptical_rigor_guardrails_section(),
     ]
+    role_kit_section = render_agent_role_kits_section(role_kits)
+    if role_kit_section:
+        sections.append(role_kit_section)
+    sections.append(skeptical_rigor_guardrails_section())
     if body:
         sections.append(body)
     return "\n\n".join(sections)
@@ -1823,7 +1839,9 @@ def _validate_write_paper_external_authoring_frontmatter(
     else:
         subject_policy = command_policy.subject_policy
         if subject_policy.explicit_input_kinds != [_WRITE_PAPER_EXTERNAL_AUTHORING_INPUT_KIND]:
-            errors.append("command-policy.subject_policy.explicit_input_kinds must contain only authoring_intake_manifest")
+            errors.append(
+                "command-policy.subject_policy.explicit_input_kinds must contain only authoring_intake_manifest"
+            )
         if subject_policy.allow_external_subjects is not False:
             errors.append("command-policy.subject_policy.allow_external_subjects must be false")
         if subject_policy.allow_interactive_without_subject is not False:
@@ -2020,7 +2038,9 @@ def _validate_spawn_contract(contract: dict[str, object], *, owner_name: str) ->
     mode = mode.strip()
     if mode not in _SPAWN_CONTRACT_WRITE_SCOPE_MODES:
         valid = ", ".join(_SPAWN_CONTRACT_WRITE_SCOPE_MODES)
-        raise ValueError(f"spawn-contract for {owner_name}: invalid write_scope.mode {mode!r}; expected one of: {valid}")
+        raise ValueError(
+            f"spawn-contract for {owner_name}: invalid write_scope.mode {mode!r}; expected one of: {valid}"
+        )
     write_scope["mode"] = mode
     if "allowed_paths" not in write_scope:
         raise ValueError(f"spawn-contract for {owner_name}: missing write_scope.allowed_paths")
@@ -2201,7 +2221,7 @@ def _reject_unquoted_placeholder_path_list_items(block: str, *, owner_name: str,
         if _UNQUOTED_PLACEHOLDER_PATH_LIST_ITEM_RE.match(line):
             raise ValueError(
                 f"{contract_label} for {owner_name}: unquoted placeholder path list item at line {line_number}; "
-                "quote placeholder paths such as \"{phase_dir}/file.md\""
+                'quote placeholder paths such as "{phase_dir}/file.md"'
             )
 
 
@@ -2280,6 +2300,7 @@ def _parse_agent_file(path: Path, source: str) -> AgentDef:
         valid_values=AGENT_SHARED_STATE_AUTHORITIES,
         default="return_only",
     )
+    role_kits = parse_agent_role_kit_ids(meta.get(AGENT_ROLE_KITS_FRONTMATTER_KEY), agent_name=agent_name)
     color = _parse_frontmatter_string_field(
         meta.get("color"),
         field_name="color",
@@ -2293,6 +2314,7 @@ def _parse_agent_file(path: Path, source: str) -> AgentDef:
         role_family=role_family,
         artifact_write_authority=artifact_write_authority,
         shared_state_authority=shared_state_authority,
+        role_kits=role_kits,
     )
     return AgentDef(
         name=agent_name,
@@ -2304,6 +2326,7 @@ def _parse_agent_file(path: Path, source: str) -> AgentDef:
         role_family=role_family,
         artifact_write_authority=artifact_write_authority,
         shared_state_authority=shared_state_authority,
+        role_kits=role_kits,
         color=color,
         path=str(path),
         source=source,
@@ -2806,6 +2829,7 @@ __all__ = [
     "list_skills",
     "render_agent_visibility_sections_from_frontmatter",
     "render_agent_requirements_section",
+    "render_agent_role_kits_section",
     "render_command_visibility_sections",
     "render_command_visibility_sections_from_frontmatter",
     "render_review_contract_section",

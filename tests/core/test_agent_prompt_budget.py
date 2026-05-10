@@ -7,6 +7,13 @@ from pathlib import Path
 import pytest
 
 from gpd import registry
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    MatchMode,
+    assert_prompt_contracts,
+    machine_exact,
+    semantic_anchor,
+)
 from tests.prompt_metrics_support import (
     budget_from_baseline,
     expanded_include_markers,
@@ -21,31 +28,32 @@ PATH_PREFIX = "/runtime/"
 
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
+PHASE6_MAX_AGENT_EXPANDED_CHARS = 49_999
 
 AGENT_BASELINES = {
     "gpd-bibliographer": (132, 6_015),
     "gpd-check-proof": (81, 6_231),
     "gpd-consistency-checker": (64, 3_993),
     "gpd-debugger": (246, 9_494),
-    "gpd-executor": (775, 49_130),
-    "gpd-experiment-designer": (797, 43_393),
+    "gpd-executor": (763, 48_258),
+    "gpd-experiment-designer": (631, 35_483),
     "gpd-explainer": (241, 9_508),
     "gpd-literature-reviewer": (394, 14_734),
     "gpd-notation-coordinator": (629, 36_452),
-    "gpd-paper-writer": (594, 34_110),
+    "gpd-paper-writer": (598, 34_030),
     "gpd-phase-researcher": (366, 15_409),
     "gpd-plan-checker": (399, 22_456),
     "gpd-planner": (594, 33_278),
-    "gpd-project-researcher": (969, 58_911),
-    "gpd-referee": (545, 35_476),
+    "gpd-project-researcher": (274, 12_725),
+    "gpd-referee": (547, 35_781),
     "gpd-research-mapper": (743, 37_100),
-    "gpd-research-synthesizer": (988, 49_313),
+    "gpd-research-synthesizer": (978, 48_673),
     "gpd-review-literature": (53, 2_591),
     "gpd-review-math": (54, 3_343),
     "gpd-review-physics": (53, 2_604),
     "gpd-review-reader": (52, 3_166),
     "gpd-review-significance": (54, 2_790),
-    "gpd-roadmapper": (913, 39_230),
+    "gpd-roadmapper": (903, 38_674),
     "gpd-verifier": (384, 26_135),
 }
 
@@ -59,6 +67,7 @@ LIGHTWEIGHT_SHARED_PROTOCOL_AGENTS = (
     "gpd-experiment-designer",
     "gpd-literature-reviewer",
     "gpd-planner",
+    "gpd-project-researcher",
 )
 
 MODE_TABLE_ALLOWLIST = {
@@ -70,24 +79,27 @@ MODE_TABLE_ALLOWLIST = {
 }
 WORST_AGENT_HARD_CAPS = {
     "gpd-planner": (614, 34_278),
-    "gpd-executor": (807, 50_866),
+    "gpd-executor": (783, 49_500),
     "gpd-research-mapper": (800, 39_000),
     "gpd-roadmapper": (988, 42_619),
-    "gpd-project-researcher": (1_500, 81_000),
-    "gpd-experiment-designer": (850, 47_000),
+    "gpd-project-researcher": (300, 50_000),
+    "gpd-experiment-designer": (650, 37_000),
     "gpd-research-synthesizer": (1_008, 50_313),
+    "gpd-notation-coordinator": (650, 38_000),
+    "gpd-referee": (570, 37_000),
     "gpd-plan-checker": (419, 23_456),
     "gpd-verifier": (430, 30_000),
 }
 PHASE6_RAW_AGENT_LINE_CAPS = {
     "gpd-planner": 625,
-    "gpd-executor": 799,
+    "gpd-executor": 780,
     "gpd-plan-checker": 899,
 }
 TOP_AGENT_HARD_CAP_COUNT = 6
 BULKY_REFERENCE_INCLUDE_FILES = (
     "peer-review-panel.md",
     "contradiction-resolution-example.md",
+    "ising-experiment-design-example.md",
 )
 
 
@@ -211,6 +223,20 @@ def test_largest_agent_prompts_have_hard_caps() -> None:
     assert largest_agents <= set(WORST_AGENT_HARD_CAPS)
 
 
+def test_phase6_all_expanded_agent_prompts_stay_below_50k_chars() -> None:
+    offenders: list[str] = []
+    for agent_name in sorted(registry.list_agents()):
+        metrics = measure_prompt_surface(
+            AGENTS_DIR / f"{agent_name}.md",
+            src_root=SOURCE_ROOT,
+            path_prefix=PATH_PREFIX,
+        )
+        if metrics.expanded_char_count > PHASE6_MAX_AGENT_EXPANDED_CHARS:
+            offenders.append(f"{agent_name}: {metrics.expanded_char_count}")
+
+    assert offenders == []
+
+
 @pytest.mark.parametrize("agent_name", sorted(WORST_AGENT_HARD_CAPS))
 def test_worst_agent_prompts_do_not_eager_load_bulky_reference_examples(agent_name: str) -> None:
     expanded_text = expanded_prompt_text(
@@ -232,11 +258,35 @@ def test_research_synthesizer_references_canonical_contradiction_example_without
         path_prefix=PATH_PREFIX,
     )
 
-    assert "{GPD_INSTALL_DIR}/references/examples/contradiction-resolution-example.md" in raw_text
-    assert "@{GPD_INSTALL_DIR}/references/examples/contradiction-resolution-example.md" not in raw_text
-    assert "Worked Example: Contradiction Resolution with Confidence Weighting" not in raw_text
-    assert "Contradiction: Mott Gap at U/t = 4" not in raw_text
-    assert "contradiction-resolution-example.md" not in expanded_include_markers(expanded_text)
+    assert_prompt_contracts(
+        raw_text,
+        machine_exact(
+            "research synthesizer references contradiction example lazily",
+            "{GPD_INSTALL_DIR}/references/examples/contradiction-resolution-example.md",
+        ),
+        machine_exact(
+            "research synthesizer avoids eager contradiction include",
+            "@{GPD_INSTALL_DIR}/references/examples/contradiction-resolution-example.md",
+            mode=FragmentMode.ABSENT,
+        ),
+        semantic_anchor(
+            "research synthesizer avoids inline contradiction worked example",
+            (
+                "Worked Example: Contradiction Resolution with Confidence Weighting",
+                "Contradiction: Mott Gap at U/t = 4",
+            ),
+            mode=FragmentMode.ABSENT,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+    )
+    assert_prompt_contracts(
+        "\n".join(expanded_include_markers(expanded_text)),
+        machine_exact(
+            "expanded synthesizer prompt excludes contradiction include marker",
+            "contradiction-resolution-example.md",
+            mode=FragmentMode.ABSENT,
+        ),
+    )
 
 
 def test_agents_reference_infrastructure_for_shared_boundary_protocols_without_copying_them() -> None:
@@ -271,13 +321,26 @@ def test_prompt_body_prose_uses_runtime_neutral_external_lookup_wording() -> Non
     for path in prompt_paths:
         text = path.read_text(encoding="utf-8")
         body = text.split("---", 2)[2] if text.startswith("---") else text
-        assert "web_search" not in body, path
-        assert "web_fetch" not in body, path
+        assert_prompt_contracts(
+            body,
+            machine_exact(
+                "prompt body avoids runtime-specific web tools",
+                ("web_search", "web_fetch"),
+                mode=FragmentMode.ABSENT,
+                context=path.as_posix(),
+            ),
+        )
 
     for agent_name in ("gpd-experiment-designer", "gpd-phase-researcher", "gpd-plan-checker"):
         frontmatter = (AGENTS_DIR / f"{agent_name}.md").read_text(encoding="utf-8").split("---", 2)[1]
-        assert "web_search" in frontmatter
-        assert "web_fetch" in frontmatter
+        assert_prompt_contracts(
+            frontmatter,
+            machine_exact(
+                "runtime-specific web tools stay in frontmatter capabilities",
+                ("web_search", "web_fetch"),
+                context=agent_name,
+            ),
+        )
 
 
 @pytest.mark.parametrize("agent_name", PEER_REVIEW_SPECIALIST_AGENTS)
@@ -287,12 +350,48 @@ def test_peer_review_specialists_reference_panel_contract_without_eager_inline(a
     expanded_text = expanded_prompt_text(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
     agent = registry.get_agent(agent_name)
 
-    assert "@{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" not in raw_text
-    assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in expanded_text
-    assert "full `StageReviewReport` contract" in expanded_text
-    assert "# Peer Review Panel Protocol" not in expanded_text
-    assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in agent.system_prompt
-    assert "# Peer Review Panel Protocol" not in agent.system_prompt
+    assert_prompt_contracts(
+        raw_text,
+        machine_exact(
+            "peer review specialist avoids eager panel include",
+            "@{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md",
+            mode=FragmentMode.ABSENT,
+            context=agent_name,
+        ),
+    )
+    assert_prompt_contracts(
+        expanded_text,
+        machine_exact(
+            "peer review specialist references panel contract lazily",
+            "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md",
+            context=agent_name,
+        ),
+        semantic_anchor(
+            "peer review specialist keeps stage report contract visible",
+            "full `StageReviewReport` contract",
+            context=agent_name,
+        ),
+        machine_exact(
+            "peer review specialist excludes panel body from expanded prompt",
+            "# Peer Review Panel Protocol",
+            mode=FragmentMode.ABSENT,
+            context=agent_name,
+        ),
+    )
+    assert_prompt_contracts(
+        agent.system_prompt,
+        machine_exact(
+            "peer review specialist system prompt references panel path",
+            "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md",
+            context=agent_name,
+        ),
+        machine_exact(
+            "peer review specialist system prompt excludes panel body",
+            "# Peer Review Panel Protocol",
+            mode=FragmentMode.ABSENT,
+            context=agent_name,
+        ),
+    )
 
 
 @pytest.mark.parametrize("agent_name", LIGHTWEIGHT_SHARED_PROTOCOL_AGENTS)
@@ -302,8 +401,40 @@ def test_agents_reference_shared_protocols_without_eager_inline(agent_name: str)
     expanded_text = expanded_prompt_text(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
     agent = registry.get_agent(agent_name)
 
-    assert "{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" in raw_text
-    assert "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" not in raw_text
-    assert "# Shared Protocols" not in expanded_text
-    assert "{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" in agent.system_prompt
-    assert "# Shared Protocols" not in agent.system_prompt
+    assert_prompt_contracts(
+        raw_text,
+        machine_exact(
+            "agent references shared protocols lazily",
+            "{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
+            context=agent_name,
+        ),
+        machine_exact(
+            "agent avoids eager shared protocol include",
+            "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
+            mode=FragmentMode.ABSENT,
+            context=agent_name,
+        ),
+    )
+    assert_prompt_contracts(
+        expanded_text,
+        machine_exact(
+            "expanded agent prompt excludes shared protocol body",
+            "# Shared Protocols",
+            mode=FragmentMode.ABSENT,
+            context=agent_name,
+        ),
+    )
+    assert_prompt_contracts(
+        agent.system_prompt,
+        machine_exact(
+            "agent system prompt references shared protocols path",
+            "{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
+            context=agent_name,
+        ),
+        machine_exact(
+            "agent system prompt excludes shared protocol body",
+            "# Shared Protocols",
+            mode=FragmentMode.ABSENT,
+            context=agent_name,
+        ),
+    )

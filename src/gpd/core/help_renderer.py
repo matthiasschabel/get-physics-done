@@ -52,6 +52,9 @@ class HelpCommandDetail:
     argument_hint: str
     context_mode: str
     project_reentry_capable: bool
+    signature: str
+    group: str
+    documented_variants: list[str]
     allowed_tools: list[str]
     requires: dict[str, object]
 
@@ -251,6 +254,160 @@ _ADDITIONAL_QUICK_START_RUNTIME_COMMANDS = (
     "gpd:branch-hypothesis",
 )
 
+_COMMAND_DETAIL_SIGNATURE_OVERRIDES: dict[str, str] = {
+    "gpd:compare-results": "gpd:compare-results [phase, artifact, or comparison target]",
+    "gpd:digest-knowledge": "gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]",
+    "gpd:map-research": "gpd:map-research",
+    "gpd:new-project": "gpd:new-project",
+    "gpd:peer-review": "gpd:peer-review [paper directory | manuscript path | explicit artifact path]",
+    "gpd:respond-to-referees": "gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]",
+    "gpd:review-knowledge": "gpd:review-knowledge [knowledge path or knowledge id]",
+}
+
+_COMMAND_DETAIL_USAGE_EXAMPLES: dict[str, tuple[str, ...]] = {
+    "gpd:arxiv-submission": ("gpd:arxiv-submission paper/",),
+    "gpd:digest-knowledge": (
+        'gpd:digest-knowledge "renormalization group fixed points"',
+        "gpd:digest-knowledge 2401.12345v2",
+        "gpd:digest-knowledge hep-th/9901001",
+        "gpd:digest-knowledge ./notes/rg-notes.md",
+        "gpd:digest-knowledge ./sources/review.docx",
+        "gpd:digest-knowledge ./data/observables.csv",
+        "gpd:digest-knowledge GPD/knowledge/K-renormalization-group-fixed-points.md",
+    ),
+    "gpd:dimensional-analysis": ("gpd:dimensional-analysis results/01-SUMMARY.md",),
+    "gpd:error-patterns": ("gpd:error-patterns sign-error",),
+    "gpd:export": ("gpd:export --format latex --commit",),
+    "gpd:export-logs": ("gpd:export-logs --command execute-phase --phase 3 --category workflow",),
+    "gpd:limiting-cases": ("gpd:limiting-cases results/01-SUMMARY.md",),
+    "gpd:new-project": (
+        "gpd:new-project --minimal",
+        "gpd:new-project --minimal @file.md",
+        "gpd:new-project --auto",
+    ),
+    "gpd:numerical-convergence": ("gpd:numerical-convergence results/mesh-study.csv",),
+    "gpd:peer-review": (
+        "gpd:peer-review draft.docx",
+        "gpd:peer-review data/observables.csv",
+    ),
+    "gpd:respond-to-referees": (
+        "gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md",
+        "gpd:respond-to-referees reports/referee-report.md",
+        "gpd:respond-to-referees paste",
+    ),
+    "gpd:write-paper": (
+        "gpd:write-paper",
+        "gpd:write-paper --intake intake/write-paper-authoring-input.json",
+    ),
+}
+
+_COMMAND_DETAIL_NOTES: dict[str, tuple[str, ...]] = {
+    "gpd:arxiv-submission": (
+        "Packages the GPD-owned manuscript root or a supported .tex entrypoint; it does not package arbitrary external material.",
+    ),
+    "gpd:compact-state": (
+        "Suggested by `gpd:progress` when STATE.md grows large.",
+    ),
+    "gpd:compare-results": (
+        "Writes a decisive comparison artifact under GPD/comparisons/ for the current workspace.",
+    ),
+    "gpd:derive-equation": (
+        "Part of the project-aware technical-analysis lane for explicit current-workspace derivations.",
+    ),
+    "gpd:dimensional-analysis": (
+        "Part of the project-aware technical-analysis lane; analysis artifacts belong under GPD/analysis/ when a standalone target is supplied.",
+    ),
+    "gpd:discover": (
+        "Depth quick is verification-only and writes no file; medium and deep write discovery artifacts.",
+        "Discovery artifacts feed planning or standalone analysis.",
+    ),
+    "gpd:digest-knowledge": (
+        "Creates a current-workspace knowledge document draft from a topic, paper, source file, or explicit knowledge path.",
+        "Example document source: `gpd:digest-knowledge ./sources/review.docx`; example tabular source: `gpd:digest-knowledge ./data/observables.csv`.",
+        "Knowledge lifecycle states are draft, in_review, stable, and superseded; use gpd:review-knowledge for approval.",
+        "Stable knowledge enters shared runtime reference surfaces as reviewed background synthesis; it is a separate authority tier and does not override stronger evidence.",
+        "Resolves one canonical `GPD/knowledge/{knowledge_id}.md` target in the current workspace and stops on ambiguity.",
+        "Supports an arXiv identifier with accepted prefixes.",
+    ),
+    "gpd:error-patterns": (
+        "Pattern-library categories include sign-error, factor-error, convention-pitfall, convergence-issue, approximation-failure, numerical-instability, conceptual-error, and dimensional-error.",
+    ),
+    "gpd:export": (
+        "For generated text exports, outputs are committed only with explicit `--commit`.",
+        "gpd observe execution, gpd observe sessions, gpd observe show, and gpd trace show inspect only; gpd observe event, gpd observe export, and gpd trace start|log|stop write observability.",
+    ),
+    "gpd:export-logs": (
+        "Exports observability logs with passthrough filters such as --command <label>, --phase <phase>, and --category <name>.",
+        "Empty result payloads report empty_export: true.",
+    ),
+    "gpd:graph": (
+        "Complements the technical-analysis lane; use separate commands such as gpd:error-propagation for uncertainty flow.",
+    ),
+    "gpd:limiting-cases": (
+        "Part of the project-aware technical-analysis lane for explicit current-workspace limit checks.",
+    ),
+    "gpd:literature-review": (
+        "Runs on the current project or an explicit topic: a physics research topic or research question, and writes under GPD/literature/ in the current workspace.",
+    ),
+    "gpd:new-project": (
+        "All modes build a scoping contract before downstream artifacts.",
+        "Blocking gaps get one targeted repair prompt, and scope must be explicitly approved before requirements or roadmap generation.",
+        "`--minimal @file.md` still repairs blocking gaps and asks for scoping approval.",
+        "`--auto` follows the configured autonomy gates.",
+        "`GPD/state.json.bak` and `GPD/state.json.lock` are local recovery/coordination files.",
+    ),
+    "gpd:numerical-convergence": (
+        "Part of the project-aware technical-analysis lane for explicit current-workspace convergence checks.",
+    ),
+    "gpd:peer-review": (
+        "Explicit artifact intake follows command-policy supported suffixes for publication-artifact paths.",
+        "Use `gpd validate artifact-text <path> --output <txt-path>` when explicit artifact text extraction is needed.",
+        "Project-backed mode uses the resolved manuscript entrypoint before staged review.",
+    ),
+    "gpd:plan-phase": (
+        "`--skip-verify` may skip routine verification, but proof-bearing plans still require checker review or an equivalent main-context audit.",
+    ),
+    "gpd:progress": (
+        "Usage: `gpd:progress --full`",
+        "Usage: `gpd:progress --brief`",
+        "Usage: `gpd:progress --reconcile`",
+        "The local CLI `gpd progress` is a read-only renderer with `json|bar|table` output. Local CLI: `gpd progress json|bar|table`.",
+    ),
+    "gpd:resume-work": (
+        "`state.json.continuation` is the durable authority. Canonical continuation fields define the public resume vocabulary: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, `resume_candidates`.",
+    ),
+    "gpd:respond-to-referees": (
+        "Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy.",
+        "Project-backed review/response/package outputs stay under the resolved manuscript root; this is not a full publication-root migration.",
+    ),
+    "gpd:route": (
+        "The frozen scope-expansion path renders the ordered compound sequence `gpd:complete-milestone` then `gpd:new-milestone`.",
+    ),
+    "gpd:review-knowledge": (
+        "Reviews a canonical current-workspace knowledge document using typed approval evidence.",
+        "Approval can promote stable knowledge; stable and superseded states remain addressable and traceable by canonical path or knowledge id.",
+        "Writes review artifacts under GPD/knowledge/reviews/.",
+    ),
+    "gpd:sensitivity-analysis": (
+        "Part of the project-aware technical-analysis lane for ranking influential inputs from project context or explicit current-workspace flags.",
+    ),
+    "gpd:settings": (
+        "Autonomy vocabulary: Supervised, Max quality, Balanced, Budget-aware, runtime defaults, YOLO.",
+        "Configuration keys include `execution.review_cadence`, `planning.commit_docs`, `git.branching_strategy`, and statuses such as `needs-calculation`; model tiers are `tier-1`, `tier-2`, and `tier-3`.",
+        "Use `gpd observe execution` and `gpd cost` from the normal terminal for read-only status and usage review.",
+    ),
+    "gpd:update": (
+        "Runs the public bootstrap update command for the active runtime.",
+        "Preserves local modifications via patch backups.",
+    ),
+    "gpd:write-paper": (
+        "Uses a bounded external-authoring lane driven by an explicit intake manifest only.",
+        "GPD-authored outputs live under `GPD/publication/{subject_slug}/...`; `GPD/publication/{subject_slug}/intake/` stores intake/provenance state only.",
+        "It does not mine arbitrary folders, and embedded external staged-review parity is out of scope.",
+        "Project-backed review/response/package outputs remain in the resolved GPD manuscript lane.",
+    ),
+}
+
 
 def _runtime_command_for_ladder_step(step: str) -> tuple[str, ...]:
     return tuple(f"gpd:{part.strip()}" for part in step.split("/") if part.strip())
@@ -312,6 +469,155 @@ def _entry_from_spec(spec: _CommandEntrySpec) -> HelpCommandEntry:
         registry_command=registry_command,
         documented_variant=len(spec) == 3,
     )
+
+
+def _base_command_entries_by_label() -> dict[str, tuple[str, HelpCommandEntry]]:
+    entries: dict[str, tuple[str, HelpCommandEntry]] = {}
+    for group in help_command_groups():
+        for entry in group.commands:
+            if entry.documented_variant:
+                continue
+            entries[entry.registry_command] = (group.name, entry)
+    return entries
+
+
+def _documented_variants_for(registry_command: str) -> tuple[str, ...]:
+    return tuple(
+        entry.command
+        for group in help_command_groups()
+        for entry in group.commands
+        if entry.documented_variant and entry.registry_command == registry_command
+    )
+
+
+def _display_signature_for_command(registry_command: str) -> str:
+    if registry_command in _COMMAND_DETAIL_SIGNATURE_OVERRIDES:
+        return _COMMAND_DETAIL_SIGNATURE_OVERRIDES[registry_command]
+    command = get_command(registry_command)
+    if command.argument_hint:
+        return f"{command.name} {command.argument_hint}"
+    entries = _base_command_entries_by_label()
+    entry = entries.get(registry_command, (None, None))[1]
+    return entry.command if entry is not None else command.name
+
+
+def _usage_examples_for(registry_command: str) -> tuple[str, ...]:
+    signature = _display_signature_for_command(registry_command)
+    examples: list[str] = [signature]
+    examples.extend(_documented_variants_for(registry_command))
+    examples.extend(_COMMAND_DETAIL_USAGE_EXAMPLES.get(registry_command, ()))
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for example in examples:
+        if example in seen:
+            continue
+        seen.add(example)
+        deduped.append(example)
+    return tuple(deduped)
+
+
+def _format_sequence(values: list[str] | tuple[str, ...], *, limit: int = 4) -> str:
+    cleaned = [value for value in values if value]
+    if not cleaned:
+        return ""
+    shown = cleaned[:limit]
+    suffix = "" if len(cleaned) <= limit else f", and {len(cleaned) - limit} more"
+    return ", ".join(f"`{value}`" for value in shown) + suffix
+
+
+def _requires_summary(requires: dict[str, object]) -> tuple[str, ...]:
+    lines: list[str] = []
+    for key in sorted(requires):
+        value = requires[key]
+        if isinstance(value, list):
+            rendered = _format_sequence([str(item) for item in value])
+            if rendered:
+                lines.append(f"{key}: {rendered}")
+            continue
+        if isinstance(value, tuple):
+            rendered = _format_sequence(tuple(str(item) for item in value))
+            if rendered:
+                lines.append(f"{key}: {rendered}")
+            continue
+        if value not in (None, "", [], {}):
+            lines.append(f"{key}: `{value}`")
+    return tuple(lines)
+
+
+def _command_policy_summary(command_name: str) -> tuple[str, ...]:
+    command = get_command(command_name)
+    policy = command.command_policy
+    if policy is None:
+        return ()
+
+    lines: list[str] = []
+    subject = policy.subject_policy
+    if subject is not None and (
+        subject.subject_kind
+        or subject.resolution_mode
+        or subject.explicit_input_kinds
+        or subject.allow_external_subjects is not None
+        or subject.bootstrap_allowed is not None
+    ):
+        parts: list[str] = []
+        if subject.subject_kind:
+            parts.append(f"subject={subject.subject_kind}")
+        if subject.resolution_mode:
+            parts.append(f"resolution={subject.resolution_mode}")
+        if subject.explicit_input_kinds:
+            parts.append("explicit inputs=" + ", ".join(subject.explicit_input_kinds))
+        if subject.allow_external_subjects is not None:
+            parts.append(f"external subjects allowed={str(subject.allow_external_subjects).lower()}")
+        if subject.bootstrap_allowed is not None:
+            parts.append(f"bootstrap allowed={str(subject.bootstrap_allowed).lower()}")
+        lines.append("Subject policy: " + "; ".join(parts))
+
+    output = policy.output_policy
+    if output is not None and (
+        output.output_mode
+        or output.managed_root_kind
+        or output.default_output_subtree
+        or output.stage_artifact_policy
+    ):
+        parts = []
+        if output.output_mode:
+            parts.append(f"mode={output.output_mode}")
+        if output.managed_root_kind:
+            parts.append(f"managed root={output.managed_root_kind}")
+        if output.default_output_subtree:
+            parts.append(f"default subtree={output.default_output_subtree}")
+        if output.stage_artifact_policy:
+            parts.append(f"stage artifacts={output.stage_artifact_policy}")
+        lines.append("Output policy: " + "; ".join(parts))
+    return tuple(lines)
+
+
+def _review_contract_summary(command_name: str) -> tuple[str, ...]:
+    command = get_command(command_name)
+    contract = command.review_contract
+    if contract is None:
+        return ()
+    lines = [
+        (
+            f"Review contract: {contract.review_mode} mode with "
+            f"{len(contract.required_outputs)} required output(s), "
+            f"{len(contract.preflight_checks)} preflight check(s), and "
+            f"{len(contract.blocking_conditions)} blocking condition(s)."
+        )
+    ]
+    if contract.scope_variants:
+        scopes = ", ".join(variant.scope for variant in contract.scope_variants)
+        lines.append(f"Scope variants: {scopes}.")
+    return tuple(lines)
+
+
+def _staged_workflow_summary(command_name: str) -> tuple[str, ...]:
+    command = get_command(command_name)
+    manifest = command.staged_loading
+    if manifest is None:
+        return ()
+    stage_ids = ", ".join(manifest.stage_ids())
+    return (f"Staged workflow: {manifest.workflow_id} with stages {stage_ids}.",)
 
 
 @lru_cache(maxsize=1)
@@ -379,10 +685,16 @@ def command_index_payload() -> list[dict[str, str]]:
     ]
 
 
-def command_detail_payload(command_name: str, *, minimal: bool = False) -> dict[str, object]:
+def command_detail_payload(
+    command_name: str,
+    *,
+    minimal: bool = False,
+    include_markdown: bool = False,
+) -> dict[str, object]:
     """Return compact registry metadata for one command lookup."""
 
     command = get_command(canonical_command_label(command_name))
+    group_name, _entry = _base_command_entries_by_label()[command.name]
     detail = HelpCommandDetail(
         canonical_command=command.name,
         slug=parse_command_label(command.name).slug,
@@ -390,10 +702,127 @@ def command_detail_payload(command_name: str, *, minimal: bool = False) -> dict[
         argument_hint=command.argument_hint,
         context_mode=command.context_mode,
         project_reentry_capable=command.project_reentry_capable,
+        signature=_display_signature_for_command(command.name),
+        group=group_name,
+        documented_variants=list(_documented_variants_for(command.name)),
         allowed_tools=[] if minimal else command.allowed_tools,
         requires={} if minimal else command.requires,
     )
-    return detail.as_payload()
+    payload = detail.as_payload()
+    if include_markdown:
+        payload["detail_markdown"] = render_command_detail_markdown(command.name, include_group_heading=True)
+    return payload
+
+
+def _render_command_detail_block(
+    registry_command: str,
+    *,
+    include_group_heading: bool,
+    public_prefix: str,
+) -> str:
+    command = get_command(registry_command)
+    group_name, _entry = _base_command_entries_by_label()[command.name]
+    signature = _apply_public_prefix(_display_signature_for_command(command.name), public_prefix=public_prefix)
+    lines: list[str] = []
+    if include_group_heading:
+        lines.extend((f"### {group_name}", ""))
+
+    lines.extend(
+        (
+            f"**`{signature}`**",
+            command.description.strip(),
+            "",
+            "Usage examples:",
+        )
+    )
+    for example in _usage_examples_for(command.name):
+        lines.append(f"Usage: `{_apply_public_prefix(example, public_prefix=public_prefix)}`")
+
+    variants = tuple(_apply_public_prefix(variant, public_prefix=public_prefix) for variant in _documented_variants_for(command.name))
+    if variants:
+        lines.extend(("", "Documented variants:"))
+        lines.extend(f"- `{variant}`" for variant in variants)
+
+    notes = _COMMAND_DETAIL_NOTES.get(command.name, ())
+    if notes:
+        lines.extend(("", "Notes:"))
+        lines.extend(f"- {note}" for note in notes)
+
+    lines.extend(("", "Registry metadata:"))
+    lines.append(f"- Canonical command: `{_apply_public_prefix(command.name, public_prefix=public_prefix)}`")
+    if command.argument_hint:
+        lines.append(f"- Argument hint: `{command.argument_hint}`")
+    lines.append(f"- Context mode: `{command.context_mode}`")
+    if command.project_reentry_capable:
+        lines.append("- Project reentry: supported")
+    for require_line in _requires_summary(command.requires):
+        lines.append(f"- Requires {require_line}")
+    for policy_line in _command_policy_summary(command.name):
+        lines.append(f"- {policy_line}")
+    for review_line in _review_contract_summary(command.name):
+        lines.append(f"- {review_line}")
+    for staged_line in _staged_workflow_summary(command.name):
+        lines.append(f"- {staged_line}")
+    return "\n".join(lines).strip()
+
+
+def _apply_public_prefix(text: str, *, public_prefix: str) -> str:
+    if public_prefix == "gpd:":
+        return text
+    return text.replace("gpd:", public_prefix)
+
+
+def render_command_detail_markdown(
+    command_name: str,
+    *,
+    public_prefix: str = "gpd:",
+    include_group_heading: bool = True,
+) -> str:
+    """Render one detailed command block from registry and renderer help metadata."""
+
+    command = get_command(canonical_command_label(command_name))
+    return _render_command_detail_block(
+        command.name,
+        include_group_heading=include_group_heading,
+        public_prefix=public_prefix,
+    )
+
+
+def render_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -> str:
+    """Render the detailed command reference from registry and renderer help metadata."""
+
+    lines = [
+        "## Detailed Command Reference",
+        "",
+        "Use `gpd:help --command <name>` when you want the detailed notes for one runtime command at a time.",
+        "",
+        "Core workflow: `gpd:new-project` -> `gpd:discuss-phase` -> `gpd:plan-phase` -> `gpd:execute-phase` -> `gpd:verify-work` -> repeat.",
+        "",
+        (
+            "Project-aware technical-analysis lane: `gpd:derive-equation`, `gpd:dimensional-analysis`, "
+            "`gpd:limiting-cases`, `gpd:numerical-convergence`, `gpd:sensitivity-analysis`, `GPD/analysis/`. "
+            "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed "
+            "current-workspace lane."
+        ),
+    ]
+    emitted: set[str] = set()
+    for group in help_command_groups():
+        lines.extend(("", f"### {group.name}"))
+        for entry in group.commands:
+            if entry.documented_variant or entry.registry_command in emitted:
+                continue
+            emitted.add(entry.registry_command)
+            lines.extend(
+                (
+                    "",
+                    _render_command_detail_block(
+                        entry.registry_command,
+                        include_group_heading=False,
+                        public_prefix=public_prefix,
+                    ),
+                )
+            )
+    return "\n".join(lines).strip()
 
 
 def render_quick_start_markdown() -> str:
@@ -487,6 +916,8 @@ __all__ = [
     "help_command_groups",
     "render_command_index",
     "render_command_index_markdown",
+    "render_command_detail_markdown",
+    "render_detailed_command_reference_markdown",
     "render_quick_start",
     "render_quick_start_markdown",
 ]

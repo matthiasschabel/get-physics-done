@@ -10,14 +10,16 @@ Gemini CLI uses:
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import re
 import shlex
 import shutil
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -25,7 +27,7 @@ from gpd.adapters.base import RuntimeAdapter
 from gpd.adapters.command_projection import prepend_projection_note, rewrite_projection_shell_bridge
 from gpd.adapters.gemini_shell_patches import (
     GEMINI_APPROVED_CONTRACT_PATH,
-    apply_gemini_shell_workflow_patches,
+    rewrite_gemini_shell_workflow_guidance,
 )
 from gpd.adapters.install_utils import (
     DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
@@ -159,6 +161,42 @@ _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 
+_SHARED_SHELL_FENCE_CLASSIFIER_NAMES = (
+    "classify_shell_fence_body",
+    "classify_shell_fence",
+    "classify_fenced_shell_body",
+)
+_SHARED_NON_RUNNABLE_KINDS = frozenset({"empty", "empty-shell-fence", "non-runnable", "non-runnable-body"})
+_SHARED_TERMINAL_EXAMPLE_KINDS = frozenset({"terminal-example", "terminal"})
+_SHARED_PSEUDOCODE_KINDS = frozenset(
+    {
+        "assignment-capture",
+        "command-substitution",
+        "control-flow",
+        "gpd-capture-echo-block",
+        "gpd-capture-status-block",
+        "gpd-contract-file-transport",
+        "heredoc",
+        "heredoc-or-stdin-contract-write",
+        "pseudocode",
+        "stdin-transport",
+        "tempfile",
+        "unsafe-or-pseudocode",
+        "variable-capture",
+    }
+)
+_SHARED_HARD_UNSAFE_REASONS = frozenset(
+    {
+        "command-substitution",
+        "contract-json-transport",
+        "heredoc",
+        "leading-assignment",
+        "shell-control-operator",
+        "shell-control-prefix",
+        "stdin-contract-write",
+    }
+)
+
 
 def _manifest_gemini_managed_runtime_files_key() -> str:
     """Return the catalog-owned manifest key for Gemini managed runtime files."""
@@ -260,6 +298,97 @@ def _render_gemini_shell_allowlist(bridge_command: str) -> str:
     return "\n".join(f"  - `{prefix}`" for prefix in _gemini_policy_command_prefixes(bridge_command))
 
 
+@lru_cache(maxsize=1)
+def _shared_shell_fence_classifier() -> Callable[..., object] | None:
+    """Return Worker 1's runtime-neutral shell classifier when it is present."""
+    try:
+        module = importlib.import_module("gpd.adapters.shell_fence_projection")
+    except ModuleNotFoundError as exc:
+        if exc.name == "gpd.adapters.shell_fence_projection":
+            return None
+        raise
+
+    for name in _SHARED_SHELL_FENCE_CLASSIFIER_NAMES:
+        classifier = getattr(module, name, None)
+        if callable(classifier):
+            return classifier
+    return None
+
+
+def _classify_with_shared_shell_fence_projection(
+    body: str,
+    *,
+    bridge_command: str | None = None,
+) -> object | None:
+    """Classify with the shared classifier, tolerating the Phase 7 handoff API shape."""
+    classifier = _shared_shell_fence_classifier()
+    if classifier is None:
+        return None
+    direct_prefixes = ("gpd ",) if bridge_command is None else ("gpd ", f"{bridge_command} ")
+    for kwargs in (
+        {"direct_command_prefixes": direct_prefixes},
+        {},
+        {"language": "bash"},
+    ):
+        try:
+            return classifier(body, **kwargs)
+        except TypeError:
+            continue
+    return None
+
+
+def _normalize_shared_shell_kind(value: object) -> str | None:
+    """Normalize enum/string values from the shared classifier into kebab-case."""
+    if value is None:
+        return None
+    enum_value = getattr(value, "value", value)
+    text = str(enum_value).strip().lower()
+    if not text:
+        return None
+    return text.replace("_", "-")
+
+
+def _shared_shell_classification_kind(classification: object | None) -> str | None:
+    """Best-effort extraction of a shared shell classification kind."""
+    if classification is None:
+        return None
+    if isinstance(classification, str):
+        return _normalize_shared_shell_kind(classification)
+    if isinstance(classification, Mapping):
+        for key in ("kind", "classification", "category", "shell_class", "shape"):
+            if key in classification:
+                return _normalize_shared_shell_kind(classification[key])
+        return None
+    for attr in ("kind", "classification", "category", "shell_class", "shape"):
+        if hasattr(classification, attr):
+            return _normalize_shared_shell_kind(getattr(classification, attr))
+    return None
+
+
+def _shared_shell_classification_reasons(classification: object | None) -> tuple[str, ...]:
+    """Best-effort extraction of shared shell classification reasons."""
+    if classification is None:
+        return ()
+    reasons: object | None = None
+    if isinstance(classification, Mapping):
+        reasons = classification.get("reasons")
+    else:
+        try:
+            reasons = classification.reasons  # type: ignore[attr-defined]
+        except AttributeError:
+            reasons = None
+    if isinstance(reasons, str):
+        return (_normalize_shared_shell_kind(reasons) or reasons,)
+    if not isinstance(reasons, (list, tuple, set, frozenset)):
+        return ()
+    normalized = tuple(
+        reason
+        for value in reasons
+        if (reason := _normalize_shared_shell_kind(value)) is not None
+    )
+    return tuple(dict.fromkeys(normalized))
+
+
 def _project_managed_mcp_servers(
     env: Mapping[str, str] | None = None,
     *,
@@ -340,6 +469,7 @@ _GEMINI_SHELL_CONTROL_PREFIXES = (
     "else",
     "elif ",
 )
+_GEMINI_SHELL_CONTROL_OPERATORS = (" && ", " || ", " | ", "; ")
 _GEMINI_SHELL_UNSAFE_FRAGMENTS = (
     "<<",
     "mktemp",
@@ -396,6 +526,9 @@ def _classify_gemini_shell_fence_body(
     first = lines[0]
     reasons: list[str] = []
     first_lower = first.lower()
+    shared_classification = _classify_with_shared_shell_fence_projection(body, bridge_command=bridge_command)
+    shared_kind = _shared_shell_classification_kind(shared_classification)
+    shared_reasons = _shared_shell_classification_reasons(shared_classification)
 
     if any(fragment in body for fragment in _GEMINI_SHELL_UNSAFE_FRAGMENTS):
         reasons.append("unsafe-shell-fragment")
@@ -403,12 +536,16 @@ def _classify_gemini_shell_fence_body(
         reasons.append("leading-assignment")
     if any(line.lower().startswith(_GEMINI_SHELL_CONTROL_PREFIXES) for line in lines):
         reasons.append("shell-control-flow")
+    if any(operator in line for line in lines for operator in _GEMINI_SHELL_CONTROL_OPERATORS):
+        reasons.append("shell-control-operator")
     if "$(" in body:
         reasons.append("command-substitution")
     if any("<" in line and ">" in line for line in lines):
         reasons.append("angle-placeholder")
     if _GEMINI_SHELL_TEMPLATE_PLACEHOLDER_RE.search(body):
         reasons.append("template-placeholder")
+    if any(reason in _SHARED_HARD_UNSAFE_REASONS for reason in shared_reasons):
+        reasons.append("shared-unsafe-shell-shape")
 
     if reasons:
         return GeminiShellFenceClassification("pseudocode", first, tuple(dict.fromkeys(reasons)))
@@ -419,6 +556,13 @@ def _classify_gemini_shell_fence_body(
         return GeminiShellFenceClassification("runnable-bridge", first, ("canonical-gpd-command",))
     if first.startswith(_GEMINI_STATIC_POLICY_COMMAND_PREFIXES):
         return GeminiShellFenceClassification("policy-static", first, ("static-policy-prefix",))
+    if shared_kind in _SHARED_PSEUDOCODE_KINDS:
+        shared_reason_suffix = ",".join(shared_reasons) if shared_reasons else shared_kind
+        return GeminiShellFenceClassification("pseudocode", first, (f"shared-{shared_reason_suffix}",))
+    if shared_kind in _SHARED_NON_RUNNABLE_KINDS:
+        return GeminiShellFenceClassification("non-runnable", first, (f"shared-{shared_kind}",))
+    if shared_kind in _SHARED_TERMINAL_EXAMPLE_KINDS:
+        return GeminiShellFenceClassification("terminal-example", first, (f"shared-{shared_kind}",))
     if first_lower.startswith(_GEMINI_TERMINAL_EXAMPLE_PREFIXES):
         return GeminiShellFenceClassification("terminal-example", first, ("terminal-example-prefix",))
     return GeminiShellFenceClassification("pseudocode", first, ("unclassified-shell-shape",))
@@ -496,11 +640,16 @@ def _render_gemini_classified_shell_fences(content: str, *, bridge_command: str)
     return "".join(rendered), shell_policy_required
 
 
-def _render_gemini_command_prompt(content: str, *, bridge_command: str) -> str:
+def _render_gemini_command_prompt(
+    content: str,
+    *,
+    bridge_command: str,
+    command_name: str | None = None,
+) -> str:
     """Render one canonical command markdown source into Gemini prompt text."""
     content = strip_sub_tags(content)
     content = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
-    content = _rewrite_gemini_shell_workflow_guidance(content)
+    content = _rewrite_gemini_shell_workflow_guidance(content, command_name=command_name)
     content, shell_allowlist_required = _render_gemini_classified_shell_fences(
         content,
         bridge_command=bridge_command,
@@ -548,7 +697,7 @@ def _validate_existing_gemini_managed_state(target_dir: Path) -> None:
         raise RuntimeError("Gemini managed_runtime_files is malformed.")
 
 
-def _rewrite_gemini_shell_workflow_guidance(content: str) -> str:
+def _rewrite_gemini_shell_workflow_guidance(content: str, *, command_name: str | None = None) -> str:
     """Rewrite known shell-heavy workflow snippets into Gemini-safe forms.
 
     Gemini CLI's policy engine validates shell commands syntactically from the
@@ -558,62 +707,7 @@ def _rewrite_gemini_shell_workflow_guidance(content: str) -> str:
     Gemini headless auto-edit they lead the model to generate commands that are
     denied before GPD ever runs.
     """
-    content = apply_gemini_shell_workflow_patches(content)
-    return _rewrite_gemini_capture_assignments(content)
-
-
-_GEMINI_CAPTURE_ASSIGNMENT_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)$",
-    re.MULTILINE,
-)
-_GEMINI_CAPTURED_GPD_STATUS_BLOCK_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)\n"
-    r"(?P=indent)if \[ \$\? -ne 0 \]; then\n"
-    r"(?:(?P=indent)[ \t]+.*\n)+?"
-    r"(?P=indent)fi$",
-    re.MULTILINE,
-)
-_GEMINI_CAPTURED_GPD_ECHO_BLOCK_RE = re.compile(
-    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)\n"
-    r'(?P=indent)echo "\$(?P=var)"$',
-    re.MULTILINE,
-)
-
-
-def _gemini_direct_command_comment(command: str) -> str:
-    """Return a concise Gemini note for transformed shell-capture examples."""
-    if command.startswith("gpd --raw init"):
-        return "# Gemini: run initialization directly."
-    return "# Gemini: run this command directly."
-
-
-def _rewrite_gemini_capture_assignments(content: str) -> str:
-    """Rewrite single-line Gemini shell capture examples into direct commands."""
-
-    def _replace_capture_block(match: re.Match[str]) -> str:
-        indent = match.group("indent")
-        command = match.group("command").strip()
-        suffix = (match.group("suffix") or "").strip()
-        comment = f"{indent}{_gemini_direct_command_comment(command)}"
-        rewritten = f"{indent}{command}"
-        if suffix:
-            rewritten = f"{rewritten} {suffix}"
-        return f"{comment}\n{rewritten}"
-
-    def _replace(match: re.Match[str]) -> str:
-        indent = match.group("indent")
-        command = match.group("command").strip()
-        suffix = match.group("suffix") or ""
-        suffix = suffix.strip()
-        comment = f"{indent}{_gemini_direct_command_comment(command)}"
-        rewritten = f"{indent}{command}"
-        if suffix:
-            rewritten = f"{rewritten} {suffix}"
-        return f"{comment}\n{rewritten}"
-
-    content = _GEMINI_CAPTURED_GPD_STATUS_BLOCK_RE.sub(_replace_capture_block, content)
-    content = _GEMINI_CAPTURED_GPD_ECHO_BLOCK_RE.sub(_replace_capture_block, content)
-    return _GEMINI_CAPTURE_ASSIGNMENT_RE.sub(_replace, content)
+    return rewrite_gemini_shell_workflow_guidance(content, command_name=command_name)
 
 
 # ---------------------------------------------------------------------------
@@ -1015,7 +1109,11 @@ def _copy_commands_recursive(
             public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
             content = content.replace("`gpd:`", f"`{public_prefix}`")
             content = rewrite_runtime_command_surfaces_to_public(content, public_prefix=public_prefix)
-            content = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+            content = _render_gemini_command_prompt(
+                content,
+                bridge_command=bridge_command,
+                command_name=entry.stem,
+            )
             toml_content = _convert_to_gemini_toml(content)
             toml_path = dest_dir / entry.with_suffix(".toml").name
             toml_path.write_text(toml_content, encoding="utf-8")
@@ -1049,7 +1147,7 @@ class GeminiAdapter(RuntimeAdapter):
         command_name: str | None = None,
         bridge_command: str | None = None,
     ) -> str:
-        del path_prefix, command_name
+        del path_prefix
         if surface_kind != "command":
             return super().project_markdown_surface(
                 content,
@@ -1060,7 +1158,11 @@ class GeminiAdapter(RuntimeAdapter):
         if bridge_command is None:
             raise ValueError("bridge_command is required for projected Gemini command surfaces")
         content = self.translate_shared_command_references(content)
-        rendered = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+        rendered = _render_gemini_command_prompt(
+            content,
+            bridge_command=bridge_command,
+            command_name=command_name,
+        )
         prompt = tomllib.loads(_convert_to_gemini_toml(rendered)).get("prompt")
         if not isinstance(prompt, str):
             raise ValueError("gemini projected command surface must expose a prompt string")
@@ -1161,6 +1263,10 @@ class GeminiAdapter(RuntimeAdapter):
                 install_scope=install_scope,
             )
             translated = _rewrite_gemini_shell_workflow_guidance(translated)
+            translated, _shell_allowlist_required = _render_gemini_classified_shell_fences(
+                translated,
+                bridge_command=bridge_command,
+            )
             return _rewrite_gpd_cli_invocations(translated, bridge_command)
 
         from gpd.adapters.install_utils import install_gpd_content

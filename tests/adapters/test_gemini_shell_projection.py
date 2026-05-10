@@ -9,7 +9,7 @@ from typing import Literal
 
 import pytest
 
-from gpd.adapters.gemini import _gemini_policy_command_prefixes
+from gpd.adapters.gemini import _gemini_policy_command_prefixes, classify_gemini_shell_fence_body
 from gpd.adapters.install_utils import project_markdown_for_runtime
 from tests.adapters.projection_test_utils import (
     first_runnable_shell_command,
@@ -17,7 +17,6 @@ from tests.adapters.projection_test_utils import (
     runtime_bridge_command,
     shell_fences,
 )
-from tests.prompt_metrics_support import MarkdownFence
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GPD_ROOT = REPO_ROOT / "src/gpd"
@@ -28,6 +27,9 @@ FORBIDDEN_GEMINI_SHELL_FRAGMENTS = (
     "printf '%s\\n'",
     "mktemp",
     "<<",
+    "INIT=$(",
+    "PRE_CHECK=$(",
+    "CONTEXT=$(",
     "if [ $? -ne 0 ]",
 )
 TARGET_STAGED_COMMAND_INIT_BY_NAME = {
@@ -37,26 +39,6 @@ TARGET_STAGED_COMMAND_INIT_BY_NAME = {
     "write-paper": '--raw init write-paper --stage paper_bootstrap -- "$ARGUMENTS"',
 }
 LEADING_ASSIGNMENT_RE = re.compile(r"^[A-Z][A-Z0-9_]*=")
-SHELL_CONTROL_PREFIXES = ("case ", "elif ", "else", "fi", "for ", "if ", "then", "while ")
-TERMINAL_EXAMPLE_PREFIXES = (
-    "./",
-    "cat ",
-    "cd ",
-    "cp ",
-    "curl ",
-    "echo ",
-    "find ",
-    "git ",
-    "gpd ",
-    "grep ",
-    "ls ",
-    "mkdir ",
-    "python ",
-    "python3 ",
-    "rm ",
-    "sed ",
-    "uv ",
-)
 
 GeminiShellClassification = Literal["runnable-bridge", "policy-static", "terminal-example", "pseudocode", "non-runnable"]
 
@@ -137,40 +119,6 @@ def _new_project_contract_section(projected: str) -> str:
     return projected[start:end]
 
 
-def _classify_rendered_gemini_shell_fence(
-    fence: MarkdownFence,
-    *,
-    bridge: str,
-    allowed_prefixes: tuple[str, ...],
-) -> GeminiShellClassification:
-    command = first_runnable_shell_command(fence)
-    if command is None:
-        return "non-runnable"
-    if command.startswith(bridge):
-        return "runnable-bridge"
-    static_prefixes = tuple(prefix for prefix in allowed_prefixes if prefix != bridge)
-    if command.startswith(static_prefixes):
-        return "policy-static"
-    if _looks_like_shell_pseudocode(fence.body, command):
-        return "pseudocode"
-    return "terminal-example"
-
-
-def _looks_like_shell_pseudocode(body: str, command: str) -> bool:
-    stripped = command.strip()
-    if LEADING_ASSIGNMENT_RE.match(stripped):
-        return True
-    if stripped.startswith(SHELL_CONTROL_PREFIXES):
-        return True
-    if "$(" in body or "<<" in body:
-        return True
-    if "$ARGUMENTS" in body or "${" in body:
-        return True
-    if "<" in body and ">" in body and "```" not in body:
-        return True
-    return False
-
-
 def _gemini_shell_policy_offenders(
     text: str,
     *,
@@ -183,16 +131,13 @@ def _gemini_shell_policy_offenders(
     for fence in shell_fences(text):
         line_span = f"{fence.start_line}-{fence.end_line}"
         command = first_runnable_shell_command(fence)
-        classification = _classify_rendered_gemini_shell_fence(
-            fence,
-            bridge=bridge,
-            allowed_prefixes=allowed_prefixes,
-        )
+        rendered_classification = classify_gemini_shell_fence_body(fence.body, bridge_command=bridge)
+        classification: GeminiShellClassification = rendered_classification.kind
 
         if classification not in {"runnable-bridge", "policy-static"}:
             detail = command or "no runnable command"
-            if command and command.startswith(TERMINAL_EXAMPLE_PREFIXES):
-                detail = f"terminal command rendered as executable shell: {command}"
+            if rendered_classification.reasons:
+                detail = f"{detail}; reasons={','.join(rendered_classification.reasons)}"
             offenders.append(GeminiShellPolicyOffender(label, line_span, classification, detail))
         elif command is None or not command.startswith(allowed_prefixes):
             offenders.append(

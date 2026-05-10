@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from gpd.adapters.command_projection import classify_projection_shell_fence
 from gpd.adapters.install_utils import (
     COMPACT_HELP_BRIDGE_SHIM_SENTINEL,
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
@@ -14,6 +15,7 @@ from gpd.adapters.install_utils import (
     build_runtime_cli_bridge_command,
 )
 from gpd.adapters.runtime_catalog import get_runtime_descriptor
+from gpd.adapters.shell_fence_projection import shell_fence_runnable_lines
 from gpd.core import prompt_diagnostics
 from gpd.core.workflow_staging import load_workflow_stage_manifest_from_path
 from tests.prompt_metrics_support import MarkdownFence, iter_markdown_fences
@@ -221,11 +223,7 @@ def iter_staged_command_projection_cases(
 
 def first_runnable_shell_command(fence_or_body: MarkdownFence | str) -> str | None:
     body = fence_or_body.body if isinstance(fence_or_body, MarkdownFence) else fence_or_body
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            return stripped
-    return None
+    return classify_projection_shell_fence(body).first_command
 
 
 def runtime_bridge_command(
@@ -278,9 +276,7 @@ def shell_fence_bodies(text: str) -> tuple[str, ...]:
 
 
 def runnable_shell_lines(fence: MarkdownFence) -> tuple[str, ...]:
-    return tuple(
-        stripped for line in fence.body.splitlines() if (stripped := line.strip()) and not stripped.startswith("#")
-    )
+    return shell_fence_runnable_lines(fence.body)
 
 
 def first_runnable_shell_commands(text: str) -> tuple[str, ...]:

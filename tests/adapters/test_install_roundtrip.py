@@ -227,7 +227,9 @@ def _installed_workflow_text(target: Path, workflow_name: str) -> str:
 
 
 def _command_or_workflow_authority_text(target: Path, command_prompt: str, runtime: str, workflow_name: str) -> str:
-    if has_compact_non_native_shim(command_prompt):
+    if has_compact_non_native_shim(command_prompt) or (
+        workflow_name == "help" and "renderer-backed local CLI help bridge" in command_prompt
+    ):
         command_text = _canonicalize_runtime_markdown(command_prompt, runtime=runtime)
         workflow_text = _canonicalize_runtime_markdown(_installed_workflow_text(target, workflow_name), runtime=runtime)
         return command_text + "\n" + workflow_text
@@ -668,21 +670,17 @@ def test_installed_help_surface_uses_native_include_or_compact_help_bridge_shim(
     assert_no_unresolved_include_markers(prompt, label=f"{runtime} help")
     _assert_runtime_command_label_visible(prompt, runtime=runtime, command_name="help")
 
-    if descriptor.native_include_support:
-        assert raw_include_count(prompt, "workflows/help.md") == 1
-        assert "<!-- [included: help.md] -->" not in prompt
-        assert not has_help_bridge_shim_sentinel(prompt)
-        return
-
     assert raw_include_count(prompt, "workflows/help.md") == 0
     assert "<!-- [included: help.md] -->" not in prompt
-    assert has_help_bridge_shim_sentinel(prompt)
     assert not has_staged_shim_sentinel(prompt)
     assert "<current-help-command>" not in prompt
     assert "--raw help" in prompt
     assert "--raw help --all" in prompt
     assert "--raw help --command <name>" in prompt
     assert len(prompt) < 10_000
+
+    if not descriptor.native_include_support:
+        assert has_help_bridge_shim_sentinel(prompt)
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)

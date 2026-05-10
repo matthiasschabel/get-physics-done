@@ -514,14 +514,13 @@ class TestSkillsServerIntegration:
         assert isinstance(result, dict)
         assert "error" not in result
         assert result["name"] == "gpd-help"
-        assert "Display GPD help by delegating to the workflow-owned help surface." in result["content"]
+        assert "Display GPD help by delegating to the renderer-backed local CLI help bridge" in result["content"]
         assert "/gpd:" not in result["content"]
         assert "gpd-help" in result["content"]
         assert "## Command Requirements" in result["content"]
         assert "Quick Start Extract" in result["content"]
         assert "## Contextual Help" not in result["content"]
-        assert "subject-owned publication root at `GPD/publication/{subject_slug}`" in result["content"]
-        assert "resolved GPD-owned manuscript root" in result["content"]
+        assert "workflow-owned help surface as the marker fallback" in result["content"]
         assert result["file_count"] == 1
         assert result["allowed_tools_surface"] == "command.allowed-tools"
 

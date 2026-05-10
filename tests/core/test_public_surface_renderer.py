@@ -26,7 +26,9 @@ from gpd.core.public_surface_renderer import (
 )
 from scripts.render_public_surface import (
     check_generated_files,
+    check_generated_region_inventory,
     check_generated_regions,
+    default_target_contracts,
     generated_region_markers,
     render_generated_region,
     replace_generated_regions,
@@ -270,3 +272,51 @@ def test_generated_region_helpers_fail_closed_for_bad_markers() -> None:
     nested_start, nested_end = generated_region_markers("beginner-preflight")
     with pytest.raises(ValueError, match="Nested public surface generated block"):
         replace_generated_regions(f"{known_start}\n{nested_start}\nbody\n{nested_end}\n{known_end}\n")
+
+    with pytest.raises(ValueError, match="Orphan end marker"):
+        replace_generated_regions(f"before\n{known_end}\nafter\n")
+
+
+def test_generated_region_inventory_detects_missing_markers_and_unexpected_duplicates() -> None:
+    text = render_generated_region("beginner-preflight", render_public_surface_block("beginner-preflight"))
+
+    missing = check_generated_region_inventory(
+        text,
+        required_blocks=("beginner-preflight", "beginner-caveats"),
+    )
+    assert len(missing) == 1
+    assert "missing 1 expected marker(s) for 'beginner-caveats'" in missing[0].diff
+
+    duplicate_text = text + "\n" + text
+    duplicate = check_generated_region_inventory(
+        duplicate_text,
+        required_blocks=("beginner-preflight",),
+    )
+    assert len(duplicate) == 1
+    assert "duplicate marker for 'beginner-preflight' is not allowed" in duplicate[0].diff
+
+    allowed_duplicate = check_generated_region_inventory(
+        duplicate_text,
+        required_blocks=("beginner-preflight", "beginner-preflight"),
+        allowed_duplicate_blocks=("beginner-preflight",),
+    )
+    assert allowed_duplicate == ()
+
+
+def test_default_public_surface_targets_declare_current_marker_inventory() -> None:
+    contracts = {target.path.as_posix(): target for target in default_target_contracts()}
+
+    assert "README.md" in contracts
+    assert contracts["README.md"].allowed_duplicate_blocks == (
+        "recovery-note",
+        "local-cli-bridge-summary",
+    )
+    assert contracts["src/gpd/specs/workflows/help.md"].required_blocks == (
+        "local-cli-bridge-summary",
+        "recovery-note",
+    )
+
+    context = public_surface_context()
+    for surface in context.runtime_surfaces:
+        path = f"docs/{runtime_doc_filename(surface)}"
+        assert contracts[path].required_blocks == (runtime_quickstart_block_id(surface),)

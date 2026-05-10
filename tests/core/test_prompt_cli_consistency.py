@@ -785,7 +785,7 @@ def test_progress_prompt_requires_project_not_roadmap() -> None:
 def test_progress_prompt_and_help_clarify_runtime_vs_local_cli_boundary() -> None:
     command = (REPO_ROOT / "src/gpd/commands/progress.md").read_text(encoding="utf-8")
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
-    progress_section = _extract_between(help_workflow, "### Progress Tracking", "### Session Management")
+    progress_section = _extract_between(help_workflow, "**`gpd:progress", "**`gpd:suggest-next")
     progress_registry = get_command("progress")
 
     assert progress_registry.argument_hint == "[--brief | --full | --reconcile]"

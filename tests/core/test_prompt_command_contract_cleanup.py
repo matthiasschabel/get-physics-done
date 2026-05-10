@@ -100,6 +100,9 @@ def test_help_wrapper_uses_stable_section_markers_for_extracts() -> None:
 
     assert "Use the workflow-owned stable markers as the extraction boundaries" in help_command
     assert "never print the HTML marker comments themselves" in help_command
+    assert "renderer-backed local CLI help bridge" in help_command
+    assert "`@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path" in help_command
+    assert all(parse_at_include_path(line.strip()) is None for line in help_command.splitlines())
     assert "Start at the workflow-owned" not in help_command
     assert "Stop before `## Command Index`" not in help_command
     assert "Stop before `## Detailed Command Reference`" not in help_command

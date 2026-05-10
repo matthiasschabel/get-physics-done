@@ -19,21 +19,14 @@ from gpd.core.public_surface_renderer import (
     public_surface_context,
     render_public_surface_block,
     runtime_doc_filename,
+    runtime_quickstart_block_id,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MARKER_PREFIX = "gpd-public-surface"
-_DEFAULT_STATIC_TARGET_PATHS = (
-    Path("README.md"),
-    Path("docs/README.md"),
-    Path("docs/macos.md"),
-    Path("docs/linux.md"),
-    Path("docs/windows.md"),
-    Path("src/gpd/specs/workflows/help.md"),
-)
-
 _BLOCK_ID_PATTERN = r"[a-z0-9][a-z0-9-]*"
 _START_MARKER_RE = re.compile(rf"<!-- {MARKER_PREFIX}:(?P<block_id>{_BLOCK_ID_PATTERN}):start -->")
+_END_MARKER_RE = re.compile(rf"<!-- {MARKER_PREFIX}:(?P<block_id>{_BLOCK_ID_PATTERN}):end -->")
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +34,13 @@ class GeneratedRegionDiff:
     path: Path | None
     block_id: str
     diff: str
+
+
+@dataclass(frozen=True, slots=True)
+class PublicSurfaceTarget:
+    path: Path
+    required_blocks: tuple[str, ...]
+    allowed_duplicate_blocks: tuple[str, ...] = ()
 
 
 def generated_region_markers(block_id: str) -> tuple[str, str]:
@@ -63,14 +63,77 @@ def _known_block_ids() -> frozenset[str]:
 
 
 def default_target_paths() -> tuple[Path, ...]:
+    return tuple(target.path for target in default_target_contracts())
+
+
+def default_target_contracts() -> tuple[PublicSurfaceTarget, ...]:
     runtime_doc_paths = tuple(
-        Path("docs") / runtime_doc_filename(surface)
+        PublicSurfaceTarget(
+            Path("docs") / runtime_doc_filename(surface),
+            (runtime_quickstart_block_id(surface),),
+        )
         for surface in public_surface_context().runtime_surfaces
     )
     return (
-        *_DEFAULT_STATIC_TARGET_PATHS[:-1],
+        PublicSurfaceTarget(
+            Path("README.md"),
+            (
+                "terminal-runtime-bridge",
+                "beginner-startup-ladder",
+                "recovery-note",
+                "local-cli-bridge-summary",
+                "supported-runtimes-table",
+                "recovery-note",
+                "local-cli-bridge-summary",
+            ),
+            allowed_duplicate_blocks=("recovery-note", "local-cli-bridge-summary"),
+        ),
+        PublicSurfaceTarget(
+            Path("docs/README.md"),
+            (
+                "beginner-preflight",
+                "beginner-caveats",
+                "beginner-startup-ladder",
+                "recovery-note",
+                "terminal-runtime-bridge",
+                "post-start-settings",
+            ),
+        ),
+        PublicSurfaceTarget(
+            Path("docs/macos.md"),
+            (
+                "runtime-doc-links",
+                "os-install-matrix",
+                "supported-runtimes-table",
+                "os-next-steps-table",
+                "recovery-note",
+            ),
+        ),
+        PublicSurfaceTarget(
+            Path("docs/linux.md"),
+            (
+                "runtime-doc-links",
+                "os-install-matrix",
+                "supported-runtimes-table",
+                "os-next-steps-table",
+                "recovery-note",
+            ),
+        ),
+        PublicSurfaceTarget(
+            Path("docs/windows.md"),
+            (
+                "runtime-doc-links",
+                "os-install-matrix",
+                "supported-runtimes-table",
+                "os-next-steps-table",
+                "recovery-note",
+            ),
+        ),
         *runtime_doc_paths,
-        _DEFAULT_STATIC_TARGET_PATHS[-1],
+        PublicSurfaceTarget(
+            Path("src/gpd/specs/workflows/help.md"),
+            ("local-cli-bridge-summary", "recovery-note"),
+        ),
     )
 
 
@@ -94,9 +157,18 @@ def _replace_generated_regions_in_text(text: str, *, path: Path | None = None) -
 
     while True:
         start_match = _START_MARKER_RE.search(text, cursor)
+        orphan_end_match = _END_MARKER_RE.search(text, cursor)
         if start_match is None:
+            if orphan_end_match is not None:
+                block_id = orphan_end_match.group("block_id")
+                label = f" in {path.as_posix()}" if path is not None else ""
+                raise ValueError(f"Orphan end marker for public surface generated block {block_id!r}{label}")
             output_parts.append(text[cursor:])
             break
+        if orphan_end_match is not None and orphan_end_match.start() < start_match.start():
+            block_id = orphan_end_match.group("block_id")
+            label = f" in {path.as_posix()}" if path is not None else ""
+            raise ValueError(f"Orphan end marker for public surface generated block {block_id!r}{label}")
 
         block_id = start_match.group("block_id")
         if block_id not in known_block_ids:
@@ -122,6 +194,57 @@ def _replace_generated_regions_in_text(text: str, *, path: Path | None = None) -
     return "".join(output_parts), tuple(replaced_block_ids)
 
 
+def check_generated_region_inventory(
+    text: str,
+    *,
+    required_blocks: Sequence[str],
+    allowed_duplicate_blocks: Sequence[str] = (),
+    path: Path | None = None,
+) -> tuple[GeneratedRegionDiff, ...]:
+    """Check that a default target still carries its declared generated regions."""
+
+    known_block_ids = _known_block_ids()
+    required_counts: dict[str, int] = {}
+    for block_id in required_blocks:
+        if block_id not in known_block_ids:
+            raise ValueError(f"Unknown required public surface block {block_id!r}")
+        required_counts[block_id] = required_counts.get(block_id, 0) + 1
+
+    actual_counts: dict[str, int] = {}
+    for match in _START_MARKER_RE.finditer(text):
+        block_id = match.group("block_id")
+        actual_counts[block_id] = actual_counts.get(block_id, 0) + 1
+
+    allowed_duplicates = set(allowed_duplicate_blocks)
+    problems: list[str] = []
+    for block_id, expected_count in required_counts.items():
+        actual_count = actual_counts.get(block_id, 0)
+        if actual_count < expected_count:
+            problems.append(f"missing {expected_count - actual_count} expected marker(s) for {block_id!r}")
+        if actual_count > expected_count:
+            problems.append(f"found {actual_count} marker(s) for {block_id!r}, expected {expected_count}")
+
+    for block_id, actual_count in sorted(actual_counts.items()):
+        if block_id not in known_block_ids:
+            continue
+        if block_id not in required_counts:
+            problems.append(f"unexpected marker for {block_id!r}")
+        if actual_count > 1 and block_id not in allowed_duplicates:
+            problems.append(f"duplicate marker for {block_id!r} is not allowed")
+
+    if not problems:
+        return ()
+
+    label = path.as_posix() if path is not None else "<text>"
+    return (
+        GeneratedRegionDiff(
+            path=path,
+            block_id=", ".join(dict.fromkeys(required_blocks)),
+            diff=f"{label}: public surface marker inventory mismatch:\n- " + "\n- ".join(problems) + "\n",
+        ),
+    )
+
+
 def replace_generated_regions(text: str) -> str:
     updated, _block_ids = _replace_generated_regions_in_text(text)
     return updated
@@ -145,14 +268,30 @@ def _resolve_paths(paths: Sequence[Path] | None, *, repo_root: Path) -> tuple[Pa
     return tuple(path if path.is_absolute() else repo_root / path for path in selected_paths)
 
 
+def _default_target_contract_map(*, repo_root: Path) -> dict[Path, PublicSurfaceTarget]:
+    return {(repo_root / target.path).resolve(): target for target in default_target_contracts()}
+
+
 def check_generated_files(
     paths: Sequence[Path] | None = None,
     *,
     repo_root: Path = REPO_ROOT,
 ) -> tuple[GeneratedRegionDiff, ...]:
     diffs: list[GeneratedRegionDiff] = []
+    target_contracts = _default_target_contract_map(repo_root=repo_root) if paths is None else {}
     for path in _resolve_paths(paths, repo_root=repo_root):
-        diffs.extend(check_generated_regions(path.read_text(encoding="utf-8"), path=path))
+        content = path.read_text(encoding="utf-8")
+        diffs.extend(check_generated_regions(content, path=path))
+        target = target_contracts.get(path.resolve())
+        if target is not None:
+            diffs.extend(
+                check_generated_region_inventory(
+                    content,
+                    required_blocks=target.required_blocks,
+                    allowed_duplicate_blocks=target.allowed_duplicate_blocks,
+                    path=path,
+                )
+            )
     return tuple(diffs)
 
 
@@ -162,9 +301,20 @@ def update_generated_files(
     repo_root: Path = REPO_ROOT,
 ) -> tuple[Path, ...]:
     updated_paths: list[Path] = []
+    target_contracts = _default_target_contract_map(repo_root=repo_root) if paths is None else {}
     for path in _resolve_paths(paths, repo_root=repo_root):
         original = path.read_text(encoding="utf-8")
         updated = replace_generated_regions(original)
+        target = target_contracts.get(path.resolve())
+        if target is not None:
+            diffs = check_generated_region_inventory(
+                updated,
+                required_blocks=target.required_blocks,
+                allowed_duplicate_blocks=target.allowed_duplicate_blocks,
+                path=path,
+            )
+            if diffs:
+                raise ValueError(diffs[0].diff.strip())
         if updated == original:
             continue
         path.write_text(updated, encoding="utf-8")

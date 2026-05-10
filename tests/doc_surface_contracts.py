@@ -602,6 +602,7 @@ def assert_help_command_quick_start_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "Workflow-owned reference fallback",
             "workflow-owned reference",
             "workflow-owned `## Quick Start` section",
         ),
@@ -635,6 +636,7 @@ def assert_help_command_quick_start_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "Run this help command with --all for the compact command index.",
             "Run <current-help-command> --all for the compact command index.",
             *tuple(
                 f"Run \\`{command}\\` for the compact command index."
@@ -674,6 +676,7 @@ def assert_help_command_all_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "Run this help command with --command <name> for detailed help on one command.",
             "Run <current-help-command> --command <name> for detailed help on one command.",
             *tuple(
                 f"Run \\`{command}\\` for detailed help on one command."
@@ -731,6 +734,7 @@ def assert_help_command_single_command_extract_contract(content: str) -> None:
     _assert_contains_any(
         content,
         (
+            "Unknown command. Run this help command with --all for the compact command index.",
             "Unknown command. Run <current-help-command> --all for the compact command index.",
             "Unknown command. Run `",
             *_quoted_fragments(*_runtime_command_variants("help --all")),

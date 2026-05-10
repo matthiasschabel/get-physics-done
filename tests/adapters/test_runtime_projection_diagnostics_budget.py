@@ -63,6 +63,7 @@ def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None
     assert set(NON_NATIVE_RUNTIME_PROJECTION_TARGETS) <= set(runtime_top_prompts)
 
     hotspot_names: set[str] = set()
+    saw_bridge_pressure = False
     saw_shell_rewrite_pressure = False
     for runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS:
         rows = runtime_top_prompts[runtime]
@@ -86,8 +87,11 @@ def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None
             _non_negative_int(row, "expanded_line_count")
             _non_negative_int(row, "include_count")
             _non_negative_int(row, "runtime_note_count")
+            _non_negative_int(row, "shell_fence_count")
             shell_rewrite_count = _non_negative_int(row, "shell_rewrite_count")
+            bridge_command_occurrences = _non_negative_int(row, "bridge_command_occurrences")
 
+            saw_bridge_pressure = saw_bridge_pressure or bridge_command_occurrences > 0
             saw_shell_rewrite_pressure = saw_shell_rewrite_pressure or shell_rewrite_count > 0
             if row["name"] in KNOWN_PROJECTION_HOTSPOTS:
                 hotspot_names.add(row["name"])
@@ -95,6 +99,7 @@ def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None
         assert projected_char_counts == sorted(projected_char_counts, reverse=True)
 
     assert hotspot_names, "runtime_top_prompts should surface at least one known prompt-size hotspot"
+    assert saw_bridge_pressure, "runtime_top_prompts should expose nonzero bridge-command pressure"
     assert saw_shell_rewrite_pressure, "runtime_top_prompts should expose nonzero shell rewrite pressure"
 
 

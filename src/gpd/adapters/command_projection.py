@@ -16,6 +16,12 @@ from gpd.adapters.install_utils import (
     rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
 )
+from gpd.adapters.shell_fence_projection import (
+    DEFAULT_DIRECT_COMMAND_PREFIXES,
+    DEFAULT_TERMINAL_EXAMPLE_PREFIXES,
+    ShellFenceProjection,
+    classify_shell_fence_body,
+)
 
 
 def rewrite_projection_shell_bridge(content: str, bridge_command: str) -> str:
@@ -24,6 +30,20 @@ def rewrite_projection_shell_bridge(content: str, bridge_command: str) -> str:
         content,
         bridge_command,
         shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
+    )
+
+
+def classify_projection_shell_fence(
+    body: str,
+    *,
+    direct_command_prefixes: Sequence[str] = DEFAULT_DIRECT_COMMAND_PREFIXES,
+    terminal_example_prefixes: Sequence[str] = DEFAULT_TERMINAL_EXAMPLE_PREFIXES,
+) -> ShellFenceProjection:
+    """Classify a shell fence body for runtime-neutral projection decisions."""
+    return classify_shell_fence_body(
+        body,
+        direct_command_prefixes=direct_command_prefixes,
+        terminal_example_prefixes=terminal_example_prefixes,
     )
 
 

@@ -1048,8 +1048,8 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 "",
                 "## Runtime Top Prompts",
                 "",
-                "| Runtime | Rank | Native includes | Kind | Name | Projected chars | Expanded chars | Char delta | Line delta | Includes | Runtime notes | Shell rewrites |",
-                "|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|",
+                "| Runtime | Rank | Native includes | Kind | Name | Projected chars | Expanded chars | Char delta | Line delta | Includes | Runtime notes | Shell fences | Shell rewrites | Bridge calls |",
+                "|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
             ]
         )
         ranks_by_runtime: dict[str, int] = defaultdict(int)
@@ -1061,7 +1061,8 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 f"{str(row['native_include_support']).lower()} | {row['kind']} | `{row['name']}` | "
                 f"{row['projected_char_count']} | {row['expanded_char_count']} | "
                 f"{row['char_delta']} | {row['line_delta']} | {row['include_count']} | "
-                f"{row['runtime_note_count']} | {row['shell_rewrite_count']} |"
+                f"{row['runtime_note_count']} | {row['shell_fence_count']} | "
+                f"{row['shell_rewrite_count']} | {row['bridge_command_occurrences']} |"
             )
 
     stage_top_prompts = _stage_top_prompt_rows(report.stage_diagnostics, top)
@@ -1246,7 +1247,9 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
             str(row["line_delta"]),
             str(row["include_count"]),
             str(row["runtime_note_count"]),
+            str(row["shell_fence_count"]),
             str(row["shell_rewrite_count"]),
+            str(row["bridge_command_occurrences"]),
         )
         for row in _runtime_top_prompt_rows(report.items, top)
     ]
@@ -1261,7 +1264,9 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
             "line_delta",
             "includes",
             "runtime_notes",
+            "shell_fences",
             "shell_rewrites",
+            "bridge_calls",
         )
         runtime_widths = [len(header) for header in runtime_headers]
         for row in runtime_rows:
@@ -2895,7 +2900,9 @@ def _runtime_top_prompt_rows(
                     "include_count": metric.include_count,
                     "runtime_note_count": metric.runtime_note_count,
                     "runtime_note_chars": metric.runtime_note_chars,
+                    "shell_fence_count": metric.shell_fence_count,
                     "shell_rewrite_count": metric.shell_rewrite_count,
+                    "bridge_command_occurrences": metric.bridge_command_occurrences,
                 }
             )
 

@@ -1,441 +1,376 @@
-"""Gemini-owned ordered shell-workflow rewrite registry."""
+"""Gemini-owned structural shell workflow rewrites."""
 
 from __future__ import annotations
 
 import re
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 GEMINI_APPROVED_CONTRACT_PATH = "GPD/.approved-project-contract.json"
 
+GeminiShellWorkflowClass = Literal[
+    "direct-gpd-command",
+    "gpd-capture-status-block",
+    "gpd-capture-echo-block",
+    "gpd-precheck-commit-sequence",
+    "gpd-contract-file-transport",
+    "gpd-health-tempfile-wrapper",
+    "profile-argument-validation-guidance",
+    "set-profile-persistence-guidance",
+    "unsafe-or-pseudocode",
+    "unchanged",
+]
+
 
 @dataclass(frozen=True, slots=True)
-class GeminiShellPatch:
-    """One ordered Gemini shell-workflow rewrite."""
+class GeminiShellWorkflowRewrite:
+    """Classification and replacement for one Gemini-visible shell workflow."""
 
-    id: str
-    apply: Callable[[str], str]
-
-
-def _exact_patch(patch_id: str, old: str, new: str) -> GeminiShellPatch:
-    """Return an exact string replacement patch."""
-
-    def _apply(content: str) -> str:
-        return content.replace(old, new)
-
-    return GeminiShellPatch(patch_id, _apply)
+    kind: GeminiShellWorkflowClass
+    replacement: str | None = None
+    reason: str = ""
 
 
-def _regex_patch(
-    patch_id: str,
-    pattern: str,
-    replacement: str,
-    *,
-    flags: int = 0,
-) -> GeminiShellPatch:
-    """Return a regular-expression replacement patch."""
-    compiled = re.compile(pattern, flags)
-
-    def _apply(content: str) -> str:
-        return compiled.sub(replacement, content)
-
-    return GeminiShellPatch(patch_id, _apply)
-
-
-_GEMINI_NEW_PROJECT_INIT_REPLACEMENT = """Run the init command as its own shell call in Gemini auto-edit mode. Do not wrap it in `INIT=$(...)` or an `if` block.
-
-```bash
-gpd --raw init new-project
-```
-
-If the init command fails, stop, surface the error, and do not proceed with the workflow."""
-_GEMINI_NEW_PROJECT_INIT_BLOCK_RE = (
-    r"```bash\n"
-    r"INIT=\$\((?:gpd --raw init new-project(?: --stage [a-z_]+)?)\)\n"
-    r"if \[ \$\? -ne 0 \]; then\n"
-    r"(?:  .*\n)+?"
-    r"fi\n"
-    r"```"
-)
-_GEMINI_SET_PROFILE_BLOCK = """```bash
-gpd config ensure-section
-INIT=$(gpd --raw init progress --include state,config)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```"""
-_GEMINI_SET_PROFILE_REPLACEMENT = """Run these as separate shell calls in Gemini auto-edit mode. Do not combine them into one multi-line shell block.
-
-```bash
-gpd config ensure-section
-```
-
-Then run:
-
-```bash
-gpd config set model_profile "$PROFILE"
-```
-
-These commands may only repair `GPD/config.json` and update `GPD/config.json::model_profile`; do not run project init, progress, state sync, or project reentry from `set-profile`."""
-_GEMINI_SET_PROFILE_VALIDATE_BLOCK = """```bash
-PROFILE="$(printf '%s' "$ARGUMENTS" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-case "$PROFILE" in
-  deep-theory|numerical|exploratory|review|paper-writing) ;;
-  "")
-    echo "ERROR: Missing profile. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"
-    exit 1
-    ;;
-  *[[:space:]]*)
-    echo "ERROR: set-profile accepts exactly one profile argument."
-    exit 1
-    ;;
-  *)
-    echo "ERROR: Invalid profile \\"$PROFILE\\". Valid profiles: deep-theory, numerical, exploratory, review, paper-writing"
-    exit 1
-    ;;
-esac
-```"""
-_GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT = """Validate the single profile argument without a shell call before running persistence commands. Trim surrounding whitespace. Accept exactly one of: `deep-theory`, `numerical`, `exploratory`, `review`, `paper-writing`. If the argument is missing, contains whitespace, or is not in that list, stop and surface the validation error."""
-_GEMINI_SET_PROFILE_VALIDATE_BLOCK_RE = (
-    r"```bash\n"
-    r"PROFILE=\"\$\(printf '%s' \"\$ARGUMENTS\" \| sed 's/\^\[\[:space:\]\]\*//;s/\[\[:space:\]\]\*\$//'\)\"\n"
-    r"case \"\$PROFILE\" in\n"
-    r"  deep-theory\|numerical\|exploratory\|review\|paper-writing\) ;;\n"
-    r"  \"\"\)\n"
-    r"    echo \"ERROR: Missing profile\. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing\"\n"
-    r"    exit 1\n"
-    r"    ;;\n"
-    r"  \*\[\[:space:\]\]\*\)\n"
-    r"    echo \"ERROR: set-profile accepts exactly one profile argument\.\"\n"
-    r"    exit 1\n"
-    r"    ;;\n"
-    r"  \*\)\n"
-    r"    echo \"ERROR: Invalid profile \"\\\$PROFILE\"\. Valid profiles: deep-theory, numerical, exploratory, review, paper-writing\"\n"
-    r"    exit 1\n"
-    r"    ;;\n"
-    r"esac\n"
-    r"```"
-)
-_GEMINI_SET_PROFILE_BLOCK_RE = (
-    r"```bash\n"
-    r"gpd config ensure-section\n"
-    r"(?:#.*\n)*"
-    r"INIT=\$\((?:gpd --raw init progress --include state,config(?: --no-project-reentry)?)\)\n"
-    r"if \[ \$\? -ne 0 \]; then\n"
-    r"(?:  .*\n)+?"
-    r"fi\n"
-    r"```"
-)
-_GEMINI_MINIMAL_COMMIT_BLOCK = """```bash
-mkdir -p GPD
-
-PRE_CHECK=$(gpd pre-commit-check --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json 2>&1) || true
-echo "$PRE_CHECK"
-
-gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
-```"""
-_GEMINI_MINIMAL_COMMIT_REPLACEMENT = """Create the directory structure, run the pre-check, then commit everything. In Gemini auto-edit mode, execute each shell command separately rather than pasting the whole block as one command.
-
-```bash
-mkdir -p GPD
-```
-
-Then run:
-
-```bash
-gpd pre-commit-check --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
-```
-
-If the pre-check reports issues or exits non-zero, surface the output and continue to the commit.
-
-```bash
-gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md GPD/REQUIREMENTS.md GPD/ROADMAP.md GPD/STATE.md GPD/state.json GPD/config.json
-```"""
-_GEMINI_HEALTH_BLOCK_REPLACEMENT = """In Gemini auto-edit mode, run health checks as a direct shell call instead of capturing stderr through temp files.
-
-Default read-only check:
-
-```bash
-gpd --raw health
-```
-
-Only after explicit confirmation for `--fix`:
-
-```bash
-gpd --raw health --fix
-```
-
-Do not treat a nonzero health exit status as a wrapper failure when the command output parses as the valid report JSON below."""
+_SHELL_FENCE_LANGUAGES = frozenset({"bash", "sh", "shell", "zsh"})
 _GEMINI_CONTRACT_PERSIST_SENTENCE = (
     "Write the exact approved contract JSON to "
     f"`{GEMINI_APPROVED_CONTRACT_PATH}` using file tools, then persist it into `GPD/state.json`:"
 )
 _GEMINI_CONTRACT_FILE_NOTE = (
-    "Do not write `/tmp` intermediates for the approved contract. In Gemini headless auto-edit mode, keep the exact approved JSON in "
-    f"`{GEMINI_APPROVED_CONTRACT_PATH}`, then validate and persist from that file using direct `gpd` commands. "
-    "Do not stash the approved contract in shell variables, command substitutions, or heredocs."
+    "Do not write `/tmp` intermediates for the approved contract. In Gemini headless auto-edit mode, keep the "
+    f"exact approved JSON in `{GEMINI_APPROVED_CONTRACT_PATH}`, then validate and persist from that file using "
+    "direct `gpd` commands. Do not stash the approved contract in shell variables, command substitutions, or "
+    "heredocs."
+)
+_GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT = (
+    "Validate the single profile argument without a shell call before running persistence commands. Trim "
+    "surrounding whitespace. Accept exactly one of: `deep-theory`, `numerical`, `exploratory`, `review`, "
+    "`paper-writing`. If the argument is missing, contains whitespace, or is not in that list, stop and surface "
+    "the validation error."
+)
+_GEMINI_SET_PROFILE_REPLACEMENT = (
+    "Run these as separate shell calls in Gemini auto-edit mode. Do not combine them into one multi-line shell "
+    "block.\n\n"
+    "```bash\n"
+    "gpd config ensure-section\n"
+    "```\n\n"
+    "Then run:\n\n"
+    "```bash\n"
+    'gpd config set model_profile "$PROFILE"\n'
+    "```\n\n"
+    "These commands may only repair `GPD/config.json` and update `GPD/config.json::model_profile`; do not run "
+    "project init, progress, state sync, or project reentry from `set-profile`."
+)
+_GEMINI_HEALTH_BLOCK_REPLACEMENT = (
+    "In Gemini auto-edit mode, run health checks as direct shell calls instead of capturing stderr through temp "
+    "files.\n\n"
+    "Default read-only check:\n\n"
+    "```bash\n"
+    "gpd --raw health\n"
+    "```\n\n"
+    "Only after explicit confirmation for `--fix`:\n\n"
+    "```bash\n"
+    "gpd --raw health --fix\n"
+    "```\n\n"
+    "Do not treat a nonzero health exit status as a wrapper failure when the command output parses as the valid "
+    "report JSON below."
 )
 
-GEMINI_SHELL_WORKFLOW_PATCHES: tuple[GeminiShellPatch, ...] = (
-    _regex_patch(
-        "new-project-init-block",
-        _GEMINI_NEW_PROJECT_INIT_BLOCK_RE,
-        _GEMINI_NEW_PROJECT_INIT_REPLACEMENT,
-        flags=re.MULTILINE,
-    ),
-    _exact_patch(
-        "set-profile-validation-exact-block",
-        _GEMINI_SET_PROFILE_VALIDATE_BLOCK,
-        _GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT,
-    ),
-    _regex_patch(
-        "set-profile-validation-regex-block",
-        _GEMINI_SET_PROFILE_VALIDATE_BLOCK_RE,
-        _GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT,
-        flags=re.MULTILINE,
-    ),
-    _regex_patch(
-        "set-profile-init-block",
-        _GEMINI_SET_PROFILE_BLOCK_RE,
-        _GEMINI_SET_PROFILE_REPLACEMENT,
-        flags=re.MULTILINE,
-    ),
-    _exact_patch(
-        "minimal-commit-block",
-        _GEMINI_MINIMAL_COMMIT_BLOCK,
-        _GEMINI_MINIMAL_COMMIT_REPLACEMENT,
-    ),
-    _regex_patch(
-        "health-tempfile-block",
-        r"```bash\n"
-        r"HEALTH_ERR=\$\(mktemp\)\n"
-        r"if echo \"\$ARGUMENTS\" \| grep -q \"\\-\\-fix\"; then\n"
-        r"[\s\S]+?"
-        r"fi\n"
-        r"HEALTH_STDERR=\$\(cat \"\$HEALTH_ERR\"\)\n"
-        r"rm -f \"\$HEALTH_ERR\"\n"
-        r"```",
-        _GEMINI_HEALTH_BLOCK_REPLACEMENT,
-        flags=re.MULTILINE,
-    ),
-    _regex_patch(
-        "pre-check-capture-echo-lines",
-        r'(?m)^([ \t]*)PRE_CHECK=\$\((gpd pre-commit-check --files [^\n]+) 2>&1\) \|\| true\n\1echo "\$PRE_CHECK"$',
-        (
-            r"\1# Gemini auto-edit: run the pre-check as its own shell call.\n"
-            r"\1\2\n"
-            r"\1# If the pre-check exits non-zero, surface the output and continue."
-        ),
-    ),
-    _exact_patch(
-        "contract-validate-stdin",
-        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract -",
-        f"gpd --raw validate project-contract {GEMINI_APPROVED_CONTRACT_PATH}",
-    ),
-    _exact_patch(
-        "contract-persist-stdin",
-        "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -",
-        f"gpd state set-project-contract {GEMINI_APPROVED_CONTRACT_PATH}",
-    ),
-    _exact_patch(
-        "contract-persist-sentence",
+_GEMINI_CAPTURE_ASSIGNMENT_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)$",
+    re.MULTILINE,
+)
+_GEMINI_CAPTURED_GPD_STATUS_BLOCK_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)\n"
+    r"(?P=indent)if \[ \$\? -ne 0 \]; then\n"
+    r"(?:(?P=indent)[ \t]+.*\n)+?"
+    r"(?P=indent)fi[ \t]*$",
+    re.MULTILINE,
+)
+_GEMINI_CAPTURED_GPD_ECHO_BLOCK_RE = re.compile(
+    r"^(?P<indent>[ \t]*)(?P<var>[A-Z][A-Z0-9_]*)=\$\((?P<command>gpd[^\n]*)\)(?P<suffix>[ \t]*(?:\|\|\s*true)?)\n"
+    r'(?P=indent)echo "\$(?P=var)"[ \t]*$',
+    re.MULTILINE,
+)
+_GEMINI_PRECHECK_CAPTURE_ECHO_RE = re.compile(
+    r'(?m)^(?P<indent>[ \t]*)PRE_CHECK=\$\((?P<command>gpd(?: --cwd "[^"]+")? pre-commit-check --files [^\n]+?) 2>&1\) \|\| true\n'
+    r'(?P=indent)echo "\$PRE_CHECK"[ \t]*$'
+)
+_GEMINI_CONTRACT_VALIDATE_STDIN_RE = re.compile(
+    r"printf '%s\\n' \"\$PROJECT_CONTRACT_JSON\" \| gpd --raw validate project-contract -(?P<suffix>[^\n]*)"
+)
+_GEMINI_CONTRACT_PERSIST_STDIN_RE = re.compile(
+    r"printf '%s\\n' \"\$PROJECT_CONTRACT_JSON\" \| gpd state set-project-contract -(?P<suffix>[^\n]*)"
+)
+
+
+def _markdown_fence_marker(stripped_line: str) -> str | None:
+    """Return a Markdown fence marker from *stripped_line*, if present."""
+    if stripped_line.startswith("```"):
+        char = "`"
+    elif stripped_line.startswith("~~~"):
+        char = "~"
+    else:
+        return None
+    marker_length = 0
+    for marker_char in stripped_line:
+        if marker_char != char:
+            break
+        marker_length += 1
+    return stripped_line[:marker_length] if marker_length >= 3 else None
+
+
+def _markdown_fence_language(stripped_line: str, marker: str) -> str:
+    """Return the normalized first Markdown fence info token."""
+    info = stripped_line[len(marker) :].strip().split(None, 1)
+    return info[0].lower() if info else ""
+
+
+def _is_shell_fence(opening_line: str, marker: str) -> bool:
+    return _markdown_fence_language(opening_line.lstrip(), marker) in _SHELL_FENCE_LANGUAGES
+
+
+def _fenced(language: str, body: str) -> str:
+    body = body.strip("\n")
+    return f"```{language}\n{body}\n```"
+
+
+def _gemini_direct_command_comment(command: str) -> str:
+    """Return a concise Gemini note for transformed shell-capture examples."""
+    if command.startswith("gpd --raw init"):
+        return "# Gemini: run initialization directly."
+    return "# Gemini: run this command directly."
+
+
+def _strip_control_suffix(command: str, suffix: str) -> tuple[str, str | None]:
+    """Return a runnable direct command plus prose for unsupported shell control suffixes."""
+    suffix = suffix.strip()
+    if suffix == "|| true":
+        return command, "# If this exits non-zero, surface the output and continue only when the workflow says to."
+    return command, None
+
+
+def _rewrite_capture_block_body(match: re.Match[str]) -> str:
+    indent = match.group("indent")
+    command = match.group("command").strip()
+    suffix = (match.group("suffix") or "").strip()
+    command, suffix_note = _strip_control_suffix(command, suffix)
+    lines = [f"{indent}{_gemini_direct_command_comment(command)}", f"{indent}{command}"]
+    if suffix_note:
+        lines.append(f"{indent}{suffix_note}")
+    return "\n".join(lines)
+
+
+def _rewrite_capture_assignment_body(body: str) -> str:
+    body = _GEMINI_CAPTURED_GPD_STATUS_BLOCK_RE.sub(_rewrite_capture_block_body, body)
+    body = _GEMINI_CAPTURED_GPD_ECHO_BLOCK_RE.sub(_rewrite_capture_block_body, body)
+    return _GEMINI_CAPTURE_ASSIGNMENT_RE.sub(_rewrite_capture_block_body, body)
+
+
+def _rewrite_precheck_capture_echo_body(body: str) -> tuple[str, bool]:
+    def _replace(match: re.Match[str]) -> str:
+        indent = match.group("indent")
+        command = match.group("command").strip()
+        return "\n".join(
+            (
+                f"{indent}# Gemini: run the pre-check directly; inspect output before committing.",
+                f"{indent}{command}",
+                f"{indent}# If the pre-check exits non-zero, surface the output and continue only if commit remains appropriate.",
+            )
+        )
+
+    rewritten = _GEMINI_PRECHECK_CAPTURE_ECHO_RE.sub(_replace, body)
+    return rewritten, rewritten != body
+
+
+def _rewrite_contract_stdin_body(body: str) -> tuple[str, bool]:
+    rewritten = _GEMINI_CONTRACT_VALIDATE_STDIN_RE.sub(
+        rf"gpd --raw validate project-contract {GEMINI_APPROVED_CONTRACT_PATH}\g<suffix>",
+        body,
+    )
+    rewritten = _GEMINI_CONTRACT_PERSIST_STDIN_RE.sub(
+        rf"gpd state set-project-contract {GEMINI_APPROVED_CONTRACT_PATH}\g<suffix>",
+        rewritten,
+    )
+    return rewritten, rewritten != body
+
+
+def _is_set_profile_validation_body(body: str) -> bool:
+    stripped = body.strip()
+    return (
+        stripped.startswith('PROFILE="$(printf')
+        and 'case "$PROFILE" in' in stripped
+        and "deep-theory|numerical|exploratory|review|paper-writing" in stripped
+    )
+
+
+def _is_set_profile_persistence_body(body: str) -> bool:
+    stripped = body.strip()
+    return (
+        "gpd config ensure-section" in stripped
+        and "INIT=$(gpd --raw init progress --include state,config" in stripped
+        and "model_profile" not in stripped
+    )
+
+
+def _is_legacy_set_profile_persistence_body(body: str) -> bool:
+    stripped = body.strip()
+    return (
+        stripped.startswith("gpd config ensure-section\n")
+        and "INIT=$(gpd --raw init progress --include state,config)\n" in stripped
+        and "--no-project-reentry" not in stripped
+    )
+
+
+def _is_health_tempfile_body(body: str) -> bool:
+    stripped = body.strip()
+    return (
+        "HEALTH_ERR=$(mktemp)" in stripped
+        and "gpd --raw health" in stripped
+        and "HEALTH_STDERR=$(cat" in stripped
+    )
+
+
+def _body_has_precheck_commit_sequence(body: str) -> bool:
+    return "PRE_CHECK=$(gpd" in body and "pre-commit-check --files" in body and "\ngpd commit" in body
+
+
+def classify_gemini_shell_workflow_block(
+    body: str,
+    *,
+    command_name: str | None = None,
+) -> GeminiShellWorkflowRewrite:
+    """Classify a Gemini-visible shell block and return any structural replacement."""
+    if command_name == "set-profile" and _is_set_profile_validation_body(body):
+        return GeminiShellWorkflowRewrite(
+            "profile-argument-validation-guidance",
+            _GEMINI_SET_PROFILE_VALIDATE_REPLACEMENT,
+            "set-profile validates model arguments outside shell policy",
+        )
+    # Semantic exception: older set-profile prompt surfaces used this init block
+    # before model_profile persistence. Structural capture rewriting cannot infer
+    # the replacement command (`gpd config set model_profile "$PROFILE"`).
+    if _is_set_profile_persistence_body(body) and (
+        command_name == "set-profile" or _is_legacy_set_profile_persistence_body(body)
+    ):
+        return GeminiShellWorkflowRewrite(
+            "set-profile-persistence-guidance",
+            _GEMINI_SET_PROFILE_REPLACEMENT,
+            "set-profile must not run project init as part of profile persistence",
+        )
+    if _is_health_tempfile_body(body):
+        return GeminiShellWorkflowRewrite(
+            "gpd-health-tempfile-wrapper",
+            _GEMINI_HEALTH_BLOCK_REPLACEMENT,
+            "Gemini shell policy cannot approve tempfile stderr wrappers",
+        )
+
+    rewritten, contract_changed = _rewrite_contract_stdin_body(body)
+    if contract_changed:
+        return GeminiShellWorkflowRewrite(
+            "gpd-contract-file-transport",
+            _fenced("bash", rewritten),
+            "Gemini persists approved contracts through a project file, not stdin pipes",
+        )
+
+    rewritten, precheck_changed = _rewrite_precheck_capture_echo_body(body)
+    rewritten_capture = _rewrite_capture_assignment_body(rewritten)
+    if rewritten_capture != body:
+        if precheck_changed and _body_has_precheck_commit_sequence(body):
+            return GeminiShellWorkflowRewrite(
+                "gpd-precheck-commit-sequence",
+                _fenced("bash", rewritten_capture),
+                "pre-check capture is structural visibility before an explicit commit",
+            )
+        kind: GeminiShellWorkflowClass = "gpd-capture-echo-block" if "echo \"$" in body else "gpd-capture-status-block"
+        return GeminiShellWorkflowRewrite(
+            kind,
+            _fenced("bash", rewritten_capture),
+            "captured GPD shell output is rewritten to a direct Gemini-approved command",
+        )
+
+    return GeminiShellWorkflowRewrite("unchanged")
+
+
+def _rewrite_contract_prose(content: str) -> str:
+    content = content.replace(
         "Persist the approved contract into `GPD/state.json` from the same stdin payload:",
         _GEMINI_CONTRACT_PERSIST_SENTENCE,
-    ),
-    _exact_patch(
-        "contract-persist-after-validation-sentence",
+    )
+    content = content.replace(
         "After validation passes, persist the approved contract into `GPD/state.json` from the same stdin payload:",
         _GEMINI_CONTRACT_PERSIST_SENTENCE,
-    ),
-    _exact_patch(
-        "contract-file-note",
-        "Do not write `/tmp` intermediates for the approved contract. Prefer piping the exact approved JSON directly to `gpd ... -`. Only write a file if the user explicitly wants a durable saved copy, and if so place it under the project, not an OS temp directory.",
+    )
+    return content.replace(
+        "Do not write `/tmp` intermediates for the approved contract. Prefer piping the exact approved JSON "
+        "directly to `gpd ... -`. Only write a file if the user explicitly wants a durable saved copy, and if so "
+        "place it under the project, not an OS temp directory.",
         _GEMINI_CONTRACT_FILE_NOTE,
-    ),
-    _exact_patch(
-        "convention-check-unit-warning-block",
-        """```bash
-CONV_CHECK=$(gpd --raw convention check 2>/dev/null)
-if [ $? -ne 0 ]; then
-  echo "WARNING: Convention verification failed — unit mismatches between theory and experiment are the #1 source of false discrepancies"
-  echo "$CONV_CHECK"
-fi
-```""",
-        """```bash
-# Gemini: run convention verification directly.
-gpd --raw convention check 2>/dev/null
-```""",
-    ),
-    _exact_patch(
-        "convention-check-paper-warning-block",
-        """```bash
-CONV_CHECK=$(gpd --raw convention check 2>/dev/null)
-if [ $? -ne 0 ]; then
-  echo "WARNING: Convention verification failed — review before writing paper"
-  echo "$CONV_CHECK"
-fi
-```""",
-        """```bash
-# Gemini: run convention verification directly.
-gpd --raw convention check 2>/dev/null
-```""",
-    ),
-    _exact_patch(
-        "command-context-validate-conventions-block",
-        """```bash
-CONTEXT=$(gpd --raw validate command-context validate-conventions "$ARGUMENTS")
-if [ $? -ne 0 ]; then
-  echo "$CONTEXT"
-  exit 1
-fi
-```""",
-        """```bash
-# Gemini: run command-context validation directly.
-gpd --raw validate command-context validate-conventions "$ARGUMENTS"
-```""",
-    ),
-    _exact_patch(
-        "command-context-write-paper-block",
-        """```bash
-CONTEXT=$(gpd --raw validate command-context write-paper "$ARGUMENTS")
-if [ $? -ne 0 ]; then
-  echo "$CONTEXT"
-  exit 1
-fi
-```""",
-        """```bash
-# Gemini: run command-context validation directly.
-gpd --raw validate command-context write-paper "$ARGUMENTS"
-```""",
-    ),
-    _exact_patch(
-        "paper-quality-capture-block",
-        """```bash
-QUALITY=$(gpd --raw validate paper-quality --from-project . 2>/dev/null)
-```""",
-        """```bash
-# Gemini: run paper-quality validation directly.
-gpd --raw validate paper-quality --from-project . 2>/dev/null
-```""",
-    ),
-    _exact_patch(
-        "comparison-pre-check-commit-block",
-        """```bash
-PRE_CHECK=$(gpd pre-commit-check --files "${COMPARISON_OUTPUT_PATH}" 2>&1) || true
-echo "$PRE_CHECK"
+    )
 
-gpd commit \
-  "docs: theory-experiment comparison for {slug}" \
-  --files "${COMPARISON_OUTPUT_PATH}"
-```""",
-        """```bash
-# Gemini: run the pre-check directly; inspect output before committing.
-gpd pre-commit-check --files "${COMPARISON_OUTPUT_PATH}" 2>&1 || true
 
-gpd commit \
-  "docs: theory-experiment comparison for {slug}" \
-  --files "${COMPARISON_OUTPUT_PATH}"
-```""",
-    ),
-    _exact_patch(
-        "dependency-graph-pre-check-commit-block",
-        """```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/DEPENDENCY-GRAPH.md 2>&1) || true
-echo "$PRE_CHECK"
+def rewrite_gemini_shell_workflow_guidance(content: str, *, command_name: str | None = None) -> str:
+    """Rewrite known shell-heavy workflow snippets into Gemini-safe structural forms."""
+    content = _rewrite_contract_prose(content)
+    rendered: list[str] = []
+    active_marker: str | None = None
+    opening_line = ""
+    body_lines: list[str] = []
+    opening_is_shell = False
 
-gpd commit "docs: generate dependency graph" --files GPD/DEPENDENCY-GRAPH.md
-```""",
-        """```bash
-# Gemini: run the pre-check directly; inspect output before committing.
-gpd pre-commit-check --files GPD/DEPENDENCY-GRAPH.md 2>&1 || true
+    for line in content.splitlines(keepends=True):
+        stripped = line.lstrip()
+        fence_marker = _markdown_fence_marker(stripped)
+        if active_marker is None:
+            if fence_marker is None:
+                rendered.append(line)
+                continue
 
-gpd commit "docs: generate dependency graph" --files GPD/DEPENDENCY-GRAPH.md
-```""",
-    ),
-    _exact_patch(
-        "init-phase-op-block",
-        """```bash
-INIT=$(gpd --raw init phase-op)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init phase-op
-```""",
-    ),
-    _exact_patch(
-        "init-progress-state-roadmap-config-block",
-        """```bash
-INIT=$(gpd --raw init progress --include state,roadmap,config)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init progress --include state,roadmap,config
-```""",
-    ),
-    _exact_patch(
-        "init-progress-state-block",
-        """```bash
-INIT=$(gpd --raw init progress --include state)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init progress --include state
-```""",
-    ),
-    _exact_patch(
-        "init-phase-op-state-config-phase-arg-block",
-        """```bash
-INIT=$(gpd --raw init phase-op --include state,config "${PHASE_ARG:-}")
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init phase-op --include state,config "${PHASE_ARG:-}"
-```""",
-    ),
-    _exact_patch(
-        "init-progress-state-config-block",
-        """```bash
-INIT=$(gpd --raw init progress --include state,config)
-if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
-  # STOP — display the error to the user and do not proceed.
-fi
-```""",
-        """```bash
-# Gemini: run initialization directly.
-gpd --raw init progress --include state,config
-```""",
-    ),
-)
+            active_marker = fence_marker
+            opening_line = line
+            body_lines = []
+            opening_is_shell = _is_shell_fence(stripped, fence_marker)
+            continue
+
+        if fence_marker == active_marker:
+            body = "".join(body_lines)
+            if not opening_is_shell:
+                rendered.append(opening_line)
+                rendered.append(body)
+                rendered.append(line)
+            else:
+                rewrite = classify_gemini_shell_workflow_block(body, command_name=command_name)
+                if rewrite.replacement is None:
+                    rendered.append(opening_line)
+                    rendered.append(body)
+                    rendered.append(line)
+                else:
+                    rendered.append(rewrite.replacement.rstrip("\n"))
+                    rendered.append("\n")
+            active_marker = None
+            opening_line = ""
+            body_lines = []
+            opening_is_shell = False
+            continue
+
+        body_lines.append(line)
+
+    if active_marker is not None:
+        rendered.append(opening_line)
+        rendered.extend(body_lines)
+
+    return "".join(rendered)
 
 
 def apply_gemini_shell_workflow_patches(content: str) -> str:
-    """Apply Gemini shell-workflow patches in source-preserving order."""
-    for patch in GEMINI_SHELL_WORKFLOW_PATCHES:
-        content = patch.apply(content)
-    return content
+    """Compatibility wrapper for older callers; structural rewrites replaced the patch ledger."""
+    return rewrite_gemini_shell_workflow_guidance(content)
 
 
 __all__ = [
     "GEMINI_APPROVED_CONTRACT_PATH",
-    "GEMINI_SHELL_WORKFLOW_PATCHES",
-    "GeminiShellPatch",
+    "GeminiShellWorkflowRewrite",
+    "classify_gemini_shell_workflow_block",
+    "rewrite_gemini_shell_workflow_guidance",
     "apply_gemini_shell_workflow_patches",
 ]

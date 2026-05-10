@@ -7,6 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from gpd.adapters.install_utils import parse_at_include_path
+from scripts.render_help_surface import check_help_surface_text, replace_help_surface_text
+
 _HELP_MARKERS = ("quick-start", "command-index", "detailed-command-reference")
 
 
@@ -103,6 +106,13 @@ def _render_command_index(renderer: object) -> str:
     return _rendered_markdown(result)
 
 
+def _render_detailed_command_reference(renderer: object) -> str:
+    render_detailed = getattr(renderer, "render_detailed_command_reference_markdown", None)
+    if render_detailed is None:
+        pytest.fail("gpd.core.help_renderer must expose render_detailed_command_reference_markdown()")
+    return _rendered_markdown(_call_with_supported_kwargs(render_detailed, public_prefix="gpd:"))
+
+
 def test_help_marker_comments_are_unique_ordered_extraction_anchors() -> None:
     workflow_help = _read_workflow_help()
     positions: list[int] = []
@@ -138,6 +148,17 @@ def test_help_wrapper_extraction_contract_uses_exact_marker_anchors() -> None:
         assert extraction_rule in help_command
 
 
+def test_help_wrapper_prefers_renderer_backed_bridge_without_eager_workflow_include() -> None:
+    help_command = _read_command_help()
+
+    assert "gpd --raw help" in help_command
+    assert "gpd --raw help --all" in help_command
+    assert "gpd --raw help --command <name>" in help_command
+    assert "renderer-backed local CLI help bridge" in help_command
+    assert "`@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path" in help_command
+    assert all(parse_at_include_path(line.strip()) is None for line in help_command.splitlines())
+
+
 def test_help_quick_start_marker_matches_renderer_output() -> None:
     renderer = _help_renderer()
     workflow_help = _read_workflow_help()
@@ -152,3 +173,18 @@ def test_help_command_index_marker_matches_renderer_output() -> None:
 
     checked_in_command_index = _normalized_block(_help_marker_range(workflow_help, "command-index"))
     assert checked_in_command_index == _render_command_index(renderer)
+
+
+def test_help_detailed_reference_marker_matches_renderer_output() -> None:
+    renderer = _help_renderer()
+    workflow_help = _read_workflow_help()
+
+    checked_in_detailed_reference = _normalized_block(_help_marker_range(workflow_help, "detailed-command-reference"))
+    assert checked_in_detailed_reference == _render_detailed_command_reference(renderer)
+
+
+def test_help_surface_marker_script_is_idempotent() -> None:
+    workflow_help = _read_workflow_help()
+
+    assert check_help_surface_text(workflow_help) == ()
+    assert replace_help_surface_text(workflow_help) == workflow_help

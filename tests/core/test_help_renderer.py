@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 import pytest
 
@@ -124,15 +125,49 @@ def test_command_groups_payload_preserves_raw_help_shape() -> None:
 
 
 def test_command_detail_payload_uses_registry_and_normalizes_documented_variants() -> None:
-    detail = help_renderer.command_detail_payload("gpd:new-project --minimal", minimal=True)
+    detail = help_renderer.command_detail_payload("gpd:new-project --minimal", minimal=True, include_markdown=True)
 
     assert detail["canonical_command"] == "gpd:new-project"
     assert detail["slug"] == "new-project"
     assert detail["context_mode"] == "projectless"
+    assert detail["group"] == "Starter commands"
+    assert detail["argument_hint"] == "[--auto] [--minimal [@file.md]]"
+    assert detail["signature"] == "gpd:new-project"
+    assert detail["documented_variants"] == ["gpd:new-project --minimal"]
     assert detail["allowed_tools"] == []
     assert detail["requires"] == {}
+    assert "**`gpd:new-project`**" in detail["detail_markdown"]
+    assert "`gpd:new-project --minimal`" in detail["detail_markdown"]
 
 
 def test_command_detail_payload_fails_closed_for_unknown_commands() -> None:
     with pytest.raises(KeyError):
         help_renderer.command_detail_payload("does-not-exist")
+
+
+def test_render_command_detail_markdown_uses_registry_and_renderer_metadata() -> None:
+    detail = help_renderer.render_command_detail_markdown("gpd:peer-review")
+
+    assert detail.startswith("### Writing and publication")
+    assert "**`gpd:peer-review [paper directory | manuscript path | explicit artifact path]`**" in detail
+    assert "Conduct a staged six-pass peer review" in detail
+    assert "Explicit artifact intake" in detail
+    assert "command-policy supported suffixes" in detail
+    assert "publication-artifact paths" in detail
+    assert "resolved manuscript entrypoint" in detail
+    assert "Context mode: `project-aware`" in detail
+    assert "Subject policy:" in detail
+    assert "Review contract:" in detail
+    assert "`.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, and `.xlsx`" not in detail
+
+
+def test_render_detailed_command_reference_covers_registry_once() -> None:
+    detailed_reference = help_renderer.render_detailed_command_reference_markdown()
+    headings = re.findall(r"(?m)^\*\*`gpd:([a-z0-9-]+)\b", detailed_reference)
+    heading_counts = Counter(headings)
+
+    duplicate_headings = sorted(command for command, count in heading_counts.items() if count > 1)
+    assert duplicate_headings == []
+    assert set(headings) == set(list_commands(name_format="slug"))
+    assert "gpd:new-project --minimal" in detailed_reference
+    assert "## Command Index" not in detailed_reference

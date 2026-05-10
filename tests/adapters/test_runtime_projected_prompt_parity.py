@@ -41,7 +41,6 @@ from tests.adapters.projection_test_utils import (
     assert_protocol_bundle_jit_shape,
     assert_runtime_note_tag_count,
     assert_runtime_note_tags_not_repeated,
-    first_runnable_shell_command,
     first_runnable_shell_commands,
     has_compact_non_native_shim,
     has_help_bridge_shim_sentinel,
@@ -701,26 +700,21 @@ def test_runtime_projected_staged_commands_keep_protocol_bundle_jit_visible_with
 @pytest.mark.parametrize("runtime", RUNTIMES)
 def test_runtime_projected_help_uses_native_include_or_compact_help_bridge_shim(runtime: str) -> None:
     projected = _project_markdown(COMMANDS_DIR / "help.md", runtime, is_agent=False)
-    descriptor = get_runtime_descriptor(runtime)
 
     assert_no_unresolved_include_markers(projected, label=f"{runtime} help")
     assert get_adapter(runtime).format_command("help") in projected
 
-    if descriptor.native_include_support:
-        assert raw_include_count(projected, "workflows/help.md") == 1
-        assert "<!-- [included: help.md] -->" not in projected
-        assert not has_help_bridge_shim_sentinel(projected)
-        return
-
     assert raw_include_count(projected, "workflows/help.md") == 0
     assert "<!-- [included: help.md] -->" not in projected
-    assert has_help_bridge_shim_sentinel(projected)
     assert not has_staged_shim_sentinel(projected)
     assert "<current-help-command>" not in projected
     assert "--raw help" in projected
     assert "--raw help --all" in projected
     assert "--raw help --command <name>" in projected
     assert len(projected) < 10_000
+
+    if not get_runtime_descriptor(runtime).native_include_support:
+        assert has_help_bridge_shim_sentinel(projected)
 
 
 @pytest.mark.parametrize("selected", (True, False), ids=("selected", "absent"))
@@ -1041,9 +1035,14 @@ def test_gemini_real_command_shell_fences_start_with_policy_prefixes(tmp_path: P
             command_name=command_name,
         )
         for body in shell_fence_bodies(projected):
-            first_command = first_runnable_shell_command(body)
-            if first_command and not first_command.startswith(policy_prefixes):
-                offenders.append(f"{command_name}: {first_command}")
+            classification = gemini_module.classify_gemini_shell_fence_body(body, bridge_command=bridge)
+            first_command = classification.first_runnable_command
+            if classification.kind not in {"runnable-bridge", "policy-static"}:
+                detail = first_command or "no runnable command"
+                reasons = ", ".join(classification.reasons)
+                offenders.append(f"{command_name}: {classification.kind}: {detail} ({reasons})")
+            elif first_command is None or not first_command.startswith(policy_prefixes):
+                offenders.append(f"{command_name}: {classification.kind}: {first_command or 'no runnable command'}")
 
     assert offenders == []
 

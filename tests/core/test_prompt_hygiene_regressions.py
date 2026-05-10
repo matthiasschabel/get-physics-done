@@ -50,7 +50,6 @@ def test_help_resume_boundary_note_is_concise_and_contract_aligned() -> None:
         "/runtime/",
     ).lower()
 
-    assert help_workflow.count("@{gpd_install_dir}/references/orchestration/resume-vocabulary.md") == 1
     assert "canonical continuation fields define the public resume vocabulary" in expanded_help_workflow
     assert "public top-level resume vocabulary" not in help_workflow
 

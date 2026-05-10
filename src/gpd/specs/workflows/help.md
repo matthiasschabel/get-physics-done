@@ -2,42 +2,6 @@
 Display the complete GPD command reference. Output ONLY the reference content. Do NOT add project-specific analysis, git status, next-step suggestions, or any commentary beyond the reference.
 </purpose>
 
-<process>
-
-<step name="concepts">
-## GPD Concepts
-
-GPD organizes physics research into a clear hierarchy:
-
-```
-Project ─── the overall research goal
-  └─ Milestone ─── a major research objective (e.g., "v1.0: derive and validate")
-       └─ Phase ─── one investigation step (e.g., "Phase 3: Monte Carlo validation")
-            └─ Plan ─── a concrete execution plan (e.g., "Plan 01: implement Metropolis")
-                 └─ Task ─── an atomic work unit (e.g., "Task 2: run thermalization")
-```
-
-**Typical workflow:**
-1. `gpd:new-project` — Define research question, survey literature, create roadmap
-2. `gpd:discuss-phase N` — Clarify the phase before planning
-3. `gpd:plan-phase N` — Create detailed plans for phase N
-4. `gpd:execute-phase N` — Run all plans (derivations, simulations, analysis)
-5. `gpd:verify-work` — Verify physics correctness
-6. Repeat 2-5 for each phase (or `gpd:autonomous` to run the remaining phases under the configured checkpoint cadence)
-7. `gpd:write-paper` — Generate publication from project results or one explicit external-authoring intake manifest into the resolved manuscript lane
-8. `gpd:peer-review` — Run manuscript review before submission on the current project manuscript or one explicit artifact
-9. `gpd:respond-to-referees` — Address reviewer comments by revising the resolved manuscript root and synchronized response artifacts
-10. `gpd:arxiv-submission` — Package the approved built GPD-owned manuscript after the latest staged review gates pass
-
-**Example:** Studying the 3D Ising critical exponent:
-- Phase 1: Set up Wolff cluster MC algorithm
-- Phase 2: Run simulations at multiple temperatures and system sizes
-- Phase 3: Finite-size scaling analysis to extract nu
-- Phase 4: Compare with known results, write paper
-</step>
-
-</process>
-
 <reference>
 # GPD Command Reference
 
@@ -124,7 +88,6 @@ Use the path that matches your current situation:
 2. `gpd:set-tier-models` - Pin concrete `tier-1`, `tier-2`, and `tier-3` model ids only
 
 When a side investigation appears later, use `gpd:tangent` first. It is the chooser for stay / quick / defer / branch. Use `gpd:branch-hypothesis` only when that tangent needs its own git-backed branch.
-
 <!-- gpd-help:quick-start:end -->
 <!-- gpd-help:command-index:start -->
 ## Command Index
@@ -226,963 +189,1041 @@ This is the compact grouped list of runtime commands. For normal-terminal instal
 - `gpd:undo` - Roll back the last GPD operation with a safety checkpoint
 - `gpd:update` - Update GPD to the latest version
 - `gpd:reapply-patches` - Reapply local modifications after updating
-
 <!-- gpd-help:command-index:end -->
 <!-- gpd-help:detailed-command-reference:start -->
 ## Detailed Command Reference
 
 Use `gpd:help --command <name>` when you want the detailed notes for one runtime command at a time.
 
-### Core Workflow
+Core workflow: `gpd:new-project` -> `gpd:discuss-phase` -> `gpd:plan-phase` -> `gpd:execute-phase` -> `gpd:verify-work` -> repeat.
 
-```text
-gpd:new-project -> gpd:discuss-phase -> gpd:plan-phase -> gpd:execute-phase -> gpd:verify-work -> repeat
-```
+Project-aware technical-analysis lane: `gpd:derive-equation`, `gpd:dimensional-analysis`, `gpd:limiting-cases`, `gpd:numerical-convergence`, `gpd:sensitivity-analysis`, `GPD/analysis/`. `gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed current-workspace lane.
 
-### Project Initialization
+### Starter commands
 
-**`gpd:start`**
-Guide a first-time user to the right GPD entry point for the current folder.
+**`gpd:help [--all | --command <name>]`**
+Show available GPD commands and usage guide
 
-- Detects whether the current folder is an existing GPD project, existing non-GPD research, or a new folder
-- Recommends the right entry point instead of forcing the user to guess
-- Routes into `gpd:resume-work`, `gpd:suggest-next`, `gpd:progress`, `gpd:tour`, `gpd:map-research`, `gpd:new-project`, `gpd:new-project --minimal`, `gpd:help --all`, or `gpd:explain`
-- Does not create project artifacts itself; it is an onboarding router
+Usage examples:
+Usage: `gpd:help [--all | --command <name>]`
 
-Usage: `gpd:start`
+Registry metadata:
+- Canonical command: `gpd:help`
+- Argument hint: `[--all | --command <name>]`
+- Context mode: `global`
 
-**`gpd:tour`**
-Show a guided beginner tour of the core GPD commands without taking action.
+**`gpd:start [optional short goal]`**
+Choose the right first GPD action for this folder and route into the real workflow
 
-- Explains the main commands and when to use them
-- Stays read-only and does not create files or route into another workflow
-- Good optional first stop if you want a quick orientation before choosing a path
+Usage examples:
+Usage: `gpd:start [optional short goal]`
 
-Usage: `gpd:tour`
+Registry metadata:
+- Canonical command: `gpd:start`
+- Argument hint: `[optional short goal]`
+- Context mode: `projectless`
+
+**`gpd:tour [optional short goal]`**
+Show a guided beginner walkthrough of the core GPD commands without taking action
+
+Usage examples:
+Usage: `gpd:tour [optional short goal]`
+
+Registry metadata:
+- Canonical command: `gpd:tour`
+- Argument hint: `[optional short goal]`
+- Context mode: `projectless`
 
 **`gpd:new-project`**
-Initialize a new research project through questioning, optional survey, scoping, and roadmap generation.
+Initialize a new physics research project with deep context gathering and PROJECT.md
 
-One command takes you from idea to ready-for-investigation:
-
-- Deep questioning to understand the physics problem
-- Optional literature survey (spawns 4 parallel scout agents)
-- Research objectives definition with scoping
-- Roadmap creation with phase breakdown and success criteria
-
-Full mode creates the main `GPD/` artifacts:
-
-- `PROJECT.md` — research question, theoretical framework, key parameters
-- `config.json` — workflow settings (`autonomy`, `research_mode`, `execution.review_cadence`, `planning.commit_docs`, agent toggles)
-- `literature/` — literature survey (if selected)
-- `REQUIREMENTS.md` — scoped research requirements with REQ-IDs
-- `ROADMAP.md` — phases mapped to requirements
-- `STATE.md` — project memory
-- `CONVENTIONS.md` — notation conventions after roadmap approval
-
-All modes build a scoping contract before downstream artifacts. Blocking gaps get one targeted repair prompt, the contract must preserve decisive outputs, anchors, prior outputs, unresolved gaps, and stop/rethink triggers, and scope must be explicitly approved before requirements or roadmap generation.
-
-**Flags:**
-
-- `--minimal` — Shortest setup path. Asks one structured intake question, repairs only blocking scoping gaps, requires scope approval, then creates the core startup set: `PROJECT.md`, `config.json`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, and `state.json`.
-- `--minimal @file.md` — File-backed minimal intake. Parses research question, decisive outputs, anchors, and work chunks from the file, but still repairs blocking gaps and asks for scoping approval before writing downstream artifacts.
-- `--auto` — Document-backed full-depth mode. Expects a research proposal via @ reference, compresses intake, asks for explicit scope approval, then follows the configured autonomy gates for literature, requirements, roadmap, and conventions.
-
+Usage examples:
 Usage: `gpd:new-project`
 Usage: `gpd:new-project --minimal`
-Usage: `gpd:new-project --minimal @plan.md`
+Usage: `gpd:new-project --minimal @file.md`
+Usage: `gpd:new-project --auto`
+
+Documented variants:
+- `gpd:new-project --minimal`
+
+Notes:
+- All modes build a scoping contract before downstream artifacts.
+- Blocking gaps get one targeted repair prompt, and scope must be explicitly approved before requirements or roadmap generation.
+- `--minimal @file.md` still repairs blocking gaps and asks for scoping approval.
+- `--auto` follows the configured autonomy gates.
+- `GPD/state.json.bak` and `GPD/state.json.lock` are local recovery/coordination files.
+
+Registry metadata:
+- Canonical command: `gpd:new-project`
+- Argument hint: `[--auto] [--minimal [@file.md]]`
+- Context mode: `projectless`
+- Staged workflow: new-project with stages scope_intake, scope_approval, minimal_artifacts, workflow_preferences, project_artifacts, literature_survey, requirements_authoring, roadmap_authoring, conventions_handoff, completion.
 
 **`gpd:map-research`**
-Map an existing research project — theoretical framework, computations, conventions, and open questions.
+Map existing research project — theoretical framework, computations, conventions, and open questions
 
-- Spawns 4 parallel research-mapper agents to analyze project artifacts
-- Creates `GPD/research-map/` with 7 structured documents
-- Covers formalism, references, computational architecture, structure, conventions, validation, concerns
-- Use before `gpd:new-project` on existing research projects
-
+Usage examples:
 Usage: `gpd:map-research`
 
-### Phase Planning
-
-**`gpd:discuss-phase <number> [--auto|--compact]`**
-Help articulate your vision for a research phase before planning.
-
-- Captures how you imagine this phase proceeding
-- Creates CONTEXT.md with your approach, essentials, and boundaries
-- Use when you have specific ideas about methods or approximations
-- `--auto` compresses the discussion for fast iteration; `--compact` skips the Socratic flow and shows a single knobs-form you can fill in one turn
-
-Usage: `gpd:discuss-phase 2` / `gpd:discuss-phase 2 --compact`
-
-**`gpd:route [--frozen=yes|no] [--change=extend|revise] [--layer=new|change]`**
-Decide whether a scope change is a new phase, a revision, a new milestone, or a milestone-completion followed by a new one.
-
-- Asks three short routing questions about the intended scope change
-- Maps the answers to one recommendation; the frozen scope-expansion path renders the ordered compound sequence `gpd:complete-milestone` then `gpd:new-milestone`
-- Use it when you're not sure whether new work belongs in the current milestone
-
-Usage: `gpd:route`
-
-**`gpd:research-phase <number>`**
-Comprehensive literature survey for a specific phase.
-
-- Discovers known results, standard methods, available data
-- Creates {phase}-RESEARCH.md with domain expert knowledge
-- Use for phases involving unfamiliar techniques or contested results
-- Goes beyond "which method" to deep domain knowledge
-
-Usage: `gpd:research-phase 3`
-
-**`gpd:list-phase-assumptions <number>`**
-See what the agent plans to do before it starts.
-
-- Shows the agent's intended approach for a phase
-- Lets you course-correct if the approach is wrong
-- No files created - conversational output only
-
-Usage: `gpd:list-phase-assumptions 3`
-
-**`gpd:discover [phase or topic] [--depth quick|medium|deep]`**
-Run discovery phase to investigate methods, literature, and approaches before planning.
-
-- Surveys known results, standard methods, and computational tools
-- `quick` is verification-only and writes no file; `medium` and `deep` write discovery artifacts
-- Written discovery artifacts feed planning or standalone analysis
-- Use when entering an unfamiliar subfield or technique
-
-Usage: `gpd:discover 3`
-Usage: `gpd:discover "finite-temperature RG flow" --depth deep`
-Usage: `gpd:discover 3 --depth deep`
-
-**`gpd:show-phase <number>`**
-Inspect a single phase's artifacts, status, and results.
-
-- Shows phase goal, plans, summaries, and verification status
-- Displays frontmatter metadata (wave, dependencies, status)
-- Quick way to review what a phase produced
-
-Usage: `gpd:show-phase 3`
-
-**`gpd:plan-phase <number>`**
-Create detailed execution plan for a specific phase.
-
-- Generates `GPD/phases/XX-phase-name/XX-YY-PLAN.md`
-- Breaks phase into concrete, actionable steps
-- Includes verification criteria (limiting cases, consistency checks)
-- Multiple plans per phase supported (XX-01, XX-02, etc.)
-
-**Flags:**
-
-- `--research` — Force literature research even if RESEARCH.md already exists
-- `--skip-research` — Skip literature research entirely
-- `--gaps` — Gap closure mode: plan from VERIFICATION.md issues instead of fresh research
-- `--skip-verify` — Skip non-proof plan checker verification after planning; proof-bearing plans still require checker review or an equivalent main-context audit
-- `--light` — Produce simplified strategic outline (contract, constraints, high-level approach only)
-- `--inline-discuss` — Run discuss-phase inline before planning (skip if already done)
-
-Usage: `gpd:plan-phase 1`
-Usage: `gpd:plan-phase 3 --research`
-Usage: `gpd:plan-phase 5 --light --skip-verify`
-Result: Creates `GPD/phases/01-framework-setup/01-01-PLAN.md`
-
-### Execution
-
-**`gpd:autonomous [--from N]`**
-Run all remaining phases autonomously — discuss → plan → execute → verify for each phase.
-
-- Chains all phase commands automatically, pausing only for user decisions
-- Smart discuss proposes gray area answers in batch tables for fast acceptance
-- Convention propagation check between phases (if CONVENTIONS.md exists)
-- Gap closure with 1-retry limit; blocker handling (fix/skip/stop)
-- After all phases: milestone audit → complete
-- Re-reads ROADMAP.md after each phase to catch inserted phases
-
-Usage: `gpd:autonomous` or `gpd:autonomous --from 3`
-
-**`gpd:execute-phase <phase-number> [--gaps-only]`**
-Execute all plans in a phase.
-
-- Groups plans by wave (from frontmatter), executes waves sequentially
-- Plans within each wave run in parallel via task tool
-- `--gaps-only` executes only gap-closure plans marked `gap_closure: true`
-- Verifies phase goal after all plans complete (limiting cases, dimensional analysis, benchmarks)
-- Updates REQUIREMENTS.md, ROADMAP.md, STATE.md
-
-Usage: `gpd:execute-phase 5`
-Usage: `gpd:execute-phase 5 --gaps-only`
-
-### Derivation
-
-Project-aware technical-analysis lane: `gpd:derive-equation`, `gpd:dimensional-analysis`, `gpd:limiting-cases`, `gpd:numerical-convergence`, and `gpd:sensitivity-analysis` can run from explicit current-workspace inputs and keep durable outputs under the invoking workspace's `GPD/analysis/` tree. `gpd:parameter-sweep` can also run from one explicit current-workspace computation anchor plus `--param` / `--range` and keeps durable outputs under the invoking workspace's `GPD/sweeps/` tree. `gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed current-workspace lane.
-
-**`gpd:derive-equation`**
-Perform a rigorous physics derivation with systematic verification at each step.
-
-- States assumptions explicitly, establishes notation and conventions
-- Performs step-by-step derivation with dimensional analysis at each stage
-- Verifies intermediate results against known limits and symmetry properties
-- Justifies and bounds all approximations with error estimates
-- For theorem-bearing work, spawns `gpd-check-proof` and blocks completion until the proof audit passes
-- With one explicit derivation target, it can also run from the current workspace without silently reentering another project
-- Current-workspace durable outputs stay under `GPD/analysis/`; outside a project, rerun with an explicit derivation target
-- Produces a complete, self-contained derivation document with boxed final result
-
-Usage: `gpd:derive-equation "derive the one-loop beta function"`
-
-### Quick Mode
-
-**`gpd:quick`**
-Execute small, ad-hoc calculations with GPD guarantees but skip optional agents.
-
-Quick mode uses the same system with a shorter path:
-
-- Spawns planner + executor (skips literature scout, checker, validator)
-- Quick tasks live in `GPD/quick/` separate from planned phases
-- Updates STATE.md tracking (not ROADMAP.md)
-
-Use when you know exactly what to calculate and the task is small enough to not need literature survey or validation.
-
-Usage: `gpd:quick`
-Result: Creates `GPD/quick/NNN-slug/PLAN.md`, `GPD/quick/NNN-slug/SUMMARY.md`
-
-### Roadmap Management
-
-**`gpd:add-phase <description>`**
-Add new phase to end of current milestone.
-
-- Appends to ROADMAP.md
-- Uses next sequential number
-- Updates phase directory structure
-
-Usage: `gpd:add-phase "Compute finite-temperature corrections"`
-
-**`gpd:insert-phase <after> <description>`**
-Insert urgent work as decimal phase between existing phases.
-
-- Creates intermediate phase (e.g., 7.1 between 7 and 8)
-- Useful for discovered work that must happen mid-investigation
-- Maintains phase ordering
-
-Usage: `gpd:insert-phase 7 "Fix sign error in vertex function"`
-Result: Creates Phase 7.1
-
-**`gpd:remove-phase <number>`**
-Remove a future phase and renumber subsequent phases.
-
-- Deletes phase directory and all references
-- Renumbers all subsequent phases to close the gap
-- Only works on future (unstarted) phases
-- Git commit preserves historical record
-
-Usage: `gpd:remove-phase 17`
-Result: Phase 17 deleted, phases 18-20 become 17-19
-
-**`gpd:revise-phase <number> "<reason>"`**
-Supersede a completed phase and create a replacement for iterative revision.
-
-- Marks original phase as superseded (preserved as historical record)
-- Creates replacement phase with decimal numbering (e.g., 3.1)
-- Pre-populates replacement with context: what worked, what didn't, what to change
-- Updates downstream dependency references
-- Flags downstream phases that may also need revision
-- Only works on completed phases (use gpd:remove-phase for future phases)
-
-Usage: `gpd:revise-phase 3 "Sign error in vertex correction"`
-Result: Phase 3 superseded, Phase 3.1 created with inherited context
-
-**`gpd:merge-phases <source> <target>`**
-Merge results from one phase into another.
-
-- Copies artifacts (summaries, plans, data files) from source to target
-- Merges intermediate results and decisions with phase attribution
-- Updates roadmap to reflect the merge
-- Useful for folding decimal phases back into parents or converging parallel branches
-
-Usage: `gpd:merge-phases 2.1 2`
-
-### Milestone Management
-
-**`gpd:new-milestone <name>`**
-Start a new research milestone through unified flow.
-
-- Deep questioning to understand the next research direction
-- Optional literature survey (spawns 4 parallel scout agents)
-- Objectives definition with scoping
-- Roadmap creation with phase breakdown
-- Uses `planning.commit_docs` from init to decide whether milestone artifacts are committed immediately
-
-Mirrors `gpd:new-project` flow for continuation projects (existing PROJECT.md).
-
-Usage: `gpd:new-milestone "v2.0 Higher-order corrections"`
-
-**`gpd:complete-milestone <version>`**
-Archive completed milestone and prepare for next direction.
-
-- Creates MILESTONES.md entry with results summary
-- Archives full details to milestones/ directory
-- Creates git tag for the release
-- Prepares workspace for next research direction
-
-Usage: `gpd:complete-milestone v2.0`
-
-### Progress Tracking
-
-**`gpd:progress`**
-Check research status and intelligently route to next action.
-
-- Shows visual progress bar and completion percentage
-- Summarizes recent work from SUMMARY files
-- Displays current position and what's next
-- Lists key results and open issues
-- Offers to execute next plan or create it if missing
-- Detects 100% milestone completion
-- Use `--brief` when returning and you only need orientation
-- Use `--reconcile` only on the runtime `gpd:progress` surface when state appears out of sync with disk artifacts
-- The local CLI `gpd progress` is a separate read-only renderer and uses `json|bar|table` instead of these runtime flags
-- Local observability checks stay split by side effect: `gpd observe execution`, `gpd observe sessions`, `gpd observe show`, and `gpd trace show` inspect only; `gpd observe event`, `gpd observe export`, and `gpd trace start|log|stop` write observability, export, or trace files.
-
-Usage: `gpd:progress`
-Usage: `gpd:progress --full` (detailed runtime view with all phase artifacts)
-Usage: `gpd:progress --brief` (compact runtime orientation)
-Usage: `gpd:progress --reconcile` (runtime-only state-vs-disk reconciliation mode)
-Local CLI: `gpd progress json|bar|table` (read-only render formats; add `--watch` / `-w` for a polling heartbeat, `--interval <seconds>` tunes cadence, `--exit-on-idle` for scripting)
-
-### Session Management
+Registry metadata:
+- Canonical command: `gpd:map-research`
+- Argument hint: `[optional: specific area to map, e.g., 'hamiltonian' or 'numerics' or 'perturbation-theory']`
+- Context mode: `projectless`
+- Staged workflow: map-research with stages map_bootstrap, mapper_authoring.
 
 **`gpd:resume-work`**
-Resume research from a previous session with full context restoration.
+Resume research from previous session with full context restoration
 
-@{GPD_INSTALL_DIR}/references/orchestration/resume-vocabulary.md
-
-- Use the recovery ladder (`gpd resume` -> `gpd resume --recent` -> `gpd:resume-work`) to pick up where you left off
-- Best first in-runtime command when returning to paused or interrupted work
-
+Usage examples:
 Usage: `gpd:resume-work`
 
-**`gpd:pause-work`**
-Create a continuation handoff artifact when pausing work mid-phase.
+Notes:
+- `state.json.continuation` is the durable authority. Canonical continuation fields define the public resume vocabulary: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, `resume_candidates`.
 
-- Creates the canonical `.continue-here.md` continuation handoff artifact with current state
-- Updates canonical continuation and its STATE.md Session Continuity rendering
-- Captures in-progress work context
-- Run this before leaving mid-phase so `gpd:resume-work` has an explicit recorded handoff artifact to restore from canonical continuation state
+Registry metadata:
+- Canonical command: `gpd:resume-work`
+- Context mode: `project-required`
+- Project reentry: supported
+- Requires files: `GPD/ROADMAP.md`
+- Staged workflow: resume-work with stages resume_bootstrap, state_restore, derivation_restore, resume_routing.
 
-Usage: `gpd:pause-work`
+**`gpd:progress [--brief | --full | --reconcile]`**
+Check research progress, show context, and route to next action (execute or plan)
 
-### Todo Management
+Usage examples:
+Usage: `gpd:progress [--brief | --full | --reconcile]`
 
-**`gpd:add-todo [description]`**
-Capture idea or task as todo from current conversation.
+Notes:
+- Usage: `gpd:progress --full`
+- Usage: `gpd:progress --brief`
+- Usage: `gpd:progress --reconcile`
+- The local CLI `gpd progress` is a read-only renderer with `json|bar|table` output. Local CLI: `gpd progress json|bar|table`.
 
-- Extracts context from conversation (or uses provided description)
-- Creates structured todo file in `GPD/todos/pending/`
-- Infers area from context for grouping
-- Checks for duplicates before creating
-- Updates STATE.md todo count
+Registry metadata:
+- Canonical command: `gpd:progress`
+- Argument hint: `[--brief | --full | --reconcile]`
+- Context mode: `project-required`
+- Project reentry: supported
+- Requires files: `GPD/PROJECT.md`
 
-Usage: `gpd:add-todo` (infers from conversation)
-Usage: `gpd:add-todo Check if vertex correction satisfies Ward identity`
+**`gpd:suggest-next`**
+Suggest the most impactful next action based on current project state
 
-**`gpd:check-todos [area]`**
-List pending todos and select one to work on.
+Usage examples:
+Usage: `gpd:suggest-next`
 
-- Lists all pending todos with title, area, age
-- Optional area filter (e.g., `gpd:check-todos numerical`)
-- Loads full context for selected todo
-- Routes to appropriate action (work now, add to phase, think more)
-- Moves todo to done/ when work begins
+Registry metadata:
+- Canonical command: `gpd:suggest-next`
+- Context mode: `projectless`
 
-Usage: `gpd:check-todos`
-Usage: `gpd:check-todos analytical`
+**`gpd:explain [concept, result, method, notation, or paper]`**
+Explain a physics concept rigorously in the context of the active project or a standalone question with an explicit topic
 
-### Validation
+Usage examples:
+Usage: `gpd:explain [concept, result, method, notation, or paper]`
 
-**`gpd:verify-work [phase]`**
-Validate research results through systematic checks.
+Registry metadata:
+- Canonical command: `gpd:explain`
+- Argument hint: `[concept, result, method, notation, or paper]`
+- Context mode: `project-aware`
+- Subject policy: subject=explanation_subject; resolution=explanation_input; explicit inputs=concept, result, method, notation, or paper
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/explanations
 
-- Extracts testable results from SUMMARY.md files
-- Checks limiting cases, dimensional analysis, conservation laws
-- Compares against known benchmarks
-- Automatically diagnoses failures and creates fix plans
-- Ready for re-execution if issues found
+**`gpd:quick`**
+Execute a quick research task with GPD guarantees (atomic commits, state tracking) but skip optional agents
 
-Usage: `gpd:verify-work 3`
+Usage examples:
+Usage: `gpd:quick`
 
-### Debugging
+Registry metadata:
+- Canonical command: `gpd:quick`
+- Context mode: `project-required`
+- Staged workflow: quick with stages task_bootstrap, task_authoring, reference_context.
+
+### Planning and execution
+
+**`gpd:discuss-phase <phase> [--auto|--compact]`**
+Gather phase context through adaptive questioning before planning
+
+Usage examples:
+Usage: `gpd:discuss-phase <phase> [--auto|--compact]`
+
+Registry metadata:
+- Canonical command: `gpd:discuss-phase`
+- Argument hint: `<phase> [--auto|--compact]`
+- Context mode: `project-required`
+
+**`gpd:research-phase <phase-number>`**
+Research how to tackle a phase (standalone - usually use gpd:plan-phase instead)
+
+Usage examples:
+Usage: `gpd:research-phase <phase-number>`
+
+Registry metadata:
+- Canonical command: `gpd:research-phase`
+- Argument hint: `<phase-number>`
+- Context mode: `project-required`
+- Subject policy: subject=phase; resolution=phase_number; explicit inputs=phase-number
+- Staged workflow: research-phase with stages phase_bootstrap, research_handoff.
+
+**`gpd:list-phase-assumptions <phase-number>`**
+Surface the AI's assumptions about a phase approach before planning
+
+Usage examples:
+Usage: `gpd:list-phase-assumptions <phase-number>`
+
+Registry metadata:
+- Canonical command: `gpd:list-phase-assumptions`
+- Argument hint: `<phase-number>`
+- Context mode: `project-required`
+- Subject policy: subject=phase; resolution=phase_number; explicit inputs=phase-number
+
+**`gpd:discover [phase or topic] [--depth quick|medium|deep]`**
+Run discovery phase to investigate methods, literature, and approaches before planning
+
+Usage examples:
+Usage: `gpd:discover [phase or topic] [--depth quick|medium|deep]`
+
+Notes:
+- Depth quick is verification-only and writes no file; medium and deep write discovery artifacts.
+- Discovery artifacts feed planning or standalone analysis.
+
+Registry metadata:
+- Canonical command: `gpd:discover`
+- Argument hint: `[phase or topic] [--depth quick|medium|deep]`
+- Context mode: `project-aware`
+- Subject policy: subject=discovery_subject; resolution=phase_or_topic; explicit inputs=phase number or standalone topic
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/analysis
+
+**`gpd:show-phase <phase-number>`**
+Inspect a single phase's artifacts, status, and results
+
+Usage examples:
+Usage: `gpd:show-phase <phase-number>`
+
+Registry metadata:
+- Canonical command: `gpd:show-phase`
+- Argument hint: `<phase-number>`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`
+
+**`gpd:route [--frozen=yes|no] [--change=extend|revise] [--layer=new|change]`**
+Decide whether a scope change is a new phase, a revision, a new milestone, or a milestone completion
+
+Usage examples:
+Usage: `gpd:route [--frozen=yes|no] [--change=extend|revise] [--layer=new|change]`
+
+Notes:
+- The frozen scope-expansion path renders the ordered compound sequence `gpd:complete-milestone` then `gpd:new-milestone`.
+
+Registry metadata:
+- Canonical command: `gpd:route`
+- Argument hint: `[--frozen=yes|no] [--change=extend|revise] [--layer=new|change]`
+- Context mode: `project-required`
+
+**`gpd:plan-phase [phase] [--research] [--skip-research] [--gaps] [--skip-verify] [--light] [--inline-discuss]`**
+Create detailed execution plan for a phase (PLAN.md) with verification loop
+
+Usage examples:
+Usage: `gpd:plan-phase [phase] [--research] [--skip-research] [--gaps] [--skip-verify] [--light] [--inline-discuss]`
+
+Notes:
+- `--skip-verify` may skip routine verification, but proof-bearing plans still require checker review or an equivalent main-context audit.
+
+Registry metadata:
+- Canonical command: `gpd:plan-phase`
+- Argument hint: `[phase] [--research] [--skip-research] [--gaps] [--skip-verify] [--light] [--inline-discuss]`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`, `GPD/STATE.md`
+- Staged workflow: plan-phase with stages phase_bootstrap, research_routing, planner_authoring, checker_revision.
+
+**`gpd:execute-phase <phase-number> [--gaps-only]`**
+Execute all plans in a phase with wave-based parallelization
+
+Usage examples:
+Usage: `gpd:execute-phase <phase-number> [--gaps-only]`
+
+Registry metadata:
+- Canonical command: `gpd:execute-phase`
+- Argument hint: `<phase-number> [--gaps-only]`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`
+- Staged workflow: execute-phase with stages phase_bootstrap, phase_classification, wave_planning, pre_execution_specialists, wave_dispatch, executor_dispatch, proof_critic_dispatch, wave_return_checkpoint, wave_failure_menu, checkpoint_resume, aggregate_and_verify, verification_handoff, gap_reverification, consistency_check, closeout.
+
+**`gpd:autonomous [--from N]`**
+Run remaining phases through staged discuss→plan→execute→verify
+
+Usage examples:
+Usage: `gpd:autonomous [--from N]`
+
+Registry metadata:
+- Canonical command: `gpd:autonomous`
+- Argument hint: `[--from N]`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`, `GPD/STATE.md`
+- Staged workflow: autonomous with stages initialize_discover, phase_route, discuss_delegate, plan_execute_child_cycle, verification_route, gap_route, convention_lifecycle_closeout, blocked_recovery.
+
+**`gpd:derive-equation [equation or topic to derive]`**
+Perform a rigorous physics derivation with systematic verification at each step
+
+Usage examples:
+Usage: `gpd:derive-equation [equation or topic to derive]`
+
+Notes:
+- Part of the project-aware technical-analysis lane for explicit current-workspace derivations.
+
+Registry metadata:
+- Canonical command: `gpd:derive-equation`
+- Argument hint: `[equation or topic to derive]`
+- Context mode: `project-aware`
+- Subject policy: explicit inputs=equation or topic to derive
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/analysis; stage artifacts=gpd_owned_outputs_only
+
+### Roadmap and milestones
+
+**`gpd:add-phase <description>`**
+Add research phase to end of current milestone in roadmap
+
+Usage examples:
+Usage: `gpd:add-phase <description>`
+
+Registry metadata:
+- Canonical command: `gpd:add-phase`
+- Argument hint: `<description>`
+- Context mode: `project-required`
+
+**`gpd:insert-phase <after-phase> "<description>"`**
+Insert urgent research work as decimal phase (e.g., 72.1) between existing phases
+
+Usage examples:
+Usage: `gpd:insert-phase <after-phase> "<description>"`
+
+Registry metadata:
+- Canonical command: `gpd:insert-phase`
+- Argument hint: `<after-phase> "<description>"`
+- Context mode: `project-required`
+
+**`gpd:remove-phase <phase-number>`**
+Remove a future research phase from roadmap and renumber subsequent phases
+
+Usage examples:
+Usage: `gpd:remove-phase <phase-number>`
+
+Registry metadata:
+- Canonical command: `gpd:remove-phase`
+- Argument hint: `<phase-number>`
+- Context mode: `project-required`
+
+**`gpd:revise-phase <phase-number> <reason for revision>`**
+Supersede a completed phase and create a replacement for iterative revision
+
+Usage examples:
+Usage: `gpd:revise-phase <phase-number> <reason for revision>`
+
+Registry metadata:
+- Canonical command: `gpd:revise-phase`
+- Argument hint: `<phase-number> <reason for revision>`
+- Context mode: `project-required`
+
+**`gpd:merge-phases <source-phase> <target-phase>`**
+Merge results from one phase into another
+
+Usage examples:
+Usage: `gpd:merge-phases <source-phase> <target-phase>`
+
+Registry metadata:
+- Canonical command: `gpd:merge-phases`
+- Argument hint: `<source-phase> <target-phase>`
+- Context mode: `project-required`
+
+**`gpd:new-milestone [milestone name, e.g., 'v1.1 Finite-Temperature Extension']`**
+Start a new research milestone cycle — staged init, requirements, and roadmap
+
+Usage examples:
+Usage: `gpd:new-milestone [milestone name, e.g., 'v1.1 Finite-Temperature Extension']`
+
+Registry metadata:
+- Canonical command: `gpd:new-milestone`
+- Argument hint: `[milestone name, e.g., 'v1.1 Finite-Temperature Extension']`
+- Context mode: `project-required`
+- Staged workflow: new-milestone with stages milestone_bootstrap, survey_objectives, roadmap_authoring.
+
+**`gpd:complete-milestone <version>`**
+Archive completed research milestone and prepare for next phase of investigation
+
+Usage examples:
+Usage: `gpd:complete-milestone <version>`
+
+Registry metadata:
+- Canonical command: `gpd:complete-milestone`
+- Argument hint: `<version>`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`
+
+### Validation and analysis
+
+**`gpd:verify-work [phase] [--dimensional] [--limits] [--convergence] [--regression] [--all]`**
+Verify research results through physics consistency checks
+
+Usage examples:
+Usage: `gpd:verify-work [phase] [--dimensional] [--limits] [--convergence] [--regression] [--all]`
+
+Registry metadata:
+- Canonical command: `gpd:verify-work`
+- Argument hint: `[phase] [--dimensional] [--limits] [--convergence] [--regression] [--all]`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`
+- Review contract: review mode with 1 required output(s), 7 preflight check(s), and 4 blocking condition(s).
+- Staged workflow: verify-work with stages session_router, phase_bootstrap, inventory_build, interactive_validation, gap_repair.
 
 **`gpd:debug [issue description]`**
-Systematic debugging of physics calculations with persistent state across context resets.
+Systematic debugging of physics calculations with persistent state across context resets
 
-- Spawns gpd-debugger agent with scientific method approach
-- Maintains debug session state in `GPD/debug/`
-- Survives context window resets — resumes from last checkpoint
-- Archives resolved issues to `GPD/debug/resolved/`
+Usage examples:
+Usage: `gpd:debug [issue description]`
 
-Usage: `gpd:debug Sign error in self-energy diagram`
+Registry metadata:
+- Canonical command: `gpd:debug`
+- Argument hint: `[issue description]`
+- Context mode: `project-required`
 
-### Physics Validation
+**`gpd:dimensional-analysis [phase number or file path]`**
+Systematic dimensional analysis audit on all equations in a derivation or phase
 
-**`gpd:dimensional-analysis`**
-Check dimensional consistency of equations and expressions.
-
-- Verifies all terms have consistent units
-- Checks final results have correct dimensions
-- Flags dimensionless ratios and magic numbers
-- Works on a project phase or one explicit current-workspace file
-- Current-workspace durable outputs stay under `GPD/analysis/`; outside a project, rerun with an explicit file path
-
+Usage examples:
+Usage: `gpd:dimensional-analysis [phase number or file path]`
 Usage: `gpd:dimensional-analysis results/01-SUMMARY.md`
-Usage: `gpd:dimensional-analysis 3` (project-backed phase target)
 
-**`gpd:limiting-cases`**
-Verify results reduce correctly in known limiting cases.
+Notes:
+- Part of the project-aware technical-analysis lane; analysis artifacts belong under GPD/analysis/ when a standalone target is supplied.
 
-- Tests classical, non-relativistic, weak-coupling, thermodynamic limits
-- Compares against textbook expressions in each limit
-- Flags limits that are not recovered
-- Works on a project phase or one explicit current-workspace file
-- Current-workspace durable outputs stay under `GPD/analysis/`; outside a project, rerun with an explicit file path
+Registry metadata:
+- Canonical command: `gpd:dimensional-analysis`
+- Argument hint: `[phase number or file path]`
+- Context mode: `project-aware`
+- Subject policy: explicit inputs=phase number or file path
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/analysis
 
+**`gpd:limiting-cases [phase number or file path]`**
+Systematically identify and verify all relevant limiting cases for a result or phase
+
+Usage examples:
+Usage: `gpd:limiting-cases [phase number or file path]`
 Usage: `gpd:limiting-cases results/01-SUMMARY.md`
-Usage: `gpd:limiting-cases 3` (project-backed phase target)
 
-**`gpd:numerical-convergence`**
-Run systematic convergence tests on numerical computations.
+Notes:
+- Part of the project-aware technical-analysis lane for explicit current-workspace limit checks.
 
-- Tests convergence with grid refinement, time step, basis size
-- Estimates convergence order via Richardson extrapolation
-- Constructs error budgets for computed quantities
-- Works on a project phase or one explicit current-workspace numerical artifact
-- Current-workspace durable outputs stay under `GPD/analysis/`; outside a project, rerun with an explicit file path
+Registry metadata:
+- Canonical command: `gpd:limiting-cases`
+- Argument hint: `[phase number or file path]`
+- Context mode: `project-aware`
+- Subject policy: explicit inputs=phase number or file path
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/analysis; stage artifacts=gpd_owned_outputs_only
 
+**`gpd:numerical-convergence [phase number or file path]`**
+Systematic convergence testing for numerical physics computations
+
+Usage examples:
+Usage: `gpd:numerical-convergence [phase number or file path]`
 Usage: `gpd:numerical-convergence results/mesh-study.csv`
-Usage: `gpd:numerical-convergence 3` (project-backed phase target)
 
-**`gpd:compare-experiment`**
-Compare theoretical/numerical results against experimental data.
+Notes:
+- Part of the project-aware technical-analysis lane for explicit current-workspace convergence checks.
 
-- Loads published experimental values and error bars
-- Computes chi-squared or other goodness-of-fit measures
-- Identifies systematic deviations and their possible origins
+Registry metadata:
+- Canonical command: `gpd:numerical-convergence`
+- Argument hint: `[phase number or file path]`
+- Context mode: `project-aware`
+- Subject policy: explicit inputs=phase number or file path
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/analysis; stage artifacts=gpd_owned_outputs_only
 
-Usage: `gpd:compare-experiment predictions.csv experiment.csv`
+**`gpd:compare-experiment [prediction, dataset, phase, or comparison target]`**
+Systematically compare theoretical predictions with experimental or observational data
+
+Usage examples:
+Usage: `gpd:compare-experiment [prediction, dataset, phase, or comparison target]`
+
+Registry metadata:
+- Canonical command: `gpd:compare-experiment`
+- Argument hint: `[prediction, dataset, phase, or comparison target]`
+- Context mode: `project-aware`
+- Subject policy: subject=comparison; resolution=explicit_or_interactive_theory_data_comparison; explicit inputs=prediction, dataset path, phase identifier, or comparison target; external subjects allowed=true
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/comparisons
 
 **`gpd:compare-results [phase, artifact, or comparison target]`**
-Compare internal results, baselines, or methods and emit a decisive verdict.
+Compare internal results, baselines, or methods and emit decisive verdicts
 
-- Compares phase outputs, artifacts, or named comparison targets from the active project or one explicit target
-- Writes the decisive comparison artifact under `GPD/comparisons/` in the current workspace
-- Surfaces agreement, tension, or failure in a single verdict-oriented view
-- Useful when you need to compare internal baselines without reaching for external data
+Usage examples:
+Usage: `gpd:compare-results [phase, artifact, or comparison target]`
 
-Usage: `gpd:compare-results 3`
-Usage: `gpd:compare-results results/01-SUMMARY.md`
+Notes:
+- Writes a decisive comparison artifact under GPD/comparisons/ for the current workspace.
 
-**`gpd:validate-conventions [phase]`**
-Validate convention consistency across all phases.
+Registry metadata:
+- Canonical command: `gpd:compare-results`
+- Argument hint: `[comparison target or source-a vs source-b]`
+- Context mode: `project-aware`
+- Subject policy: subject=comparison; resolution=explicit_or_interactive_internal_comparison; explicit inputs=comparison target, phase, artifact path, or source-a vs source-b; external subjects allowed=true
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/comparisons
 
-- Checks metric signature, Fourier convention, natural units, gauge choice
-- Detects convention drift where a symbol is redefined in a later phase
-- Cross-checks locked conventions against all phase artifacts
-- Scope to a single phase using the optional phase argument, or run across all completed phases
+**`gpd:validate-conventions [phase number to limit scope, or empty for all]`**
+Validate convention consistency across all phases
 
-Usage: `gpd:validate-conventions`
-Usage: `gpd:validate-conventions 3`
+Usage examples:
+Usage: `gpd:validate-conventions [phase number to limit scope, or empty for all]`
 
-**`gpd:regression-check [phase]`**
-Scan-only audit for regressions in already-recorded verification state.
+Registry metadata:
+- Canonical command: `gpd:validate-conventions`
+- Argument hint: `[phase number to limit scope, or empty for all]`
+- Context mode: `project-required`
 
-- Detects convention conflicts where the same symbol is redefined with different values across completed SUMMARY artifacts
-- Scans `SUMMARY.md` and `VERIFICATION.md` frontmatter rather than re-running numerical or physics verification
-- Flags non-passing, invalid, or non-canonical `VERIFICATION.md` statuses in completed phases
-- Uses canonical statuses `passed`, `gaps_found`, `expert_needed`, and `human_needed`
-- Reports the affected phases and files for follow-up verification or repair
-- Scope to a single phase using the optional phase argument, or run across all completed phases
+**`gpd:regression-check [phase] [--quick]`**
+Scan completed phase summaries and verifications for convention conflicts and verification-state regressions
 
-Usage: `gpd:regression-check`
-Usage: `gpd:regression-check 3`
+Usage examples:
+Usage: `gpd:regression-check [phase] [--quick]`
 
-**`gpd:health`**
-Run project health checks and optionally auto-fix issues.
+Registry metadata:
+- Canonical command: `gpd:regression-check`
+- Argument hint: `[phase] [--quick]`
+- Context mode: `project-required`
 
-- Checks state, frontmatter, storage-path policy, and other project health surfaces
-- Reports warnings and fixable issues before they become workflow blockers
-- Supports `--fix` for automatic repair of common problems
+**`gpd:health [--fix]`**
+Run project health checks and optionally auto-fix issues
 
-Usage: `gpd:health`
-Usage: `gpd:health --fix`
+Usage examples:
+Usage: `gpd:health [--fix]`
 
-### Quantitative Analysis
+Registry metadata:
+- Canonical command: `gpd:health`
+- Argument hint: `[--fix]`
+- Context mode: `projectless`
 
-**`gpd:parameter-sweep [phase | computation anchor]`**
-Systematic parameter sweep with parallel execution and result aggregation.
+**`gpd:parameter-sweep [phase | computation anchor] [--param name --range start:end:steps] [--adaptive] [--log]`**
+Systematic parameter sweep with parallel execution and result aggregation
 
-- Varies one or more parameters across a specified range
-- Uses wave-based parallelism for independent parameter values
-- Collects results and produces summary tables
-- Supports adaptive refinement near interesting features
-- Can use authoritative current-workspace phase context or one explicit current-workspace computation anchor plus `--param` / `--range`
-- Current-workspace durable outputs stay under `GPD/sweeps/`; outside a project, rerun with one explicit computation anchor plus `--param` and `--range`
+Usage examples:
+Usage: `gpd:parameter-sweep [phase | computation anchor] [--param name --range start:end:steps] [--adaptive] [--log]`
 
-Usage: `gpd:parameter-sweep 3 --param coupling --range 0:1:20`
-Usage: `gpd:parameter-sweep results/mesh-study.py --param coupling --range 0:1:20`
-Usage: `gpd:parameter-sweep 3 --adaptive`
+Registry metadata:
+- Canonical command: `gpd:parameter-sweep`
+- Argument hint: `[phase | computation anchor] [--param name --range start:end:steps] [--adaptive] [--log]`
+- Context mode: `project-aware`
+- Subject policy: explicit inputs=computation anchor or file path, --param name, --range start:end:steps
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/sweeps; stage artifacts=gpd_owned_outputs_only
 
-**`gpd:sensitivity-analysis`**
-Determine which input parameters most strongly affect output quantities.
+**`gpd:sensitivity-analysis [--target quantity] [--params p1,p2,...] [--method analytical|numerical]`**
+Systematic sensitivity analysis -- which parameters matter most and how uncertainties propagate
 
-- Computes partial derivatives and condition numbers
-- Ranks parameters by sensitivity
-- Identifies which measurements or calculations would most improve results
-- Supports analytical and numerical methods
-- Can use active project state or one explicit current-workspace `--target` / `--params` specification
-- Current-workspace durable outputs stay under `GPD/analysis/`; outside a project, rerun with explicit `--target` and `--params`
+Usage examples:
+Usage: `gpd:sensitivity-analysis [--target quantity] [--params p1,p2,...] [--method analytical|numerical]`
 
-Usage: `gpd:sensitivity-analysis --target cross_section --params g,m,Lambda`
-Usage: `gpd:sensitivity-analysis --target cross_section --params g,m,Lambda --method numerical`
+Notes:
+- Part of the project-aware technical-analysis lane for ranking influential inputs from project context or explicit current-workspace flags.
 
-**`gpd:error-propagation`**
-Track how uncertainties propagate through multi-step calculations.
+Registry metadata:
+- Canonical command: `gpd:sensitivity-analysis`
+- Argument hint: `[--target quantity] [--params p1,p2,...] [--method analytical|numerical]`
+- Context mode: `project-aware`
+- Subject policy: explicit inputs=--target quantity, --params p1,p2,...
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/analysis; stage artifacts=gpd_owned_outputs_only
 
-- Traces input uncertainties through intermediate results to final quantities
-- Identifies dominant error sources
-- Produces error budgets
-- Scope to specific phases or full derivation chain
+**`gpd:error-propagation [--target quantity] [--phase-range start:end]`**
+Track how uncertainties propagate through multi-step calculations across phases
 
-Usage: `gpd:error-propagation --target final_mass`
-Usage: `gpd:error-propagation --phase-range 1:5`
+Usage examples:
+Usage: `gpd:error-propagation [--target quantity] [--phase-range start:end]`
 
-### Research Publishing
+Registry metadata:
+- Canonical command: `gpd:error-propagation`
+- Argument hint: `[--target quantity] [--phase-range start:end]`
+- Context mode: `project-required`
 
-Publication lane boundary: `gpd:write-paper` supports current-project manuscripts plus one bounded external-authoring lane driven by an explicit intake manifest only. In that lane, GPD-authored outputs live under `GPD/publication/{subject_slug}/...`, the subject-owned publication root at `GPD/publication/{subject_slug}`; `GPD/publication/{subject_slug}/manuscript` is the only manuscript/build root, and `GPD/publication/{subject_slug}/intake/` keeps intake/provenance state only. It does not mine arbitrary folders or infer claim/evidence bindings from loose notes. `gpd:peer-review` can review the current project manuscript or one explicit subject allowed by its command policy; it remains the standalone follow-on command when the bounded external-authoring lane needs review. Project-backed review/response/package outputs stay on their current `GPD/` and `GPD/review/` paths. `gpd:respond-to-referees` stays tied to the resolved manuscript root; `gpd:arxiv-submission` packages only a GPD-owned manuscript root or `.tex` entrypoint. This is not a full publication-root migration.
+### Knowledge authoring
+
+**`gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]`**
+Create or update a draft knowledge document in the current workspace from a topic, source file, arXiv ID, or canonical knowledge path
+
+Usage examples:
+Usage: `gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]`
+Usage: `gpd:digest-knowledge "renormalization group fixed points"`
+Usage: `gpd:digest-knowledge 2401.12345v2`
+Usage: `gpd:digest-knowledge hep-th/9901001`
+Usage: `gpd:digest-knowledge ./notes/rg-notes.md`
+Usage: `gpd:digest-knowledge ./sources/review.docx`
+Usage: `gpd:digest-knowledge ./data/observables.csv`
+Usage: `gpd:digest-knowledge GPD/knowledge/K-renormalization-group-fixed-points.md`
+
+Notes:
+- Creates a current-workspace knowledge document draft from a topic, paper, source file, or explicit knowledge path.
+- Example document source: `gpd:digest-knowledge ./sources/review.docx`; example tabular source: `gpd:digest-knowledge ./data/observables.csv`.
+- Knowledge lifecycle states are draft, in_review, stable, and superseded; use gpd:review-knowledge for approval.
+- Stable knowledge enters shared runtime reference surfaces as reviewed background synthesis; it is a separate authority tier and does not override stronger evidence.
+- Resolves one canonical `GPD/knowledge/{knowledge_id}.md` target in the current workspace and stops on ambiguity.
+- Supports an arXiv identifier with accepted prefixes.
+
+Registry metadata:
+- Canonical command: `gpd:digest-knowledge`
+- Argument hint: `[topic | source file | arXiv ID | current-workspace GPD/knowledge/K-*.md]`
+- Context mode: `project-aware`
+- Subject policy: subject=knowledge_document; resolution=explicit_input_to_canonical_current_workspace_target; explicit inputs=knowledge_document_path, source_path, arxiv_id, topic; external subjects allowed=true
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/knowledge; stage artifacts=gpd_owned_outputs_only
+
+**`gpd:review-knowledge [knowledge path or knowledge id]`**
+Review a current-workspace knowledge document for approval, changes, or promotion gating
+
+Usage examples:
+Usage: `gpd:review-knowledge [knowledge path or knowledge id]`
+
+Notes:
+- Reviews a canonical current-workspace knowledge document using typed approval evidence.
+- Approval can promote stable knowledge; stable and superseded states remain addressable and traceable by canonical path or knowledge id.
+- Writes review artifacts under GPD/knowledge/reviews/.
+
+Registry metadata:
+- Canonical command: `gpd:review-knowledge`
+- Argument hint: `[current-workspace GPD/knowledge/{knowledge_id}.md | canonical K-* knowledge_id]`
+- Context mode: `project-aware`
+- Subject policy: subject=knowledge_document; resolution=explicit_current_workspace_canonical_target; explicit inputs=knowledge_document_path, knowledge_id; external subjects allowed=false
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/knowledge; stage artifacts=gpd_owned_outputs_only
+- Review contract: review mode with 2 required output(s), 4 preflight check(s), and 5 blocking condition(s).
+
+### Writing and publication
+
+**`gpd:literature-review [topic or research question]`**
+Structured literature review for a physics research topic with citation network analysis and open question identification
+
+Usage examples:
+Usage: `gpd:literature-review [topic or research question]`
+
+Notes:
+- Runs on the current project or an explicit topic: a physics research topic or research question, and writes under GPD/literature/ in the current workspace.
+
+Registry metadata:
+- Canonical command: `gpd:literature-review`
+- Argument hint: `[topic or research question]`
+- Context mode: `project-aware`
+- Subject policy: subject=literature_topic; resolution=literature_topic; explicit inputs=topic or research question
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/literature
+- Staged workflow: literature-review with stages review_bootstrap, scope_locked, review_handoff, completion_gate.
 
 **`gpd:write-paper [--intake path/to/write-paper-authoring-input.json]`**
-Structure and write a physics paper from current project research results or one bounded explicit external-authoring intake manifest.
+Structure and write a physics paper from project research results or a bounded external-authoring intake
 
-- Loads research digest from milestone completion (if available)
-- Runs paper-readiness audit (conventions, verification, figures, citations)
-- Spawns gpd-paper-writer agents for each section (Results first, Abstract last)
-- Drafts the manuscript and uses `gpd paper-build` for the canonical scaffold/build contract
-- Uses the current project's GPD-owned manuscript root by default: `paper/`, `manuscript/`, `draft/`, or the managed lane resolved by preflight
-- Supports the bounded external-authoring lane described above
-- Keeps project-backed auxiliary review/response/package artifacts on the workflow-owned `GPD/` paths
-- Routes bounded external-authoring review follow-up to `gpd:peer-review`; embedded external staged-review parity is out of scope
-- Spawns gpd-bibliographer to verify all references
-- Runs the staged peer-review panel with gpd-referee as final adjudicator
-- Supports revision mode for referee responses (bounded 3-iteration loop)
-
+Usage examples:
+Usage: `gpd:write-paper [--intake path/to/write-paper-authoring-input.json]`
 Usage: `gpd:write-paper`
 Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`
 
+Notes:
+- Uses a bounded external-authoring lane driven by an explicit intake manifest only.
+- GPD-authored outputs live under `GPD/publication/{subject_slug}/...`; `GPD/publication/{subject_slug}/intake/` stores intake/provenance state only.
+- It does not mine arbitrary folders, and embedded external staged-review parity is out of scope.
+- Project-backed review/response/package outputs remain in the resolved GPD manuscript lane.
+
+Registry metadata:
+- Canonical command: `gpd:write-paper`
+- Argument hint: `[--intake path/to/write-paper-authoring-input.json]`
+- Context mode: `project-aware`
+- Subject policy: subject=publication; resolution=project_manuscript_or_bootstrap; explicit inputs=authoring_intake_manifest; external subjects allowed=false; bootstrap allowed=true
+- Output policy: mode=manuscript_local_plus_gpd_auxiliary; managed root=gpd_managed_durable; default subtree=GPD/publication/{subject_slug}/manuscript; stage artifacts=allowed
+- Review contract: publication mode with 9 required output(s), 13 preflight check(s), and 7 blocking condition(s).
+- Scope variants: explicit_intake_manifest.
+- Staged workflow: write-paper with stages paper_bootstrap, outline_and_scaffold, figure_and_section_authoring, consistency_and_references, publication_review.
+
 **`gpd:peer-review [paper directory | manuscript path | explicit artifact path]`**
-Run skeptical peer review on an existing manuscript or explicit review artifact.
+Conduct a staged six-pass peer review of a manuscript and supporting research artifacts from the current GPD project or an explicit external artifact
 
-- Runs strict review preflight checks against the resolved review target and available supporting artifacts
-- Loads manuscript files or explicit artifact text, plus project summaries and verification context when present
-- Explicit artifact intake follows the command-policy supported suffixes for publication-artifact paths; canonical in-project manuscript discovery still stays on the resolved manuscript entrypoint under `paper/`, `manuscript/`, or `draft/`
-- Standalone explicit-artifact intake is a peer-review-only entrypoint; downstream `gpd:respond-to-referees` and `gpd:arxiv-submission` stay bound to the resolved project manuscript root
-- Non-plain-text artifact intake uses `gpd validate artifact-text <path> --output <txt-path>` or a same-directory `.txt` companion file
-- Spawns a six-agent review panel plus the auxiliary `gpd-check-proof` critic when theorem-bearing claims are present
-- Project-backed review artifacts stay on the current `GPD/review/` plus `GPD/REFEREE-REPORT{round_suffix}.md` and `GPD/REFEREE-REPORT{round_suffix}.tex` paths
-- If an explicit external manuscript becomes a continued GPD publication subject, the GPD-owned continuation lineage can anchor under `GPD/publication/{subject_slug}/...`
-- Manuscript-local publication artifacts stay rooted at the resolved manuscript directory
-- Routes the result to `gpd:respond-to-referees` or `gpd:arxiv-submission`
-- If no argument is supplied, the command asks whether to review an explicit artifact or the current GPD project's active manuscript when available
-
-Usage: `gpd:peer-review`
-Usage: `gpd:peer-review paper/`
-Usage: `gpd:peer-review draft.pdf`
+Usage examples:
+Usage: `gpd:peer-review [paper directory | manuscript path | explicit artifact path]`
 Usage: `gpd:peer-review draft.docx`
-Usage: `gpd:peer-review notes.txt`
 Usage: `gpd:peer-review data/observables.csv`
 
-**`gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]`**
-Structure point-by-point response to referee reports and revise the manuscript.
-- Preferred explicit intake is `--manuscript PATH --report PATH`; repeat `--report PATH` for multiple referee reports
-- Positional report paths and `paste` remain valid shorthand when the manuscript subject resolves from the current GPD project
-- `$ARGUMENTS` selects the referee report source, while manuscript edits always apply to the resolved manuscript root rather than the report path
-- Parses referee comments into structured items with severity levels
-- Project-backed continuation keeps `GPD/AUTHOR-RESPONSE{round_suffix}.md` and `GPD/review/REFEREE_RESPONSE{round_suffix}.md` with REF-xxx issue tracking (fixed/rebutted/acknowledged/needs-calculation)
-- Explicit external-manuscript continuation uses a subject-owned publication root under `GPD/publication/{subject_slug}/...`
-- Consumes `GPD/review/REVIEW-LEDGER*.json` and `GPD/review/REFEREE-DECISION*.json` when present to preserve blocking-issue context
-- Spawns paper-writer agents for targeted section revisions
-- Tracks new calculations required by referees as revision tasks
-- Keeps the authoritative GPD-owned response artifacts synchronized with the resolved manuscript root; any manuscript-local response letter is an optional companion only
-- Produces response letter from `templates/paper/referee-response.md`
-- Bounded revision loop (max 3 iterations with re-review)
+Notes:
+- Explicit artifact intake follows command-policy supported suffixes for publication-artifact paths.
+- Use `gpd validate artifact-text <path> --output <txt-path>` when explicit artifact text extraction is needed.
+- Project-backed mode uses the resolved manuscript entrypoint before staged review.
 
-Usage: `gpd:respond-to-referees`
+Registry metadata:
+- Canonical command: `gpd:peer-review`
+- Argument hint: `[paper directory or manuscript/artifact path]`
+- Context mode: `project-aware`
+- Requires files: `paper/*.tex`, `paper/*.md`, `manuscript/*.tex`, `manuscript/*.md`, and 2 more
+- Subject policy: subject=publication; resolution=explicit_or_project_manuscript; explicit inputs=manuscript_root, manuscript_path, publication_artifact_path; external subjects allowed=true; bootstrap allowed=false
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD
+- Review contract: publication mode with 10 required output(s), 3 preflight check(s), and 4 blocking condition(s).
+- Scope variants: explicit_artifact.
+- Staged workflow: peer-review with stages bootstrap, preflight, artifact_discovery, panel_stages, final_adjudication, finalize.
+
+**`gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]`**
+Structure a point-by-point response to referee reports for an explicit manuscript target or the current GPD manuscript
+
+Usage examples:
+Usage: `gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]`
 Usage: `gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md`
 Usage: `gpd:respond-to-referees reports/referee-report.md`
 Usage: `gpd:respond-to-referees paste`
 
+Notes:
+- Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy.
+- Project-backed review/response/package outputs stay under the resolved manuscript root; this is not a full publication-root migration.
+
+Registry metadata:
+- Canonical command: `gpd:respond-to-referees`
+- Argument hint: `[--manuscript PATH] (--report PATH [--report PATH...] | paste)`
+- Context mode: `project-aware`
+- Subject policy: subject=publication; resolution=explicit_or_project_manuscript; explicit inputs=manuscript_path, referee_report_path, paste_referee_report; external subjects allowed=true
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD
+- Review contract: publication mode with 2 required output(s), 5 preflight check(s), and 5 blocking condition(s).
+- Scope variants: managed_publication_subject, explicit_external_manuscript.
+- Staged workflow: respond-to-referees with stages bootstrap, report_triage, revision_planning, response_authoring, finalize.
+
 **`gpd:arxiv-submission [manuscript root or .tex entrypoint]`**
-Prepare a completed GPD-owned manuscript for arXiv submission with validation and packaging.
+Prepare a GPD-owned manuscript for arXiv submission with validation and packaging
 
-- Requires a successful `gpd paper-build` before packaging
-- Project-backed only: package the resolved built `.tex` manuscript plus manuscript-root support artifacts; standalone peer-review targets such as `.pdf`, `.docx`, `.csv`, `.tsv`, and `.xlsx` are not valid submission inputs
-- Optional local compiler smoke check if available
-- Bibliography flattening (inline .bbl or resolve .bib)
-- Figure format and resolution checking
-- `\input` resolution into single .tex file (optional)
-- Metadata verification (title, authors, abstract)
-- Ancillary file packaging
-- Generates submission-ready `.tar.gz`
-- Uses `gpd paper-build` and the resolved GPD-owned manuscript root as the build/package contract; it does not package arbitrary external manuscript directories
-- Requires the latest staged `GPD/review/REVIEW-LEDGER*.json` and `GPD/review/REFEREE-DECISION*.json` pair for the active manuscript
-- Produces checklist of remaining manual steps
-
-Usage: `gpd:arxiv-submission`
+Usage examples:
+Usage: `gpd:arxiv-submission [manuscript root or .tex entrypoint]`
 Usage: `gpd:arxiv-submission paper/`
 
-**`gpd:explain [concept]`**
-Explain a concept, method, notation, result, or paper in project context or from a standalone question.
+Notes:
+- Packages the GPD-owned manuscript root or a supported .tex entrypoint; it does not package arbitrary external material.
 
-- Spawns a `gpd-explainer` agent and grounds the explanation in the active phase, manuscript, or local workflow when available
-- Produces a structured explanation under `GPD/explanations/`
-- Audits cited papers with `gpd-bibliographer` and includes a reading path with openable links
+Registry metadata:
+- Canonical command: `gpd:arxiv-submission`
+- Argument hint: `[manuscript root or .tex entrypoint]`
+- Context mode: `project-aware`
+- Requires files: `paper/*.tex`, `manuscript/*.tex`, `draft/*.tex`, `GPD/publication/*/manuscript/*.tex`
+- Subject policy: subject=publication; resolution=explicit_or_project_manuscript; explicit inputs=manuscript_path, manuscript_root; external subjects allowed=false; bootstrap allowed=false
+- Output policy: mode=managed; managed root=gpd_managed_durable; default subtree=GPD/publication/{subject_slug}/arxiv; stage artifacts=gpd_owned_outputs_only
+- Review contract: publication mode with 1 required output(s), 17 preflight check(s), and 13 blocking condition(s).
+- Staged workflow: arxiv-submission with stages bootstrap, manuscript_preflight, review_gate, package, finalize.
 
-Usage: `gpd:explain "Ward identity"`
+**`gpd:slides [topic, talk title, audience, or source path]`**
+Create presentation slides from a GPD project or the current folder
 
-**`gpd:suggest-next`**
-Suggest the most impactful next action based on current project state.
+Usage examples:
+Usage: `gpd:slides [topic, talk title, audience, or source path]`
 
-- Scans phases, plans, verification status, blockers, and todos
-- Produces a prioritized action list
-- Local CLI equivalent: `gpd --raw suggest`
-- Fastest way to answer "what should I do next?" without reading through progress reports
-- Fastest post-resume command when you only need the next action
+Registry metadata:
+- Canonical command: `gpd:slides`
+- Argument hint: `[topic, talk title, audience, or source path]`
+- Context mode: `projectless`
 
-Usage: `gpd:suggest-next`
+### Tangents, memory, and exports
 
-**`gpd:literature-review [topic or research question]`**
-Structured literature review for a physics research topic from the current project or one explicit topic or research question.
+**`gpd:tangent [optional description]`**
+Choose how to handle a possible side investigation without silently widening scope
 
-- Writes the review and citation-source sidecar under `GPD/literature/` in the current workspace
-- Citation network analysis and open question identification
-- Spawns `gpd-literature-reviewer` for the structured review
-- Spawns gpd-bibliographer agent for citation verification
-- Creates structured review with key papers, methods, and gaps
+Usage examples:
+Usage: `gpd:tangent [optional description]`
 
-Usage: `gpd:literature-review "Sachdev-Ye-Kitaev model thermodynamics"`
+Registry metadata:
+- Canonical command: `gpd:tangent`
+- Argument hint: `[optional description]`
+- Context mode: `project-required`
 
-**`gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]`**
-Create or update a current-workspace knowledge document draft from a topic, paper, source file, or explicit knowledge path.
+**`gpd:branch-hypothesis <description>`**
+Create a hypothesis branch for parallel investigation of an alternative approach
 
-- Accepts an explicit knowledge-doc path, a source file path, an arXiv identifier with accepted prefixes, or a topic string
-- Resolves one canonical `GPD/knowledge/{knowledge_id}.md` target in the current workspace or stops on ambiguity
-- Source-file intake accepts `.md`, `.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, and `.xlsx` when those paths are supplied explicitly
-- Non-plain-text source intake (`.pdf`, `.docx`, `.xlsx`) is normalized through `gpd validate artifact-text <path> --output <txt-path>` before drafting; keep the original artifact path as the canonical source reference
-- Reopens existing draft knowledge docs in place and routes approval or stable-state requests to `gpd:review-knowledge`
-- Drafts stay `draft` until reviewed, and they move into `in_review` while a review round is open
-- If the target is `stable` or `superseded`, route the user to `gpd:review-knowledge`
-- Stable knowledge is already visible through the shared runtime reference surfaces, but it remains reviewed background synthesis rather than a separate authority tier
-- Use canonical `GPD/knowledge/{knowledge_id}.md` targets for existing knowledge docs; new draft targets are created under the current workspace `GPD/knowledge/` tree.
+Usage examples:
+Usage: `gpd:branch-hypothesis <description>`
 
-- Example topic: `gpd:digest-knowledge "renormalization group fixed points"`
-- Example arXiv identifier: `gpd:digest-knowledge 2401.12345v2`
-- Example prefixed arXiv identifier: `gpd:digest-knowledge hep-th/9901001`
-- Example source file: `gpd:digest-knowledge ./notes/rg-notes.md`
-- Example document source: `gpd:digest-knowledge ./drafts/review-notes.docx`
-- Example tabular source: `gpd:digest-knowledge ./data/critical-exponents.csv`
-- Example explicit knowledge path: `gpd:digest-knowledge GPD/knowledge/K-renormalization-group-fixed-points.md`
+Registry metadata:
+- Canonical command: `gpd:branch-hypothesis`
+- Argument hint: `<description>`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`, `GPD/STATE.md`
 
-Usage: `gpd:digest-knowledge "renormalization group fixed points"`
+**`gpd:compare-branches`**
+Compare results across hypothesis branches side-by-side
 
-**`gpd:review-knowledge [knowledge path or knowledge id]`**
-Review one canonical current-workspace knowledge document, record typed approval evidence, and promote a fresh approved draft to stable.
+Usage examples:
+Usage: `gpd:compare-branches`
 
-- Resolves an exact existing current-workspace knowledge target by canonical path or knowledge id
-- Writes a deterministic review artifact under `GPD/knowledge/reviews/` in the current workspace
-- Records review round, reviewer identity, approval artifact hash, reviewed content hash, and stale state
-- Promotes the document to `stable` only when the review is fresh and explicitly approved
-- Keeps `needs_changes` and `rejected` outcomes in the review loop without pretending they are stable
-- `stable` docs can later become `superseded`; superseded docs remain addressable and traceable rather than disappearing
-- Stable knowledge is available through the shared runtime reference surfaces, but it does not override stronger evidence or explicit dependency gates
+Registry metadata:
+- Canonical command: `gpd:compare-branches`
+- Context mode: `project-required`
 
-Usage: `gpd:review-knowledge GPD/knowledge/K-renormalization-group-fixed-points.md` or `gpd:review-knowledge K-renormalization-group-fixed-points`
+**`gpd:pause-work`**
+Create continuation handoff when pausing research mid-phase
+
+Usage examples:
+Usage: `gpd:pause-work`
+
+Registry metadata:
+- Canonical command: `gpd:pause-work`
+- Context mode: `project-required`
+
+**`gpd:add-todo [optional description]`**
+Capture idea or task as todo from current research conversation context
+
+Usage examples:
+Usage: `gpd:add-todo [optional description]`
+
+Registry metadata:
+- Canonical command: `gpd:add-todo`
+- Argument hint: `[optional description]`
+- Context mode: `projectless`
+
+**`gpd:check-todos [area filter]`**
+List pending research todos and select one to work on
+
+Usage examples:
+Usage: `gpd:check-todos [area filter]`
+
+Registry metadata:
+- Canonical command: `gpd:check-todos`
+- Argument hint: `[area filter]`
+- Context mode: `projectless`
+
+**`gpd:decisions [phase number or keyword]`**
+Display and search the cumulative decision log
+
+Usage examples:
+Usage: `gpd:decisions [phase number or keyword]`
+
+Registry metadata:
+- Canonical command: `gpd:decisions`
+- Argument hint: `[phase number or keyword]`
+- Context mode: `project-required`
+- Requires files: `GPD/STATE.md`
+
+**`gpd:graph`**
+Visualize dependency graph across phases and identify gaps
+
+Usage examples:
+Usage: `gpd:graph`
+
+Notes:
+- Complements the technical-analysis lane; use separate commands such as gpd:error-propagation for uncertainty flow.
+
+Registry metadata:
+- Canonical command: `gpd:graph`
+- Context mode: `project-required`
+
+**`gpd:export [--format html|latex|zip|all] [--commit]`**
+Export research results to HTML, LaTeX, or ZIP package
+
+Usage examples:
+Usage: `gpd:export [--format html|latex|zip|all] [--commit]`
+Usage: `gpd:export --format latex --commit`
+
+Notes:
+- For generated text exports, outputs are committed only with explicit `--commit`.
+- gpd observe execution, gpd observe sessions, gpd observe show, and gpd trace show inspect only; gpd observe event, gpd observe export, and gpd trace start|log|stop write observability.
+
+Registry metadata:
+- Canonical command: `gpd:export`
+- Argument hint: `[--format html|latex|zip|all] [--commit]`
+- Context mode: `project-required`
+
+**`gpd:export-logs [--format jsonl|json|markdown] [--session <id>] [--last N] [--command <label>] [--phase <phase>] [--category <name>] [--no-traces] [--output-dir <path>]`**
+Export session logs and traces to files for external review or archival
+
+Usage examples:
+Usage: `gpd:export-logs [--format jsonl|json|markdown] [--session <id>] [--last N] [--command <label>] [--phase <phase>] [--category <name>] [--no-traces] [--output-dir <path>]`
+Usage: `gpd:export-logs --command execute-phase --phase 3 --category workflow`
+
+Notes:
+- Exports observability logs with passthrough filters such as --command <label>, --phase <phase>, and --category <name>.
+- Empty result payloads report empty_export: true.
+
+Registry metadata:
+- Canonical command: `gpd:export-logs`
+- Argument hint: `[--format jsonl|json|markdown] [--session <id>] [--last N] [--command <label>] [--phase <phase>] [--category <name>] [--no-traces] [--output-dir <path>]`
+- Context mode: `project-required`
+
+**`gpd:error-patterns [category]`**
+View accumulated physics error patterns for this project
+
+Usage examples:
+Usage: `gpd:error-patterns [category]`
+Usage: `gpd:error-patterns sign-error`
+
+Notes:
+- Pattern-library categories include sign-error, factor-error, convention-pitfall, convergence-issue, approximation-failure, numerical-instability, conceptual-error, and dimensional-error.
+
+Registry metadata:
+- Canonical command: `gpd:error-patterns`
+- Argument hint: `[category]`
+- Context mode: `project-required`
+
+**`gpd:record-backtrack [--reverted-commit=<sha>] [--trigger=<text>] [--phase=<NN-slug>] [description]`**
+Record a backtrack event (what went wrong, what got reverted) to the backtracks ledger
+
+Usage examples:
+Usage: `gpd:record-backtrack [--reverted-commit=<sha>] [--trigger=<text>] [--phase=<NN-slug>] [description]`
+
+Registry metadata:
+- Canonical command: `gpd:record-backtrack`
+- Argument hint: `[--reverted-commit=<sha>] [--trigger=<text>] [--phase=<NN-slug>] [description]`
+- Context mode: `project-required`
+
+**`gpd:record-insight [optional description]`**
+Record a project-specific learning or pattern to the insights ledger
+
+Usage examples:
+Usage: `gpd:record-insight [optional description]`
+
+Registry metadata:
+- Canonical command: `gpd:record-insight`
+- Argument hint: `[optional description]`
+- Context mode: `project-required`
+
+**`gpd:audit-milestone [version]`**
+Audit research milestone completion against original research goals
+
+Usage examples:
+Usage: `gpd:audit-milestone [version]`
+
+Registry metadata:
+- Canonical command: `gpd:audit-milestone`
+- Argument hint: `[version]`
+- Context mode: `project-required`
+- Requires files: `GPD/ROADMAP.md`, `GPD/STATE.md`
+
+**`gpd:plan-milestone-gaps`**
+Create phases to close all gaps identified by research milestone audit
+
+Usage examples:
+Usage: `gpd:plan-milestone-gaps`
+
+Registry metadata:
+- Canonical command: `gpd:plan-milestone-gaps`
+- Context mode: `project-required`
+- Requires files: `GPD/v*-MILESTONE-AUDIT.md`
+
+### Configuration and maintenance
+
+**`gpd:settings`**
+Configure autonomy, unattended execution budgets, runtime permission sync, workflow preset bundles, model-cost posture, runtime-specific tier model overrides, review cadence, and git preferences
+
+Usage examples:
+Usage: `gpd:settings`
+
+Notes:
+- Autonomy vocabulary: Supervised, Max quality, Balanced, Budget-aware, runtime defaults, YOLO.
+- Configuration keys include `execution.review_cadence`, `planning.commit_docs`, `git.branching_strategy`, and statuses such as `needs-calculation`; model tiers are `tier-1`, `tier-2`, and `tier-3`.
+- Use `gpd observe execution` and `gpd cost` from the normal terminal for read-only status and usage review.
+
+Registry metadata:
+- Canonical command: `gpd:settings`
+- Context mode: `projectless`
+
+**`gpd:set-tier-models`**
+Configure concrete tier-1/tier-2/tier-3 model IDs for the active runtime
+
+Usage examples:
+Usage: `gpd:set-tier-models`
+
+Registry metadata:
+- Canonical command: `gpd:set-tier-models`
+- Context mode: `projectless`
+
+**`gpd:set-profile <profile>`**
+Switch research profile for GPD agents (deep-theory/numerical/exploratory/review/paper-writing)
+
+Usage examples:
+Usage: `gpd:set-profile <profile>`
+
+Registry metadata:
+- Canonical command: `gpd:set-profile`
+- Argument hint: `<profile>`
+- Context mode: `projectless`
+
+**`gpd:compact-state [--force]`**
+Archive historical entries from STATE.md to keep it under the 150-line target
+
+Usage examples:
+Usage: `gpd:compact-state [--force]`
+
+Notes:
+- Suggested by `gpd:progress` when STATE.md grows large.
+
+Registry metadata:
+- Canonical command: `gpd:compact-state`
+- Argument hint: `[--force]`
+- Context mode: `project-required`
+
+**`gpd:sync-state`**
+Reconcile diverged STATE.md and state.json after manual edits or corruption
+
+Usage examples:
+Usage: `gpd:sync-state`
+
+Registry metadata:
+- Canonical command: `gpd:sync-state`
+- Context mode: `project-required`
+- Project reentry: supported
+- Staged workflow: sync-state with stages sync_bootstrap, single_source_recovery, conflict_analysis, reconcile_and_validate.
+
+**`gpd:undo`**
+Rollback last GPD operation with safety checkpoint
+
+Usage examples:
+Usage: `gpd:undo`
+
+Registry metadata:
+- Canonical command: `gpd:undo`
+- Context mode: `project-required`
+
+**`gpd:update`**
+Update GPD to latest version with changelog display
+
+Usage examples:
+Usage: `gpd:update`
+
+Notes:
+- Runs the public bootstrap update command for the active runtime.
+- Preserves local modifications via patch backups.
+
+Registry metadata:
+- Canonical command: `gpd:update`
+- Context mode: `global`
+
+**`gpd:reapply-patches`**
+Reapply local modifications after a GPD update
+
+Usage examples:
+Usage: `gpd:reapply-patches`
+
+Registry metadata:
+- Canonical command: `gpd:reapply-patches`
+- Context mode: `projectless`
+<!-- gpd-help:detailed-command-reference:end -->
+
+### Research Publishing
+
+Publication lane boundary: `gpd:write-paper` supports current-project manuscripts plus one bounded external-authoring lane driven by an explicit intake manifest only. In that lane, GPD-authored outputs live under `GPD/publication/{subject_slug}/...`; `GPD/publication/{subject_slug}/manuscript` is the only manuscript/build root, and `GPD/publication/{subject_slug}/intake/` keeps intake/provenance state only. It does not mine arbitrary folders or infer claim/evidence bindings from loose notes. `gpd:peer-review` can review the current project manuscript or one explicit subject allowed by its command policy; it remains the standalone follow-on command when the bounded external-authoring lane needs review. Project-backed review/response/package outputs stay on the `GPD/` and `GPD/review/` paths. `gpd:respond-to-referees` stays tied to the resolved manuscript root; `gpd:arxiv-submission` packages only a GPD-owned manuscript root or `.tex` entrypoint and does not package arbitrary external manuscript directories. This is not a full publication-root migration.
 
 ### Optional Local CLI Add-Ons
 
-**Workflow presets**
-
-- `Paper/manuscript workflows` - First supported workflow preset for `write-paper`, `paper-build`, `peer-review`, and `arxiv-submission`; inspect paper-toolchain readiness with `gpd doctor`, inspect the preset with `gpd presets list`, preview it with `gpd presets show <preset>`, and apply it from your normal terminal with `gpd presets apply <preset>` or through your runtime-specific `gpd:settings` command
-- `gpd doctor --runtime <runtime> --local` / `gpd doctor --runtime <runtime> --global` - Check the local or global runtime target from your normal terminal before using that preset. Add `--live-executable-probes` if you also want cheap local executable probes such as `pdflatex --version`, `tectonic --version`, or `wolframscript -version`. Failed preset rows degrade `write-paper`, but `paper-build` remains the build contract and `arxiv-submission` requires the built manuscript
-- `gpd presets list` - Inspect the local preset catalog; presets resolve to the existing config keys and do not add a separate persisted preset block
-- `gpd presets show <preset>` - Preview one preset's bundle before applying it
-- `gpd presets apply <preset> [--dry-run]` - Apply or preview one preset from your normal terminal without inventing a separate preset schema
-
-Workflow presets are bundles over the existing config keys only; they do not add a separate persisted preset block.
-
-**Contract alignment gate**
-
-- `gpd contract fingerprint` - Print the canonical sha256 fingerprint of the current machine contract
-- `gpd contract context-fingerprint [path]` - Print the sha256 fingerprint of a CONTEXT.md file's text (defaults to the active phase's CONTEXT.md)
-- `gpd contract record-alignment --contract-hash <hash> --context-hash <hash>` - Persist operator confirmation that the claim-deliverable alignment was reviewed
-- `gpd contract alignment-status` - Print the persisted claim-deliverable alignment confirmation as JSON
-- `gpd contract alignment-summary` - Print the claim-deliverable alignment row summary as JSON
-
-The contract subgroup is the claim-deliverable alignment precheck used by `gpd:execute-phase` before a phase can claim a deliverable.
-
-**Wolfram integration**
-
-- `gpd integrations status wolfram` - Inspect the shared optional Wolfram integration config only; this does not prove local Mathematica availability or plan readiness, and optional doctor probes do not change that
-- `gpd integrations enable wolfram` - Enable the shared optional Wolfram integration config
-- `gpd integrations disable wolfram` - Disable the shared optional Wolfram integration config
-
-Local Mathematica installs are separate from the shared optional Wolfram integration config.
-
-Workflow preset tooling is layered on top of the base install; it does not change runtime permission alignment.
-
-### Tangents & Hypothesis Branches
-
-**`gpd:tangent [description]`**
-Choose what to do with a possible side investigation without immediately committing to a git branch.
-
-- Acts as the tangent chooser: stay on the current line, do a quick tangent, defer it, or escalate to a branch
-- Use when an interesting sub-question appears but you have not yet decided whether it deserves isolated branch state
-- Keeps hypothesis branching as an explicit follow-on decision rather than the default for every tangent
-- If `gpd observe execution` surfaces an alternative-path follow-up or `branch later` recommendation, run `gpd:tangent` first rather than skipping straight to `gpd:branch-hypothesis`
-
-Usage: `gpd:tangent "Check whether the 2D case is degenerate before branching"`
-
-**`gpd:branch-hypothesis <description>`**
-Create a hypothesis branch for parallel investigation of an alternative approach.
-
-- Creates git branch with isolated `GPD/` state
-- Allows exploring alternative methods without disrupting main line
-- Use when the tangent should become an explicit git-backed alternative path you intend to compare
-
-Usage: `gpd:branch-hypothesis "Try perturbative RG instead of exact RG"`
-
-**`gpd:compare-branches`**
-Compare results across hypothesis branches side-by-side.
-
-- Reads SUMMARY.md and VERIFICATION.md from each branch
-- Shows which approach produced better results
-- Helps decide which branch to merge back
-
-Usage: `gpd:compare-branches`
-
-### Decision Tracking
-
-**`gpd:decisions [phase or keyword]`**
-Display and search the cumulative decision log.
-
-- Shows all recorded decisions across phases
-- Filter by phase number or keyword
-- Tracks sign conventions, approximation choices, gauge choices
-- Reads from `GPD/DECISIONS.md`
-
-Usage: `gpd:decisions`
-Usage: `gpd:decisions 3`
-Usage: `gpd:decisions "gauge"`
-
-### Visualization & Export
-
-**`gpd:graph`**
-Visualize dependency graph across phases and identify gaps.
-
-- Builds Mermaid diagram from phase frontmatter (provides/requires/affects)
-- Identifies gaps where a phase requires something no other phase provides
-- Computes critical path through the research project
-
-Usage: `gpd:graph`
-
-> **Note:** Wave dependency validation runs automatically when executing phases. To validate manually, use `gpd phase validate-waves <phase>` — checks depends_on targets, file overlap within waves, wave consistency, and circular dependencies.
-
-**`gpd:export [--format html|latex|zip|all] [--commit]`**
-Export research results to HTML, LaTeX, or ZIP package.
-
-- HTML: standalone page with MathJax rendering
-- LaTeX: document with proper equations and bibliography
-- ZIP: complete archive of all planning artifacts
-- Does not commit generated files by default; add `--commit` to opt in to committing generated HTML, LaTeX, and BibTeX exports
-
-Usage: `gpd:export --format html`
-Usage: `gpd:export --format all`
-Usage: `gpd:export --format latex --commit`
-
-**`gpd:export-logs [--format jsonl|json|markdown] [--session <id>] [--last N] [--command <label>] [--phase <phase>] [--category <name>] [--no-traces] [--output-dir <path>]`**
-Export observability sessions and optional traces to files for review, sharing, or archival.
-
-- Reads session event streams from `GPD/observability/sessions/` and optional traces from `GPD/traces/`
-- Writes filtered exports to `GPD/exports/logs/` or a custom directory
-- Supports JSONL, JSON, and markdown output
-- Supports passthrough filters `--command <label>`, `--phase <phase>`, and `--category <name>`
-- Validates the output format before creating directories; refuses to write if no observability sessions exist; labels filtered empty exports with `empty_export: true`
-- Useful when you need to share or inspect the recorded execution history outside the runtime
-
-Usage: `gpd:export-logs`
-Usage: `gpd:export-logs --format markdown`
-Usage: `gpd:export-logs --last 5`
-Usage: `gpd:export-logs --command execute-phase --phase 3 --category workflow`
-
-**`gpd:slides [topic, audience, or source path]`**
-Create presentation slides from a GPD project or the current folder.
-
-- Audits papers, figures, notes, code, and data to build a talk brief
-- Asks targeted questions about audience, duration, format/toolchain, templates, technical depth, and whether to refresh or extend existing slide assets
-- Defaults toward Beamer for equation-heavy talks and uses markdown or native decks when that fits better
-- Produces an outline plus deck source files in `slides/`
-
-Usage: `gpd:slides "Group meeting update on finite-temperature RG"`
-Usage: `gpd:slides -- "20 minute seminar for condensed matter theorists"`
-
-**`gpd:error-patterns [category]`**
-View accumulated physics error patterns for this project.
-
-- Shows common mistakes discovered during debugging and verification
-- Category filters use the pattern-library names, such as `sign-error`, `factor-error`, `convention-pitfall`, `convergence-issue`, `approximation-failure`, `numerical-instability`, `conceptual-error`, or `dimensional-error`
-- Helps avoid repeating known pitfalls
-
-Usage: `gpd:error-patterns`
-Usage: `gpd:error-patterns sign-error`
-
-**`gpd:record-backtrack [--reverted-commit=<sha>] [--trigger=<text>] [--phase=<NN-slug>] [description]`**
-Capture a backtrack event so the planner can avoid repeating the same mistake.
-
-- Records the trigger, what was produced, why it was wrong, and the counter-action
-- Checks for duplicates on `trigger` + `why_wrong`
-- Optional flags can pin the reverted commit, trigger text, or phase slug
-- When `promote: true`, auto-copies a parallel row into `GPD/INSIGHTS.md`'s `## Execution Deviations` section
-- Updates `GPD/BACKTRACKS.md`
-
-Usage: `gpd:record-backtrack`
-Usage: `gpd:record-backtrack Proof used mostly-minus metric when lock pinned +----`
-Usage: `gpd:record-backtrack --phase=03-proof --trigger="metric mismatch" --reverted-commit=abc123 "Wrong signature assumption"`
-
-**`gpd:record-insight [description]`**
-Record a project-specific learning or pattern to the insights ledger.
-
-- Records error patterns, convention pitfalls, verification lessons
-- Checks for duplicates before adding
-- Categorizes into appropriate section (Debugging Patterns, Verification Lessons, etc.)
-- Updates `GPD/INSIGHTS.md`
-
-Usage: `gpd:record-insight`
-Usage: `gpd:record-insight Sign error in Wick contractions with mostly-minus metric`
-
-### Milestone Auditing
-
-**`gpd:audit-milestone [version]`**
-Audit milestone completion against original objectives.
-
-- Reads all phase VERIFICATION.md files
-- Checks objectives coverage
-- Spawns cross-check agent for consistency between phases
-- Creates MILESTONE-AUDIT.md with gaps and open questions
-
-Usage: `gpd:audit-milestone`
-
-**`gpd:plan-milestone-gaps`**
-Create phases to close gaps identified by audit.
-
-- Reads MILESTONE-AUDIT.md and groups gaps into phases
-- Prioritizes by objective priority
-- Adds gap closure phases to ROADMAP.md
-- Ready for `gpd:plan-phase` on new phases
-
-Usage: `gpd:plan-milestone-gaps`
-
-### Configuration
-
-**`gpd:settings`**
-Primary guided setup for autonomy, unattended execution budgets, runtime permission sync, model profile, `execution.review_cadence`, and runtime-specific tier model overrides.
-
-- Choose how often GPD should pause for you (`Supervised (Recommended)` is the default and matches the advisor cadence; `Balanced` for unattended runs once you trust the boundary)
-- Review unattended execution budgets and other bounded continuation limits before leaving runs alone
-- Start with a qualitative model-cost posture: `Max quality`, `Balanced`, or `Budget-aware`
-- Sync runtime-owned permissions after autonomy changes when the active runtime supports it
-- If settings reports a relaunch is required, the new autonomy level is not unattended-ready yet
-- Toggle plan researcher, plan checker, and execution verifier agents
-- Configure inter-wave verification gates (`execution.review_cadence`: `dense`, `adaptive`, or `sparse`)
-- Toggle parallel execution of wave plans
-- Select model profile (deep-theory/numerical/exploratory/review/paper-writing); `review` with runtime defaults is the safest first choice
-- Let that posture drive whether you keep runtime defaults or pin concrete runtime model strings for `tier-1`, `tier-2`, and `tier-3`
-- Configure whether planning artifacts are committed (`planning.commit_docs`)
-- Configure git branching strategy (`git.branching_strategy`: `none`, `per-phase`, or `per-milestone`)
-- Use `gpd cost` after runs when you want the read-only machine-local usage / cost summary
-- Updates `GPD/config.json`
-
-Usage: `gpd:settings`
-
-**`gpd:set-tier-models`**
-Direct concrete model-id setup for `tier-1`, `tier-2`, and `tier-3` on the active runtime.
-
-- `tier-1` — highest capability, usually highest cost
-- `tier-2` — middle/default capability tier
-- `tier-3` — fastest / most economical
-- Clears or writes only `model_overrides.<runtime>` in `GPD/config.json`
-- Leaves `model_profile`, autonomy, `execution.review_cadence`, budgets, and workflow toggles unchanged
-- Use runtime defaults if you are unsure; pin exact ids only when you want explicit control
-- Use `gpd cost` after runs for the read-only recorded local usage / cost view
-
-Usage: `gpd:set-tier-models`
-
-**`gpd:set-profile <profile>`**
-Quick switch model profile for GPD agents. Use `gpd:set-tier-models` for the direct concrete tier-id path, or `gpd:settings` when you want broader unattended/configuration changes too.
-
-- `deep-theory` — tier-1 (highest capability) for all reasoning-intensive agents (formal derivations, proofs)
-- `numerical` — tier-1 for planning/verification, tier-2 for execution (simulations, numerics)
-- `exploratory` — tier-1 for planner/researchers, tier-2 for execution (hypothesis generation)
-- `review` (default) — tier-1 for verifier/checker/debugger, tier-2 for execution (validation focus)
-- `paper-writing` — tier-1 for planner/executor/synthesizer, tier-2 for verification
-
-Usage: `gpd:set-profile deep-theory`
-
-### Utility Commands
-
-**`gpd:compact-state`**
-Archive historical entries from STATE.md to keep it lean.
-
-- Moves old decisions, metrics, and resolved blockers to STATE-ARCHIVE.md
-- Keeps STATE.md under the target line budget (~150 lines)
-- Suggested by `gpd:progress` when STATE.md grows large; transition workflows may compact during phase changes
-
-Usage: `gpd:compact-state`
-Usage: `gpd:compact-state --force` (skip line-count check)
-
-**`gpd:sync-state`**
-Reconcile diverged STATE.md and state.json after manual edits or corruption.
-
-- Detects mismatches between human-readable STATE.md and structured state.json
-- Resolves by choosing the more recent or more complete source
-- Fixes broken convention locks, missing phase counters, or stale progress bars
-- Use after manual edits to STATE.md or after a crash during state updates
-
-Usage: `gpd:sync-state`
-
-**`gpd:undo`**
-Rollback last GPD operation with safety checkpoint.
-
-- Creates a safety tag before reverting so the undo itself is reversible
-- Reverts only GPD-related commits (not arbitrary git history)
-- Rejects merge commits — manual resolution required
-
-Usage: `gpd:undo`
-
-**`gpd:update`**
-Update GPD to latest version with changelog display.
-
-- Runs the public bootstrap update command for the active runtime
-- Shows changelog of what changed since your version
-- Preserves local modifications via patch backups (use `gpd:reapply-patches` after if needed)
-
-Usage: `gpd:update`
-
-**`gpd:reapply-patches`**
-Reapply local modifications after a GPD update.
-
-- Detects and replays customizations you made to GPD files
-- Use after `gpd:update` if you have local workflow or template modifications
-
-Usage: `gpd:reapply-patches`
-
-**`gpd:help`**
-Show this command reference.
-
-<!-- gpd-help:detailed-command-reference:end -->
+- `gpd doctor --runtime <runtime> --local` / `gpd doctor --runtime <runtime> --global` - Check the local or global runtime target from your normal terminal before using paper/manuscript workflow presets. Add `--live-executable-probes` if you also want cheap local executable probes such as `pdflatex --version`, `tectonic --version`, or `wolframscript -version`.
+- Paper/manuscript workflows: inspect paper-toolchain readiness with `gpd doctor` before you plan to use that preset. Missing preset tooling degrades that preset; it does not block the base GPD install.
+- `paper-build` remains the build contract, and `paper-build` and `arxiv-submission` require the `LaTeX Toolchain`; `arxiv-submission` requires the built manuscript.
+- Wolfram integration status is separate from plan readiness and does not replace `gpd validate plan-preflight <PLAN.md>`.
+- **Workflow presets**: use `gpd presets list`, `gpd presets show <preset>`, and `gpd presets apply <preset>` from your normal terminal.
+- Missing preset tooling can degrade `write-paper`; it does not block the base GPD install.
+- Workflow presets are bundles over the existing config keys only; use `gpd presets list`, `gpd presets show <preset>`, and `gpd presets apply <preset>` from your normal terminal; they do not add a separate persisted preset block. Workflow preset tooling is layered on top of the base install and does not change runtime permission alignment.
+- Shared Wolfram capability controls stay on the local CLI: `gpd integrations enable wolfram` and `gpd integrations disable wolfram`.
+
+### Generated Detail Compatibility Notes
+
+Regression checks scan recorded `SUMMARY` frontmatter, convention conflicts, `VERIFICATION` artifacts, and canonical statuses; they do not rerun full verification workflows.
+
+Project-aware technical-analysis lane: `gpd:derive-equation`, `gpd:dimensional-analysis`, `gpd:limiting-cases`, `gpd:numerical-convergence`, `gpd:sensitivity-analysis`, `GPD/analysis/`, `gpd:graph`, and `gpd:error-propagation` are separate commands. Parameter-sweep artifacts under `GPD/sweeps/` are not part of this relaxed current-workspace lane.
+
+Current-workspace durable outputs can be created from a project context or outside a project only when the user supplies an explicit derivation target or explicit file path. Parameter and sensitivity helpers keep their explicit flags visible: `--param`, `--range`, `--target`, and `--params`.
+
+Usage: `gpd:dimensional-analysis notes/dimension-check.md`
+Usage: `gpd:limiting-cases notes/limit-check.md`
+Usage: `gpd:numerical-convergence data/convergence.csv`
+Usage: `gpd:parameter-sweep --param beta --range 0.1:1.0`
+Usage: `gpd:compare-experiment data/results.csv`
+Usage: `gpd:compare-results GPD/comparisons/baseline.md`
+Usage: `gpd:review-knowledge GPD/knowledge/K-example.md`
+Usage: `gpd:sensitivity-analysis --target observable --params alpha,beta --method sobol`
 
 ## Files & Structure
 

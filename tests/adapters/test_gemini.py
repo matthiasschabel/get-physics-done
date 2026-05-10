@@ -28,7 +28,7 @@ from gpd.adapters.gemini import (
     _rewrite_gpd_cli_invocations,
     classify_gemini_shell_fence_body,
 )
-from gpd.adapters.gemini_shell_patches import GEMINI_SHELL_WORKFLOW_PATCHES
+from gpd.adapters.gemini_shell_patches import classify_gemini_shell_workflow_block
 from gpd.adapters.install_utils import (
     COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
@@ -303,36 +303,21 @@ class TestConvertToGeminiToml:
 
 
 class TestRewriteGeminiShellWorkflowGuidance:
-    def test_shell_workflow_patch_registry_ids_are_unique_and_ordered(self) -> None:
-        patch_ids = tuple(patch.id for patch in GEMINI_SHELL_WORKFLOW_PATCHES)
-
-        assert len(patch_ids) == len(set(patch_ids))
-        assert patch_ids == (
-            "new-project-init-block",
-            "set-profile-validation-exact-block",
-            "set-profile-validation-regex-block",
-            "set-profile-init-block",
-            "minimal-commit-block",
-            "health-tempfile-block",
-            "pre-check-capture-echo-lines",
-            "contract-validate-stdin",
-            "contract-persist-stdin",
-            "contract-persist-sentence",
-            "contract-persist-after-validation-sentence",
-            "contract-file-note",
-            "convention-check-unit-warning-block",
-            "convention-check-paper-warning-block",
-            "command-context-validate-conventions-block",
-            "command-context-write-paper-block",
-            "paper-quality-capture-block",
-            "comparison-pre-check-commit-block",
-            "dependency-graph-pre-check-commit-block",
-            "init-phase-op-block",
-            "init-progress-state-roadmap-config-block",
-            "init-progress-state-block",
-            "init-phase-op-state-config-phase-arg-block",
-            "init-progress-state-config-block",
+    def test_classifies_structural_init_capture_without_patch_registry(self) -> None:
+        body = (
+            "BOOTSTRAP=$(gpd --raw init progress --include state,config --no-project-reentry)\n"
+            "if [ $? -ne 0 ]; then\n"
+            '  echo "ERROR: bootstrap failed: $BOOTSTRAP"\n'
+            "  # STOP; surface the error.\n"
+            "fi\n"
         )
+
+        rewrite = classify_gemini_shell_workflow_block(body)
+
+        assert rewrite.kind == "gpd-capture-status-block"
+        assert rewrite.replacement is not None
+        assert "gpd --raw init progress --include state,config --no-project-reentry" in rewrite.replacement
+        assert "BOOTSTRAP=$(" not in rewrite.replacement
 
     def test_rewrites_set_profile_validation_shell_block_to_non_shell_guidance(self) -> None:
         content = (
@@ -356,7 +341,7 @@ class TestRewriteGeminiShellWorkflowGuidance:
             "```"
         )
 
-        result = _rewrite_gemini_shell_workflow_guidance(content)
+        result = _rewrite_gemini_shell_workflow_guidance(content, command_name="set-profile")
 
         assert "Validate the single profile argument without a shell call" in result
         assert 'PROFILE="$(' not in result
@@ -375,7 +360,7 @@ class TestRewriteGeminiShellWorkflowGuidance:
             "```"
         )
 
-        result = _rewrite_gemini_shell_workflow_guidance(content)
+        result = _rewrite_gemini_shell_workflow_guidance(content, command_name="set-profile")
 
         assert "Run these as separate shell calls in Gemini auto-edit mode." in result
         assert "gpd config ensure-section" in result
@@ -429,9 +414,48 @@ class TestRewriteGeminiShellWorkflowGuidance:
         result = _rewrite_gemini_shell_workflow_guidance(content)
 
         assert "# Gemini: run this command directly." in result
-        assert "gpd pre-commit-check --files GPD/STATE.md 2>&1 || true" in result
+        assert "gpd pre-commit-check --files GPD/STATE.md 2>&1" in result
+        assert "|| true" not in result
         assert "PREVIEW=$(" not in result
         assert "$PREVIEW" not in result
+
+    def test_structural_contract_file_transport_preserves_mode_approved(self) -> None:
+        content = (
+            "```bash\n"
+            "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract - --mode approved\n"
+            "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -\n"
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert f"gpd --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH} --mode approved" in result
+        assert f"gpd state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in result
+        assert "PROJECT_CONTRACT_JSON" not in result
+        assert "printf '%s\\n'" not in result
+
+    def test_structural_health_tempfile_wrapper_renders_direct_health_commands(self) -> None:
+        content = (
+            "```bash\n"
+            "HEALTH_ERR=$(mktemp)\n"
+            "if echo \"$ARGUMENTS\" | grep -q \"\\-\\-fix\"; then\n"
+            "  HEALTH=$(gpd --raw health --fix 2>\"$HEALTH_ERR\")\n"
+            "  HEALTH_STATUS=$?\n"
+            "else\n"
+            "  HEALTH=$(gpd --raw health 2>\"$HEALTH_ERR\")\n"
+            "  HEALTH_STATUS=$?\n"
+            "fi\n"
+            "HEALTH_STDERR=$(cat \"$HEALTH_ERR\")\n"
+            "rm -f \"$HEALTH_ERR\"\n"
+            "```"
+        )
+
+        result = _rewrite_gemini_shell_workflow_guidance(content)
+
+        assert "gpd --raw health\n" in result
+        assert "gpd --raw health --fix" in result
+        assert "mktemp" not in result
+        assert "HEALTH_ERR=$(" not in result
 
 
 class TestGeminiShellFenceClassification:
@@ -443,6 +467,7 @@ class TestGeminiShellFenceClassification:
             ("git init\n", "policy-static"),
             ("git status --porcelain\n", "terminal-example"),
             ("mkdir -p exports\n", "terminal-example"),
+            ("gpd status || true\n", "pseudocode"),
             ("VALUE=$(gpd status)\n", "pseudocode"),
             ("git show {branch}:GPD/STATE.md\n", "pseudocode"),
             ("\n# comment only\n", "non-runnable"),
@@ -561,6 +586,17 @@ class TestGeminiCommandRuntimeNotes:
         assert "printf '%s\\n'" not in result
         assert "If `run_shell_command` is denied by policy, stop and report the policy block" in result
         assert f"{bridge_command} status" in result
+
+    def test_command_prompt_rendering_is_idempotent_for_projected_gemini_markdown(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = "---\nname: gpd:status\ndescription: Show project status\n---\n```bash\ngpd status\n```\n"
+
+        once = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+        twice = _render_gemini_command_prompt(once, bridge_command=bridge_command)
+
+        assert once == twice
+        assert twice.count("<gemini_runtime_notes>") == 1
+        assert twice.count("<gemini_shell_runtime_notes>") == 1
 
     def test_rendered_shell_allowlist_matches_policy_prefixes(self) -> None:
         bridge_command = "/runtime/gpd-cli"

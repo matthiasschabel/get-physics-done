@@ -6,6 +6,7 @@ import re
 from collections import Counter
 
 from gpd import registry as content_registry
+from gpd.core import help_renderer
 from tests.assertion_taxonomy_support import FragmentMode, fragment_count, semantic_anchor
 from tests.doc_surface_contracts import assert_publication_lane_boundary_contract
 
@@ -32,12 +33,29 @@ def _help_marker_range(content: str, marker_name: str) -> str:
     return _range(content, start_marker, end_marker)
 
 
+def _rendered_detailed_reference() -> str:
+    return help_renderer.render_detailed_command_reference_markdown()
+
+
+def _rendered_command_index_rows() -> dict[str, str]:
+    rows = re.findall(r"(?m)^- `([^`]+)` - (.+)$", help_renderer.render_command_index_markdown())
+    assert len(rows) == len({command for command, _description in rows})
+    return dict(rows)
+
+
 def _detailed_command_block(content: str, command_heading: str, next_command_heading: str | None = None) -> str:
-    detailed_reference = _help_marker_range(content, "detailed-command-reference")
+    if "<!-- gpd-help:detailed-command-reference:start -->" in content:
+        detailed_reference = _help_marker_range(content, "detailed-command-reference")
+    else:
+        detailed_reference = content
     start = detailed_reference.index(command_heading)
-    if next_command_heading is None:
+    if next_command_heading is not None and next_command_heading in detailed_reference[start + len(command_heading) :]:
+        end = detailed_reference.index(next_command_heading, start + len(command_heading))
+        return detailed_reference[start:end]
+    next_heading = re.search(r"(?m)^\*\*`gpd:[a-z0-9-]+\b", detailed_reference[start + len(command_heading) :])
+    if next_heading is None:
         return detailed_reference[start:]
-    end = detailed_reference.index(next_command_heading, start + len(command_heading))
+    end = start + len(command_heading) + next_heading.start()
     return detailed_reference[start:end]
 
 
@@ -50,7 +68,10 @@ def _help_command_inventory(*contents: str) -> set[str]:
 
 
 def _detailed_command_headings(content: str) -> list[str]:
-    detailed_reference = _help_marker_range(content, "detailed-command-reference")
+    if "<!-- gpd-help:detailed-command-reference:start -->" in content:
+        detailed_reference = _help_marker_range(content, "detailed-command-reference")
+    else:
+        detailed_reference = content
     return re.findall(r"(?m)^\*\*`gpd:([a-z0-9-]+)\b", detailed_reference)
 
 
@@ -75,7 +96,9 @@ def test_help_inventory_covers_registry_command_inventory() -> None:
     registry_commands = set(content_registry.list_commands())
     help_inventory = _help_command_inventory(
         _read("src/gpd/commands/help.md"),
-        _read("src/gpd/specs/workflows/help.md"),
+        help_renderer.render_quick_start_markdown(),
+        help_renderer.render_command_index_markdown(),
+        _rendered_detailed_reference(),
     )
 
     missing = sorted(registry_commands - help_inventory)
@@ -86,7 +109,7 @@ def test_detailed_help_reference_has_one_block_for_each_registry_command() -> No
     content_registry.invalidate_cache()
 
     registry_commands = set(content_registry.list_commands())
-    detailed_headings = _detailed_command_headings(_read("src/gpd/specs/workflows/help.md"))
+    detailed_headings = _detailed_command_headings(_rendered_detailed_reference())
 
     heading_counts = Counter(detailed_headings)
     duplicate_headings = sorted(command for command, count in heading_counts.items() if count > 1)
@@ -115,10 +138,11 @@ def test_help_wrapper_followups_do_not_hard_code_gpd_help_runtime_syntax() -> No
     assert "gpd:help --all" not in help_command
     assert "gpd:help --command <name>" not in help_command
     assert "this runtime's help command" not in help_command
-    assert "never print the placeholder" in help_command
-    assert "Run <current-help-command> --all for the compact command index." in help_command
-    assert "Run <current-help-command> --command <name> for detailed help on one command." in help_command
-    assert "Unknown command. Run <current-help-command> --all for the compact command index." in help_command
+    assert "current-help-command" not in help_command
+    assert 'refer to the command that invoked this wrapper as "this help command"' in help_command
+    assert "Run this help command with --all for the compact command index." in help_command
+    assert "Run this help command with --command <name> for detailed help on one command." in help_command
+    assert "Unknown command. Run this help command with --all for the compact command index." in help_command
 
 
 def test_help_wrapper_documents_inline_argument_command_lookup_normalization() -> None:
@@ -149,9 +173,9 @@ def test_help_workflow_removes_unreachable_contextual_help_variant() -> None:
 
 
 def test_peer_review_detailed_help_uses_command_policy_instead_of_suffix_inventory() -> None:
-    help_workflow = _read("src/gpd/specs/workflows/help.md")
+    detailed_reference = _rendered_detailed_reference()
     peer_review_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:peer-review [paper directory | manuscript path | explicit artifact path]`**",
         "**`gpd:respond-to-referees",
     )
@@ -210,6 +234,7 @@ def test_public_docs_frame_typed_review_surfaces_as_command_policy_specializatio
 def test_public_docs_explain_publication_lane_boundary_and_follow_on_command_args() -> None:
     readme = _read("README.md")
     help_workflow = _read("src/gpd/specs/workflows/help.md")
+    detailed_reference = _rendered_detailed_reference()
     research_publishing = _range(help_workflow, "### Research Publishing", "### Optional Local CLI Add-Ons")
 
     assert_publication_lane_boundary_contract(readme)
@@ -243,16 +268,16 @@ def test_public_docs_explain_publication_lane_boundary_and_follow_on_command_arg
     assert "`GPD/review/`" in readme
     assert "`GPD/` and `GPD/review/`" in research_publishing
     assert "`respond-to-referees`" in readme
-    assert "**`gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]`**" in help_workflow
-    assert "**`gpd:arxiv-submission [manuscript root or .tex entrypoint]`**" in help_workflow
+    assert "**`gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]`**" in detailed_reference
+    assert "**`gpd:arxiv-submission [manuscript root or .tex entrypoint]`**" in detailed_reference
     assert (
         "Usage: `gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md`"
-        in help_workflow
+        in detailed_reference
     )
-    assert "Usage: `gpd:respond-to-referees reports/referee-report.md`" in help_workflow
-    assert "Usage: `gpd:respond-to-referees paste`" in help_workflow
-    assert "Usage: `gpd:arxiv-submission paper/`" in help_workflow
-    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_workflow
+    assert "Usage: `gpd:respond-to-referees reports/referee-report.md`" in detailed_reference
+    assert "Usage: `gpd:respond-to-referees paste`" in detailed_reference
+    assert "Usage: `gpd:arxiv-submission paper/`" in detailed_reference
+    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in detailed_reference
     _assert_anchor(
         research_publishing,
         "arxiv submission package boundary",
@@ -262,46 +287,47 @@ def test_public_docs_explain_publication_lane_boundary_and_follow_on_command_arg
 
 def test_public_write_paper_help_surfaces_match_supported_command_metadata() -> None:
     readme = _read("README.md")
-    help_workflow = _read("src/gpd/specs/workflows/help.md")
+    detailed_reference = _rendered_detailed_reference()
     write_paper_workflow = _read("src/gpd/specs/workflows/write-paper.md")
-    public_surfaces = (readme, help_workflow)
+    public_surfaces = (readme, detailed_reference)
 
     for content in public_surfaces:
         assert "gpd:write-paper [title or topic]" not in content
         assert "--from-phases" not in content
         assert 'gpd:write-paper "' not in content
     assert "write-paper --intake intake/write-paper-authoring-input.json" in readme
-    assert "gpd:write-paper --intake intake/write-paper-authoring-input.json" in help_workflow
+    assert "gpd:write-paper --intake intake/write-paper-authoring-input.json" in detailed_reference
 
-    assert "Usage: `gpd:write-paper`" in help_workflow
+    assert "Usage: `gpd:write-paper`" in detailed_reference
     assert "--from-phases" not in write_paper_workflow
 
 
 def test_help_workflow_export_logs_surfaces_passthrough_filters() -> None:
     help_workflow = _read("src/gpd/specs/workflows/help.md")
+    detailed_reference = _rendered_detailed_reference()
 
     export_index = "- `gpd:export-logs"
     export_detail = "**`gpd:export-logs"
     assert export_index in help_workflow
-    assert export_detail in help_workflow
+    assert export_detail in detailed_reference
     for flag in ("--command <label>", "--phase <phase>", "--category <name>"):
-        assert flag in help_workflow
-    assert "empty_export: true" in help_workflow
-    assert "Usage: `gpd:export-logs --command execute-phase --phase 3 --category workflow`" in help_workflow
+        assert flag in detailed_reference
+    assert "empty_export: true" in detailed_reference
+    assert "Usage: `gpd:export-logs --command execute-phase --phase 3 --category workflow`" in detailed_reference
     _assert_anchor(
-        help_workflow,
+        detailed_reference,
         "export logs passthrough filter semantics",
         ("gpd:export-logs", "passthrough filters", "--command <label>", "--phase <phase>", "--category <name>"),
     )
 
 
 def test_help_workflow_labels_observe_trace_side_effects_and_export_commit_opt_in() -> None:
-    help_workflow = _read("src/gpd/specs/workflows/help.md")
+    detailed_reference = _rendered_detailed_reference()
 
-    assert "**`gpd:export [--format html|latex|zip|all] [--commit]`**" in help_workflow
-    assert "Usage: `gpd:export --format latex --commit`" in help_workflow
+    assert "**`gpd:export [--format html|latex|zip|all] [--commit]`**" in detailed_reference
+    assert "Usage: `gpd:export --format latex --commit`" in detailed_reference
     _assert_anchor(
-        help_workflow,
+        detailed_reference,
         "observe and trace read/write boundary",
         (
             "gpd observe execution",
@@ -316,16 +342,16 @@ def test_help_workflow_labels_observe_trace_side_effects_and_export_commit_opt_i
         ),
     )
     _assert_anchor(
-        help_workflow,
+        detailed_reference,
         "export commit opt in",
         ("generated text exports", "committed", "explicit `--commit`"),
     )
 
 
 def test_help_workflow_error_patterns_uses_pattern_library_categories() -> None:
-    help_workflow = _read("src/gpd/specs/workflows/help.md")
+    detailed_reference = _rendered_detailed_reference()
     error_patterns_section = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:error-patterns [category]`**",
         "**`gpd:record-backtrack [--reverted-commit=<sha>] [--trigger=<text>] [--phase=<NN-slug>] [description]`**",
     )
@@ -394,14 +420,15 @@ def test_help_workflow_keeps_concise_local_cli_surface_note() -> None:
 
 def test_help_workflow_files_and_structure_and_knowledge_lifecycle_coverages() -> None:
     help_workflow = _read("src/gpd/specs/workflows/help.md")
+    detailed_reference = _rendered_detailed_reference()
     files_section = _range(help_workflow, "## Files & Structure", "## Workflow Modes")
     digest_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]`**",
         "**`gpd:review-knowledge",
     )
     review_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:review-knowledge [knowledge path or knowledge id]`**",
         "### Optional Local CLI Add-Ons",
     )
@@ -456,7 +483,7 @@ def test_help_workflow_files_and_structure_and_knowledge_lifecycle_coverages() -
     assert "arXiv identifier with accepted prefixes" in digest_detail
     assert "legacy arxiv" not in digest_detail.lower()
     _assert_anchor(
-        help_workflow,
+        detailed_reference,
         "stable knowledge shared runtime visibility appears in digest and review flows",
         (
             "Stable knowledge",
@@ -468,30 +495,30 @@ def test_help_workflow_files_and_structure_and_knowledge_lifecycle_coverages() -
 
 
 def test_help_workflow_current_workspace_helpers_and_discover_quick_mode_wording() -> None:
-    help_workflow = _read("src/gpd/specs/workflows/help.md")
-    command_index_rows = _command_index_rows(help_workflow)
+    detailed_reference = _rendered_detailed_reference()
+    command_index_rows = _rendered_command_index_rows()
     discover_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:discover [phase or topic] [--depth quick|medium|deep]`**",
         "**`gpd:show-phase",
     )
     compare_results_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:compare-results [phase, artifact, or comparison target]`**",
         "**`gpd:validate-conventions",
     )
     digest_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]`**",
         "**`gpd:review-knowledge",
     )
     review_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:review-knowledge [knowledge path or knowledge id]`**",
         "### Optional Local CLI Add-Ons",
     )
     literature_detail = _detailed_command_block(
-        help_workflow,
+        detailed_reference,
         "**`gpd:literature-review [topic or research question]`**",
         "**`gpd:digest-knowledge",
     )
@@ -551,8 +578,7 @@ def test_help_workflow_current_workspace_helpers_and_discover_quick_mode_wording
 
 
 def test_help_workflow_relaxed_technical_analysis_lane_stays_honest() -> None:
-    help_workflow = _read("src/gpd/specs/workflows/help.md")
-    detailed_reference = _help_marker_range(help_workflow, "detailed-command-reference")
+    detailed_reference = _rendered_detailed_reference()
 
     _assert_anchor(
         detailed_reference,

@@ -30,7 +30,7 @@ COMMAND_BASELINES = {
     "add-todo": (227, 6_977, 1),
     "arxiv-submission": (288, 14_691, 1),
     "audit-milestone": (518, 20_292, 1),
-    "autonomous": (1_013, 39_407, 1),
+    "autonomous": (62, 2_003, 1),
     "branch-hypothesis": (383, 11_072, 1),
     "check-todos": (241, 6_763, 1),
     "compact-state": (259, 8_283, 1),
@@ -99,7 +99,7 @@ COMMAND_BASELINES = {
     "write-paper": (433, 20_231, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
-    "autonomous": (1_050, 41_000),
+    "autonomous": (90, 4_000),
     "complete-milestone": (1_270, 39_000),
     "derive-equation": (780, 38_000),
     "discuss-phase": (1_100, 43_000),
@@ -110,6 +110,7 @@ WORST_COMMAND_HARD_CAPS = {
     "help": (1_475, 77_600),
     "peer-review": (340, 16_000),
     "respond-to-referees": (350, 22_000),
+    "sensitivity-analysis": (780, 33_000),
     "settings": (550, 34_000),
     "verify-work": (240, 9_000),
 }
@@ -136,7 +137,7 @@ WORKFLOW_BASELINES = {
     "add-todo": (186, 5_694, 0),
     "arxiv-submission": (39, 2_176, 0),
     "audit-milestone": (430, 15_421, 1),
-    "autonomous": (961, 37_688, 0),
+    "autonomous": (92, 4_151, 0),
     "branch-hypothesis": (334, 9_597, 0),
     "check-todos": (205, 5_768, 0),
     "compact-state": (213, 6_916, 0),

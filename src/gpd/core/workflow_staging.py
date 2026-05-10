@@ -23,6 +23,7 @@ LITERATURE_REVIEW_STAGE_MANIFEST_PATH = (
 )
 RESEARCH_PHASE_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"research-phase{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 MAP_RESEARCH_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"map-research{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
+AUTONOMOUS_STAGE_MANIFEST_PATH = WORKFLOW_STAGE_MANIFEST_DIR / f"autonomous{WORKFLOW_STAGE_MANIFEST_SUFFIX}"
 WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT = "GPD/publication/{subject_slug}/manuscript"
 WRITE_PAPER_MANAGED_INTAKE_ROOT = "GPD/publication/{subject_slug}/intake"
 RESUME_WORK_INIT_FIELDS = frozenset(
@@ -1055,7 +1056,51 @@ ARXIV_SUBMISSION_INIT_FIELDS = frozenset(
         *ARXIV_SUBMISSION_SNAPSHOT_FIELDS,
     }
 )
+AUTONOMOUS_INIT_FIELDS = frozenset(
+    {
+        "project_root",
+        "autonomous_argument_input",
+        "autonomous_from_phase",
+        "commit_docs",
+        "autonomy",
+        "research_mode",
+        "review_cadence",
+        "model_profile",
+        "platform",
+        "milestone_version",
+        "milestone_name",
+        "milestone_slug",
+        "phase_count",
+        "completed_phases",
+        "all_phases_complete",
+        "project_exists",
+        "roadmap_exists",
+        "state_exists",
+        "phases_dir_exists",
+        "autonomous_phase_plan",
+        "autonomous_completed_phase_numbers",
+        "autonomous_completed_phase_verification_statuses",
+        "autonomous_incomplete_phase_count",
+        "autonomous_current_phase_number",
+        "autonomous_current_phase_name",
+        "autonomous_current_phase_goal",
+        "autonomous_current_phase_success_criteria",
+        "phase_found",
+        "phase_dir",
+        "phase_number",
+        "phase_name",
+        "phase_slug",
+        "padded_phase",
+        "has_context",
+        "has_plans",
+        "plan_count",
+        "verification_report_status",
+        "verification_report_status_payload",
+        "phase_proof_review_status",
+    }
+)
 _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW = {
+    "autonomous": AUTONOMOUS_INIT_FIELDS,
     "resume-work": RESUME_WORK_INIT_FIELDS,
     "sync-state": SYNC_STATE_INIT_FIELDS,
     "new-project": NEW_PROJECT_INIT_FIELDS,
@@ -1849,6 +1894,14 @@ def validate_arxiv_submission_stage_contract_payload(raw: object) -> WorkflowSta
     return validate_workflow_stage_manifest_payload(raw, expected_workflow_id="arxiv-submission")
 
 
+def load_autonomous_stage_contract() -> WorkflowStageManifest:
+    return load_workflow_stage_manifest("autonomous")
+
+
+def validate_autonomous_stage_contract_payload(raw: object) -> WorkflowStageManifest:
+    return validate_workflow_stage_manifest_payload(raw, expected_workflow_id="autonomous")
+
+
 def load_literature_review_stage_contract() -> WorkflowStageManifest:
     return load_workflow_stage_manifest("literature-review")
 
@@ -1889,6 +1942,8 @@ __all__ = [
     "ARXIV_SUBMISSION_BOOTSTRAP_FIELDS",
     "ARXIV_SUBMISSION_INIT_FIELDS",
     "ARXIV_SUBMISSION_SNAPSHOT_FIELDS",
+    "AUTONOMOUS_INIT_FIELDS",
+    "AUTONOMOUS_STAGE_MANIFEST_PATH",
     "NEW_PROJECT_INIT_FIELDS",
     "NEW_PROJECT_STAGE_MANIFEST_PATH",
     "NEW_MILESTONE_INIT_FIELDS",
@@ -1942,6 +1997,7 @@ __all__ = [
     "load_new_milestone_stage_contract",
     "load_new_milestone_stage_contract_from_path",
     "load_arxiv_submission_stage_contract",
+    "load_autonomous_stage_contract",
     "load_literature_review_stage_contract",
     "load_literature_review_stage_contract_from_path",
     "load_execute_phase_stage_contract",
@@ -1957,6 +2013,7 @@ __all__ = [
     "validate_new_project_stage_contract_payload",
     "validate_new_milestone_stage_contract_payload",
     "validate_arxiv_submission_stage_contract_payload",
+    "validate_autonomous_stage_contract_payload",
     "validate_literature_review_stage_contract_payload",
     "validate_map_research_stage_contract_payload",
     "validate_execute_phase_stage_contract_payload",

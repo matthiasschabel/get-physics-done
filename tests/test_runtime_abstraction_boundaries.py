@@ -1096,8 +1096,13 @@ def test_shared_generic_tests_do_not_hardcode_provider_or_model_literals() -> No
 
 
 def test_autonomous_success_criteria_do_not_hardcode_provider_literals() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/autonomous.md").read_text(encoding="utf-8")
-    success_criteria = workflow.split("<success_criteria>", 1)[1].split("</success_criteria>", 1)[0]
+    workflow_paths = [REPO_ROOT / "src/gpd/specs/workflows/autonomous.md"]
+    autonomous_stage_dir = REPO_ROOT / "src/gpd/specs/workflows/autonomous"
+    if autonomous_stage_dir.is_dir():
+        workflow_paths.extend(sorted(autonomous_stage_dir.glob("*.md")))
+    workflow = "\n\n".join(path.read_text(encoding="utf-8") for path in workflow_paths)
+    sections = re.findall(r"<success_criteria>(.*?)</success_criteria>", workflow, flags=re.DOTALL)
+    success_criteria = "\n\n".join(sections) if sections else workflow
 
     provider_literals = ("Anthropic", "OpenAI", "Google", "Claude", "Gemini")
     leaks = [literal for literal in provider_literals if literal in success_criteria]

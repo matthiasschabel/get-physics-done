@@ -10,6 +10,7 @@ from gpd.core.config import GPDProjectConfig
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
+AUTONOMOUS_STAGE_DIR = WORKFLOWS_DIR / "autonomous"
 
 
 def _execute_phase_stage(name: str) -> str:
@@ -29,6 +30,13 @@ def _execute_phase_combined() -> str:
         "closeout.md",
     )
     return "\n\n".join(_execute_phase_stage(stage_file) for stage_file in stage_files)
+
+
+def _autonomous_combined() -> str:
+    paths = [WORKFLOWS_DIR / "autonomous.md"]
+    if AUTONOMOUS_STAGE_DIR.is_dir():
+        paths.extend(sorted(AUTONOMOUS_STAGE_DIR.glob("*.md")))
+    return "\n\n".join(path.read_text(encoding="utf-8") for path in paths)
 
 
 def test_execute_phase_has_no_commented_pre_execution_specialist_task_spawns() -> None:
@@ -95,16 +103,18 @@ def test_execute_workflow_fallback_defaults_match_project_config_defaults() -> N
 
 
 def test_autonomous_prompt_uses_supported_transition_and_discuss_contracts() -> None:
-    autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
+    autonomous = _autonomous_combined()
 
     assert "workflow.skip_discuss" not in autonomous
     assert "--no-transition" not in autonomous
     assert "execute-phase` owns its normal phase transition / closeout path" in autonomous
-    assert "`gpd:execute-phase` with `{phase: PHASE_NUM}`" in autonomous
+    assert "`gpd:execute-phase` with `{phase: PHASE_NUM}`" in autonomous or (
+        "`gpd:execute-phase` child command with structured arguments `{phase: PHASE_NUM}`" in autonomous
+    )
 
 
 def test_autonomous_uses_child_delegation_not_local_grep_status_readers() -> None:
-    autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
+    autonomous = _autonomous_combined()
 
     forbidden_fragments = (
         'VERIFY_STATUS=$(grep',
@@ -116,19 +126,40 @@ def test_autonomous_uses_child_delegation_not_local_grep_status_readers() -> Non
     )
     for fragment in forbidden_fragments:
         assert fragment not in autonomous
-    assert "Autonomous mode is an orchestrator, not a Markdown status parser." in autonomous
-    assert "`gpd:verify-work` with `{phase: PHASE_NUM}`" in autonomous
+    assert "Autonomous mode is an orchestrator, not a Markdown status parser." in autonomous or (
+        "Autonomous mode is a runtime/provider-neutral orchestrator." in autonomous
+    )
+    assert "`gpd:verify-work` with `{phase: PHASE_NUM}`" in autonomous or (
+        "`gpd:verify-work` child command with structured arguments `{phase: PHASE_NUM}`" in autonomous
+    )
     assert "verification_report_status" in autonomous
 
 
 def test_autonomous_stops_at_bounded_checkpoint_before_verification_routing() -> None:
-    autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
+    if (AUTONOMOUS_STAGE_DIR / "plan-execute-child-cycle.md").is_file():
+        autonomous = (AUTONOMOUS_STAGE_DIR / "plan-execute-child-cycle.md").read_text(encoding="utf-8")
+        bounded_match = re.search(
+            r'<step name="bounded_checkpoint_stop">(?P<body>.*?)</step>',
+            autonomous,
+            flags=re.DOTALL,
+        )
+        assert bounded_match is not None
+        bounded_stop = bounded_match.group("body")
 
-    bounded_idx = autonomous.index("**Bounded checkpoint stop override:**")
-    verification_idx = autonomous.index("**3e. Post-Execution Verification Routing**")
+        assert "bounded to one authorized segment/checkpoint" in bounded_stop
+        assert "Do not run redundant read-only probing" in bounded_stop
+        assert "do not invoke verification" in bounded_stop
+        assert "convention checks" in bounded_stop
+        assert "milestone audit" in bounded_stop
+        assert "another phase" in bounded_stop
+        assert "gpd:resume-work" in bounded_stop
+    else:
+        autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
+        bounded_idx = autonomous.index("**Bounded checkpoint stop override:**")
+        verification_idx = autonomous.index("**3e. Post-Execution Verification Routing**")
 
-    assert bounded_idx < verification_idx
-    assert "bounded to one authorized segment/checkpoint" in autonomous
-    assert "Do not run redundant read-only probing" in autonomous
-    assert "do not invoke `gpd:verify-work`" in autonomous
-    assert "then return from autonomous mode" in autonomous
+        assert bounded_idx < verification_idx
+        assert "bounded to one authorized segment/checkpoint" in autonomous
+        assert "Do not run redundant read-only probing" in autonomous
+        assert "do not invoke `gpd:verify-work`" in autonomous
+        assert "then return from autonomous mode" in autonomous

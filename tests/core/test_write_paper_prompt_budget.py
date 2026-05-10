@@ -15,6 +15,7 @@ SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 WRITE_PAPER_STAGE_DIR = WORKFLOWS_DIR / "write-paper"
 BOOTSTRAP_AUTHORITY = WRITE_PAPER_STAGE_DIR / "paper-bootstrap.md"
+PUBLICATION_REVIEW_EAGER_CHAR_BUDGET = 45_000
 
 
 def _expanded_stage_surface(stage: object) -> str:
@@ -148,15 +149,30 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
     assert publication_review.loaded_authorities == (
         "workflows/write-paper/publication-review-finalization.md",
         "references/publication/publication-review-round-artifacts.md",
-        "references/publication/publication-response-artifacts.md",
-        "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/stage-recovery-gate.md",
-        "templates/paper/author-response.md",
-        "templates/paper/referee-response.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md",
     )
+    conditional_authorities = {
+        conditional.when: conditional.authorities
+        for conditional in publication_review.conditional_authorities
+    }
+    assert conditional_authorities == {
+        "response_pair_authoring": (
+            "references/publication/publication-response-writer-handoff.md",
+            "references/publication/publication-response-artifacts.md",
+            "references/publication/stage-recovery-gate.md",
+            "templates/paper/author-response.md",
+            "templates/paper/referee-response.md",
+        ),
+        "advisory_paper_quality_scoring": (
+            "references/publication/paper-quality-scoring.md",
+        ),
+        "review_failure_or_round_state_debug": (
+            "references/publication/peer-review-reliability.md",
+        ),
+    }
+    assert "references/publication/peer-review-panel.md" in publication_review.must_not_eager_load
+    assert "templates/paper/review-ledger-schema.md" in publication_review.must_not_eager_load
+    assert "templates/paper/referee-decision-schema.md" in publication_review.must_not_eager_load
+    assert len(_expanded_stage_surface(publication_review)) < PUBLICATION_REVIEW_EAGER_CHAR_BUDGET
 
 
 def test_write_paper_bootstrap_stage_blocks_before_downstream_prompt_loading() -> None:

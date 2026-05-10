@@ -1761,10 +1761,11 @@ def test_write_paper_stage_visibility_delays_publication_review_schemas_until_th
     assert "templates/paper/bibliography-audit-schema.md" in consistency.loaded_authorities
     assert "templates/paper/reproducibility-manifest.md" in consistency.loaded_authorities
     assert "templates/paper/figure-tracker.md" not in consistency.loaded_authorities
-    assert "references/publication/peer-review-panel.md" in review.loaded_authorities
-    assert "references/publication/peer-review-reliability.md" in review.loaded_authorities
-    assert "templates/paper/review-ledger-schema.md" in review.loaded_authorities
-    assert "templates/paper/referee-decision-schema.md" in review.loaded_authorities
+    assert "references/publication/publication-review-round-artifacts.md" in review.loaded_authorities
+    assert "references/publication/peer-review-panel.md" in review.must_not_eager_load
+    assert "references/publication/peer-review-reliability.md" in review.must_not_eager_load
+    assert "templates/paper/review-ledger-schema.md" in review.must_not_eager_load
+    assert "templates/paper/referee-decision-schema.md" in review.must_not_eager_load
     assert "templates/paper/paper-config-schema.md" not in review.loaded_authorities
     assert "templates/paper/artifact-manifest-schema.md" not in review.loaded_authorities
     assert "templates/paper/figure-tracker.md" not in review.loaded_authorities

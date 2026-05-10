@@ -15,6 +15,18 @@ SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 
 
+def _expanded_stage_surface(stage: object) -> str:
+    authority_paths = list(dict.fromkeys([*stage.mode_paths, *stage.loaded_authorities]))
+    return "\n\n".join(
+        expanded_prompt_text(
+            SOURCE_ROOT / "specs" / authority,
+            src_root=SOURCE_ROOT,
+            path_prefix=PATH_PREFIX,
+        )
+        for authority in authority_paths
+    )
+
+
 def test_peer_review_command_stays_thin_and_only_eagerly_loads_bootstrap_authority() -> None:
     command_text = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
     metrics = measure_prompt_surface(
@@ -109,6 +121,7 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
     assert panel_execution.loaded_authorities == (
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
+        "references/publication/peer-review-panel-playbook.md",
         "references/publication/stage-recovery-gate.md",
         "references/verification/core/proof-redteam-workflow-gate.md",
         "references/verification/core/proof-redteam-protocol.md",
@@ -117,6 +130,7 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
     assert "workflows/peer-review/final-adjudication.md" in final_adjudication.loaded_authorities
     assert "references/publication/publication-final-adjudication-boundary.md" in final_adjudication.loaded_authorities
     assert "references/publication/peer-review-panel.md" in final_adjudication.loaded_authorities
+    assert "references/publication/peer-review-panel-playbook.md" not in final_adjudication.loaded_authorities
     assert "templates/paper/review-ledger-schema.md" in final_adjudication.loaded_authorities
     assert "templates/paper/referee-decision-schema.md" in final_adjudication.loaded_authorities
     assert finalize.loaded_authorities == (
@@ -125,3 +139,20 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
         "references/publication/publication-response-artifacts.md",
         "references/publication/publication-response-writer-handoff.md",
     )
+
+
+def test_peer_review_panel_stage_eager_surface_stays_below_phase5_cap() -> None:
+    manifest = validate_workflow_stage_manifest_payload(
+        json.loads((WORKFLOWS_DIR / "peer-review-stage-manifest.json").read_text(encoding="utf-8")),
+        expected_workflow_id="peer-review",
+    )
+    panel_stage = manifest.stage("panel_stages")
+    final_adjudication = manifest.stage("final_adjudication")
+
+    panel_surface = _expanded_stage_surface(panel_stage)
+    final_surface = _expanded_stage_surface(final_adjudication)
+
+    assert len(panel_surface) < 70_000
+    assert "# Peer Review Panel Contract" in panel_surface
+    assert "# Peer Review Panel Playbook" in panel_surface
+    assert "# Peer Review Panel Playbook" not in final_surface

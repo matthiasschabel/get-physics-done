@@ -13,9 +13,9 @@ stale-output rejection, retry freshness, and sequential fallback cleanup. Each
 downstream stage begins from persisted artifacts plus the declared
 carry-forward inputs for that stage.
 
-Load panel schemas from:
-
-@{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md
+The stage manifest loads `references/publication/peer-review-panel.md` for the
+machine contract and `references/publication/peer-review-panel-playbook.md` for
+Stage 1-5 reviewer guidance.
 </stage_boundary>
 
 <announce_panel>
@@ -125,9 +125,9 @@ If theorem-bearing claims are present, `gpd-check-proof` may be running in paral
 and will produce `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`; do not wait on that
 artifact to begin the math review, and do not duplicate the proof audit yourself.
 
-@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md
-@{GPD_INSTALL_DIR}/templates/proof-redteam-schema.md
-@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md
+The stage manifest loads the proof-redteam workflow gate, protocol, and schema
+authorities. Use those loaded authorities for same-round theorem binding,
+frontmatter requirements, status handling, and artifact validation.
 
 Conditional proof-critique prompt when theorem-bearing claims are present:
 

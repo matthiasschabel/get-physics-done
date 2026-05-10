@@ -72,12 +72,10 @@ AUTHORITY_DOC_BUDGETS = (
     ),
     AuthorityDocBudget(
         rel_path="specs/references/publication/peer-review-panel.md",
-        baseline_lines=531,
-        baseline_chars=29_094,
-        max_raw_includes=2,
+        baseline_lines=190,
+        baseline_chars=9_500,
+        max_raw_includes=0,
         semantic_anchors=("Peer Review Panel Protocol", "ClaimIndex", "StageReviewReport", "gpd-referee"),
-        required_include_markers=("review-ledger-schema.md", "referee-decision-schema.md"),
-        allowed_include_markers=("review-ledger-schema.md", "referee-decision-schema.md"),
     ),
     AuthorityDocBudget(
         rel_path="specs/references/verification/meta/verifier-profile-checks.md",
@@ -113,8 +111,8 @@ AUTHORITY_DOC_BUDGETS = (
     ),
 )
 
-AGGREGATE_BASELINE_LINES = 2_990
-AGGREGATE_BASELINE_CHARS = 180_682
+AGGREGATE_BASELINE_LINES = 2_650
+AGGREGATE_BASELINE_CHARS = 165_000
 
 
 def _assert_prompt_baseline_is_current(

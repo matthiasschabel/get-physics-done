@@ -8,10 +8,10 @@ Stage 6 reads all prior stage artifacts and spot-checks the manuscript. It may w
 only Stage 6-owned adjudication artifacts for this round. It must never modify or list
 upstream staged-review artifacts in `gpd_return.files_written`.
 
-@{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md
-@{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md
-@{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md
-@{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md
+The stage manifest loads the compact panel contract, Stage 6 boundary,
+stage-recovery gate, review-ledger schema, and referee-decision schema. Use
+those loaded authorities for read-only upstream enforcement, retry
+classification, and final artifact validation.
 </stage_boundary>
 
 <final_adjudication>

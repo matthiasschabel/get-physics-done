@@ -5508,6 +5508,34 @@ def _parse_init_include_option(
     return includes
 
 
+@init_app.command("autonomous")
+def init_autonomous(
+    argument: list[str] = typer.Argument(
+        None,
+        help="Optional autonomous launch arguments.",
+    ),
+    from_phase: str | None = typer.Option(
+        None,
+        "--from",
+        help="Start from this roadmap phase instead of the first incomplete phase.",
+    ),
+    stage: str | None = typer.Option(
+        None,
+        "--stage",
+        help="Load the staged autonomous context for a specific stage id.",
+    ),
+) -> None:
+    """Assemble context for autonomous milestone execution."""
+    from gpd.core.context import init_autonomous
+
+    argument_text = " ".join(argument) if argument else None
+    try:
+        payload = init_autonomous(_get_cwd(), argument_input=argument_text, stage=stage, from_phase=from_phase)
+    except ValueError as exc:
+        _error(str(exc))
+    _output(payload)
+
+
 @init_app.command("execute-phase")
 def init_execute_phase(
     phase: str | None = typer.Argument(None, help="Phase number"),

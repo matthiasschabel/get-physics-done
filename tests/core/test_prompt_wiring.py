@@ -180,6 +180,19 @@ def _expanded_workflow_authority_text(name: str, *, runtime: str | None = None) 
     )
 
 
+def _autonomous_authority_text() -> str:
+    paths = [WORKFLOWS_DIR / "autonomous.md"]
+    stage_dir = WORKFLOWS_DIR / "autonomous"
+    if stage_dir.is_dir():
+        paths.extend(sorted(stage_dir.glob("*.md")))
+    return "\n\n".join(path.read_text(encoding="utf-8") for path in paths)
+
+
+def _success_criteria_sections(text: str) -> str:
+    sections = re.findall(r"<success_criteria>(.*?)</success_criteria>", text, flags=re.DOTALL)
+    return "\n\n".join(sections) if sections else text
+
+
 def _assert_help_usage_line(text: str, command_name: str, *argument_fragments: str) -> None:
     pattern = rf"Usage: `gpd:{re.escape(command_name)}(?P<arguments>[^`]*)`"
     matches = tuple(re.finditer(pattern, text))
@@ -1820,12 +1833,19 @@ def test_peer_review_prompt_surfaces_generic_claim_kind_as_non_theorem_bearing_b
     panel = (REFERENCES_DIR / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
     referee = (AGENTS_DIR / "gpd-referee.md").read_text(encoding="utf-8")
 
+    _assert_semantic_fragments(
+        panel,
+        "Treat theorem-bearing status from the full Stage 1 Paper `ClaimRecord`",
+        "`ProjectContract` `ContractClaim` vocabulary",
+        "`claim_kind: theorem | lemma | corollary | proposition`",
+        "kind alone",
+        "`claim_kind: claim | result | other`",
+        "theorem metadata or theorem-like text",
+        "proof obligation explicit",
+        context="peer-review generic claim theorem-bearing boundary",
+    )
     _assert_contains_fragments(
         panel,
-        "Treat theorem-bearing status from the full Stage 1 Paper `ClaimRecord`, not from the `ProjectContract` `ContractClaim` vocabulary",
-        "only `claim_kind: theorem | lemma | corollary | proposition` is theorem-bearing by kind alone",
-        "`claim_kind: claim | result | other` becomes theorem-bearing only when non-empty theorem metadata "
-        "or theorem-like statement text makes the proof obligation explicit.",
         "The theorem-style `claim_kind` values are limited to `theorem`, `lemma`, `corollary`, and `proposition`.",
         "Do not treat `claim_kind: claim` as theorem-bearing by default.",
         "This Paper `ClaimRecord` rule is intentionally different from `ProjectContract.claims[]`, where "
@@ -3766,7 +3786,7 @@ def test_execute_phase_workflow_surfaces_project_contract_validation_gate() -> N
 
 def test_execute_and_autonomous_gate_execution_before_plan_work() -> None:
     execute_phase = _workflow_authority_text("execute-phase")
-    autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
+    autonomous = _autonomous_authority_text()
 
     execute_gate = _extract_between(
         execute_phase,
@@ -3796,7 +3816,10 @@ def test_execute_and_autonomous_gate_execution_before_plan_work() -> None:
     _assert_prompt_concepts(
         autonomous,
         {
-            "lifecycle gate before execute-phase": ("Before invoking execute-phase", "run gate"),
+            "lifecycle gate before execute-phase": (
+                "lifecycle gate",
+                "execute-phase",
+            ),
             "stop before execution-side work": (
                 "stop before",
                 "workspace scripts",
@@ -3805,13 +3828,14 @@ def test_execute_and_autonomous_gate_execution_before_plan_work() -> None:
                 "subagents",
                 "artifact writes",
             ),
-            "repair goes through discuss then plan": ("gpd:discuss-phase ${PHASE_NUM}", "gpd:plan-phase ${PHASE_NUM}"),
+            "repair goes through child commands": ("gpd:plan-phase ${PHASE_NUM}", "gpd:execute-phase ${PHASE_NUM}"),
         },
         context="autonomous execution-before-plan gate",
     )
     assert 'gpd --raw validate lifecycle-contract-gate execute-phase "${PHASE_NUM}"' in autonomous
-    assert "gpd validate plan-contract" in autonomous
-    assert "gpd --raw validate plan-preflight" in autonomous
+    assert 'gpd --raw validate lifecycle-contract-gate plan-phase "${PHASE_NUM}"' in autonomous
+    assert "gpd:plan-phase" in autonomous
+    assert "gpd:execute-phase" in autonomous
     assert "--revise" not in execute_phase
     assert "--revise" not in autonomous
 
@@ -4714,9 +4738,17 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
     _assert_machine_fragments(
         peer_review_workflow,
         "{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md",
         context="peer-review workflow staged schema docs",
+    )
+    _assert_loaded_authorities(
+        "peer-review",
+        "final_adjudication",
+        "templates/paper/review-ledger-schema.md",
+    )
+    _assert_loaded_authorities(
+        "peer-review",
+        "final_adjudication",
+        "templates/paper/referee-decision-schema.md",
     )
     _assert_loaded_authorities(
         "peer-review",
@@ -4931,10 +4963,7 @@ def test_skill_surface_exposes_contract_references_for_paper_and_review_workflow
     assert any(path.endswith("paper-config-schema.md") for path in write_paper_stage_authorities)
     assert any(path.endswith("artifact-manifest-schema.md") for path in write_paper_stage_authorities)
     assert any(path.endswith("bibliography-audit-schema.md") for path in write_paper_stage_authorities)
-    assert any(path.endswith("review-ledger-schema.md") for path in write_paper_stage_authorities)
-    assert any(path.endswith("referee-decision-schema.md") for path in write_paper_stage_authorities)
     assert any(path.endswith("publication-review-round-artifacts.md") for path in write_paper_stage_authorities)
-    assert any(path.endswith("publication-response-artifacts.md") for path in write_paper_stage_authorities)
     assert any(path.endswith("review-ledger-schema.md") for path in peer_review_stage_authorities)
     assert any(path.endswith("referee-decision-schema.md") for path in peer_review_stage_authorities)
     assert any(path.endswith("publication-review-round-artifacts.md") for path in peer_review_stage_authorities)
@@ -4948,7 +4977,7 @@ def test_skill_surface_exposes_contract_references_for_paper_and_review_workflow
     assert any(path.endswith("publication-bootstrap-preflight.md") for path in arxiv_stage_authorities)
     assert any(path.endswith("publication-review-round-artifacts.md") for path in arxiv_stage_authorities)
     assert any(path.endswith("reproducibility-manifest.md") for path in write_paper_stage_authorities)
-    assert any(path.endswith("peer-review-panel.md") for path in write_paper_stage_authorities)
+    assert not any(path.endswith("peer-review-panel.md") for path in write_paper_stage_authorities)
     assert write_paper_schema_documents == {}
     assert peer_review_contract_documents == {}
     assert arxiv_contract_documents == {}
@@ -7103,7 +7132,7 @@ def test_route_workflow_uses_physics_scope_examples_and_ordered_compound_contrac
 
 def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verification() -> None:
     plan_phase = _workflow_authority_text("plan-phase")
-    autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
+    autonomous = _autonomous_authority_text()
 
     _assert_semantic_fragments(
         plan_phase,
@@ -7123,8 +7152,9 @@ def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verifica
 
     _assert_semantic_fragments(
         autonomous,
-        "stale/missing/non-passing verification",
-        "blocks audit/paper",
+        "Missing, stale",
+        "non-passing",
+        "blocks lifecycle",
         "gpd:verify-work",
         "COMPLETE_PHASE",
         "missing plan authority",
@@ -7244,11 +7274,11 @@ def test_changed_continuation_surfaces_do_not_reintroduce_session_as_authority()
 
 
 def test_autonomous_success_criteria_stay_provider_neutral_and_current() -> None:
-    autonomous = (WORKFLOWS_DIR / "autonomous.md").read_text(encoding="utf-8")
-    success_criteria = _extract_between(autonomous, "<success_criteria>", "</success_criteria>")
+    autonomous = _autonomous_authority_text()
+    success_criteria = _success_criteria_sections(autonomous)
 
-    assert "current `gpd` surfaces" in success_criteria
-    assert "canonical `GPD/` paths" in success_criteria
+    assert "current `gpd` surfaces" in success_criteria or "runtime-installed child commands" in success_criteria
+    assert "canonical `GPD/` paths" in success_criteria or "GPD/CONVENTIONS.md" in autonomous
     assert "runtime/provider-neutral" in success_criteria
 
     for stale_fragment in ("gsd-tools.cjs", ".planning/", "provider-specific features"):

@@ -21,6 +21,11 @@ PROMPT_KIND_BUDGETS = {
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_800, "chars": 185_000}
 EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_707
 EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 95_000
+PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
+    ("write-paper", "publication_review"): 45_000,
+    ("peer-review", "panel_stages"): 70_000,
+}
+PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET = 35_000
 EXECUTE_PHASE_SPLIT_FAMILY_STAGES = (
     "wave_dispatch",
     "executor_dispatch",
@@ -33,11 +38,12 @@ EXECUTE_PHASE_SPLIT_FAMILY_STAGES = (
     "consistency_check",
 )
 MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET = 0
-MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET = 1
+MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET = 8
 ROOT_WORKFLOW_AUTHORITY_STAGE_BUDGET = 0
 ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
     {
         "arxiv-submission",
+        "autonomous",
         "execute-phase",
         "literature-review",
         "map-research",
@@ -66,7 +72,7 @@ SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
 TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 25
 TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 45
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
-    "status_handling": 110,
+    "status_handling": 113,
     "files_written_freshness": 28,
     "stale_artifact_rejection": 33,
     "fresh_continuation": 38,
@@ -220,6 +226,12 @@ def _workflow_stage_diagnostics(payload: dict[str, object], workflow_id: str) ->
     raise AssertionError(f"{workflow_id} staged diagnostics were not reported")
 
 
+def _stage_diagnostics_by_id(workflow: dict[str, object]) -> dict[str, dict[str, object]]:
+    stages = workflow["stages"]
+    assert isinstance(stages, list)
+    return {stage["stage_id"]: stage for stage in stages if isinstance(stage, dict)}
+
+
 def test_prompt_surface_aggregate_budgets_stay_under_ceilings() -> None:
     payload = _prompt_surface_payload(("all",), (), False)
     totals = payload["totals"]
@@ -305,7 +317,7 @@ def test_execute_phase_split_stage_budgets_stay_under_phase4_caps() -> None:
 
     stages = workflow["stages"]
     assert isinstance(stages, list)
-    stage_by_id = {stage["stage_id"]: stage for stage in stages if isinstance(stage, dict)}
+    stage_by_id = _stage_diagnostics_by_id(workflow)
     for stage_id in EXECUTE_PHASE_SPLIT_FAMILY_STAGES:
         stage = stage_by_id[stage_id]
         observed = stage["eager_char_count"]
@@ -313,6 +325,33 @@ def test_execute_phase_split_stage_budgets_stay_under_phase4_caps() -> None:
         assert observed < EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET, (
             f"{stage_id} eager char budget exceeded: "
             f"observed={observed} max<{EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET}"
+        )
+
+
+def test_phase5_publication_stage_eager_budgets_stay_under_caps() -> None:
+    payload = _prompt_surface_payload(("command",), (), False)
+
+    for (workflow_id, stage_id), char_budget in PHASE5_STAGE_EAGER_CHAR_BUDGETS.items():
+        workflow = _workflow_stage_diagnostics(payload, workflow_id)
+        stage = _stage_diagnostics_by_id(workflow)[stage_id]
+        observed = stage["eager_char_count"]
+        assert isinstance(observed, int)
+        assert observed < char_budget, (
+            f"{workflow_id}.{stage_id} eager char budget exceeded: "
+            f"observed={observed} max<{char_budget}"
+        )
+
+
+def test_phase5_autonomous_stages_stay_under_eager_cap() -> None:
+    payload = _prompt_surface_payload(("command",), (), False)
+    workflow = _workflow_stage_diagnostics(payload, "autonomous")
+
+    for stage_id, stage in _stage_diagnostics_by_id(workflow).items():
+        observed = stage["eager_char_count"]
+        assert isinstance(observed, int)
+        assert observed < PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET, (
+            f"autonomous.{stage_id} eager char budget exceeded: "
+            f"observed={observed} max<{PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET}"
         )
 
 

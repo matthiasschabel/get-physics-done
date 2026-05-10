@@ -42,15 +42,16 @@ The staged authorities reference these canonical contracts as needed:
 
 - `references/publication/publication-bootstrap-preflight.md`
 - `templates/paper/publication-manuscript-root-preflight.md`
-- `references/publication/publication-pipeline-modes.md`
-- `references/publication/publication-review-round-artifacts.md`
-- `references/publication/publication-response-writer-handoff.md`
-- `templates/paper/paper-config-schema.md`
-- `templates/paper/artifact-manifest-schema.md`
-- `templates/paper/bibliography-audit-schema.md`
-- `templates/paper/figure-tracker.md`
-- `templates/paper/reproducibility-manifest.md`
-- `templates/paper/author-response.md`
-- `templates/paper/review-ledger-schema.md`
-- `templates/paper/referee-decision-schema.md`
+- `{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md`
+- `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`
+- `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md`
+- `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`
+- `{GPD_INSTALL_DIR}/templates/paper/paper-config-schema.md`
+- `{GPD_INSTALL_DIR}/templates/paper/artifact-manifest-schema.md`
+- `{GPD_INSTALL_DIR}/templates/paper/bibliography-audit-schema.md`
+- `{GPD_INSTALL_DIR}/templates/paper/figure-tracker.md`
+- `{GPD_INSTALL_DIR}/templates/paper/reproducibility-manifest.md`
+- `{GPD_INSTALL_DIR}/templates/paper/author-response.md`
+- `{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md`
+- `{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md`
 </canonical_references>

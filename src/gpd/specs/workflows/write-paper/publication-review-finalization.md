@@ -4,14 +4,19 @@ checks, and in-workflow revision/response artifacts.
 </purpose>
 
 <stage_boundary>
-This stage may load publication-review, response, panel, reliability, review
-ledger, referee-decision, and stage-recovery authorities. It must start only
-after manuscript-root artifacts, fresh bibliography audit, reproducibility
-manifest, and claim/proof blockers are clear.
+This stage is a compact routing/finalization surface. It eagerly loads only the
+publication-review stage instructions and review-round artifact contract.
+Response authoring, recovery, paper-quality scoring, and reliability diagnostics
+are conditional branches. Peer-review panel execution, review-ledger schemas,
+referee-decision schemas, and proof-redteam details stay inside staged
+`gpd:peer-review` authorities and must not be inlined here.
+
+Start only after manuscript-root artifacts, fresh bibliography audit,
+reproducibility manifest, and claim/proof blockers are clear.
 </stage_boundary>
 
 <init>
-Load the staged publication-review payload before running embedded peer review or
+Load the staged publication-review payload before routing peer review or
 evaluating review-round artifacts:
 
 ```bash
@@ -31,18 +36,18 @@ to confirm the manifest-selected publication-review fields before reading
 <pre_submission_review>
 Branch by write-paper lane before finalizing.
 
-**Project-backed lane:** run the staged `gpd:peer-review` authorities for the
-resolved `${PAPER_DIR}/{topic_specific_stem}.tex` target recorded in
-`ARTIFACT-MANIFEST.json`. Use the stage manifest's publication/review
-authorities; do not inline the standalone panel protocol here.
+**Project-backed lane:** route to staged `gpd:peer-review` for the resolved
+`${PAPER_DIR}/{topic_specific_stem}.tex` target recorded in
+`ARTIFACT-MANIFEST.json`. Use the peer-review stage manifest for panel
+execution, final adjudication, review-ledger/referee-decision schemas, and any
+proof-redteam gate. Do not inline those authorities here.
 
-Load `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md`
-before review-round routing and `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`
-before paired response authoring.
+This write-paper stage may read review-round artifacts after peer review returns.
+Load the conditional `response_pair_authoring` authorities only when paired
+response artifacts are actually being drafted.
 
 Use `gpd-referee` only through the peer-review final-adjudication authority. Keep
-the project-contract gate fields and `active_reference_context` visible; theorem
-or `proof_obligation` claims inherit the mandatory proof-redteam gate.
+the project-contract gate fields and `active_reference_context` visible.
 
 Read `${selected_review_root}/REFEREE-DECISION{round_suffix}.json` and
 `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json` first when they
@@ -80,8 +85,9 @@ explicitly requested polish:
 - equations and figures
 - page count and reference formatting
 
-Paper quality scoring is advisory and artifact-driven through
-`{GPD_INSTALL_DIR}/references/publication/paper-quality-scoring.md`. Use
+Paper quality scoring is advisory and artifact-driven. Load the
+`advisory_paper_quality_scoring` authority only when the score is still
+decisive. Use
 `${PAPER_DIR}/ARTIFACT-MANIFEST.json`, `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`,
 `${PAPER_DIR}/FIGURE_TRACKER.md`, `GPD/comparisons/*-COMPARISON.md`, and phase
 summary/verification `contract_results` and `comparison_verdicts`. Treat paper-support artifacts as scaffolding, not as proof that a claim is established.
@@ -113,16 +119,24 @@ When revising a paper in response to referee reports:
    manuscript section(s).
 2. Spawn targeted section revision agents for manuscript changes; a point is not
    `fixed` until the corresponding section file changes have landed on disk.
-3. Produce paired response artifacts after manuscript edits land.
+3. Load `response_pair_authoring` authorities only after manuscript edits land,
+   then produce paired response artifacts through `gpd-paper-writer`.
 
-Spawn `gpd-paper-writer` through
-`{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`
-after loading `{GPD_INSTALL_DIR}/templates/paper/author-response.md`.
 Pass `<autonomy_mode>{AUTONOMY}</autonomy_mode>`,
 `<research_mode>{RESEARCH_MODE}</research_mode>`, selected roots, round,
 referee report, optional ledger/decision paths, manifest-resolved manuscript
-tree, and the two concrete response paths below. For each `REF-xxx` issue,
+tree, and the concrete author/referee response paths. For each `REF-xxx` issue,
 classify it only after the corresponding manuscript edits exist on disk.
+
+Response-pair completion is delegated to
+`publication-response-writer-handoff.md` plus `stage-recovery-gate.md` under the
+`response_pair_authoring` condition. Keep the callsite identifier
+`id: "write_paper_response_pair"` when applying that delegated gate, with
+`${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and
+`${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md` as the expected
+outputs. Both response paths must pass handoff artifact validation, round
+binding, manuscript binding, allowed-root checks, and freshness checks before
+this stage treats the response pair as complete.
 
 Response-pair child gate:
 
@@ -130,7 +144,7 @@ Response-pair child gate:
 child_gate:
   id: "write_paper_response_pair"
   role: "gpd-paper-writer"
-  return_profile: "response_writer"
+  return_profile: "paper_writer"
   required_status: "completed"
   expected_artifacts:
     - "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md"
@@ -143,10 +157,9 @@ child_gate:
     - "gpd validate handoff-artifacts for both response paths"
     - "publication-response-writer-handoff.md frontmatter, round, and manuscript binding"
   applicator: "none"
-  failure_route: "retry agent | main-context response drafting | skip structured response and proceed to calculation tracking"
+  failure_route: "stage-recovery-gate -> retry response writer | stop incomplete"
 ```
 
-Run this tuple under `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`.
 Response-pair completion requires this callsite tuple to pass for both paths.
 
 Track new calculations in `${PAPER_DIR}/REVISION_TASKS.md`. After targeted

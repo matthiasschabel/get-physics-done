@@ -17,6 +17,81 @@ REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references" / "publicati
 RAW_INCLUDE_ALLOWED_DEFERRED_AUTHORITIES = {
     "references/orchestration/runtime-delegation-note.md",
 }
+WRITE_PAPER_PUBLICATION_REVIEW_REQUIRED_EAGER = frozenset(
+    {
+        "workflows/write-paper/publication-review-finalization.md",
+        "references/publication/publication-review-round-artifacts.md",
+    }
+)
+WRITE_PAPER_PUBLICATION_REVIEW_DEFERRED = frozenset(
+    {
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/publication-response-artifacts.md",
+        "references/publication/peer-review-panel.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
+        "references/publication/paper-quality-scoring.md",
+        "templates/paper/author-response.md",
+        "templates/paper/referee-response.md",
+        "templates/paper/review-ledger-schema.md",
+        "templates/paper/referee-decision-schema.md",
+    }
+)
+WRITE_PAPER_PUBLICATION_REVIEW_CONDITIONALS = {
+    "response_pair_authoring": frozenset(
+        {
+            "references/publication/publication-response-writer-handoff.md",
+            "references/publication/publication-response-artifacts.md",
+            "references/publication/stage-recovery-gate.md",
+            "templates/paper/author-response.md",
+            "templates/paper/referee-response.md",
+        }
+    ),
+    "advisory_paper_quality_scoring": frozenset({"references/publication/paper-quality-scoring.md"}),
+    "review_failure_or_round_state_debug": frozenset({"references/publication/peer-review-reliability.md"}),
+}
+PEER_REVIEW_PANEL_REQUIRED_EAGER = frozenset(
+    {
+        "workflows/peer-review/panel-stages.md",
+        "references/publication/peer-review-panel.md",
+        "references/publication/peer-review-panel-playbook.md",
+        "references/publication/stage-recovery-gate.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
+        "templates/proof-redteam-schema.md",
+    }
+)
+PEER_REVIEW_PANEL_DEFERRED = frozenset(
+    {
+        "references/publication/peer-review-reliability.md",
+        "references/publication/publication-final-adjudication-boundary.md",
+        "references/publication/publication-response-writer-handoff.md",
+    }
+)
+PEER_REVIEW_PANEL_FINAL_ONLY_AUTHORITIES = frozenset(
+    {
+        "templates/paper/review-ledger-schema.md",
+        "templates/paper/referee-decision-schema.md",
+    }
+)
+PEER_REVIEW_FINAL_ADJUDICATION_REQUIRED_EAGER = frozenset(
+    {
+        "workflows/peer-review/final-adjudication.md",
+        "references/publication/publication-final-adjudication-boundary.md",
+        "references/publication/peer-review-panel.md",
+        "references/publication/stage-recovery-gate.md",
+        "templates/paper/review-ledger-schema.md",
+        "templates/paper/referee-decision-schema.md",
+    }
+)
+PEER_REVIEW_FINAL_ADJUDICATION_DEFERRED = frozenset(
+    {
+        "references/publication/peer-review-panel-playbook.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
+        "templates/proof-redteam-schema.md",
+    }
+)
 
 
 def _load_manifest(workflow_name: str) -> object:
@@ -24,6 +99,10 @@ def _load_manifest(workflow_name: str) -> object:
         json.loads((WORKFLOWS_DIR / f"{workflow_name}-stage-manifest.json").read_text(encoding="utf-8")),
         expected_workflow_id=workflow_name,
     )
+
+
+def _conditional_authorities_by_when(stage: object) -> dict[str, frozenset[str]]:
+    return {conditional.when: frozenset(conditional.authorities) for conditional in stage.conditional_authorities}
 
 
 def _canonical_include_relpath(include_path: str) -> str:
@@ -105,20 +184,22 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
     consistency = manifest.stage("consistency_and_references")
     publication_review = manifest.stage("publication_review")
 
-    assert "publication_subject_status" in bootstrap.required_init_fields
-    assert "publication_bootstrap_mode" in bootstrap.required_init_fields
-    assert "publication_bootstrap_root" in bootstrap.required_init_fields
-    assert "artifact_manifest_path" in bootstrap.required_init_fields
+    assert {
+        "publication_subject_status",
+        "publication_bootstrap_mode",
+        "publication_bootstrap_root",
+        "artifact_manifest_path",
+        "contract_intake",
+        "effective_reference_intake",
+        "publication_subject_slug",
+        "publication_lane_kind",
+        "publication_lane_owner",
+        "selected_publication_root",
+        "publication_intake_root",
+        "managed_publication_root",
+        "managed_manuscript_root",
+    } <= set(bootstrap.required_init_fields)
     assert bootstrap.writes_allowed == ()
-    assert "contract_intake" in bootstrap.required_init_fields
-    assert "effective_reference_intake" in bootstrap.required_init_fields
-    assert "publication_subject_slug" in bootstrap.required_init_fields
-    assert "publication_lane_kind" in bootstrap.required_init_fields
-    assert "publication_lane_owner" in bootstrap.required_init_fields
-    assert "selected_publication_root" in bootstrap.required_init_fields
-    assert "publication_intake_root" in bootstrap.required_init_fields
-    assert "managed_publication_root" in bootstrap.required_init_fields
-    assert "managed_manuscript_root" in bootstrap.required_init_fields
     for stage in (bootstrap, outline, authoring, consistency, publication_review):
         assert "write_paper_argument_input" in stage.required_init_fields
     assert outline.writes_allowed[0] == WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT
@@ -131,8 +212,10 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
     assert "GPD/AUTHOR-RESPONSE.md" in publication_review.writes_allowed
     assert "GPD/REFEREE-REPORT.tex" in publication_review.writes_allowed
 
-    assert "references/publication/publication-review-round-artifacts.md" in bootstrap.must_not_eager_load
-    assert "references/publication/publication-response-artifacts.md" in bootstrap.must_not_eager_load
+    assert {
+        "references/publication/publication-review-round-artifacts.md",
+        "references/publication/publication-response-artifacts.md",
+    } <= set(bootstrap.must_not_eager_load)
 
     assert consistency.loaded_authorities == (
         "workflows/write-paper/consistency-references.md",
@@ -140,24 +223,11 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/reproducibility-manifest.md",
     )
-    assert publication_review.loaded_authorities == (
-        "workflows/write-paper/publication-review-finalization.md",
-        "references/publication/publication-review-round-artifacts.md",
-        "references/publication/publication-response-artifacts.md",
-        "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/stage-recovery-gate.md",
-        "templates/paper/author-response.md",
-        "templates/paper/referee-response.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md",
-    )
-    assert "references/publication/publication-review-round-artifacts.md" in publication_review.loaded_authorities
-    assert "references/publication/publication-response-artifacts.md" in publication_review.loaded_authorities
-    assert "references/publication/peer-review-panel.md" in publication_review.loaded_authorities
-    assert "references/publication/peer-review-reliability.md" in publication_review.loaded_authorities
-    assert "templates/paper/review-ledger-schema.md" in publication_review.loaded_authorities
-    assert "templates/paper/referee-decision-schema.md" in publication_review.loaded_authorities
+    publication_review_loaded = set(publication_review.loaded_authorities)
+    assert WRITE_PAPER_PUBLICATION_REVIEW_REQUIRED_EAGER <= publication_review_loaded
+    assert publication_review_loaded.isdisjoint(WRITE_PAPER_PUBLICATION_REVIEW_DEFERRED)
+    assert WRITE_PAPER_PUBLICATION_REVIEW_DEFERRED <= set(publication_review.must_not_eager_load)
+    assert _conditional_authorities_by_when(publication_review) == WRITE_PAPER_PUBLICATION_REVIEW_CONDITIONALS
 
 
 def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> None:
@@ -178,21 +248,27 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
     panel_stages = manifest.stage("panel_stages")
     final_adjudication = manifest.stage("final_adjudication")
 
-    assert "references/publication/publication-review-round-artifacts.md" in bootstrap.must_not_eager_load
-    assert "references/publication/publication-response-artifacts.md" in bootstrap.must_not_eager_load
-    assert "publication_subject_slug" in bootstrap.required_init_fields
-    assert "publication_lane_kind" in bootstrap.required_init_fields
-    assert "publication_lane_owner" in bootstrap.required_init_fields
-    assert "managed_publication_root" in bootstrap.required_init_fields
-    assert "selected_publication_root" in bootstrap.required_init_fields
-    assert "selected_review_root" in bootstrap.required_init_fields
+    assert {
+        "references/publication/publication-review-round-artifacts.md",
+        "references/publication/publication-response-artifacts.md",
+    } <= set(bootstrap.must_not_eager_load)
+    assert {
+        "publication_subject_slug",
+        "publication_lane_kind",
+        "publication_lane_owner",
+        "managed_publication_root",
+        "selected_publication_root",
+        "selected_review_root",
+    } <= set(bootstrap.required_init_fields)
 
     assert preflight.loaded_authorities[0] == "workflows/peer-review/preflight.md"
-    assert "references/publication/peer-review-reliability.md" in preflight.loaded_authorities
-    assert "templates/paper/paper-config-schema.md" in preflight.loaded_authorities
-    assert "templates/paper/artifact-manifest-schema.md" in preflight.loaded_authorities
-    assert "templates/paper/bibliography-audit-schema.md" in preflight.loaded_authorities
-    assert "templates/paper/reproducibility-manifest.md" in preflight.loaded_authorities
+    assert {
+        "references/publication/peer-review-reliability.md",
+        "templates/paper/paper-config-schema.md",
+        "templates/paper/artifact-manifest-schema.md",
+        "templates/paper/bibliography-audit-schema.md",
+        "templates/paper/reproducibility-manifest.md",
+    } <= set(preflight.loaded_authorities)
     assert artifact_discovery.loaded_authorities == (
         "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",
@@ -210,9 +286,14 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
         assert field in final_adjudication.required_init_fields
     assert "GPD/publication/{subject_slug}/review/CLAIMS{round_suffix}.json" in panel_stages.writes_allowed
     assert "GPD/publication/{subject_slug}/review/PROOF-REDTEAM{round_suffix}.md" in panel_stages.writes_allowed
-    assert "references/publication/peer-review-panel.md" in final_adjudication.loaded_authorities
-    assert "templates/paper/review-ledger-schema.md" in final_adjudication.loaded_authorities
-    assert "templates/paper/referee-decision-schema.md" in final_adjudication.loaded_authorities
+    panel_loaded = set(panel_stages.loaded_authorities)
+    final_loaded = set(final_adjudication.loaded_authorities)
+    assert PEER_REVIEW_PANEL_REQUIRED_EAGER <= panel_loaded
+    assert PEER_REVIEW_PANEL_DEFERRED <= set(panel_stages.must_not_eager_load)
+    assert panel_loaded.isdisjoint(PEER_REVIEW_PANEL_FINAL_ONLY_AUTHORITIES)
+    assert PEER_REVIEW_FINAL_ADJUDICATION_REQUIRED_EAGER <= final_loaded
+    assert final_loaded.isdisjoint(PEER_REVIEW_FINAL_ADJUDICATION_DEFERRED)
+    assert PEER_REVIEW_FINAL_ADJUDICATION_DEFERRED <= set(final_adjudication.must_not_eager_load)
     assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" in final_adjudication.writes_allowed
     assert "GPD/publication/{subject_slug}/review/REVIEW-LEDGER{round_suffix}.json" in final_adjudication.writes_allowed
     assert "GPD/publication/{subject_slug}/REFEREE-REPORT{round_suffix}.md" in final_adjudication.writes_allowed

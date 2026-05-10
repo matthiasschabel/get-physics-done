@@ -123,7 +123,10 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
     assert "theorem-style claims beyond passed proof-redteam scope" in write_paper
 
     assert "<proof_bearing_routing>" in peer_review
-    assert PROOF_GATE_REF in peer_review_raw
+    assert PROOF_GATE_PATH not in peer_review_raw
+    assert "references/verification/core/proof-redteam-workflow-gate.md" in (
+        WORKFLOWS_DIR / "peer-review-stage-manifest.json"
+    ).read_text(encoding="utf-8")
     assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in peer_review
     assert "gpd-check-proof" in peer_review
     assert "may be running in parallel" in peer_review

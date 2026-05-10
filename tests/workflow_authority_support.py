@@ -9,6 +9,7 @@ from gpd.adapters.install_utils import expand_at_includes
 
 STAGED_WORKFLOW_AUTHORITY_NAMES = {
     "arxiv-submission",
+    "autonomous",
     "execute-phase",
     "literature-review",
     "map-research",

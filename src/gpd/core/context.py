@@ -142,6 +142,9 @@ from gpd.core.workflow_staging import (
     load_arxiv_submission_stage_contract,
 )
 from gpd.core.workflow_staging import (
+    AUTONOMOUS_INIT_FIELDS as _AUTONOMOUS_INIT_FIELDS,
+)
+from gpd.core.workflow_staging import (
     EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS as _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
 )
 from gpd.core.workflow_staging import (
@@ -851,6 +854,7 @@ def _ignore_dirs() -> frozenset[str]:
 
 __all__ = [
     "init_arxiv_submission",
+    "init_autonomous",
     "init_execute_phase",
     "init_literature_review",
     "init_map_research",
@@ -5648,6 +5652,195 @@ def init_todos(cwd: Path, area: str | None = None) -> dict:
         # Platform
         "platform": _detect_platform(effective_cwd),
     }
+
+
+def _parse_autonomous_from_phase(argument_input: str, explicit_from_phase: str | None = None) -> str | None:
+    """Return the requested autonomous start phase from CLI-style launch input."""
+
+    if explicit_from_phase is not None and explicit_from_phase.strip():
+        return explicit_from_phase.strip()
+    match = re.search(r"(?:^|\s)--from(?:=|\s+)([0-9]+(?:\.[0-9]+)*)", argument_input)
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _autonomous_roadmap_phase_payload(phase: object) -> dict[str, object]:
+    """Serialize the compact roadmap fields autonomous needs for routing."""
+
+    return {
+        "number": getattr(phase, "number", None),
+        "name": getattr(phase, "name", None),
+        "goal": getattr(phase, "goal", None),
+        "depends_on": getattr(phase, "depends_on", None),
+        "disk_status": getattr(phase, "disk_status", None),
+        "roadmap_complete": getattr(phase, "roadmap_complete", False),
+        "plan_count": getattr(phase, "plan_count", 0),
+        "summary_count": getattr(phase, "summary_count", 0),
+        "has_context": getattr(phase, "has_context", False),
+        "has_research": getattr(phase, "has_research", False),
+    }
+
+
+def _autonomous_selected_phase(phases: list[object], from_phase: str | None) -> object | None:
+    """Select the first incomplete roadmap phase at or after ``from_phase``."""
+
+    threshold = _phase_sort_key(from_phase) if from_phase else None
+    for phase in sorted(phases, key=lambda item: _phase_sort_key(str(getattr(item, "number", "")))):
+        number = str(getattr(phase, "number", ""))
+        if threshold is not None and _phase_sort_key(number) < threshold:
+            continue
+        if getattr(phase, "disk_status", None) != "complete":
+            return phase
+    return None
+
+
+def _autonomous_completed_phase_verification_statuses(cwd: Path, phase_numbers: list[str]) -> list[dict[str, object]]:
+    """Return compact session-router style status rows for completed phases."""
+
+    statuses: list[dict[str, object]] = []
+    for phase_number in phase_numbers:
+        phase_info = _try_find_phase(cwd, phase_number)
+        _path, payload = _verify_work_status_payload(cwd, phase_info)
+        statuses.append(
+            {
+                "phase_number": phase_number,
+                "path": payload.get("path"),
+                "exists": payload.get("exists"),
+                "routing_status": payload.get("routing_status"),
+                "session_status": payload.get("session_status"),
+                "score": payload.get("score"),
+                "errors": payload.get("errors", []),
+            }
+        )
+    return statuses
+
+
+def init_autonomous(
+    cwd: Path,
+    argument_input: str | None = None,
+    stage: str | None = None,
+    from_phase: str | None = None,
+) -> dict:
+    """Assemble context for staged autonomous milestone execution."""
+
+    effective_cwd = _resolve_project_scoped_cwd(cwd)
+    config = load_config(effective_cwd)
+    argument_text = argument_input.strip() if isinstance(argument_input, str) else ""
+    parsed_from_phase = _parse_autonomous_from_phase(argument_text, explicit_from_phase=from_phase)
+
+    milestone = _try_get_milestone_info(effective_cwd)
+    milestone_snapshot = _milestone_completion_snapshot(effective_cwd)
+    roadmap = roadmap_analyze(effective_cwd)
+    roadmap_phases = sorted(roadmap.phases, key=lambda phase: _phase_sort_key(phase.number))
+    phase_plan = [_autonomous_roadmap_phase_payload(phase) for phase in roadmap_phases]
+    completed_phase_numbers = [
+        str(phase.number)
+        for phase in roadmap_phases
+        if phase.disk_status == "complete"
+    ]
+    current_phase = _autonomous_selected_phase(roadmap_phases, parsed_from_phase)
+    current_phase_number = str(current_phase.number) if current_phase is not None else None
+    current_phase_name = str(current_phase.name) if current_phase is not None else None
+    current_phase_goal = str(current_phase.goal) if current_phase is not None and current_phase.goal else None
+
+    phase_info = _try_find_phase(effective_cwd, current_phase_number) if current_phase_number else None
+    phase_dir = phase_info["directory"] if phase_info else None
+    phase_dir_path = effective_cwd / phase_dir if phase_dir else None
+    verification_report_path, verification_status_payload = _verify_work_status_payload(effective_cwd, phase_info)
+    if verification_status_payload.get("path") is None and verification_report_path is not None:
+        verification_status_payload["path"] = verification_report_path
+    phase_proof_review_status = resolve_phase_proof_review_status(
+        effective_cwd,
+        phase_dir_path,
+        persist_manifest=False,
+    )
+
+    if phase_info is not None:
+        phase_number = phase_info["phase_number"]
+        phase_name = phase_info.get("phase_name")
+        phase_slug = phase_info.get("phase_slug")
+        padded_phase = _normalize_phase_name(str(phase_number))
+        has_context = bool(phase_info.get("has_context", False))
+        plan_count = len(phase_info.get("plans", []))
+    else:
+        phase_number = current_phase_number
+        phase_name = current_phase_name
+        phase_slug = _generate_slug(current_phase_name)
+        padded_phase = _normalize_phase_name(current_phase_number) if current_phase_number else None
+        has_context = bool(getattr(current_phase, "has_context", False)) if current_phase is not None else False
+        plan_count = int(getattr(current_phase, "plan_count", 0)) if current_phase is not None else 0
+
+    base_result: dict[str, object] = {
+        "project_root": effective_cwd.as_posix(),
+        "autonomous_argument_input": argument_text,
+        "autonomous_from_phase": parsed_from_phase,
+        "commit_docs": config["commit_docs"],
+        "autonomy": config["autonomy"],
+        "research_mode": config["research_mode"],
+        "review_cadence": config["review_cadence"],
+        "model_profile": config["model_profile"],
+        "platform": _detect_platform(effective_cwd),
+        "milestone_version": milestone["version"],
+        "milestone_name": milestone["name"],
+        "milestone_slug": _generate_slug(milestone["name"]),
+        "phase_count": milestone_snapshot.phase_count,
+        "completed_phases": milestone_snapshot.completed_phases,
+        "all_phases_complete": milestone_snapshot.all_phases_complete,
+        "project_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}"),
+        "roadmap_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}"),
+        "state_exists": _state_exists(effective_cwd),
+        "phases_dir_exists": _path_exists(effective_cwd, f"{PLANNING_DIR_NAME}/{PHASES_DIR_NAME}"),
+        "autonomous_phase_plan": phase_plan,
+        "autonomous_completed_phase_numbers": completed_phase_numbers,
+        "autonomous_completed_phase_verification_statuses": _autonomous_completed_phase_verification_statuses(
+            effective_cwd,
+            completed_phase_numbers,
+        ),
+        "autonomous_incomplete_phase_count": sum(1 for phase in roadmap_phases if phase.disk_status != "complete"),
+        "autonomous_current_phase_number": current_phase_number,
+        "autonomous_current_phase_name": current_phase_name,
+        "autonomous_current_phase_goal": current_phase_goal,
+        "autonomous_current_phase_success_criteria": None,
+        "phase_found": phase_info is not None,
+        "phase_dir": phase_dir,
+        "phase_number": phase_number,
+        "phase_name": phase_name,
+        "phase_slug": phase_slug,
+        "padded_phase": padded_phase,
+        "has_context": has_context,
+        "has_plans": plan_count > 0,
+        "plan_count": plan_count,
+        "verification_report_status": verification_status_payload["routing_status"],
+        "verification_report_status_payload": verification_status_payload,
+        "phase_proof_review_status": phase_proof_review_status.to_context_dict(effective_cwd),
+    }
+    missing_known_fields = sorted(_AUTONOMOUS_INIT_FIELDS - set(base_result))
+    if missing_known_fields:
+        raise ValueError(
+            f"autonomous init field source missing known field(s): {', '.join(missing_known_fields)}"
+        )
+
+    if stage is None:
+        return base_result
+
+    from gpd.core.workflow_staging import load_autonomous_stage_contract
+
+    manifest = load_autonomous_stage_contract()
+    try:
+        stage_def = manifest.stage_by_id(stage)
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown autonomous stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
+        ) from exc
+
+    missing_fields = [field for field in stage_def.required_init_fields if field not in base_result]
+    if missing_fields:
+        raise ValueError(f"autonomous stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
+
+    staged_payload = {field: base_result[field] for field in stage_def.required_init_fields}
+    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
+    return staged_payload
 
 
 def init_milestone_op(cwd: Path) -> dict:

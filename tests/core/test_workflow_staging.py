@@ -10,6 +10,7 @@ import pytest
 from gpd.core import context as context_module
 from gpd.core.context import (
     init_arxiv_submission,
+    init_autonomous,
     init_literature_review,
     init_map_research,
     init_new_milestone,
@@ -23,6 +24,8 @@ from gpd.core.context import (
     init_write_paper,
 )
 from gpd.core.workflow_staging import (
+    AUTONOMOUS_INIT_FIELDS,
+    AUTONOMOUS_STAGE_MANIFEST_PATH,
     EXECUTE_PHASE_STAGE_MANIFEST_PATH,
     LITERATURE_REVIEW_STAGE_MANIFEST_PATH,
     MAP_RESEARCH_STAGE_MANIFEST_PATH,
@@ -100,6 +103,8 @@ def _setup_generic_staged_init_project(cwd: Path) -> None:
 
 
 def _staged_init_payload_for_workflow(cwd: Path, workflow_id: str, stage_id: str) -> dict[str, object]:
+    if workflow_id == "autonomous":
+        return init_autonomous(cwd, stage=stage_id)
     if workflow_id == "new-project":
         return init_new_project(cwd, stage=stage_id)
     if workflow_id == "new-milestone":
@@ -142,6 +147,7 @@ def _assert_staged_init_payload_matches_manifest(
     ("workflow_id", "expected_path"),
     [
         ("new-project", NEW_PROJECT_STAGE_MANIFEST_PATH),
+        ("autonomous", AUTONOMOUS_STAGE_MANIFEST_PATH),
         ("plan-phase", PLAN_PHASE_STAGE_MANIFEST_PATH),
         ("quick", QUICK_STAGE_MANIFEST_PATH),
         ("literature-review", LITERATURE_REVIEW_STAGE_MANIFEST_PATH),
@@ -473,6 +479,13 @@ def test_verify_work_context_uses_workflow_staging_init_field_source() -> None:
         "stable_knowledge_doc_files",
         "knowledge_doc_status_counts",
     } <= VERIFY_WORK_INIT_FIELDS
+
+
+def test_autonomous_context_uses_workflow_staging_init_field_source() -> None:
+    assert context_module._AUTONOMOUS_INIT_FIELDS == AUTONOMOUS_INIT_FIELDS
+    assert "autonomous_argument_input" in AUTONOMOUS_INIT_FIELDS
+    assert "autonomous_completed_phase_verification_statuses" in AUTONOMOUS_INIT_FIELDS
+    assert "verification_report_status_payload" in AUTONOMOUS_INIT_FIELDS
 
 
 def test_stage_manifests_are_prompt_used_or_cli_reachable() -> None:
@@ -807,6 +820,7 @@ def test_known_init_fields_for_verify_work_include_proof_gate_and_artifact_conte
     [
         "literature-review",
         "map-research",
+        "autonomous",
         "new-milestone",
         "new-project",
         "quick",
@@ -1036,15 +1050,19 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
     assert publication_review.loaded_authorities == (
         "workflows/write-paper/publication-review-finalization.md",
         "references/publication/publication-review-round-artifacts.md",
+    )
+    assert publication_review.conditional_authorities[0].when == "response_pair_authoring"
+    assert publication_review.conditional_authorities[0].authorities == (
+        "references/publication/publication-response-writer-handoff.md",
         "references/publication/publication-response-artifacts.md",
-        "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-reliability.md",
         "references/publication/stage-recovery-gate.md",
         "templates/paper/author-response.md",
         "templates/paper/referee-response.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md",
     )
+    assert "references/publication/peer-review-panel.md" in publication_review.must_not_eager_load
+    assert "references/publication/peer-review-reliability.md" in publication_review.must_not_eager_load
+    assert "templates/paper/review-ledger-schema.md" in publication_review.must_not_eager_load
+    assert "templates/paper/referee-decision-schema.md" in publication_review.must_not_eager_load
     assert publication_review.writes_allowed == (
         WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT,
         "GPD/review",
@@ -1460,6 +1478,7 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert panel_stages.loaded_authorities == (
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
+        "references/publication/peer-review-panel-playbook.md",
         "references/publication/stage-recovery-gate.md",
         "references/verification/core/proof-redteam-workflow-gate.md",
         "references/verification/core/proof-redteam-protocol.md",

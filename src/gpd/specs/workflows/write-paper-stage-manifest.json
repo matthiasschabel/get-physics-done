@@ -435,7 +435,7 @@
     {
       "id": "publication_review",
       "order": 5,
-      "purpose": "staged peer review, referee adjudication, and revision routing",
+      "purpose": "publication review routing, finalization checks, and revision handoff",
       "mode_paths": [
         "workflows/write-paper/publication-review-finalization.md"
       ],
@@ -459,27 +459,52 @@
       ],
       "loaded_authorities": [
         "workflows/write-paper/publication-review-finalization.md",
-        "references/publication/publication-review-round-artifacts.md",
-        "references/publication/publication-response-artifacts.md",
-        "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/stage-recovery-gate.md",
-        "templates/paper/author-response.md",
-        "templates/paper/referee-response.md",
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md"
+        "references/publication/publication-review-round-artifacts.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "response_pair_authoring",
+          "authorities": [
+            "references/publication/publication-response-writer-handoff.md",
+            "references/publication/publication-response-artifacts.md",
+            "references/publication/stage-recovery-gate.md",
+            "templates/paper/author-response.md",
+            "templates/paper/referee-response.md"
+          ]
+        },
+        {
+          "when": "advisory_paper_quality_scoring",
+          "authorities": [
+            "references/publication/paper-quality-scoring.md"
+          ]
+        },
+        {
+          "when": "review_failure_or_round_state_debug",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/write-paper.md",
         "workflows/write-paper/outline-scaffold.md",
         "workflows/write-paper/authoring.md",
         "workflows/write-paper/consistency-references.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/publication-response-artifacts.md",
+        "references/publication/peer-review-panel.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
+        "references/publication/paper-quality-scoring.md",
         "references/publication/publication-pipeline-modes.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
+        "templates/paper/author-response.md",
+        "templates/paper/referee-response.md",
+        "templates/paper/review-ledger-schema.md",
+        "templates/paper/referee-decision-schema.md",
         "templates/paper/figure-tracker.md",
         "templates/paper/reproducibility-manifest.md"
       ],

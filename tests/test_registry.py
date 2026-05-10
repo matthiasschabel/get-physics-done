@@ -2196,18 +2196,11 @@ class TestRegistryPromptIncludeInlining:
             "templates/paper/paper-config-schema.md"
             in command.staged_loading.stage("outline_and_scaffold").loaded_authorities
         )
-        assert (
-            "references/publication/peer-review-panel.md"
-            in command.staged_loading.stage("publication_review").loaded_authorities
-        )
-        assert (
-            "templates/paper/review-ledger-schema.md"
-            in command.staged_loading.stage("publication_review").loaded_authorities
-        )
-        assert (
-            "templates/paper/referee-decision-schema.md"
-            in command.staged_loading.stage("publication_review").loaded_authorities
-        )
+        publication_review = command.staged_loading.stage("publication_review")
+        assert "references/publication/publication-review-round-artifacts.md" in publication_review.loaded_authorities
+        assert "references/publication/peer-review-panel.md" in publication_review.must_not_eager_load
+        assert "templates/paper/review-ledger-schema.md" in publication_review.must_not_eager_load
+        assert "templates/paper/referee-decision-schema.md" in publication_review.must_not_eager_load
 
     def test_write_paper_registry_surface_exposes_bounded_external_authoring_lane(self) -> None:
         command = registry.get_command("gpd:write-paper")

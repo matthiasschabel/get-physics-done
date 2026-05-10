@@ -2996,7 +2996,10 @@ class TestPublicAPI:
         assert synthesizer.path.endswith("gpd-research-synthesizer.md")
         assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer.content
         assert "put it in `files_written` when this run creates or updates it" in synthesizer.content
-        assert "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields" in synthesizer.content
+        assert (
+            "agent-infrastructure.md, which owns the return skeleton/profile status vocabulary and base fields"
+            in synthesizer.content
+        )
         assert "gpd_return:" in synthesizer.content
 
         assert new_project.spawn_contracts == new_project_command.spawn_contracts
@@ -3138,27 +3141,50 @@ class TestPublicAPI:
             "shell",
             "task",
         )
-        assert cmd.staged_loading.stages[3].loaded_authorities == (
-            "workflows/verify-work/interactive-validation.md",
-            "templates/research-verification.md",
-            "templates/verification-report.md",
-            "templates/contract-results-schema.md",
-            "references/shared/canonical-schema-discipline.md",
+        assert cmd.staged_loading.stages[3].loaded_authorities == ("workflows/verify-work/interactive-validation.md",)
+        assert tuple(entry.to_payload() for entry in cmd.staged_loading.stages[3].conditional_authorities) == (
+            {
+                "when": "session_overlay_write_or_repair",
+                "authorities": [
+                    "templates/research-verification.md",
+                    "templates/verification-report.md",
+                    "templates/contract-results-schema.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            },
+            {
+                "when": "custom_verifier_continuation",
+                "authorities": [
+                    "templates/verification-report.md",
+                    "templates/contract-results-schema.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            },
         )
         assert cmd.staged_loading.stages[3].writes_allowed == ("GPD/phases/XX-name/XX-VERIFICATION.md",)
         assert cmd.staged_loading.stages[3].next_stages == ("gap_repair",)
         assert cmd.staged_loading.stages[3].checkpoints == (
             "verification file can be written",
-            "writer-stage schema is visible",
+            "writer-stage schema deferral barrier is visible",
             "check results remain contract-backed",
         )
-        assert cmd.staged_loading.stages[4].loaded_authorities == (
-            "workflows/verify-work/gap-repair.md",
-            "templates/research-verification.md",
-            "templates/verification-report.md",
-            "templates/contract-results-schema.md",
-            "references/shared/canonical-schema-discipline.md",
-            "references/protocols/error-propagation-protocol.md",
+        assert cmd.staged_loading.stages[4].loaded_authorities == ("workflows/verify-work/gap-repair.md",)
+        assert tuple(entry.to_payload() for entry in cmd.staged_loading.stages[4].conditional_authorities) == (
+            {
+                "when": "gap_report_write_or_schema_repair",
+                "authorities": [
+                    "templates/research-verification.md",
+                    "templates/verification-report.md",
+                    "templates/contract-results-schema.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            },
+            {
+                "when": "error_propagation_gap",
+                "authorities": [
+                    "references/protocols/error-propagation-protocol.md",
+                ],
+            },
         )
         assert cmd.staged_loading.stages[4].writes_allowed == ("GPD/phases/XX-name/XX-VERIFICATION.md",)
         assert cmd.staged_loading.stages[4].next_stages == ()

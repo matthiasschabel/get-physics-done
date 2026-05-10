@@ -28,9 +28,33 @@
       "derived_manuscript_reference_status_count",
       "derived_manuscript_proof_review_status"
     ],
+    "preflight_contract_gate_context": [
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation",
+      "contract_intake",
+      "effective_reference_intake"
+    ],
+    "preflight_reference_status_context": [
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
     "reference_evidence_context": [
       "reference_artifact_files",
       "reference_artifacts_content",
+      "literature_review_files",
+      "literature_review_count",
+      "research_map_reference_files",
+      "research_map_reference_count",
+      "citation_source_files",
+      "citation_source_count",
+      "citation_source_warnings",
+      "derived_citation_sources",
+      "derived_citation_source_count"
+    ],
+    "reference_handle_context": [
+      "reference_artifact_files",
       "literature_review_files",
       "literature_review_count",
       "research_map_reference_files",
@@ -90,7 +114,8 @@
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths",
@@ -162,8 +187,8 @@
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths",
@@ -174,14 +199,25 @@
       ],
       "loaded_authorities": [
         "workflows/peer-review/preflight.md",
-        "templates/paper/publication-manuscript-root-preflight.md",
-        "references/publication/peer-review-reliability.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-        "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md"
+        "templates/paper/publication-manuscript-root-preflight.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "manual_publication_artifact_validation",
+          "authorities": [
+            "templates/paper/paper-config-schema.md",
+            "templates/paper/artifact-manifest-schema.md",
+            "templates/paper/bibliography-audit-schema.md",
+            "templates/paper/reproducibility-manifest.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/peer-review.md",
         "workflows/peer-review/artifact-discovery.md",
@@ -192,12 +228,17 @@
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-panel-playbook.md",
+        "references/publication/peer-review-reliability.md",
         "references/publication/stage-recovery-gate.md",
         "references/publication/publication-final-adjudication-boundary.md",
         "references/publication/publication-response-writer-handoff.md",
         "references/verification/core/proof-redteam-workflow-gate.md",
         "references/verification/core/proof-redteam-protocol.md",
         "references/shared/canonical-schema-discipline.md",
+        "templates/paper/paper-config-schema.md",
+        "templates/paper/artifact-manifest-schema.md",
+        "templates/paper/bibliography-audit-schema.md",
+        "templates/paper/reproducibility-manifest.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
         "templates/proof-redteam-schema.md"
@@ -232,8 +273,9 @@
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
+        "reference_handle_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths",
@@ -389,8 +431,9 @@
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
+        "reference_handle_context",
         "publication_lane_context",
         "manuscript_resolution_context",
         "manuscript_package_paths"
@@ -476,7 +519,7 @@
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
+        "preflight_contract_gate_context",
         "publication_lane_context"
       ],
       "required_init_fields": [

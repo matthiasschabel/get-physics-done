@@ -263,16 +263,27 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
         "selected_review_root",
     } <= set(bootstrap.required_init_fields)
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
-    assert {"active_reference_context", "protocol_bundle_context"} <= set(bootstrap.required_init_fields)
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(bootstrap.required_init_fields)
 
     assert preflight.loaded_authorities[0] == "workflows/peer-review/preflight.md"
-    assert {
-        "references/publication/peer-review-reliability.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-        "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md",
-    } <= set(preflight.loaded_authorities)
+    assert preflight.loaded_authorities == (
+        "workflows/peer-review/preflight.md",
+        "templates/paper/publication-manuscript-root-preflight.md",
+    )
+    assert _conditional_authorities_by_when(preflight) == {
+        "review_integrity_recovery_needed": frozenset({"references/publication/peer-review-reliability.md"}),
+        "manual_publication_artifact_validation": frozenset(
+            {
+                "templates/paper/paper-config-schema.md",
+                "templates/paper/artifact-manifest-schema.md",
+                "templates/paper/bibliography-audit-schema.md",
+                "templates/paper/reproducibility-manifest.md",
+            }
+        ),
+    }
+    assert "reference_artifacts_content" not in preflight.required_init_fields
+    assert "protocol_bundle_context" not in preflight.required_init_fields
+    assert "active_reference_context" not in preflight.required_init_fields
     assert artifact_discovery.loaded_authorities == (
         "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",
@@ -354,8 +365,13 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
     assert "latest_response_artifacts" in bootstrap.required_init_fields
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
     assert "reference_artifacts_content" not in report_triage.required_init_fields
-    assert {"active_reference_context", "protocol_bundle_context"} <= set(bootstrap.required_init_fields)
-    assert {"active_reference_context", "protocol_bundle_context"} <= set(report_triage.required_init_fields)
+    assert "reference_artifacts_content" not in revision_planning.required_init_fields
+    assert "reference_artifacts_content" in response_authoring.required_init_fields
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(bootstrap.required_init_fields)
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(report_triage.required_init_fields)
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(revision_planning.required_init_fields)
+    assert "selected_protocol_bundle_ids" in revision_planning.required_init_fields
+    assert {"active_reference_context", "protocol_bundle_context"} <= set(response_authoring.required_init_fields)
 
     assert bootstrap.mode_paths == ("workflows/respond-to-referees/bootstrap.md",)
     assert bootstrap.loaded_authorities == (
@@ -368,16 +384,33 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
     assert "workflows/respond-to-referees/finalize.md" in bootstrap.must_not_eager_load
     assert report_triage.loaded_authorities == (
         "workflows/respond-to-referees/report-triage.md",
-        "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
-        "references/publication/stage-recovery-gate.md",
     )
-    assert "reference_artifacts_content" in revision_planning.required_init_fields
+    assert _conditional_authorities_by_when(report_triage) == {
+        "review_integrity_recovery_needed": frozenset({"references/publication/peer-review-reliability.md"}),
+        "checkpoint_or_child_recovery_needed": frozenset({"references/publication/stage-recovery-gate.md"}),
+    }
+    assert revision_planning.loaded_authorities == ("workflows/respond-to-referees/revision-planning.md",)
+    assert _conditional_authorities_by_when(revision_planning) == {
+        "response_pair_artifact_contract_needed": frozenset(
+            {"references/publication/publication-response-writer-handoff.md"}
+        ),
+        "review_integrity_recovery_needed": frozenset({"references/publication/peer-review-reliability.md"}),
+        "checkpoint_or_child_recovery_needed": frozenset({"references/publication/stage-recovery-gate.md"}),
+    }
     for stage_id in manifest.stage_ids()[1:]:
         assert "response_intake_input" in manifest.stage(stage_id).required_init_fields
     assert "templates/paper/referee-response.md" in response_authoring.loaded_authorities
     assert "templates/paper/author-response.md" in response_authoring.loaded_authorities
     assert "references/publication/stage-recovery-gate.md" in response_authoring.loaded_authorities
+    assert finalize.loaded_authorities == (
+        "workflows/respond-to-referees/finalize.md",
+        "references/publication/publication-response-writer-handoff.md",
+    )
+    assert _conditional_authorities_by_when(finalize) == {
+        "review_integrity_recovery_needed": frozenset({"references/publication/peer-review-reliability.md"}),
+        "checkpoint_or_child_recovery_needed": frozenset({"references/publication/stage-recovery-gate.md"}),
+    }
     assert "GPD/AUTHOR-RESPONSE{round_suffix}.md" in response_authoring.writes_allowed
     assert "GPD/review/REFEREE_RESPONSE{round_suffix}.md" in response_authoring.writes_allowed
     assert "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md" in response_authoring.writes_allowed

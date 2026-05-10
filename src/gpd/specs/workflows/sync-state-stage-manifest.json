@@ -69,23 +69,24 @@
         "state_md_exists",
         "state_json_exists",
         "state_json_backup_exists",
-        "state_md_content",
-        "state_json_content",
-        "state_json_backup_content",
+        "state_recovery_guidance",
         "state_load_source",
-        "state_integrity_issues",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+        "state_integrity_issues"
       ],
       "loaded_authorities": [
-        "workflows/sync-state/single-source-recovery.md",
-        "templates/state-json-schema.md"
+        "workflows/sync-state/single-source-recovery.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "backend_validation_failed_needs_schema_context",
+          "authorities": [
+            "templates/state-json-schema.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
-        "workflows/sync-state.md"
+        "workflows/sync-state.md",
+        "templates/state-json-schema.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -112,7 +113,7 @@
     {
       "id": "conflict_analysis",
       "order": 3,
-      "purpose": "deterministic comparison of mirrored fields under schema authority",
+      "purpose": "read-only deterministic comparison of mirrored fields for drift reporting",
       "mode_paths": [
         "workflows/sync-state/conflict-analysis.md"
       ],
@@ -132,12 +133,19 @@
         "project_contract_validation"
       ],
       "loaded_authorities": [
-        "workflows/sync-state/conflict-analysis.md",
-        "templates/state-json-schema.md"
+        "workflows/sync-state/conflict-analysis.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "manual_schema_drift_analysis",
+          "authorities": [
+            "templates/state-json-schema.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
-        "workflows/sync-state.md"
+        "workflows/sync-state.md",
+        "templates/state-json-schema.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -155,7 +163,7 @@
         "reconcile_and_validate"
       ],
       "checkpoints": [
-        "schema outranks timestamps",
+        "state.json authority outranks timestamps",
         "comparison covers mirrored fields explicitly"
       ]
     },
@@ -171,23 +179,24 @@
         "state_md_exists",
         "state_json_exists",
         "state_json_backup_exists",
-        "state_md_content",
-        "state_json_content",
-        "state_json_backup_content",
+        "state_recovery_guidance",
         "state_load_source",
-        "state_integrity_issues",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+        "state_integrity_issues"
       ],
       "loaded_authorities": [
-        "workflows/sync-state/reconcile-and-validate.md",
-        "templates/state-json-schema.md"
+        "workflows/sync-state/reconcile-and-validate.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "backend_validation_failed_needs_schema_context",
+          "authorities": [
+            "templates/state-json-schema.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
-        "workflows/sync-state.md"
+        "workflows/sync-state.md",
+        "templates/state-json-schema.md"
       ],
       "allowed_tools": [
         "file_read",

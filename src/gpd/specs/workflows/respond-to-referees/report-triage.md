@@ -3,7 +3,7 @@ Own referee report ingestion, active-round detection, latest-round artifact disc
 </purpose>
 
 <stage_boundary>
-Load this stage only after bootstrap resolves the manuscript subject and selected response roots. This stage may read referee reports, latest review artifacts, `peer-review-reliability.md`, `publication-response-writer-handoff.md`, and `stage-recovery-gate.md`.
+Load this stage only after bootstrap resolves the manuscript subject and selected response roots. This stage may read referee reports, latest review artifacts, and the eagerly loaded `publication-response-writer-handoff.md`. Load `{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md` or `stage-recovery-gate.md` only through the matching conditional authority when integrity recovery or checkpoint recovery is actually needed.
 
 This stage is read-only. It must not create response artifacts, load response templates, edit the manuscript, spawn paper-writer agents, or run finalization gates.
 </stage_boundary>
@@ -27,9 +27,12 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Read `{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md` from this stage for failure recovery, round suffixes, and latest-round artifact conventions.
 Apply `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` from this stage exactly.
 Use that shared handoff for `round_suffix`, sibling-artifact discovery, and the canonical response-artifact pair for the active round.
+If latest-round artifacts are inconsistent, stale, or partially written, load the
+`review_integrity_recovery_needed` conditional authority before diagnosing the
+round. If a checkpoint or child-return recovery path is reached, load
+`checkpoint_or_child_recovery_needed` before presenting recovery choices.
 
 **Obtain referee reports from the user:**
 

@@ -46,9 +46,15 @@
       "effective_reference_intake",
       "active_reference_context"
     ],
+    "reference_intake_context": [
+      "effective_reference_intake"
+    ],
     "reference_artifact_context": [
       "reference_artifact_files",
       "reference_artifacts_content"
+    ],
+    "reference_artifact_handles": [
+      "reference_artifact_files"
     ],
     "protocol_bundle_context": [
       "selected_protocol_bundle_ids",
@@ -73,22 +79,7 @@
       "execution_downstream_locked",
       "execution_blocked",
       "execution_resumable",
-      "execution_paused_at",
-      "current_execution_resume_file",
-      "handoff_resume_file",
-      "recorded_handoff_resume_file",
-      "missing_handoff_resume_file",
-      "execution_resume_file",
-      "execution_resume_file_source",
-      "resume_projection",
-      "current_hostname",
-      "current_platform",
-      "session_hostname",
-      "session_platform",
-      "session_last_date",
-      "session_stopped_at",
-      "machine_change_detected",
-      "machine_change_notice"
+      "execution_paused_at"
     ],
     "state_integrity_context": [
       "state_load_source",
@@ -850,9 +841,8 @@
         "execution_phase_base",
         "summary_plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
-        "reference_artifact_context",
-        "protocol_bundle_context",
+        "reference_intake_context",
+        "reference_artifact_handles",
         "execution_resume_context"
       ],
       "required_init_fields": [
@@ -1056,9 +1046,8 @@
         "execution_phase_base",
         "summary_plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
-        "reference_artifact_context",
-        "protocol_bundle_context",
+        "reference_intake_context",
+        "reference_artifact_handles",
         "execution_resume_context"
       ],
       "required_init_fields": [
@@ -1160,9 +1149,8 @@
         "execution_phase_base",
         "summary_plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
-        "reference_artifact_context",
-        "protocol_bundle_context",
+        "reference_intake_context",
+        "reference_artifact_handles",
         "execution_resume_context"
       ],
       "required_init_fields": [
@@ -1258,19 +1246,28 @@
         "execution_phase_base",
         "summary_plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
         "execution_resume_context",
         "state_integrity_context"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase/closeout.md",
-        "workflows/transition.md",
-        "references/ui/ui-brand.md",
-        "references/orchestration/state-portability.md",
-        "references/orchestration/continuous-execution.md",
-        "templates/state-machine.md"
+        "workflows/execute-phase/closeout.md"
       ],
       "conditional_authorities": [
+        {
+          "when": "transition_helper_ambiguity",
+          "authorities": [
+            "workflows/transition.md",
+            "templates/state-machine.md",
+            "references/orchestration/state-portability.md"
+          ]
+        },
+        {
+          "when": "next_up_rendering_recovery",
+          "authorities": [
+            "references/ui/ui-brand.md",
+            "references/orchestration/continuous-execution.md"
+          ]
+        },
         {
           "when": "release_or_branch_recovery",
           "authorities": [
@@ -1282,19 +1279,25 @@
       "must_not_eager_load": [
         "references/orchestration/checkpoints.md",
         "references/orchestration/agent-infrastructure.md",
+        "references/orchestration/state-portability.md",
+        "references/orchestration/continuous-execution.md",
         "references/verification/core/verification-core.md",
         "references/execution/executor-index.md",
+        "references/execution/git-integration.md",
         "references/execution/github-lifecycle.md",
         "references/execution/execute-plan-validation.md",
         "references/execution/execute-plan-checkpoints.md",
         "references/execution/execute-plan-recovery.md",
+        "references/ui/ui-brand.md",
         "references/protocols/error-propagation-protocol.md",
         "templates/contract-results-schema.md",
         "templates/recovery-plan.md",
+        "templates/state-machine.md",
         "templates/paper/figure-tracker.md",
         "templates/paper/experimental-comparison.md",
         "workflows/execute-plan.md",
-        "workflows/verify-phase.md"
+        "workflows/verify-phase.md",
+        "workflows/transition.md"
       ],
       "allowed_tools": [
         "ask_user",

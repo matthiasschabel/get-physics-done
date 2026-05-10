@@ -278,6 +278,11 @@ def test_phase_help_lists_closeout_readiness_not_removed_verification_summary() 
 
 def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
     workflow = (EXECUTE_PHASE_STAGE_DIR / "closeout.md").read_text(encoding="utf-8")
+    manifest = json.loads((EXECUTE_PHASE_STAGE_DIR.parent / "execute-phase-stage-manifest.json").read_text())
+    closeout_stage = next(stage for stage in manifest["stages"] if stage["id"] == "closeout")
+    conditional_authorities = {
+        authority for condition in closeout_stage["conditional_authorities"] for authority in condition["authorities"]
+    }
 
     assert "does not spawn verifiers, close gaps, run consistency checks, or decide scientific status" in workflow
     assert (
@@ -289,5 +294,5 @@ def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
     assert 'gpd phase complete "${phase_number}"' in workflow
     assert workflow.index("gpd --raw phase closeout-readiness") < workflow.index('gpd phase complete "${phase_number}"')
     assert "Do not repair blockers, update roadmap/state, or clean checkpoints from this stage." in workflow
-    assert "workflows/transition.md" not in workflow
-    assert "templates/state-machine.md" not in workflow
+    assert closeout_stage["loaded_authorities"] == ["workflows/execute-phase/closeout.md"]
+    assert {"workflows/transition.md", "templates/state-machine.md"} <= conditional_authorities

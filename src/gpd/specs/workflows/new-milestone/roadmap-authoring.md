@@ -55,7 +55,7 @@ State content: {state_content}
 Milestones content: {milestones_content}
 Requirements content: {requirements_content}
 Roadmap content: {roadmap_content}
-Reference artifacts: {reference_artifacts_content}
+Reference artifact file handles: {reference_artifact_files}
 </milestone_context>
 
 <contract_context>
@@ -66,7 +66,7 @@ Project contract load info: {project_contract_load_info}
 Contract intake: {contract_intake}
 Active references: {active_reference_context}
 Effective reference intake: {effective_reference_intake}
-Reference artifacts: {reference_artifacts_content}
+Reference artifact file handles: {reference_artifact_files}
 </contract_context>
 
 <shallow_mode>false</shallow_mode>

@@ -2765,16 +2765,26 @@ def _build_peer_review_runtime_context(
     launch_cwd: Path | None = None,
     persist_manuscript_proof_review_manifest: bool = False,
     preserve_standalone_publication_roots: bool = False,
+    reference_fields: set[str] | frozenset[str] | None = None,
 ) -> dict[str, object]:
     """Build the shared publication runtime payload for peer-review init and staging."""
 
     target_base_cwd = (launch_cwd or cwd).expanduser().resolve(strict=False)
     resolved_subject = _explicit_subject_from_launch_cwd(subject, target_base_cwd)
-    result = dict(
-        _build_reference_runtime_context(
-            cwd, persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest
+    if reference_fields is None:
+        result = dict(
+            _build_reference_runtime_context(
+                cwd, persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest
+            )
         )
-    )
+    else:
+        result = dict(
+            _build_staged_reference_runtime_context(
+                cwd,
+                frozenset(reference_fields),
+                persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest,
+            )
+        )
     result.update(
         _build_publication_bootstrap_runtime_context(
             cwd, persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest
@@ -4350,8 +4360,9 @@ def init_plan_phase(
 
     def build_plan_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
-        if required_fields & _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS:
-            return _build_reference_runtime_context(effective_cwd)
+        reference_fields = required_fields & _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS
+        if reference_fields:
+            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
         return _build_new_project_contract_runtime_context(effective_cwd)
 
     def build_plan_file_content(assembly_context: object) -> Mapping[str, object]:
@@ -4550,8 +4561,9 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
 
     def build_new_milestone_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
-        if required_fields & _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS:
-            return _build_reference_runtime_context(effective_cwd)
+        reference_fields = required_fields & _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS
+        if reference_fields:
+            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
         return _build_new_project_contract_runtime_context(effective_cwd)
 
     def build_new_milestone_file_content(assembly_context: object) -> Mapping[str, object]:
@@ -4589,9 +4601,7 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
             _StagedInitProvider(
                 "roadmapper_model",
                 {"roadmapper_model"},
-                lambda _assembly_context: {
-                    "roadmapper_model": _resolve_model(effective_cwd, "gpd-roadmapper", config)
-                },
+                lambda _assembly_context: {"roadmapper_model": _resolve_model(effective_cwd, "gpd-roadmapper", config)},
             ),
             _StagedInitProvider(
                 "reference_or_contract",
@@ -4684,8 +4694,9 @@ def init_quick(cwd: Path, description: str | None = None, stage: str | None = No
 
     def build_quick_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
-        if required_fields & _QUICK_REFERENCE_RUNTIME_FIELDS:
-            return _build_reference_runtime_context(cwd)
+        reference_fields = required_fields & _QUICK_REFERENCE_RUNTIME_FIELDS
+        if reference_fields:
+            return _build_staged_reference_runtime_context(cwd, reference_fields)
         return _build_new_project_contract_runtime_context(cwd)
 
     return _assemble_staged_init_payload(
@@ -5173,13 +5184,14 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
 
     def build_write_paper_reference_or_bootstrap(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
-        needs_full_reference_context = bool(required_fields & _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS)
+        reference_fields = required_fields & _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS
+        needs_full_reference_context = bool(reference_fields)
         needs_bootstrap_reference_context = bool(required_fields & _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS)
         needs_contract_gate_context = bool(required_fields & _WRITE_PAPER_CONTRACT_GATE_FIELDS)
         needs_publication_bootstrap_context = bool(required_fields & _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS)
         payload: dict[str, object] = {}
         if needs_full_reference_context:
-            payload.update(_build_reference_runtime_context(effective_cwd))
+            payload.update(_build_staged_reference_runtime_context(effective_cwd, reference_fields))
         elif needs_bootstrap_reference_context or needs_contract_gate_context or needs_publication_bootstrap_context:
             payload.update(
                 _build_publication_bootstrap_runtime_context(
@@ -5266,10 +5278,11 @@ def init_peer_review(cwd: Path, subject: str | None = None, stage: str | None = 
             _StagedInitProvider(
                 "peer_review_runtime",
                 PEER_REVIEW_INIT_FIELDS - frozenset(base_result),
-                lambda _assembly_context: _build_peer_review_runtime_context(
+                lambda assembly_context: _build_peer_review_runtime_context(
                     effective_cwd,
                     subject,
                     launch_cwd=launch_cwd,
+                    reference_fields=assembly_context.required_fields & _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS,
                 ),
             ),
         ),
@@ -5320,11 +5333,12 @@ def init_respond_to_referees(cwd: Path, subject: str | None = None, stage: str |
             _StagedInitProvider(
                 "peer_review_runtime",
                 PEER_REVIEW_INIT_FIELDS - frozenset(base_result),
-                lambda _assembly_context: _build_peer_review_runtime_context(
+                lambda assembly_context: _build_peer_review_runtime_context(
                     effective_cwd,
                     manuscript_subject,
                     launch_cwd=launch_cwd,
                     preserve_standalone_publication_roots=True,
+                    reference_fields=assembly_context.required_fields & _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS,
                 ),
             ),
         ),
@@ -5476,10 +5490,9 @@ def init_phase_op(
 
     def build_research_phase_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
-        if required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS:
-            return _build_reference_runtime_context(effective_cwd)
-        if required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS:
-            return _build_contract_reference_runtime_context(effective_cwd)
+        reference_fields = required_fields & (_STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS)
+        if reference_fields:
+            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
         return _build_new_project_contract_runtime_context(effective_cwd)
 
     def build_research_phase_file_content(assembly_context: object) -> Mapping[str, object]:
@@ -5574,10 +5587,9 @@ def init_literature_review(cwd: Path, topic: str | None = None, stage: str | Non
 
     def build_literature_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
-        if required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS:
-            return _build_reference_runtime_context(effective_cwd)
-        if required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS:
-            return _build_contract_reference_runtime_context(effective_cwd)
+        reference_fields = required_fields & (_STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS)
+        if reference_fields:
+            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
         return _build_new_project_contract_runtime_context(effective_cwd)
 
     return _assemble_staged_init_payload(
@@ -5751,11 +5763,7 @@ def init_autonomous(
     roadmap = roadmap_analyze(effective_cwd)
     roadmap_phases = sorted(roadmap.phases, key=lambda phase: _phase_sort_key(phase.number))
     phase_plan = [_autonomous_roadmap_phase_payload(phase) for phase in roadmap_phases]
-    completed_phase_numbers = [
-        str(phase.number)
-        for phase in roadmap_phases
-        if phase.disk_status == "complete"
-    ]
+    completed_phase_numbers = [str(phase.number) for phase in roadmap_phases if phase.disk_status == "complete"]
     current_phase = _autonomous_selected_phase(roadmap_phases, parsed_from_phase)
     current_phase_number = str(current_phase.number) if current_phase is not None else None
     current_phase_name = str(current_phase.name) if current_phase is not None else None
@@ -5834,9 +5842,7 @@ def init_autonomous(
     }
     missing_known_fields = sorted(_AUTONOMOUS_INIT_FIELDS - set(base_result))
     if missing_known_fields:
-        raise ValueError(
-            f"autonomous init field source missing known field(s): {', '.join(missing_known_fields)}"
-        )
+        raise ValueError(f"autonomous init field source missing known field(s): {', '.join(missing_known_fields)}")
 
     if stage is None:
         return base_result
@@ -5957,10 +5963,9 @@ def init_map_research(cwd: Path, focus: str | None = None, stage: str | None = N
 
     def build_map_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
         required_fields = assembly_context.required_fields
-        if required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS:
-            return _build_reference_runtime_context(effective_cwd)
-        if required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS:
-            return _build_contract_reference_runtime_context(effective_cwd)
+        reference_fields = required_fields & (_STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS)
+        if reference_fields:
+            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
         return _build_new_project_contract_runtime_context(effective_cwd)
 
     return _assemble_staged_init_payload(

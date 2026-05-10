@@ -2,7 +2,7 @@
   "schema_version": 1,
   "workflow_id": "respond-to-referees",
   "required_init_field_groups": {
-    "response_round_common": [
+    "response_launch_context": [
       "project_exists",
       "state_exists",
       "commit_docs",
@@ -14,33 +14,91 @@
       "review_target_mode_reason",
       "resolved_review_target",
       "resolved_review_root",
+      "platform"
+    ],
+    "response_contract_gate_context": [
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation",
+      "contract_intake",
+      "effective_reference_intake"
+    ],
+    "response_contract_body_context": [
       "project_contract",
       "project_contract_gate",
       "project_contract_load_info",
       "project_contract_validation",
       "contract_intake",
-      "effective_reference_intake",
+      "effective_reference_intake"
+    ],
+    "response_protocol_reference_context": [
       "selected_protocol_bundle_ids",
       "protocol_bundle_context",
       "active_reference_context",
       "derived_manuscript_reference_status",
       "derived_manuscript_reference_status_count",
-      "derived_manuscript_proof_review_status",
+      "derived_manuscript_proof_review_status"
+    ],
+    "response_protocol_reference_handles": [
+      "selected_protocol_bundle_ids",
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
+    "response_manuscript_status_context": [
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
+    "response_reference_evidence_context": [
+      "reference_artifact_files",
+      "reference_artifacts_content",
+      "literature_review_files",
+      "literature_review_count",
+      "research_map_reference_files",
+      "research_map_reference_count",
+      "citation_source_files",
+      "citation_source_count",
+      "citation_source_warnings",
+      "derived_citation_sources",
+      "derived_citation_source_count"
+    ],
+    "response_reference_handle_context": [
+      "reference_artifact_files",
+      "literature_review_files",
+      "literature_review_count",
+      "research_map_reference_files",
+      "research_map_reference_count",
+      "citation_source_files",
+      "citation_source_count",
+      "citation_source_warnings",
+      "derived_citation_sources",
+      "derived_citation_source_count"
+    ],
+    "response_publication_roots": [
       "publication_subject_slug",
       "publication_lane_kind",
       "publication_lane_owner",
       "managed_publication_root",
       "selected_publication_root",
-      "selected_review_root",
+      "selected_review_root"
+    ],
+    "response_manuscript_resolution": [
       "manuscript_resolution_status",
-      "manuscript_resolution_detail",
+      "manuscript_resolution_detail"
+    ],
+    "response_manuscript_package_paths": [
       "manuscript_root",
       "manuscript_entrypoint",
       "artifact_manifest_path",
       "bibliography_audit_path",
-      "reproducibility_manifest_path",
+      "reproducibility_manifest_path"
+    ],
+    "response_blockers_context": [
       "publication_blockers",
-      "publication_blocker_count",
+      "publication_blocker_count"
+    ],
+    "response_review_round_artifacts": [
       "latest_review_round",
       "latest_review_round_suffix",
       "latest_review_ledger",
@@ -48,13 +106,14 @@
       "latest_referee_report_md",
       "latest_referee_report_tex",
       "latest_proof_redteam",
-      "latest_review_artifacts",
+      "latest_review_artifacts"
+    ],
+    "response_artifact_pair_context": [
       "latest_response_round",
       "latest_response_round_suffix",
       "latest_author_response",
       "latest_referee_response",
-      "latest_response_artifacts",
-      "platform"
+      "latest_response_artifacts"
     ]
   },
   "stages": [
@@ -108,7 +167,15 @@
         "selected publication and review roots identified"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_contract_gate_context",
+        "response_manuscript_status_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_blockers_context",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
       ]
     },
     {
@@ -120,16 +187,29 @@
       ],
       "loaded_authorities": [
         "workflows/respond-to-referees/report-triage.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md",
-        "references/publication/stage-recovery-gate.md"
+        "references/publication/publication-response-writer-handoff.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "checkpoint_or_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/respond-to-referees.md",
         "workflows/respond-to-referees/revision-planning.md",
         "workflows/respond-to-referees/response-authoring.md",
         "workflows/respond-to-referees/finalize.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
@@ -156,7 +236,13 @@
         "issue inventory ready for revision planning"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_blockers_context",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
       ]
     },
     {
@@ -166,30 +252,36 @@
       "mode_paths": [
         "workflows/respond-to-referees/revision-planning.md"
       ],
-      "required_init_fields": [
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count"
-      ],
       "loaded_authorities": [
-        "workflows/respond-to-referees/revision-planning.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md",
-        "references/publication/stage-recovery-gate.md"
+        "workflows/respond-to-referees/revision-planning.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "response_pair_artifact_contract_needed",
+          "authorities": [
+            "references/publication/publication-response-writer-handoff.md"
+          ]
+        },
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "checkpoint_or_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/respond-to-referees.md",
         "workflows/respond-to-referees/response-authoring.md",
         "workflows/respond-to-referees/finalize.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
@@ -216,7 +308,15 @@
         "subagent revision handoffs scoped"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_contract_gate_context",
+        "response_protocol_reference_handles",
+        "response_reference_handle_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
       ]
     },
     {
@@ -233,8 +333,16 @@
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "references/publication/peer-review-reliability.md",
         "references/publication/publication-review-round-artifacts.md"
       ],
       "allowed_tools": [
@@ -268,7 +376,15 @@
         "new calculation artifacts linked when needed"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_contract_body_context",
+        "response_protocol_reference_context",
+        "response_reference_evidence_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_review_round_artifacts",
+        "response_artifact_pair_context"
       ]
     },
     {
@@ -280,12 +396,32 @@
       ],
       "loaded_authorities": [
         "workflows/respond-to-referees/finalize.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md",
-        "references/publication/stage-recovery-gate.md"
+        "references/publication/publication-response-writer-handoff.md"
       ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        },
+        {
+          "when": "checkpoint_or_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        }
+      ],
+      "must_not_eager_load": [
+        "workflows/respond-to-referees.md",
+        "workflows/respond-to-referees/report-triage.md",
+        "workflows/respond-to-referees/revision-planning.md",
+        "workflows/respond-to-referees/response-authoring.md",
+        "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
+        "templates/paper/referee-response.md",
+        "templates/paper/author-response.md"
+      ],
       "allowed_tools": [
         "ask_user",
         "file_read",
@@ -311,7 +447,11 @@
         "next command surfaced"
       ],
       "required_init_field_groups": [
-        "response_round_common"
+        "response_launch_context",
+        "response_publication_roots",
+        "response_manuscript_resolution",
+        "response_manuscript_package_paths",
+        "response_artifact_pair_context"
       ]
     }
   ]

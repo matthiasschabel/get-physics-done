@@ -4425,7 +4425,8 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "project_contract_gate",
         "project_contract_load_info",
         "project_contract_validation",
-        "authoritative only when `project_contract_gate.authoritative` is true",
+        "Treat the project contract as authoritative only when",
+        "`project_contract_gate.authoritative` is true",
         context="respond-to-referees contract gate",
     )
     _assert_forbidden_fragments(
@@ -4464,8 +4465,12 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "authoritative verification report",
         context="verify-work interactive validation stage",
     )
-    assert "templates/verification-report.md" in interactive_validation.loaded_authorities
-    assert "templates/contract-results-schema.md" in interactive_validation.loaded_authorities
+    interactive_conditionals = tuple(
+        authority
+        for conditional in interactive_validation.conditional_authorities
+        for authority in conditional.authorities
+    )
+    assert {"templates/verification-report.md", "templates/contract-results-schema.md"} <= set(interactive_conditionals)
     assert "references/verification/meta/verification-independence.md" in inventory_build.loaded_authorities
     _assert_forbidden_fragments(
         write_paper_command,
@@ -5208,7 +5213,14 @@ def test_skill_surface_exposes_contract_references_for_paper_and_review_workflow
     peer_review_stage_authorities = {
         authority
         for stage in peer_review.get("staged_loading", {}).get("stages", [])
-        for authority in stage.get("loaded_authorities", [])
+        for authority in (
+            *stage.get("loaded_authorities", []),
+            *(
+                authority
+                for conditional in stage.get("conditional_authorities", [])
+                for authority in conditional.get("authorities", [])
+            ),
+        )
     }
 
     assert "error" not in write_paper
@@ -5367,7 +5379,12 @@ def test_verification_and_agent_reference_prompts_expand_or_stage_required_refer
     assert "Verification Independence" not in verify_work
     assert "# Contract Results Schema" not in verify_work
     assert "references/verification/meta/verification-independence.md" in inventory_build.loaded_authorities
-    assert "templates/contract-results-schema.md" in interactive_validation.loaded_authorities
+    interactive_conditionals = tuple(
+        authority
+        for conditional in interactive_validation.conditional_authorities
+        for authority in conditional.authorities
+    )
+    assert {"templates/contract-results-schema.md"} <= set(interactive_conditionals)
     assert "Verification Independence" not in verify_phase
     assert "# Contract Results Schema" not in verify_phase
     assert "Do not raw-include the verification reference library at workflow load." in verify_phase
@@ -7119,9 +7136,9 @@ def test_expanded_artifact_intake_surfaces_use_cli_text_extraction_helper() -> N
     )
     _assert_semantic_fragments(
         peer_review_workflow,
-        "explicitly points",
-        "external-artifact intake surface only",
-        "do not widen",
+        "points at one artifact path",
+        "external-artifact intake surface",
+        "must not widen",
         "default `paper/`, `manuscript/`, or `draft/` discovery rules",
         context="peer-review artifact intake",
     )

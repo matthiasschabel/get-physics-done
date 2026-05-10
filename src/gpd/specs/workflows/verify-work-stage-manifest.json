@@ -243,25 +243,41 @@
         "contract_intake",
         "selected_protocol_bundle_ids",
         "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
         "active_reference_context",
         "reference_artifact_files"
       ],
       "loaded_authorities": [
-        "workflows/verify-work/interactive-validation.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md"
+        "workflows/verify-work/interactive-validation.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "session_overlay_write_or_repair",
+          "authorities": [
+            "templates/research-verification.md",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md"
+          ]
+        },
+        {
+          "when": "custom_verifier_continuation",
+          "authorities": [
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/verify-work.md",
         "workflows/verify-work/gap-repair.md",
         "references/protocols/error-propagation-protocol.md",
         "references/verification/core/verification-core.md",
         "references/verification/meta/verification-independence.md",
+        "references/shared/canonical-schema-discipline.md",
+        "templates/research-verification.md",
+        "templates/verification-report.md",
+        "templates/contract-results-schema.md",
         "templates/planner-subagent-prompt.md"
       ],
       "allowed_tools": [
@@ -287,7 +303,7 @@
       ],
       "checkpoints": [
         "verification file can be written",
-        "writer-stage schema is visible",
+        "writer-stage schema deferral barrier is visible",
         "check results remain contract-backed"
       ]
     },
@@ -314,16 +330,32 @@
         "reference_artifacts_content"
       ],
       "loaded_authorities": [
-        "workflows/verify-work/gap-repair.md",
+        "workflows/verify-work/gap-repair.md"
+      ],
+      "conditional_authorities": [
+        {
+          "when": "gap_report_write_or_schema_repair",
+          "authorities": [
+            "templates/research-verification.md",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md"
+          ]
+        },
+        {
+          "when": "error_propagation_gap",
+          "authorities": [
+            "references/protocols/error-propagation-protocol.md"
+          ]
+        }
+      ],
+      "must_not_eager_load": [
+        "workflows/verify-work.md",
+        "references/protocols/error-propagation-protocol.md",
+        "references/shared/canonical-schema-discipline.md",
         "templates/research-verification.md",
         "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md",
-        "references/protocols/error-propagation-protocol.md"
-      ],
-      "conditional_authorities": [],
-      "must_not_eager_load": [
-        "workflows/verify-work.md"
+        "templates/contract-results-schema.md"
       ],
       "allowed_tools": [
         "ask_user",

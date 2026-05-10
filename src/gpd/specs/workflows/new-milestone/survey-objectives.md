@@ -27,7 +27,7 @@ Before defining scope, inspect these carry-forward inputs and keep them visible 
 - `effective_reference_intake.crucial_inputs`
 - `contract_intake`
 
-If `reference_artifact_files` is non-empty, read the listed reference artifacts or use `reference_artifacts_content` as a compact fallback.
+If `reference_artifact_files` is non-empty, read the listed reference artifact handles when they are relevant. This handle-first stage does not receive embedded artifact bodies.
 
 ## 2. Gather Milestone Goals
 
@@ -258,7 +258,7 @@ Milestones content: {milestones_content}
 Contract intake: {contract_intake}
 Active references: {active_reference_context}
 Effective reference intake: {effective_reference_intake}
-Reference artifacts: {reference_artifacts_content}
+Reference artifact file handles: {reference_artifact_files}
 </survey_context>
 
 <output>

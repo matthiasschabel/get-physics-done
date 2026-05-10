@@ -18,13 +18,23 @@ PROMPT_KIND_BUDGETS = {
     "agent": {"lines": 10_500, "chars": 557_000},
     "workflow": {"lines": 21_000, "chars": 846_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_550, "chars": 172_000}
-STAGE_SELECTED_INIT_FIELD_BUDGET = 3_227
-STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 73
-STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 743
-STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 743
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_500, "chars": 171_390}
+STAGE_SELECTED_INIT_FIELD_BUDGET = 2_937
+STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 58
+REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 15
+STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 664
+STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 664
 EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_707
 EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 16_000
+PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS = {
+    ("execute-phase", "closeout"): 7_167,
+    ("peer-review", "preflight"): 9_178,
+    ("verify-work", "gap_repair"): 14_122,
+    ("verify-work", "interactive_validation"): 7_956,
+    ("sync-state", "reconcile_and_validate"): 3_836,
+    ("sync-state", "conflict_analysis"): 2_634,
+    ("sync-state", "single_source_recovery"): 1_763,
+}
 PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
     ("write-paper", "publication_review"): 12_000,
     ("peer-review", "panel_stages"): 40_000,
@@ -94,7 +104,7 @@ FORBIDDEN_MIGRATED_PROMPT_SHELL_FRAGMENTS = {
     "plan-phase.md": (
         "printf '```yaml\\ngpd_return:\\n'",
         "printf '  status: completed\\n  files_written:\\n'",
-        "PLAN_RETURN_MARKDOWN=\"$MAIN_CONTEXT_PLAN_RETURN\"",
+        'PLAN_RETURN_MARKDOWN="$MAIN_CONTEXT_PLAN_RETURN"',
     ),
     "execute-phase.md": (
         'PROJECT_ROOT=$(pwd -P); while [ "$PROJECT_ROOT" != "/" ]',
@@ -242,6 +252,12 @@ def _stage_diagnostics_by_id(workflow: dict[str, object]) -> dict[str, dict[str,
     return {stage["stage_id"]: stage for stage in stages if isinstance(stage, dict)}
 
 
+def _stage_init_field_rows(payload: dict[str, object]) -> list[dict[str, object]]:
+    rows = payload["stage_init_field_diagnostics"]
+    assert isinstance(rows, list)
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def test_prompt_surface_aggregate_budgets_stay_under_ceilings() -> None:
     payload = _prompt_surface_payload(("all",), (), False)
     totals = payload["totals"]
@@ -295,15 +311,28 @@ def test_staged_init_field_pressure_totals_do_not_grow_from_phase6_baseline() ->
         "likely_bulky_init_field_count": STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET,
     }
 
-    observed = {
-        field_name: _required_stage_diagnostic_count(stage_diagnostics, field_name)
-        for field_name in budgets
-    }
+    observed = {field_name: _required_stage_diagnostic_count(stage_diagnostics, field_name) for field_name in budgets}
     for field_name, budget in budgets.items():
         assert observed[field_name] <= budget, (
             f"{field_name} budget exceeded: observed={observed[field_name]} max={budget}; "
             "move bulky staged-init payload fields to later stages or cheap handles"
         )
+
+
+def test_reference_artifacts_content_selection_count_stays_under_phase3_baseline() -> None:
+    payload = _prompt_surface_payload(("command",), (), False)
+
+    rows = [row for row in _stage_init_field_rows(payload) if row["field_name"] == "reference_artifacts_content"]
+    observed = len(rows)
+    assert observed <= REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET, (
+        "reference_artifacts_content staged-init selection budget exceeded: "
+        f"observed={observed} max={REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET}; "
+        "stages that only need artifact handles should select reference_artifact_files"
+    )
+    assert {row["selection_count"] for row in rows} == {observed}
+    assert {row["field_kind_guess"] for row in rows} == {"content"}
+    assert {row["field_pressure_class"] for row in rows} == {"likely_bulky"}
+    assert {row["likely_bulky"] for row in rows} == {True}
 
 
 def test_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings() -> None:
@@ -361,6 +390,24 @@ def test_execute_phase_split_stage_budgets_stay_under_phase4_caps() -> None:
         )
 
 
+def test_phase3_target_stage_eager_budgets_do_not_rebound_above_measured_baselines() -> None:
+    payload = _prompt_surface_payload(("command",), (), False)
+
+    workflow_ids = {workflow_id for workflow_id, _stage_id in PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS}
+    stage_by_workflow = {
+        workflow_id: _stage_diagnostics_by_id(_workflow_stage_diagnostics(payload, workflow_id))
+        for workflow_id in workflow_ids
+    }
+    for (workflow_id, stage_id), char_budget in PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS.items():
+        stage = stage_by_workflow[workflow_id][stage_id]
+        observed = stage["eager_char_count"]
+        assert isinstance(observed, int)
+        assert observed <= char_budget, (
+            f"{workflow_id}.{stage_id} eager char budget exceeded: "
+            f"observed={observed} max={char_budget}; keep optional stage authorities conditional"
+        )
+
+
 def test_phase5_publication_stage_eager_budgets_stay_under_caps() -> None:
     payload = _prompt_surface_payload(("command",), (), False)
 
@@ -370,8 +417,7 @@ def test_phase5_publication_stage_eager_budgets_stay_under_caps() -> None:
         observed = stage["eager_char_count"]
         assert isinstance(observed, int)
         assert observed < char_budget, (
-            f"{workflow_id}.{stage_id} eager char budget exceeded: "
-            f"observed={observed} max<{char_budget}"
+            f"{workflow_id}.{stage_id} eager char budget exceeded: observed={observed} max<{char_budget}"
         )
 
 

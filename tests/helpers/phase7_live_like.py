@@ -13,6 +13,18 @@ from tests.helpers.phase4_persona.behavior_metrics import (
     BehaviorScore,
     score_behavior_metrics,
 )
+from tests.helpers.phase4_persona.interaction_events import (
+    FakePersonaTrace,
+    FakePersonaTurn,
+    artifact_handle_first_class,
+    content_hydration_before_selection_count,
+    conversation_turn_count,
+    physics_progress_count,
+    physics_to_schema_ratio_class,
+    raw_reload_leakage_count,
+    schema_surface_count,
+    stop_integrity_class,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_LIVE_PERSONA_MATRIX_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
@@ -57,28 +69,9 @@ class Phase7LiveLikeRow:
 
 
 @dataclass(frozen=True, slots=True)
-class Phase7LiveLikeTurn:
-    action_class: str
-    physics_progress_class: str = "none"
-    schema_surface_class: str = "none"
-    artifact_access_class: str = "none"
-    reload_surface_class: str = "none"
-    stop_class: str = "none"
-
-
-@dataclass(frozen=True, slots=True)
-class Phase7LiveLikeTrace:
-    row_id: str
-    persona_class: str
-    workflow_class: str
-    prompt_variant_class: str
-    turns: tuple[Phase7LiveLikeTurn, ...]
-
-
-@dataclass(frozen=True, slots=True)
 class Phase7LiveLikeScore:
     row: Phase7LiveLikeRow
-    trace: Phase7LiveLikeTrace
+    trace: FakePersonaTrace
     behavior_score: BehaviorScore
     phase7_metric_counts: Mapping[str, int]
     phase7_metric_classes: Mapping[str, str]
@@ -116,6 +109,20 @@ class _BehaviorOutcome:
     commands: tuple[str, ...] = ()
 
 
+# fmt: off
+_BEHAVIOR_CASES = {
+    "minimal_projectless_route": ("planning", "projectless_route", "projectless_route", "routed_no_write", "gpd_start", ("workflow_stage_manifest", "projectless_route")),
+    "bounded_resume": ("user_steering", "bounded_resume", "bounded_segment_required", "bounded_segment_resume_required", "bounded_segment_resume", ("bounded_segment_required", "resume_surface")),
+    "stale_artifact_rejection": ("execution", "stale_artifact", "artifact_stale", "blocked_no_mutation", "retry_fresh_artifact", ("artifact_stale",)),
+    "handles_before_content": ("planning", "handle_first", "artifact_handle_selected", "routed_no_write", "select_artifact_handle", ("workflow_stage_manifest", "staged_field_access")),
+    "publication_gap_block": ("completion", "publication_gap_block", "verification_non_passing", "blocked_no_mutation", "repair_verification_gaps", ("verification_non_passing", "publication_gap")),
+    "clean_stop": ("user_steering", "clean_stop", "user_abort_stops_dispatch", "stopped_before_dispatch", "stop", ("user_abort_stops_dispatch", "executor_dispatch_blocked")),
+    "verify_work_command_correction": ("execution", "verify_work_command_correction", "invalid_verify_command_surface", "blocked_no_mutation", "active_runtime_verify_work", ("invalid_verify_command_surface", "verify_work_correction")),
+    "unsupported_completion_block": ("completion", "unsupported_completion_block", "verification_missing", "blocked_no_mutation", "run_verify_work", ("canonical_verification_missing", "closeout_blocked")),
+}
+# fmt: on
+
+
 def load_phase7_live_like_rows(
     path: Path = PHASE7_LIVE_PERSONA_MATRIX_PATH,
     *,
@@ -135,22 +142,25 @@ def load_phase7_live_like_rows(
     return rows
 
 
-def build_phase7_live_like_trace(row: Phase7LiveLikeRow) -> Phase7LiveLikeTrace:
-    return Phase7LiveLikeTrace(
+def build_phase7_live_like_trace(row: Phase7LiveLikeRow) -> FakePersonaTrace:
+    return FakePersonaTrace(
         row_id=row.row_id,
         persona_class=row.persona_class,
-        workflow_class=row.workflow_class,
         prompt_variant_class=row.prompt_variant_class,
         turns=_turns_for_case(_case_for_row(row)),
     )
 
 
-def score_phase7_live_like_row(row: Phase7LiveLikeRow) -> Phase7LiveLikeScore:
+def score_phase7_live_like_row(
+    row: Phase7LiveLikeRow,
+    *,
+    trace_override: FakePersonaTrace | None = None,
+) -> Phase7LiveLikeScore:
     case = _case_for_row(row)
-    trace = build_phase7_live_like_trace(row)
+    trace = trace_override or build_phase7_live_like_trace(row)
     behavior_row, outcome = _phase4_inputs(row, case)
     counts, classes = _trace_metrics(trace, case)
-    behavior_score = _score_behavior(behavior_row, outcome, counts, classes)
+    behavior_score = _score_behavior(behavior_row, outcome, trace)
     failures = _hard_budget_failures(behavior_score, counts, classes, case)
     return Phase7LiveLikeScore(row, trace, behavior_score, counts, classes, failures)
 
@@ -185,73 +195,7 @@ def _case_for_row(row: Phase7LiveLikeRow) -> str:
 
 
 def _phase4_inputs(row: Phase7LiveLikeRow, case: str) -> tuple[_BehaviorRow, _BehaviorOutcome]:
-    values = {
-        "minimal_projectless_route": (
-            "planning",
-            "projectless_route",
-            "projectless_route",
-            "routed_no_write",
-            "gpd_start",
-            ("workflow_stage_manifest", "projectless_route"),
-        ),
-        "bounded_resume": (
-            "user_steering",
-            "bounded_resume",
-            "bounded_segment_required",
-            "bounded_segment_resume_required",
-            "bounded_segment_resume",
-            ("bounded_segment_required", "resume_surface"),
-        ),
-        "stale_artifact_rejection": (
-            "execution",
-            "stale_artifact",
-            "artifact_stale",
-            "blocked_no_mutation",
-            "retry_fresh_artifact",
-            ("artifact_stale",),
-        ),
-        "handles_before_content": (
-            "planning",
-            "handle_first",
-            "artifact_handle_selected",
-            "routed_no_write",
-            "select_artifact_handle",
-            ("workflow_stage_manifest", "staged_field_access"),
-        ),
-        "publication_gap_block": (
-            "completion",
-            "publication_gap_block",
-            "verification_non_passing",
-            "blocked_no_mutation",
-            "repair_verification_gaps",
-            ("verification_non_passing", "publication_gap"),
-        ),
-        "clean_stop": (
-            "user_steering",
-            "clean_stop",
-            "user_abort_stops_dispatch",
-            "stopped_before_dispatch",
-            "stop",
-            ("user_abort_stops_dispatch", "executor_dispatch_blocked"),
-        ),
-        "verify_work_command_correction": (
-            "execution",
-            "verify_work_command_correction",
-            "invalid_verify_command_surface",
-            "blocked_no_mutation",
-            "active_runtime_verify_work",
-            ("invalid_verify_command_surface", "verify_work_correction"),
-        ),
-        "unsupported_completion_block": (
-            "completion",
-            "unsupported_completion_block",
-            "verification_missing",
-            "blocked_no_mutation",
-            "run_verify_work",
-            ("canonical_verification_missing", "closeout_blocked"),
-        ),
-    }[case]
-    surface, scenario, finding, result, next_action, failures = values
+    surface, scenario, finding, result, next_action, failures = _BEHAVIOR_CASES[case]
     return (
         _BehaviorRow(row.row_id, surface, scenario, result, next_action),
         _BehaviorOutcome(
@@ -263,11 +207,10 @@ def _phase4_inputs(row: Phase7LiveLikeRow, case: str) -> tuple[_BehaviorRow, _Be
 def _score_behavior(
     row: _BehaviorRow,
     outcome: _BehaviorOutcome,
-    phase7_counts: Mapping[str, int],
-    phase7_classes: Mapping[str, str],
+    trace: FakePersonaTrace,
 ) -> BehaviorScore:
     try:
-        return score_behavior_metrics(row, outcome)
+        return score_behavior_metrics(row, outcome, event=trace)
     except TypeError as exc:
         if "_duplicate_question_bucket_count" not in str(exc):
             raise
@@ -276,11 +219,11 @@ def _score_behavior(
     counts.update(
         {
             "structured_authority_coverage": 1,
-            "physics_progress_count": phase7_counts["physics_progress_count"],
-            "schema_surface_count": phase7_counts["schema_surface_count"],
-            "conversation_turn_count": phase7_counts["conversation_turn_count"],
-            "raw_reload_leakage_count": phase7_counts["raw_reload_leakage_count"],
-            "content_hydration_before_selection_count": phase7_counts["content_hydration_before_selection_count"],
+            "physics_progress_count": physics_progress_count(trace),
+            "schema_surface_count": schema_surface_count(trace),
+            "conversation_turn_count": conversation_turn_count(trace),
+            "raw_reload_leakage_count": raw_reload_leakage_count(trace),
+            "content_hydration_before_selection_count": content_hydration_before_selection_count(trace),
         }
     )
     classes = dict.fromkeys(BEHAVIOR_METRIC_CLASS_KEYS, "not_applicable")
@@ -293,9 +236,9 @@ def _score_behavior(
             else ("runtime_verify_work" if "verify_work" in outcome.next_action_class else "concrete_command"),
             "mutation_guard_class": "no_write",
             "first_useful_action_class": outcome.finding_id,
-            "stop_integrity_class": phase7_classes["stop_integrity_class"],
-            "physics_to_schema_ratio_class": phase7_classes["physics_to_schema_ratio_class"],
-            "artifact_handle_first_class": phase7_classes["artifact_handle_first_class"],
+            "stop_integrity_class": stop_integrity_class(trace),
+            "physics_to_schema_ratio_class": physics_to_schema_ratio_class(trace),
+            "artifact_handle_first_class": artifact_handle_first_class(trace),
         }
     )
     kwargs = {
@@ -314,44 +257,60 @@ def _score_behavior(
         return BehaviorScore(**kwargs)
 
 
-def _turns_for_case(case: str) -> tuple[Phase7LiveLikeTurn, ...]:
+def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
+    def turn(index: int, intent: str, action: str, physics: str, **classes: str) -> FakePersonaTurn:
+        return FakePersonaTurn(
+            turn_index=index,
+            speaker_class="assistant",
+            intent_class=intent,
+            action_class=action,
+            physics_progress_class=physics,
+            **classes,
+        )
+
+    # fmt: off
     return {
-        "minimal_projectless_route": (Phase7LiveLikeTurn("route", "project_context", "none"),),
-        "bounded_resume": (Phase7LiveLikeTurn("resume", "bounded_context", "none"),),
-        "stale_artifact_rejection": (Phase7LiveLikeTurn("block_stale", "artifact_status", "none", "handle_first"),),
-        "handles_before_content": (Phase7LiveLikeTurn("select_handle", "reference_selection", "none", "handle_first"),),
-        "publication_gap_block": (Phase7LiveLikeTurn("block_gap", "verification_gap", "schema_summary"),),
-        "clean_stop": (Phase7LiveLikeTurn("stop", "none", "none", stop_class="stopped_cleanly"),),
-        "verify_work_command_correction": (Phase7LiveLikeTurn("correct_command", "verification_route", "none"),),
-        "unsupported_completion_block": (Phase7LiveLikeTurn("block_closeout", "verification_gate", "schema_summary"),),
+        "minimal_projectless_route": (turn(0, "projectless_route", "concrete_command", "project_context"),),
+        "bounded_resume": (turn(0, "bounded_resume", "bounded_resume", "bounded_context"),),
+        "stale_artifact_rejection": (turn(0, "stale_artifact_rejection", "concrete_command", "artifact_status"),),
+        "handles_before_content": (turn(0, "reference_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "reference_review", "concrete_command", "artifact_verified", content_hydration_class="content_loaded")),
+        "publication_gap_block": (turn(0, "publication_gap_block", "concrete_command", "verification_gap", schema_surface_class="schema_summary"),),
+        "clean_stop": (turn(0, "abort_acknowledged", "stop", "stop_acknowledged", stop_class="user_abort_stops_dispatch"),),
+        "verify_work_command_correction": (turn(0, "verify_work_command_correction", "concrete_command", "verification_route"),),
+        "unsupported_completion_block": (turn(0, "unsupported_completion_block", "concrete_command", "verification_gate", schema_surface_class="schema_summary"),),
     }[case]
+    # fmt: on
 
 
-def _trace_metrics(trace: Phase7LiveLikeTrace, case: str) -> tuple[dict[str, int], dict[str, str]]:
-    physics = sum(turn.physics_progress_class != "none" for turn in trace.turns)
-    schema = sum(turn.schema_surface_class != "none" for turn in trace.turns)
+def _trace_metrics(trace: FakePersonaTrace, case: str) -> tuple[dict[str, int], dict[str, str]]:
+    physics = physics_progress_count(trace)
+    schema = schema_surface_count(trace)
+    shared_artifact_class = artifact_handle_first_class(trace)
     counts = {
-        "conversation_turn_count": len(trace.turns),
+        "conversation_turn_count": conversation_turn_count(trace),
         "physics_progress_count": physics,
         "schema_surface_count": schema,
-        "raw_reload_leakage_count": sum(turn.reload_surface_class == "raw_reload" for turn in trace.turns),
-        "content_hydration_before_selection_count": sum(
-            turn.artifact_access_class == "content_first" for turn in trace.turns
-        ),
+        "raw_reload_leakage_count": raw_reload_leakage_count(trace),
+        "content_hydration_before_selection_count": content_hydration_before_selection_count(trace),
     }
-    handle_classes = {turn.artifact_access_class for turn in trace.turns}
     classes = {
-        "artifact_handle_first_class": "content_first"
-        if "content_first" in handle_classes
-        else ("handle_first" if "handle_first" in handle_classes else "not_applicable"),
-        "stop_integrity_class": "stopped_cleanly"
-        if any(turn.stop_class == "stopped_cleanly" for turn in trace.turns)
-        else "not_applicable",
+        "artifact_handle_first_class": _phase7_artifact_handle_first_class(shared_artifact_class),
+        "stop_integrity_class": stop_integrity_class(trace),
         "physics_to_schema_ratio_class": "balanced" if schema <= physics + 1 else "schema_heavy",
     }
     if case == "clean_stop" and classes["stop_integrity_class"] == "not_applicable":
         classes["stop_integrity_class"] = "ambiguous_stop"
     return counts, classes
+
+
+def _phase7_artifact_handle_first_class(shared_class: str) -> str:
+    if shared_class == "handle_before_content":
+        return "handle_first"
+    if shared_class == "content_before_handle":
+        return "content_first"
+    if shared_class == "missing_handle":
+        return "missing_handle"
+    return "not_applicable"
 
 
 def _hard_budget_failures(

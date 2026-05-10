@@ -17,7 +17,7 @@ fi
 
 - Use `gpd --raw stage field-access literature-review --stage scope_locked --style instruction` to confirm the manifest-selected scoped-reference fields. Read only those keys from `SCOPE_LOCKED_INIT`; `SCOPE_LOCKED_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 - If `reference_artifact_files` is populated, read those files now and keep only the entries that support the confirmed scope.
-- If `reference_artifacts_content` is available, use it now as supporting evidence for already-scoped anchors, baselines, prior outputs, and citation reuse.
+- Carry forward the scoped file handles; do not rely on embedded artifact bodies in this handle-first stage.
 - Only read or propagate the deferred reference-artifact context after the scope has been fixed.
 - Do not use deferred reference artifacts to reopen the scope question.
 </step>
@@ -228,7 +228,7 @@ Project contract: {project_contract}
 Contract intake: {contract_intake}
 Effective reference intake: {effective_reference_intake}
 Active references: {active_reference_context}
-Scoped reference artifacts: {reference_artifacts_content}
+Scoped reference artifact file handles: {reference_artifact_files}
 </context>
 
 <output>

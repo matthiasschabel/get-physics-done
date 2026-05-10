@@ -449,6 +449,30 @@ def _fail_if_context_builder_runs(name: str):
     return fail
 
 
+def _record_reference_artifact_payload_calls(calls: list[bool]):
+    def record(
+        _cwd: Path,
+        *,
+        include_content: bool = True,
+    ) -> dict[str, object]:
+        calls.append(include_content)
+        return {
+            "literature_review_files": [],
+            "literature_review_count": 0,
+            "research_map_reference_files": ["GPD/research-map/REFERENCES.md"],
+            "research_map_reference_count": 1,
+            "knowledge_doc_files": [],
+            "knowledge_doc_count": 0,
+            "stable_knowledge_doc_files": [],
+            "stable_knowledge_doc_count": 0,
+            "knowledge_doc_status_counts": {},
+            "reference_artifact_files": ["GPD/research-map/REFERENCES.md"],
+            "reference_artifacts_content": "hydrated reference artifacts" if include_content else None,
+        }
+
+    return record
+
+
 def _write_state_intent_recovery_files(project_root: Path) -> ProjectLayout:
     from gpd.core.state import default_state_dict
 
@@ -3367,6 +3391,36 @@ class TestInitNewProject:
         assert ctx["selected_publication_root"] == "GPD"
         assert ctx["selected_review_root"] == "GPD/review"
 
+    def test_peer_review_stage_bootstrap_skips_artifact_content_hydration(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _setup_project(tmp_path)
+        (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n\nPeer review target.\n", encoding="utf-8")
+        _write_project_contract_state(tmp_path)
+        manuscript_dir = tmp_path / "paper"
+        manuscript_dir.mkdir()
+        manuscript = manuscript_dir / "main.tex"
+        manuscript.write_text(
+            "\\documentclass{article}\\begin{document}Draft manuscript.\\end{document}\n",
+            encoding="utf-8",
+        )
+        (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
+            json.dumps(_artifact_manifest_payload(manuscript)) + "\n",
+            encoding="utf-8",
+        )
+        calls: list[bool] = []
+        monkeypatch.setattr(
+            context_module, "_reference_artifact_payload", _record_reference_artifact_payload_calls(calls)
+        )
+
+        ctx = init_peer_review(tmp_path, stage="bootstrap")
+
+        assert ctx["staged_loading"]["stage_id"] == "bootstrap"
+        assert "reference_artifacts_content" not in ctx
+        assert calls == [False]
+
     def test_respond_to_referees_stage_bootstrap_routes_explicit_manuscript_intake(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
@@ -3392,6 +3446,43 @@ class TestInitNewProject:
         assert ctx["review_target_input"] == "paper/main.tex"
         assert ctx["resolved_review_target"] == str(manuscript)
         assert ctx["resolved_review_root"] == str(manuscript_dir)
+
+    def test_respond_to_referees_response_authoring_hydrates_artifact_content(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _setup_project(tmp_path)
+        _write_project_contract_state(tmp_path)
+        manuscript_dir = tmp_path / "paper"
+        manuscript_dir.mkdir()
+        manuscript = manuscript_dir / "main.tex"
+        manuscript.write_text(
+            "\\documentclass{article}\\begin{document}Draft manuscript.\\end{document}\n",
+            encoding="utf-8",
+        )
+        (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
+            json.dumps(_artifact_manifest_payload(manuscript)) + "\n",
+            encoding="utf-8",
+        )
+        reports = tmp_path / "reviews"
+        reports.mkdir()
+        (reports / "referee-1.md").write_text("# Referee 1\n", encoding="utf-8")
+        calls: list[bool] = []
+        monkeypatch.setattr(
+            context_module, "_reference_artifact_payload", _record_reference_artifact_payload_calls(calls)
+        )
+
+        ctx = init_respond_to_referees(
+            tmp_path,
+            subject="reviews/referee-1.md",
+            stage="response_authoring",
+        )
+
+        assert ctx["staged_loading"]["stage_id"] == "response_authoring"
+        assert ctx["reference_artifact_files"] == ["GPD/research-map/REFERENCES.md"]
+        assert ctx["reference_artifacts_content"] == "hydrated reference artifacts"
+        assert calls == [True]
 
     def test_respond_to_referees_stage_bootstrap_treats_bare_path_as_report_source(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
@@ -3440,7 +3531,6 @@ class TestInitNewProject:
             assert ctx["review_target_mode"] == "standalone explicit-artifact review"
             assert ctx["resolved_review_target"] == str(review_target)
             assert ctx["resolved_review_root"] == str(nested)
-            assert ctx["project_contract"] is None
             assert ctx["project_contract_validation"] is None
             assert ctx["project_contract_gate"]["status"] == "standalone_explicit_artifact"
             assert ctx["project_contract_gate"]["source_path"] is None
@@ -3457,10 +3547,6 @@ class TestInitNewProject:
                 "context_gaps": [],
                 "crucial_inputs": [],
             }
-            assert ctx["active_reference_context"] == ""
-            assert ctx["selected_protocol_bundle_ids"] == []
-            assert ctx["protocol_bundle_load_manifest"]["selected_bundle_ids"] == []
-            assert ctx["protocol_bundle_context"] is None
             assert ctx.get("publication_bootstrap") is None
             assert ctx.get("publication_bootstrap_mode") is None
             assert ctx.get("publication_bootstrap_root") is None
@@ -3474,6 +3560,18 @@ class TestInitNewProject:
                 assert ctx["publication_intake_root"] == f"{managed_root}/intake"
             assert ctx["selected_publication_root"] == managed_root
             assert ctx["selected_review_root"] == f"{managed_root}/review"
+        assert full_ctx["project_contract"] is None
+        assert full_ctx["active_reference_context"] == ""
+        assert full_ctx["selected_protocol_bundle_ids"] == []
+        assert full_ctx["protocol_bundle_load_manifest"]["selected_bundle_ids"] == []
+        assert full_ctx["protocol_bundle_context"] is None
+        assert {
+            "project_contract",
+            "active_reference_context",
+            "selected_protocol_bundle_ids",
+            "protocol_bundle_load_manifest",
+            "protocol_bundle_context",
+        }.isdisjoint(staged_ctx)
 
     def test_peer_review_stage_projectless_manuscript_artifact_uses_subject_owned_review_roots(
         self,
@@ -3799,7 +3897,8 @@ class TestInitNewMilestone:
         ]
         assert "contract_intake" in ctx
         assert "effective_reference_intake" in ctx
-        assert "reference_artifacts_content" in ctx
+        assert "reference_artifact_files" in ctx
+        assert "reference_artifacts_content" not in ctx
         assert "roadmapper_model" not in ctx
 
     def test_new_milestone_stage_roadmap_authoring_filters_payload(self, tmp_path: Path) -> None:
@@ -3841,6 +3940,8 @@ class TestInitNewMilestone:
         ]
         assert "requirements_content" in ctx
         assert "roadmap_content" in ctx
+        assert "reference_artifact_files" in ctx
+        assert "reference_artifacts_content" not in ctx
 
 
 # ─── init_quick ───────────────────────────────────────────────────────────────
@@ -3937,8 +4038,14 @@ class TestInitQuick:
         )
         calls: list[Path] = []
 
-        def reference_runtime_context(cwd: Path) -> dict[str, object]:
+        def reference_runtime_context(
+            cwd: Path,
+            *,
+            include_artifact_content: bool = True,
+            **_kwargs: object,
+        ) -> dict[str, object]:
             calls.append(cwd)
+            assert include_artifact_content is True
             return {
                 "project_contract": {"version": 1},
                 "project_contract_gate": {"authoritative": True},
@@ -3979,6 +4086,57 @@ class TestInitQuick:
         assert ctx["protocol_bundle_verifier_extensions"] == ["verifier extensions"]
         assert ctx["active_reference_context"] == "active reference context"
         assert ctx["reference_artifacts_content"] == "reference artifacts"
+
+    def test_stage_handle_only_reference_payload_skips_artifact_content_hydration(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _setup_project(tmp_path)
+        (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        _write_project_contract_state(tmp_path)
+        _install_fake_stage_manifest(
+            monkeypatch,
+            workflow_id="quick",
+            stages={
+                "handle_only_reference": [
+                    "description",
+                    "project_exists",
+                    "reference_artifact_files",
+                ]
+            },
+        )
+        calls: list[bool] = []
+        monkeypatch.setattr(
+            context_module, "_reference_artifact_payload", _record_reference_artifact_payload_calls(calls)
+        )
+
+        ctx = init_quick(tmp_path, "Check handles", stage="handle_only_reference")
+
+        assert ctx["staged_loading"]["stage_id"] == "handle_only_reference"
+        assert ctx["reference_artifact_files"] == ["GPD/research-map/REFERENCES.md"]
+        assert "reference_artifacts_content" not in ctx
+        assert calls == [False]
+
+    def test_stage_reference_context_hydrates_artifact_content_when_selected(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _setup_project(tmp_path)
+        (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        _write_project_contract_state(tmp_path)
+        calls: list[bool] = []
+        monkeypatch.setattr(
+            context_module, "_reference_artifact_payload", _record_reference_artifact_payload_calls(calls)
+        )
+
+        ctx = init_quick(tmp_path, "Look up benchmark source", stage="reference_context")
+
+        assert ctx["staged_loading"]["stage_id"] == "reference_context"
+        assert ctx["reference_artifact_files"] == ["GPD/research-map/REFERENCES.md"]
+        assert ctx["reference_artifacts_content"] == "hydrated reference artifacts"
+        assert calls == [True]
 
     def test_stage_validation_failure_names_workflow_stage_and_spec(
         self,
@@ -6415,8 +6573,14 @@ class TestInitPhaseOp:
         _create_phase_dir(tmp_path, "01-test")
         calls: list[str] = []
 
-        def reference_context(cwd: Path) -> dict[str, object]:
+        def reference_context(
+            cwd: Path,
+            *,
+            include_artifact_content: bool = True,
+            **_kwargs: object,
+        ) -> dict[str, object]:
             calls.append("reference")
+            assert include_artifact_content is True
             return {
                 **{
                     field: f"reference::{field}"

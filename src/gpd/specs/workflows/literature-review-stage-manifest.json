@@ -89,7 +89,6 @@
         "effective_reference_intake",
         "active_reference_context",
         "reference_artifact_files",
-        "reference_artifacts_content",
         "literature_review_files",
         "literature_review_count",
         "research_map_reference_files",
@@ -104,9 +103,6 @@
         "stable_knowledge_doc_count",
         "knowledge_doc_status_counts",
         "knowledge_doc_warnings",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
         "active_references",
         "active_reference_count"
       ],

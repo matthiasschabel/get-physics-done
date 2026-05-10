@@ -57,7 +57,7 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
         ("resume-work.md", "- **Availability and contract authority:**", "project_contract_gate"),
         ("write-paper.md", "Parse bootstrap JSON using", "project_contract_gate"),
         ("respond-to-referees.md", "Parse JSON for:", "project_contract_gate"),
-        ("peer-review.md", "Parse bootstrap JSON using", "project_contract_gate"),
+        ("peer-review.md", "Parse only `staged_loading.required_init_fields`", "project_contract_gate"),
     ],
 )
 def test_contract_gate_is_visible_before_authoritative_use(
@@ -241,7 +241,7 @@ def test_new_milestone_roadmapper_prompt_surfaces_contract_gate_inputs() -> None
     assert "Contract intake: {contract_intake}" in contract_context
     assert "Active references: {active_reference_context}" in contract_context
     assert "Effective reference intake: {effective_reference_intake}" in contract_context
-    assert "Reference artifacts: {reference_artifacts_content}" in contract_context
+    assert "Reference artifact file handles: {reference_artifact_files}" in contract_context
     assert workflow.index("Project contract gate: {project_contract_gate}") < workflow.index(
         "approved project contract"
     )

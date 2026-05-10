@@ -38,6 +38,10 @@ def _expanded_stage_surface(stage: object) -> str:
     )
 
 
+def _conditional_authorities_by_when(stage: object) -> dict[str, tuple[str, ...]]:
+    return {conditional.when: conditional.authorities for conditional in stage.conditional_authorities}
+
+
 def _yaml_gate_payload(source: str, key: str, gate_id: str) -> dict:
     for block in source.split("```yaml")[1:]:
         yaml_text = block.split("```", 1)[0]
@@ -84,11 +88,11 @@ def test_respond_to_referees_command_uses_first_stage_authority_boundary() -> No
 
     for forbidden in (
         "gpd-paper-writer",
-        "subagent_type=\"gpd-paper-writer\"",
+        'subagent_type="gpd-paper-writer"',
         "respond_to_referees_revision_section",
         "aggregate_child_gate",
         "docs: referee response and manuscript revisions",
-        "<step name=\"commit_and_present\">",
+        '<step name="commit_and_present">',
     ):
         assert forbidden not in expanded_command
 
@@ -134,21 +138,31 @@ def test_respond_to_referees_workflow_defers_stage_authorities_until_the_manifes
 
     assert report_triage.loaded_authorities == (
         "workflows/respond-to-referees/report-triage.md",
-        "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
-        "references/publication/stage-recovery-gate.md",
     )
+    assert _conditional_authorities_by_when(report_triage) == {
+        "review_integrity_recovery_needed": ("references/publication/peer-review-reliability.md",),
+        "checkpoint_or_child_recovery_needed": ("references/publication/stage-recovery-gate.md",),
+    }
     assert "workflows/respond-to-referees/response-authoring.md" in report_triage.must_not_eager_load
     assert "workflows/respond-to-referees/finalize.md" in report_triage.must_not_eager_load
+    assert "references/publication/peer-review-reliability.md" in report_triage.must_not_eager_load
+    assert "references/publication/stage-recovery-gate.md" in report_triage.must_not_eager_load
     assert "templates/paper/referee-response.md" in report_triage.must_not_eager_load
     assert "templates/paper/author-response.md" in report_triage.must_not_eager_load
 
-    assert revision_planning.loaded_authorities == (
-        "workflows/respond-to-referees/revision-planning.md",
-        "references/publication/peer-review-reliability.md",
-        "references/publication/publication-response-writer-handoff.md",
-        "references/publication/stage-recovery-gate.md",
-    )
+    assert revision_planning.loaded_authorities == ("workflows/respond-to-referees/revision-planning.md",)
+    assert _conditional_authorities_by_when(revision_planning) == {
+        "response_pair_artifact_contract_needed": ("references/publication/publication-response-writer-handoff.md",),
+        "review_integrity_recovery_needed": ("references/publication/peer-review-reliability.md",),
+        "checkpoint_or_child_recovery_needed": ("references/publication/stage-recovery-gate.md",),
+    }
+    assert "reference_artifacts_content" not in revision_planning.required_init_fields
+    assert "selected_protocol_bundle_ids" in revision_planning.required_init_fields
+    assert "protocol_bundle_context" not in revision_planning.required_init_fields
+    assert "active_reference_context" not in revision_planning.required_init_fields
+    assert "references/publication/publication-response-writer-handoff.md" in revision_planning.must_not_eager_load
+    assert "references/publication/stage-recovery-gate.md" in revision_planning.must_not_eager_load
     assert "templates/paper/referee-response.md" in revision_planning.must_not_eager_load
     assert "templates/paper/author-response.md" in revision_planning.must_not_eager_load
 
@@ -159,12 +173,16 @@ def test_respond_to_referees_workflow_defers_stage_authorities_until_the_manifes
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md",
     )
+    assert "reference_artifacts_content" in response_authoring.required_init_fields
     assert finalize.loaded_authorities == (
         "workflows/respond-to-referees/finalize.md",
-        "references/publication/peer-review-reliability.md",
         "references/publication/publication-response-writer-handoff.md",
-        "references/publication/stage-recovery-gate.md",
     )
+    assert _conditional_authorities_by_when(finalize) == {
+        "review_integrity_recovery_needed": ("references/publication/peer-review-reliability.md",),
+        "checkpoint_or_child_recovery_needed": ("references/publication/stage-recovery-gate.md",),
+    }
+    assert "reference_artifacts_content" not in finalize.required_init_fields
 
 
 def test_respond_to_referees_triage_stage_blocks_before_response_authoring_and_finalization() -> None:
@@ -176,11 +194,11 @@ def test_respond_to_referees_triage_stage_blocks_before_response_authoring_and_f
     assert "canonical `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md`" in triage_surface
 
     for forbidden in (
-        "subagent_type=\"gpd-paper-writer\"",
+        'subagent_type="gpd-paper-writer"',
         "respond_to_referees_revision_section",
         "aggregate_child_gate",
         "docs: referee response and manuscript revisions",
-        "<step name=\"commit_and_present\">",
+        '<step name="commit_and_present">',
     ):
         assert forbidden not in triage_surface
 
@@ -207,5 +225,9 @@ def test_respond_to_referees_response_authoring_stage_retains_response_pair_and_
         "${RESPONSE_AUTHOR_PATH}",
         "${RESPONSE_REFEREE_PATH}",
     ]
-    assert "fresh child handoff and named in current-run `files_written` / `gpd_return.files_written`" in response_surface
-    assert "gpd validate handoff-artifacts for revised section plus both response artifacts" in revision_gate["validators"]
+    assert (
+        "fresh child handoff and named in current-run `files_written` / `gpd_return.files_written`" in response_surface
+    )
+    assert (
+        "gpd validate handoff-artifacts for revised section plus both response artifacts" in revision_gate["validators"]
+    )

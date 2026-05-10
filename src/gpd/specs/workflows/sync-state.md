@@ -24,5 +24,10 @@ Each later stage must be reached by a staged reload:
 gpd --raw init sync-state --stage {stage_id}
 ```
 
-Load only the active stage's `staged_loading.eager_authorities`. Bootstrap must keep the state JSON schema and write-capable repair authority lazy until the selected recovery/reconcile stage.
+Load only the active stage's `staged_loading.eager_authorities`. Bootstrap and
+backend repair stages must keep the state JSON schema lazy until a conditional
+manual schema-drift or backend validation-failure diagnosis path is selected.
+Raw state bodies are reserved for `conflict_analysis` read-only drift reporting;
+repair and validation stages rely on compact status fields plus backend repair
+commands.
 </stage_loading_rule>

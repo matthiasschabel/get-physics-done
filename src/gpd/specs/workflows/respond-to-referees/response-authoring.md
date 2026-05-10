@@ -87,6 +87,11 @@ Successful response states:
 <step name="draft_responses">
 **Draft responses for all Group A and Group B items:**
 
+Use full `reference_artifacts_content` only for comments whose response or
+manuscript edit depends on reference-backed evidence. For routine wording,
+formatting, or already-local manuscript changes, prefer the selected manuscript
+files, latest review artifacts, and reference handles.
+
 Resolve writer model:
 
 ```bash

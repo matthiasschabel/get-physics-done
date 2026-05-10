@@ -597,9 +597,7 @@ def test_get_skill_verify_work_surfaces_staged_loading_sidecar() -> None:
         "gap_repair",
     ]
     assert result["staged_loading"]["workflow_id"] == "verify-work"
-    assert result["staged_loading"]["stages"][0]["loaded_authorities"] == [
-        "workflows/verify-work/session-router.md"
-    ]
+    assert result["staged_loading"]["stages"][0]["loaded_authorities"] == ["workflows/verify-work/session-router.md"]
     assert "Follow the included first-stage authority exactly" in result["content"]
     assert (
         "The staged workflow authorities own the detailed check taxonomy; this wrapper only bootstraps the canonical "
@@ -631,25 +629,52 @@ def test_get_skill_verify_work_surfaces_staged_loading_sidecar() -> None:
     ]
     assert result["staged_loading"]["stages"][3]["loaded_authorities"] == [
         "workflows/verify-work/interactive-validation.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md",
+    ]
+    assert result["staged_loading"]["stages"][3]["conditional_authorities"] == [
+        {
+            "when": "session_overlay_write_or_repair",
+            "authorities": [
+                "templates/research-verification.md",
+                "templates/verification-report.md",
+                "templates/contract-results-schema.md",
+                "references/shared/canonical-schema-discipline.md",
+            ],
+        },
+        {
+            "when": "custom_verifier_continuation",
+            "authorities": [
+                "templates/verification-report.md",
+                "templates/contract-results-schema.md",
+                "references/shared/canonical-schema-discipline.md",
+            ],
+        },
     ]
     assert result["staged_loading"]["stages"][3]["writes_allowed"] == ["GPD/phases/XX-name/XX-VERIFICATION.md"]
     assert result["staged_loading"]["stages"][3]["next_stages"] == ["gap_repair"]
     assert result["staged_loading"]["stages"][3]["checkpoints"] == [
         "verification file can be written",
-        "writer-stage schema is visible",
+        "writer-stage schema deferral barrier is visible",
         "check results remain contract-backed",
     ]
     assert result["staged_loading"]["stages"][4]["loaded_authorities"] == [
         "workflows/verify-work/gap-repair.md",
-        "templates/research-verification.md",
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "references/shared/canonical-schema-discipline.md",
-        "references/protocols/error-propagation-protocol.md",
+    ]
+    assert result["staged_loading"]["stages"][4]["conditional_authorities"] == [
+        {
+            "when": "gap_report_write_or_schema_repair",
+            "authorities": [
+                "templates/research-verification.md",
+                "templates/verification-report.md",
+                "templates/contract-results-schema.md",
+                "references/shared/canonical-schema-discipline.md",
+            ],
+        },
+        {
+            "when": "error_propagation_gap",
+            "authorities": [
+                "references/protocols/error-propagation-protocol.md",
+            ],
+        },
     ]
     assert result["staged_loading"]["stages"][4]["writes_allowed"] == ["GPD/phases/XX-name/XX-VERIFICATION.md"]
     assert result["staged_loading"]["stages"][4]["next_stages"] == []

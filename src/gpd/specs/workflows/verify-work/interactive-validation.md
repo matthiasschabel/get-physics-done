@@ -58,7 +58,10 @@ Infer severity from the response text:
 - `label`, `formatting`, `axis`, `legend`, `cosmetic` -> cosmetic
 - default -> major
 
+Before creating, editing, or repairing the session overlay, load the `session_overlay_write_or_repair` conditional authority pack. That pack contains the verification report, research-verification, contract-results schema, and canonical schema discipline authorities needed for any write path.
+
 Update the session overlay only. The canonical verifier verdict remains verifier-owned.
+After any overlay write, validate the verification report/contract through the existing helper path before presenting the next check or routing to gap repair. If the schema/report pack cannot be loaded, stop instead of writing from memory.
 </step>
 
 <step name="resume_from_file">
@@ -91,6 +94,7 @@ Examples: "check Ward identity", "verify sum rule", "test at strong coupling"
 ```
 
 If the researcher provides custom checks, spawn a fresh verifier continuation rather than extending the old run. Keep the one-shot delegation rule in force.
+Before spawning that custom verifier continuation, load the `custom_verifier_continuation` conditional authority pack so report serialization and contract schema expectations are visible to the continuation handoff.
 
 If the researcher says `done`, `no`, `skip`, or leaves it empty, proceed to issue routing.
 </step>

@@ -23,4 +23,7 @@ stages must be loaded with `gpd --raw init peer-review "$REVIEW_TARGET" --stage
 Artifact preflight, claim extraction, specialist review, proof/stage validation,
 final adjudication, and response routing are separated by stage authority. Stage ids
 remain unchanged for compatibility.
+
+Bundle guidance is additive only: Reader-visible claims, surfaced evidence, and
+review-support artifacts stay first-class.
 </boundary_summary>

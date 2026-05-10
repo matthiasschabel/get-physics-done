@@ -40,7 +40,8 @@ def test_literature_review_stage_manifest_defers_reference_artifacts_and_tracks_
     assert "workflows/literature-review/scope-locked.md" in bootstrap.must_not_eager_load
 
     assert "reference_artifact_files" in scope_locked.required_init_fields
-    assert "reference_artifacts_content" in scope_locked.required_init_fields
+    assert "reference_artifacts_content" not in scope_locked.required_init_fields
+    assert "protocol_bundle_context" not in scope_locked.required_init_fields
     assert scope_locked.loaded_authorities == ("workflows/literature-review/scope-locked.md",)
     assert "references/orchestration/runtime-delegation-note.md" in scope_locked.must_not_eager_load
 

@@ -5,8 +5,9 @@ Reconcile diverged `STATE.md` and `state.json` with a deterministic, fail-closed
 <required_reading>
 Read all files referenced by the invoking prompt's execution_context before starting.
 
-Canonical reconciliation contract: later stages load
-`{GPD_INSTALL_DIR}/templates/state-json-schema.md`; do not eager-load it during bootstrap routing.
+Canonical reconciliation contract: later stages keep
+`{GPD_INSTALL_DIR}/templates/state-json-schema.md` conditional; load it only for
+manual schema-drift diagnosis or backend validation failure context.
 </required_reading>
 
 <process>

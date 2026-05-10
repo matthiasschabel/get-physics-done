@@ -50,25 +50,38 @@ def test_sync_state_stage_manifest_loads_and_preserves_stage_order() -> None:
     )
     assert "templates/state-json-schema.md" in bootstrap.must_not_eager_load
 
-    assert recovery.loaded_authorities == (
-        "workflows/sync-state/single-source-recovery.md",
-        "templates/state-json-schema.md",
-    )
-    assert "state_md_content" in recovery.required_init_fields
-    assert "state_json_content" in recovery.required_init_fields
-    assert "project_contract_gate" in recovery.required_init_fields
+    assert recovery.loaded_authorities == ("workflows/sync-state/single-source-recovery.md",)
+    assert recovery.conditional_authorities[0].when == "backend_validation_failed_needs_schema_context"
+    assert recovery.conditional_authorities[0].authorities == ("templates/state-json-schema.md",)
+    assert "templates/state-json-schema.md" in recovery.must_not_eager_load
+    assert "state_recovery_guidance" in recovery.required_init_fields
+    assert "state_load_source" in recovery.required_init_fields
+    assert "state_integrity_issues" in recovery.required_init_fields
+    assert "state_md_content" not in recovery.required_init_fields
+    assert "state_json_content" not in recovery.required_init_fields
+    assert "state_json_backup_content" not in recovery.required_init_fields
+    assert "project_contract_gate" not in recovery.required_init_fields
 
-    assert conflict.loaded_authorities == (
-        "workflows/sync-state/conflict-analysis.md",
-        "templates/state-json-schema.md",
-    )
+    assert conflict.loaded_authorities == ("workflows/sync-state/conflict-analysis.md",)
+    assert conflict.conditional_authorities[0].when == "manual_schema_drift_analysis"
+    assert conflict.conditional_authorities[0].authorities == ("templates/state-json-schema.md",)
+    assert "templates/state-json-schema.md" in conflict.must_not_eager_load
     assert "project_contract_validation" in conflict.required_init_fields
+    assert "state_md_content" in conflict.required_init_fields
+    assert "state_json_content" in conflict.required_init_fields
     assert "state_json_backup_content" in conflict.required_init_fields
 
-    assert reconcile.loaded_authorities == (
-        "workflows/sync-state/reconcile-and-validate.md",
-        "templates/state-json-schema.md",
-    )
+    assert reconcile.loaded_authorities == ("workflows/sync-state/reconcile-and-validate.md",)
+    assert reconcile.conditional_authorities[0].when == "backend_validation_failed_needs_schema_context"
+    assert reconcile.conditional_authorities[0].authorities == ("templates/state-json-schema.md",)
+    assert "templates/state-json-schema.md" in reconcile.must_not_eager_load
+    assert "state_recovery_guidance" in reconcile.required_init_fields
+    assert "state_load_source" in reconcile.required_init_fields
+    assert "state_integrity_issues" in reconcile.required_init_fields
+    assert "state_md_content" not in reconcile.required_init_fields
+    assert "state_json_content" not in reconcile.required_init_fields
+    assert "state_json_backup_content" not in reconcile.required_init_fields
+    assert "project_contract_validation" not in reconcile.required_init_fields
     assert reconcile.writes_allowed == (
         "GPD/STATE.md",
         "GPD/state.json",
@@ -104,6 +117,10 @@ def test_sync_state_workflow_uses_staged_fields_instead_of_manual_state_probing(
     assert "--prefer" not in text
     assert "Do not re-probe `GPD/STATE.md`, `GPD/state.json`, or `GPD/state.json.bak` by hand during routing." in text
     assert "Do not re-read the mirrored files by hand for comparison." in text
+    assert re.search(r"Do not request raw\s+`STATE\.md`, `state\.json`, or `state\.json\.bak` bodies", text)
+    assert "Raw state bodies are reserved for `conflict_analysis` read-only drift reporting" in text
+    assert "backend_validation_failed_needs_schema_context" in text
+    assert "manual_schema_drift_analysis" in text
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in text
     assert "MD_EXISTS=$(test -f" not in text
     assert "JSON_EXISTS=$(test -f" not in text

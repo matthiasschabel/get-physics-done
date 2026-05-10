@@ -147,6 +147,17 @@ def test_prompt_surface_diagnostics_stage_authority_and_init_pressure_raw_shape(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.output)
 
+    stage_totals = payload["totals"]["stage_diagnostics"]
+    assert isinstance(stage_totals, dict)
+    for key in (
+        "stage_eager_char_count",
+        "selected_init_content_field_count",
+        "likely_bulky_init_field_count",
+        "must_not_eager_load_prior_stage_residue_count",
+    ):
+        assert isinstance(stage_totals[key], int)
+        assert stage_totals[key] >= 0
+
     authority_rows = payload["stage_authority_top_prompts"]
     assert isinstance(authority_rows, list)
     assert 1 <= len(authority_rows) <= 20

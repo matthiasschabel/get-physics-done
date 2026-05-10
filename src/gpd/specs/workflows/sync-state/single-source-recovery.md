@@ -21,6 +21,10 @@ fi
 ```
 
 Use `single_source_recovery.required_init_fields` from `SINGLE_SOURCE_RECOVERY_INIT`.
+These fields are compact status and loader fields only. Do not request raw
+`STATE.md`, `state.json`, or `state.json.bak` bodies, and do not load the state
+JSON schema before repair; the backend repair command owns source selection and
+state reconstruction.
 
 Repair the dual-write pair through the tested backend path:
 
@@ -35,6 +39,11 @@ fi
 Report `source_used`, `integrity_issues`, and `validation_status` from
 `SYNC_STATE_REPAIR`, then stop. Do not prompt for a merge decision and do not
 run raw JSON or markdown parsing from the prompt.
+
+If the backend repair completes but validation reports schema-specific failures,
+select the `backend_validation_failed_needs_schema_context` conditional
+authority for diagnosis only. Do not use schema context to edit either state
+file by hand.
 
 </step>
 

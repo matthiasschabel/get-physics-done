@@ -309,6 +309,22 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
     assert execute_phase_manifest.stage("gap_reverification").next_stages == ("consistency_check",)
     assert execute_phase_manifest.stage("consistency_check").next_stages == ("closeout",)
     assert execute_phase_manifest.stage("closeout").next_stages == ()
+    closeout = execute_phase_manifest.stage("closeout")
+    closeout_conditionals = {
+        authority for conditional in closeout.conditional_authorities for authority in conditional.authorities
+    }
+    assert closeout.loaded_authorities == ("workflows/execute-phase/closeout.md",)
+    for authority in (
+        "workflows/transition.md",
+        "templates/state-machine.md",
+        "references/orchestration/state-portability.md",
+        "references/ui/ui-brand.md",
+        "references/orchestration/continuous-execution.md",
+    ):
+        assert authority in closeout_conditionals
+        assert authority in closeout.must_not_eager_load
+    assert "active_reference_context" not in closeout.required_init_fields
+    assert "reference_artifacts_content" not in closeout.required_init_fields
     assert execute_phase_manifest.stage("pre_execution_specialists").loaded_authorities == (
         "workflows/execute-phase/pre-execution-specialists.md",
         "references/orchestration/agent-delegation.md",
@@ -317,48 +333,62 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
     assert execute_phase_manifest.stage("pre_execution_specialists").next_stages == ("wave_dispatch",)
     assert "workflows/execute-plan.md" not in execute_phase_manifest.stage("executor_dispatch").loaded_authorities
     assert "workflows/execute-plan.md" in execute_phase_manifest.stage("executor_dispatch").must_not_eager_load
-    assert "references/orchestration/checkpoints.md" not in execute_phase_manifest.stage("wave_dispatch").loaded_authorities
-    assert "references/orchestration/agent-infrastructure.md" not in execute_phase_manifest.stage(
-        "wave_failure_menu"
-    ).loaded_authorities
+    assert (
+        "references/orchestration/checkpoints.md"
+        not in execute_phase_manifest.stage("wave_dispatch").loaded_authorities
+    )
+    assert (
+        "references/orchestration/agent-infrastructure.md"
+        not in execute_phase_manifest.stage("wave_failure_menu").loaded_authorities
+    )
     assert "templates/summary.md" in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
     assert (
         "templates/contract-results-schema.md"
         not in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
     )
-    assert "templates/contract-results-schema.md" in execute_phase_manifest.stage(
-        "verification_handoff"
-    ).must_not_eager_load
+    assert (
+        "templates/contract-results-schema.md"
+        in execute_phase_manifest.stage("verification_handoff").must_not_eager_load
+    )
     assert "templates/calculation-log.md" in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
-    assert "templates/paper/figure-tracker.md" not in execute_phase_manifest.stage(
-        "aggregate_and_verify"
-    ).loaded_authorities
-    assert "templates/paper/experimental-comparison.md" not in execute_phase_manifest.stage(
-        "aggregate_and_verify"
-    ).loaded_authorities
+    assert (
+        "templates/paper/figure-tracker.md"
+        not in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
+    )
+    assert (
+        "templates/paper/experimental-comparison.md"
+        not in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
+    )
     assert "workflows/verify-phase.md" not in execute_phase_manifest.stage("verification_handoff").loaded_authorities
     assert "workflows/verify-phase.md" in execute_phase_manifest.stage("verification_handoff").must_not_eager_load
-    assert "references/verification/core/verification-core.md" not in execute_phase_manifest.stage(
-        "verification_handoff"
-    ).loaded_authorities
-    assert "references/verification/core/verification-core.md" in execute_phase_manifest.stage(
-        "verification_handoff"
-    ).must_not_eager_load
-    assert "verification_report_skeleton_bridge" not in execute_phase_manifest.stage(
-        "aggregate_and_verify"
-    ).required_init_fields
-    assert "verification_report_finalizer_bridge" not in execute_phase_manifest.stage(
-        "aggregate_and_verify"
-    ).required_init_fields
-    assert "verification_report_skeleton_bridge" in execute_phase_manifest.stage(
-        "verification_handoff"
-    ).required_init_fields
-    assert "verification_report_finalizer_bridge" in execute_phase_manifest.stage(
-        "verification_handoff"
-    ).required_init_fields
-    assert "verification_report_skeleton_bridge" not in execute_phase_manifest.stage(
-        "phase_bootstrap"
-    ).required_init_fields
+    assert (
+        "references/verification/core/verification-core.md"
+        not in execute_phase_manifest.stage("verification_handoff").loaded_authorities
+    )
+    assert (
+        "references/verification/core/verification-core.md"
+        in execute_phase_manifest.stage("verification_handoff").must_not_eager_load
+    )
+    assert (
+        "verification_report_skeleton_bridge"
+        not in execute_phase_manifest.stage("aggregate_and_verify").required_init_fields
+    )
+    assert (
+        "verification_report_finalizer_bridge"
+        not in execute_phase_manifest.stage("aggregate_and_verify").required_init_fields
+    )
+    assert (
+        "verification_report_skeleton_bridge"
+        in execute_phase_manifest.stage("verification_handoff").required_init_fields
+    )
+    assert (
+        "verification_report_finalizer_bridge"
+        in execute_phase_manifest.stage("verification_handoff").required_init_fields
+    )
+    assert (
+        "verification_report_skeleton_bridge"
+        not in execute_phase_manifest.stage("phase_bootstrap").required_init_fields
+    )
     assert execute_phase_manifest.stage("wave_dispatch").writes_allowed == ("GPD/phases",)
     assert execute_phase_manifest.stage("executor_dispatch").writes_allowed == ("GPD/phases",)
     assert execute_phase_manifest.stage("wave_return_checkpoint").writes_allowed == ("GPD/phases",)
@@ -448,18 +478,31 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert manifest.stages[3].writes_allowed == ("GPD/phases/XX-name/XX-VERIFICATION.md",)
     assert manifest.stages[3].checkpoints == (
         "verification file can be written",
-        "writer-stage schema is visible",
+        "writer-stage schema deferral barrier is visible",
         "check results remain contract-backed",
     )
     assert "reference_artifact_files" in manifest.stages[3].required_init_fields
     assert "reference_artifacts_content" not in manifest.stages[3].required_init_fields
-    assert manifest.stages[3].loaded_authorities == (
-        "workflows/verify-work/interactive-validation.md",
+    assert "protocol_bundle_context" not in manifest.stages[3].required_init_fields
+    assert "protocol_bundle_verifier_extensions" not in manifest.stages[3].required_init_fields
+    assert manifest.stages[3].loaded_authorities == ("workflows/verify-work/interactive-validation.md",)
+    interactive_schema_pack = (
         "templates/research-verification.md",
         "templates/verification-report.md",
         "templates/contract-results-schema.md",
         "references/shared/canonical-schema-discipline.md",
     )
+    interactive_conditionals = {
+        conditional.when: conditional.authorities for conditional in manifest.stages[3].conditional_authorities
+    }
+    assert interactive_conditionals["session_overlay_write_or_repair"] == interactive_schema_pack
+    assert interactive_conditionals["custom_verifier_continuation"] == (
+        "templates/verification-report.md",
+        "templates/contract-results-schema.md",
+        "references/shared/canonical-schema-discipline.md",
+    )
+    for authority in interactive_schema_pack:
+        assert authority in manifest.stages[3].must_not_eager_load
     assert manifest.stages[4].allowed_tools == (
         "ask_user",
         "file_read",
@@ -484,14 +527,20 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "protocol_bundle_load_manifest" in manifest.stages[4].required_init_fields
     assert "protocol_bundle_context" in manifest.stages[4].required_init_fields
     assert "protocol_bundle_verifier_extensions" in manifest.stages[4].required_init_fields
-    assert manifest.stages[4].loaded_authorities == (
-        "workflows/verify-work/gap-repair.md",
+    assert manifest.stages[4].loaded_authorities == ("workflows/verify-work/gap-repair.md",)
+    gap_schema_pack = (
         "templates/research-verification.md",
         "templates/verification-report.md",
         "templates/contract-results-schema.md",
         "references/shared/canonical-schema-discipline.md",
-        "references/protocols/error-propagation-protocol.md",
     )
+    gap_conditionals = {
+        conditional.when: conditional.authorities for conditional in manifest.stages[4].conditional_authorities
+    }
+    assert gap_conditionals["gap_report_write_or_schema_repair"] == gap_schema_pack
+    assert gap_conditionals["error_propagation_gap"] == ("references/protocols/error-propagation-protocol.md",)
+    for authority in (*gap_schema_pack, "references/protocols/error-propagation-protocol.md"):
+        assert authority in manifest.stages[4].must_not_eager_load
 
 
 def test_verify_work_context_uses_workflow_staging_init_field_source() -> None:
@@ -1359,8 +1408,7 @@ def test_validate_workflow_stage_manifest_payload_loads_research_phase_manifest(
     assert "workflows/research-phase.md" in manifest.stage("phase_bootstrap").must_not_eager_load
     assert "workflows/research-phase/research-handoff.md" in manifest.stage("phase_bootstrap").must_not_eager_load
     assert (
-        "references/orchestration/runtime-delegation-note.md"
-        in manifest.stage("phase_bootstrap").must_not_eager_load
+        "references/orchestration/runtime-delegation-note.md" in manifest.stage("phase_bootstrap").must_not_eager_load
     )
     assert "reference_artifacts_content" not in manifest.stage("phase_bootstrap").required_init_fields
     assert manifest.stage("research_handoff").loaded_authorities == (
@@ -1406,12 +1454,8 @@ def test_validate_workflow_stage_manifest_payload_loads_new_milestone_manifest()
     assert manifest.stage("milestone_bootstrap").loaded_authorities == (
         "workflows/new-milestone/milestone-bootstrap.md",
     )
-    assert "workflows/new-milestone/survey-objectives.md" in manifest.stage(
-        "milestone_bootstrap"
-    ).must_not_eager_load
-    assert "workflows/new-milestone/roadmap-authoring.md" in manifest.stage(
-        "milestone_bootstrap"
-    ).must_not_eager_load
+    assert "workflows/new-milestone/survey-objectives.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
+    assert "workflows/new-milestone/roadmap-authoring.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
     assert "references/research/questioning.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
     assert "templates/project.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
     assert "templates/requirements.md" in manifest.stage("milestone_bootstrap").must_not_eager_load
@@ -1424,7 +1468,8 @@ def test_validate_workflow_stage_manifest_payload_loads_new_milestone_manifest()
     assert "roadmapper_model" not in manifest.stage("survey_objectives").required_init_fields
     assert "contract_intake" in manifest.stage("survey_objectives").required_init_fields
     assert "effective_reference_intake" in manifest.stage("survey_objectives").required_init_fields
-    assert "reference_artifacts_content" in manifest.stage("survey_objectives").required_init_fields
+    assert "reference_artifact_files" in manifest.stage("survey_objectives").required_init_fields
+    assert "reference_artifacts_content" not in manifest.stage("survey_objectives").required_init_fields
     assert manifest.stage("survey_objectives").writes_allowed == (
         "GPD/PROJECT.md",
         "GPD/STATE.md",
@@ -1442,6 +1487,8 @@ def test_validate_workflow_stage_manifest_payload_loads_new_milestone_manifest()
     )
     assert "requirements_content" in manifest.stage("roadmap_authoring").required_init_fields
     assert "roadmap_content" in manifest.stage("roadmap_authoring").required_init_fields
+    assert "reference_artifact_files" in manifest.stage("roadmap_authoring").required_init_fields
+    assert "reference_artifacts_content" not in manifest.stage("roadmap_authoring").required_init_fields
     assert manifest.stage("roadmap_authoring").writes_allowed == (
         "GPD/PROJECT.md",
         "GPD/STATE.md",
@@ -1495,12 +1542,17 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert preflight.loaded_authorities == (
         "workflows/peer-review/preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md",
-        "references/publication/peer-review-reliability.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-        "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md",
     )
+    preflight_conditionals = {
+        authority for conditional in preflight.conditional_authorities for authority in conditional.authorities
+    }
+    assert "references/publication/peer-review-reliability.md" in preflight_conditionals
+    assert "templates/paper/paper-config-schema.md" in preflight_conditionals
+    assert "templates/paper/artifact-manifest-schema.md" in preflight_conditionals
+    assert "templates/paper/bibliography-audit-schema.md" in preflight_conditionals
+    assert "templates/paper/reproducibility-manifest.md" in preflight_conditionals
+    assert "references/publication/peer-review-reliability.md" in preflight.must_not_eager_load
+    assert "templates/paper/paper-config-schema.md" in preflight.must_not_eager_load
     assert "review_target_input" in preflight.required_init_fields
     assert "review_target_mode" in preflight.required_init_fields
     assert "review_target_mode_reason" in preflight.required_init_fields

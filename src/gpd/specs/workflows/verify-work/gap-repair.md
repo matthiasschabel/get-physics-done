@@ -44,6 +44,7 @@ Spawn `gpd-planner` in `--gaps` mode as a fresh one-shot delegation from the sta
 First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
 Use `templates/planner-subagent-prompt.md` to build the gap_closure planner handoff from the staged payload. Keep `tool_requirements`, the checker feedback, and other machine-checkable hard requirements explicit.
 Bind the template's protocol fields from the gap-repair payload: `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}`. Do not collapse verifier extensions into the rendered context block.
+If a diagnosed gap is specifically an uncertainty or error-propagation gap, load the `error_propagation_gap` conditional authority pack before using error-propagation protocol requirements in the planner handoff.
 
 > Apply the canonical runtime delegation convention above; planner status, freshness, continuation, and failure routing use the tuple below.
 
@@ -154,6 +155,8 @@ Render that stop through `references/orchestration/stage-stop-envelope.md`: prim
 <step name="complete_session">
 **Complete validation and commit**
 
+Before updating `XX-VERIFICATION.md`, repairing its schema, or serializing the final gap ledger, load the `gap_report_write_or_schema_repair` conditional authority pack. That pack contains the research-verification template, verification-report template, contract-results schema, and canonical schema discipline needed for report writes.
+
 Update the verification file overlay:
 
 - `verified`: now
@@ -163,6 +166,7 @@ Update the verification file overlay:
 Clear the current check display to indicate completion.
 
 Run `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before committing it; invalid reports stop non-green and do not advance state.
+If the schema/report pack cannot be loaded or validation fails, stop before commit and before `record-verification`.
 
 ```bash
 gpd commit "verify(${phase_number}): complete research validation - {passed} passed, {issues} issues" --files "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"

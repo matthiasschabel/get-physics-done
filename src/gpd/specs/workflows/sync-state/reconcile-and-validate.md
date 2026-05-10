@@ -16,6 +16,9 @@ fi
 ```
 
 Use `reconcile_and_validate.required_init_fields` as the reconciliation inputs.
+These are compact existence, recovery, and loader-status fields. Do not request
+or inspect raw state file bodies in this stage; the backend repair command owns
+the source decision and all state mutation.
 
 Run the backend reconciliation command. It chooses the recovery source from the
 loader result, prefers valid backup state over malformed markdown, rejects
@@ -37,6 +40,10 @@ gpd --raw --cwd "$PROJECT_ROOT" state validate
 ```
 
 If validation fails, report the validation issues and stop. Do not commit a partially reconciled pair.
+If schema-specific failure context is needed after backend validation fails,
+select the `backend_validation_failed_needs_schema_context` conditional
+authority for diagnosis only. Do not patch `GPD/STATE.md`, `GPD/state.json`, or
+`GPD/state.json.bak` by hand.
 </step>
 
 <step name="report">
@@ -84,9 +91,9 @@ gpd --cwd "$PROJECT_ROOT" commit \
 
 - [ ] Both state files checked for existence
 - [ ] Missing file regenerated from the other when applicable
-- [ ] Shared fields compared between STATE.md and state.json
-- [ ] `state.json` precedence applied deterministically for mirrored fields
-- [ ] JSON-only fields preserved during sync
+- [ ] Backend repair selected the source and wrote the dual state pair
+- [ ] Raw state bodies were not inspected in the prompt
+- [ ] JSON-only fields preserved by backend sync
 - [ ] Validation rerun after regeneration
 - [ ] Divergences reported without ad hoc merge heuristics
 - [ ] Optional commit kept separate from the core reconcile/validate/report path

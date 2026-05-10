@@ -16,6 +16,11 @@ carry-forward inputs for that stage.
 The stage manifest loads `references/publication/peer-review-panel.md` for the
 machine contract and `references/publication/peer-review-panel-playbook.md` for
 Stage 1-5 reviewer guidance.
+
+Bundle guidance from `protocol_bundle_context` is additive only. Reader-visible
+claims, surfaced evidence, `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`,
+`GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are scaffolding
+and remain first-class; do not let bundle guidance invent new claims.
 </stage_boundary>
 
 <announce_panel>

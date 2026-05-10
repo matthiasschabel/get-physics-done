@@ -25,20 +25,20 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse bootstrap JSON using only fields named by `staged_loading.required_init_fields`, including `project_contract_gate`, `project_contract_load_info`, and `project_contract_validation`.
-Use `gpd --raw stage field-access peer-review --stage bootstrap --style instruction`
-before reading `BOOTSTRAP_INIT` if the runtime needs field-access instructions.
+Parse only `staged_loading.required_init_fields`; keep `project_contract_gate`,
+`project_contract_load_info`, and `project_contract_validation` visible. Use
+`gpd --raw stage field-access peer-review --stage bootstrap --style instruction`
+only if the runtime needs key guidance.
 
 AUTONOMY=$(echo "$BOOTSTRAP_INIT" | gpd json get .autonomy --default balanced)
 RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)
 Pass `<autonomy_mode>{AUTONOMY}</autonomy_mode>` and
-`<research_mode>{RESEARCH_MODE}</research_mode>` into spawned reviewer prompts.
+`<research_mode>{RESEARCH_MODE}</research_mode>` to reviewers.
 
-Keep `project_contract_gate` visible before authoritative-use decisions. Use
-`project_contract` and `contract_intake` only when `project_contract_gate.authoritative`
-is true; otherwise keep them as diagnostics/context and rely on
-`effective_reference_intake`, `reference_artifacts_content`, and
-`active_reference_context` as carry-forward evidence.
+Keep `project_contract_gate` visible. If `project_contract_gate.authoritative`
+is false, use `contract_intake` and `effective_reference_intake` only as
+diagnostics/context carry-forward evidence. Do not hydrate full reference or
+active-reference bodies in bootstrap.
 If contract loading is blocked, repair the blocked contract before retrying.
 </bootstrap_init>
 
@@ -46,9 +46,9 @@ If contract loading is blocked, repair the blocked contract before retrying.
 Review target: `$ARGUMENTS` can be empty, a paper directory, a manuscript path, or an
 explicit external artifact path.
 
-Explicit external artifact intake explicitly points at one specific artifact
-path, uses the external-artifact intake surface only, and does not widen; do not widen into
-default `paper/`, `manuscript/`, or `draft/` discovery rules.
+Explicit external artifact intake points at one artifact path, uses only the
+external-artifact intake surface, and must not widen into default `paper/`,
+`manuscript/`, or `draft/` discovery rules.
 
 Peer review supports two intake modes:
 

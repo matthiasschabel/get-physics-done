@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
+from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_dict
 from tests.prompt_metrics_support import measure_prompt_surface
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -12,6 +14,29 @@ COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+VERIFY_WORK_STAGE_EAGER_CHAR_BUDGETS = {
+    "interactive_validation": 12_000,
+    "gap_repair": 20_000,
+}
+
+
+@lru_cache
+def _verify_work_stage_diagnostics() -> dict[str, object]:
+    payload = report_to_dict(
+        build_prompt_surface_report(
+            REPO_ROOT,
+            surfaces=("command",),
+            include_tests=False,
+            include_runtime_projections=False,
+        )
+    )
+    workflows = payload["stage_diagnostics"]
+    assert isinstance(workflows, list)
+    for workflow in workflows:
+        assert isinstance(workflow, dict)
+        if workflow.get("workflow_id") == "verify-work":
+            return workflow
+    raise AssertionError("verify-work staged diagnostics were not reported")
 
 
 def test_verify_work_command_only_eagerly_loads_the_workflow() -> None:
@@ -43,3 +68,17 @@ def test_verify_work_workflow_defers_heavy_authorities_until_later_steps() -> No
     assert report_owner_marker in workflow_text
     assert overlay_marker in workflow_text
     assert workflow_text.index(report_owner_marker) < workflow_text.index(overlay_marker)
+
+
+def test_verify_work_interactive_and_gap_stages_keep_schema_packs_conditional() -> None:
+    workflow = _verify_work_stage_diagnostics()
+    assert workflow["violation_count"] == 0
+
+    stages = workflow["stages"]
+    assert isinstance(stages, list)
+    stage_by_id = {stage["stage_id"]: stage for stage in stages if isinstance(stage, dict)}
+
+    for stage_id, budget in VERIFY_WORK_STAGE_EAGER_CHAR_BUDGETS.items():
+        observed = stage_by_id[stage_id]["eager_char_count"]
+        assert isinstance(observed, int)
+        assert observed < budget, f"{stage_id} eager chars exceeded deferral cap: observed={observed} max<{budget}"

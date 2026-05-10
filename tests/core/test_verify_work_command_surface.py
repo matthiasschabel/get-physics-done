@@ -109,7 +109,7 @@ def test_verify_work_workflow_loads_staged_init_payloads_on_demand() -> None:
     assert 'SESSION_ROUTER_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage session_router)' in text
     assert 'PROJECT_ROOT=$(echo "$SESSION_ROUTER_INIT" | gpd json get .project_root)' in text
     assert 'PHASE_DIR_ABS=$(echo "$SESSION_ROUTER_INIT" | gpd json get .phase_dir_abs --default "")' in text
-    assert "VERIFY_FLAG_TEXT=\"${VERIFY_FLAGS[*]}\"" in text
+    assert 'VERIFY_FLAG_TEXT="${VERIFY_FLAGS[*]}"' in text
     assert "Verification flags from the normalized parser: $VERIFY_FLAG_TEXT" in text
     assert "Verification flags from the invoking wrapper: $ARGUMENTS" not in text
     assert 'PHASE_BOOTSTRAP_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage phase_bootstrap)' in text
@@ -197,12 +197,24 @@ def test_verify_work_manifest_eager_authorities_follow_stage_boundaries() -> Non
     assert "workflows/verify-work/gap-repair.md" not in inventory_build.eager_authorities()
 
     assert interactive_validation.mode_paths == ("workflows/verify-work/interactive-validation.md",)
-    assert "templates/verification-report.md" in interactive_validation.eager_authorities()
+    assert {"templates/verification-report.md"}.isdisjoint(interactive_validation.eager_authorities())
+    assert {"templates/verification-report.md"} <= set(
+        interactive_validation.eager_authorities(selected_conditions=("session_overlay_write_or_repair",))
+    )
+    assert {"templates/contract-results-schema.md"} <= set(interactive_validation.must_not_eager_load)
     assert "workflows/verify-work/gap-repair.md" not in interactive_validation.eager_authorities()
 
     assert gap_repair.mode_paths == ("workflows/verify-work/gap-repair.md",)
-    assert "templates/verification-report.md" in gap_repair.eager_authorities()
-    assert "references/protocols/error-propagation-protocol.md" in gap_repair.eager_authorities()
+    assert {
+        "templates/verification-report.md",
+        "references/protocols/error-propagation-protocol.md",
+    }.isdisjoint(gap_repair.eager_authorities())
+    assert {"templates/verification-report.md"} <= set(
+        gap_repair.eager_authorities(selected_conditions=("gap_report_write_or_schema_repair",))
+    )
+    assert {"references/protocols/error-propagation-protocol.md"} <= set(
+        gap_repair.eager_authorities(selected_conditions=("error_propagation_gap",))
+    )
 
 
 def test_verify_work_phase_bootstrap_session_router_is_prior_stage_residue() -> None:

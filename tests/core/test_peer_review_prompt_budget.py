@@ -27,6 +27,10 @@ def _expanded_stage_surface(stage: object) -> str:
     )
 
 
+def _conditional_authorities_by_when(stage: object) -> dict[str, tuple[str, ...]]:
+    return {conditional.when: conditional.authorities for conditional in stage.conditional_authorities}
+
+
 def test_peer_review_command_stays_thin_and_only_eagerly_loads_bootstrap_authority() -> None:
     command_text = (COMMANDS_DIR / "peer-review.md").read_text(encoding="utf-8")
     metrics = measure_prompt_surface(
@@ -107,12 +111,24 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
     assert preflight.loaded_authorities == (
         "workflows/peer-review/preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md",
-        "references/publication/peer-review-reliability.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-        "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md",
     )
+    assert _conditional_authorities_by_when(preflight) == {
+        "review_integrity_recovery_needed": ("references/publication/peer-review-reliability.md",),
+        "manual_publication_artifact_validation": (
+            "templates/paper/paper-config-schema.md",
+            "templates/paper/artifact-manifest-schema.md",
+            "templates/paper/bibliography-audit-schema.md",
+            "templates/paper/reproducibility-manifest.md",
+        ),
+    }
+    assert "references/publication/peer-review-reliability.md" in preflight.must_not_eager_load
+    assert "templates/paper/artifact-manifest-schema.md" in preflight.must_not_eager_load
+    assert "protocol_bundle_context" not in preflight.required_init_fields
+    assert "active_reference_context" not in preflight.required_init_fields
+    assert "reference_artifacts_content" not in preflight.required_init_fields
+    assert {"protocol_bundle_context", "active_reference_context"}.isdisjoint(bootstrap.required_init_fields)
+    assert "reference_artifacts_content" not in artifact_discovery.required_init_fields
+    assert "reference_artifacts_content" not in final_adjudication.required_init_fields
     assert artifact_discovery.loaded_authorities == (
         "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",

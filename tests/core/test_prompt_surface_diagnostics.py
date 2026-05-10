@@ -307,20 +307,14 @@ def test_stage_diagnostics_exposes_conditional_authority_bucket_and_metrics(tmp_
     payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
 
     stage = _stage_by_id(payload, "bootstrap")
-    assert stage["conditional_authorities"] == [
-        {"when": "need_deep_dive", "authorities": ["references/deep-dive.md"]}
-    ]
-    assert [metric["authority"] for metric in stage["conditional_authority_metrics"]] == [
-        "references/deep-dive.md"
-    ]
+    assert stage["conditional_authorities"] == [{"when": "need_deep_dive", "authorities": ["references/deep-dive.md"]}]
+    assert [metric["authority"] for metric in stage["conditional_authority_metrics"]] == ["references/deep-dive.md"]
     assert stage["conditional_char_count"] == stage["conditional_authority_metrics"][0]["expanded_char_count"]
     assert "references/deep-dive.md" not in stage["eager_authorities"]
 
     bucket_rows = stage["authority_bucket_metrics"]
     conditional_rows = [
-        row
-        for row in bucket_rows
-        if row["bucket"] == "conditional" and row["authority"] == "references/deep-dive.md"
+        row for row in bucket_rows if row["bucket"] == "conditional" and row["authority"] == "references/deep-dive.md"
     ]
     assert conditional_rows
     assert {row["bucket"] for row in bucket_rows} >= {"first_turn_active", "stage_eager", "conditional", "lazy"}
@@ -359,6 +353,7 @@ def test_stage_init_field_pressure_rows_classify_likely_bulky_fields(tmp_path: P
                 "revision_report",
                 "schema_bridge",
                 "reference_artifacts",
+                "reference_artifacts_content",
                 "state_content"
               ],
               "loaded_authorities": ["workflows/probe.md"],
@@ -389,19 +384,22 @@ def test_stage_init_field_pressure_rows_classify_likely_bulky_fields(tmp_path: P
         "revision_report",
         "schema_bridge",
         "reference_artifacts",
+        "reference_artifacts_content",
         "state_content",
     }
     assert set(rows_by_field) == likely_bulky_fields | {"workspace_root"}
-    assert all(
-        rows_by_field[field]["field_pressure_class"] == "likely_bulky" for field in likely_bulky_fields
-    )
+    assert all(rows_by_field[field]["field_pressure_class"] == "likely_bulky" for field in likely_bulky_fields)
     assert rows_by_field["workspace_root"]["field_pressure_class"] == "ordinary"
     assert rows_by_field["project_contract"]["field_kind_guess"] == "contract"
     assert rows_by_field["schema_bridge"]["field_kind_guess"] == "schema_bridge"
+    assert rows_by_field["reference_artifacts_content"]["field_kind_guess"] == "content"
     assert rows_by_field["state_content"]["field_kind_guess"] == "content"
+    content_rows = [row for row in rows if row["field_kind_guess"] == "content"]
+    assert {row["field_name"] for row in content_rows} == {"reference_artifacts_content", "state_content"}
+    assert payload["totals"]["stage_diagnostics"]["selected_init_content_field_count"] == len(content_rows)
     assert {row["selection_count"] for row in rows} == {1}
-    assert {row["required_init_field_count"] for row in rows} == {7}
-    assert {row["likely_bulky_field_count"] for row in rows} == {6}
+    assert {row["required_init_field_count"] for row in rows} == {8}
+    assert {row["likely_bulky_field_count"] for row in rows} == {7}
 
 
 def test_stage_diagnostics_uses_workflow_staging_group_validation_for_local_sources(tmp_path: Path) -> None:
@@ -457,9 +455,7 @@ def test_stage_diagnostics_uses_workflow_staging_group_validation_for_local_sour
     payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
 
     assert payload["stage_diagnostics"] == []
-    assert any(
-        "unknown field name" in warning and "not_a_quick_field" in warning for warning in payload["warnings"]
-    )
+    assert any("unknown field name" in warning and "not_a_quick_field" in warning for warning in payload["warnings"])
 
 
 def test_report_detects_invalid_schema_and_forbidden_child_return_synthesis(tmp_path: Path) -> None:
@@ -622,8 +618,7 @@ def test_prompt_diagnostics_modules_stay_small_enough_for_phase_6_split() -> Non
     if support_module_loc:
         assert loc_by_module[PROMPT_DIAGNOSTICS_PATH.name] <= PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP, loc_by_module
         assert all(
-            line_count <= PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP
-            for line_count in support_module_loc.values()
+            line_count <= PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP for line_count in support_module_loc.values()
         ), support_module_loc
 
     stage_prompt_diagnostics_loc = _source_line_count(STAGE_PROMPT_DIAGNOSTICS_PATH)

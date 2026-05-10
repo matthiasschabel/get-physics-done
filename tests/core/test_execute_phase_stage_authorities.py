@@ -51,11 +51,15 @@ TARGET_STAGE_EDGES = {
 HEAVY_AUTHORITIES = {
     "workflows/execute-plan.md",
     "workflows/verify-phase.md",
+    "workflows/transition.md",
     "references/orchestration/checkpoints.md",
     "references/orchestration/agent-infrastructure.md",
+    "references/orchestration/continuous-execution.md",
     "references/verification/core/verification-core.md",
     "references/execution/github-lifecycle.md",
+    "references/ui/ui-brand.md",
     "templates/recovery-plan.md",
+    "templates/state-machine.md",
     "templates/paper/figure-tracker.md",
     "templates/paper/experimental-comparison.md",
 }
@@ -117,11 +121,7 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
     closeout = manifest.stage("closeout")
 
     conditional_by_stage = {
-        stage.id: {
-            authority
-            for conditional in stage.conditional_authorities
-            for authority in conditional.authorities
-        }
+        stage.id: {authority for conditional in stage.conditional_authorities for authority in conditional.authorities}
         for stage in manifest.stages
     }
 
@@ -132,12 +132,30 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
     assert "templates/paper/experimental-comparison.md" in conditional_by_stage["aggregate_and_verify"]
     assert "templates/recovery-plan.md" in conditional_by_stage["aggregate_and_verify"]
     assert "references/execution/github-lifecycle.md" in conditional_by_stage["closeout"]
+    assert closeout.loaded_authorities == ("workflows/execute-phase/closeout.md",)
+    for authority in (
+        "workflows/transition.md",
+        "templates/state-machine.md",
+        "references/orchestration/state-portability.md",
+        "references/ui/ui-brand.md",
+        "references/orchestration/continuous-execution.md",
+    ):
+        assert authority in conditional_by_stage["closeout"]
 
     assert "workflows/execute-plan.md" in executor_dispatch.must_not_eager_load
     assert "workflows/verify-phase.md" in verification_handoff.must_not_eager_load
     assert "references/verification/core/verification-core.md" in verification_handoff.must_not_eager_load
     assert "templates/recovery-plan.md" in aggregate.must_not_eager_load
     assert "references/execution/github-lifecycle.md" in closeout.must_not_eager_load
+    assert "references/execution/git-integration.md" in closeout.must_not_eager_load
+    for authority in (
+        "workflows/transition.md",
+        "templates/state-machine.md",
+        "references/orchestration/state-portability.md",
+        "references/ui/ui-brand.md",
+        "references/orchestration/continuous-execution.md",
+    ):
+        assert authority in closeout.must_not_eager_load
 
 
 def test_execute_phase_split_stage_write_scopes_are_narrow() -> None:
@@ -156,6 +174,7 @@ def test_execute_phase_early_reference_content_boundaries_are_explicit() -> None
     manifest = load_workflow_stage_manifest("execute-phase")
     phase_classification = manifest.stage("phase_classification")
     wave_planning = manifest.stage("wave_planning")
+    closeout = manifest.stage("closeout")
 
     assert "reference_artifacts_content" not in phase_classification.required_init_fields
     assert "protocol_bundle_context" not in phase_classification.required_init_fields
@@ -164,6 +183,11 @@ def test_execute_phase_early_reference_content_boundaries_are_explicit() -> None
     assert "reference_artifact_files" in wave_planning.required_init_fields
     assert "reference_artifacts_content" in wave_planning.required_init_fields
     assert "protocol_bundle_context" in wave_planning.required_init_fields
+
+    assert "active_reference_context" not in closeout.required_init_fields
+    assert "reference_artifact_files" not in closeout.required_init_fields
+    assert "reference_artifacts_content" not in closeout.required_init_fields
+    assert "current_execution" in closeout.required_init_fields
 
 
 def test_execute_phase_command_bootstraps_only_first_stage_authority() -> None:

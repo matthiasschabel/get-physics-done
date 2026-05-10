@@ -1,5 +1,6 @@
 <purpose>
-Compare mirrored state fields under schema authority and classify reconciliation deterministically.
+Compare mirrored state fields when a human-readable drift report is needed, and
+classify reconciliation deterministically without mutating state files.
 </purpose>
 
 <process>
@@ -16,6 +17,9 @@ fi
 ```
 
 Use `conflict_analysis.required_init_fields` from `CONFLICT_ANALYSIS_INIT`. Do not re-read the mirrored files by hand for comparison.
+This is the only non-bootstrap sync stage that may receive raw state bodies for
+a read-only drift report. Do not load the state JSON schema unless
+`manual_schema_drift_analysis` is explicitly selected.
 
 **Parse STATE.md into comparable fields:**
 - Current Phase (number and name)
@@ -54,6 +58,8 @@ state.json is authoritative for structured fields, and STATE.md is regenerated a
 
 This workflow is intentionally fail-closed: no recency heuristics, no user prompt, and no silent promotion of markdown-only edits into structured state when `state.json` is still readable.
 Do not move or delete files from the prompt.
+Do not write reconciled state from this stage; the backend repair path in
+`reconcile_and_validate` owns mutation.
 </step>
 
 </process>

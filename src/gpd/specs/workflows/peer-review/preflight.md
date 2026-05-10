@@ -23,15 +23,23 @@ Parse only fields named by `staged_loading.required_init_fields`. Use the manife
 field names for `review_target_mode`, `resolved_review_target`,
 `selected_publication_root`, `selected_review_root`, `manuscript_root`,
 `manuscript_entrypoint`, `artifact_manifest_path`, `bibliography_audit_path`,
-`reproducibility_manifest_path`, and `publication_blockers`.
+`reproducibility_manifest_path`, `publication_blockers`,
+`project_contract_gate`, `derived_manuscript_reference_status`, and
+`derived_manuscript_proof_review_status`.
 
 Apply the canonical manuscript-root publication preflight:
 
 @{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md
 
-Use the staged peer-review reliability reference only for preflight integrity checks:
+On the normal path, rely on centralized validators for artifact freshness,
+bibliography, reproducibility, and review integrity. If strict preflight
+surfaces recovery or manual schema validation, load only the matching
+`conditional_authorities` entry from `staged_loading` before continuing:
 
-@{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md
+- `review_integrity_recovery_needed` for
+  `{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md`
+- `manual_publication_artifact_validation` for the paper config, artifact
+  manifest, bibliography audit, and reproducibility manifest schemas
 </load_specialized_review_context>
 
 <preflight>
@@ -72,16 +80,14 @@ Do not copy manuscript-local artifacts into `GPD/` to satisfy strict review gate
 Do not write a managed-subject review bundle to global `GPD/review`; use
 `selected_review_root`.
 
-Bundle guidance from `protocol_bundle_context` is additive only; it
-cannot override visible evidence, the resolved manuscript, `project_contract`,
-comparison/figure artifacts such as `GPD/comparisons/*-COMPARISON.md`, or
-verification evidence. Include `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md` when
-present. Reader-visible claims and surfaced evidence remain first-class review
-inputs. review-support artifacts are scaffolding, not substitutes for
-authoritative evidence.
+Do not hydrate protocol bundles, active-reference bodies, citation-source bodies,
+or full reference artifacts during preflight. Those are artifact-discovery and
+panel-stage inputs. Preflight only preserves the selected roots, resolved
+manuscript paths, strict validator output, compact reference/proof status, and
+visible blockers needed to decide whether review may proceed.
 
 Carry forward a compact `REVIEW_CARRY_FORWARD` packet containing the selected
-target, roots, claim/evidence context, and blockers instead of reloading broad
+target, roots, compact readiness status, and blockers instead of reloading broad
 bootstrap state before spawning panel stages.
 Carry-forward packet: {REVIEW_CARRY_FORWARD}
 Do not repeat broad bootstrap prose in panel-stage prompts.

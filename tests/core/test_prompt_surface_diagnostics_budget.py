@@ -19,7 +19,8 @@ PROMPT_KIND_BUDGETS = {
     "workflow": {"lines": 24_500, "chars": 1_000_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_800, "chars": 185_000}
-MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET = 1
+MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET = 0
+MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET = 1
 ROOT_WORKFLOW_AUTHORITY_STAGE_BUDGET = 1
 ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
     {
@@ -185,6 +186,16 @@ def _assert_non_native_projection_has_no_projected_includes(
     assert include_count == 0, f"{label} projected include count must stay zero"
 
 
+def _stage_diagnostic_count(stage_diagnostics: dict[str, object], *field_names: str) -> int:
+    for field_name in field_names:
+        value = stage_diagnostics.get(field_name)
+        if value is None:
+            continue
+        assert isinstance(value, int)
+        return value
+    raise AssertionError(f"stage diagnostics missing expected count field from {field_names}")
+
+
 def test_prompt_surface_aggregate_budgets_stay_under_ceilings() -> None:
     payload = _prompt_surface_payload(("all",), (), False)
     totals = payload["totals"]
@@ -210,9 +221,20 @@ def test_prompt_surface_safety_floors_stay_within_current_budgets() -> None:
 
     stage_diagnostics = totals["stage_diagnostics"]
     assert isinstance(stage_diagnostics, dict)
-    violation_count = stage_diagnostics["must_not_eager_load_violation_count"]
-    assert isinstance(violation_count, int)
+    violation_count = _stage_diagnostic_count(stage_diagnostics, "must_not_eager_load_violation_count")
     assert violation_count <= MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
+    actionable_violation_count = _stage_diagnostic_count(
+        stage_diagnostics,
+        "must_not_eager_load_actionable_violation_count",
+        "must_not_eager_load_violation_count",
+    )
+    assert actionable_violation_count <= MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
+    prior_stage_residue_count = _stage_diagnostic_count(
+        stage_diagnostics,
+        "must_not_eager_load_prior_stage_residue_count",
+        "prior_stage_residue_count",
+    )
+    assert prior_stage_residue_count <= MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET
 
 
 def test_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_dict
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -11,6 +12,74 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMAND_PATH = REPO_ROOT / "src/gpd/commands/verify-work.md"
 WORKFLOW_PATH = REPO_ROOT / "src/gpd/specs/workflows/verify-work.md"
 WORKFLOW_STAGE_DIR = REPO_ROOT / "src/gpd/specs/workflows/verify-work"
+SESSION_ROUTER_AUTHORITY = "workflows/verify-work/session-router.md"
+
+
+def _verify_work_stage_diagnostic() -> tuple[dict[str, object], dict[str, object]]:
+    report = build_prompt_surface_report(
+        REPO_ROOT,
+        surfaces=("command",),
+        runtime_names=(),
+        include_tests=False,
+        include_runtime_projections=False,
+    )
+    payload = report_to_dict(report)
+    stage_diagnostics = payload["stage_diagnostics"]
+    assert isinstance(stage_diagnostics, list)
+    matches = [
+        diagnostic
+        for diagnostic in stage_diagnostics
+        if isinstance(diagnostic, dict) and diagnostic.get("workflow_id") == "verify-work"
+    ]
+    assert len(matches) == 1
+    return payload, matches[0]
+
+
+def _stage_diagnostic_by_id(workflow_diagnostic: dict[str, object], stage_id: str) -> dict[str, object]:
+    stages = workflow_diagnostic["stages"]
+    assert isinstance(stages, list)
+    matches = [stage for stage in stages if isinstance(stage, dict) and stage.get("stage_id") == stage_id]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _dict_rows(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [row for row in value if isinstance(row, dict)]
+
+
+def _session_router_residue_evidence(
+    payload: dict[str, object],
+    stage: dict[str, object],
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for key in (
+        "top_authority_metrics",
+        "authority_usage_metrics",
+        "prior_stage_residue_authority_metrics",
+        "must_not_eager_load_violations",
+    ):
+        rows.extend(row for row in _dict_rows(stage.get(key)) if row.get("authority") == SESSION_ROUTER_AUTHORITY)
+
+    for key in ("stage_top_authorities", "stage_authority_top_prompts"):
+        rows.extend(
+            row
+            for row in _dict_rows(payload.get(key))
+            if row.get("workflow_id") == "verify-work"
+            and row.get("stage_id") == "phase_bootstrap"
+            and row.get("authority") == SESSION_ROUTER_AUTHORITY
+        )
+    return rows
+
+
+def _row_reports_prior_stage_residue(row: dict[str, object]) -> bool:
+    return (
+        row.get("classification") == "prior_stage_residue"
+        or row.get("violation_source") == "prior_stage_residue"
+        or row.get("first_turn_role") == "prior_stage_residue"
+        or row.get("bucket") == "prior_stage_residue"
+    )
 
 
 def test_verify_work_command_wrapper_stays_thin_and_delegates_policy_to_workflow() -> None:
@@ -117,6 +186,8 @@ def test_verify_work_manifest_eager_authorities_follow_stage_boundaries() -> Non
 
     assert phase_bootstrap.mode_paths == ("workflows/verify-work/phase-bootstrap.md",)
     assert "references/verification/core/proof-redteam-workflow-gate.md" in phase_bootstrap.eager_authorities()
+    assert SESSION_ROUTER_AUTHORITY in phase_bootstrap.must_not_eager_load
+    assert SESSION_ROUTER_AUTHORITY not in phase_bootstrap.eager_authorities()
     assert "templates/verification-report.md" not in phase_bootstrap.eager_authorities()
     assert "workflows/verify-work/gap-repair.md" not in phase_bootstrap.eager_authorities()
 
@@ -132,3 +203,22 @@ def test_verify_work_manifest_eager_authorities_follow_stage_boundaries() -> Non
     assert gap_repair.mode_paths == ("workflows/verify-work/gap-repair.md",)
     assert "templates/verification-report.md" in gap_repair.eager_authorities()
     assert "references/protocols/error-propagation-protocol.md" in gap_repair.eager_authorities()
+
+
+def test_verify_work_phase_bootstrap_session_router_is_prior_stage_residue() -> None:
+    payload, verify_work = _verify_work_stage_diagnostic()
+    phase_bootstrap = _stage_diagnostic_by_id(verify_work, "phase_bootstrap")
+    evidence_rows = _session_router_residue_evidence(payload, phase_bootstrap)
+
+    assert any(_row_reports_prior_stage_residue(row) for row in evidence_rows), (
+        "verify-work.phase_bootstrap must report workflows/verify-work/session-router.md "
+        "as prior_stage_residue, not hide it or count it as a true eager-load violation"
+    )
+
+    true_violation_rows = [
+        row
+        for row in _dict_rows(phase_bootstrap.get("must_not_eager_load_violations"))
+        if row.get("authority") == SESSION_ROUTER_AUTHORITY
+        and row.get("classification", "eager_load_violation") == "eager_load_violation"
+    ]
+    assert true_violation_rows == []

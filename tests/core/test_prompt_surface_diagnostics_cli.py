@@ -20,6 +20,11 @@ class _StableCliRunner(CliRunner):
 runner = _StableCliRunner()
 
 
+def _rendered_tail_after(output: str, marker: str) -> str:
+    assert marker in output
+    return output.split(marker, 1)[1]
+
+
 def _non_native_runtime_name() -> str:
     return next(
         descriptor.runtime_name for descriptor in iter_runtime_descriptors() if not descriptor.native_include_support
@@ -65,6 +70,71 @@ def test_prompt_surface_diagnostics_raw_json_shape() -> None:
     assert all(len(group["examples"]) <= 3 for group in payload["semantic_duplicate_invariants"])
 
 
+def test_prompt_surface_diagnostics_stage_authority_and_init_pressure_raw_shape() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "diagnostics", "prompt-surface", "--top", "20", "--no-runtime-projections"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+
+    authority_rows = payload["stage_authority_top_prompts"]
+    assert isinstance(authority_rows, list)
+    assert 1 <= len(authority_rows) <= 20
+    authority_row = authority_rows[0]
+    assert {
+        "workflow_id",
+        "stage_id",
+        "bucket",
+        "authority",
+        "expanded_char_count",
+        "expanded_line_count",
+        "raw_line_count",
+        "raw_include_count",
+        "transitive_include_count",
+        "violation_source",
+        "eager_via",
+    } <= set(authority_row)
+    assert authority_row["bucket"] in {
+        "first_turn_active",
+        "prior_stage_residue",
+        "stage_eager",
+        "conditional",
+        "lazy",
+        "violation",
+    }
+    assert isinstance(authority_row["authority"], str)
+    assert authority_row["authority"].endswith(".md")
+    assert isinstance(authority_row["expanded_char_count"], int)
+    assert authority_row["expanded_char_count"] > 0
+    assert isinstance(authority_row["transitive_include_count"], int)
+    assert isinstance(authority_row["eager_via"], list)
+
+    init_field_rows = payload["stage_init_field_diagnostics"]
+    assert isinstance(init_field_rows, list)
+    assert 1 <= len(init_field_rows) <= 20
+    init_field_row = init_field_rows[0]
+    assert {
+        "workflow_id",
+        "stage_id",
+        "required_init_field_count",
+        "likely_bulky_field_count",
+        "field_name",
+        "field_kind_guess",
+        "field_pressure_class",
+        "selection_count",
+    } <= set(init_field_row)
+    assert isinstance(init_field_row["field_name"], str)
+    assert init_field_row["field_name"]
+    assert isinstance(init_field_row["required_init_field_count"], int)
+    assert init_field_row["required_init_field_count"] > 0
+    assert isinstance(init_field_row["likely_bulky_field_count"], int)
+    assert isinstance(init_field_row["selection_count"], int)
+    assert init_field_row["selection_count"] > 0
+
+
 def test_prompt_surface_diagnostics_include_tests_exactness_summary() -> None:
     result = runner.invoke(
         app,
@@ -91,6 +161,60 @@ def test_prompt_surface_diagnostics_include_tests_exactness_summary() -> None:
     assert exactness["taxonomy_helper_usage"]["totals"]["taxonomy_helper_call_count"] > 0
     assert len(exactness["taxonomy_helper_usage"]["files"]) == 1
     assert len(payload["exact_prose_assertion_files"]) == 1
+
+
+def test_prompt_surface_diagnostics_stage_authority_and_init_pressure_renderers() -> None:
+    markdown_result = runner.invoke(
+        app,
+        ["diagnostics", "prompt-surface", "--top", "5", "--no-runtime-projections", "--format", "markdown"],
+        catch_exceptions=False,
+    )
+    table_result = runner.invoke(
+        app,
+        ["diagnostics", "prompt-surface", "--top", "5", "--no-runtime-projections"],
+        catch_exceptions=False,
+    )
+
+    assert markdown_result.exit_code == 0, markdown_result.output
+    markdown_authority = _rendered_tail_after(markdown_result.output, "## Stage Authority Hotspots")
+    for column in (
+        "Workflow",
+        "Stage",
+        "Bucket",
+        "Authority",
+        "Expanded chars",
+        "Transitive includes",
+    ):
+        assert column in markdown_authority
+    markdown_init_fields = _rendered_tail_after(markdown_result.output, "## Staged-Init Field Pressure")
+    for column in (
+        "Workflow",
+        "Stage",
+        "Required fields",
+        "Likely bulky",
+        "Field",
+        "Kind",
+        "Pressure",
+        "Selections",
+    ):
+        assert column in markdown_init_fields
+
+    assert table_result.exit_code == 0, table_result.output
+    table_authority = _rendered_tail_after(table_result.output, "stage authority hotspots")
+    for column in ("workflow", "stage", "bucket", "authority", "expanded_chars", "transitive_includes"):
+        assert column in table_authority
+    table_init_fields = _rendered_tail_after(table_result.output, "staged-init field pressure")
+    for column in (
+        "workflow",
+        "stage",
+        "required_fields",
+        "likely_bulky",
+        "field_name",
+        "field_kind",
+        "pressure",
+        "selections",
+    ):
+        assert column in table_init_fields
 
 
 def test_prompt_surface_diagnostics_runtime_projection_and_renderers() -> None:

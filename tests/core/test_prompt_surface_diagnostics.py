@@ -52,6 +52,14 @@ def _relative_report_path(raw_path: str) -> str:
     return path.as_posix()
 
 
+def _stage_by_id(payload: dict[str, object], stage_id: str) -> dict[str, object]:
+    diagnostics = payload["stage_diagnostics"]
+    assert isinstance(diagnostics, list)
+    assert len(diagnostics) == 1
+    stages = diagnostics[0]["stages"]
+    return next(stage for stage in stages if stage["stage_id"] == stage_id)
+
+
 def _source_line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
@@ -172,7 +180,226 @@ def test_stage_diagnostics_detect_transitive_eager_loading_violations(tmp_path: 
     assert "templates/deferred.md" in stage["eager_authority_metrics"][0]["transitive_include_authorities"]
     violation_sources = {violation["violation_source"] for violation in stage["must_not_eager_load_violations"]}
     assert {"first_turn_transitive_include", "stage_eager_transitive_include"} <= violation_sources
+    assert payload["totals"]["stage_diagnostics"]["must_not_eager_load_violation_count"] == len(
+        stage["must_not_eager_load_violations"]
+    )
     assert payload["stage_diagnostics"][0]["runtime_projection"][0]["runtime"] == runtime_name
+
+
+def test_stage_diagnostics_classifies_prior_stage_first_turn_residue_without_counting_violation(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe command
+        ---
+        @{GPD_INSTALL_DIR}/workflows/probe-router.md
+        """,
+    )
+    _write(tmp_path, "src/gpd/specs/workflows/probe-router.md", "Router body.\n")
+    _write(tmp_path, "src/gpd/specs/workflows/probe-bootstrap.md", "Bootstrap body.\n")
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/probe-stage-manifest.json",
+        """
+        {
+          "schema_version": 1,
+          "workflow_id": "probe",
+          "stages": [
+            {
+              "id": "session_router",
+              "order": 1,
+              "purpose": "Route into the staged workflow.",
+              "mode_paths": ["workflows/probe-router.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe-router.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": [],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": ["phase_bootstrap"],
+              "checkpoints": []
+            },
+            {
+              "id": "phase_bootstrap",
+              "order": 2,
+              "purpose": "Bootstrap the selected phase without reloading the router.",
+              "mode_paths": ["workflows/probe-bootstrap.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe-bootstrap.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": ["workflows/probe-router.md"],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": [],
+              "checkpoints": []
+            }
+          ]
+        }
+        """,
+    )
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
+
+    bootstrap = _stage_by_id(payload, "phase_bootstrap")
+    residue_metrics = bootstrap["prior_stage_residue_authority_metrics"]
+    assert bootstrap["must_not_eager_load_violations"] == []
+    assert [metric["authority"] for metric in residue_metrics] == ["workflows/probe-router.md"]
+    assert residue_metrics[0]["violation_source"] == "prior_stage_residue"
+    assert residue_metrics[0]["eager_via"] == ["workflows/probe-router.md"]
+    assert payload["totals"]["stage_diagnostics"]["must_not_eager_load_violation_count"] == 0
+    assert payload["totals"]["stage_diagnostics"]["prior_stage_residue_count"] == 1
+
+
+def test_stage_diagnostics_exposes_conditional_authority_bucket_and_metrics(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe command
+        ---
+        @{GPD_INSTALL_DIR}/workflows/probe.md
+        """,
+    )
+    _write(tmp_path, "src/gpd/specs/workflows/probe.md", "Probe body.\n")
+    _write(tmp_path, "src/gpd/specs/references/deep-dive.md", "Deep dive authority.\n")
+    _write(tmp_path, "src/gpd/specs/templates/deferred.md", "Deferred body.\n")
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/probe-stage-manifest.json",
+        """
+        {
+          "schema_version": 1,
+          "workflow_id": "probe",
+          "stages": [
+            {
+              "id": "bootstrap",
+              "order": 1,
+              "purpose": "Load the probe bootstrap.",
+              "mode_paths": ["workflows/probe.md"],
+              "required_init_fields": [],
+              "loaded_authorities": ["workflows/probe.md"],
+              "conditional_authorities": [
+                {"when": "need_deep_dive", "authorities": ["references/deep-dive.md"]}
+              ],
+              "must_not_eager_load": ["templates/deferred.md"],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": [],
+              "checkpoints": []
+            }
+          ]
+        }
+        """,
+    )
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
+
+    stage = _stage_by_id(payload, "bootstrap")
+    assert stage["conditional_authorities"] == [
+        {"when": "need_deep_dive", "authorities": ["references/deep-dive.md"]}
+    ]
+    assert [metric["authority"] for metric in stage["conditional_authority_metrics"]] == [
+        "references/deep-dive.md"
+    ]
+    assert stage["conditional_char_count"] == stage["conditional_authority_metrics"][0]["expanded_char_count"]
+    assert "references/deep-dive.md" not in stage["eager_authorities"]
+
+    bucket_rows = stage["authority_bucket_metrics"]
+    conditional_rows = [
+        row
+        for row in bucket_rows
+        if row["bucket"] == "conditional" and row["authority"] == "references/deep-dive.md"
+    ]
+    assert conditional_rows
+    assert {row["bucket"] for row in bucket_rows} >= {"first_turn_active", "stage_eager", "conditional", "lazy"}
+
+
+def test_stage_init_field_pressure_rows_classify_likely_bulky_fields(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "src/gpd/commands/probe.md",
+        """
+        ---
+        name: gpd:probe
+        description: Probe command
+        ---
+        @{GPD_INSTALL_DIR}/workflows/probe.md
+        """,
+    )
+    _write(tmp_path, "src/gpd/specs/workflows/probe.md", "Probe body.\n")
+    _write(
+        tmp_path,
+        "src/gpd/specs/workflows/probe-stage-manifest.json",
+        """
+        {
+          "schema_version": 1,
+          "workflow_id": "probe",
+          "stages": [
+            {
+              "id": "bootstrap",
+              "order": 1,
+              "purpose": "Load the probe bootstrap.",
+              "mode_paths": ["workflows/probe.md"],
+              "required_init_fields": [
+                "workspace_root",
+                "phase_context",
+                "project_contract",
+                "revision_report",
+                "schema_bridge",
+                "reference_artifacts",
+                "state_content"
+              ],
+              "loaded_authorities": ["workflows/probe.md"],
+              "conditional_authorities": [],
+              "must_not_eager_load": [],
+              "allowed_tools": [],
+              "writes_allowed": [],
+              "produced_state": [],
+              "next_stages": [],
+              "checkpoints": []
+            }
+          ]
+        }
+        """,
+    )
+
+    payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("command",), runtime_names=()))
+
+    rows = [
+        row
+        for row in payload["stage_init_field_diagnostics"]
+        if row["workflow_id"] == "probe" and row["stage_id"] == "bootstrap"
+    ]
+    rows_by_field = {row["field_name"]: row for row in rows}
+    likely_bulky_fields = {
+        "phase_context",
+        "project_contract",
+        "revision_report",
+        "schema_bridge",
+        "reference_artifacts",
+        "state_content",
+    }
+    assert set(rows_by_field) == likely_bulky_fields | {"workspace_root"}
+    assert all(
+        rows_by_field[field]["field_pressure_class"] == "likely_bulky" for field in likely_bulky_fields
+    )
+    assert rows_by_field["workspace_root"]["field_pressure_class"] == "ordinary"
+    assert rows_by_field["project_contract"]["field_kind_guess"] == "contract"
+    assert rows_by_field["schema_bridge"]["field_kind_guess"] == "schema_bridge"
+    assert rows_by_field["state_content"]["field_kind_guess"] == "content"
+    assert {row["selection_count"] for row in rows} == {1}
+    assert {row["required_init_field_count"] for row in rows} == {7}
+    assert {row["likely_bulky_field_count"] for row in rows} == {6}
 
 
 def test_stage_diagnostics_uses_workflow_staging_group_validation_for_local_sources(tmp_path: Path) -> None:

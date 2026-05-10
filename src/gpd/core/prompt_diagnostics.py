@@ -43,10 +43,16 @@ from gpd.core.prompt_stage_diagnostics import (
     build_stage_diagnostics as _build_stage_diagnostics,
 )
 from gpd.core.prompt_stage_diagnostics import (
+    stage_authority_top_rows as _stage_authority_top_rows,
+)
+from gpd.core.prompt_stage_diagnostics import (
     stage_diagnostic_to_dict as _stage_diagnostic_to_dict,
 )
 from gpd.core.prompt_stage_diagnostics import (
     stage_diagnostics_totals as _stage_diagnostics_totals,
+)
+from gpd.core.prompt_stage_diagnostics import (
+    stage_init_field_top_rows as _stage_init_field_top_rows,
 )
 from gpd.core.prompt_stage_diagnostics import (
     stage_top_prompt_rows as _stage_top_prompt_rows,
@@ -72,7 +78,7 @@ _top_limit = _prompt_markdown_scan.top_limit
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
-PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v7"
+PROMPT_SURFACE_REPORT_SCHEMA_VERSION = "prompt_surface_diagnostics.v8"
 DEFAULT_PATH_PREFIX = "/runtime/"
 DEFAULT_SURFACES: tuple[PromptSurfaceKind, ...] = ("command", "agent", "workflow")
 
@@ -790,6 +796,8 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
     """Convert a report into JSON-serializable primitives."""
 
     limit = _top_limit(top)
+    stage_authority_rows = _stage_authority_top_prompt_rows(report.stage_diagnostics, top)
+    stage_init_field_rows = _stage_init_field_pressure_rows(report.stage_diagnostics, top)
     return {
         "schema_version": report.schema_version,
         "repo_root": report.repo_root,
@@ -799,6 +807,10 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         "stage_diagnostics": [
             _stage_diagnostic_to_dict(metric) for metric in _top_stage_diagnostics(report.stage_diagnostics, top)
         ],
+        "stage_authority_top_prompts": list(stage_authority_rows),
+        "stage_authority_top": list(stage_authority_rows),
+        "stage_init_field_diagnostics": list(stage_init_field_rows),
+        "stage_field_payload_pressure": list(stage_init_field_rows),
         "invalid_gpd_return_examples": [
             _invalid_gpd_return_example_to_dict(example) for example in report.invalid_gpd_return_examples
         ],
@@ -851,6 +863,59 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
         "exact_prose_assertion_files": [dict(entry) for entry in report.exact_prose_assertion_files[:limit]],
         "warnings": list(report.warnings),
     }
+
+
+def _stage_authority_top_prompt_rows(
+    stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric],
+    top: int | None,
+) -> tuple[dict[str, object], ...]:
+    return tuple(dict(row) for row in _stage_authority_top_rows(stage_diagnostics, top))
+
+
+def _stage_init_field_pressure_rows(
+    stage_diagnostics: Sequence[StageAwareWorkflowPromptMetric],
+    top: int | None,
+) -> tuple[dict[str, object], ...]:
+    return tuple(dict(row) for row in _stage_init_field_top_rows(stage_diagnostics, top))
+
+
+def _row_int(row: Mapping[str, object], *keys: str) -> int:
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return 0
+
+
+def _row_text(row: Mapping[str, object], *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            return str(value)
+    return ""
+
+
+def _fixed_table_section_lines(
+    title: str,
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+) -> list[str]:
+    if not rows:
+        return []
+    widths = [len(header) for header in headers]
+    for row in rows:
+        widths = [max(width, len(cell)) for width, cell in zip(widths, row, strict=True)]
+
+    def render_row(row: Sequence[str]) -> str:
+        return "  ".join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)).rstrip()
+
+    return [
+        "",
+        title,
+        render_row(headers),
+        render_row(tuple("-" * width for width in widths)),
+        *(render_row(row) for row in rows),
+    ]
 
 
 def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None = None) -> str:
@@ -1014,6 +1079,46 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
             lines.append(
                 f"| `{row['workflow_id']}` | `{row['stage_id']}` | {row['first_turn_char_count']} | "
                 f"{row['eager_char_count']} | {row['lazy_char_count']} | {row['violation_count']} |"
+            )
+
+    stage_authority_rows = _stage_authority_top_prompt_rows(report.stage_diagnostics, top)
+    if stage_authority_rows:
+        lines.extend(
+            [
+                "",
+                "## Stage Authority Hotspots",
+                "",
+                "| Workflow | Stage | Bucket | Authority | Expanded chars | Lines | Includes | Transitive includes |",
+                "|---|---|---|---|---:|---:|---:|---:|",
+            ]
+        )
+        for row in stage_authority_rows:
+            lines.append(
+                f"| `{_row_text(row, 'workflow_id')}` | `{_row_text(row, 'stage_id')}` | "
+                f"{_row_text(row, 'bucket')} | `{_row_text(row, 'authority')}` | "
+                f"{_row_int(row, 'expanded_char_count')} | {_row_int(row, 'expanded_line_count')} | "
+                f"{_row_int(row, 'raw_include_count')} | "
+                f"{_row_int(row, 'transitive_include_count')} |"
+            )
+
+    stage_init_field_rows = _stage_init_field_pressure_rows(report.stage_diagnostics, top)
+    if stage_init_field_rows:
+        lines.extend(
+            [
+                "",
+                "## Staged-Init Field Pressure",
+                "",
+                "| Workflow | Stage | Required fields | Likely bulky | Field | Kind | Pressure | Selections |",
+                "|---|---|---:|---:|---|---|---|---:|",
+            ]
+        )
+        for row in stage_init_field_rows:
+            lines.append(
+                f"| `{_row_text(row, 'workflow_id')}` | `{_row_text(row, 'stage_id')}` | "
+                f"{_row_int(row, 'required_init_field_count')} | "
+                f"{_row_int(row, 'likely_bulky_field_count')} | `{_row_text(row, 'field_name')}` | "
+                f"{_row_text(row, 'field_kind_guess')} | {_row_text(row, 'field_pressure_class')} | "
+                f"{_row_int(row, 'selection_count')} |"
             )
 
     duplicate_groups = report.duplicate_invariants[: top or len(report.duplicate_invariants)]
@@ -1210,6 +1315,45 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
             )
         )
         lines.extend(render_stage_row(row) for row in stage_rows)
+    authority_rows = [
+        (
+            _row_text(row, "workflow_id"),
+            _row_text(row, "stage_id"),
+            _row_text(row, "bucket"),
+            _row_text(row, "authority"),
+            str(_row_int(row, "expanded_char_count")),
+            str(_row_int(row, "raw_include_count")),
+            str(_row_int(row, "transitive_include_count")),
+        )
+        for row in _stage_authority_top_prompt_rows(report.stage_diagnostics, top)
+    ]
+    lines.extend(
+        _fixed_table_section_lines(
+            "stage authority hotspots",
+            ("workflow", "stage", "bucket", "authority", "expanded_chars", "includes", "transitive_includes"),
+            authority_rows,
+        )
+    )
+    init_field_rows = [
+        (
+            _row_text(row, "workflow_id"),
+            _row_text(row, "stage_id"),
+            str(_row_int(row, "required_init_field_count")),
+            str(_row_int(row, "likely_bulky_field_count")),
+            _row_text(row, "field_name"),
+            _row_text(row, "field_kind_guess"),
+            _row_text(row, "field_pressure_class"),
+            str(_row_int(row, "selection_count")),
+        )
+        for row in _stage_init_field_pressure_rows(report.stage_diagnostics, top)
+    ]
+    lines.extend(
+        _fixed_table_section_lines(
+            "staged-init field pressure",
+            ("workflow", "stage", "required_fields", "likely_bulky", "field_name", "field_kind", "pressure", "selections"),
+            init_field_rows,
+        )
+    )
     exact_rows = [
         (
             str(row.get("path", "")),

@@ -1861,10 +1861,14 @@ description: Nested command include expansion regression
 
         adapter.install(gpd_root, target, skills_dir=skills)
 
-        workflow = (target / "get-physics-done" / "workflows" / "new-project.md").read_text(encoding="utf-8")
+        workflow = (
+            target / "get-physics-done" / "workflows" / "new-project" / "scope-intake.md"
+        ).read_text(encoding="utf-8")
         _assert_no_legacy_codex_questioning(workflow)
-        _assert_inline_freeform_question_guidance(workflow)
-        assert "Ask each user-facing question exactly once" not in single_runtime_note_block(workflow, "codex_questioning")
+        assert "ask exactly one inline\nfreeform question first" in workflow
+        assert "Wait for the response." in workflow
+        assert "ask one\nnarrow repair question" in workflow
+        assert "Ask each user-facing question exactly once" not in workflow
 
     def test_install_agents_inline_gpd_agents_dir_in_agent_surfaces_only(
         self,

@@ -2265,7 +2265,7 @@ review_summary:
         ]
         assert not (workspace / "GPD").exists()
 
-    def test_new_project_init_stage_post_scope_filters_payload(self, gpd_project: Path) -> None:
+    def test_new_project_init_stage_literature_survey_filters_payload(self, gpd_project: Path) -> None:
         from gpd.core.workflow_staging import load_workflow_stage_manifest
 
         state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
@@ -2273,11 +2273,11 @@ review_summary:
         (gpd_project / "GPD" / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
         manifest = load_workflow_stage_manifest("new-project")
-        stage = manifest.get_stage("post_scope")
+        stage = manifest.get_stage("literature_survey")
 
         result = runner.invoke(
             app,
-            ["--raw", "init", "new-project", "--stage", "post_scope"],
+            ["--raw", "--cwd", str(gpd_project), "init", "new-project", "--stage", "literature_survey"],
             catch_exceptions=False,
         )
         assert result.exit_code == 0, result.output
@@ -2285,31 +2285,32 @@ review_summary:
 
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"]["workflow_id"] == "new-project"
-        assert payload["staged_loading"]["stage_id"] == "post_scope"
-        assert payload["staged_loading"]["loaded_authorities"] == [
-            "references/ui/ui-brand.md",
-            "templates/project.md",
-            "templates/requirements.md",
-            "templates/state.md",
-        ]
+        assert payload["staged_loading"] == manifest.staged_loading_payload("literature_survey")
+        assert payload["staged_loading"]["loaded_authorities"] == ["workflows/new-project/literature-survey.md"]
         assert payload["staged_loading"]["writes_allowed"] == [
-            "GPD/PROJECT.md",
-            "GPD/REQUIREMENTS.md",
-            "GPD/ROADMAP.md",
-            "GPD/STATE.md",
-            "GPD/state.json",
-            "GPD/state.json.bak",
-            "GPD/state.json.lock",
-            "GPD/config.json",
-            "GPD/CONVENTIONS.md",
-            "GPD/init-progress.json",
             "GPD/literature/PRIOR-WORK.md",
             "GPD/literature/METHODS.md",
             "GPD/literature/COMPUTATIONAL.md",
             "GPD/literature/PITFALLS.md",
             "GPD/literature/SUMMARY.md",
+            "GPD/init-progress.json",
         ]
-        assert payload["staged_loading"]["next_stages"] == []
+        assert "researcher_model" in payload
+        assert "synthesizer_model" in payload
+        assert "roadmapper_model" not in payload
+        assert "workflows/new-project.md" in payload["staged_loading"]["must_not_eager_load"]
+
+    def test_new_project_init_stage_post_scope_is_unknown(self, gpd_project: Path) -> None:
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(gpd_project), "init", "new-project", "--stage", "post_scope"],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code != 0
+        assert "Unknown new-project stage 'post_scope'" in result.output
+        assert "minimal_artifacts" in result.output
+        assert "workflow_preferences" in result.output
 
     def test_quick_init_stage_task_authoring_filters_payload(
         self,

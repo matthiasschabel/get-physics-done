@@ -29,11 +29,14 @@ def test_new_project_emits_shallow_roadmap_and_standard_next_up_order() -> None:
     """gpd:new-project must (a) offer shallow-mode where Phase 1 is detailed
     and Phases 2+ are stubs, and (b) in standard mode prioritize
     ``gpd:discuss-phase 1`` over ``gpd:plan-phase 1`` in the Next-Up block."""
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    roadmap_authoring = (WORKFLOWS_DIR / "new-project" / "roadmap-authoring.md").read_text(encoding="utf-8")
+    completion = (WORKFLOWS_DIR / "new-project" / "completion.md").read_text(encoding="utf-8")
 
-    assert "<shallow_mode>true</shallow_mode>" in new_project
+    assert "<shallow_mode>true</shallow_mode>" in roadmap_authoring
 
-    standard_next_up = _section_from_last_marker(new_project, "## > Next Up")
+    full_completion_start = completion.index("<full_completion>")
+    full_completion_end = completion.index("</full_completion>", full_completion_start)
+    standard_next_up = completion[completion.index("## > Next Up", full_completion_start) : full_completion_end]
     plan_idx = standard_next_up.index("`gpd:plan-phase 1`")
     discuss_idx = standard_next_up.index("`gpd:discuss-phase 1`")
     also_available_idx = standard_next_up.index("**Also available:**")
@@ -42,5 +45,5 @@ def test_new_project_emits_shallow_roadmap_and_standard_next_up_order() -> None:
 
     command = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
     assert "**After this command:** Run `gpd:discuss-phase 1`" in command
-    assert "- [ ] User knows next step is `gpd:discuss-phase 1`" in new_project
+    assert "- [ ] user sees `gpd:discuss-phase 1` as the primary next step." in completion
     assert "- [ ] User told the next step is `gpd:discuss-phase 1`" in command

@@ -46,6 +46,29 @@ from gpd.core.workflow_staging import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+NEW_PROJECT_ROOT_AUTHORITY = "workflows/new-project.md"
+NEW_PROJECT_STAGE_IDS = (
+    "scope_intake",
+    "scope_approval",
+    "minimal_artifacts",
+    "workflow_preferences",
+    "project_artifacts",
+    "literature_survey",
+    "requirements_authoring",
+    "roadmap_authoring",
+    "conventions_handoff",
+    "completion",
+)
+NEW_PROJECT_SPLIT_AUTHORITIES = {
+    "minimal_artifacts": "workflows/new-project/minimal-artifacts.md",
+    "workflow_preferences": "workflows/new-project/workflow-preferences.md",
+    "project_artifacts": "workflows/new-project/project-artifacts.md",
+    "literature_survey": "workflows/new-project/literature-survey.md",
+    "requirements_authoring": "workflows/new-project/requirements-authoring.md",
+    "roadmap_authoring": "workflows/new-project/roadmap-authoring.md",
+    "conventions_handoff": "workflows/new-project/conventions-handoff.md",
+    "completion": "workflows/new-project/completion.md",
+}
 
 
 def _workflow_payload(workflow_id: str) -> dict[str, object]:
@@ -144,7 +167,7 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
     second = load_workflow_stage_manifest("new-project")
 
     assert first is second
-    assert first.stage_ids() == ("scope_intake", "scope_approval", "post_scope")
+    assert first.stage_ids() == NEW_PROJECT_STAGE_IDS
     assert "references/shared/canonical-schema-discipline.md" in first.stages[0].must_not_eager_load
     assert first.stages[0].required_init_fields == (
         "commit_docs",
@@ -187,40 +210,41 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
         "approval gate has passed",
         "project contract is ready for persistence",
     )
-    assert first.stages[2].produced_state == (
-        "project artifacts",
-        "workflow preferences",
-        "downstream stage handoff",
-    )
-    assert first.stages[2].checkpoints == (
-        "approval gate has passed",
-        "stage-aware deferred reads are now allowed",
-    )
-    assert first.stages[2].loaded_authorities == (
-        "references/ui/ui-brand.md",
-        "templates/project.md",
-        "templates/requirements.md",
-        "templates/state.md",
-    )
-    assert first.stages[2].must_not_eager_load == ()
-    assert first.stages[2].writes_allowed == (
+    assert first.stages[1].next_stages == ("minimal_artifacts", "workflow_preferences")
+
+    for stage in first.stages:
+        assert NEW_PROJECT_ROOT_AUTHORITY not in stage.mode_paths
+        assert NEW_PROJECT_ROOT_AUTHORITY not in stage.loaded_authorities
+
+    for stage_id, authority_path in NEW_PROJECT_SPLIT_AUTHORITIES.items():
+        stage = first.stage(stage_id)
+        assert stage.mode_paths == (authority_path,)
+        assert stage.loaded_authorities == (authority_path,)
+
+    minimal = first.stage("minimal_artifacts")
+    assert "researcher_model" not in minimal.required_init_fields
+    assert "synthesizer_model" not in minimal.required_init_fields
+    assert "roadmapper_model" not in minimal.required_init_fields
+    assert "GPD/literature/SUMMARY.md" not in minimal.writes_allowed
+    assert "GPD/CONVENTIONS.md" not in minimal.writes_allowed
+    assert minimal.writes_allowed == (
         "GPD/PROJECT.md",
+        "GPD/config.json",
         "GPD/REQUIREMENTS.md",
         "GPD/ROADMAP.md",
         "GPD/STATE.md",
         "GPD/state.json",
         "GPD/state.json.bak",
         "GPD/state.json.lock",
-        "GPD/config.json",
-        "GPD/CONVENTIONS.md",
-        "GPD/init-progress.json",
-        "GPD/literature/PRIOR-WORK.md",
-        "GPD/literature/METHODS.md",
-        "GPD/literature/COMPUTATIONAL.md",
-        "GPD/literature/PITFALLS.md",
-        "GPD/literature/SUMMARY.md",
     )
-    assert first.stages[2].next_stages == ()
+    assert minimal.next_stages == ("completion",)
+    assert first.stage("workflow_preferences").next_stages == ("project_artifacts",)
+    assert first.stage("project_artifacts").next_stages == ("literature_survey",)
+    assert first.stage("literature_survey").next_stages == ("requirements_authoring",)
+    assert first.stage("requirements_authoring").next_stages == ("roadmap_authoring",)
+    assert first.stage("roadmap_authoring").next_stages == ("conventions_handoff",)
+    assert first.stage("conventions_handoff").next_stages == ("completion",)
+    assert first.stage("completion").next_stages == ()
 
     execute_phase_manifest = load_workflow_stage_manifest("execute-phase")
     assert execute_phase_manifest.stage_ids() == (
@@ -257,6 +281,19 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
     assert "verification_report_skeleton_bridge" not in execute_phase_manifest.stage(
         "phase_bootstrap"
     ).required_init_fields
+
+
+def test_new_project_split_stages_do_not_load_root_index_as_authority() -> None:
+    manifest = load_workflow_stage_manifest("new-project")
+
+    assert manifest.stage_ids() == NEW_PROJECT_STAGE_IDS
+    for stage in manifest.stages:
+        assert NEW_PROJECT_ROOT_AUTHORITY not in stage.mode_paths
+        assert NEW_PROJECT_ROOT_AUTHORITY not in stage.loaded_authorities
+        staged_payload = manifest.staged_loading_payload(stage.id)
+        assert NEW_PROJECT_ROOT_AUTHORITY not in staged_payload["mode_paths"]
+        assert NEW_PROJECT_ROOT_AUTHORITY not in staged_payload["loaded_authorities"]
+        assert NEW_PROJECT_ROOT_AUTHORITY not in staged_payload["eager_authorities"]
 
 
 def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -> None:

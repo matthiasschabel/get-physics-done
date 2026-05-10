@@ -239,20 +239,30 @@ def test_planner_agent_does_not_duplicate_canonical_plan_template_blocks() -> No
 
 
 def test_new_project_workflow_keeps_contract_preservation_rules_single_sourced() -> None:
-    new_project = _read("new-project.md")
-
-    assert _has_line_with(
-        new_project,
-        "project_contract",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "approval gate",
-        "continuation decision",
+    scope_intake = (WORKFLOWS_DIR / "new-project" / "scope-intake.md").read_text(encoding="utf-8")
+    scope_approval = (WORKFLOWS_DIR / "new-project" / "scope-approval.md").read_text(encoding="utf-8")
+    contract_schema = expand_at_includes(
+        (TEMPLATES_DIR / "project-contract-schema.md").read_text(encoding="utf-8"),
+        REPO_ROOT / "src/gpd/specs",
+        "/runtime/",
     )
-    assert not _has_line_with(new_project, "preserve any init-surfaced", "fresh work", "continuation")
-    assert _has_line_with(new_project, "schema_version", "integer `1`", "references[].must_surface", "boolean")
-    assert _has_line_with(new_project, "context_intake", "uncertainty_markers", "references[]", "approval gate")
-    assert not _has_line_with(new_project, "schema_version", "references[].must_surface", "not a synonym")
+
+    for fragment in (
+        "`project_contract`",
+        "`project_contract_load_info`",
+        "`project_contract_validation`",
+        "preserve that state",
+        "fresh work or a continuation",
+        "visible-but-blocked contract",
+    ):
+        assert fragment in scope_intake
+    assert _has_line_with(scope_approval, "approval", "contract", "schema")
+    assert not _has_line_with(scope_intake + scope_approval, "preserve any init-surfaced", "fresh work", "continuation")
+    for fragment in ("`schema_version` must be the integer `1`", "`references[]`", "`must_surface` is a boolean scalar"):
+        assert fragment in contract_schema
+    for fragment in ("`context_intake`", "`uncertainty_markers`", "`project_contract`"):
+        assert fragment in scope_approval
+    assert not _has_line_with(contract_schema, "schema_version", "references[].must_surface", "not a synonym")
 
 
 def test_new_project_workflow_references_late_artifact_templates_without_inlining_skeletons() -> None:
@@ -260,8 +270,8 @@ def test_new_project_workflow_references_late_artifact_templates_without_inlinin
     project_template = (TEMPLATES_DIR / "project.md").read_text(encoding="utf-8")
     state_template = (TEMPLATES_DIR / "state.md").read_text(encoding="utf-8")
 
-    assert "{GPD_INSTALL_DIR}/templates/project.md" in new_project
-    assert "{GPD_INSTALL_DIR}/templates/state.md" in new_project
+    assert "templates/project.md" in new_project
+    assert "templates/state.md" in new_project
     assert "@{GPD_INSTALL_DIR}/templates/project.md" not in new_project
     assert "@{GPD_INSTALL_DIR}/templates/state.md" not in new_project
 
@@ -385,7 +395,6 @@ def test_runtime_delegation_note_is_loaded_once_per_workflow() -> None:
         "audit-milestone.md",
         "explain.md",
         "new-milestone.md",
-        "new-project.md",
         "quick.md",
         "write-paper.md",
     }
@@ -399,6 +408,18 @@ def test_runtime_delegation_note_is_loaded_once_per_workflow() -> None:
             text = _read_authority(path.stem)
             assert text.count(include) == 1, path.name
             assert _has_line_with(text, "runtime delegation convention", "loaded above"), path.name
+
+    new_project_authority_paths = workflow_authority_paths(WORKFLOWS_DIR, "new-project")
+    new_project_task_stage_names = {
+        authority_path.name
+        for authority_path in new_project_authority_paths
+        if include in authority_path.read_text(encoding="utf-8")
+    }
+    assert new_project_task_stage_names == {
+        "literature-survey.md",
+        "roadmap-authoring.md",
+        "conventions-handoff.md",
+    }
 
 
 def test_experiment_designer_uses_external_ising_example_as_single_source() -> None:

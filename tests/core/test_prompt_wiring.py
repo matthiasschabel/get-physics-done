@@ -41,7 +41,6 @@ from tests.doc_surface_contracts import (
     assert_resume_authority_contract,
     assert_runtime_reset_rediscovery_contract,
 )
-from tests.markdown_test_support import extract_markdown_section
 from tests.workflow_authority_support import (
     STAGED_WORKFLOW_AUTHORITY_NAMES,
     expanded_workflow_authority_text,
@@ -1942,7 +1941,7 @@ def test_remove_phase_workflow_stages_checkpoint_shelf_updates() -> None:
 
 
 def test_new_project_surfaces_supervised_default_and_core_research_preset_preview() -> None:
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("new-project")
 
     # The minimal-mode config.json template emits the supervised default explicitly.
     assert '"autonomy": "supervised"' in workflow_text
@@ -1959,10 +1958,15 @@ def test_new_project_surfaces_supervised_default_and_core_research_preset_previe
     # The core-research preset aligns with the Phase-1 defaults
     # (autonomy=supervised, review_cadence=dense), so its preview surfaces
     # those values rather than weaker overrides.
-    assert (
-        "`autonomy=supervised`, `research_mode=balanced`, `parallelization=true`, "
-        "`planning.commit_docs=true`, `execution.review_cadence=dense`"
-    ) in workflow_text
+    _assert_machine_fragments(
+        workflow_text,
+        '"autonomy": "supervised"',
+        '"research_mode": "balanced"',
+        '"parallelization": true',
+        '"commit_docs": true',
+        '"review_cadence": "dense"',
+        context="new-project core-research preset machine preview",
+    )
     _assert_semantic_fragments(
         workflow_text,
         "Config:",
@@ -1982,7 +1986,7 @@ def test_new_project_surfaces_supervised_default_and_core_research_preset_previe
 
 
 def test_settings_and_new_project_surface_runtime_permission_sync_for_yolo() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = _workflow_authority_text("new-project")
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
     permissions_sync = re.compile(
         r"gpd --raw permissions sync\b"
@@ -1996,13 +2000,13 @@ def test_settings_and_new_project_surface_runtime_permission_sync_for_yolo() -> 
     assert 'gpd --raw permissions sync --autonomy "$SELECTED_AUTONOMY"' not in settings
     _assert_machine_fragments(
         new_project,
-        "model_overrides.<SELECTED_RUNTIME>", "runtime-owned permission settings", "base install",
-        "workflow-tool readiness", "If `requires_relaunch` is `true`, show `next_step` verbatim",
+        "SELECTED_RUNTIME", "runtime-owned permission settings", "base install",
+        "tool readiness", "workflow readiness", "If `requires_relaunch` is `true`, show `next_step` verbatim",
         context="new-project runtime permission sync fields",
     )
     _assert_semantic_fragments(
         new_project,
-        "sync the active runtime", "most autonomous permission mode", context="new-project runtime permission sync",
+        "sync runtime-owned permissions", "selected autonomy", context="new-project runtime permission sync",
     )
     _assert_machine_fragments(
         settings,
@@ -2017,21 +2021,21 @@ def test_settings_and_new_project_surface_runtime_permission_sync_for_yolo() -> 
 
 
 def test_new_project_requires_scoping_contract_across_setup_modes() -> None:
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("new-project")
     command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
 
     _assert_contains_fragments(
         workflow_text,
         "scoping contract",
-        "approval gate",
+        "explicit approval",
         "decisive outputs",
         "anchors",
         "prior outputs",
-        "review/stop triggers",
-        "contract-free",
-        "scope.unresolved_questions",
-        "context_intake.context_gaps",
-        "uncertainty_markers.weakest_anchors",
+        "stop conditions",
+        "rethink triggers",
+        "`context_intake`",
+        "`approach_policy`",
+        "`uncertainty_markers`",
     )
     _assert_contains_fragments(
         command_text,
@@ -2050,7 +2054,8 @@ def _assert_parse_line_includes_tokens(parse_line: str, fields: tuple[str, ...])
 
 
 def test_new_project_wiring_mentions_contract_persistence_and_contract_first_downstream_generation() -> None:
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("new-project")
+    scope_intake_text = (WORKFLOWS_DIR / "new-project" / "scope-intake.md").read_text(encoding="utf-8")
     command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "new-project-stage-manifest.json").read_text(encoding="utf-8")),
@@ -2063,13 +2068,8 @@ def test_new_project_wiring_mentions_contract_persistence_and_contract_first_dow
     assert "gpd state set-project-contract -" in workflow_text
     assert "/tmp/gpd-project-contract.json" not in workflow_text
     assert "temporary JSON file if needed" not in workflow_text
-    assert "Parse JSON for:" not in extract_markdown_section(
-        workflow_text,
-        "## 1. Setup",
-        context="new-project scope intake",
-    )
-    assert "gpd --raw stage field-access new-project --stage scope_intake --style instruction" in workflow_text
-    assert "SCOPE_INIT.staged_loading.required_init_fields" in workflow_text
+    assert "Parse JSON for:" not in scope_intake_text
+    assert "staged_loading.required_init_fields" in workflow_text
     for field in (
         "commit_docs",
         "autonomy",
@@ -2089,7 +2089,9 @@ def test_new_project_wiring_mentions_contract_persistence_and_contract_first_dow
     ):
         assert field in scope_intake.required_init_fields
     assert "SCOPE_APPROVAL_INIT=$(gpd --raw init new-project --stage scope_approval)" in workflow_text
-    assert "POST_SCOPE_INIT=$(gpd --raw init new-project --stage post_scope)" in workflow_text
+    assert "MINIMAL_ARTIFACTS_INIT=$(gpd --raw init new-project --stage minimal_artifacts)" in workflow_text
+    assert "WORKFLOW_PREFS_INIT=$(gpd --raw init new-project --stage workflow_preferences)" in workflow_text
+    assert "POST_SCOPE_INIT=$(gpd --raw init new-project --stage post_scope)" not in workflow_text
     assert "roadmapper_model" in workflow_text
     _assert_contains_fragments(
         workflow_text,
@@ -2109,23 +2111,24 @@ def test_new_project_wiring_mentions_contract_persistence_and_contract_first_dow
 
 
 def test_new_project_defers_workflow_setup_until_after_scope_approval() -> None:
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("new-project")
+    workflow_preferences = (WORKFLOWS_DIR / "new-project" / "workflow-preferences.md").read_text(encoding="utf-8")
+    project_artifacts = (WORKFLOWS_DIR / "new-project" / "project-artifacts.md").read_text(encoding="utf-8")
     command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
 
     _assert_contains_fragments(
-        workflow_text,
+        workflow_preferences,
         "GPD/config.json",
-        "temporary defaults",
         "scope approval",
-        "first project-artifact commit",
+        "before downstream project artifacts",
     )
     assert "## 2.5 Early Workflow Setup" not in workflow_text
-    assert "What physics problem do you want to investigate?" in workflow_text
+    assert "Describe your research project in one pass" in workflow_text
     _assert_contains_fragments(
-        workflow_text,
-        "If `GPD/config.json` does not exist yet",
-        "scope approval",
-        "before the first project-artifact commit",
+        project_artifacts,
+        "If `GPD/config.json` is missing",
+        "workflow_preferences",
+        "After `GPD/config.json` exists",
     )
     assert "If Step 2.5 already captured provisional setup preferences" not in workflow_text
     assert "start with physics questioning" in command_text
@@ -2184,39 +2187,25 @@ def test_questioning_guide_requires_anchors_and_disconfirming_questions() -> Non
 
 
 def test_new_project_questioning_requires_smoking_gun_and_rejects_proxy_only_readiness() -> None:
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    scope_intake = (WORKFLOWS_DIR / "new-project" / "scope-intake.md").read_text(encoding="utf-8")
+    scope_approval = (WORKFLOWS_DIR / "new-project" / "scope-approval.md").read_text(encoding="utf-8")
     guide_text = (REFERENCES_DIR / "research" / "questioning.md").read_text(encoding="utf-8")
-    deep_questioning = _extract_between(workflow_text, "## 3. Deep Questioning", "## 4. ")
-    step_m1_contract = _extract_between(workflow_text, "#### M1.5. Synthesize", "#### M2. ")
     guide_decision_gate = _extract_between(guide_text, "<decision_gate>", "</decision_gate>")
     guide_question_types = _extract_between(guide_text, "<question_types>", "</question_types>")
 
     _assert_prompt_concepts(
-        deep_questioning,
+        scope_intake,
         {
-            "smoking-gun intake": (
-                "smoking-gun",
-                "observable",
-                "curve",
-                "benchmark reproduction",
-                "scaling law",
-                "softer sanity checks",
-            ),
-            "proxy rejection": ("limiting cases", "sanity checks", "generic benchmark language", "keep exploring"),
-            "disconfirming follow-up": ("wrong or incomplete", "progress", "should not count as success"),
+            "decisive intake": ("output, claim, or deliverable", "anchor", "baseline", "rethink"),
+            "single repair": ("missing", "blocks a coherent scoping contract", "one narrow repair question"),
         },
         context="new-project deep questioning",
     )
     _assert_prompt_concepts(
-        step_m1_contract,
+        scope_approval,
         {
-            "user smoking-gun preservation": ("first smoking-gun check", "softer proxies", "limiting cases"),
-            "proxy-only underspecified": (
-                "limiting cases",
-                "sanity checks",
-                "qualitative expectations",
-                "underspecified",
-            ),
+            "user anchor preservation": ("concrete anchor", "reference", "prior-output constraint", "baseline"),
+            "no invented grounding": ("Do not invent anchors", "references", "baselines", "prior outputs"),
         },
         context="new-project Step M1.5 contract",
     )
@@ -2621,7 +2610,7 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     roadmap_template = (TEMPLATES_DIR / "roadmap.md").read_text(encoding="utf-8")
     state_template = (TEMPLATES_DIR / "state.md").read_text(encoding="utf-8")
     roadmapper_agent = (AGENTS_DIR / "gpd-roadmapper.md").read_text(encoding="utf-8")
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = _workflow_authority_text("new-project")
     new_milestone = _workflow_authority_text("new-milestone")
     new_project_roadmapper = _find_single_task(WORKFLOWS_DIR / "new-project.md", "gpd-roadmapper").text
 
@@ -2685,8 +2674,8 @@ def test_roadmap_template_and_workflows_surface_phase_contract_coverage() -> Non
     # new-milestone keeps full-detail roadmap for scoped continuations.
     _assert_semantic_fragments(
         new_project,
-        "For Phase 1", "explicit contract coverage", "ROADMAP.md", "Do NOT skip", "scoping-contract approval gate",
-        "requirement to show contract coverage", context="new-project roadmap contract coverage",
+        "For Phase 1", "explicit contract coverage", "ROADMAP.md", "requirements or contract demand",
+        "contract-critical identity", context="new-project roadmap contract coverage",
     )
     _assert_semantic_fragments(
         new_milestone,
@@ -2710,36 +2699,32 @@ def test_research_prompt_surfaces_use_canonical_literature_outputs() -> None:
 
 
 def test_new_project_minimal_mode_and_planning_wiring_allow_coarse_scoped_decomposition() -> None:
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_text = _workflow_authority_text("new-project")
+    scope_intake = (WORKFLOWS_DIR / "new-project" / "scope-intake.md").read_text(encoding="utf-8")
+    scope_approval = (WORKFLOWS_DIR / "new-project" / "scope-approval.md").read_text(encoding="utf-8")
+    roadmap_authoring = (WORKFLOWS_DIR / "new-project" / "roadmap-authoring.md").read_text(encoding="utf-8")
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
-    approval_contract = _extract_between(workflow_text, "#### M1.5. Synthesize", "#### M2. ")
-    roadmap_instructions = _extract_between(workflow_text, "<instructions>", "</instructions>")
+    roadmap_instructions = _extract_between(roadmap_authoring, "<instructions>", "</instructions>")
 
-    assert "whether the anchor is still unknown" in workflow_text
+    assert "say the anchor is\nunknown" in scope_intake
     _assert_prompt_concepts(
-        approval_contract,
+        scope_approval,
         {
             "unknown anchor fields": (
                 "anchor",
-                "scope.unresolved_questions",
-                "context_intake.context_gaps",
-                "uncertainty_markers.weakest_anchors",
+                "context_intake",
+                "uncertainty_markers",
+                "missing-anchor uncertainty",
             ),
-            "no invented grounding": ("rather than inventing", "paper", "benchmark", "baseline"),
-            "coarse decomposition": ("Do not force a phase list", "uncertainty", "single coarse phase"),
+            "no invented grounding": ("Do not invent anchors", "references", "baselines", "prior outputs"),
         },
         context="new-project approval contract",
-    )
-    assert "put it in `context_intake.must_include_prior_outputs`" in workflow_text
-    assert (
-        "`context_intake.crucial_inputs` for user-stated observables, stop conditions, review requests, or constraints"
-        in workflow_text
     )
     _assert_prompt_concepts(
         workflow_text,
         {
-            "missing anchor is not approval": ("Missing-anchor notes", "do not satisfy approval", "concrete anchor"),
-            "coarse stage gate": ("full phase breakdown", "not required", "first grounded investigation chunk"),
+            "missing anchor is carried": ("anchor is unknown", "explicit unknown-anchor gap"),
+            "coarse stage gate": ("single phase", "coarse early roadmap", "smallest decomposition"),
         },
         context="new-project missing-anchor approval gate",
     )
@@ -6036,7 +6021,7 @@ def test_decisive_comparisons_paper_quality_artifacts_and_profile_invariants_are
     internal_template = (TEMPLATES_DIR / "paper" / "internal-comparison.md").read_text(encoding="utf-8")
     figure_tracker = (TEMPLATES_DIR / "paper" / "figure-tracker.md").read_text(encoding="utf-8")
     write_paper = _workflow_authority_text("write-paper")
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = _workflow_authority_text("new-project")
     execute_phase = _workflow_authority_text("execute-phase")
     scoring = (REFERENCES_DIR / "publication" / "paper-quality-scoring.md").read_text(encoding="utf-8")
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
@@ -6297,7 +6282,7 @@ def test_adaptive_mode_and_review_cadence_docs_stay_aligned() -> None:
     research_phase = _workflow_authority_text("research-phase")
     verify_work = _workflow_authority_text("verify-work")
     plan_phase = _workflow_authority_text("plan-phase")
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = _workflow_authority_text("new-project")
     new_milestone = _workflow_authority_text("new-milestone")
     set_profile = (WORKFLOWS_DIR / "set-profile.md").read_text(encoding="utf-8")
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
@@ -6315,8 +6300,9 @@ def test_adaptive_mode_and_review_cadence_docs_stay_aligned() -> None:
         )
     _assert_semantic_fragments(
         new_project,
-        "anchors or decisive evidence",
-        "one method family clearly preferable",
+        "adaptive",
+        "Research mode",
+        "Review cadence",
         context="new-project adaptive mode gate",
     )
     _assert_semantic_fragments(
@@ -7038,7 +7024,7 @@ def test_verification_and_publication_prompts_keep_decisive_contract_targets_rea
 
 
 def test_new_project_spawns_roadmapper_with_shallow_mode_in_standard_mode() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = _workflow_authority_text("new-project")
     assert "<shallow_mode>true</shallow_mode>" in new_project
 
 
@@ -7048,7 +7034,7 @@ def test_new_milestone_keeps_full_roadmap_detail_shallow_mode_false() -> None:
 
 
 def test_new_project_next_up_recommends_discuss_phase_1_primary() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = (WORKFLOWS_DIR / "new-project" / "completion.md").read_text(encoding="utf-8")
     # The standard-mode Next Up block is the final occurrence; the first is the --minimal path.
     next_up_block = new_project[new_project.rindex("## > Next Up") :]
     # discuss-phase 1 should appear before plan-phase 1 in that block.
@@ -7152,28 +7138,26 @@ def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verifica
 
 
 def test_new_project_customize_settings_matches_supervised_dense_defaults() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = (WORKFLOWS_DIR / "new-project" / "workflow-preferences.md").read_text(encoding="utf-8")
 
-    round_1_start = new_project.index("**Round 1 — Core workflow settings")
-    round_1_end = new_project.index("**Round 2 — Workflow agents", round_1_start)
-    round_1 = new_project[round_1_start:round_1_end]
+    customize = _extract_between(new_project, "<customize_settings>", "</customize_settings>")
 
     _assert_semantic_fragments(
-        round_1,
-        "Round 1",
-        "Core workflow settings",
-        "5 questions",
+        customize,
+        "Autonomy: supervised / balanced / yolo",
+        "Review cadence: dense / adaptive / sparse",
+        "Planning commit docs: true / false",
         context="new-project customize round-one shape",
     )
-    _assert_public_fragments(
-        round_1,
-        '{ label: "Supervised (Recommended)"',
-        '{ label: "Dense (Recommended)"',
-        'header: "Review Cadence"',
+    _assert_machine_fragments(
+        new_project,
+        '"autonomy": "supervised"',
+        '"review_cadence": "dense"',
+        '"commit_docs": true',
         context="new-project customize supervised dense defaults",
     )
     _assert_forbidden_fragments(
-        round_1,
+        customize,
         'Balanced (Recommended)", description: "Routine work is automatic',
         context="new-project customize stale balanced default",
     )

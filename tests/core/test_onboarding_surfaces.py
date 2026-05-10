@@ -36,6 +36,7 @@ from gpd.core.public_surface_contract import (
     resume_authority_fields,
 )
 from tests import doc_surface_contracts as doc_surface_contracts_module
+from tests.workflow_authority_support import workflow_authority_text
 
 
 @pytest.fixture(autouse=True)
@@ -832,15 +833,21 @@ def test_workflow_interactive_choice_fallback_is_single_sourced() -> None:
     repo_root = Path(__file__).resolve().parents[2]
     fallback_ref = "@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md"
     workflow_surfaces = (
-        "src/gpd/specs/workflows/start.md",
-        "src/gpd/specs/workflows/new-project.md",
-        "src/gpd/specs/workflows/settings.md",
+        ("src/gpd/specs/workflows/start.md", None),
+        ("src/gpd/specs/workflows/new-project.md", "new-project"),
+        ("src/gpd/specs/workflows/settings.md", None),
     )
 
-    for rel in workflow_surfaces:
+    for rel, staged_name in workflow_surfaces:
         raw = (repo_root / rel).read_text(encoding="utf-8")
-        expanded = expand_at_includes(raw, repo_root / "src/gpd", "/runtime/")
-        assert fallback_ref in raw
+        authority_text = (
+            workflow_authority_text(repo_root / "src/gpd/specs/workflows", staged_name)
+            if staged_name is not None
+            else raw
+        )
+        expanded = expand_at_includes(authority_text, repo_root / "src/gpd", "/runtime/")
+        if staged_name is None:
+            assert fallback_ref in raw
         assert "Use `ask_user` for structured choices when the runtime supports it." in expanded
         assert "Platform note" not in raw
         assert "If `ask_user` is available" not in raw

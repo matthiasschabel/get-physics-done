@@ -55,7 +55,7 @@ Present a concise scoping summary and require explicit approval:
   - "Stop here" -- do not create downstream artifacts
 
 Headless or non-interactive mode is not scope approval. If explicit approval is
-not available, stop with `## > Next Up`.
+not available, stop with `## > Next Up`; never auto-select approval.
 </approval_gate>
 
 <validation_and_persistence>
@@ -66,7 +66,7 @@ printf '%s\n' "$PROJECT_CONTRACT_JSON" | gpd --raw validate project-contract - -
 ```
 
 If validation fails, show the errors, repair the contract, and do not continue.
-If repair would require inventing grounding, stop and ask the user.
+If repair would require inventing anchors, references, baselines, DOI/arXiv/file locators, or prior outputs, stop and ask the user. If a validation or persistence shell call is denied by runtime policy, stop and report the policy block; do not substitute unvalidated file writes.
 
 Persist the same approved JSON:
 
@@ -78,7 +78,9 @@ This stage may write only the state files declared by `staged_loading`.
 </validation_and_persistence>
 
 <handoff>
-After persistence succeeds, reload with
-`gpd --raw init new-project --stage post_scope` before any downstream artifact
-creation or late setup.
+After persistence succeeds, reload the flag-selected post-approval stage before
+any downstream artifact creation or late setup:
+
+- `gpd --raw init new-project --stage minimal_artifacts` for `--minimal`
+- `gpd --raw init new-project --stage workflow_preferences` for full or `--auto`
 </handoff>

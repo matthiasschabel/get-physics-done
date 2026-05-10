@@ -622,10 +622,12 @@ def test_help_new_project_detail_describes_current_scope_gate_contract() -> None
 
 def test_new_project_minimal_prompt_documents_core_artifacts_not_full_mode_outputs() -> None:
     command_text = (COMMANDS_DIR / "new-project.md").read_text(encoding="utf-8")
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    completion = (WORKFLOWS_DIR / "new-project" / "completion.md").read_text(encoding="utf-8")
 
-    for content in (command_text, workflow_text):
-        assert "does not promise" in content
+    assert "does not promise" in command_text
+    assert "no promise is made" in completion
+    for content in (command_text, completion):
         assert "GPD/CONVENTIONS.md" in content
         assert "GPD/literature/" in content
 
@@ -893,14 +895,12 @@ def test_command_prompts_declare_valid_context_modes() -> None:
 
 
 def test_new_project_prompt_uses_stdin_for_contract_validation_and_persistence() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project/scope-approval.md").read_text(encoding="utf-8")
 
     assert (
         "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd --raw validate project-contract - --mode approved" in workflow
     )
     assert "printf '%s\\n' \"$PROJECT_CONTRACT_JSON\" | gpd state set-project-contract -" in workflow
-    assert "gpd permissions sync --runtime <runtime>" in workflow
-    assert "gpd permissions sync --runtime <name>" not in workflow
     assert "/tmp/gpd-project-contract.json" not in workflow
     assert "temporary JSON file if needed" not in workflow
 
@@ -920,17 +920,17 @@ def test_state_json_schema_stays_aligned_with_stdin_contract_persistence_flow() 
 
 
 def test_new_project_and_state_schema_surface_contract_id_integrity_rules() -> None:
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project/scope-approval.md").read_text(encoding="utf-8")
     schema = expand_at_includes(
         (REPO_ROOT / "src/gpd/specs/templates/state-json-schema.md").read_text(encoding="utf-8"),
         REPO_ROOT / "src/gpd/specs",
         "/runtime/",
     )
 
-    assert (
-        "do not paraphrase the schema here; reuse its exact keys, enum values, list/object shapes, ID-linkage rules, and proof-bearing claim requirements"
-        in workflow
-    )
+    assert "Follow the schema exactly" in workflow
+    assert "no invented\nkeys" in workflow
+    assert "near-miss enum values" in workflow
+    assert "list fields" in workflow
     assert "Same-kind IDs must be unique within each section." in schema
     assert "must not match any declared contract ID" in schema
 
@@ -955,16 +955,16 @@ def test_help_prompts_surface_tangent_command_for_side_investigations() -> None:
 
 def test_settings_and_research_mode_docs_keep_tangent_branch_taxonomy_strict() -> None:
     settings = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = workflow_authority_text(WORKFLOWS_DIR, "new-project")
     research_modes = (REPO_ROOT / "src/gpd/specs/references/research/research-modes.md").read_text(encoding="utf-8")
     preset_labels = _workflow_preset_labels()
 
     assert "Which starting workflow preset should GPD use for `GPD/config.json`?" in new_project
-    assert "offer a preset choice before individual questions" in new_project
-    assert "preset bundle over the existing config knobs" in new_project
+    assert "First offer a preset choice." in new_project
+    assert "bundles over existing config keys only" in new_project
     assert "preview" in new_project
-    assert "writing `GPD/config.json`" in new_project
-    assert "Do not persist a separate preset key." in new_project
+    assert "Before writing `GPD/config.json`" in new_project
+    assert "Do not create, persist, or infer a separate preset block." in new_project
     assert "Core research" in preset_labels
     assert '"Core research (Recommended)"' in new_project
     for label in sorted(preset_labels - {"Core research"}):
@@ -983,14 +983,15 @@ def test_settings_and_research_mode_docs_keep_tangent_branch_taxonomy_strict() -
 
 
 def test_new_project_and_help_surface_runtime_default_and_state_backup_gitignore_guidance() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    new_project = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    new_project_manifest = (WORKFLOWS_DIR / "new-project-stage-manifest.json").read_text(encoding="utf-8")
     help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
     planning_config = (REPO_ROOT / "src/gpd/specs/references/planning/planning-config.md").read_text(encoding="utf-8")
 
     assert "without commentary about the missing override" in new_project
     assert 'normal "use the runtime default model" path' in new_project
-    assert "GPD/state.json.bak" in new_project
-    assert "GPD/state.json.lock" in new_project
+    assert "GPD/state.json.bak" in new_project_manifest
+    assert "GPD/state.json.lock" in new_project_manifest
     assert "GPD/state.json.bak" in help_workflow
     assert "GPD/state.json.lock" in help_workflow
     assert "GPD/state.json.bak" in planning_config
@@ -1174,13 +1175,13 @@ def test_help_prompt_session_management_keeps_pause_before_leave_and_resume_on_r
 
 def test_new_project_prompt_surfaces_discuss_phase_before_planning_in_command_and_workflow() -> None:
     command = (REPO_ROOT / "src/gpd/commands/new-project.md").read_text(encoding="utf-8")
-    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / "src/gpd/specs/workflows/new-project/completion.md").read_text(encoding="utf-8")
 
     for content in (command, workflow):
         assert "gpd:discuss-phase 1" in content
 
     assert "Discuss phase 1 now?" in command
-    assert "Discuss phase 1 now?" in workflow
+    assert "`gpd:discuss-phase 1`" in workflow
     assert "Plan phase 1 now?" not in command
     assert "Plan phase 1 now?" not in workflow
 
@@ -1256,11 +1257,11 @@ def test_new_project_and_new_milestone_closeouts_include_concrete_next_up_comman
     new_milestone = workflow_authority_text(WORKFLOWS_DIR, "new-milestone")
     new_milestone_command = (COMMANDS_DIR / "new-milestone.md").read_text(encoding="utf-8")
 
-    assert "Stop after this error with `## > Next Up`" in new_project
+    assert "not available, stop with `## > Next Up`" in new_project
     assert "`gpd:discuss-phase 1`" in new_project
     assert "`gpd:plan-phase 1`" in new_project
     assert "`gpd:suggest-next`" in new_project
-    assert "re-offer `gpd:discuss-phase 1` as primary" in new_project
+    assert "user sees `gpd:discuss-phase 1` as the primary next step" in new_project
 
     assert "`gpd:discuss-phase [N]`" in new_milestone
     assert "`gpd:plan-phase [N]`" in new_milestone

@@ -2756,54 +2756,60 @@ class TestInitNewProject:
             "project contract is ready for persistence",
         ]
 
-    def test_new_project_stage_post_scope_filters_payload(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        "stage_id",
+        (
+            "minimal_artifacts",
+            "workflow_preferences",
+            "project_artifacts",
+            "literature_survey",
+            "requirements_authoring",
+            "roadmap_authoring",
+            "conventions_handoff",
+            "completion",
+        ),
+    )
+    def test_new_project_post_approval_stages_filter_payload(self, tmp_path: Path, stage_id: str) -> None:
         from gpd.core.workflow_staging import load_workflow_stage_manifest
 
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("new-project")
-        stage = manifest.get_stage("post_scope")
+        stage = manifest.get_stage(stage_id)
 
-        ctx = init_new_project(tmp_path, stage="post_scope")
+        ctx = init_new_project(tmp_path, stage=stage_id)
 
         assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
         assert ctx["staged_loading"]["workflow_id"] == "new-project"
-        assert ctx["staged_loading"]["stage_id"] == "post_scope"
-        assert ctx["staged_loading"]["loaded_authorities"] == [
-            "references/ui/ui-brand.md",
-            "templates/project.md",
-            "templates/requirements.md",
-            "templates/state.md",
-        ]
-        assert ctx["staged_loading"]["writes_allowed"] == [
-            "GPD/PROJECT.md",
-            "GPD/REQUIREMENTS.md",
-            "GPD/ROADMAP.md",
-            "GPD/STATE.md",
-            "GPD/state.json",
-            "GPD/state.json.bak",
-            "GPD/state.json.lock",
-            "GPD/config.json",
-            "GPD/CONVENTIONS.md",
-            "GPD/init-progress.json",
-            "GPD/literature/PRIOR-WORK.md",
-            "GPD/literature/METHODS.md",
-            "GPD/literature/COMPUTATIONAL.md",
-            "GPD/literature/PITFALLS.md",
-            "GPD/literature/SUMMARY.md",
-        ]
-        assert ctx["staged_loading"]["next_stages"] == []
+        assert ctx["staged_loading"]["stage_id"] == stage_id
+        assert ctx["staged_loading"]["order"] == stage.order
+        assert ctx["staged_loading"]["loaded_authorities"] == list(stage.loaded_authorities)
+        assert ctx["staged_loading"]["eager_authorities"] == list(stage.loaded_authorities)
+        assert ctx["staged_loading"]["writes_allowed"] == list(stage.writes_allowed)
+        assert ctx["staged_loading"]["next_stages"] == list(stage.next_stages)
+        assert "workflows/new-project.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert "reference_artifacts_content" not in ctx
         assert "active_reference_context" not in ctx
         assert "effective_reference_intake" not in ctx
         assert "reference_artifact_files" not in ctx
+        assert "post_scope" not in ctx["staged_loading"]["next_stages"]
+        if stage_id != "literature_survey":
+            assert "GPD/literature/SUMMARY.md" not in ctx["staged_loading"]["writes_allowed"]
+        if stage_id not in {"roadmap_authoring", "conventions_handoff", "completion"}:
+            assert "workflows/new-project/conventions-handoff.md" in ctx["staged_loading"]["must_not_eager_load"]
 
     def test_new_project_stage_rejects_unknown_stage(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
 
         with pytest.raises(ValueError, match="Unknown new-project stage"):
             init_new_project(tmp_path, stage="bogus")
+
+    def test_new_project_stage_rejects_removed_post_scope_alias(self, tmp_path: Path) -> None:
+        _setup_project(tmp_path)
+
+        with pytest.raises(ValueError, match="Unknown new-project stage"):
+            init_new_project(tmp_path, stage="post_scope")
 
     def test_new_project_bootstrap_omits_reference_ledger_payload(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)

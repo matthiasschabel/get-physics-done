@@ -61,7 +61,7 @@ COMMAND_BASELINES = {
     "map-research": (216, 9_899, 1),
     "merge-phases": (387, 12_144, 1),
     "new-milestone": (152, 6_940, 1),
-    "new-project": (251, 11_153, 1),
+    "new-project": (256, 11_152, 1),
     "numerical-convergence": (570, 27_086, 1),
     "parameter-sweep": (832, 31_119, 1),
     "pause-work": (302, 13_207, 1),
@@ -115,7 +115,7 @@ WORST_COMMAND_HARD_CAPS = {
 }
 PROJECTED_COMMAND_HARD_CAPS = {
     "execute-phase": (300, 12_000),
-    "new-project": (2_200, 107_000),
+    "new-project": (280, 14_000),
     "research-phase": (430, 22_000),
     "respond-to-referees": (1_000, 62_000),
     "verify-work": (850, 47_000),
@@ -167,7 +167,7 @@ WORKFLOW_BASELINES = {
     "map-research": (27, 1_388, 0),
     "merge-phases": (348, 11_234, 0),
     "new-milestone": (30, 1_511, 0),
-    "new-project": (1_937, 88_661, 2),
+    "new-project": (67, 3_143, 1),
     "numerical-convergence": (482, 23_756, 0),
     "parameter-sweep": (751, 29_022, 1),
     "pause-work": (275, 12_667, 0),
@@ -209,7 +209,7 @@ WORST_WORKFLOW_HARD_CAPS = {
     "verify-phase": (720, 44_000),
     "write-paper": (70, 3_000),
     "respond-to-referees": (70, 4_000),
-    "new-project": (1_960, 91_000),
+    "new-project": (90, 4_500),
     "execute-phase": (50, 2_000),
     "help": (1_420, 74_000),
 }

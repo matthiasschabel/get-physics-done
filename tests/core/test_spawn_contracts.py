@@ -560,7 +560,8 @@ def test_new_project_notation_coordinator_uses_explicit_model_and_spawn_contract
     assert "write_scope:\n  mode: no_write" in notation_section
     assert "status: checkpoint" in notation_section
     assert "gpd convention set" in notation_section
-    assert "Do not hardcode `natural` or `mostly_minus`" in content
+    assert "Do not hardcode" in content
+    assert "`natural` or `mostly_minus`" in content
     assert 'gpd convention set units "$RESOLVED_UNITS"' in content
     assert 'gpd convention set metric_signature "$RESOLVED_METRIC"' in content
 

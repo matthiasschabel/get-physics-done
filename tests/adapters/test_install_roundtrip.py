@@ -196,9 +196,34 @@ def _runtime_public_helper_labels(runtime: str) -> tuple[str, ...]:
 
 
 def _installed_workflow_text(target: Path, workflow_name: str) -> str:
-    path = target / "get-physics-done" / "workflows" / f"{workflow_name}.md"
+    workflow_root = target / "get-physics-done" / "workflows"
+    path = workflow_root / f"{workflow_name}.md"
     assert path.exists(), f"missing installed workflow authority: {path}"
-    return path.read_text(encoding="utf-8")
+    texts = [path.read_text(encoding="utf-8")]
+
+    manifest_path = workflow_root / f"{workflow_name}-stage-manifest.json"
+    if manifest_path.exists():
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        seen: set[Path] = set()
+        for stage in payload.get("stages", []):
+            if not isinstance(stage, dict):
+                continue
+            for key in ("mode_paths", "loaded_authorities"):
+                values = stage.get(key, [])
+                if not isinstance(values, list):
+                    continue
+                for value in values:
+                    if not isinstance(value, str):
+                        continue
+                    prefix = f"workflows/{workflow_name}/"
+                    if not value.startswith(prefix) or not value.endswith(".md"):
+                        continue
+                    stage_path = target / "get-physics-done" / value
+                    if stage_path.exists() and stage_path not in seen:
+                        seen.add(stage_path)
+                        texts.append(stage_path.read_text(encoding="utf-8"))
+
+    return "\n\n".join(texts)
 
 
 def _command_or_workflow_authority_text(target: Path, command_prompt: str, runtime: str, workflow_name: str) -> str:

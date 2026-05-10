@@ -7,6 +7,7 @@ from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -16,8 +17,8 @@ TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 _RUNTIME_DISPLAY_NAMES = tuple(descriptor.display_name for descriptor in iter_runtime_descriptors())
 
 
-def test_new_project_minimal_contract_guidance_surfaces_contract_enum_vocabulary() -> None:
-    workflow_text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+def test_new_project_scope_approval_surfaces_contract_schema_without_restating_it() -> None:
+    workflow_text = (WORKFLOWS_DIR / "new-project/scope-approval.md").read_text(encoding="utf-8")
     project_contract_schema_text = expand_at_includes(
         (TEMPLATES_DIR / "project-contract-schema.md").read_text(encoding="utf-8"),
         REPO_ROOT / "src/gpd/specs",
@@ -26,10 +27,7 @@ def test_new_project_minimal_contract_guidance_surfaces_contract_enum_vocabulary
 
     assert "templates/project-contract-schema.md" in workflow_text
     assert "templates/state-json-schema.md" not in workflow_text
-    assert "use that schema as the canonical source of truth for the object rules" in workflow_text
-    assert (
-        "Do not restate the full contract rules here; keep only the approval-critical reminders below." in workflow_text
-    )
+    assert "Follow the schema exactly" in workflow_text
     assert (
         '`observables[]` — `{ "id", "name", "kind", "definition", "regime?", "units?" }`'
         in project_contract_schema_text
@@ -69,7 +67,7 @@ def test_settings_and_planning_config_keep_conventions_outside_config_json() -> 
     settings_command = (COMMANDS_DIR / "settings.md").read_text(encoding="utf-8")
     settings_workflow = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
     planning_config = (REFERENCES_DIR / "planning" / "planning-config.md").read_text(encoding="utf-8")
-    new_project = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    workflow_preferences = (WORKFLOWS_DIR / "new-project/workflow-preferences.md").read_text(encoding="utf-8")
 
     assert "physics research preferences" not in settings_command
     assert "physics-specific settings" not in settings_workflow
@@ -81,9 +79,52 @@ def test_settings_and_planning_config_keep_conventions_outside_config_json() -> 
     assert '"physics": {' not in planning_config
     assert "Project conventions are not part of `config.json`." in planning_config
     assert "Do **not** introduce a `physics` block there." in planning_config
+    assert "Project conventions are outside this stage and outside `GPD/config.json`" in workflow_preferences
+    assert '"physics": {' not in workflow_preferences
+
+
+def test_new_project_workflow_preferences_writes_only_existing_config_keys_and_syncs_runtime_permissions() -> None:
+    workflow_preferences = (WORKFLOWS_DIR / "new-project/workflow-preferences.md").read_text(encoding="utf-8")
+    aggregated_new_project = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    permissions_sync = re.compile(
+        r"gpd --raw permissions sync\b"
+        r"(?=[^\n]*--runtime \"\$SELECTED_RUNTIME\")"
+        r"(?=[^\n]*--autonomy \"\$SELECTED_AUTONOMY\")"
+    )
+
+    assert workflow_preferences in aggregated_new_project
+    assert "Do not create, persist, or infer a separate preset block." in workflow_preferences
+    assert "`SELECTED_RUNTIME`" in workflow_preferences
+    assert permissions_sync.search(workflow_preferences)
+    assert 'gpd --raw permissions sync --autonomy "$SELECTED_AUTONOMY"' not in workflow_preferences
+
+    for key in (
+        "autonomy",
+        "research_mode",
+        "parallelization",
+        "planning.commit_docs",
+        "execution.review_cadence",
+        "model_profile",
+        "workflow.research",
+        "workflow.plan_checker",
+        "workflow.verifier",
+    ):
+        assert key in workflow_preferences
+
+    forbidden_writes = (
+        "gpd config set model_overrides",
+        "gpd config set git.branching_strategy",
+        "gpd config set execution.max_unattended_minutes_per_plan",
+        "gpd config set execution.project_usd_budget",
+        "gpd config set execution.session_usd_budget",
+        "GPD/init-progress.json",
+    )
+    for forbidden_write in forbidden_writes:
+        assert forbidden_write not in workflow_preferences
+
     assert (
         "The user can run `gpd:validate-conventions`; the fallback lock must match the values written into `GPD/CONVENTIONS.md`."
-        in new_project
+        not in workflow_preferences
     )
 
 

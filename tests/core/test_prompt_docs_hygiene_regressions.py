@@ -106,9 +106,18 @@ def test_workflows_loading_runtime_delegation_note_do_not_duplicate_shortform_po
 
 
 def test_new_project_minimal_scope_block_delegates_missing_anchor_examples_to_schema() -> None:
-    text = (WORKFLOWS_DIR / "new-project.md").read_text(encoding="utf-8")
+    text = (WORKFLOWS_DIR / "new-project" / "scope-approval.md").read_text(encoding="utf-8")
+    grounding_linkage = (SPECS_DIR / "templates" / "project-contract-grounding-linkage.md").read_text(
+        encoding="utf-8"
+    )
 
-    assert "Use the schema's grounding-linkage rules for accepted missing-anchor wording." in text
+    assert "explicit missing-anchor uncertainty" in text
+    assert "concrete anchor, reference, prior-output constraint, or baseline" in text
     assert "Prefer explicit missing-anchor wording such as" not in text
     assert "Accepted shorthand like `need grounding`" not in text
-    assert text.count("Missing-anchor notes preserve uncertainty, but they do not satisfy approval on their own.") == 1
+    assert (
+        grounding_linkage.count(
+            "explicit missing-anchor notes preserve uncertainty but do not satisfy approval on their own"
+        )
+        == 1
+    )

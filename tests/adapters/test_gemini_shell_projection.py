@@ -115,7 +115,7 @@ def _project_new_project_workflow_probe(target_dir: Path) -> str:
         "allowed-tools:\n"
         "  - shell\n"
         "---\n"
-        "@{GPD_INSTALL_DIR}/workflows/new-project.md\n"
+        "@{GPD_INSTALL_DIR}/workflows/new-project/scope-approval.md\n"
     )
     return project_markdown_for_runtime(
         source,
@@ -130,8 +130,8 @@ def _project_new_project_workflow_probe(target_dir: Path) -> str:
 
 
 def _new_project_contract_section(projected: str) -> str:
-    start_marker = "After approval, validate the contract before persisting it:"
-    end_marker = "#### M2. Create PROJECT.md"
+    start_marker = "After approval, validate the exact JSON:"
+    end_marker = "</validation_and_persistence>"
     start = projected.index(start_marker)
     end = projected.index(end_marker, start)
     return projected[start:end]

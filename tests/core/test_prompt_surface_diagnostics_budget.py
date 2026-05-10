@@ -21,7 +21,7 @@ PROMPT_KIND_BUDGETS = {
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_800, "chars": 185_000}
 MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET = 0
 MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET = 1
-ROOT_WORKFLOW_AUTHORITY_STAGE_BUDGET = 1
+ROOT_WORKFLOW_AUTHORITY_STAGE_BUDGET = 0
 ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
     {
         "arxiv-submission",
@@ -29,6 +29,7 @@ ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
         "literature-review",
         "map-research",
         "new-milestone",
+        "new-project",
         "peer-review",
         "plan-phase",
         "quick",

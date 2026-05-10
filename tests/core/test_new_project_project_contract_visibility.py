@@ -8,9 +8,12 @@ from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.assertion_taxonomy_support import FragmentMode, forbidden_duplicate, machine_exact, semantic_anchor
 from tests.markdown_test_support import extract_markdown_section
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-NEW_PROJECT = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "new-project.md"
+WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+NEW_PROJECT = WORKFLOWS_DIR / "new-project.md"
+NEW_PROJECT_STAGE_DIR = WORKFLOWS_DIR / "new-project"
 PROJECT_CONTRACT_SCHEMA = REPO_ROOT / "src" / "gpd" / "specs" / "templates" / "project-contract-schema.md"
 STATE_SCHEMA = REPO_ROOT / "src" / "gpd" / "specs" / "templates" / "state-json-schema.md"
 QUESTIONING = REPO_ROOT / "src" / "gpd" / "specs" / "references" / "research" / "questioning.md"
@@ -48,57 +51,53 @@ def _extract_contract_rule_block_lines(text: str, start_marker: str) -> tuple[st
 
 
 def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_contract_grounding() -> None:
-    new_project_text = NEW_PROJECT.read_text(encoding="utf-8")
+    new_project_text = workflow_authority_text(WORKFLOWS_DIR, "new-project")
+    scope_intake_text = (NEW_PROJECT_STAGE_DIR / "scope-intake.md").read_text(encoding="utf-8")
+    scope_approval_text = (NEW_PROJECT_STAGE_DIR / "scope-approval.md").read_text(encoding="utf-8")
     manifest = load_workflow_stage_manifest("new-project")
     scope_intake = manifest.stage("scope_intake")
-    post_scope = manifest.stage("post_scope")
+    literature_survey = manifest.stage("literature_survey")
+    roadmap_authoring = manifest.stage("roadmap_authoring")
 
     _assert_prompt_contracts(
-        new_project_text,
+        scope_approval_text,
         machine_exact(
             "canonical schema source remains visible",
             ("templates/project-contract-schema.md", "`project_contract`"),
             owner=PROJECT_CONTRACT_OWNER,
             rationale="new-project must author the object governed by the canonical schema path",
-            section=NEW_PROJECT_M15_SECTION,
         ),
         semantic_anchor(
             "approval authors a literal project_contract object",
             (
                 "literal JSON object",
                 "`project_contract` subsection",
-                "canonical source of truth",
-                "approval-critical reminders",
+                "Follow the schema exactly",
+                "near-miss enum values",
             ),
-            section=NEW_PROJECT_M15_SECTION,
         ),
         semantic_anchor(
             "approval preserves decisive user guidance",
             (
-                "decisive outputs",
+                "decisive output",
                 "anchors",
                 "prior outputs",
-                "review/stop triggers",
-                "generic placeholders",
+                "stop conditions",
+                "rethink triggers",
             ),
-            section=NEW_PROJECT_M15_SECTION,
         ),
         semantic_anchor(
             "raw approval gate contract follows canonical schema",
             (
-                "raw contract as a literal JSON object",
-                "not the surrounding `state.json` envelope",
-                "`project_contract` object rules",
-                "exact keys",
-                "enum values",
-                "list/object shapes",
-                "ID-linkage rules",
-                "proof-bearing claim requirements",
+                "invented\nkeys",
+                "no near-miss enum values",
+                "no scalar shortcuts",
+                "collapsed `context_intake`",
+                "`approach_policy`",
+                "`uncertainty_markers`",
                 "near-miss enum values",
                 "scalar shortcuts",
-                "fix them to the schema before approval",
             ),
-            section=NEW_PROJECT_M15_SECTION,
         ),
         machine_exact(
             "contract shape and boolean keys stay exact",
@@ -106,26 +105,9 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
                 "`context_intake`",
                 "`approach_policy`",
                 "`uncertainty_markers`",
-                "`schema_version`",
-                "`references[].must_surface`",
-                "`true`",
-                "`false`",
-                "references[]",
             ),
             owner=PROJECT_CONTRACT_OWNER,
             rationale="schema keys and JSON boolean values are machine contracts",
-            section=NEW_PROJECT_M15_SECTION,
-        ),
-        semantic_anchor(
-            "approval-state diagnostics are preserved",
-            (
-                "`project_contract_load_info`",
-                "`project_contract_validation`",
-                "preserve that state",
-                "approval gate",
-                "visible-but-blocked contract",
-            ),
-            section=NEW_PROJECT_M15_SECTION,
         ),
         semantic_anchor(
             "stale inlined schema prose stays absent",
@@ -137,16 +119,23 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
             mode=FragmentMode.ABSENT,
         ),
     )
+    _assert_prompt_contracts(
+        scope_intake_text,
+        semantic_anchor(
+            "approval-state diagnostics are preserved",
+            (
+                "`project_contract_load_info`",
+                "`project_contract_validation`",
+                "preserve that state",
+                "visible-but-blocked contract",
+            ),
+        ),
+    )
     assert "project_contract_load_info" in new_project_text
     assert "project_contract_validation" in new_project_text
 
-    assert "gpd --raw stage field-access new-project --stage scope_intake --style instruction" in new_project_text
-    assert "SCOPE_INIT.staged_loading.required_init_fields" in new_project_text
-    assert "Parse JSON for:" not in extract_markdown_section(
-        new_project_text,
-        "## 1. Setup",
-        context="new-project scope intake",
-    )
+    assert "staged_loading.required_init_fields" in new_project_text
+    assert "Parse JSON for:" not in scope_intake_text
     assert tuple(
         field
         for field in (
@@ -177,8 +166,9 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
     ) == ()
     assert "researcher_model" not in scope_intake.required_init_fields
     assert "synthesizer_model" not in scope_intake.required_init_fields
-    for field in ("researcher_model", "synthesizer_model", "roadmapper_model"):
-        assert field in post_scope.required_init_fields
+    assert "researcher_model" in literature_survey.required_init_fields
+    assert "synthesizer_model" in literature_survey.required_init_fields
+    assert "roadmapper_model" in roadmap_authoring.required_init_fields
     for field in (
         "{researcher_model}",
         "{synthesizer_model}",
@@ -186,10 +176,13 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
     ):
         assert field in new_project_text
     machine_exact(
-        "post-scope init command stays exact",
-        "POST_SCOPE_INIT=$(gpd --raw init new-project --stage post_scope)",
+        "post-approval init commands stay exact",
+        (
+            "MINIMAL_ARTIFACTS_INIT=$(gpd --raw init new-project --stage minimal_artifacts)",
+            "WORKFLOW_PREFS_INIT=$(gpd --raw init new-project --stage workflow_preferences)",
+        ),
         owner=PROJECT_CONTRACT_OWNER,
-        rationale="late model selection uses this exact raw init command",
+        rationale="late stage selection uses exact raw init commands",
     ).check(new_project_text)
     semantic_anchor(
         "stale continuation wording stays absent",
@@ -200,47 +193,43 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
 
 
 def test_new_project_contract_rule_block_is_not_duplicated() -> None:
-    new_project_text = NEW_PROJECT.read_text(encoding="utf-8")
-    show_block = _extract_contract_rule_block_lines(
-        new_project_text,
-        "Before you show the approval gate, build the raw contract as a literal JSON object for the `project_contract` subsection of `templates/project-contract-schema.md`:",
-    )
+    scope_approval_text = (NEW_PROJECT_STAGE_DIR / "scope-approval.md").read_text(encoding="utf-8")
+    project_artifacts_text = (NEW_PROJECT_STAGE_DIR / "project-artifacts.md").read_text(encoding="utf-8")
+    contract_schema_text = _expanded(PROJECT_CONTRACT_SCHEMA)
 
     _assert_prompt_contracts(
-        new_project_text,
+        scope_approval_text,
         forbidden_duplicate(
             "raw approval contract rule appears once",
-            "Before you show the approval gate, build the raw contract as a literal JSON object",
+            "Build a literal JSON object for the `project_contract` subsection",
         ),
         forbidden_duplicate(
             "pre-approval literal contract reminder appears once",
-            "Before you ask for approval, keep the contract as a literal JSON object",
+            "literal JSON object",
         ),
+    )
+    _assert_prompt_contracts(
+        project_artifacts_text,
         semantic_anchor(
-            "step 4 delegates to the M1.5 scoping-contract procedure",
+            "project artifacts consume the approved contract without redefining approval",
             (
-                "Use the scoping-contract procedure from Step M1.5",
-                "same blocking fields",
-                "preservation rules",
-                "schema discipline",
-                "approval options",
-                "validation command",
-                "`gpd state set-project-contract -`",
-                "Do not define a second scoping-contract variant here.",
+                "does not author, approve, validate, or persist the scoping contract",
+                "already persisted `project_contract`",
+                "source of truth",
             ),
-            section=NEW_PROJECT_STEP4_SECTION,
         ),
         machine_exact(
-            "step 4 does not revive stale approval-card fields",
+            "project artifacts do not revive stale approval-card fields",
             ("`scope.question`", "`context_intake.must_read_refs`", 'header: "Scope"'),
             owner=PROJECT_CONTRACT_OWNER,
             rationale="stale schema/card fragments would create a second contract variant",
             mode=FragmentMode.ABSENT,
-            section=NEW_PROJECT_STEP4_SECTION,
         ),
     )
-    assert any("context_intake" in line and "uncertainty_markers" in line for line in show_block)
-    assert any("schema_version" in line and "must_surface" in line for line in show_block)
+    assert "context_intake" in scope_approval_text
+    assert "uncertainty_markers" in scope_approval_text
+    assert "`schema_version` must be the integer `1`." in contract_schema_text
+    assert "`must_surface` is a boolean scalar." in contract_schema_text
 
 
 def test_project_contract_schema_slice_keeps_contract_critical_rules_visible() -> None:
@@ -408,30 +397,25 @@ def test_state_schema_surfaces_the_exact_approved_mode_grounding_rule() -> None:
 
 
 def test_new_project_and_questioning_gate_do_not_treat_missing_anchor_notes_as_approval_ready_grounding() -> None:
-    new_project_text = NEW_PROJECT.read_text(encoding="utf-8")
+    scope_approval_text = (NEW_PROJECT_STAGE_DIR / "scope-approval.md").read_text(encoding="utf-8")
     questioning_text = QUESTIONING.read_text(encoding="utf-8")
 
     _assert_prompt_contracts(
-        new_project_text,
+        scope_approval_text,
         semantic_anchor(
             "new-project approval waits for real grounding",
             (
-                "At least one concrete anchor, reference, prior-output constraint, or baseline",
-                "decisive anchor is still unknown",
-                "keep that blocker explicit",
-                "Missing-anchor notes preserve uncertainty",
-                "do not satisfy approval on their own",
-                "Do not offer approval",
-                "must ground approval or be carried forward",
+                "at least one concrete anchor, reference, prior-output constraint, or baseline",
+                "explicit missing-anchor uncertainty",
+                "Approval is blocked",
+                "Do not invent anchors",
             ),
-            section=NEW_PROJECT_M15_SECTION,
         ),
         machine_exact(
             "approved-mode validation command remains visible",
             "gpd --raw validate project-contract - --mode approved",
             owner=PROJECT_CONTRACT_OWNER,
             rationale="scope approval must call the approved-mode validator exactly",
-            section=NEW_PROJECT_M15_SECTION,
         ),
     )
     _assert_prompt_contracts(

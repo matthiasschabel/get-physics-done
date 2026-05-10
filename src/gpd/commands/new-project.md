@@ -49,17 +49,22 @@ Start from the included `scope_intake` authority. It owns read-only setup,
 recovery routing, existing-work routing, and the first narrow scope/anchor
 question.
 
-After each staged reload, follow `staged_loading.eager_authorities` for the active
-stage and do not read `staged_loading.must_not_eager_load`. Load later authorities
-only when the staged payload reaches the matching stage:
-- Load `references/research/questioning.md` only when entering the full questioning path.
-- Load `templates/project-contract-schema.md` and `templates/project-contract-grounding-linkage.md` only when preparing the approval gate and validating the raw scoping contract.
-- Load `references/shared/canonical-schema-discipline.md` only when authoring or repairing the scoping contract.
-- Load `workflows/new-project.md` only after `scope_approval` hands off to `post_scope`.
+After each reload, follow the active stage's `staged_loading.eager_authorities`
+and never read `staged_loading.must_not_eager_load`. Load later authorities only
+when the staged payload reaches them:
+- `references/research/questioning.md` only for the full questioning path.
+- Load `templates/project-contract-schema.md` and
+  `templates/project-contract-grounding-linkage.md` only for approval,
+  validation, and repair.
+- Load `references/shared/canonical-schema-discipline.md` only for contract
+  authoring or repair.
+- After `scope_approval`, reload `minimal_artifacts` for `--minimal` and
+  `workflow_preferences` for full/`--auto`.
+- Never load `workflows/new-project.md` as authority; it is an index.
 - Load `templates/project.md` only when writing `GPD/PROJECT.md`.
 - Load `templates/requirements.md` only when writing `GPD/REQUIREMENTS.md`.
 - Load `templates/state.md` only when writing `GPD/STATE.md`.
-- Load `references/ui/ui-brand.md` only when rendering branded completion or status blocks.
+- Load `references/ui/ui-brand.md` only for branded completion/status blocks.
 
 Execute the workflow end-to-end. Preserve all workflow gates (validation, approvals, routing).
 

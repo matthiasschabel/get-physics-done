@@ -1214,15 +1214,21 @@ class TestInstall:
 
         expected_bridge = expected_gemini_bridge(target)
         command = (target / "commands" / "gpd" / "new-project.toml").read_text(encoding="utf-8")
-        workflow = (target / "get-physics-done" / "workflows" / "new-project.md").read_text(encoding="utf-8")
+        workflow_root = target / "get-physics-done" / "workflows"
+        workflow = (workflow_root / "new-project.md").read_text(encoding="utf-8")
+        split_workflow = "\n\n".join(
+            path.read_text(encoding="utf-8") for path in sorted((workflow_root / "new-project").glob("*.md"))
+        )
+        workflow_authority = f"{workflow}\n\n{split_workflow}"
         state_schema = (target / "get-physics-done" / "templates" / "state-json-schema.md").read_text(encoding="utf-8")
 
         assert f"Runtime bridge for runnable shell GPD CLI calls: {expected_bridge}" in command
         assert "INIT=$(gpd --raw init new-project)" not in workflow
         assert f"INIT=$({expected_bridge} --raw init new-project)" not in workflow
-        assert f"{expected_bridge} --raw init new-project" in workflow
-        assert "commit them with message" in workflow
-        assert ' gpd commit "' not in workflow
+        assert f"{expected_bridge} --raw init new-project" in workflow_authority
+        assert "docs: initialize research project" in workflow_authority
+        assert "docs: literature survey complete" in workflow_authority
+        assert ' gpd commit "' not in workflow_authority
         if COMPACT_STAGED_COMMAND_SHIM_SENTINEL in command:
             assert f"{expected_bridge} --raw init new-project --stage scope_intake" in command
             assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in command
@@ -1232,11 +1238,11 @@ class TestInstall:
             assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in command
         assert "PROJECT_CONTRACT_JSON" not in command
         assert "printf '%s\\n'" not in command
-        assert "PROJECT_CONTRACT_JSON" not in workflow
+        assert "PROJECT_CONTRACT_JSON" not in workflow_authority
         assert "PROJECT_CONTRACT_JSON" not in state_schema
-        assert "PRE_CHECK=$(" not in workflow
-        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow
-        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow
+        assert "PRE_CHECK=$(" not in workflow_authority
+        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow_authority
+        assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow_authority
         assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema
         assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema
 

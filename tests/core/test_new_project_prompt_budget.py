@@ -42,8 +42,9 @@ def test_new_project_prompt_surface_uses_first_stage_authority_boundary() -> Non
     assert start.raw_include_count > 0
     assert new_project.expanded_line_count < start.expanded_line_count
     assert new_project.expanded_char_count < start.expanded_char_count
-    assert new_project.expanded_line_count < workflow.expanded_line_count * 0.25
-    assert new_project.expanded_char_count < workflow.expanded_char_count * 0.25
+    assert workflow.raw_include_count == 1
+    assert workflow.expanded_line_count < 80
+    assert workflow.expanded_char_count < 5_000
     assert new_project.raw_include_count == 1
     assert new_project.first_question_line is not None
     assert new_project.first_question_marker == MINIMAL_QUESTION
@@ -102,6 +103,56 @@ def test_new_project_scope_intake_stage_surface_cannot_see_post_scope_machinery(
         "references/ui/ui-brand.md",
         "GPD/literature",
         "GPD/CONVENTIONS.md",
+    ):
+        assert forbidden not in stage_surface
+
+
+def test_new_project_minimal_artifacts_stage_surface_excludes_deferred_full_machinery() -> None:
+    stage = _new_project_stage("minimal_artifacts")
+    stage_surface = _expanded_stage_surface(stage)
+
+    assert stage["mode_paths"] == ["workflows/new-project/minimal-artifacts.md"]
+    assert stage["loaded_authorities"] == ["workflows/new-project/minimal-artifacts.md"]
+    assert "researcher_model" not in stage["required_init_fields"]
+    assert "synthesizer_model" not in stage["required_init_fields"]
+    assert "roadmapper_model" not in stage["required_init_fields"]
+
+    core_outputs = {
+        "GPD/PROJECT.md",
+        "GPD/config.json",
+        "GPD/REQUIREMENTS.md",
+        "GPD/ROADMAP.md",
+        "GPD/STATE.md",
+        "GPD/state.json",
+    }
+    assert core_outputs <= set(stage["writes_allowed"])
+    assert "docs: initialize research project (minimal)" in stage_surface
+    assert "MINIMAL_ARTIFACTS_INIT=$(gpd --raw init new-project --stage minimal_artifacts)" in stage_surface
+    assert "Do not delegate this file to a later roadmap authority in minimal mode." in stage_surface
+
+    forbidden_authorities = {
+        "workflows/new-project.md",
+        "workflows/new-project/literature-survey.md",
+        "workflows/new-project/roadmap-authoring.md",
+        "workflows/new-project/conventions-handoff.md",
+        "references/ui/ui-brand.md",
+    }
+    assert forbidden_authorities.isdisjoint(stage["mode_paths"])
+    assert forbidden_authorities.isdisjoint(stage["loaded_authorities"])
+
+    for forbidden in (
+        ">>> Spawning 4 literature scouts",
+        "gpd-project-researcher",
+        "gpd-research-synthesizer",
+        "gpd-roadmapper",
+        "gpd-notation-coordinator",
+        "literature survey",
+        "GPD/literature",
+        "GPD/CONVENTIONS.md",
+        "workflows/new-project/literature-survey.md",
+        "workflows/new-project/roadmap-authoring.md",
+        "workflows/new-project/conventions-handoff.md",
+        "references/ui/ui-brand.md",
     ):
         assert forbidden not in stage_surface
 

@@ -43,7 +43,15 @@ EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
         "aggregate_and_verify",
         "closeout",
     ),
-    "new-project": ("scope_intake", "scope_approval", "post_scope"),
+    "new-project": (
+        "minimal_artifacts",
+        "project_artifacts",
+        "literature_survey",
+        "requirements_authoring",
+        "roadmap_authoring",
+        "conventions_handoff",
+        "completion",
+    ),
     "write-paper": (
         "paper_bootstrap",
         "outline_and_scaffold",

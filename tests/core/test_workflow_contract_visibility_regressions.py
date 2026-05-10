@@ -51,7 +51,7 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
         ("execute-plan.md", "Extract from init JSON:", "project_contract_gate"),
         ("compare-experiment.md", "Parse JSON for:", "project_contract_gate"),
         ("compare-results.md", "Parse JSON for:", "project_contract_gate"),
-        ("new-project.md", "Treat `project_contract` as approved scope only when", "project_contract_gate"),
+        ("new-project.md", "If `project_contract_gate.authoritative` is false", "project_contract_gate"),
         ("progress.md", "Extract from init JSON:", "project_contract_gate"),
         ("audit-milestone.md", "Extract from init JSON:", "project_contract_gate"),
         ("resume-work.md", "- **Availability and contract authority:**", "project_contract_gate"),

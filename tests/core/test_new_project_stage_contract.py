@@ -10,10 +10,24 @@ import yaml
 
 from gpd.core.child_handoff import ChildGateTuple, child_gate_tuple_from_payload
 from tests import new_project_stage_contract_support as stage_contract_module
+from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NEW_PROJECT_COMMAND_PATH = REPO_ROOT / "src" / "gpd" / "commands" / "new-project.md"
 NEW_PROJECT_WORKFLOW_PATH = REPO_ROOT / "src" / "gpd" / "specs" / "workflows" / "new-project.md"
+WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+EXPECTED_STAGE_IDS = (
+    "scope_intake",
+    "scope_approval",
+    "minimal_artifacts",
+    "workflow_preferences",
+    "project_artifacts",
+    "literature_survey",
+    "requirements_authoring",
+    "roadmap_authoring",
+    "conventions_handoff",
+    "completion",
+)
 
 
 def _read_new_project_command() -> str:
@@ -22,6 +36,14 @@ def _read_new_project_command() -> str:
 
 def _read_new_project_workflow() -> str:
     return NEW_PROJECT_WORKFLOW_PATH.read_text(encoding="utf-8")
+
+
+def _read_new_project_authority() -> str:
+    return workflow_authority_text(WORKFLOWS_DIR, "new-project")
+
+
+def _read_stage_authority(stage_file: str) -> str:
+    return (WORKFLOWS_DIR / "new-project" / stage_file).read_text(encoding="utf-8")
 
 
 def _tagged_block(text: str, tag: str) -> str:
@@ -63,13 +85,31 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
 
     assert contract.schema_version == 1
     assert contract.workflow_id == "new-project"
-    assert contract.stage_ids() == ("scope_intake", "scope_approval", "post_scope")
-    assert contract.stages[0].order == 1
-    assert contract.stages[1].order == 2
-    assert contract.stages[2].order == 3
-    assert contract.stages[0].mode_paths == ("workflows/new-project/scope-intake.md",)
-    assert contract.stages[0].loaded_authorities == ("workflows/new-project/scope-intake.md",)
-    assert contract.stages[0].required_init_fields == (
+    assert contract.stage_ids() == EXPECTED_STAGE_IDS
+    assert tuple(stage.order for stage in contract.stages) == tuple(range(1, len(EXPECTED_STAGE_IDS) + 1))
+
+    root_authority = "workflows/new-project.md"
+    for stage in contract.stages:
+        assert root_authority not in stage.mode_paths
+        assert root_authority not in stage.loaded_authorities
+        assert all(
+            path.startswith("workflows/new-project/") for path in stage.mode_paths
+        ), f"{stage.id} must use split stage authority files"
+
+    scope_intake = contract.stage("scope_intake")
+    scope_approval = contract.stage("scope_approval")
+    minimal_artifacts = contract.stage("minimal_artifacts")
+    workflow_preferences = contract.stage("workflow_preferences")
+    project_artifacts = contract.stage("project_artifacts")
+    literature_survey = contract.stage("literature_survey")
+    requirements_authoring = contract.stage("requirements_authoring")
+    roadmap_authoring = contract.stage("roadmap_authoring")
+    conventions_handoff = contract.stage("conventions_handoff")
+    completion = contract.stage("completion")
+
+    assert scope_intake.mode_paths == ("workflows/new-project/scope-intake.md",)
+    assert scope_intake.loaded_authorities == ("workflows/new-project/scope-intake.md",)
+    assert scope_intake.required_init_fields == (
         "commit_docs",
         "autonomy",
         "research_mode",
@@ -99,115 +139,169 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
         "project_contract_load_info",
         "project_contract_validation",
     )
-    assert "researcher_model" not in contract.stages[0].required_init_fields
-    assert "synthesizer_model" not in contract.stages[0].required_init_fields
-    assert "roadmapper_model" not in contract.stages[0].required_init_fields
-    assert "project_contract_gate" in contract.stages[0].required_init_fields
-    assert "needs_research_map" in contract.stages[0].required_init_fields
-    assert "init_progress_status" in contract.stages[0].required_init_fields
-    assert contract.stages[0].conditional_authorities[0].when == "full_questioning_path"
-    assert contract.stages[0].conditional_authorities[0].authorities == ("references/research/questioning.md",)
-    assert "workflows/new-project.md" in contract.stages[0].must_not_eager_load
-    assert "workflows/new-project/scope-approval.md" in contract.stages[0].must_not_eager_load
-    assert "references/research/questioning.md" in contract.stages[0].must_not_eager_load
-    assert "references/shared/canonical-schema-discipline.md" in contract.stages[0].must_not_eager_load
-    assert "templates/state.md" in contract.stages[0].must_not_eager_load
-    assert "templates/project-contract-schema.md" in contract.stages[0].must_not_eager_load
-    assert "templates/project-contract-grounding-linkage.md" in contract.stages[0].must_not_eager_load
-    assert contract.stages[0].allowed_tools == ("file_read", "ask_user", "shell")
-    assert contract.stages[0].produced_state == ("intake routing state", "scoping-contract gate state")
-    assert contract.stages[0].checkpoints == (
+    assert "researcher_model" not in scope_intake.required_init_fields
+    assert "synthesizer_model" not in scope_intake.required_init_fields
+    assert "roadmapper_model" not in scope_intake.required_init_fields
+    assert "project_contract_gate" in scope_intake.required_init_fields
+    assert "needs_research_map" in scope_intake.required_init_fields
+    assert "init_progress_status" in scope_intake.required_init_fields
+    assert scope_intake.conditional_authorities[0].when == "full_questioning_path"
+    assert scope_intake.conditional_authorities[0].authorities == ("references/research/questioning.md",)
+    assert "workflows/new-project/scope-approval.md" in scope_intake.must_not_eager_load
+    assert "references/research/questioning.md" in scope_intake.must_not_eager_load
+    assert "references/shared/canonical-schema-discipline.md" in scope_intake.must_not_eager_load
+    assert "templates/state.md" in scope_intake.must_not_eager_load
+    assert "templates/project-contract-schema.md" in scope_intake.must_not_eager_load
+    assert "templates/project-contract-grounding-linkage.md" in scope_intake.must_not_eager_load
+    assert scope_intake.allowed_tools == ("file_read", "ask_user", "shell")
+    assert scope_intake.produced_state == ("intake routing state", "scoping-contract gate state")
+    assert scope_intake.checkpoints == (
         "detect existing workspace state",
         "surface the first scoping question",
         "preserve contract gate visibility without assuming approval-stage authority",
     )
-    assert contract.stages[0].writes_allowed == ()
-    assert contract.stages[1].required_init_fields == (
+    assert scope_intake.writes_allowed == ()
+    assert scope_intake.next_stages == ("scope_approval",)
+
+    assert scope_approval.required_init_fields == (
         "project_contract",
         "project_contract_gate",
         "project_contract_load_info",
         "project_contract_validation",
     )
-    assert contract.stages[1].mode_paths == ("workflows/new-project/scope-approval.md",)
-    assert contract.stages[1].loaded_authorities == (
+    assert scope_approval.mode_paths == ("workflows/new-project/scope-approval.md",)
+    assert scope_approval.loaded_authorities == (
         "workflows/new-project/scope-approval.md",
         "templates/project-contract-schema.md",
         "templates/project-contract-grounding-linkage.md",
         "references/shared/canonical-schema-discipline.md",
     )
-    assert contract.stages[1].conditional_authorities == ()
-    assert contract.stages[1].produced_state == ("approved project contract", "approval-state persistence")
-    assert contract.stages[1].checkpoints == (
+    assert scope_approval.conditional_authorities == ()
+    assert scope_approval.produced_state == ("approved project contract", "approval-state persistence")
+    assert scope_approval.checkpoints == (
         "approval gate has passed",
         "project contract is ready for persistence",
     )
-    assert contract.stages[1].writes_allowed == (
+    assert scope_approval.writes_allowed == (
         "GPD/state.json",
         "GPD/STATE.md",
         "GPD/state.json.bak",
         "GPD/state.json.lock",
     )
-    assert contract.stages[2].required_init_fields == (
-        "researcher_model",
-        "synthesizer_model",
-        "roadmapper_model",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-    )
-    assert contract.stages[2].loaded_authorities == (
-        "references/ui/ui-brand.md",
-        "templates/project.md",
-        "templates/requirements.md",
-        "templates/state.md",
-    )
-    assert contract.stages[2].conditional_authorities == ()
-    assert contract.stages[2].writes_allowed == (
+    assert scope_approval.next_stages == ("minimal_artifacts", "workflow_preferences")
+
+    assert minimal_artifacts.loaded_authorities == ("workflows/new-project/minimal-artifacts.md",)
+    assert minimal_artifacts.writes_allowed == (
         "GPD/PROJECT.md",
+        "GPD/config.json",
         "GPD/REQUIREMENTS.md",
         "GPD/ROADMAP.md",
         "GPD/STATE.md",
         "GPD/state.json",
         "GPD/state.json.bak",
         "GPD/state.json.lock",
-        "GPD/config.json",
-        "GPD/CONVENTIONS.md",
+    )
+    assert "workflows/new-project/literature-survey.md" in minimal_artifacts.must_not_eager_load
+    assert "workflows/new-project/roadmap-authoring.md" in minimal_artifacts.must_not_eager_load
+    assert "workflows/new-project/conventions-handoff.md" in minimal_artifacts.must_not_eager_load
+    assert "GPD/literature/SUMMARY.md" not in minimal_artifacts.writes_allowed
+    assert "GPD/CONVENTIONS.md" not in minimal_artifacts.writes_allowed
+    assert minimal_artifacts.next_stages == ("completion",)
+
+    assert workflow_preferences.loaded_authorities == ("workflows/new-project/workflow-preferences.md",)
+    assert workflow_preferences.writes_allowed == ("GPD/config.json",)
+    assert "workflows/new-project/roadmap-authoring.md" in workflow_preferences.must_not_eager_load
+    assert "workflows/new-project/conventions-handoff.md" in workflow_preferences.must_not_eager_load
+    assert workflow_preferences.next_stages == ("project_artifacts",)
+
+    assert project_artifacts.loaded_authorities == ("workflows/new-project/project-artifacts.md",)
+    assert project_artifacts.writes_allowed == (
+        "GPD/PROJECT.md",
+        "GPD/state.json",
+        "GPD/state.json.bak",
+        "GPD/state.json.lock",
         "GPD/init-progress.json",
+    )
+    assert "workflows/new-project/roadmap-authoring.md" in project_artifacts.must_not_eager_load
+    assert "workflows/new-project/conventions-handoff.md" in project_artifacts.must_not_eager_load
+    assert project_artifacts.next_stages == ("literature_survey",)
+
+    assert literature_survey.loaded_authorities == ("workflows/new-project/literature-survey.md",)
+    assert "researcher_model" in literature_survey.required_init_fields
+    assert "synthesizer_model" in literature_survey.required_init_fields
+    assert "roadmapper_model" not in literature_survey.required_init_fields
+    assert literature_survey.writes_allowed == (
         "GPD/literature/PRIOR-WORK.md",
         "GPD/literature/METHODS.md",
         "GPD/literature/COMPUTATIONAL.md",
         "GPD/literature/PITFALLS.md",
         "GPD/literature/SUMMARY.md",
+        "GPD/init-progress.json",
     )
-    assert "references/research/questioning.md" not in contract.stages[2].loaded_authorities
-    assert contract.stages[2].produced_state == (
-        "project artifacts",
-        "workflow preferences",
-        "downstream stage handoff",
+    assert "workflows/new-project/roadmap-authoring.md" in literature_survey.must_not_eager_load
+    assert "workflows/new-project/conventions-handoff.md" in literature_survey.must_not_eager_load
+    assert literature_survey.next_stages == ("requirements_authoring",)
+
+    assert requirements_authoring.loaded_authorities == ("workflows/new-project/requirements-authoring.md",)
+    assert requirements_authoring.writes_allowed == ("GPD/REQUIREMENTS.md", "GPD/init-progress.json")
+    assert "roadmapper_model" not in requirements_authoring.required_init_fields
+    assert "workflows/new-project/roadmap-authoring.md" in requirements_authoring.must_not_eager_load
+    assert "workflows/new-project/conventions-handoff.md" in requirements_authoring.must_not_eager_load
+    assert requirements_authoring.next_stages == ("roadmap_authoring",)
+
+    assert roadmap_authoring.loaded_authorities == ("workflows/new-project/roadmap-authoring.md",)
+    assert "roadmapper_model" in roadmap_authoring.required_init_fields
+    assert roadmap_authoring.writes_allowed == (
+        "GPD/ROADMAP.md",
+        "GPD/STATE.md",
+        "GPD/state.json",
+        "GPD/state.json.bak",
+        "GPD/state.json.lock",
+        "GPD/init-progress.json",
     )
-    assert contract.stages[2].checkpoints == (
-        "approval gate has passed",
-        "stage-aware deferred reads are now allowed",
+    assert "workflows/new-project/conventions-handoff.md" in roadmap_authoring.must_not_eager_load
+    assert roadmap_authoring.next_stages == ("conventions_handoff",)
+
+    assert conventions_handoff.loaded_authorities == ("workflows/new-project/conventions-handoff.md",)
+    assert "notation_model" not in conventions_handoff.required_init_fields
+    assert conventions_handoff.writes_allowed == (
+        "GPD/CONVENTIONS.md",
+        "GPD/state.json",
+        "GPD/state.json.bak",
+        "GPD/state.json.lock",
+        "GPD/init-progress.json",
     )
+    assert conventions_handoff.next_stages == ("completion",)
+
+    assert completion.loaded_authorities == ("workflows/new-project/completion.md",)
+    assert completion.writes_allowed == ("GPD/init-progress.json",)
+    assert completion.next_stages == ()
 
 
-def test_new_project_post_scope_loads_templates_for_every_template_written_artifact() -> None:
+def test_new_project_split_stages_load_templates_at_write_boundaries() -> None:
     contract = stage_contract_module.load_new_project_stage_contract()
-    post_scope = contract.stages[2]
     command_text = _read_new_project_command()
-    required_template_by_output = {
+    minimal = contract.stage("minimal_artifacts")
+    project_artifacts = contract.stage("project_artifacts")
+    requirements = contract.stage("requirements_authoring")
+
+    assert "GPD/PROJECT.md" in minimal.writes_allowed
+    assert "GPD/STATE.md" in minimal.writes_allowed
+    minimal_text = _read_stage_authority("minimal-artifacts.md")
+    assert "templates/project.md" in minimal_text
+    assert "templates/state.md" in minimal_text
+
+    assert "GPD/PROJECT.md" in project_artifacts.writes_allowed
+    assert "templates/project.md" in _read_stage_authority("project-artifacts.md")
+
+    assert "GPD/REQUIREMENTS.md" in requirements.writes_allowed
+    assert "templates/requirements.md" in _read_stage_authority("requirements-authoring.md")
+
+    for output_path, template_path in {
         "GPD/PROJECT.md": "templates/project.md",
         "GPD/REQUIREMENTS.md": "templates/requirements.md",
         "GPD/STATE.md": "templates/state.md",
-    }
-
-    for output_path, template_path in required_template_by_output.items():
-        assert output_path in post_scope.writes_allowed
-        assert template_path in post_scope.loaded_authorities
+    }.items():
         assert f"Load `{template_path}` only when writing `{output_path}`." in command_text
 
 
@@ -227,51 +321,44 @@ def test_new_project_command_mentions_approval_time_grounding_linkage() -> None:
 
 def test_new_project_defines_auto_minimal_conflict_as_prewrite_gate() -> None:
     command_text = _read_new_project_command()
-    workflow_text = _read_new_project_workflow()
+    scope_intake = _read_stage_authority("scope-intake.md")
 
     expected_error = "Error: --auto and --minimal cannot be combined."
     assert expected_error in command_text
-    assert expected_error in workflow_text
     assert "This conflict stop happens before git initialization" in command_text
-    assert "Do not initialize git, create `GPD/`, write state" in workflow_text
-    assert workflow_text.index(expected_error) < workflow_text.index("## 1. Setup")
+    assert "Do not initialize git, create `GPD/`, write state" in scope_intake
+    assert "writes_allowed" not in scope_intake
 
 
 def test_new_project_recovery_gate_precedes_generic_project_hard_stops() -> None:
-    workflow_text = _read_new_project_workflow()
+    workflow_text = _read_stage_authority("scope-intake.md")
 
-    progress_gate = workflow_text.index(
-        "**Check for previous initialization attempt before generic project/recovery hard-stops:**"
-    )
-    project_stop = workflow_text.index("**If `project_exists` is true:**")
-    recoverable_stop = workflow_text.index("**If `recoverable_project_exists` is true")
+    progress_gate = workflow_text.index("<recovery_routing>")
+    project_stop = workflow_text.index("`project_exists=true`")
+    recoverable_stop = workflow_text.index("`recoverable_project_exists=true`")
 
     assert progress_gate < project_stop
     assert progress_gate < recoverable_stop
-    assert (
-        "Use the structured setup fields from `SCOPE_INIT`; do not manually parse `GPD/init-progress.json`"
-        in workflow_text
-    )
+    assert "Use the structured setup fields from `SCOPE_INIT`; do not manually parse" in workflow_text
+    assert "`GPD/init-progress.json`" in workflow_text
     assert 'init_progress_status="interrupted_init_progress"' in workflow_text
-    assert "{init_progress_step}: {init_progress_description}" in workflow_text
-    assert "Do not delete it automatically" in workflow_text
-    assert "If start fresh: delete `init-progress.json` only after the user explicitly chooses" in workflow_text
+    assert "Delete\n  `GPD/init-progress.json` only after an explicit start-fresh choice." in workflow_text
     assert "cat GPD/init-progress.json" not in workflow_text
 
 
 def test_new_project_minimal_roadmap_contract_is_direct_not_staged_handoff() -> None:
-    workflow_text = _read_new_project_workflow()
+    workflow_text = _read_stage_authority("minimal-artifacts.md")
     minimal_m4 = workflow_text[
-        workflow_text.index("#### M4. Create ROADMAP.md") : workflow_text.index("#### M5. Create STATE.md")
+        workflow_text.index("## M4. Create ROADMAP.md") : workflow_text.index("## M5. Create STATE.md")
     ]
 
-    assert "For minimal bootstrap only, write a lightweight local `GPD/ROADMAP.md` directly" in minimal_m4
-    assert "Do not claim or invoke the staged post-scope roadmapping handoff in the minimal path" in minimal_m4
-    assert "Route `GPD/ROADMAP.md` through the staged post-scope roadmapping handoff" not in minimal_m4
+    assert "Write a lightweight local `GPD/ROADMAP.md` directly from the approved contract." in minimal_m4
+    assert "Do not delegate this file to a later roadmap authority in minimal mode." in minimal_m4
+    assert "gpd-roadmapper" not in workflow_text
 
 
 def test_new_project_post_scope_child_gates_preserve_artifact_contracts() -> None:
-    workflow_text = _read_new_project_workflow()
+    workflow_text = _read_new_project_authority()
     scouts = _child_gate(workflow_text, "literature_scouts")
     synthesizer = _child_gate(workflow_text, "literature_synthesizer")
     roadmapper = _child_gate(workflow_text, "project_roadmapper")
@@ -304,24 +391,24 @@ def test_new_project_post_scope_child_gates_preserve_artifact_contracts() -> Non
 
 
 def test_new_project_defers_git_until_first_mutation_gate() -> None:
-    workflow_text = _read_new_project_workflow()
+    command_text = _read_new_project_command()
+    scope_intake = _read_stage_authority("scope-intake.md")
+    scope_approval = _read_stage_authority("scope-approval.md")
+    minimal = _read_stage_authority("minimal-artifacts.md")
+    project_artifacts = _read_stage_authority("project-artifacts.md")
 
-    setup_start = workflow_text.index("## 1. Setup")
-    existing_work_start = workflow_text.index("## 2. Existing Work Offer")
-    first_mutation_gate = workflow_text.index("Before persistence, cross the **First Mutation Gate**")
-    git_init = workflow_text.index("```bash\ngit init\n```")
-    state_persistence = workflow_text.index("gpd state set-project-contract -")
-    minimal_parse_failure = workflow_text.index("Error: Could not extract research context from the provided file.")
-    auto_doc_failure = workflow_text.index("Error: --auto requires a research document via @ reference.")
-
-    assert "```bash\ngit init\n```" not in workflow_text[setup_start:existing_work_start]
-    assert auto_doc_failure < git_init
-    assert minimal_parse_failure < git_init
-    assert first_mutation_gate < git_init < state_persistence
+    assert "This conflict stop happens before git initialization" in command_text
+    assert "Do not initialize git in Setup." in command_text
+    assert "Do not initialize git, create `GPD/`, write state" in scope_intake
+    assert "git init" not in scope_intake
+    assert "git init" not in scope_approval
+    assert "gpd state set-project-contract -" in scope_approval
+    assert "If `has_git` is false, initialize git before the commit" in minimal
+    assert "If `has_git` is false, initialize git before the commit" in project_artifacts
 
 
 def test_new_project_notation_contracts_split_checkpoint_from_artifact_write() -> None:
-    workflow_text = _read_new_project_workflow()
+    workflow_text = _read_stage_authority("conventions-handoff.md")
     auto_contract = next(
         block for block in _tagged_blocks(workflow_text, "spawn_contract") if "GPD/CONVENTIONS.md" in block
     )
@@ -332,18 +419,19 @@ def test_new_project_notation_contracts_split_checkpoint_from_artifact_write() -
     assert "status: checkpoint" in interactive_contract
     assert "GPD/CONVENTIONS.md" not in interactive_contract
     assert "CHECKPOINT REACHED" not in workflow_text
-    assert "gpd_return.status: checkpoint" in workflow_text
+    assert "Return `status: checkpoint`" in workflow_text
 
 
 def test_new_project_notation_spawn_model_and_recovery_contract_are_conditional() -> None:
-    workflow_text = _read_new_project_workflow()
+    workflow_text = _read_stage_authority("conventions-handoff.md")
 
     assert 'model="{NOTATION_MODEL}"' not in workflow_text
     assert 'model="$NOTATION_MODEL"' in workflow_text
     assert 'task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", readonly=false' in workflow_text
     assert "write the returned content in the main context" not in workflow_text
     assert "re-execute the convention-establishment task in the main context" not in workflow_text
-    assert "spawn one fresh `gpd-notation-coordinator` continuation" in workflow_text
+    assert "spawn one fresh `gpd-notation-coordinator`" in workflow_text
+    assert "continuation that writes `GPD/CONVENTIONS.md`" in workflow_text
     assert "fail closed" in workflow_text
 
 

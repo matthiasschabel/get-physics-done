@@ -2817,7 +2817,18 @@ class TestPublicAPI:
 
         assert cmd.staged_loading is not None
         assert cmd.staged_loading.workflow_id == "new-project"
-        assert cmd.staged_loading.stage_ids() == ("scope_intake", "scope_approval", "post_scope")
+        assert cmd.staged_loading.stage_ids() == (
+            "scope_intake",
+            "scope_approval",
+            "minimal_artifacts",
+            "workflow_preferences",
+            "project_artifacts",
+            "literature_survey",
+            "requirements_authoring",
+            "roadmap_authoring",
+            "conventions_handoff",
+            "completion",
+        )
         assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/new-project/scope-intake.md",)
         assert "researcher_model" not in cmd.staged_loading.stages[0].required_init_fields
         assert "synthesizer_model" not in cmd.staged_loading.stages[0].required_init_fields
@@ -2841,14 +2852,17 @@ class TestPublicAPI:
             "project contract is ready for persistence",
         )
         assert cmd.staged_loading.stages[2].produced_state == (
-            "project artifacts",
-            "workflow preferences",
-            "downstream stage handoff",
+            "minimal project artifacts",
+            "approved project contract reflected in state",
         )
         assert cmd.staged_loading.stages[2].checkpoints == (
-            "approval gate has passed",
-            "stage-aware deferred reads are now allowed",
+            "approved scope is persisted",
+            "minimal artifact set is ready",
         )
+        assert cmd.staged_loading.stage("roadmap_authoring").loaded_authorities == (
+            "workflows/new-project/roadmap-authoring.md",
+        )
+        assert cmd.staged_loading.stage("completion").next_stages == ()
 
     def test_get_command_new_project_surfaces_spawn_contract_inventory(self) -> None:
         registry.invalidate_cache()

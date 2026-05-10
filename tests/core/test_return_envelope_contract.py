@@ -10,6 +10,7 @@ from gpd.core.return_contract import (
     GpdReturnStatusContract,
     validate_gpd_return_markdown,
 )
+from tests.return_skeleton_support import render_gpd_return_block
 
 
 def _wrap_return_block(yaml_body: str) -> str:
@@ -27,25 +28,30 @@ def test_required_return_fields_derive_from_envelope_model() -> None:
 
 
 def test_accepts_nested_state_and_continuation_payloads() -> None:
-    content = _wrap_return_block(
-        "  status: checkpoint\n"
-        "  files_written: [src/main.py]\n"
-        "  issues: []\n"
-        "  next_actions: [gpd:resume-work]\n"
-        "  state_updates:\n"
-        "    advance_plan: true\n"
-        "    update_progress: true\n"
-        "  continuation_update:\n"
-        "    handoff:\n"
-        "      stopped_at: Completed phase 01\n"
-        "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
-        "    bounded_segment:\n"
-        "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
-        '      phase: "01"\n'
-        '      plan: "01"\n'
-        "      segment_id: seg-01\n"
-        "      segment_status: paused\n"
-        "      checkpoint_reason: segment_boundary\n"
+    content = render_gpd_return_block(
+        ["src/main.py"],
+        status="checkpoint",
+        next_actions=["gpd:resume-work"],
+        extra_fields={
+            "state_updates": {
+                "advance_plan": True,
+                "update_progress": True,
+            },
+            "continuation_update": {
+                "handoff": {
+                    "stopped_at": "Completed phase 01",
+                    "resume_file": "GPD/phases/01-test-phase/.continue-here.md",
+                },
+                "bounded_segment": {
+                    "resume_file": "GPD/phases/01-test-phase/.continue-here.md",
+                    "phase": "01",
+                    "plan": "01",
+                    "segment_id": "seg-01",
+                    "segment_status": "paused",
+                    "checkpoint_reason": "segment_boundary",
+                },
+            },
+        },
     )
 
     result = validate_gpd_return_markdown(content)
@@ -58,13 +64,14 @@ def test_accepts_nested_state_and_continuation_payloads() -> None:
 
 
 def test_accepts_typed_checker_plan_lists() -> None:
-    content = _wrap_return_block(
-        "  status: checkpoint\n"
-        "  files_written: []\n"
-        "  issues: []\n"
-        "  next_actions: [gpd:plan-phase]\n"
-        "  approved_plans: [plan-01, plan-03]\n"
-        "  blocked_plans: [plan-02]\n"
+    content = render_gpd_return_block(
+        [],
+        status="checkpoint",
+        next_actions=["gpd:plan-phase"],
+        extra_fields={
+            "approved_plans": ["plan-01", "plan-03"],
+            "blocked_plans": ["plan-02"],
+        },
     )
 
     result = validate_gpd_return_markdown(content)
@@ -147,20 +154,14 @@ def test_rejects_unknown_top_level_typo_fields() -> None:
 
 def test_rejects_multiple_canonical_return_blocks_as_ambiguous() -> None:
     content = (
-        _wrap_return_block(
-            "  status: completed\n"
-            "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
-            "  issues: []\n"
-            "  next_actions: []\n"
-        )
+        render_gpd_return_block(["GPD/phases/02-analysis/02-02-SUMMARY.md"])
         + "\n"
-        + _wrap_return_block(
-            "  status: blocked\n"
-            "  files_written: []\n"
-            "  issues: [conflicting return]\n"
-            "  next_actions: [gpd:resume-work]\n"
-            "  blockers:\n"
-            "    - conflicting return\n"
+        + render_gpd_return_block(
+            [],
+            status="blocked",
+            issues=["conflicting return"],
+            next_actions=["gpd:resume-work"],
+            extra_fields={"blockers": ["conflicting return"]},
         )
     )
 
@@ -189,12 +190,7 @@ def test_rejects_child_reports_as_callsite_evidence_not_return_field() -> None:
 
 
 def test_accepts_child_reports_omitted_from_applicator_envelope() -> None:
-    content = _wrap_return_block(
-        "  status: completed\n"
-        "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
-        "  issues: []\n"
-        "  next_actions: []\n"
-    )
+    content = render_gpd_return_block(["GPD/phases/02-analysis/02-02-SUMMARY.md"])
 
     result = validate_gpd_return_markdown(content)
 
@@ -316,9 +312,7 @@ def test_rejects_scalar_where_continuation_update_requires_mapping() -> None:
 
 
 def test_accepts_synthesizer_style_completed_return_with_summary_only_file_list() -> None:
-    content = _wrap_return_block(
-        "  status: completed\n  files_written: [GPD/literature/SUMMARY.md]\n  issues: []\n  next_actions: []\n"
-    )
+    content = render_gpd_return_block(["GPD/literature/SUMMARY.md"])
 
     result = validate_gpd_return_markdown(content)
 

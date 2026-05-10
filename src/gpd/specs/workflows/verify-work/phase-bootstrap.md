@@ -59,7 +59,7 @@ task(
 )
 ```
 
-Proof critic child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
 
 ```yaml
 child_gate:
@@ -78,6 +78,10 @@ child_gate:
     - "frontmatter status: passed before finalizing the gap ledger"
   applicator: none
   failure_route: "fail_closed_or_fresh_proof_continuation | repair_prompt_once | fail_closed | fresh_proof_continuation"
+  status_route:
+    checkpoint: "fresh proof continuation after user response"
+    blocked: "fresh proof continuation or fail closed"
+    failed: "fresh proof continuation or fail closed"
 ```
 
 After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` after a successful `gpd proof-redteam finalize ...` and `gpd validate proof-redteam` run before finalizing the gap ledger. Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation.

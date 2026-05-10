@@ -15,6 +15,7 @@ from gpd.core.return_repair_classifier import (
     return_repair_hint,
 )
 from gpd.core.state import default_state_dict, generate_state_markdown
+from tests.return_skeleton_support import render_gpd_return_block
 
 
 def _wrap_return_block(yaml_body: str) -> str:
@@ -22,12 +23,9 @@ def _wrap_return_block(yaml_body: str) -> str:
 
 
 def _valid_completed_return() -> str:
-    return _wrap_return_block(
-        "  status: completed\n"
-        "  files_written: [GPD/phases/01-test/SUMMARY.md]\n"
-        "  issues: []\n"
-        "  next_actions: []\n"
-        "  duration_seconds: 1\n"
+    return "# Child output\n\n" + render_gpd_return_block(
+        ["GPD/phases/01-test/SUMMARY.md"],
+        extra_fields={"duration_seconds": 1},
     )
 
 
@@ -231,9 +229,7 @@ def test_classifies_continuation_schema_error() -> None:
 
 def test_classifies_valid_non_completed_return_without_treating_it_as_malformed() -> None:
     result = classify_gpd_return_repair(
-        _wrap_return_block(
-            "  status: checkpoint\n  files_written: []\n  issues: []\n  next_actions: [gpd resume-work]\n"
-        )
+        render_gpd_return_block([], status="checkpoint", next_actions=["gpd resume-work"])
     )
 
     assert result.valid is True
@@ -249,9 +245,7 @@ def test_classifies_valid_non_completed_return_without_treating_it_as_malformed(
 
 def test_can_accept_non_completed_status_when_required() -> None:
     result = classify_gpd_return_repair(
-        _wrap_return_block(
-            "  status: checkpoint\n  files_written: []\n  issues: []\n  next_actions: [gpd resume-work]\n"
-        ),
+        render_gpd_return_block([], status="checkpoint", next_actions=["gpd resume-work"]),
         require_status="checkpoint",
     )
 

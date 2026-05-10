@@ -49,6 +49,20 @@ def test_execute_phase_still_owns_wave_risk_and_artifact_gate_routing() -> None:
     assert "fanout" in workflow_text.lower()
 
 
+def test_execute_phase_gate_callsite_prose_stays_compact_without_hiding_tuple_semantics() -> None:
+    workflow_text = _execute_phase_stage("wave-dispatch.md") + "\n" + _execute_phase_stage("aggregate-and-verify.md")
+
+    assert "child artifact gate: apply" not in workflow_text
+    assert "checkpoint handling applies" not in workflow_text
+    assert workflow_text.count("run the local `child_gate` below") >= 5
+    assert workflow_text.count("This callsite owns") >= 5
+    assert 'command: "gpd --raw apply-return-updates ${SUMMARY_FILE}"' in workflow_text
+    assert "frontmatter status: passed before executor wave success" in workflow_text
+    assert "phase closeout/update_roadmap only after verifier gate and status route" in workflow_text
+    assert "mark phase complete/update_roadmap only after verifier gate and passed verdict" in workflow_text
+    assert 'failure_route: "blocked -> gpd:validate-conventions | repair_prompt_once | retry_fresh_execute_continuation | retry_once"' in workflow_text
+
+
 def test_execute_phase_explicitly_defers_plan_local_semantics_to_execute_plan() -> None:
     workflow_text = _execute_phase_stage("wave-planning.md")
     execute_plan_text = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")

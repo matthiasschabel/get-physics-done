@@ -167,7 +167,7 @@ WORKFLOW_BASELINES = {
     "map-research": (27, 1_388, 0),
     "merge-phases": (348, 11_234, 0),
     "new-milestone": (30, 1_511, 0),
-    "new-project": (1_968, 91_683, 2),
+    "new-project": (1_937, 88_661, 2),
     "numerical-convergence": (482, 23_756, 0),
     "parameter-sweep": (751, 29_022, 1),
     "pause-work": (275, 12_667, 0),

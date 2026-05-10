@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
+from gpd.core.child_handoff import ChildGateTuple, child_gate_tuple_from_payload
 from tests import new_project_stage_contract_support as stage_contract_module
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -38,6 +40,22 @@ def _tagged_blocks(text: str, tag: str) -> list[str]:
         end = text.index(f"</{tag}>", start)
         blocks.append(text[start:end])
         cursor = end + len(f"</{tag}>")
+
+
+def _child_gate(source: str, gate_id: str) -> ChildGateTuple:
+    for block in source.split("```yaml")[1:]:
+        yaml_text = block.split("```", 1)[0]
+        payload = yaml.safe_load(yaml_text)
+        if not isinstance(payload, dict):
+            continue
+        child_gate = payload.get("child_gate")
+        if isinstance(child_gate, dict) and child_gate.get("id") == gate_id:
+            return child_gate_tuple_from_payload(payload)
+    raise AssertionError(f"missing child gate {gate_id}")
+
+
+def _artifact_paths(gate: ChildGateTuple) -> tuple[str, ...]:
+    return tuple(artifact.path for artifact in gate.expected_artifacts)
 
 
 def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
@@ -250,6 +268,39 @@ def test_new_project_minimal_roadmap_contract_is_direct_not_staged_handoff() -> 
     assert "For minimal bootstrap only, write a lightweight local `GPD/ROADMAP.md` directly" in minimal_m4
     assert "Do not claim or invoke the staged post-scope roadmapping handoff in the minimal path" in minimal_m4
     assert "Route `GPD/ROADMAP.md` through the staged post-scope roadmapping handoff" not in minimal_m4
+
+
+def test_new_project_post_scope_child_gates_preserve_artifact_contracts() -> None:
+    workflow_text = _read_new_project_workflow()
+    scouts = _child_gate(workflow_text, "literature_scouts")
+    synthesizer = _child_gate(workflow_text, "literature_synthesizer")
+    roadmapper = _child_gate(workflow_text, "project_roadmapper")
+    notation = _child_gate(workflow_text, "notation_conventions")
+
+    assert _artifact_paths(scouts) == (
+        "GPD/literature/PRIOR-WORK.md",
+        "GPD/literature/METHODS.md",
+        "GPD/literature/COMPUTATIONAL.md",
+        "GPD/literature/PITFALLS.md",
+    )
+    assert scouts.allowed_roots == ("GPD/literature",)
+    assert scouts.freshness is not None
+    assert scouts.freshness.marker == "$SCOUT_HANDOFF_STARTED_AT per scout"
+
+    assert _artifact_paths(synthesizer) == ("GPD/literature/SUMMARY.md",)
+    assert synthesizer.allowed_roots == ("GPD/literature",)
+    assert synthesizer.freshness is not None
+    assert synthesizer.freshness.marker == "$SYNTHESIZER_HANDOFF_STARTED_AT"
+
+    assert _artifact_paths(roadmapper) == ("GPD/ROADMAP.md", "GPD/STATE.md", "GPD/REQUIREMENTS.md")
+    assert roadmapper.allowed_roots == ("GPD",)
+    assert roadmapper.applicator.command == "shared_state_policy=direct for this legacy init handoff"
+    assert roadmapper.applicator.require_passed_true is False
+
+    assert _artifact_paths(notation) == ("GPD/CONVENTIONS.md",)
+    assert notation.allowed_roots == ("GPD",)
+    assert notation.applicator.command == "child direct gpd convention set in auto/approved continuation"
+    assert notation.applicator.require_passed_true is False
 
 
 def test_new_project_defers_git_until_first_mutation_gate() -> None:

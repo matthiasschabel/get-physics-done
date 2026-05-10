@@ -11,6 +11,7 @@ from gpd.core.commands import cmd_apply_return_updates
 from gpd.core.continuation import ContinuationResumeSource, resolve_continuation
 from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.state import default_state_dict, generate_state_markdown
+from tests.return_skeleton_support import render_gpd_return_block
 
 
 def _write_project_state(tmp_path: Path) -> Path:
@@ -33,22 +34,26 @@ def test_validate_and_apply_the_same_durable_continuation_payload(tmp_path: Path
     resume_path.write_text("resume\n", encoding="utf-8")
     return_file = tmp_path / "durable_return.md"
     return_file.write_text(
-        _wrap_return_block(
-            "  status: checkpoint\n"
-            "  files_written: [GPD/state.json]\n"
-            "  issues: []\n"
-            "  next_actions: [gpd:resume-work]\n"
-            "  continuation_update:\n"
-            "    handoff:\n"
-            "      stopped_at: Completed phase 01\n"
-            "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
-            "    bounded_segment:\n"
-            "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
-            "      phase: \"01\"\n"
-            "      plan: \"01\"\n"
-            "      segment_id: seg-01\n"
-            "      segment_status: paused\n"
-            "      checkpoint_reason: segment_boundary\n"
+        render_gpd_return_block(
+            ["GPD/state.json"],
+            status="checkpoint",
+            next_actions=["gpd:resume-work"],
+            extra_fields={
+                "continuation_update": {
+                    "handoff": {
+                        "stopped_at": "Completed phase 01",
+                        "resume_file": "GPD/phases/01-test-phase/.continue-here.md",
+                    },
+                    "bounded_segment": {
+                        "resume_file": "GPD/phases/01-test-phase/.continue-here.md",
+                        "phase": "01",
+                        "plan": "01",
+                        "segment_id": "seg-01",
+                        "segment_status": "paused",
+                        "checkpoint_reason": "segment_boundary",
+                    },
+                },
+            },
         ),
         encoding="utf-8",
     )
@@ -76,15 +81,17 @@ def test_validate_and_apply_the_same_durable_continuation_payload(tmp_path: Path
 
 def test_checkpoint_intent_is_checkpoint_status_scoped(tmp_path: Path) -> None:
     _write_project_state(tmp_path)
-    checkpoint_payload = _wrap_return_block(
-        "  status: checkpoint\n"
-        "  files_written: [GPD/state.json]\n"
-        "  issues: []\n"
-        "  next_actions: [gpd:resume-work]\n"
-        "  checkpoint_intent:\n"
-        "    checkpoint_reason: pre_fanout\n"
-        "    awaiting: user_review\n"
-        "    first_result_gate_pending: true\n"
+    checkpoint_payload = render_gpd_return_block(
+        ["GPD/state.json"],
+        status="checkpoint",
+        next_actions=["gpd:resume-work"],
+        extra_fields={
+            "checkpoint_intent": {
+                "checkpoint_reason": "pre_fanout",
+                "awaiting": "user_review",
+                "first_result_gate_pending": True,
+            }
+        },
     )
     completed_payload = checkpoint_payload.replace("status: checkpoint", "status: completed")
 

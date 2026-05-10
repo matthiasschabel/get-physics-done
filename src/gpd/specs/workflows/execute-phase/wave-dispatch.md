@@ -174,7 +174,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
    )
    ```
 
-   Proof critic child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+   Proof critic child artifact gate: run the local `child_gate` below. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`. This callsite owns the proof-redteam artifact, `status: passed` validator, no-op applicator, and failure route.
 
    ```yaml
    child_gate:
@@ -207,7 +207,7 @@ Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_D
 
    This ensures the user sees progress even when waves have multiple parallel plans. Do not wait for the entire wave to finish before showing any output.
 
-   Wave child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+   Wave child artifact gate: run the local `child_gate` below. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`. This callsite owns the SUMMARY artifact, applicator command, proof-redteam dependency, and failure route.
 
    ```yaml
    child_gate:
@@ -436,7 +436,7 @@ When processing plans in waves N+1, N+2, etc., check each plan against the `SKIP
 
 For each later wave plan, compare its indexed dependencies against `SKIPPED_PLANS`. If any dependency was skipped or failed, skip the current plan, record `depends_on_{dep_id}`, and continue with the next eligible plan.
 
-> **Handoff verification:** Apply the local child artifact gate before success; git commits are partial evidence only.
+> **Handoff verification:** Run the local child artifact gate before success; git commits are partial evidence only.
 </step>
 
 </process>

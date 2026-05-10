@@ -23,7 +23,7 @@ def test_new_project_project_researcher_scouts_route_on_typed_return_and_reject_
     assert 'freshness_marker: "after $SCOUT_HANDOFF_STARTED_AT per scout"' in workflow
     assert "--require-status completed --require-files-written" in workflow
     assert 'failure_route: "retry missing scout once | repair prompt once | stop this scout path' in workflow
-    assert "Status route: `checkpoint` -> present checkpoint and spawn a fresh continuation" in workflow
+    assert "Route non-completed returns through `references/orchestration/child-artifact-gate.md`" in workflow
     assert "Do not proceed with a partial literature survey" in workflow
 
 
@@ -38,6 +38,6 @@ def test_new_milestone_project_researcher_scouts_require_fresh_continuations_and
     assert "GPD/literature/COMPUTATIONAL.md" in workflow
     assert "GPD/literature/PITFALLS.md" in workflow
     assert 'failure_route: "retry missing scout once | repair prompt once | stop survey path' in workflow
-    assert "Status route: `checkpoint`, `blocked`, or final `failed`" in workflow
-    assert "before counting any scout as complete" in workflow
+    assert "Route `checkpoint`, `blocked`, or final `failed` through" in workflow
+    assert "Do not count a\nscout as complete until the tuple passes." in workflow
     assert "references/orchestration/continuation-boundary.md" in workflow

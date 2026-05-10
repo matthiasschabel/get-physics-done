@@ -44,7 +44,7 @@ def test_new_project_and_new_milestone_route_roadmaps_on_typed_status() -> None:
         assert "`blocked`" in workflow
         assert "--require-status completed --require-files-written" in workflow
         assert "GPD/REQUIREMENTS.md" in workflow
-        assert "child artifact gate" in workflow
+        assert "child gate" in workflow
 
     assert 'id: "project_roadmapper"' in new_project
     assert '"GPD/ROADMAP.md"' in new_project
@@ -53,13 +53,13 @@ def test_new_project_and_new_milestone_route_roadmaps_on_typed_status() -> None:
     assert 'return_profile: "roadmapper"' in new_project
     assert "shared_state_policy=direct for this legacy init handoff" in new_project
     assert "do not invent an alternate roadmap path" in new_project
-    assert "Headings such as `## ROADMAP CREATED` or `## ROADMAP BLOCKED` are not authority" in new_project
+    assert "Headings such as\n`## ROADMAP CREATED` or `## ROADMAP BLOCKED` are not authority" in new_project
     assert 'id: "milestone_roadmapper"' in new_milestone
     assert '"GPD/ROADMAP.md"' in new_milestone
     assert '"GPD/REQUIREMENTS.md"' in new_milestone
     assert 'return_profile: "roadmapper"' in new_milestone
     assert "shared_state_policy: return_only" in new_milestone
-    assert "Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof." in new_milestone
+    assert "direct roadmapper edit to\n`GPD/STATE.md` is not success proof." in new_milestone
     assert "Project contract gate: {project_contract_gate}" in new_milestone
     assert "Project contract load info: {project_contract_load_info}" in new_milestone
     assert "Project contract validation: {project_contract_validation}" in new_milestone

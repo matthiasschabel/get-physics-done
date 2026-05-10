@@ -45,6 +45,8 @@ Spawn gpd-planner with the quick-mode context:
 
 > Apply the canonical runtime delegation convention already loaded above.
 
+Set `QUICK_PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
+
 ```
 task(
   prompt="First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
@@ -106,7 +108,31 @@ Return a structured `gpd_return` envelope. Local completed output is `${QUICK_DI
 )
 ```
 
-Child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-planner`; expected=`${QUICK_DIR}/${next_num}-PLAN.md`; allowed_root=`${QUICK_DIR}`; validators=`gpd validate plan-preflight` when the plan declares `tool_requirements`; applicator=none before execution; failure=`retry planner | explicit main-context fallback with its own return | abort`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+
+```yaml
+child_gate:
+  id: "quick_planner_plan"
+  role: "gpd-planner"
+  return_profile: "planner"
+  required_status: "completed"
+  expected_artifacts:
+    - "${QUICK_DIR}/${next_num}-PLAN.md"
+  allowed_roots:
+    - "${QUICK_DIR}"
+  freshness_marker: "after $QUICK_PLANNER_HANDOFF_STARTED_AT"
+  validators:
+    - "readable artifact check"
+    - "gpd validate plan-preflight <PLAN.md> when tool_requirements is non-empty"
+  applicator: none
+  failure_route: "retry planner | explicit main-context fallback with its own return | abort"
+  status_route:
+    checkpoint: "fresh planner continuation after user response"
+    blocked: "retry planner, main-context planning, or abort"
+    failed: "retry planner, main-context planning, or abort"
+```
+
+Tuple summary: role=`gpd-planner`; expected=`${QUICK_DIR}/${next_num}-PLAN.md`.
 
 **If the planner agent fails to spawn or returns an error:** Keep the handoff incomplete under the gate above. A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only; require a valid planner `gpd_return` naming that plan, or run explicit main-context fallback with its own return. Offer: 1) Retry planner, 2) Create the plan in the main context, 3) Abort.
 
@@ -139,6 +165,8 @@ fi
 
 Spawn gpd-executor with plan reference:
 Apply the canonical runtime delegation convention already loaded above.
+
+Set `QUICK_EXECUTOR_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
 ```
 task(
@@ -184,7 +212,32 @@ Reference artifacts: {reference_artifacts_content}
 )
 ```
 
-Child artifact gate: apply `references/orchestration/child-artifact-gate.md`; tuple: role=`gpd-executor`; expected=`${QUICK_DIR}/${next_num}-SUMMARY.md`; allowed_root=`${QUICK_DIR}`; validators=readable summary; applicator=`gpd apply-return-updates "${QUICK_DIR}/${next_num}-SUMMARY.md"`; failure=`retry executor | explicit main-context fallback with its own return | abort`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
+
+```yaml
+child_gate:
+  id: "quick_executor_summary"
+  role: "gpd-executor"
+  return_profile: "executor"
+  required_status: "completed"
+  expected_artifacts:
+    - "${QUICK_DIR}/${next_num}-SUMMARY.md"
+  allowed_roots:
+    - "${QUICK_DIR}"
+  freshness_marker: "after $QUICK_EXECUTOR_HANDOFF_STARTED_AT"
+  validators:
+    - "readable summary artifact check"
+  applicator:
+    command: "gpd apply-return-updates \"${QUICK_DIR}/${next_num}-SUMMARY.md\""
+    require_passed_true: true
+  failure_route: "retry executor | explicit main-context fallback with its own return | abort"
+  status_route:
+    checkpoint: "fresh executor continuation after user response"
+    blocked: "retry executor, main-context execution, or abort"
+    failed: "retry executor, main-context execution, or abort"
+```
+
+Tuple summary: role=`gpd-executor`; expected=`${QUICK_DIR}/${next_num}-SUMMARY.md`.
 
 **If the executor agent fails to spawn or returns an error:** Check `git log --oneline -3` only for partial evidence. Commits or files do not prove success without the local child artifact gate above. Offer: 1) Retry executor, 2) Execute in explicit main-context fallback with its own return, 3) Abort.
 
@@ -214,7 +267,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Apply `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`: completed means the summary gate and applicator passed; checkpoint means present the checkpoint and spawn a fresh continuation; blocked or failed means surface issues and retry or handle manually.
+Apply `quick_executor_summary`: completed means the summary gate and applicator passed; non-completed statuses route through `status_route`.
 
 Only proceed to the quick-task completion record after `apply-return-updates` succeeds and the summary file still exists on disk.
 

@@ -1157,7 +1157,7 @@ shared_state_policy: return_only
 ", subagent_type="gpd-project-researcher", model="{researcher_model}", readonly=false, description="Pitfalls research")
 ```
 
-**Handle scout returns with the child artifact gate:**
+**Scout child gate:**
 
 ```yaml
 child_gate:
@@ -1180,9 +1180,13 @@ child_gate:
   failure_route: "retry missing scout once | repair prompt once | stop this scout path | repair path once | fail closed | stop survey path | ..."
 ```
 
-Status route: `checkpoint` -> present checkpoint and spawn a fresh continuation; `blocked` -> surface blocker and stop this scout path; `failed` -> retry once then stop; Next Up primary `gpd:new-project`, also `gpd:suggest-next`.
-
-Apply `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md` to each scout. Do not proceed with a partial literature survey, synthesize from incomplete scout output, or silently downgrade to manual main-context research.
+Route non-completed returns through `references/orchestration/child-artifact-gate.md`
+and `references/orchestration/continuation-boundary.md`: `checkpoint` -> fresh
+continuation, `blocked` -> surface blocker and stop this scout path, `failed`
+-> retry once then stop; Next Up primary `gpd:new-project`, also
+`gpd:suggest-next`. Do not proceed with a partial literature survey, synthesize
+from incomplete scout output, or silently downgrade to manual main-context
+research.
 
 After all 4 scout artifacts pass the gate, spawn synthesizer to create SUMMARY.md:
 
@@ -1223,7 +1227,7 @@ shared_state_policy: return_only
 ", subagent_type="gpd-research-synthesizer", model="{synthesizer_model}", readonly=false, description="Synthesize research")
 ```
 
-**Handle the synthesizer return with the child artifact gate:**
+**Synthesizer child gate:**
 
 ```yaml
 child_gate:
@@ -1243,9 +1247,12 @@ child_gate:
   failure_route: "retry once | repair prompt once | stop synth path | retry once for fresh SUMMARY.md proof | repair path once | fail closed | ..."
 ```
 
-Status route: `checkpoint` -> present checkpoint and spawn a fresh continuation; `blocked` -> surface blocker and stop synth path until resolved; `failed` -> retry once then stop; Next Up primary `gpd:new-project`, also `gpd:suggest-next`.
-
-Apply the gate above before displaying or committing `SUMMARY.md`. If a scout output is incomplete, stop before the synthesizer. If the synthesizer gate remains incomplete after the retry, surface the blocker rather than creating a fallback summary in the main context.
+Run the gate before displaying or committing `SUMMARY.md`. Route
+`checkpoint` -> fresh continuation, `blocked` -> surface blocker and stop synth
+path until resolved, `failed` -> retry once then stop; Next Up primary
+`gpd:new-project`, also `gpd:suggest-next`. If scout output is incomplete, stop
+before the synthesizer; if the synthesizer gate remains incomplete after retry,
+surface the blocker rather than creating a fallback summary in the main context.
 
 Display research complete banner and key findings:
 
@@ -1502,7 +1509,7 @@ shared_state_policy: direct
 ", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Create research roadmap")
 ```
 
-**Handle roadmapper return with the child artifact gate:**
+**Roadmapper child gate:**
 
 ```yaml
 child_gate:
@@ -1527,9 +1534,12 @@ child_gate:
   failure_route: "retry once | repair prompt once | stop roadmap path | retry once; partial writes are diagnostics only | repair path once | fail closed | ..."
 ```
 
-Status route: `checkpoint` -> present checkpoint and spawn a fresh continuation; `blocked` -> resolve then fresh continuation; `failed` -> retry once then stop; Next Up primary `gpd:new-project`, also `gpd:suggest-next`.
-
-Apply the child gate before displaying, approving, or committing the roadmap. Headings such as `## ROADMAP CREATED` or `## ROADMAP BLOCKED` are not authority; the tuple and shared gate are.
+Run the child gate before displaying, approving, or committing the roadmap.
+Route `checkpoint` -> fresh continuation, `blocked` -> resolve then fresh
+continuation, `failed` -> retry once then stop; Next Up primary
+`gpd:new-project`, also `gpd:suggest-next`. Headings such as
+`## ROADMAP CREATED` or `## ROADMAP BLOCKED` are not authority; the tuple and
+shared gate are.
 
 **If `gpd_return.status: completed`:**
 
@@ -1728,7 +1738,7 @@ shared_state_policy: none
 </spawn_contract_interactive>
 ```
 
-**Handle notation-coordinator return with the child artifact gate:**
+**Notation-coordinator child gate:**
 
 ```yaml
 child_gate:
@@ -1751,7 +1761,13 @@ child_gate:
   failure_route: "spawn one fresh gpd-notation-coordinator continuation when usable content exists | repair prompt once | fail closed | fresh continuation persists GPD/CONVENTIONS.md and convention lock | repair path once | fail closed; surface incomplete handoff and stop | ..."
 ```
 
-No-write approval boundary: in `interactive` mode before user approval, expected artifacts are `[]` and the first checkpoint proposal is the supervised success path, not an error. Status route: `checkpoint` -> present proposed conventions, collect confirmation/overrides, then spawn one fresh `gpd-notation-coordinator` continuation; `spawn_or_error` -> deterministic convention fallback below. The approved continuation receives the original project context, the returned proposal, user-approved values, and instructions to write `GPD/CONVENTIONS.md`, run `gpd convention set`, and return `gpd_return.status: completed`.
+No-write approval boundary: in `interactive` mode before user approval,
+expected artifacts are `[]` and the first checkpoint proposal is supervised
+success, not an error. Route `checkpoint` -> present conventions, collect
+confirmation/overrides, then spawn one fresh `gpd-notation-coordinator` continuation
+that writes `GPD/CONVENTIONS.md`, runs `gpd convention set`, and
+returns `gpd_return.status: completed`; route `spawn_or_error` -> deterministic
+convention fallback below.
 
 **If the notation-coordinator agent fails to spawn or returns an error:** Use a deterministic fallback instead of hardcoded defaults:
 

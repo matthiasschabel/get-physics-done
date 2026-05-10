@@ -1,8 +1,4 @@
-"""Compatibility exports for child gate tuple schema.
-
-Prompt snippet rendering was removed; child-gate authority now lives in
-``gpd.core.child_handoff`` beside the read-only validator.
-"""
+"""Compatibility exports for child gate tuple schema and renderers."""
 
 from __future__ import annotations
 
@@ -12,6 +8,8 @@ from gpd.core.child_handoff import (
     ChildGateFreshness,
     ChildGateTuple,
     child_gate_tuple_from_payload,
+    render_child_gate_inline_summary,
+    render_child_gate_markdown,
 )
 
 __all__ = [
@@ -20,4 +18,6 @@ __all__ = [
     "ChildGateFreshness",
     "ChildGateTuple",
     "child_gate_tuple_from_payload",
+    "render_child_gate_inline_summary",
+    "render_child_gate_markdown",
 ]

@@ -146,7 +146,8 @@ child_gate:
   failure_route: "retry agent | main-context response drafting | skip structured response and proceed to calculation tracking"
 ```
 
-Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` through this tuple before treating the response pair as complete. Every paired response completion depends on `gpd_return.files_written` plus on-disk verification of both paths.
+Run this tuple under `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`.
+Response-pair completion requires this callsite tuple to pass for both paths.
 
 Track new calculations in `${PAPER_DIR}/REVISION_TASKS.md`. After targeted
 revisions, rerun consistency/reference checks and then this publication-review

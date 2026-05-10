@@ -864,7 +864,7 @@ def test_new_milestone_roadmapper_stage_parse_and_artifact_words_match_payload()
     assert "fresh `SUMMARY.md` proof" not in roadmap_authoring
     assert "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md" in roadmap_authoring
     assert "shared_state_policy: return_only" in roadmap_authoring
-    assert "Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof." in roadmap_authoring
+    assert "direct roadmapper edit to\n`GPD/STATE.md` is not success proof." in roadmap_authoring
 
 
 def test_progress_route_d_includes_required_milestone_version_argument() -> None:
@@ -1202,14 +1202,15 @@ def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None
     _assert_normalized_fragments(
         offer_next,
         (
-            "concrete commands",
-            "one matching variant",
-            "gpd:discuss-phase {X+1}",
-            "gpd:plan-phase {X+1}",
-            "gpd:suggest-next",
-            "Primary: `{chosen primary command}`",
-            "gpd:complete-milestone",
-            "**Also available:** `gpd:suggest-next`",
+                "stage_stop.next_runtime_command",
+                "one matching variant",
+                "exactly one `Primary:` line",
+                "gpd:discuss-phase {X+1}",
+                "gpd:plan-phase {X+1}",
+                "gpd:suggest-next",
+                "Primary: `{chosen primary command}`",
+                "gpd:complete-milestone",
+                "- `gpd:suggest-next` -- confirm the next action",
         ),
     )
     _assert_normalized_absent(

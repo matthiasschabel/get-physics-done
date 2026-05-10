@@ -57,13 +57,29 @@ Run `gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace ph
 After phase completion, check the project's autonomy mode. If yolo or balanced with no pending checkpoint, auto-route to the next phase. If supervised, or if a checkpoint requires review, pause with a clear status message showing: current phase completed, why execution paused, exact next command to continue, and key artifacts to review. See `{GPD_INSTALL_DIR}/references/orchestration/continuous-execution.md` for the standard checkpoint protocol.
 </continuation_routing>
 
-Never end with only "ready to plan/continue" prose. After a successful closeout, choose exactly one matching variant and emit a `Next Up` block with concrete commands; do not print conditional "if context is missing/exists" labels in the final answer.
+Never end with only "ready to plan/continue" prose. After a successful closeout, choose exactly one matching variant, populate `stage_stop.next_runtime_command`, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print conditional "if context is missing/exists" labels or raw staged-init/field-access commands in the final answer.
 
 - If the next phase has no `*-CONTEXT.md`, make `gpd:discuss-phase {X+1}` the primary command and show `gpd:plan-phase {X+1}` as the direct-plan alternative.
 - If the next phase already has context, make `gpd:plan-phase {X+1}` the primary command.
 - Always include `gpd:suggest-next` as the shortest recovery/confirmation command when the user only wants the next action.
 
 **If more phases:**
+
+Populate the stop envelope before rendering:
+
+```yaml
+stage_stop:
+  workflow: execute-phase
+  stage: closeout
+  status: completed
+  reason: next_phase_available
+  checkpoint: none
+  user_decision_needed: false
+  next_runtime_command: "{chosen primary command}"
+  also_available:
+    - "{secondary command}"
+    - "gpd:suggest-next"
+```
 
 ```
 ## > Next Up
@@ -81,16 +97,34 @@ Primary: `{chosen primary command}`
 
 **If milestone complete:**
 
+Populate the stop envelope before rendering:
+
+```yaml
+stage_stop:
+  workflow: execute-phase
+  stage: closeout
+  status: completed
+  reason: milestone_complete
+  checkpoint: none
+  user_decision_needed: false
+  next_runtime_command: "gpd:complete-milestone"
+  also_available:
+    - "gpd:suggest-next"
 ```
+
+```
+## > Next Up
+
 MILESTONE COMPLETE!
 
 All {N} phases executed.
 
-`gpd:complete-milestone`
+Primary: `gpd:complete-milestone`
 
-**Also available:** `gpd:suggest-next`
+**Also available:**
+- `gpd:suggest-next` -- confirm the next action
 
-<sub>Start a fresh context window, then run `gpd:complete-milestone`.</sub>
+<sub>Start a fresh context window, then run the primary command above.</sub>
 ```
 
 </step>

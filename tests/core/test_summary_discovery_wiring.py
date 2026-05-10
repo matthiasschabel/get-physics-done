@@ -153,7 +153,9 @@ def test_respond_to_referees_prefers_canonical_markdown_report_path() -> None:
     assert "Use that shared handoff for `round_suffix`, sibling-artifact discovery, and the canonical response-artifact pair for the active round." in workflow_text
     assert "`${RESPONSE_REFEREE_PATH}`" in workflow_text
     assert "`${RESPONSE_AUTHOR_PATH}`" in workflow_text
-    assert "Read the completed `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`" in workflow_text
+    assert "Before response-pair completion, read `${RESPONSE_AUTHOR_PATH}` and" in workflow_text
+    assert "`${RESPONSE_REFEREE_PATH}`" in workflow_text
+    assert "run the aggregate below" in workflow_text
     assert "Do not write `AUTHOR-RESPONSE*` or `REFEREE_RESPONSE*` beside `${PAPER_DIR}` or beside the imported report source." in workflow_text
     assert "keep auxiliary response outputs under the selected GPD roots" in workflow_text
     assert "`GPD/paper/referee-report-*.md` or `paper/referee-reports/*.md`" not in workflow_text

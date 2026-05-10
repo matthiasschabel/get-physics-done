@@ -111,7 +111,7 @@ shared_state_policy: return_only
 
 This roadmapper contract is task-local. Do not widen the write scope or reuse it outside this handoff. The roadmapper does not own shared state; apply any accepted STATE.md updates in the main workflow with `gpd state` commands only after the roadmap artifacts pass the freshness gate.
 
-**Handle roadmapper return with the child artifact gate:**
+**Roadmapper child gate:**
 
 ```yaml
 child_gate:
@@ -134,9 +134,12 @@ child_gate:
   failure_route: "ask retry or stop | repair prompt once | stop roadmapper path | request fresh continuation | repair path once | fail closed | ..."
 ```
 
-Status route: `checkpoint` -> present checkpoint and spawn a fresh roadmapper continuation; `blocked` -> resolve then fresh continuation; `failed` -> ask retry or stop; Next Up primary `gpd:new-milestone [milestone name]`, also `gpd:suggest-next`.
-
-Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow with `gpd state patch` / `gpd state add-decision`. Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof.
+Route `checkpoint` -> fresh roadmapper continuation, `blocked` -> resolve then
+fresh continuation, `failed` -> ask retry or stop; Next Up primary
+`gpd:new-milestone [milestone name]`, also `gpd:suggest-next`. Only after the
+artifact gate passes, apply accepted state changes in the main workflow with
+`gpd state patch` / `gpd state add-decision`; a direct roadmapper edit to
+`GPD/STATE.md` is not success proof.
 
 **If `gpd_return.status: completed`:** Read ROADMAP.md only after the fresh file proof is satisfied, then present the roadmap inline:
 

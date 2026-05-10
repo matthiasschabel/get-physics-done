@@ -224,7 +224,7 @@ def test_new_project_notation_delegate_threads_resolved_model_through_the_spawn_
     content = (REPO_ROOT / "src/gpd/specs/workflows/new-project.md").read_text(encoding="utf-8")
     marker = "Resolve the notation-coordinator model override for the spawn call."
     start = content.index(marker)
-    section_end = content.index("**Handle notation-coordinator return with the child artifact gate:**", start)
+    section_end = content.index("**Notation-coordinator child gate:**", start)
     notation_block = content[start:section_end]
 
     assert 'task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", model="$NOTATION_MODEL"' in notation_block

@@ -53,7 +53,7 @@ def test_executor_handoff_recovery_treats_commits_as_partial_evidence_only() -> 
 
     assert "Commits or files do not prove success" in quick
     assert "Commits or output files do not prove success" in execute_plan
-    assert "Apply the local child artifact gate before success" in execute_phase
+    assert "Run the local child artifact gate before success" in execute_phase
     assert "If the return envelope is missing or invalid, keep the child handoff incomplete" in execute_plan
     assert "git commits are partial evidence only" in quick
     assert "git commits are partial evidence only" in execute_plan

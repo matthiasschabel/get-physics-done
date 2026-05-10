@@ -21,6 +21,7 @@ from tests.helpers.phase4_persona.matrix import (
 from tests.helpers.phase4_persona.matrix import (
     load_phase4_rows as load_phase4_matrix_rows,
 )
+from tests.return_skeleton_support import render_gpd_return_block
 
 PHASE = "02"
 PLAN = "02"
@@ -437,27 +438,12 @@ def _return_block(
     next_actions: list[str] | None = None,
     extra: str = "",
 ) -> str:
-    if files_written:
-        files_yaml = "  files_written:\n" + "".join(f"    - {json.dumps(path)}\n" for path in files_written)
-    else:
-        files_yaml = "  files_written: []\n"
-    issues = [] if issues is None else issues
-    next_actions = [] if next_actions is None else next_actions
-    issues_yaml = "  issues:\n" + "".join(f"    - {json.dumps(issue)}\n" for issue in issues) if issues else "  issues: []\n"
-    next_actions_yaml = (
-        "  next_actions:\n" + "".join(f"    - {json.dumps(action)}\n" for action in next_actions)
-        if next_actions
-        else "  next_actions: []\n"
-    )
-    return (
-        "```yaml\n"
-        "gpd_return:\n"
-        f"  status: {status}\n"
-        f"{files_yaml}"
-        f"{issues_yaml}"
-        f"{next_actions_yaml}"
-        f"{extra}"
-        "```\n"
+    return render_gpd_return_block(
+        files_written,
+        status=status,
+        issues=issues,
+        next_actions=next_actions,
+        extra_yaml=extra,
     )
 
 

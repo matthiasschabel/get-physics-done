@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from gpd.core.workflow_staging import load_workflow_stage_manifest
@@ -25,6 +26,10 @@ STAGE_AUTHORITY_BY_ID = {
 
 def _stage_text(stage_file: str) -> str:
     return (EXECUTE_PHASE_STAGE_DIR / stage_file).read_text(encoding="utf-8")
+
+
+def _next_up_blocks(text: str) -> list[str]:
+    return re.findall(r"## > Next Up\n(?P<body>.*?)(?:\n```|\Z)", text, flags=re.DOTALL)
 
 
 def test_execute_phase_manifest_uses_stage_authorities_without_root_eager_loads() -> None:
@@ -99,3 +104,22 @@ def test_execute_phase_late_authorities_live_in_owning_stages() -> None:
     assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in aggregate
     assert "{GPD_INSTALL_DIR}/templates/recovery-plan.md" in aggregate
     assert "{GPD_INSTALL_DIR}/workflows/transition.md" in closeout
+
+
+def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> None:
+    checkpoint = _stage_text("checkpoint-resume.md")
+    aggregate = _stage_text("aggregate-and-verify.md")
+    closeout = _stage_text("closeout.md")
+
+    assert "stage: checkpoint_resume" in checkpoint
+    assert 'next_runtime_command: "gpd:resume-work"' in checkpoint
+    assert "stage: aggregate_and_verify" in aggregate
+    assert 'next_runtime_command: "gpd:plan-phase {X} --gaps"' in aggregate
+    assert "stage_stop.next_runtime_command" in aggregate
+    assert "stage: closeout" in closeout
+    assert 'next_runtime_command: "gpd:complete-milestone"' in closeout
+
+    for block in _next_up_blocks(checkpoint + "\n" + aggregate + "\n" + closeout):
+        assert block.count("Primary:") == 1
+        assert "gpd --raw init" not in block
+        assert "field-access" not in block

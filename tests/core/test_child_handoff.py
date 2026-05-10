@@ -7,7 +7,6 @@ import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import yaml
 from typer.testing import CliRunner
 
 from gpd.cli import app
@@ -16,18 +15,11 @@ from gpd.core.child_handoff import (
     ChildGateArtifact,
     ChildGateFreshness,
     ChildGateTuple,
+    render_child_gate_markdown,
     validate_child_handoff,
 )
 from gpd.core.handoff_artifacts import HandoffFailureClass
-
-
-def _return_block(files_written: list[str], *, status: str = "completed") -> str:
-    files_written_yaml = (
-        "  files_written: []\n"
-        if not files_written
-        else "  files_written:\n" + "\n".join(f"    - {json.dumps(path)}" for path in files_written) + "\n"
-    )
-    return f"```yaml\ngpd_return:\n  status: {status}\n{files_written_yaml}  issues: []\n  next_actions: []\n```\n"
+from tests.return_skeleton_support import render_gpd_return_block as _return_block
 
 
 def _files_only_return_block(files_written: list[str]) -> str:
@@ -75,14 +67,7 @@ def _gate(
 
 
 def _gate_markdown(gate: ChildGateTuple) -> str:
-    rendered = yaml.safe_dump(
-        {"child_gate": gate.to_payload()},
-        default_flow_style=False,
-        allow_unicode=False,
-        sort_keys=False,
-        width=999999,
-    ).rstrip()
-    return f"```yaml\n{rendered}\n```\n"
+    return render_child_gate_markdown(gate)
 
 
 def test_child_handoff_accepts_valid_readable_artifact(tmp_path: Path) -> None:

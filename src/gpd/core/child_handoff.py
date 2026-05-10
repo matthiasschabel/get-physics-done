@@ -387,6 +387,8 @@ __all__ = [
     "ChildHandoffValidatorResult",
     "child_gate_tuple_from_payload",
     "parse_child_gate_markdown",
+    "render_child_gate_inline_summary",
+    "render_child_gate_markdown",
     "validate_child_handoff",
 ]
 
@@ -413,6 +415,41 @@ def parse_child_gate_markdown(content: str) -> ChildGateTuple:
         if "child_gate" in payload or {"id", "role"} <= set(payload):
             return child_gate_tuple_from_payload(payload)
     raise ValueError("No child_gate YAML block found")
+
+
+def render_child_gate_markdown(gate: ChildGateTuple | Mapping[str, object] | str) -> str:
+    """Render a deterministic fenced YAML ``child_gate`` tuple."""
+
+    gate_tuple = _coerce_gate(gate)
+    rendered = yaml.safe_dump(
+        {"child_gate": gate_tuple.to_payload()},
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=False,
+        width=999999,
+    ).rstrip()
+    return f"```yaml\n{rendered}\n```\n"
+
+
+def render_child_gate_inline_summary(gate: ChildGateTuple | Mapping[str, object] | str) -> str:
+    """Render a compact, deterministic summary of the callsite-owned gate fields."""
+
+    gate_tuple = _coerce_gate(gate)
+    return "; ".join(
+        (
+            f"child_gate={gate_tuple.id}",
+            f"role={gate_tuple.role}",
+            f"required_status={gate_tuple.required_status}",
+            f"artifacts={_artifact_summary(gate_tuple)}",
+            f"allowed_roots={_sequence_summary(gate_tuple.allowed_roots)}",
+            f"freshness={_freshness_summary(gate_tuple)}",
+            f"validators={_sequence_summary(gate_tuple.validators)}",
+            f"applicator={_applicator_summary(gate_tuple.applicator)}",
+            f"write_allowlist={_sequence_summary(gate_tuple.write_allowlist)}",
+            f"status_route={_route_summary(gate_tuple.status_route.items())}",
+            f"failure_route={_route_summary((failure.value, route) for failure, route in gate_tuple.failure_route.items())}",
+        )
+    )
 
 
 def validate_child_handoff(
@@ -579,6 +616,53 @@ def _coerce_gate(gate: ChildGateTuple | Mapping[str, object] | str) -> ChildGate
     if isinstance(gate, str):
         return parse_child_gate_markdown(gate)
     return child_gate_tuple_from_payload(gate)
+
+
+def _artifact_summary(gate: ChildGateTuple) -> str:
+    if not gate.expected_artifacts:
+        return "none"
+    return ", ".join(
+        (
+            f"{artifact.path}"
+            f"[kind={artifact.kind}, required={_bool_text(artifact.required)}, "
+            f"files_written={_bool_text(artifact.must_be_named_in_files_written)}]"
+        )
+        for artifact in gate.expected_artifacts
+    )
+
+
+def _freshness_summary(gate: ChildGateTuple) -> str:
+    freshness = gate.freshness
+    if freshness is None:
+        return "none"
+    marker = freshness.marker or "none"
+    return (
+        f"marker={marker}, "
+        f"mtime_at_or_after_marker={_bool_text(freshness.require_mtime_at_or_after_marker)}, "
+        f"preexisting_artifacts={freshness.preexisting_artifacts}"
+    )
+
+
+def _applicator_summary(applicator: ChildGateApplicator) -> str:
+    return f"{applicator.command} require_passed_true={_bool_text(applicator.require_passed_true)}"
+
+
+def _sequence_summary(values: Iterable[str]) -> str:
+    items = tuple(values)
+    if not items:
+        return "none"
+    return ", ".join(items)
+
+
+def _route_summary(routes: Iterable[tuple[object, object]]) -> str:
+    items = tuple(routes)
+    if not items:
+        return "none"
+    return ", ".join(f"{key}->{value}" for key, value in items)
+
+
+def _bool_text(value: bool) -> str:
+    return "true" if value else "false"
 
 
 def _valid_non_required_status_route_result(

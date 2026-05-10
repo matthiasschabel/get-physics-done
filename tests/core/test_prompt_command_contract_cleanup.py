@@ -241,7 +241,7 @@ def test_response_writer_handoff_is_included_once_in_respond_to_referees() -> No
     assert raw_include not in workflow
     assert literal_reference in workflow
     assert "Use the publication response-writer handoff already loaded during initialization" in workflow
-    assert "Apply the already-loaded shared publication response-writer handoff" in workflow
+    assert "The already-loaded shared\npublication response-writer handoff owns pair freshness and binding." in workflow
 
 
 def test_write_paper_response_writer_handoff_stays_deferred_to_stage_authority() -> None:

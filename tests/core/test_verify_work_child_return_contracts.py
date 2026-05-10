@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
 from gpd.core.context import (
     _build_proof_redteam_finalizer_bridge,
     _build_verification_report_finalizer_bridge,
@@ -15,12 +17,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def _read(path: Path) -> str:
     if path.parent == WORKFLOWS_DIR and path.stem == "verify-work":
         return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
+
+
+def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
+    for match in _YAML_BLOCK_RE.finditer(text):
+        body = match.group("body")
+        if "child_gate:" not in body:
+            continue
+        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
+        if gate.id == gate_id:
+            return gate
+    raise AssertionError(f"missing child_gate {gate_id}")
 
 
 def test_verify_work_inventory_bridge_exposes_writer_command_and_preview_command(tmp_path: Path) -> None:
@@ -107,12 +121,24 @@ def test_verify_work_verifier_handoff_stays_one_shot_and_routes_on_typed_status(
 
 def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_routing() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
+    gate = _child_gate(workflow, "verify_work_verifier_report")
 
     assert "Apply the `verify_work_verifier_report` child_gate before downstream routing." in workflow
-    assert '"${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"' in workflow
-    assert "--require-status completed --require-files-written" in workflow
+    assert [artifact.path for artifact in gate.expected_artifacts] == [
+        "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"
+    ]
+    assert gate.allowed_roots == ("${PHASE_DIR_ABS}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$VERIFIER_HANDOFF_STARTED_AT"
+    assert any("--require-status completed --require-files-written" in validator for validator in gate.validators)
+    assert "gpd validate verification-contract ${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md" in gate.validators
+    assert gate.applicator.command == "sync_verifier_output only after tuple passes"
+    assert gate.status_route == {
+        "checkpoint": "fresh verifier continuation after user response",
+        "blocked": "non-green stop with validator errors",
+        "failed": "non-green stop with validator errors",
+    }
     assert 'gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"' in workflow
-    assert "gpd validate verification-contract ${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md" in workflow
     assert (
         'Any verifier-written canonical `VERIFICATION.md`, including gap reports and `blocked`/`failed` handoffs, must pass `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before this wrapper accepts it as canonical.'
         in workflow
@@ -167,10 +193,15 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
         "Do not list the invalid `VERIFICATION.md` as an authoritative artifact, do not route to gaps unless a schema-valid gap report exists, do not enter `gap_repair` or `complete_session`, "
         "and do not patch the canonical verification report from this wrapper."
     )
+    stage_stop_line = (
+        "- Do not patch canonical verification frontmatter in this wrapper. Surface bounded-loop validator errors fail-closed through `references/orchestration/stage-stop-envelope.md`: "
+        "primary `gpd:verify-work ${phase_number}`, secondary `gpd:resume-work` and `gpd:suggest-next`."
+    )
 
     for fragment in fallback_fragments:
         assert fragment in workflow
     assert sync_stop in workflow
+    assert stage_stop_line in workflow
     assert (
         "Schema finalization is bounded: validator pass returns; after the second validator failure total, including the initial failure and one repair rerun, return `gpd_return.status: blocked` with latest errors."
         in workflow
@@ -190,6 +221,7 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
 def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
     checker = _read(AGENTS_DIR / "gpd-plan-checker.md")
+    gate = _child_gate(workflow, "verify_work_gap_plan_checker")
 
     assert 'gpd --raw init verify-work "${PHASE_ARG}" --stage gap_repair' in workflow
     assert "staged payload as the source of truth for planner and checker routing" in workflow
@@ -202,15 +234,20 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
         in workflow
     )
     assert (
-        "- `checkpoint`: some plans are approved and others need revision; record `approved_plans` and `blocked_plans`, then send only the blocked plans back through the revision loop."
+        "- `checkpoint`: some plans are approved and others need revision; record `approved_plans` and `blocked_plans`, then send only the blocked plans back through the revision loop. If stopping for user input, use the gap-checker checkpoint stop route."
         in workflow
     )
     assert (
-        "- `blocked`: nothing is approved; feed the checker issues and blocked plan IDs back into the revision loop without rewriting approved plans."
+        "- `blocked`: nothing is approved; feed the checker issues and blocked plan IDs back into the revision loop without rewriting approved plans. If stopping, use the gap-checker blocked stop route."
         in workflow
     )
-    assert "- `failed`: present the issues and offer retry or manual revision." in workflow
+    assert "- `failed`: present the issues and offer retry or manual revision. If stopping, use the gap-checker failed stop route." in workflow
     assert "Use the structured fields, not the human-readable approval table, as the source of truth." in workflow
+    assert gate.status_route == {
+        "checkpoint": "record approved/blocked plans for gap revision",
+        "blocked": "gpd:plan-phase ${phase_number} --gaps",
+        "failed": "retry or manual revision",
+    }
 
     assert "The label examples in `checker-return-protocol.md` are UI only" in checker
     assert "the machine decision comes from `gpd_return.status`, approved/blocked plan lists, and `issues`" in checker
@@ -222,18 +259,28 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
 def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifacts() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
     planner_prompt = _read(TEMPLATES_DIR / "planner-subagent-prompt.md")
+    gate = _child_gate(workflow, "verify_work_gap_planner")
 
     assert (
         "Use `templates/planner-subagent-prompt.md` to build the gap_closure planner handoff from the staged payload."
         in workflow
     )
-    assert 'id: "verify_work_gap_planner"' in workflow
-    assert "path: \"${PHASE_DIR_ABS}/*-PLAN.md\"" in workflow
-    assert "gpd validate plan-contract <each fresh gap plan>" in workflow
+    assert [(artifact.path, artifact.kind) for artifact in gate.expected_artifacts] == [
+        ("${PHASE_DIR_ABS}/*-PLAN.md", "glob")
+    ]
+    assert gate.allowed_roots == ("${PHASE_DIR_ABS}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$GAP_PLANNER_HANDOFF_STARTED_AT"
+    assert "gpd validate plan-contract <each fresh gap plan>" in gate.validators
     assert (
         "If the planner fails to spawn or returns an error, keep the session fail-closed and offer retry or manual plan creation. Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone."
         in workflow
     )
+    assert gate.status_route == {
+        "checkpoint": "fresh gap-planner continuation after user response",
+        "blocked": "gpd:plan-phase ${phase_number} --gaps",
+        "failed": "retry gap planner or gpd:plan-phase ${phase_number} --gaps",
+    }
     assert 'id: "verify_work_gap_plan_checker"' in workflow
     assert "fresh planner PLAN.md artifacts remain readable and named in planner files_written" in workflow
     assert (
@@ -257,6 +304,7 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
 
 def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_closed_artifact_gates() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
+    gate = _child_gate(workflow, "verify_work_proof_critic")
 
     assert "Use `phase_proof_review_status` as the proof-review freshness summary." in workflow
     assert "Use `proof_redteam_finalizer_bridge` as the helper-owned passed-audit bridge." in workflow
@@ -269,6 +317,17 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
     assert "exclude installed runtime/config/skills trees" in workflow
     assert 'id: "verify_work_proof_critic"' in workflow
     assert "Apply the canonical runtime delegation convention above; this proof handoff uses the tuple below" in workflow
+    assert [artifact.path for artifact in gate.expected_artifacts] == [
+        "${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md"
+    ]
+    assert gate.allowed_roots == ("${PHASE_DIR_ABS}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$PROOF_HANDOFF_STARTED_AT"
+    assert gate.status_route == {
+        "checkpoint": "fresh proof continuation after user response",
+        "blocked": "fresh proof continuation or fail closed",
+        "failed": "fresh proof continuation or fail closed",
+    }
     assert "Return `status: checkpoint` instead of waiting for user input inside this run." not in workflow
     assert (
         "Never trust the return text alone; if the file is missing, stale, malformed, or not passed, keep the verification session fail-closed and start a fresh proof continuation."

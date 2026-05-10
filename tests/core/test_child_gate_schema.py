@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from gpd.core.child_gate_snippets import render_child_gate_inline_summary, render_child_gate_markdown
 from gpd.core.child_handoff import (
     ChildGateApplicator,
     ChildGateArtifact,
@@ -47,14 +48,39 @@ def _planner_gate() -> ChildGateTuple:
 
 
 def _gate_markdown(gate: ChildGateTuple) -> str:
-    rendered = yaml.safe_dump(
-        {"child_gate": gate.to_payload()},
-        default_flow_style=False,
-        allow_unicode=False,
-        sort_keys=False,
-        width=999999,
-    ).rstrip()
-    return f"```yaml\n{rendered}\n```\n"
+    return render_child_gate_markdown(gate)
+
+
+def _renderer_gate() -> ChildGateTuple:
+    return ChildGateTuple(
+        id="renderer_gate",
+        role="gpd-planner",
+        required_status="completed",
+        expected_artifacts=(
+            ChildGateArtifact(path="GPD/plan.md"),
+            ChildGateArtifact(
+                path="GPD/reports/*.md",
+                kind="glob",
+                required=False,
+                must_be_named_in_files_written=False,
+            ),
+        ),
+        allowed_roots=("GPD",),
+        freshness=ChildGateFreshness(
+            marker="$HANDOFF_STARTED_AT",
+            require_mtime_at_or_after_marker=True,
+        ),
+        validators=("readable", "plan-contract"),
+        applicator=ChildGateApplicator(
+            command="gpd --raw apply-return-updates GPD/plan.md",
+            require_passed_true=True,
+        ),
+        write_allowlist=("GPD/plan.md", "GPD/reports/*.md"),
+        status_route={
+            "checkpoint": "present_checkpoint",
+            "blocked": "surface_blocker",
+        },
+    )
 
 
 def test_child_gate_tuple_renders_compact_yaml_with_inferred_return_profile() -> None:
@@ -83,6 +109,48 @@ def test_child_gate_tuple_renders_compact_yaml_with_inferred_return_profile() ->
     }
     assert child_gate["applicator"] == {"command": "none", "require_passed_true": False}
     assert list(child_gate["failure_route"]) == [failure_class.value for failure_class in HandoffFailureClass]
+
+
+def test_render_child_gate_markdown_round_trips_full_tuple_payload() -> None:
+    gate = _renderer_gate()
+
+    rendered = render_child_gate_markdown(gate)
+    payload = yaml.safe_load(rendered.removeprefix("```yaml\n").removesuffix("```\n"))
+
+    assert payload == {"child_gate": gate.to_payload()}
+    assert parse_child_gate_markdown(rendered) == gate
+    assert render_child_gate_markdown(payload) == rendered
+    for key in (
+        "expected_artifacts",
+        "allowed_roots",
+        "freshness",
+        "validators",
+        "applicator",
+        "write_allowlist",
+        "status_route",
+        "failure_route",
+    ):
+        assert key in payload["child_gate"]
+
+
+def test_render_child_gate_inline_summary_names_gate_anchors() -> None:
+    summary = render_child_gate_inline_summary(_renderer_gate())
+
+    assert "child_gate=renderer_gate" in summary
+    assert "role=gpd-planner" in summary
+    assert "required_status=completed" in summary
+    assert "artifacts=GPD/plan.md[kind=path, required=true, files_written=true]" in summary
+    assert "GPD/reports/*.md[kind=glob, required=false, files_written=false]" in summary
+    assert "allowed_roots=GPD" in summary
+    assert (
+        "freshness=marker=$HANDOFF_STARTED_AT, "
+        "mtime_at_or_after_marker=true, preexisting_artifacts=recovery_evidence_only"
+    ) in summary
+    assert "validators=readable, plan-contract" in summary
+    assert "applicator=gpd --raw apply-return-updates GPD/plan.md require_passed_true=true" in summary
+    assert "write_allowlist=GPD/plan.md, GPD/reports/*.md" in summary
+    assert "status_route=checkpoint->present_checkpoint, blocked->surface_blocker" in summary
+    assert "failure_route=return_missing->retry_once" in summary
 
 
 def test_child_gate_tuple_from_payload_accepts_wrapped_payload_and_failure_class_strings() -> None:

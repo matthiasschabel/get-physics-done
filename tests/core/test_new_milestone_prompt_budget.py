@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import yaml
+
+from gpd.core.child_handoff import ChildGateTuple, child_gate_tuple_from_payload
 from tests.prompt_metrics_support import measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +14,24 @@ COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+SURVEY_AUTHORITY = WORKFLOWS_DIR / "new-milestone" / "survey-objectives.md"
+ROADMAP_AUTHORITY = WORKFLOWS_DIR / "new-milestone" / "roadmap-authoring.md"
+
+
+def _child_gate(source: str, gate_id: str) -> ChildGateTuple:
+    for block in source.split("```yaml")[1:]:
+        yaml_text = block.split("```", 1)[0]
+        payload = yaml.safe_load(yaml_text)
+        if not isinstance(payload, dict):
+            continue
+        child_gate = payload.get("child_gate")
+        if isinstance(child_gate, dict) and child_gate.get("id") == gate_id:
+            return child_gate_tuple_from_payload(payload)
+    raise AssertionError(f"missing child gate {gate_id}")
+
+
+def _artifact_paths(gate: ChildGateTuple) -> tuple[str, ...]:
+    return tuple(artifact.path for artifact in gate.expected_artifacts)
 
 
 def test_new_milestone_command_stays_thin_and_only_eagerly_loads_the_workflow() -> None:
@@ -55,3 +76,31 @@ def test_new_milestone_command_budget_tracks_the_workflow_without_wrapper_bloat(
     assert command.expanded_line_count < bootstrap.expanded_line_count + 120
     assert command.expanded_char_count < bootstrap.expanded_char_count + 4000
     assert command.expanded_char_count < 9000
+
+
+def test_new_milestone_child_gates_preserve_artifact_contracts() -> None:
+    survey = SURVEY_AUTHORITY.read_text(encoding="utf-8")
+    roadmap_source = ROADMAP_AUTHORITY.read_text(encoding="utf-8")
+    scouts = _child_gate(survey, "milestone_literature_scouts")
+    synthesizer = _child_gate(survey, "milestone_literature_synthesizer")
+    roadmapper = _child_gate(roadmap_source, "milestone_roadmapper")
+
+    assert _artifact_paths(scouts) == (
+        "GPD/literature/PRIOR-WORK.md",
+        "GPD/literature/METHODS.md",
+        "GPD/literature/COMPUTATIONAL.md",
+        "GPD/literature/PITFALLS.md",
+    )
+    assert scouts.allowed_roots == ("GPD/literature",)
+    assert scouts.freshness is not None
+    assert scouts.freshness.marker == "$SCOUT_HANDOFF_STARTED_AT per scout"
+
+    assert _artifact_paths(synthesizer) == ("GPD/literature/SUMMARY.md",)
+    assert synthesizer.allowed_roots == ("GPD/literature",)
+    assert synthesizer.freshness is not None
+    assert synthesizer.freshness.marker == "$SYNTHESIZER_HANDOFF_STARTED_AT"
+
+    assert _artifact_paths(roadmapper) == ("GPD/ROADMAP.md", "GPD/REQUIREMENTS.md")
+    assert roadmapper.allowed_roots == ("GPD",)
+    assert roadmapper.applicator.command.startswith("main workflow applies accepted state changes")
+    assert roadmapper.applicator.require_passed_true is False

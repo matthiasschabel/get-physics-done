@@ -26,7 +26,21 @@ Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --styl
 1. Spawn agent for checkpoint plan
 2. Agent runs until checkpoint task or validation gate -> returns structured state
 3. Agent return includes completed tasks, current blocker, awaited item, and bounded execution segment; first-result/pre-fanout pauses add gate flags, skeptical re-questioning fields, and `downstream_locked`.
-4. **Present to user:**
+4. **Present to user:** populate the stop envelope, then render the canonical block.
+
+   ```yaml
+   stage_stop:
+     workflow: execute-phase
+     stage: checkpoint_resume
+     status: checkpoint
+     reason: checkpoint_plan_pause
+     checkpoint: "{checkpoint_type}"
+     user_decision_needed: true
+     next_runtime_command: "gpd:resume-work"
+     also_available:
+       - "gpd:execute-phase {PHASE_NUMBER}"
+       - "gpd:suggest-next"
+   ```
 
    ```
    ## Checkpoint: [Type]
@@ -39,9 +53,13 @@ Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --styl
 
    ## > Next Up
 
-   `gpd:resume-work`
+   Primary: `gpd:resume-work`
 
-   Also available: `gpd:execute-phase {PHASE_NUMBER}` or `gpd:suggest-next`
+   **Also available:**
+   - `gpd:execute-phase {PHASE_NUMBER}` -- retry this phase workflow
+   - `gpd:suggest-next` -- confirm the next action
+
+   <sub>Start a fresh context window, then run the primary command above.</sub>
    ```
 
 5. User responds: "approved"/"done" | issue description | decision selection

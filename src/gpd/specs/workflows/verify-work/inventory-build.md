@@ -108,7 +108,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Verifier child artifact gate: apply `references/orchestration/child-artifact-gate.md`; scientific status routing applies `references/verification/verification-status-authority.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; scientific status routing is owned by `references/verification/verification-status-authority.md`.
 
 ```yaml
 child_gate:
@@ -130,6 +130,10 @@ child_gate:
     command: "sync_verifier_output only after tuple passes"
     require_passed_true: false
   failure_route: "fail_closed -> gpd:verify-work ${phase_number} | repair_prompt_once | fresh_verifier_continuation_or_non_green_stop | non_green_stop_with_validator_errors"
+  status_route:
+    checkpoint: "fresh verifier continuation after user response"
+    blocked: "non-green stop with validator errors"
+    failed: "non-green stop with validator errors"
 ```
 
 If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge` and `verification_report_finalizer_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict). For conservative gap reports, replace `BODY.md` in the skeleton bridge `writer_command` with that file and run it. For passed, `human_needed`, `expert_needed`, or typed non-gap outcomes, write the finalizer bridge patch JSON, replace `PATCH.json` and `BODY.md` in its `writer_command_template`, and run `gpd verification-report finalize`. The helper serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
@@ -142,7 +146,7 @@ Apply the `verify_work_verifier_report` child_gate before downstream routing. Ro
 - Any verifier-written canonical `VERIFICATION.md`, including gap reports and `blocked`/`failed` handoffs, must pass `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before this wrapper accepts it as canonical.
 - Missing/unreadable/unnamed/invalid artifacts use the tuple failure route; never present them as accepted or passed.
 - Fallback executions that reach this step after failed report validation stop here: emit the blocked/final response with latest validator errors. Do not list the invalid `VERIFICATION.md` as an authoritative artifact, do not route to gaps unless a schema-valid gap report exists, do not enter `gap_repair` or `complete_session`, and do not patch the canonical verification report from this wrapper.
-- Do not patch canonical verification frontmatter in this wrapper. Surface bounded-loop validator errors fail-closed with `## > Next Up`: `gpd:verify-work ${phase_number}`, `gpd:resume-work`, `gpd:suggest-next`.
+- Do not patch canonical verification frontmatter in this wrapper. Surface bounded-loop validator errors fail-closed through `references/orchestration/stage-stop-envelope.md`: primary `gpd:verify-work ${phase_number}`, secondary `gpd:resume-work` and `gpd:suggest-next`.
 - If a canonical verification file already exists, preserve its authoritative frontmatter and append only the session-local overlay here.
 - Do not recompute canonical verification status in this workflow.
 

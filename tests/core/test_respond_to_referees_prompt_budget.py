@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
 from tests.prompt_metrics_support import expanded_prompt_text, measure_prompt_surface
 
@@ -34,6 +36,18 @@ def _expanded_stage_surface(stage: object) -> str:
         )
         for authority in authority_paths
     )
+
+
+def _yaml_gate_payload(source: str, key: str, gate_id: str) -> dict:
+    for block in source.split("```yaml")[1:]:
+        yaml_text = block.split("```", 1)[0]
+        payload = yaml.safe_load(yaml_text)
+        if not isinstance(payload, dict):
+            continue
+        gate = payload.get(key)
+        if isinstance(gate, dict) and gate.get("id") == gate_id:
+            return gate
+    raise AssertionError(f"missing {key} {gate_id}")
 
 
 def test_respond_to_referees_command_uses_first_stage_authority_boundary() -> None:
@@ -174,12 +188,24 @@ def test_respond_to_referees_triage_stage_blocks_before_response_authoring_and_f
 def test_respond_to_referees_response_authoring_stage_retains_response_pair_and_writer_contract() -> None:
     manifest = _manifest()
     response_surface = _expanded_stage_surface(manifest.stage("response_authoring"))
+    revision_gate = _yaml_gate_payload(response_surface, "child_gate", "respond_to_referees_revision_section")
+    aggregate_gate = _yaml_gate_payload(
+        response_surface, "aggregate_child_gate", "respond_to_referees_response_pair_current"
+    )
 
     assert "{GPD_INSTALL_DIR}/templates/paper/author-response.md" in response_surface
     assert "{GPD_INSTALL_DIR}/templates/paper/referee-response.md" in response_surface
     assert "publication-response-writer-handoff.md" in response_surface
     assert 'subagent_type="gpd-paper-writer"' in response_surface
-    assert 'id: "respond_to_referees_revision_section"' in response_surface
-    assert "aggregate_child_gate:" in response_surface
+    assert revision_gate["expected_artifacts"] == [
+        "${PAPER_DIR}/{resolved_section_file}",
+        "${RESPONSE_AUTHOR_PATH}",
+        "${RESPONSE_REFEREE_PATH}",
+    ]
+    assert aggregate_gate["expected_artifacts"] == [
+        "every required revised section under ${PAPER_DIR}",
+        "${RESPONSE_AUTHOR_PATH}",
+        "${RESPONSE_REFEREE_PATH}",
+    ]
     assert "fresh child handoff and named in current-run `files_written` / `gpd_return.files_written`" in response_surface
-    assert "gpd validate handoff-artifacts for revised section plus both response artifacts" in response_surface
+    assert "gpd validate handoff-artifacts for revised section plus both response artifacts" in revision_gate["validators"]

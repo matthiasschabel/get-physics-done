@@ -112,7 +112,7 @@ task(
 )
 ```
 
-Checker child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
 
 ```yaml
 child_gate:
@@ -128,9 +128,13 @@ child_gate:
     - "blocked_plans empty for completed status"
   applicator: none
   failure_route: "fail_closed_or_manual_review | repair_prompt_once | revision_loop_or_fail_closed"
+  status_route:
+    checkpoint: "record partial approval then revision loop or fresh continuation"
+    blocked: "revision loop or manual review"
+    failed: "revision loop or manual review"
 ```
 
-Status route: `checkpoint` uses the continuation boundary; `blocked` or `failed` routes to revision loop or manual review.
+Route non-completed statuses through `status_route`.
 
 ## 11. Handle Checker Return
 
@@ -236,7 +240,7 @@ task(
 )
 ```
 
-Revision planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
 
 ```yaml
 child_gate:
@@ -256,9 +260,13 @@ child_gate:
     - "gpd validate plan-preflight <each fresh plan>"
   applicator: none
   failure_route: "retry_revision_planner_or_manual_revision_or_force_decision | repair_prompt_once | fail_closed | retry_once | repair_path_once | recheck_or_manual_decision"
+  status_route:
+    checkpoint: "fresh revision-planner continuation after user response"
+    blocked: "retry, manual revision, or force decision"
+    failed: "retry, manual revision, or force decision"
 ```
 
-Status route: `checkpoint` uses the continuation boundary; unresolved revision blockers choose retry, manual revision, or force decision.
+Route non-completed statuses through `status_route`.
 
 **If the revision planner agent fails to spawn or returns an error:** Do not proceed to re-check just because revised `PLAN.md` files exist on disk. Treat any such files as incomplete until a fresh typed planner return explicitly names them in `gpd_return.files_written`. If no fresh revision return is available, keep the loop fail-closed and offer: 1) Retry revision planner, 2) Apply revisions manually in the main context using checker feedback, 3) Force proceed with current plans despite checker issues.
 

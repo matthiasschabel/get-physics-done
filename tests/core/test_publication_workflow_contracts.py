@@ -53,7 +53,7 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
     assert "<research_mode>{RESEARCH_MODE}</research_mode>" in workflow
     assert workflow.count("<autonomy_mode>{AUTONOMY}</autonomy_mode>") >= 3
     assert workflow.count("<research_mode>{RESEARCH_MODE}</research_mode>") >= 3
-    assert "Treat the emitted `.tex` file as the success artifact gate for each section only after the tuple passes." in workflow
+    assert "Treat the emitted `.tex` file as the success artifact gate\nfor each section only after the tuple passes." in workflow
     assert 'id: "write_paper_bibliographer"' in workflow
     assert "Always list `${PAPER_DIR}/CITATION-AUDIT.md` and `GPD/references-status.json` in `gpd_return.files_written`; list `{ACTIVE_BIBLIOGRAPHY_PATH}` only when the bibliography file changed." in workflow
     assert "Confirm `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json`" in workflow

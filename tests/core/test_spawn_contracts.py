@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
 from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +43,7 @@ MODEL_OMISSION_FRAGMENT = (
 )
 READONLY_FALSE_FRAGMENT = "readonly=false"
 READONLY_RUNTIME_NOTE_FRAGMENT = "Always pass `readonly=false` for file-producing agents."
+_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +56,21 @@ def _read(path: Path) -> str:
     if path.parent == WORKFLOWS_DIR and path.stem in STAGED_WORKFLOW_AUTHORITY_NAMES:
         return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
+
+
+def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
+    for match in _YAML_BLOCK_RE.finditer(text):
+        body = match.group("body")
+        if "child_gate:" not in body:
+            continue
+        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
+        if gate.id == gate_id:
+            return gate
+    raise AssertionError(f"missing child_gate {gate_id}")
+
+
+def _artifact_paths(gate: ChildGateTuple) -> tuple[str, ...]:
+    return tuple(artifact.path for artifact in gate.expected_artifacts)
 
 
 def _extract_task_blocks(text: str) -> list[TaskBlock]:
@@ -256,6 +273,7 @@ def test_every_workflow_task_block_carries_runtime_delegation_note_and_bootstrap
 def test_new_project_roadmapper_spawn_contract_uses_direct_shared_state_and_artifact_gate() -> None:
     content = _read(WORKFLOWS_DIR / "new-project.md")
     task = _find_single_task(WORKFLOWS_DIR / "new-project.md", "gpd-roadmapper")
+    gate = _child_gate(content, "project_roadmapper")
 
     _assert_spawn_contract(
         content,
@@ -270,8 +288,11 @@ def test_new_project_roadmapper_spawn_contract_uses_direct_shared_state_and_arti
             "GPD/REQUIREMENTS.md",
         ),
     )
-    assert "child_gate:\n  id: \"project_roadmapper\"" in content
-    assert "Apply the child gate before displaying, approving, or committing the roadmap." in content
+    assert _artifact_paths(gate) == ("GPD/ROADMAP.md", "GPD/STATE.md", "GPD/REQUIREMENTS.md")
+    assert gate.allowed_roots == ("GPD",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$ROADMAPPER_HANDOFF_STARTED_AT"
+    assert "Run the child gate before displaying, approving, or committing the roadmap." in content
     assert 'subagent_type="gpd-roadmapper"' in task.text
     assert 'model="{roadmapper_model}"' in task.text
     assert "Write files immediately (ROADMAP.md, STATE.md, update REQUIREMENTS.md traceability)" in task.text
@@ -287,6 +308,7 @@ def test_new_project_roadmapper_spawn_contract_uses_direct_shared_state_and_arti
 def test_new_milestone_roadmapper_spawn_contract_keeps_return_only_shared_state_and_explicit_contract_inputs() -> None:
     content = _read(WORKFLOWS_DIR / "new-milestone.md")
     task = _find_single_task(WORKFLOWS_DIR / "new-milestone.md", "gpd-roadmapper")
+    gate = _child_gate(content, "milestone_roadmapper")
 
     _assert_spawn_contract(
         content,
@@ -300,7 +322,10 @@ def test_new_milestone_roadmapper_spawn_contract_keeps_return_only_shared_state_
             "GPD/REQUIREMENTS.md",
         ),
     )
-    assert "child_gate:\n  id: \"milestone_roadmapper\"" in content
+    assert _artifact_paths(gate) == ("GPD/ROADMAP.md", "GPD/REQUIREMENTS.md")
+    assert gate.allowed_roots == ("GPD",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT"
     assert "<contract_context>" in task.text
     assert "Project contract gate: {project_contract_gate}" in task.text
     assert "Project contract load info: {project_contract_load_info}" in task.text
@@ -316,10 +341,7 @@ def test_new_milestone_roadmapper_spawn_contract_keeps_return_only_shared_state_
         "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md"
         in content
     )
-    assert (
-        "Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow"
-        in content
-    )
+    assert "artifact gate passes, apply accepted state changes in the main workflow" in content
 
 
 def test_debug_workflow_and_command_share_the_same_one_shot_debugger_contract() -> None:
@@ -355,7 +377,7 @@ def test_quick_and_write_paper_gate_handoffs_on_expected_artifacts() -> None:
     assert "Apply the executor child artifact gate before success" in quick
     assert 'id: "write_paper_section_writer"' in write_paper
     assert "${PAPER_DIR}/{section_path}.tex" in write_paper
-    assert "success artifact gate for each section" in write_paper
+    assert "success artifact gate\nfor each section only after the tuple passes" in write_paper
 
 
 def test_plan_phase_reloads_research_from_disk_and_keeps_checker_advisory() -> None:
@@ -378,7 +400,7 @@ def test_execute_phase_requires_state_return_envelope_and_handoff_spot_checks() 
     )
     assert "State updates returned (NOT written to STATE.md directly)" in executor.text
     assert "Executor subagents MUST NOT write STATE.md directly." in content
-    assert "Apply the local child artifact gate before success" in content
+    assert "Run the local child artifact gate before success" in content
     assert "git commits are partial evidence only" in content
     assert "pre_execution_specialists" in content
     assert '# task(subagent_type="gpd-notation-coordinator"' not in content
@@ -510,14 +532,15 @@ def test_new_project_roadmapper_uses_spawn_contract_and_artifact_gate() -> None:
     path = WORKFLOWS_DIR / "new-project.md"
     content = _read(path)
     roadmapper = _find_single_task(path, "gpd-roadmapper")
+    gate = _child_gate(content, "project_roadmapper")
 
     _assert_spawn_contract(roadmapper, ("GPD/ROADMAP.md", "GPD/STATE.md"), shared_state_policy="direct")
     assert "GPD/REQUIREMENTS.md" in roadmapper.text
     assert "gpd_return.files_written" in roadmapper.text
     assert "GPD/literature/SUMMARY.md" in roadmapper.text
     assert "allowed_paths:" in roadmapper.text
-    assert "child_gate:\n  id: \"project_roadmapper\"" in content
-    assert "Apply the child gate before displaying, approving, or committing the roadmap." in content
+    assert _artifact_paths(gate) == ("GPD/ROADMAP.md", "GPD/STATE.md", "GPD/REQUIREMENTS.md")
+    assert "Run the child gate before displaying, approving, or committing the roadmap." in content
     assert "retry once; partial writes are diagnostics only" in content
 
 
@@ -525,7 +548,7 @@ def test_new_project_notation_coordinator_uses_explicit_model_and_spawn_contract
     path = WORKFLOWS_DIR / "new-project.md"
     content = _read(path)
     start = content.index("## 8.5. Establish Conventions")
-    end = content.index("**Handle notation-coordinator return with the child artifact gate:**", start)
+    end = content.index("**Notation-coordinator child gate:**", start)
     notation_section = content[start:end]
 
     assert _find_single_task(path, "gpd-notation-coordinator")
@@ -564,9 +587,10 @@ def test_validate_conventions_uses_one_shot_delegation_and_artifact_gating_for_r
 
 def test_new_milestone_research_and_roadmapper_gate_success_path_artifacts() -> None:
     content = _read(WORKFLOWS_DIR / "new-milestone.md")
+    gate = _child_gate(content, "milestone_roadmapper")
 
     assert content.count("<spawn_contract>") >= 3
-    assert "child_gate:\n  id: \"milestone_roadmapper\"" in content
+    assert _artifact_paths(gate) == ("GPD/ROADMAP.md", "GPD/REQUIREMENTS.md")
     assert (
         "child_gate:\n  id: \"milestone_literature_scouts\"" in content
     )
@@ -578,10 +602,7 @@ def test_new_milestone_research_and_roadmapper_gate_success_path_artifacts() -> 
         "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md"
         in content
     )
-    assert (
-        "Only after the artifact gate passes, apply any accepted state changes from the roadmapper return in the main workflow"
-        in content
-    )
+    assert "artifact gate passes, apply accepted state changes in the main workflow" in content
     assert "GPD/REQUIREMENTS.md" in content
     assert "require-files-written" in content
     assert "shared_state_policy: return_only" in content
@@ -598,7 +619,7 @@ def test_new_milestone_research_and_roadmapper_gate_success_path_artifacts() -> 
     assert 'subagent_type="gpd-roadmapper"' in content
     assert "GPD/ROADMAP.md" in content
     assert "GPD/STATE.md" in content
-    assert "Do not accept a direct roadmapper edit to `GPD/STATE.md` as success proof." in content
+    assert "direct roadmapper edit to\n`GPD/STATE.md` is not success proof." in content
 
 
 def test_peer_review_stages_use_fresh_context_and_stage_artifacts() -> None:

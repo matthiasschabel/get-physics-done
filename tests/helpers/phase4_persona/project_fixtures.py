@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from gpd.core.state import default_state_dict, generate_state_markdown
+from tests.return_skeleton_support import render_gpd_return_block as _render_gpd_return_block
 
 PHASE = "02"
 PHASE_NAME = "Analysis"
@@ -46,11 +47,7 @@ def render_gpd_return_block(
 ) -> str:
     """Render one fenced return block without embedding provider transcript data."""
 
-    if files_written:
-        files_yaml = "  files_written:\n" + "".join(f"    - {json.dumps(path)}\n" for path in files_written)
-    else:
-        files_yaml = "  files_written: []\n"
-    return f"```yaml\ngpd_return:\n  status: {status}\n{files_yaml}  issues: []\n  next_actions: []\n{extra}```\n"
+    return _render_gpd_return_block(files_written, status=status, extra_yaml=extra)
 
 
 def write_phase_project(

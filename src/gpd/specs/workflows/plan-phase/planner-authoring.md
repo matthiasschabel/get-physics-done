@@ -94,7 +94,7 @@ task(
 )
 ```
 
-Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
 
 ```yaml
 child_gate:
@@ -114,9 +114,13 @@ child_gate:
     - "gpd validate plan-preflight <each fresh plan>"
   applicator: none
   failure_route: "retry_planner_or_main_context_plan_or_abort | repair_prompt_once | fail_closed | retry_once | repair_path_once | abort | ..."
+  status_route:
+    checkpoint: "fresh planner continuation after user response"
+    blocked: "add context, retry, or main-context plan"
+    failed: "add context, retry, or main-context plan"
 ```
 
-Status route: `checkpoint` uses the continuation boundary; unresolved planner blockers choose retry, main-context plan, or abort.
+Route non-completed statuses through `status_route`.
 
 ## 9. Handle Planner Return
 

@@ -218,9 +218,10 @@ Options:
 <step name="generate_response_letter">
 **Finalize the canonical response artifacts and generate an optional manuscript-local response letter companion:**
 
-Apply the already-loaded shared publication response-writer handoff before treating the response-artifact pair as complete.
-
-Read the completed `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` (all comments should have status "Response drafted" or "Final"). Treat those files as complete only through this aggregate:
+Before response-pair completion, read `${RESPONSE_AUTHOR_PATH}` and
+`${RESPONSE_REFEREE_PATH}` (all comments should have status "Response drafted"
+or "Final") and run the aggregate below. The already-loaded shared
+publication response-writer handoff owns pair freshness and binding.
 
 ```yaml
 aggregate_child_gate:

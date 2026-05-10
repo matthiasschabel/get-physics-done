@@ -49,7 +49,7 @@ Bind the template's protocol fields from the gap-repair payload: `{selected_prot
 
 Set `GAP_PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
-Gap planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
 
 ```yaml
 child_gate:
@@ -69,9 +69,13 @@ child_gate:
     - "gpd validate plan-preflight <each fresh gap plan>"
   applicator: none
   failure_route: "fail_closed -> gpd:plan-phase ${phase_number} --gaps | repair_prompt_once | fresh_gap_planner_continuation"
+  status_route:
+    checkpoint: "fresh gap-planner continuation after user response"
+    blocked: "gpd:plan-phase ${phase_number} --gaps"
+    failed: "retry gap planner or gpd:plan-phase ${phase_number} --gaps"
 ```
 
-If the planner fails to spawn or returns an error, keep the session fail-closed and offer retry or manual plan creation. Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone. End with the same `gpd:plan-phase ${phase_number} --gaps` Next Up route.
+If the planner fails to spawn or returns an error, keep the session fail-closed and offer retry or manual plan creation. Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone. Use the gap-repair blocked stop route: primary `gpd:plan-phase ${phase_number} --gaps`.
 </step>
 
 <step name="verify_gap_plans">
@@ -93,7 +97,7 @@ Spawn `gpd-plan-checker` as a fresh one-shot delegation.
 
 Set `GAP_CHECKER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
-Gap plan-checker child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Run the local `child_gate` below. Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md`; this callsite owns the tuple fields, validators, applicator, and routes.
 
 ```yaml
 child_gate:
@@ -109,18 +113,24 @@ child_gate:
     - "files_written: []"
   applicator: none
   failure_route: "manual_review_or_fail_closed | repair_prompt_once | fail_closed | revision_loop_or_fail_closed"
+  status_route:
+    checkpoint: "record approved/blocked plans for gap revision"
+    blocked: "gpd:plan-phase ${phase_number} --gaps"
+    failed: "retry or manual revision"
 ```
 
-Status route: `checkpoint` records approved/blocked plans for gap revision; `blocked` routes to `gpd:plan-phase ${phase_number} --gaps`; `failed` routes to retry or manual revision.
+Route non-completed statuses through `status_route`.
+
+Gap-checker stops render through `references/orchestration/stage-stop-envelope.md`: checkpoint stops use primary `gpd:resume-work`; blocked or failed stops use primary `gpd:plan-phase ${phase_number} --gaps`; keep `gpd:suggest-next` secondary.
 
 If the checker fails to spawn or returns an error, proceed without plan verification but note that the plans were not verified.
 
 If the checker returns a structured `gpd_return`, route on `gpd_return.status` and the structured plan lists, not on presentation text:
 
 - `completed`: treat the fresh fix plans as verified only after the on-disk files still match the planner's `files_written` set.
-- `checkpoint`: some plans are approved and others need revision; record `approved_plans` and `blocked_plans`, then send only the blocked plans back through the revision loop. If stopping for user input, end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:plan-phase ${phase_number} --gaps` and `gpd:suggest-next`.
-- `blocked`: nothing is approved; feed the checker issues and blocked plan IDs back into the revision loop without rewriting approved plans. If stopping, use the same Next Up route.
-- `failed`: present the issues and offer retry or manual revision. End with `## > Next Up`: primary `gpd:plan-phase ${phase_number} --gaps`, plus `gpd:resume-work` and `gpd:suggest-next`.
+- `checkpoint`: some plans are approved and others need revision; record `approved_plans` and `blocked_plans`, then send only the blocked plans back through the revision loop. If stopping for user input, use the gap-checker checkpoint stop route.
+- `blocked`: nothing is approved; feed the checker issues and blocked plan IDs back into the revision loop without rewriting approved plans. If stopping, use the gap-checker blocked stop route.
+- `failed`: present the issues and offer retry or manual revision. If stopping, use the gap-checker failed stop route.
 </step>
 
 <step name="revision_loop">
@@ -138,7 +148,7 @@ If iteration count reaches 3, stop and offer the user:
 2. Provide guidance and retry
 3. Abandon and exit
 
-End that stop with `## > Next Up`: primary `gpd:plan-phase ${phase_number} --gaps`, plus `gpd:execute-phase ${phase_number} --gaps-only`, `gpd:verify-work ${phase_number}`, and `gpd:suggest-next`.
+Render that stop through `references/orchestration/stage-stop-envelope.md`: primary `gpd:plan-phase ${phase_number} --gaps`, secondary `gpd:execute-phase ${phase_number} --gaps-only`, `gpd:verify-work ${phase_number}`, and `gpd:suggest-next`.
 </step>
 
 <step name="complete_session">

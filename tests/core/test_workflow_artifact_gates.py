@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
+from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def _read(name: str) -> str:
@@ -16,15 +19,35 @@ def _read(name: str) -> str:
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 
+def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
+    for match in _YAML_BLOCK_RE.finditer(text):
+        body = match.group("body")
+        if "child_gate:" not in body:
+            continue
+        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
+        if gate.id == gate_id:
+            return gate
+    raise AssertionError(f"missing child_gate {gate_id}")
+
+
 def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
     plan_phase = _read("plan-phase.md")
+    gate = _child_gate(plan_phase, "planner_initial_plan")
 
-    assert "Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`" in plan_phase
-    assert "Planner child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in plan_phase
-    assert 'path: "${PHASE_DIR}/*-PLAN.md"' in plan_phase
-    assert 'freshness_marker: "after $PLANNER_HANDOFF_STARTED_AT"' in plan_phase
-    assert "gpd validate handoff-artifacts - --expected-glob '${PHASE_DIR}/*-PLAN.md'" in plan_phase
-    assert "every file passes `gpd validate plan-contract`" in plan_phase
+    assert [(artifact.path, artifact.kind) for artifact in gate.expected_artifacts] == [
+        ("${PHASE_DIR}/*-PLAN.md", "glob")
+    ]
+    assert gate.allowed_roots == ("${PHASE_DIR}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$PLANNER_HANDOFF_STARTED_AT"
+    assert any(
+        "gpd validate handoff-artifacts - --expected-glob '${PHASE_DIR}/*-PLAN.md'" in validator
+        for validator in gate.validators
+    )
+    assert "gpd validate plan-contract <each fresh plan>" in gate.validators
+    assert "gpd validate plan-preflight <each fresh plan>" in gate.validators
+    assert gate.applicator.command == "none"
+    assert gate.status_route["checkpoint"] == "fresh planner continuation after user response"
     assert "The shared child artifact gate owns the no-synthetic-child-return rule" in plan_phase
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in plan_phase
 

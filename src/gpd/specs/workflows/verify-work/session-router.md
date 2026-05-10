@@ -101,7 +101,7 @@ If `project_contract_load_info.status` starts with `blocked`, stop and show the 
 
 If `project_contract_validation.valid` is false, stop and show `project_contract_validation.errors` before delegation.
 
-**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint. Show gate/load/validation errors. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until repaired. End with `## > Next Up`: primary `gpd:sync-state` or `gpd:new-project`, then `gpd:verify-work ${PHASE_ARG}` after repair, plus `gpd:suggest-next`.
+**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint. Show gate/load/validation errors. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until repaired. Render the blocked stop through `references/orchestration/stage-stop-envelope.md`: primary `gpd:sync-state` or `gpd:new-project`, then `gpd:verify-work ${PHASE_ARG}` after repair, plus `gpd:suggest-next`.
 
 Run the executable lifecycle authority gate before proof repair, inventory building, contract checks, or verifier delegation:
 

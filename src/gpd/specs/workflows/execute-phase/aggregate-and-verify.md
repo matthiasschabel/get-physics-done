@@ -182,7 +182,7 @@ Return one typed `gpd_return` envelope with `status`, the written report path, a
 )
 ```
 
-Post-execution verifier child artifact gate: apply `references/orchestration/child-artifact-gate.md`; scientific status routing applies `references/verification/verification-status-authority.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Post-execution verifier child artifact gate: run the local `child_gate` below. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; scientific status routing lives in `references/verification/verification-status-authority.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`. This callsite owns the verification report bridge, validators, closeout applicator boundary, and failure route.
 
 ```yaml
 child_gate:
@@ -231,7 +231,22 @@ All automated checks passed. {N} items need human review:
 "approved" -> continue | Report issues -> gap closure
 ```
 
-**If gaps_found:**
+**If gaps_found:** populate the stop envelope, then render the canonical block.
+
+```yaml
+stage_stop:
+  workflow: execute-phase
+  stage: aggregate_and_verify
+  status: blocked
+  reason: verification_gaps_found
+  checkpoint: verification_gap
+  user_decision_needed: true
+  next_runtime_command: "gpd:plan-phase {X} --gaps"
+  also_available:
+    - "cat {phase_dir}/{phase}-VERIFICATION.md"
+    - "gpd:verify-work {X}"
+    - "gpd:suggest-next"
+```
 
 ```
 ## Phase {X}: {Name} -- Gaps Found
@@ -248,12 +263,14 @@ All automated checks passed. {N} items need human review:
 ---
 ## > Next Up
 
-`gpd:plan-phase {X} --gaps`
+Primary: `gpd:plan-phase {X} --gaps`
 
-<sub>Start a fresh context window</sub>
+**Also available:**
+- `cat {phase_dir}/{phase}-VERIFICATION.md` -- full report
+- `gpd:verify-work {X}` -- manual review first
+- `gpd:suggest-next` -- confirm the next action
 
-Also: `cat {phase_dir}/{phase}-VERIFICATION.md` -- full report
-Also: `gpd:verify-work {X}` -- manual review first
+<sub>Start a fresh context window, then run the primary command above.</sub>
 ```
 
 Gap closure cycle: `gpd:plan-phase {X} --gaps` reads VERIFICATION.md -> creates gap plans with `gap_closure: true` -> user runs `gpd:execute-phase {X} --gaps-only` -> automatic re-verification (below).
@@ -386,7 +403,7 @@ Re-verify Phase {PHASE_NUMBER} after gap closure.
 )
 ```
 
-Gap re-verifier child artifact gate: apply `references/orchestration/child-artifact-gate.md`; scientific status routing applies `references/verification/verification-status-authority.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+Gap re-verifier child artifact gate: run the local `child_gate` below. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; scientific status routing lives in `references/verification/verification-status-authority.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`. This callsite owns the re-verification report validator, closeout boundary, and failure route.
 
 ```yaml
 child_gate:
@@ -455,7 +472,7 @@ Return exactly one typed `gpd_return` envelope, include `files_written`, and wri
 ", subagent_type="gpd-consistency-checker", model="{consistency_model}", readonly=false, description="Rapid consistency check")
 )
 
-**Consistency checker child artifact gate:** apply `references/orchestration/child-artifact-gate.md`; checkpoint handling applies `references/orchestration/continuation-boundary.md`.
+**Consistency checker child artifact gate:** run the local `child_gate` below. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`. This callsite owns the consistency artifact, validator, no-op applicator, and failure route.
 
 ```yaml
 child_gate:
@@ -490,12 +507,35 @@ printf '%s\n' "$CONSISTENCY_RETURN" | gpd validate handoff-artifacts - \
   --fresh-after "$CONSISTENCY_HANDOFF_STARTED_AT" || exit 1
 ```
 
-**If the consistency checker agent fails to spawn or returns an error:** Treat the consistency check as blocked. Do not proceed as if the phase was checked. End with `## > Next Up`: primary `gpd:validate-conventions`, plus `gpd:resume-work`, `gpd:execute-phase {PHASE_NUMBER}`, and `gpd:suggest-next`.
+For every consistency-check stop, populate `stage_stop` before rendering. Do not print raw staged-init or field-access commands in `## > Next Up`; those remain runtime mechanics.
+
+| Stop | `stage_stop.status` | `reason` | `checkpoint` | `next_runtime_command` | `also_available` |
+|---|---|---|---|---|---|
+| checker spawn/error | `blocked` | `consistency_checker_unavailable` | `consistency_check` | `gpd:validate-conventions` | `gpd:resume-work`; `gpd:execute-phase {PHASE_NUMBER}`; `gpd:suggest-next` |
+| checker checkpoint | `checkpoint` | `consistency_checker_checkpoint` | `consistency_check` | `gpd:resume-work` | `gpd:validate-conventions`; `gpd:suggest-next` |
+| checker blocked | `blocked` | `consistency_checker_blocked` | `consistency_check` | `gpd:validate-conventions` | `gpd:resume-work`; `gpd:suggest-next` |
+| checker failed | `failed` | `consistency_checker_failed` | `consistency_check` | `gpd:validate-conventions` | `gpd:resume-work`; `gpd:suggest-next` |
+
+Render all three routes with this shape:
+
+```
+## > Next Up
+
+Primary: `{stage_stop.next_runtime_command}`
+
+**Also available:**
+- `{secondary command}` -- route-specific recovery
+- `gpd:suggest-next` -- confirm the next action
+
+<sub>Start a fresh context window, then run the primary command above.</sub>
+```
+
+**If the consistency checker agent fails to spawn or returns an error:** Treat the consistency check as blocked. Do not proceed as if the phase was checked. Use the `checker spawn/error` route above.
 
 **Handle the checker response through `gpd_return.status`:**
 - `gpd_return.status: completed`: accept only if the consistency checker gate passes. Surface any `issues` as warnings, then continue.
-- `gpd_return.status: checkpoint`: stop, surface the checkpoint payload from the checker, and end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:validate-conventions` and `gpd:suggest-next`. Do not wait in place for user input inside this run.
-- `gpd_return.status: blocked` / `gpd_return.status: failed`: stop execution, surface the returned issues, and end with `## > Next Up`: primary `gpd:validate-conventions`, plus `gpd:resume-work` and `gpd:suggest-next`. If the user wants convention repair, route through `gpd:validate-conventions`; the fresh continuation handoff owns any notation-coordinator work.
+- `gpd_return.status: checkpoint`: stop, surface the checkpoint payload from the checker, and use the `checker checkpoint` route above. Do not wait in place for user input inside this run.
+- `gpd_return.status: blocked` / `gpd_return.status: failed`: stop execution, surface the returned issues, and use the matching `checker blocked` or `checker failed` route above. If the user wants convention repair, route through `gpd:validate-conventions`; the fresh continuation handoff owns any notation-coordinator work.
 
 **If the checker output is malformed or omits `gpd_return.status`:** Treat it as blocked. Do not infer success from prose headings or untyped routing. Do not hand-author or paste a synthetic `gpd_return` into an already-returned report in the orchestrator; retry or repair the checker handoff so the child owns the typed envelope.
 

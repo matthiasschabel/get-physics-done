@@ -52,3 +52,15 @@ def test_execute_phase_consistency_check_no_longer_routes_on_legacy_status() -> 
     assert "Present issues to user with resolution options" not in workflow
     assert "Do not infer success from prose headings or untyped routing." in workflow
     assert "Do not hand-author or paste a synthetic `gpd_return`" in workflow
+
+
+def test_execute_phase_consistency_stops_render_from_stage_stop_routes() -> None:
+    workflow = _read_execute_phase_stage("aggregate-and-verify.md")
+
+    assert "For every consistency-check stop, populate `stage_stop` before rendering." in workflow
+    assert "| checker spawn/error | `blocked` | `consistency_checker_unavailable`" in workflow
+    assert "| checker checkpoint | `checkpoint` | `consistency_checker_checkpoint`" in workflow
+    assert "| checker blocked | `blocked` | `consistency_checker_blocked`" in workflow
+    assert "| checker failed | `failed` | `consistency_checker_failed`" in workflow
+    assert "Primary: `{stage_stop.next_runtime_command}`" in workflow
+    assert "End with `## > Next Up`: primary" not in workflow

@@ -88,8 +88,6 @@ Before spawning each wave, check whether expected `.tex` outputs already exist.
 Existing `.tex` files can make a resumed wave current, but they are not fresh
 child handoff success. Treat the emitted `.tex` file as the success artifact gate
 for each section only after the tuple passes.
-Existing `.tex` files can make a resumed wave current, but they are not fresh child handoff success.
-Treat the emitted `.tex` file as the success artifact gate for each section only after the tuple passes.
 
 For each section, spawn a writer agent:
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
@@ -125,8 +123,9 @@ child_gate:
   failure_route: "stage-recovery-gate -> retry writer | main-context section drafting | stop or leave incomplete"
 ```
 
-Apply `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` through
-this tuple before treating section authoring as complete.
+Run this tuple under `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md`;
+section authoring is complete only after the emitted `.tex` path passes this
+callsite tuple.
 
 Each writer receives the paper context, section brief, narrative continuity,
 evidence paths, active decisive-comparison artifacts, relevant

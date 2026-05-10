@@ -198,7 +198,7 @@ Each scout contract is task-local. Do not widen the write scope or reuse a share
 | GATES            | References specific, conditions stated, relevance explained            | Methods specific to this physics domain, cost noted, limitations identified | Algorithms defined with convergence criteria, versions current, dependencies mapped | Pitfalls specific to this extension, numerical issues covered, prevention actionable |
 | FILE             | PRIOR-WORK.md                                                          | METHODS.md                                                                  | COMPUTATIONAL.md                                                                    | PITFALLS.md                                                                          |
 
-**Handle scout returns with the child artifact gate:**
+**Scout child gate:**
 
 ```yaml
 child_gate:
@@ -221,9 +221,11 @@ child_gate:
   failure_route: "retry missing scout once | repair prompt once | stop survey path | retry missing scout once in the same task-local write scope | repair path once | fail closed | ..."
 ```
 
-Status route: `checkpoint`, `blocked`, or final `failed` -> `## > Next Up` primary `gpd:new-milestone [milestone name]`, also `gpd:suggest-next`.
-
-Apply `references/orchestration/child-artifact-gate.md` and `references/orchestration/continuation-boundary.md` before counting any scout as complete.
+Route `checkpoint`, `blocked`, or final `failed` through
+`references/orchestration/child-artifact-gate.md` and
+`references/orchestration/continuation-boundary.md` to `## > Next Up` primary
+`gpd:new-milestone [milestone name]`, also `gpd:suggest-next`. Do not count a
+scout as complete until the tuple passes.
 
 After all 4 complete and required artifacts are present, spawn synthesizer:
 
@@ -287,7 +289,7 @@ shared_state_policy: return_only
 
 This synthesizer contract is task-local. Do not reuse survey write scopes or widen the summary handoff.
 
-**Handle synthesizer return with the child artifact gate:**
+**Synthesizer child gate:**
 
 ```yaml
 child_gate:
@@ -307,9 +309,11 @@ child_gate:
   failure_route: "retry once | repair prompt once | stop synth path | repair path once | fail closed | stop; no stale SUMMARY.md or partial scout synthesis | ..."
 ```
 
-Status route: `checkpoint`, `blocked`, or final `failed` -> `## > Next Up` primary `gpd:new-milestone [milestone name]`, also `gpd:suggest-next`.
-
-Apply the gate before displaying or committing `SUMMARY.md`. Do not create `SUMMARY.md` in the main context from partial scout output or from a stale summary that was not named in the fresh return.
+Route `checkpoint`, `blocked`, or final `failed` through the gate to
+`## > Next Up` primary `gpd:new-milestone [milestone name]`, also
+`gpd:suggest-next`. Do not display or commit `SUMMARY.md`, create it in the
+main context, or use a stale summary unless the fresh return names it and the
+tuple passes.
 
 Display key findings from SUMMARY.md:
 

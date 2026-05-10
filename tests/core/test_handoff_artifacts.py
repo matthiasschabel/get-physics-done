@@ -11,15 +11,7 @@ from typer.testing import CliRunner
 
 from gpd.cli import app
 from gpd.core.handoff_artifacts import HandoffFailureClass, validate_handoff_artifacts_markdown
-
-
-def _return_block(files_written: list[str], *, status: str = "completed") -> str:
-    files_written_yaml = (
-        "  files_written: []\n"
-        if not files_written
-        else "  files_written:\n" + "\n".join(f"    - {json.dumps(path)}" for path in files_written) + "\n"
-    )
-    return f"```yaml\ngpd_return:\n  status: {status}\n{files_written_yaml}  issues: []\n  next_actions: []\n```\n"
+from tests.return_skeleton_support import render_gpd_return_block as _return_block
 
 
 def _files_only_return_block(files_written: list[str]) -> str:

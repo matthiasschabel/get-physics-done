@@ -24,7 +24,7 @@ def test_verify_work_routes_on_structured_checker_statuses() -> None:
 def test_verify_work_references_one_shot_checker_contract_in_the_gap_closure_loop() -> None:
     workflow = workflow_authority_text(VERIFY_WORK.parent, "verify-work")
 
-    assert "Gap plan-checker child artifact gate" in workflow
-    assert "checkpoint handling applies `references/orchestration/continuation-boundary.md`" in workflow
+    assert 'id: "verify_work_gap_plan_checker"' in workflow
+    assert "Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md`" in workflow
     assert "use the structured `approved_plans`, `blocked_plans`, and `issues` fields" in workflow
     assert "Use the structured fields, not the human-readable approval table, as the source of truth." in workflow

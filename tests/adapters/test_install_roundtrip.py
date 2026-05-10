@@ -74,7 +74,14 @@ STAGED_COMMAND_PROJECTION_CASES = iter_staged_command_projection_cases(
     workflows_dir=WORKFLOWS_DIR,
 )
 STAGED_CASE_BY_COMMAND = {case.command_name: case for case in STAGED_COMMAND_PROJECTION_CASES}
-INSTALLED_PROJECTION_SMOKE_COMMANDS = ("help", "execute-phase", "new-project", "write-paper", "peer-review", "verify-work")
+INSTALLED_PROJECTION_SMOKE_COMMANDS = (
+    "help",
+    "execute-phase",
+    "new-project",
+    "write-paper",
+    "peer-review",
+    "verify-work",
+)
 INSTALLED_STAGED_SMOKE_COMMANDS = ("execute-phase", "new-project", "write-paper", "verify-work")
 INSTALLED_SHELL_SMOKE_COMMANDS = ("health",)
 INSTALLED_PROTOCOL_BUNDLE_SMOKE_COMMANDS = ("execute-phase",)
@@ -468,6 +475,8 @@ def _read_runtime_agent_prompt(target: Path, runtime: str, agent_name: str) -> s
     if runtime in {"claude-code", "codex", "gemini", "opencode"}:
         return (target / "agents" / f"{agent_name}.md").read_text(encoding="utf-8")
     raise AssertionError(f"Unsupported runtime {runtime}")
+
+
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
 def test_installed_peer_review_prompt_keeps_publication_lane_boundary(
     real_installed_repo_factory,
@@ -778,8 +787,7 @@ def test_installed_target_workflow_helper_calls_stay_local_cli_not_runtime_label
             for public_label in public_helper_labels:
                 if public_label in line:
                     offenders.append(
-                        f"{runtime}:{workflow_name}: line {line_number}: "
-                        f"internal helper surfaced as {public_label!r}"
+                        f"{runtime}:{workflow_name}: line {line_number}: internal helper surfaced as {public_label!r}"
                     )
 
         for fence in shell_fences(workflow_text):
@@ -1188,9 +1196,9 @@ def test_real_installed_help_prompt_keeps_relaxed_technical_analysis_contract(
         "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed current-workspace lane."
         in help_prompt
     )
-    assert "Usage: `gpd:dimensional-analysis results/01-SUMMARY.md`" in help_prompt
-    assert "Usage: `gpd:limiting-cases results/01-SUMMARY.md`" in help_prompt
-    assert "Usage: `gpd:numerical-convergence results/mesh-study.csv`" in help_prompt
+    assert "`gpd:dimensional-analysis results/01-SUMMARY.md`" in help_prompt
+    assert "`gpd:limiting-cases results/01-SUMMARY.md`" in help_prompt
+    assert "`gpd:numerical-convergence results/mesh-study.csv`" in help_prompt
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)
@@ -1203,7 +1211,7 @@ def test_real_installed_help_prompt_surfaces_bounded_write_paper_external_author
     help_prompt = _command_or_workflow_authority_text(target, raw_help_prompt, runtime, "help")
 
     assert_publication_lane_boundary_contract(help_prompt)
-    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_prompt
+    assert "`gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_prompt
 
 
 @pytest.mark.parametrize("runtime", FULL_RUNTIME_MATRIX)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import difflib
 import hashlib
 import json
 import sys
@@ -17,6 +16,7 @@ if __package__ in {None, ""}:
 
 from gpd.adapters.runtime_catalog import GlobalConfigPolicy, RuntimeDescriptor, iter_runtime_descriptors
 from gpd.core.public_surface_contract import PublicSurfaceContract, load_public_surface_contract
+from scripts.generated_region_support import GeneratedRegionDiff, unified_diff_text, write_stale_check_result
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALLER_METADATA_PATH = REPO_ROOT / "src" / "gpd" / "bootstrap" / "installer_metadata.json"
@@ -129,22 +129,11 @@ def render_installer_metadata_text(*, repo_root: Path = REPO_ROOT) -> str:
     return json.dumps(build_installer_metadata(repo_root=repo_root), indent=2, ensure_ascii=True) + "\n"
 
 
-def _diff(expected: str, actual: str, *, path: Path) -> str:
-    try:
-        label = path.relative_to(REPO_ROOT).as_posix()
-    except ValueError:
-        label = path.as_posix()
-    return "".join(
-        difflib.unified_diff(
-            actual.splitlines(keepends=True),
-            expected.splitlines(keepends=True),
-            fromfile=f"{label} (current)",
-            tofile=f"{label} (expected)",
-        )
-    )
-
-
-def check_installer_metadata(*, path: Path = INSTALLER_METADATA_PATH, repo_root: Path = REPO_ROOT) -> tuple[str, ...]:
+def check_installer_metadata(
+    *,
+    path: Path = INSTALLER_METADATA_PATH,
+    repo_root: Path = REPO_ROOT,
+) -> tuple[GeneratedRegionDiff, ...]:
     expected = render_installer_metadata_text(repo_root=repo_root)
     try:
         actual = path.read_text(encoding="utf-8")
@@ -152,7 +141,13 @@ def check_installer_metadata(*, path: Path = INSTALLER_METADATA_PATH, repo_root:
         actual = ""
     if actual == expected:
         return ()
-    return (_diff(expected, actual, path=path),)
+    return (
+        GeneratedRegionDiff(
+            path=path,
+            block_id="installer-metadata",
+            diff=unified_diff_text(expected, actual, path=path, block_id="installer-metadata"),
+        ),
+    )
 
 
 def write_installer_metadata(*, path: Path = INSTALLER_METADATA_PATH, repo_root: Path = REPO_ROOT) -> bool:
@@ -180,12 +175,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.check:
         diffs = check_installer_metadata()
         if diffs:
-            sys.stderr.write(
-                "Bootstrap installer metadata is stale. "
-                "Run `uv run python scripts/render_bootstrap_installer_metadata.py` and commit the result.\n\n"
+            return write_stale_check_result(
+                diffs,
+                heading="Bootstrap installer metadata is stale.",
+                regenerate_command="uv run python scripts/render_bootstrap_installer_metadata.py",
             )
-            sys.stderr.write("\n".join(diffs))
-            return 1
         return 0
 
     if write_installer_metadata():

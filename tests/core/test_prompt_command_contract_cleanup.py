@@ -22,7 +22,12 @@ LINUX_DOC = REPO_ROOT / "docs/linux.md"
 
 
 def _read(path: Path) -> str:
-    if path.parent == WORKFLOWS_DIR and path.stem in {"execute-phase", "peer-review", "respond-to-referees", "write-paper"}:
+    if path.parent == WORKFLOWS_DIR and path.stem in {
+        "execute-phase",
+        "peer-review",
+        "respond-to-referees",
+        "write-paper",
+    }:
         return workflow_authority_text(WORKFLOWS_DIR, path.stem)
     return path.read_text(encoding="utf-8")
 
@@ -37,6 +42,12 @@ def _first_markdown_fence(text: str) -> str:
     match = re.search(r"```markdown\n(.*?)\n```", text, re.S)
     assert match is not None
     return match.group(1)
+
+
+def _single_line_starting(text: str, prefix: str) -> str:
+    matches = [line for line in text.splitlines() if line.startswith(prefix)]
+    assert len(matches) == 1
+    return matches[0]
 
 
 def test_discover_managed_outputs_have_write_capability_and_documented_route() -> None:
@@ -100,7 +111,11 @@ def test_help_wrapper_uses_stable_section_markers_for_extracts() -> None:
 
     assert "Use the workflow-owned stable markers as the extraction boundaries" in help_command
     assert "never print the HTML marker comments themselves" in help_command
-    assert "renderer-backed local CLI help bridge" in help_command
+    bridge_rule = _single_line_starting(help_command, "Bridge command rule:")
+    for bridge_token in ("local CLI", "JSON", "renderer-backed"):
+        assert bridge_token in bridge_rule
+    for detail_token in ("`detail_markdown`", "`canonical_command`", "`allowed_tools`"):
+        assert detail_token in help_command
     assert "`@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path" in help_command
     assert all(parse_at_include_path(line.strip()) is None for line in help_command.splitlines())
     assert "Start at the workflow-owned" not in help_command

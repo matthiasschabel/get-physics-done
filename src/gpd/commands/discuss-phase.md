@@ -38,8 +38,11 @@ Then render a one-screen summary of the resulting `{phase}-CONTEXT.md` and ask f
 
 <execution_context>
 @{GPD_INSTALL_DIR}/workflows/discuss-phase.md
-@{GPD_INSTALL_DIR}/templates/context.md
 </execution_context>
+
+<late_read_authorities>
+Read `{GPD_INSTALL_DIR}/templates/context.md` only when writing or updating `{phase}-CONTEXT.md`. Do not load the template during gray-area discovery, user questioning, or compact-form intake.
+</late_read_authorities>
 
 <context>
 Phase number: $ARGUMENTS (required)

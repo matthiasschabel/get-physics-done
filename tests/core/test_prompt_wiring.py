@@ -216,7 +216,7 @@ def _success_criteria_sections(text: str) -> str:
 
 
 def _assert_help_usage_line(text: str, command_name: str, *argument_fragments: str) -> None:
-    pattern = rf"Usage: `gpd:{re.escape(command_name)}(?P<arguments>[^`]*)`"
+    pattern = rf"(?:^|\n)(?:- )?(?:Usage: )?`gpd:{re.escape(command_name)}(?P<arguments>[^`]*)`"
     matches = tuple(re.finditer(pattern, text))
 
     assert matches, f"missing help usage line for gpd:{command_name}"
@@ -6644,7 +6644,7 @@ def test_respond_to_referees_arxiv_handoff_uses_public_positional_arxiv_target()
     )
     _assert_public_fragments(
         arxiv_help_block,
-        "Usage: `gpd:arxiv-submission paper/`",
+        "`gpd:arxiv-submission paper/`",
         context="arxiv help positional manuscript target",
     )
     _assert_forbidden_fragments(
@@ -7183,7 +7183,7 @@ def test_expanded_artifact_intake_surfaces_use_cli_text_extraction_helper() -> N
         context="peer-review help artifact text validator",
     )
     _assert_help_usage_line(peer_review_help_block, "peer-review", ".docx")
-    assert "Usage: `gpd:peer-review data/observables.csv`" in peer_review_help_block
+    assert "`gpd:peer-review data/observables.csv`" in peer_review_help_block
     _assert_semantic_fragments(
         help_workflow,
         "Example document source",

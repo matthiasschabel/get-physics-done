@@ -1,5 +1,7 @@
 <purpose>
-Perform a rigorous physics derivation with systematic verification at each step. Handles the complete derivation pipeline: stating assumptions, establishing notation, performing algebraic manipulations, verifying intermediate results, checking limits, and documenting the full chain of reasoning.
+Perform a rigorous physics derivation with systematic verification at each step:
+state assumptions, establish notation, derive, check intermediate results and
+limits, and document the reasoning chain.
 
 This workflow ensures that derivations are not just correct in their final form but verifiably correct at every intermediate step, with all assumptions explicit and all approximations justified.
 </purpose>
@@ -14,41 +16,17 @@ A derivation is a chain of logical steps from assumptions to conclusion. Every l
 
 ### What Makes a Rigorous Derivation
 
-1. **Assumptions are stated explicitly before the derivation begins.**
-
-   - Physical assumptions (system is in equilibrium, fields are weak, particles are non-relativistic)
-   - Mathematical assumptions (function is analytic, series converges, integral exists)
-   - Each assumption is numbered and referenced when used
-
-2. **Notation is defined before use.**
-
-   - Every symbol has exactly one meaning
-   - Conventions are stated (metric signature, Fourier transform, index ranges)
-   - Operator ordering is specified for quantum systems
-
-3. **Each step follows logically from the previous.**
-
-   - Algebraic manipulations are explicit enough to verify
-   - When a step involves a nontrivial identity, the identity is stated and cited
-   - When a step involves a standard technique (integration by parts, completing the square, saddle-point approximation), name it explicitly
-
-4. **Approximations are justified and bounded.**
-
-   - State what is being neglected: "We drop terms of O(epsilon^2) and higher"
-   - State why it is valid: "because epsilon = m/M << 1 in this regime"
-   - Estimate the error: "The leading correction is O(epsilon^2) ~ 0.01"
-
-5. **Intermediate results are checked.**
-
-   - Dimensional analysis at each stage (not just the final result)
-   - Known limits at intermediate stages (not just the final result)
-   - Symmetry properties preserved through each step
-
-6. **The result is clearly stated and interpreted.**
-   - Final expression boxed or highlighted
-   - Physical interpretation in words
-   - Domain of validity stated explicitly
-   - Connection to known results
+1. State physical and mathematical assumptions before the derivation; number
+   them and cite each use.
+2. Define every symbol and convention before use, including metric, Fourier,
+   index, and quantum-operator conventions.
+3. Make each algebraic step checkable; cite nontrivial identities and name
+   standard techniques.
+4. Justify every approximation with what is neglected, why the regime permits
+   it, and the leading error scale.
+5. Check dimensions, known limits, and symmetries at intermediate stages.
+6. Box the final expression and state interpretation, validity domain, and
+   relation to known results.
 
 </derivation_standards>
 
@@ -57,11 +35,10 @@ A derivation is a chain of logical steps from assumptions to conclusion. Every l
 <step name="load_context">
 **Pre-Step: Load Project Context**
 
-Load current-workspace state and conventions before beginning any derivation.
-
-Keep this bootstrap bound to the invoking workspace. `derive-equation` can run as a current-workspace standalone derivation, so do not auto-reenter an ancestor or recent project here.
-
-- Run:
+Load current-workspace state and conventions before any derivation. Keep this
+bootstrap bound to the invoking workspace; `derive-equation` can run as a
+current-workspace standalone derivation, so do not auto-reenter an ancestor or
+recent project here.
 
 ```bash
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
@@ -71,14 +48,20 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-- Parse JSON for: `workspace_root`, `project_root`, `state_exists`, `current_phase`, `convention_lock`, `derived_convention_lock`, and any continuation/runtime fields that pin this run to a concrete phase directory.
-- Treat phase context as authoritative only when the bootstrap surfaces a concrete phase number and phase directory (for example via `current_phase.number` plus `current_phase.directory`, or an equivalent canonical continuation field). Do not invent `phase_dir` from an ancestor project, a guessed numeric phase, or prose alone.
-- A nonzero init exit is a hard stop, not standalone mode.
-- **If init succeeds** (non-empty JSON with `state_exists: true`): Extract `convention_lock` for metric signature, Fourier transform convention, and index ranges. Extract active approximations and their validity ranges. Load any previously established notation from STATE.md.
-- If project state exists, inspect `intermediate_results` before re-deriving. Capture any existing canonical equation/result entries related to the target, including `id`, `equation`, `description`, `phase`, `depends_on`, and `verified`, so you can reuse the authoritative result instead of restating it.
+- Parse `workspace_root`, `project_root`, `state_exists`, `current_phase`,
+  `convention_lock`, `derived_convention_lock`, and continuation/runtime fields
+  that pin this run to a concrete phase directory.
+- Treat phase context as authoritative only when the bootstrap surfaces a concrete phase number and phase directory. Do not invent `phase_dir` from an ancestor project, a guessed numeric phase, or prose alone.
+- Nonzero init exit is a hard stop, not standalone mode.
+- If `state_exists=true`: extract conventions, active approximations, validity
+  ranges, and prior notation; inspect `intermediate_results` before re-deriving.
+  Capture existing canonical equation/result entries related to the target.
 - Use `gpd result search` to locate the canonical result first when the target equation or derived quantity may already exist in the registry. Prefer `--equation` for exact formula lookup and `--text` for descriptive or shorthand matching. Once a canonical `result_id` is known, use `gpd result show "{result_id}"` for the direct stored-result view before deciding whether a fresh derivation is still warranted.
-- **If init succeeds** (non-empty JSON with `state_exists: false`): Proceed in standalone mode with explicit convention declarations required from user in Step 1. All conventions must be stated explicitly before any derivation begins.
-- **If init succeeds** with `state_exists: true` but no authoritative phase context: Keep the project conventions and prior results visible as supporting context, but keep durable outputs under `GPD/analysis/` and skip phase-local persistence later.
+- If `state_exists=false`: proceed standalone with explicit convention
+  declarations in Step 1.
+- If `state_exists=true` but phase context is not authoritative: keep
+  conventions/prior results visible, write under `GPD/analysis/`, and skip
+  phase-local persistence.
 
 **This is the most critical workflow to have convention context.** Derivations without locked conventions risk sign errors, missing factors of 2pi, and metric signature inconsistencies that propagate silently through all subsequent steps.
 

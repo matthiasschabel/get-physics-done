@@ -95,7 +95,8 @@ gpd --raw help --command <name>
 
 - Pass through the normalized command name after `--command`.
 - If the bridge returns `ok: false` with `error: "unknown_command"`, output this one line and STOP: `Unknown command. Run this help command with --all for the compact command index.`
-- Render a compact detail block from `canonical_command`, `description`, `argument_hint`, `context_mode`, `project_reentry_capable`, `requires`, and `allowed_tools`.
+- If the bridge returns `detail_markdown`, output that renderer-owned markdown without rewriting it.
+- Otherwise render a compact detail block from `canonical_command`, `description`, `argument_hint`, `context_mode`, `project_reentry_capable`, `requires`, and `allowed_tools`.
 - Include command-context preflight fields when present, including the read-only runtime-owned permission snapshot / runtime-owned permission alignment metadata projected from canonical command policy.
 
 Workflow-owned reference fallback:

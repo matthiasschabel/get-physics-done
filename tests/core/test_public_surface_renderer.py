@@ -36,6 +36,8 @@ from scripts.render_public_surface import (
 )
 from tests.markdown_test_support import parse_markdown_table
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 
 def _synthetic_runtime_surface(display_name: str) -> BeginnerRuntimeSurface:
     return BeginnerRuntimeSurface(
@@ -279,21 +281,26 @@ def test_generated_region_helpers_fail_closed_for_bad_markers() -> None:
 
 def test_generated_region_inventory_detects_missing_markers_and_unexpected_duplicates() -> None:
     text = render_generated_region("beginner-preflight", render_public_surface_block("beginner-preflight"))
+    target_path = Path("docs/README.md")
 
     missing = check_generated_region_inventory(
         text,
         required_blocks=("beginner-preflight", "beginner-caveats"),
+        path=target_path,
     )
     assert len(missing) == 1
-    assert "missing 1 expected marker(s) for 'beginner-caveats'" in missing[0].diff
+    assert missing[0].path == target_path
+    assert missing[0].block_id == "beginner-preflight, beginner-caveats"
 
     duplicate_text = text + "\n" + text
     duplicate = check_generated_region_inventory(
         duplicate_text,
         required_blocks=("beginner-preflight",),
+        path=target_path,
     )
     assert len(duplicate) == 1
-    assert "duplicate marker for 'beginner-preflight' is not allowed" in duplicate[0].diff
+    assert duplicate[0].path == target_path
+    assert duplicate[0].block_id == "beginner-preflight"
 
     allowed_duplicate = check_generated_region_inventory(
         duplicate_text,
@@ -301,6 +308,10 @@ def test_generated_region_inventory_detects_missing_markers_and_unexpected_dupli
         allowed_duplicate_blocks=("beginner-preflight",),
     )
     assert allowed_duplicate == ()
+
+
+def test_default_public_surface_targets_are_current_in_repo() -> None:
+    assert check_generated_files(repo_root=REPO_ROOT) == ()
 
 
 def test_default_public_surface_targets_declare_current_marker_inventory() -> None:

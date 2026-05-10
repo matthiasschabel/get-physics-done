@@ -46,6 +46,12 @@ def _normalized_block(text: str) -> str:
     return text.strip().replace("\r\n", "\n")
 
 
+def _single_line_starting(text: str, prefix: str) -> str:
+    matches = [line for line in text.splitlines() if line.startswith(prefix)]
+    assert len(matches) == 1
+    return matches[0]
+
+
 def _help_renderer() -> object:
     return pytest.importorskip(
         "gpd.core.help_renderer",
@@ -154,7 +160,11 @@ def test_help_wrapper_prefers_renderer_backed_bridge_without_eager_workflow_incl
     assert "gpd --raw help" in help_command
     assert "gpd --raw help --all" in help_command
     assert "gpd --raw help --command <name>" in help_command
-    assert "renderer-backed local CLI help bridge" in help_command
+    bridge_rule = _single_line_starting(help_command, "Bridge command rule:")
+    for bridge_token in ("local CLI", "JSON", "renderer-backed"):
+        assert bridge_token in bridge_rule
+    for detail_token in ("`detail_markdown`", "`canonical_command`", "`allowed_tools`"):
+        assert detail_token in help_command
     assert "`@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path" in help_command
     assert all(parse_at_include_path(line.strip()) is None for line in help_command.splitlines())
 

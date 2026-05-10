@@ -266,6 +266,7 @@ _COMMAND_DETAIL_SIGNATURE_OVERRIDES: dict[str, str] = {
 
 _COMMAND_DETAIL_USAGE_EXAMPLES: dict[str, tuple[str, ...]] = {
     "gpd:arxiv-submission": ("gpd:arxiv-submission paper/",),
+    "gpd:derive-equation": ('gpd:derive-equation "effective mass from self-energy"',),
     "gpd:digest-knowledge": (
         'gpd:digest-knowledge "renormalization group fixed points"',
         "gpd:digest-knowledge 2401.12345v2",
@@ -276,10 +277,13 @@ _COMMAND_DETAIL_USAGE_EXAMPLES: dict[str, tuple[str, ...]] = {
         "gpd:digest-knowledge GPD/knowledge/K-renormalization-group-fixed-points.md",
     ),
     "gpd:dimensional-analysis": ("gpd:dimensional-analysis results/01-SUMMARY.md",),
+    "gpd:discover": ('gpd:discover --depth medium "finite-size scaling"',),
     "gpd:error-patterns": ("gpd:error-patterns sign-error",),
     "gpd:export": ("gpd:export --format latex --commit",),
     "gpd:export-logs": ("gpd:export-logs --command execute-phase --phase 3 --category workflow",),
+    "gpd:explain": ('gpd:explain "Ward identity"',),
     "gpd:limiting-cases": ("gpd:limiting-cases results/01-SUMMARY.md",),
+    "gpd:literature-review": ('gpd:literature-review "holographic superconductors"',),
     "gpd:new-project": (
         "gpd:new-project --minimal",
         "gpd:new-project --minimal @file.md",
@@ -290,11 +294,17 @@ _COMMAND_DETAIL_USAGE_EXAMPLES: dict[str, tuple[str, ...]] = {
         "gpd:peer-review draft.docx",
         "gpd:peer-review data/observables.csv",
     ),
+    "gpd:progress": (
+        "gpd:progress --full",
+        "gpd:progress --brief",
+        "gpd:progress --reconcile",
+    ),
     "gpd:respond-to-referees": (
         "gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md",
         "gpd:respond-to-referees reports/referee-report.md",
         "gpd:respond-to-referees paste",
     ),
+    "gpd:review-knowledge": ("gpd:review-knowledge GPD/knowledge/K-example.md",),
     "gpd:write-paper": (
         "gpd:write-paper",
         "gpd:write-paper --intake intake/write-paper-authoring-input.json",
@@ -305,12 +315,8 @@ _COMMAND_DETAIL_NOTES: dict[str, tuple[str, ...]] = {
     "gpd:arxiv-submission": (
         "Packages the GPD-owned manuscript root or a supported .tex entrypoint; it does not package arbitrary external material.",
     ),
-    "gpd:compact-state": (
-        "Suggested by `gpd:progress` when STATE.md grows large.",
-    ),
-    "gpd:compare-results": (
-        "Writes a decisive comparison artifact under GPD/comparisons/ for the current workspace.",
-    ),
+    "gpd:compact-state": ("Suggested by `gpd:progress` when STATE.md grows large.",),
+    "gpd:compare-results": ("Writes a decisive comparison artifact under GPD/comparisons/ for the current workspace.",),
     "gpd:derive-equation": (
         "Part of the project-aware technical-analysis lane for explicit current-workspace derivations.",
     ),
@@ -368,9 +374,6 @@ _COMMAND_DETAIL_NOTES: dict[str, tuple[str, ...]] = {
         "`--skip-verify` may skip routine verification, but proof-bearing plans still require checker review or an equivalent main-context audit.",
     ),
     "gpd:progress": (
-        "Usage: `gpd:progress --full`",
-        "Usage: `gpd:progress --brief`",
-        "Usage: `gpd:progress --reconcile`",
         "The local CLI `gpd progress` is a read-only renderer with `json|bar|table` output. Local CLI: `gpd progress json|bar|table`.",
     ),
     "gpd:resume-work": (
@@ -502,10 +505,7 @@ def _display_signature_for_command(registry_command: str) -> str:
 
 
 def _usage_examples_for(registry_command: str) -> tuple[str, ...]:
-    signature = _display_signature_for_command(registry_command)
-    examples: list[str] = [signature]
-    examples.extend(_documented_variants_for(registry_command))
-    examples.extend(_COMMAND_DETAIL_USAGE_EXAMPLES.get(registry_command, ()))
+    examples = _COMMAND_DETAIL_USAGE_EXAMPLES.get(registry_command, ())
     seen: set[str] = set()
     deduped: list[str] = []
     for example in examples:
@@ -574,10 +574,7 @@ def _command_policy_summary(command_name: str) -> tuple[str, ...]:
 
     output = policy.output_policy
     if output is not None and (
-        output.output_mode
-        or output.managed_root_kind
-        or output.default_output_subtree
-        or output.stage_artifact_policy
+        output.output_mode or output.managed_root_kind or output.default_output_subtree or output.stage_artifact_policy
     ):
         parts = []
         if output.output_mode:
@@ -616,8 +613,7 @@ def _staged_workflow_summary(command_name: str) -> tuple[str, ...]:
     manifest = command.staged_loading
     if manifest is None:
         return ()
-    stage_ids = ", ".join(manifest.stage_ids())
-    return (f"Staged workflow: {manifest.workflow_id} with stages {stage_ids}.",)
+    return (f"Staged workflow: `{manifest.workflow_id}`.",)
 
 
 @lru_cache(maxsize=1)
@@ -731,14 +727,16 @@ def _render_command_detail_block(
         (
             f"**`{signature}`**",
             command.description.strip(),
-            "",
-            "Usage examples:",
         )
     )
-    for example in _usage_examples_for(command.name):
-        lines.append(f"Usage: `{_apply_public_prefix(example, public_prefix=public_prefix)}`")
+    examples = _usage_examples_for(command.name)
+    if examples:
+        lines.append("")
+        lines.extend(f"- `{_apply_public_prefix(example, public_prefix=public_prefix)}`" for example in examples)
 
-    variants = tuple(_apply_public_prefix(variant, public_prefix=public_prefix) for variant in _documented_variants_for(command.name))
+    variants = tuple(
+        _apply_public_prefix(variant, public_prefix=public_prefix) for variant in _documented_variants_for(command.name)
+    )
     if variants:
         lines.extend(("", "Documented variants:"))
         lines.extend(f"- `{variant}`" for variant in variants)
@@ -748,21 +746,17 @@ def _render_command_detail_block(
         lines.extend(("", "Notes:"))
         lines.extend(f"- {note}" for note in notes)
 
-    lines.extend(("", "Registry metadata:"))
-    lines.append(f"- Canonical command: `{_apply_public_prefix(command.name, public_prefix=public_prefix)}`")
-    if command.argument_hint:
-        lines.append(f"- Argument hint: `{command.argument_hint}`")
-    lines.append(f"- Context mode: `{command.context_mode}`")
-    if command.project_reentry_capable:
-        lines.append("- Project reentry: supported")
+    metadata_lines: list[str] = []
     for require_line in _requires_summary(command.requires):
-        lines.append(f"- Requires {require_line}")
+        metadata_lines.append(f"- Requires {require_line}")
     for policy_line in _command_policy_summary(command.name):
-        lines.append(f"- {policy_line}")
+        metadata_lines.append(f"- {policy_line}")
     for review_line in _review_contract_summary(command.name):
-        lines.append(f"- {review_line}")
+        metadata_lines.append(f"- {review_line}")
     for staged_line in _staged_workflow_summary(command.name):
-        lines.append(f"- {staged_line}")
+        metadata_lines.append(f"- {staged_line}")
+    if metadata_lines:
+        lines.extend(("", *metadata_lines))
     return "\n".join(lines).strip()
 
 

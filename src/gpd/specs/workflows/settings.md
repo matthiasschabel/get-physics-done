@@ -80,7 +80,7 @@ Parse current values, using the schema defaults noted below when a key is absent
 - Optional USD budget guardrails are advisory only; `gpd cost` evaluates them, and missing telemetry keeps the result partial or estimated rather than exact.
 - `git.branching_strategy` -- `"branching_strategy": "none" | "per-phase" | "per-milestone"` (default: `"none"`)
 
-`research_mode` controls breadth vs focus only. It does **not** by itself authorize git-backed hypothesis branches, branch-like alternative plans, or side investigations; those still require an explicit tangent decision.
+`research_mode` controls breadth vs focus only. It does **not** by itself authorize git-backed hypothesis branches, branch-like alternative plans, or side investigations; those still require an explicit tangent decision. Surface tangent decisions explicitly. Suppress optional tangents unless the user explicitly requests them.
 
 `git.branching_strategy` is separate from tangent handling. It controls the normal git branch naming policy for approved phase/milestone work, not whether GPD may silently create hypothesis branches.
 
@@ -136,130 +136,22 @@ Before the detailed question list, offer a compact preset chooser when the user 
 - Full research: preview the core-research-plus-publication-readiness bundle over the existing knobs, then apply or customize
 - Customize settings: skip the preset and proceed to the detailed questions below
 
-Use ask_user with current values pre-selected:
+Use `ask_user` with current values pre-selected. Every group is single-select (`multiSelect: false`) and must preserve these labels and mappings:
 
-```
-ask_user([
-  {
-    question: "How much autonomy should the AI have? Supervised is the default and matches the advisor cadence — frequent checkpoints let you verify and redirect early. Balanced is for users who have built intuition for GPD's boundary. YOLO only stops on hard failures after runtime permissions are synced.",
-    header: "Autonomy",
-    multiSelect: false,
-    options: [
-      { label: "Supervised (Recommended)", description: "You carry the veto; GPD carries the task. Checkpoint at every physics-bearing decision so you can redirect early. Default cadence for new projects." },
-      { label: "Balanced", description: "Lighter checkpoint cadence for users who have built intuition for GPD's boundary. AI handles routine work and pauses on important physics decisions, ambiguities, blockers, or scope changes." },
-      { label: "YOLO", description: "Fastest mode. AI auto-approves checkpoints, syncs the runtime to its most autonomous permission mode when supported, and only stops on hard failures." }
-    ]
-  },
-  {
-    question: "Research strategy?",
-    header: "Research Mode",
-    multiSelect: false,
-    options: [
-      { label: "Explore", description: "Broad literature search, compare multiple viable approaches, and surface tangent decisions explicitly before any branch or side investigation." },
-      { label: "Balanced (Recommended)", description: "Standard: plan one approach, execute, verify, iterate" },
-      { label: "Exploit", description: "Focused execution of known methodology. Suppress optional tangents unless the user explicitly requests them or the current approach is blocked." },
-      { label: "Adaptive", description: "Start broad enough to compare viable approaches, keep tangents explicit, then narrow only after decisive evidence locks the method." }
-    ]
-  },
-  {
-    question: "Which research profile for agents?",
-    header: "Research Profile",
-    multiSelect: false,
-    options: [
-      { label: "Deep Theory", description: "Rigorous derivations, formal proofs, exact results (highest cost)" },
-      { label: "Numerical", description: "Computational implementation, optimization, convergence" },
-      { label: "Exploratory", description: "Rapid prototyping, hypothesis testing, parameter scanning" },
-      { label: "Review (Recommended)", description: "Critical assessment, error checking, literature comparison (default)" },
-      { label: "Paper Writing", description: "LaTeX production, figures, narrative flow" }
-    ]
-  },
-  {
-    question: "What model-cost posture should GPD optimize for?",
-    header: "Model Cost Posture",
-    multiSelect: false,
-    options: [
-      { label: "Max Quality", description: "Favor the strongest acceptable runtime-native models. Use explicit tier overrides only when you already know the exact ids you want." },
-      { label: "Balanced (Recommended)", description: "Keep the default `review` profile guidance and runtime defaults unless there is a concrete reason to pin tier models." },
-      { label: "Budget-aware", description: "Prefer runtime defaults and avoid explicit tier pinning unless it clearly improves the result for this runtime." }
-    ]
-  },
-  {
-    question: "How should GPD handle concrete tier models for the active runtime?",
-    header: "Tier Models",
-    multiSelect: false,
-    options: [
-      { label: "Leave current setting unchanged", description: "Keep the current runtime-specific tier override map exactly as-is" },
-      { label: "Use runtime defaults", description: "Do not pin model IDs for this runtime; GPD will omit the model parameter unless another override exists" },
-      { label: "Configure explicit tier models", description: "Step-by-step setup for runtime-specific tier-1, tier-2, and tier-3 model strings" }
-    ]
-  },
-  {
-    question: "Spawn Plan Researcher? (researches domain before planning)",
-    header: "Research",
-    multiSelect: false,
-    options: [
-      { label: "Yes", description: "Research phase goals before planning" },
-      { label: "No", description: "Skip research, plan directly" }
-    ]
-  },
-  {
-    question: "Spawn Plan Checker? (verifies plans before execution)",
-    header: "Plan Check",
-    multiSelect: false,
-    options: [
-      { label: "Yes", description: "Verify plans meet phase goals" },
-      { label: "No", description: "Skip plan verification" }
-    ]
-  },
-	{
-	    question: "Spawn Execution Verifier? (verifies phase completion)",
-	    header: "Verifier",
-	    multiSelect: false,
-	    options: [
-	      { label: "Yes", description: "Verify contract targets after execution" },
-	      { label: "No", description: "Skip only the generic post-execution verifier. Mandatory proof red-teaming for proof-bearing or `proof_obligation` work still runs." }
-	    ]
-	  },
-  {
-    question: "How aggressively should execution inject review gates?",
-    header: "Cadence",
-    multiSelect: false,
-    options: [
-	      { label: "Dense (Recommended)", description: "Every wave gates on its first load-bearing result (and on any `result/produce|log` event) before fan-out. The first-result gate and pre-fanout review are forced regardless of the risk classifier." },
-	      { label: "Adaptive", description: "Inject first-result and risky-fanout gates automatically while letting clean segments continue." },
-	      { label: "Sparse", description: "Fewest review stops, but required correctness gates still run. Sparse mode does not waive proof red-teaming for proof-bearing work." }
-	    ]
-	  },
-  {
-    question: "Should planning artifacts be committed to git?",
-    header: "Planning Commit Docs",
-    multiSelect: false,
-    options: [
-      { label: "Commit planning docs", description: "Set planning.commit_docs=true so planning artifacts are committed normally." },
-      { label: "Keep planning docs local-only", description: "Set planning.commit_docs=false so planning artifacts stay uncommitted." }
-    ]
-  },
-  {
-    question: "Execute plans within a wave in parallel?",
-    header: "Parallel",
-    multiSelect: false,
-    options: [
-      { label: "Yes (Recommended)", description: "Plans in the same wave run concurrently via parallel task() calls" },
-      { label: "No", description: "Plans execute sequentially within each wave" }
-    ]
-  },
-  {
-    question: "Git branching strategy?",
-    header: "Branching",
-    multiSelect: false,
-    options: [
-      { label: "none (Recommended)", description: "Commit directly to current branch" },
-      { label: "per-phase", description: "Create branch for each phase (gpd/phase-{N}-{name})" },
-      { label: "per-milestone", description: "Create branch for entire milestone (gpd/{version}-{name})" }
-    ]
-  }
-])
-```
+| Header | Question | Options and mapping |
+| --- | --- | --- |
+| `Autonomy` | How much autonomy should the AI have? | `Supervised (Recommended)` -> `autonomy=supervised`; `Balanced` -> `autonomy=balanced`; `YOLO` -> `autonomy=yolo`. Supervised is the default advisor cadence; Balanced is lighter checkpointing after trust is established; YOLO auto-approves checkpoints after permission sync and stops only on hard failures. |
+| `Research Mode` | Research strategy? | `Explore` -> `research_mode=explore`; `Balanced (Recommended)` -> `research_mode=balanced`; `Exploit` -> `research_mode=exploit`; `Adaptive` -> `research_mode=adaptive`. Tangents and branch-like side investigations still require explicit approval. |
+| `Research Profile` | Which research profile for agents? | `Deep Theory` -> `model_profile=deep-theory`; `Numerical` -> `model_profile=numerical`; `Exploratory` -> `model_profile=exploratory`; `Review (Recommended)` -> `model_profile=review`; `Paper Writing` -> `model_profile=paper-writing`. |
+| `Model Cost Posture` | What model-cost posture should GPD optimize for? | `Max Quality`; `Balanced (Recommended)`; `Budget-aware`. Qualitative only: no persisted key, billing promise, or spend enforcement. |
+| `Tier Models` | How should GPD handle concrete tier models for the active runtime? | `Leave current setting unchanged` preserves `model_overrides.<SELECTED_RUNTIME>` exactly; `Use runtime defaults` clears that runtime's tier map; `Configure explicit tier models` asks for runtime-native `tier-1`, `tier-2`, and `tier-3` strings. |
+| `Research` | Spawn Plan Researcher? (researches domain before planning) | `Yes` -> `workflow.research=true`; `No` -> `workflow.research=false`. |
+| `Plan Check` | Spawn Plan Checker? (verifies plans before execution) | `Yes` -> `workflow.plan_checker=true`; `No` -> `workflow.plan_checker=false`. |
+| `Verifier` | Spawn Execution Verifier? (verifies phase completion) | `Yes` -> `workflow.verifier=true`; `No` -> `workflow.verifier=false` for only the generic post-execution verifier; this does NOT disable mandatory proof red-teaming for proof-bearing or `proof_obligation` work. |
+| `Cadence` | How aggressively should execution inject review gates? | `Dense (Recommended)` -> `execution.review_cadence=dense`; `Adaptive` -> `execution.review_cadence=adaptive`; `Sparse` -> `execution.review_cadence=sparse`. Sparse cadence does not waive proof red-teaming for proof-bearing work. |
+| `Planning Commit Docs` | Should planning artifacts be committed to git? | `Commit planning docs` -> `planning.commit_docs=true`; `Keep planning docs local-only` -> `planning.commit_docs=false`. |
+| `Parallel` | Execute plans within a wave in parallel? | `Yes (Recommended)` -> `parallelization=true`; `No` -> `parallelization=false`. |
+| `Branching` | Git branching strategy? | `none (Recommended)` -> `git.branching_strategy=none`; `per-phase` -> `git.branching_strategy=per-phase`; `per-milestone` -> `git.branching_strategy=per-milestone`. |
 
 After the ask_user responses are collected, ask one compact inline follow-up for unattended execution budgets and checkpoint controls using the current values as defaults:
 
@@ -340,36 +232,33 @@ Before applying, map the collected ask_user and inline follow-up responses into 
 
 For optional USD budgets, valid write values are a positive number or literal JSON `null`; if the user left the answer blank, preserve the current value by skipping that `gpd config set` call. Preserve `git.phase_branch_template` and `git.milestone_branch_template` exactly as the current config stores them; this guided flow changes only `git.branching_strategy`.
 
-```bash
-gpd config set autonomy "$SELECTED_AUTONOMY"
-gpd config set research_mode "$SELECTED_RESEARCH_MODE"
-gpd config set model_profile "$SELECTED_MODEL_PROFILE"
-gpd config set parallelization "$SELECTED_PARALLELIZATION"
-gpd config set planning.commit_docs "$SELECTED_COMMIT_DOCS"
-gpd config set workflow.research "$SELECTED_WORKFLOW_RESEARCH"
-gpd config set workflow.plan_checker "$SELECTED_WORKFLOW_PLAN_CHECKER"
-gpd config set workflow.verifier "$SELECTED_WORKFLOW_VERIFIER"
-gpd config set execution.review_cadence "$SELECTED_REVIEW_CADENCE"
-gpd config set execution.max_unattended_minutes_per_plan "$SELECTED_MAX_UNATTENDED_MINUTES_PER_PLAN"
-gpd config set execution.max_unattended_minutes_per_wave "$SELECTED_MAX_UNATTENDED_MINUTES_PER_WAVE"
-gpd config set execution.checkpoint_after_n_tasks "$SELECTED_CHECKPOINT_AFTER_N_TASKS"
-gpd config set execution.checkpoint_after_first_load_bearing_result "$SELECTED_CHECKPOINT_AFTER_FIRST_RESULT"
-gpd config set execution.checkpoint_before_downstream_dependent_tasks "$SELECTED_CHECKPOINT_BEFORE_DEPENDENTS"
-gpd config set git.branching_strategy "$SELECTED_BRANCHING_STRATEGY"
+Run `gpd config set <key> "$<selected variable>"` for each row; skip only the USD-budget rows when the corresponding answer is blank:
 
-if [ -n "$SELECTED_PROJECT_USD_BUDGET" ]; then
-  # To clear the budget, SELECTED_PROJECT_USD_BUDGET must be literal JSON null.
-  gpd config set execution.project_usd_budget "$SELECTED_PROJECT_USD_BUDGET"
-fi
-if [ -n "$SELECTED_SESSION_USD_BUDGET" ]; then
-  # To clear the budget, SELECTED_SESSION_USD_BUDGET must be literal JSON null.
-  gpd config set execution.session_usd_budget "$SELECTED_SESSION_USD_BUDGET"
-fi
-```
+| Config key | Selected variable |
+| --- | --- |
+| `autonomy` | `SELECTED_AUTONOMY` |
+| `research_mode` | `SELECTED_RESEARCH_MODE` |
+| `model_profile` | `SELECTED_MODEL_PROFILE` |
+| `parallelization` | `SELECTED_PARALLELIZATION` |
+| `planning.commit_docs` | `SELECTED_COMMIT_DOCS` |
+| `workflow.research` | `SELECTED_WORKFLOW_RESEARCH` |
+| `workflow.plan_checker` | `SELECTED_WORKFLOW_PLAN_CHECKER` |
+| `workflow.verifier` | `SELECTED_WORKFLOW_VERIFIER` |
+| `execution.review_cadence` | `SELECTED_REVIEW_CADENCE` |
+| `execution.max_unattended_minutes_per_plan` | `SELECTED_MAX_UNATTENDED_MINUTES_PER_PLAN` |
+| `execution.max_unattended_minutes_per_wave` | `SELECTED_MAX_UNATTENDED_MINUTES_PER_WAVE` |
+| `execution.checkpoint_after_n_tasks` | `SELECTED_CHECKPOINT_AFTER_N_TASKS` |
+| `execution.checkpoint_after_first_load_bearing_result` | `SELECTED_CHECKPOINT_AFTER_FIRST_RESULT` |
+| `execution.checkpoint_before_downstream_dependent_tasks` | `SELECTED_CHECKPOINT_BEFORE_DEPENDENTS` |
+| `git.branching_strategy` | `SELECTED_BRANCHING_STRATEGY` |
+| `execution.project_usd_budget` | `SELECTED_PROJECT_USD_BUDGET` |
+| `execution.session_usd_budget` | `SELECTED_SESSION_USD_BUDGET` |
+
+Exact command forms that must remain valid include `gpd config set autonomy "$SELECTED_AUTONOMY"`, `gpd config set workflow.research "$SELECTED_WORKFLOW_RESEARCH"`, `gpd config set execution.review_cadence "$SELECTED_REVIEW_CADENCE"`, and `gpd config set git.branching_strategy "$SELECTED_BRANCHING_STRATEGY"`.
 
 For runtime model overrides, first merge the new `<SELECTED_RUNTIME>` tier map with existing `model_overrides` for other runtimes, then write the whole `model_overrides` object with `gpd config set model_overrides "$MODEL_OVERRIDES_JSON"`. Include only non-empty tier values; omit or clear `<SELECTED_RUNTIME>` when using runtime defaults.
 
-Then immediately sync runtime-owned permissions against the selected autonomy:
+Then immediately sync runtime-owned permissions against the selected autonomy. This syncs the runtime to the selected autonomy, including the most autonomous permission mode when YOLO is selected:
 
 ```bash
 PERMISSIONS_SYNC=$(gpd --raw permissions sync --runtime "$SELECTED_RUNTIME" --autonomy "$SELECTED_AUTONOMY" 2>/dev/null || true)

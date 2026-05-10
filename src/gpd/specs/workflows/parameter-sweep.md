@@ -84,55 +84,14 @@ Parse command arguments for sweep definition. If arguments are incomplete, promp
 | Computation anchor   | Existing phase plan, file path, notebook/script, or explicit description | `3`, `scripts/self_energy.py`, `mesh-study.ipynb`, or inline description |
 | Scale                | Linear or logarithmic             | `--log` for logarithmic spacing             |
 
-**1D sweep:**
+Examples and generation rules:
 
-```
---param temperature --range 0.1:10.0:20
-```
+| Shape | Example input | Expansion |
+| --- | --- | --- |
+| 1D | `--param temperature --range 0.1:10.0:20` | 20 values from 0.1 to 10.0; linear by default, logarithmic with `--log`. |
+| 2D | `--param temperature --range 0.1:10.0:10 --param coupling --range 0.01:1.0:10` | 10x10 cartesian grid. Each pair is an independent computation. |
 
-Generates 20 values of temperature from 0.1 to 10.0 (linearly spaced by default, logarithmically if `--log`).
-
-**2D sweep:**
-
-```
---param temperature --range 0.1:10.0:10 --param coupling --range 0.01:1.0:10
-```
-
-Generates a 10x10 grid (100 points total). Each (temperature, coupling) pair is an independent computation.
-
-**Parameter generation:**
-
-```python
-import numpy as np
-
-if scale == "log":
-    values = np.logspace(np.log10(start), np.log10(end), steps)
-else:
-    values = np.linspace(start, end, steps)
-
-# For 2D: cartesian product
-if param_2:
-    grid = [(v1, v2) for v1 in values_1 for v2 in values_2]
-```
-
-**Display sweep plan:**
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD > PARAMETER SWEEP
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Parameter: {name}
-Range: {start} to {end} ({steps} points, {linear|logarithmic})
-Observable: {quantity to compute}
-Total computations: {N}
-Adaptive refinement: {enabled|disabled}
-
-{For 2D:}
-Parameter 1: {name1} -- {start1} to {end1} ({steps1} points)
-Parameter 2: {name2} -- {start2} to {end2} ({steps2} points)
-Grid: {steps1} x {steps2} = {total} points
-```
+Generate linear values with `np.linspace(start, end, steps)`, logarithmic values with `np.logspace(np.log10(start), np.log10(end), steps)`, and 2D points as the cartesian product. Display a compact plan with parameter name(s), range(s), point count, observable, total computations, adaptive-refinement status, and for 2D the grid shape.
 
 If `autonomy=supervised`, show this plan and ask for confirmation before generating plans. Otherwise continue automatically unless the balanced-mode pause conditions are met.
 
@@ -167,102 +126,17 @@ For each parameter value (or combination in 2D), create a plan from the computat
 
 **Plan generation:**
 
-For each sweep point `i` with parameter value `p_i`:
+For each sweep point `i` with parameter value `p_i`, write `${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-PLAN.md` with this required checklist:
 
-Write `${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-PLAN.md`:
+| Section | Required fields |
+| --- | --- |
+| Frontmatter | `wave`, `interactive: false`, `depends_on: []`, `sweep_index`, `sweep_param`, `sweep_value`, optional `sweep_param_2` / `sweep_value_2`, and `files_modified` containing `${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-SUMMARY.md` plus `${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json`. |
+| Contract | `schema_version: 1`; `context_intake:` with `must_read_refs: [ref-sweep-anchor]`; one scope question for `{observable}` at the configured point; `claim-sweep-point`; `deliv-sweep-point` with dataset path `${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json`; `test-sweep-point`; `fp-sweep-point`; uncertainty markers for numerical stability and out-of-regime values. |
+| Objective | Compute `{observable}` at `{param_name}={p_i}` and, for 2D, `{param_name_2}={p_i_2}`. |
+| Tasks | Set the point parameters, verify the valid regime, run the identical computation template used by every sweep point, record the observable and uncertainty, write `${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json`, and create `${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-SUMMARY.md` with the standard template. |
+| Result JSON | Include `sweep_index`, the parameter name/value pair(s), `{observable}`, `uncertainty`, `status`, and `notes`. A successful point uses `"status": "completed"`. |
 
-```markdown
----
-wave: {wave_number}
-interactive: false
-depends_on: []
-sweep_index: {i}
-sweep_param: {param_name}
-sweep_value: {p_i}
-{For 2D:}
-sweep_param_2: {param_name_2}
-sweep_value_2: {p_i_2}
-files_modified:
-  - ${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-SUMMARY.md
-  - ${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json
-contract:
-  schema_version: 1
-  scope:
-    question: "What does {observable} evaluate to at {param_name}={p_i}?"
-  context_intake:
-    must_read_refs: [ref-sweep-anchor]
-    must_include_prior_outputs: ["Phase-level sweep baseline"]
-    user_asserted_anchors: ["The observable stays within the approved regime"]
-  claims:
-    - id: claim-sweep-point
-      statement: "{observable} computed at {param_name}={p_i}"
-      deliverables: [deliv-sweep-point]
-      acceptance_tests: [test-sweep-point]
-      references: [ref-sweep-anchor]
-  deliverables:
-    - id: deliv-sweep-point
-      kind: dataset
-      path: ${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json
-      description: "Recorded sweep result for this parameter point"
-      must_contain: ["{observable}", "{param_name}", "status"]
-  references:
-    - id: ref-sweep-anchor
-      kind: other
-      locator: "{approved sweep observable or baseline anchor}"
-      role: must_consider
-      why_it_matters: "Keeps the sweep point tied to the approved observable, regime, and comparison path."
-      applies_to: [claim-sweep-point]
-      must_surface: true
-      required_actions: [compare]
-  acceptance_tests:
-    - id: test-sweep-point
-      subject: claim-sweep-point
-      kind: existence
-      procedure: "Check that the result file contains the configured parameter values, computed observable, and status."
-      pass_condition: "Result file exists, encodes the requested point, and records {observable} for downstream comparison."
-      evidence_required: [deliv-sweep-point, ref-sweep-anchor]
-  forbidden_proxies:
-    - id: fp-sweep-point
-      subject: claim-sweep-point
-      proxy: "Recording a number without regime checks or parameter metadata."
-      reason: "Would allow false progress by logging an uninterpretable sweep point."
-  uncertainty_markers:
-    weakest_anchors: ["Numerical stability at this sweep point"]
-    disconfirming_observations: ["The observable falls outside the valid regime or fails the comparison anchor"]
----
-
-<objective>
-Compute {observable} at {param_name} = {p_i}.
-{For 2D: and {param_name_2} = {p_i_2}.}
-</objective>
-
-<task id="1" name="set_parameters">
-Set {param_name} = {p_i} in the computation context.
-{For 2D: Set {param_name_2} = {p_i_2}.}
-Verify parameter is within the valid regime for the computation method.
-</task>
-
-<task id="2" name="compute">
-{Computation template -- identical across all sweep points.}
-Record the computed value of {observable} with uncertainty if available.
-</task>
-
-<task id="3" name="record_result">
-Write results to `${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json`:
-
-{
-"sweep_index": {i},
-"{param_name}": {p_i},
-{For 2D: "{param_name_2}": {p_i_2},}
-"{observable}": {computed_value},
-"uncertainty": {uncertainty_or_null},
-"status": "completed",
-"notes": "{any anomalies or warnings}"
-}
-
-Create SUMMARY.md with the standard template.
-</task>
-```
+Hard stop: do not generate a plan that changes methodology across points. Split the request into multiple sweeps if a different approximation, solver, data source, or validity regime is required for part of the range.
 
 **Wave assignment:**
 
@@ -313,8 +187,10 @@ Execute the sweep plans using wave-based parallel execution following the execut
 
 2. **Spawn executor agents for all plans in the wave:**
 
-   Follow the same task() spawning pattern as execute-phase.md step `execute_waves`.
+   Follow the same `task()` spawning pattern as execute-phase.md step `execute_waves`.
    @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+
+   Use this compact task payload for each point:
 
    ```
    task(
@@ -322,12 +198,10 @@ Execute the sweep plans using wave-based parallel execution following the execut
      model="{executor_model}",
      readonly=false,
      prompt="First, read {GPD_AGENTS_DIR}/gpd-executor.md for your role and instructions.
-
-       <objective>
-       Execute sweep plan {plan_number}: compute {observable} at {param_name} = {p_i}.
+       Execute ${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-PLAN.md.
        Write result to ${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json.
-       Create SUMMARY.md. Return state updates in your response -- do NOT write STATE.md directly.
-       </objective>
+       Create ${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-SUMMARY.md.
+       Return state updates in your response -- do NOT write STATE.md directly.
 
        <spawn_contract>
        write_scope:
@@ -341,27 +215,9 @@ Execute the sweep plans using wave-based parallel execution following the execut
        shared_state_policy: return_only
        </spawn_contract>
 
-       <context_hint>code-heavy</context_hint>
-       <phase_class>numerical</phase_class>
+       Read at execution start: {GPD_INSTALL_DIR}/workflows/execute-plan.md, {GPD_INSTALL_DIR}/templates/summary.md, ${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-PLAN.md, GPD/STATE.md only when state_exists=true, and GPD/config.json if it exists.
 
-       <files_to_read>
-       Read these files at execution start using the file_read tool:
-       - Workflow: {GPD_INSTALL_DIR}/workflows/execute-plan.md
-       - Summary template: {GPD_INSTALL_DIR}/templates/summary.md
-       - Plan: ${SWEEP_DOC_DIR}/sweep-{PADDED_INDEX}-PLAN.md
-       - State: GPD/STATE.md (only when `state_exists: true`)
-       - Config: GPD/config.json (if exists)
-       </files_to_read>
-
-       <success_criteria>
-       - [ ] Parameter set to specified value
-       - [ ] Computation executed with identical methodology to other sweep points
-       - [ ] Result written to ${SWEEP_RESULTS_DIR}/point-{PADDED_INDEX}.json
-       - [ ] Uncertainty estimated if applicable
-       - [ ] SUMMARY.md created
-       - [ ] State updates returned (NOT written to STATE.md directly) only when authoritative phase-backed persistence is actually in scope
-       </success_criteria>
-     "
+       Success checks: parameter set; identical methodology used; result JSON written; uncertainty estimated if applicable; SUMMARY.md created; State updates returned (NOT written to STATE.md directly) only when authoritative phase-backed persistence is actually in scope."
    )
    ```
 

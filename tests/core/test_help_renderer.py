@@ -39,10 +39,7 @@ def _assert_in_order(text: str, fragments: tuple[str, ...]) -> None:
 
 def _runtime_ladder_commands() -> tuple[str, ...]:
     return tuple(
-        f"gpd:{part.strip()}"
-        for step in beginner_startup_ladder()
-        for part in step.split("/")
-        if part.strip()
+        f"gpd:{part.strip()}" for step in beginner_startup_ladder() for part in step.split("/") if part.strip()
     )
 
 
@@ -146,18 +143,22 @@ def test_command_detail_payload_fails_closed_for_unknown_commands() -> None:
 
 
 def test_render_command_detail_markdown_uses_registry_and_renderer_metadata() -> None:
+    payload = help_renderer.command_detail_payload("gpd:peer-review", minimal=True)
     detail = help_renderer.render_command_detail_markdown("gpd:peer-review")
 
-    assert detail.startswith("### Writing and publication")
-    assert "**`gpd:peer-review [paper directory | manuscript path | explicit artifact path]`**" in detail
-    assert "Conduct a staged six-pass peer review" in detail
-    assert "Explicit artifact intake" in detail
-    assert "command-policy supported suffixes" in detail
-    assert "publication-artifact paths" in detail
-    assert "resolved manuscript entrypoint" in detail
-    assert "Context mode: `project-aware`" in detail
+    assert detail.startswith(f"### {payload['group']}")
+    assert f"**`{payload['signature']}`**" in detail
+    assert payload["description"] in detail
+    assert payload["canonical_command"] == "gpd:peer-review"
+    assert payload["argument_hint"] == "[paper directory or manuscript/artifact path]"
+    assert payload["context_mode"] == "project-aware"
     assert "Subject policy:" in detail
     assert "Review contract:" in detail
+    assert "Staged workflow: `peer-review`." in detail
+    assert "Registry metadata:" not in detail
+    assert "Canonical command:" not in detail
+    assert "Argument hint:" not in detail
+    assert "Context mode:" not in detail
     assert "`.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, and `.xlsx`" not in detail
 
 
@@ -171,3 +172,22 @@ def test_render_detailed_command_reference_covers_registry_once() -> None:
     assert set(headings) == set(list_commands(name_format="slug"))
     assert "gpd:new-project --minimal" in detailed_reference
     assert "## Command Index" not in detailed_reference
+
+    for boilerplate in (
+        "Usage examples:",
+        "Registry metadata:",
+        "Canonical command:",
+        "Argument hint:",
+        "Context mode:",
+        "Project reentry:",
+        " with stages ",
+    ):
+        assert boilerplate not in detailed_reference
+
+    for command in list_commands(name_format="label"):
+        payload = help_renderer.command_detail_payload(command, minimal=True)
+        assert f"Usage: `{payload['signature']}`" not in detailed_reference
+
+    assert "`gpd:peer-review draft.docx`" in detailed_reference
+    assert "`gpd:progress --full`" in detailed_reference
+    assert "Documented variants:" in detailed_reference

@@ -22,9 +22,9 @@ A numerical result without demonstrated convergence and error bars is not a resu
 <step name="load_context" priority="first">
 **Load Current-Workspace Context**
 
-Load project state and conventions before beginning validation. Keep this workflow rooted in the invoking workspace; numerical convergence can use project context when it exists there, but it must not silently reenter a different recent project.
-
-- Run:
+Load project state and conventions before validation. Keep this workflow rooted
+in the invoking workspace; numerical convergence can use project context when it
+exists there, but it must not silently reenter a different recent project.
 
 ```bash
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
@@ -34,12 +34,14 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-- A nonzero init exit is a hard stop, not standalone mode.
-- Parse JSON for: `state_exists`, `project_exists`, `commit_docs`.
-- **If init succeeds** (non-empty JSON with `state_exists: true`): Extract `convention_lock` for unit system (needed to verify dimensional consistency of benchmarks). Extract active approximations and their validity ranges (informs which convergence tests are most critical). Extract `intermediate_results` for previously computed quantities to validate. If you need to find a canonical prior result first, use `gpd result search`; once a canonical `result_id` is known, use `gpd result show "{result_id}"` for the direct stored-result view before reading supporting artifacts. Keep `gpd query search` for SUMMARY/frontmatter lookup.
-- **If init succeeds** (non-empty JSON with `state_exists: false`): Proceed in standalone/current-workspace mode with explicit specification of the computation to validate. The user must provide the unit system and computation details directly. Standalone durable outputs live under `GPD/analysis/` in the invoking workspace and do not mutate `STATE.md` or `state.json`.
+- Nonzero init exit is a hard stop, not standalone mode.
+- Parse `state_exists`, `project_exists`, `commit_docs`.
+- If `state_exists=true`: extract `convention_lock`, active approximations and validity ranges, and `intermediate_results`. Use `gpd result search` for canonical prior-result lookup; once a canonical `result_id` is known, use `gpd result show "{result_id}"` for the direct stored-result view before reading supporting artifacts. Keep `gpd query search` for SUMMARY/frontmatter lookup.
+- If `state_exists=false`: proceed current-workspace standalone with explicit computation details and units from the user; outputs stay under `GPD/analysis/` and do not mutate `STATE.md` or `state.json`.
 
-Resolve authoritative phase context only after the target is known. If the target is a current-workspace phase number or a canonical stored result with phase metadata, load phase context explicitly:
+Resolve phase context only after the target is known. If the target is a
+current-workspace phase number or a canonical stored result with phase metadata,
+load phase context explicitly:
 
 ```bash
 PHASE_INIT=$(gpd --raw init phase-op --include state,config "{phase_number}")
@@ -50,8 +52,6 @@ fi
 ```
 
 Use that follow-up phase init only when the phase number is authoritative for this run. If the user supplied a bare phase number but no initialized current-workspace project owns it, stop and ask for a file target or the correct project rather than pretending phase-local outputs exist.
-
-Convention context is important for numerical validation: unit system determines what "reasonable" values are, and approximation validity ranges determine the expected convergence behavior.
 
 **Convention verification** (if project exists):
 
@@ -69,17 +69,17 @@ fi
 
 Use the command wrapper's centralized command-context preflight plus `$ARGUMENTS` to classify the target honestly before scanning physics content.
 
-- If `$ARGUMENTS` is empty and `project_exists` is true: ask one focused question for either a phase number or a file path in the current workspace.
-- If `$ARGUMENTS` is empty and `project_exists` is false: stop. Standalone empty launch is invalid; the wrapper should already have rejected it.
-- If the first positional token is a bare phase number:
-  - only treat it as a phase-backed target when an initialized current-workspace project exists and that phase resolves authoritatively through `gpd --raw init phase-op`
-  - otherwise stop and require an explicit file target; do not invent `phase_dir` or `phase_slug` from ambient workspace state
-- If the first positional token resolves to a file path, treat the run as a current-workspace file target and derive a stable ASCII `slug` from that path
+- Empty input + project: ask one focused question for phase number or file path.
+- Empty input + no project: stop; the wrapper should already reject it.
+- Bare number: phase-backed only when a current-workspace project exists and `gpd --raw init phase-op` resolves it; otherwise require an explicit file target and do not invent `phase_dir` or `phase_slug` from ambient workspace state.
+- File path: derive stable ASCII `slug` and treat it as current-workspace standalone/file mode.
 
-Set the durable output path only after this classification:
+Set the durable output path only after classification:
 
-- Authoritative phase target: `OUTPUT_PATH="${phase_dir}/NUMERICAL-VALIDATION.md"`
-- Standalone/current-workspace file target: `OUTPUT_PATH="GPD/analysis/numerical-{slug}.md"`
+| Target kind | Output |
+| --- | --- |
+| authoritative phase | `OUTPUT_PATH="${phase_dir}/NUMERICAL-VALIDATION.md"` |
+| standalone/current-workspace file | `OUTPUT_PATH="GPD/analysis/numerical-{slug}.md"` |
 
 Create `GPD/analysis/` only for the standalone/current-workspace branch:
 

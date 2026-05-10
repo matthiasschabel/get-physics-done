@@ -856,9 +856,9 @@ def test_progress_prompt_and_help_clarify_runtime_vs_local_cli_boundary() -> Non
     _assert_normalized_fragments(
         progress_section,
         (
-            "Usage: `gpd:progress --full`",
-            "Usage: `gpd:progress --brief`",
-            "Usage: `gpd:progress --reconcile`",
+            "`gpd:progress --full`",
+            "`gpd:progress --brief`",
+            "`gpd:progress --reconcile`",
             "local CLI `gpd progress`",
             "read-only renderer",
             "json|bar|table",
@@ -1188,7 +1188,7 @@ def test_help_prompt_surfaces_bounded_write_paper_external_authoring_lane() -> N
     )
     assert "GPD-authored outputs live under `GPD/publication/{subject_slug}/...`" in help_workflow
     assert "`GPD/publication/{subject_slug}/intake/`" in help_workflow
-    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_workflow
+    assert "`gpd:write-paper --intake intake/write-paper-authoring-input.json`" in help_workflow
 
 
 def test_help_prompt_selected_signatures_match_registry_argument_hints() -> None:

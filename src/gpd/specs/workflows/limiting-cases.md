@@ -12,9 +12,7 @@ Every new result must reduce to known results in appropriate limits. If it doesn
 
 ## 0. Validate Context, Load Workspace State, and Resolve the Durable Target
 
-Run centralized command-context preflight first.
-
-- Run:
+Run centralized command-context preflight first:
 
 ```bash
 CONTEXT=$(gpd --raw validate command-context limiting-cases "$ARGUMENTS")
@@ -24,16 +22,18 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-- Parse JSON for: `project_exists`, `checks`, and any surfaced `managed_output_root`.
-- Classify the requested target honestly from the current workspace:
-  - If `$ARGUMENTS` is empty and `project_exists` is true: ask one focused question asking for either a phase number or a file path, then continue with that clarified input.
-  - If `$ARGUMENTS` is empty and `project_exists` is false: stop. Standalone empty launch is invalid; centralized preflight should already have rejected it.
-  - If `project_exists` is false and the first positional token is a bare phase number like `3` or `4.1`: stop and tell the user standalone `gpd:limiting-cases` requires an explicit file path. Do not reinterpret a numeric token as a hidden phase selection.
-  - If the first positional token resolves to a file path, set `TARGET_KIND=file` and `TARGET_FILE` to that explicit path resolved from the invoking workspace.
-  - If `project_exists` is true and the first positional token is a bare phase number, set `TARGET_KIND=phase` and `PHASE_ARG` to that number.
-  - Otherwise stop and ask one focused clarification question instead of guessing.
+Parse `project_exists`, `checks`, and `managed_output_root`, then classify one target:
 
-After classifying the target, load workspace-bound state and conventions without project reentry:
+| Condition | Action |
+| --- | --- |
+| Empty input + current project | ask one focused question for phase number or file path |
+| Empty input + no project | stop; centralized preflight should already reject standalone empty launch |
+| No project + bare number like `3` or `4.1` | stop: standalone `gpd:limiting-cases` requires an explicit file path. Do not reinterpret a numeric token as a hidden phase selection. |
+| Resolved file path | set `TARGET_KIND=file`, `TARGET_FILE=<resolved current-workspace path>` |
+| Current project + bare phase number | set `TARGET_KIND=phase`, `PHASE_ARG=<number>` |
+| Anything else | ask one focused clarification question instead of guessing |
+
+After classification, load workspace-bound state and conventions without project reentry:
 
 ```bash
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
@@ -43,11 +43,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-- A nonzero init exit is a hard stop, not standalone mode.
-- Parse JSON for: `commit_docs`, `project_exists`, `state_exists`.
-- **If init succeeds** (non-empty JSON with `state_exists: true`): Extract `convention_lock` for unit system and sign conventions. Extract `intermediate_results` from state for previously verified expressions. If you need canonical stored-result context before checking limits, load and follow `{GPD_INSTALL_DIR}/references/results/result-lookup-policy.md`. Extract active approximations and their validity ranges — these define the limits to check.
-- **If init succeeds** (non-empty JSON with `state_exists: false`): Proceed in standalone mode with explicit convention declarations required from user via ask_user.
-- If `TARGET_KIND=phase`, resolve authoritative phase context inside the current workspace:
+- Nonzero init exit is a hard stop, not standalone mode.
+- Parse `commit_docs`, `project_exists`, `state_exists`.
+- If `state_exists=true`: extract `convention_lock`, active approximations and validity ranges, and `intermediate_results`; when canonical stored-result context is needed, follow `{GPD_INSTALL_DIR}/references/results/result-lookup-policy.md`.
+- If `state_exists=false`: require explicit convention declarations via ask_user.
+- If `TARGET_KIND=phase`, resolve the phase inside the current workspace:
 
 ```bash
 PHASE_INIT=$(gpd --raw init phase-op --include state,config "${PHASE_ARG}")
@@ -57,15 +57,14 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-- Parse `PHASE_INIT` for `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`.
-- If `TARGET_KIND=phase` and `phase_found` is false: stop — the requested phase does not exist in the current workspace project.
+Parse `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`; stop if a requested phase is absent. Set target/output variables before scanning physics:
 
-Set the canonical target/output variables before scanning physics content:
+| Target kind | Variables |
+| --- | --- |
+| phase | `TARGET_LABEL="phase ${phase_number}"`; `OUTPUT_PATH="${phase_dir}/LIMITING-CASES.md"` |
+| file | stable ASCII `slug`; `TARGET_LABEL="${TARGET_FILE}"`; `OUTPUT_PATH="GPD/analysis/limits-{slug}.md"` rooted at the current workspace |
 
-- **Phase target:** `TARGET_LABEL="phase ${phase_number}"` and `OUTPUT_PATH="${phase_dir}/LIMITING-CASES.md"`.
-- **File target:** derive a stable ASCII `slug` from `TARGET_FILE`, set `TARGET_LABEL` to the resolved file path, and set `OUTPUT_PATH="GPD/analysis/limits-{slug}.md"` rooted at the current workspace.
-- Only when `TARGET_KIND=file`, ensure the current-workspace managed output root exists: `mkdir -p GPD/analysis`.
-- Do not use placeholder prose paths later in the workflow. Reuse the resolved `TARGET_KIND`, `TARGET_FILE`, `slug`, and `OUTPUT_PATH` variables consistently.
+Only file mode creates `GPD/analysis`. Reuse the resolved `TARGET_KIND`, `TARGET_FILE`, `slug`, and `OUTPUT_PATH` variables consistently. Never replace them with placeholder prose paths.
 
 Active approximations from the project state directly inform which limits are most important to verify (e.g., if a perturbative approximation is active, the free-theory limit g→0 is mandatory).
 

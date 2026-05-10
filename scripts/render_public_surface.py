@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import difflib
-import re
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -21,19 +19,19 @@ from gpd.core.public_surface_renderer import (
     runtime_doc_filename,
     runtime_quickstart_block_id,
 )
+from scripts.generated_region_support import (
+    GeneratedRegionDiff,
+    GeneratedRegionSpec,
+    marker_pair,
+    marker_start_counts,
+    render_region,
+    replace_regions,
+    unified_diff_text,
+    write_stale_check_result,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MARKER_PREFIX = "gpd-public-surface"
-_BLOCK_ID_PATTERN = r"[a-z0-9][a-z0-9-]*"
-_START_MARKER_RE = re.compile(rf"<!-- {MARKER_PREFIX}:(?P<block_id>{_BLOCK_ID_PATTERN}):start -->")
-_END_MARKER_RE = re.compile(rf"<!-- {MARKER_PREFIX}:(?P<block_id>{_BLOCK_ID_PATTERN}):end -->")
-
-
-@dataclass(frozen=True, slots=True)
-class GeneratedRegionDiff:
-    path: Path | None
-    block_id: str
-    diff: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,23 +41,24 @@ class PublicSurfaceTarget:
     allowed_duplicate_blocks: tuple[str, ...] = ()
 
 
+def _known_block_ids() -> frozenset[str]:
+    return frozenset(public_surface_block_ids())
+
+
+_PUBLIC_REGION_SPEC = GeneratedRegionSpec(
+    marker_prefix=MARKER_PREFIX,
+    known_block_ids=_known_block_ids,
+    block_label="public surface generated block",
+    invalid_block_id_message="Generated public surface block ids must be kebab-case: {block_id!r}",
+)
+
+
 def generated_region_markers(block_id: str) -> tuple[str, str]:
-    if re.fullmatch(_BLOCK_ID_PATTERN, block_id) is None:
-        raise ValueError(f"Generated public surface block ids must be kebab-case: {block_id!r}")
-    return (
-        f"<!-- {MARKER_PREFIX}:{block_id}:start -->",
-        f"<!-- {MARKER_PREFIX}:{block_id}:end -->",
-    )
+    return marker_pair(_PUBLIC_REGION_SPEC, block_id)
 
 
 def render_generated_region(block_id: str, body: str) -> str:
-    start_marker, end_marker = generated_region_markers(block_id)
-    normalized_body = body.rstrip() + "\n"
-    return f"{start_marker}\n{normalized_body}{end_marker}"
-
-
-def _known_block_ids() -> frozenset[str]:
-    return frozenset(public_surface_block_ids())
+    return render_region(_PUBLIC_REGION_SPEC, block_id, body)
 
 
 def default_target_paths() -> tuple[Path, ...]:
@@ -73,6 +72,16 @@ def default_target_contracts() -> tuple[PublicSurfaceTarget, ...]:
             (runtime_quickstart_block_id(surface),),
         )
         for surface in public_surface_context().runtime_surfaces
+    )
+    os_doc_blocks = (
+        "runtime-doc-links",
+        "os-install-matrix",
+        "supported-runtimes-table",
+        "os-next-steps-table",
+        "recovery-note",
+    )
+    os_doc_paths = tuple(
+        PublicSurfaceTarget(Path(f"docs/{os_name}.md"), os_doc_blocks) for os_name in ("macos", "linux", "windows")
     )
     return (
         PublicSurfaceTarget(
@@ -99,36 +108,7 @@ def default_target_contracts() -> tuple[PublicSurfaceTarget, ...]:
                 "post-start-settings",
             ),
         ),
-        PublicSurfaceTarget(
-            Path("docs/macos.md"),
-            (
-                "runtime-doc-links",
-                "os-install-matrix",
-                "supported-runtimes-table",
-                "os-next-steps-table",
-                "recovery-note",
-            ),
-        ),
-        PublicSurfaceTarget(
-            Path("docs/linux.md"),
-            (
-                "runtime-doc-links",
-                "os-install-matrix",
-                "supported-runtimes-table",
-                "os-next-steps-table",
-                "recovery-note",
-            ),
-        ),
-        PublicSurfaceTarget(
-            Path("docs/windows.md"),
-            (
-                "runtime-doc-links",
-                "os-install-matrix",
-                "supported-runtimes-table",
-                "os-next-steps-table",
-                "recovery-note",
-            ),
-        ),
+        *os_doc_paths,
         *runtime_doc_paths,
         PublicSurfaceTarget(
             Path("src/gpd/specs/workflows/help.md"),
@@ -137,61 +117,13 @@ def default_target_contracts() -> tuple[PublicSurfaceTarget, ...]:
     )
 
 
-def _diff(expected: str, actual: str, *, path: Path | None, block_id: str) -> str:
-    label = path.as_posix() if path is not None else "<text>"
-    return "".join(
-        difflib.unified_diff(
-            actual.splitlines(keepends=True),
-            expected.splitlines(keepends=True),
-            fromfile=f"{label}:{block_id} (current)",
-            tofile=f"{label}:{block_id} (expected)",
-        )
-    )
-
-
 def _replace_generated_regions_in_text(text: str, *, path: Path | None = None) -> tuple[str, tuple[str, ...]]:
-    known_block_ids = _known_block_ids()
-    output_parts: list[str] = []
-    replaced_block_ids: list[str] = []
-    cursor = 0
-
-    while True:
-        start_match = _START_MARKER_RE.search(text, cursor)
-        orphan_end_match = _END_MARKER_RE.search(text, cursor)
-        if start_match is None:
-            if orphan_end_match is not None:
-                block_id = orphan_end_match.group("block_id")
-                label = f" in {path.as_posix()}" if path is not None else ""
-                raise ValueError(f"Orphan end marker for public surface generated block {block_id!r}{label}")
-            output_parts.append(text[cursor:])
-            break
-        if orphan_end_match is not None and orphan_end_match.start() < start_match.start():
-            block_id = orphan_end_match.group("block_id")
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Orphan end marker for public surface generated block {block_id!r}{label}")
-
-        block_id = start_match.group("block_id")
-        if block_id not in known_block_ids:
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Unknown public surface generated block {block_id!r}{label}")
-
-        start_marker, end_marker = generated_region_markers(block_id)
-        end_index = text.find(end_marker, start_match.end())
-        if end_index < 0:
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Missing end marker for public surface generated block {block_id!r}{label}")
-
-        next_start = _START_MARKER_RE.search(text, start_match.end())
-        if next_start is not None and next_start.start() < end_index:
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Nested public surface generated block before {block_id!r} ends{label}")
-
-        output_parts.append(text[cursor : start_match.start()])
-        output_parts.append(render_generated_region(block_id, render_public_surface_block(block_id)))
-        cursor = end_index + len(end_marker)
-        replaced_block_ids.append(block_id)
-
-    return "".join(output_parts), tuple(replaced_block_ids)
+    return replace_regions(
+        text,
+        spec=_PUBLIC_REGION_SPEC,
+        render_body=render_public_surface_block,
+        path=path,
+    )
 
 
 def check_generated_region_inventory(
@@ -210,10 +142,7 @@ def check_generated_region_inventory(
             raise ValueError(f"Unknown required public surface block {block_id!r}")
         required_counts[block_id] = required_counts.get(block_id, 0) + 1
 
-    actual_counts: dict[str, int] = {}
-    for match in _START_MARKER_RE.finditer(text):
-        block_id = match.group("block_id")
-        actual_counts[block_id] = actual_counts.get(block_id, 0) + 1
+    actual_counts = marker_start_counts(text, spec=_PUBLIC_REGION_SPEC)
 
     allowed_duplicates = set(allowed_duplicate_blocks)
     problems: list[str] = []
@@ -258,7 +187,7 @@ def check_generated_regions(text: str, *, path: Path | None = None) -> tuple[Gen
         GeneratedRegionDiff(
             path=path,
             block_id=", ".join(dict.fromkeys(block_ids)),
-            diff=_diff(updated, text, path=path, block_id="generated-regions"),
+            diff=unified_diff_text(updated, text, path=path, block_id="generated-regions"),
         ),
     )
 
@@ -345,12 +274,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.check:
         diffs = check_generated_files(args.paths)
         if diffs:
-            sys.stderr.write(
-                "Public surface generated regions are stale. "
-                "Run `uv run python scripts/render_public_surface.py` and commit the result.\n\n"
+            return write_stale_check_result(
+                diffs,
+                heading="Public surface generated regions are stale.",
+                regenerate_command="uv run python scripts/render_public_surface.py",
             )
-            sys.stderr.write("\n".join(diff.diff for diff in diffs))
-            return 1
         return 0
 
     updated_paths = update_generated_files(args.paths)

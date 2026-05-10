@@ -12,11 +12,11 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 55_000, "chars": 2_340_000}
+PROMPT_TOTAL_BUDGET = {"lines": 52_500, "chars": 2_260_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 24_000, "chars": 950_000},
-    "agent": {"lines": 10_500, "chars": 557_000},
-    "workflow": {"lines": 21_000, "chars": 846_000},
+    "command": {"lines": 22_700, "chars": 900_000},
+    "agent": {"lines": 10_200, "chars": 545_000},
+    "workflow": {"lines": 19_700, "chars": 815_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_500, "chars": 171_390}
 # Phase 4 scaffolding guard. Aggregate prompt caps are intentionally not

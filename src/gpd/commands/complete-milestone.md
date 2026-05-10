@@ -22,9 +22,14 @@ This wrapper owns the public command surface and required version argument. The 
 **Load these files NOW (before proceeding):**
 
 - @{GPD_INSTALL_DIR}/workflows/complete-milestone.md (main workflow)
-- @{GPD_INSTALL_DIR}/templates/milestone.md (milestone template)
-- @{GPD_INSTALL_DIR}/templates/milestone-archive.md (archive template)
   </execution_context>
+
+<late_read_authorities>
+Read these templates only when the included workflow asks for their corresponding milestone/archive write step:
+
+- `{GPD_INSTALL_DIR}/templates/milestone.md` (milestone template)
+- `{GPD_INSTALL_DIR}/templates/milestone-archive.md` (archive template)
+  </late_read_authorities>
 
 <context>
 **User input:**
@@ -38,7 +43,7 @@ Primary outputs remain workflow-owned:
   </context>
 
 <process>
-Follow the included complete-milestone workflow end-to-end after loading the execution-context files above.
+Follow the included complete-milestone workflow end-to-end after loading the workflow authority above.
 
 Use the workflow's readiness, audit, confirmation, archive, commit, and tag gates as the authority. The wrapper must not restate or fork those mechanics.
 

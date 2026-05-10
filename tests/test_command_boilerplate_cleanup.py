@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from gpd.adapters.install_utils import parse_at_include_path
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
@@ -37,6 +39,11 @@ STALE_MODEL_FACING_WORDING = (
     "test alignment",
     "regression guardrail",
 )
+
+
+def _eager_include_paths(text: str) -> set[str]:
+    return {include_path for line in text.splitlines() if (include_path := parse_at_include_path(line)) is not None}
+
 
 WORKFLOW_DELEGATING_COMMANDS = (
     "compare-experiment.md",
@@ -276,12 +283,27 @@ def test_debug_command_wrapper_delegates_mechanics_to_workflow() -> None:
     assert "Check Active Sessions" not in text
 
 
+def test_discuss_phase_command_wrapper_late_reads_context_template() -> None:
+    text = (COMMANDS_DIR / "discuss-phase.md").read_text(encoding="utf-8")
+    eager_includes = _eager_include_paths(text)
+
+    assert "@{GPD_INSTALL_DIR}/workflows/discuss-phase.md" in text
+    assert "{GPD_INSTALL_DIR}/templates/context.md" in text
+    assert "{GPD_INSTALL_DIR}/workflows/discuss-phase.md" in eager_includes
+    assert "{GPD_INSTALL_DIR}/templates/context.md" not in eager_includes
+    assert "only when writing or updating `{phase}-CONTEXT.md`" in text
+
+
 def test_complete_milestone_command_wrapper_delegates_mechanics_to_workflow() -> None:
     text = (COMMANDS_DIR / "complete-milestone.md").read_text(encoding="utf-8")
+    eager_includes = _eager_include_paths(text)
 
     assert "@{GPD_INSTALL_DIR}/workflows/complete-milestone.md" in text
-    assert "@{GPD_INSTALL_DIR}/templates/milestone.md" in text
-    assert "@{GPD_INSTALL_DIR}/templates/milestone-archive.md" in text
+    assert "{GPD_INSTALL_DIR}/templates/milestone.md" in text
+    assert "{GPD_INSTALL_DIR}/templates/milestone-archive.md" in text
+    assert "{GPD_INSTALL_DIR}/workflows/complete-milestone.md" in eager_includes
+    assert "{GPD_INSTALL_DIR}/templates/milestone.md" not in eager_includes
+    assert "{GPD_INSTALL_DIR}/templates/milestone-archive.md" not in eager_includes
     assert "The workflow owns audit/readiness checks" in text
     assert "This wrapper owns the public command surface and required version argument." in text
     assert "If audit status is `gaps_found`" not in text

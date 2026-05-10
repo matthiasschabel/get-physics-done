@@ -139,7 +139,16 @@ def test_help_wrapper_followups_do_not_hard_code_gpd_help_runtime_syntax() -> No
     assert "gpd:help --command <name>" not in help_command
     assert "this runtime's help command" not in help_command
     assert "current-help-command" not in help_command
-    assert 'refer to the command that invoked this wrapper as "this help command"' in help_command
+    fragment_count(
+        "one runtime-neutral command surface note",
+        "Runtime command-surface note:",
+        expected_count=1,
+    ).check(help_command)
+    _assert_anchor(
+        help_command,
+        "runtime-neutral command surface note",
+        ("command that invoked this wrapper", "this help command", "do not print adapter-specific examples"),
+    )
     assert "Run this help command with --all for the compact command index." in help_command
     assert "Run this help command with --command <name> for detailed help on one command." in help_command
     assert "Unknown command. Run this help command with --all for the compact command index." in help_command
@@ -271,13 +280,13 @@ def test_public_docs_explain_publication_lane_boundary_and_follow_on_command_arg
     assert "**`gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]`**" in detailed_reference
     assert "**`gpd:arxiv-submission [manuscript root or .tex entrypoint]`**" in detailed_reference
     assert (
-        "Usage: `gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md`"
+        "- `gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md`"
         in detailed_reference
     )
-    assert "Usage: `gpd:respond-to-referees reports/referee-report.md`" in detailed_reference
-    assert "Usage: `gpd:respond-to-referees paste`" in detailed_reference
-    assert "Usage: `gpd:arxiv-submission paper/`" in detailed_reference
-    assert "Usage: `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in detailed_reference
+    assert "- `gpd:respond-to-referees reports/referee-report.md`" in detailed_reference
+    assert "- `gpd:respond-to-referees paste`" in detailed_reference
+    assert "- `gpd:arxiv-submission paper/`" in detailed_reference
+    assert "- `gpd:write-paper --intake intake/write-paper-authoring-input.json`" in detailed_reference
     _assert_anchor(
         research_publishing,
         "arxiv submission package boundary",
@@ -298,7 +307,7 @@ def test_public_write_paper_help_surfaces_match_supported_command_metadata() -> 
     assert "write-paper --intake intake/write-paper-authoring-input.json" in readme
     assert "gpd:write-paper --intake intake/write-paper-authoring-input.json" in detailed_reference
 
-    assert "Usage: `gpd:write-paper`" in detailed_reference
+    assert "- `gpd:write-paper`" in detailed_reference
     assert "--from-phases" not in write_paper_workflow
 
 
@@ -313,7 +322,7 @@ def test_help_workflow_export_logs_surfaces_passthrough_filters() -> None:
     for flag in ("--command <label>", "--phase <phase>", "--category <name>"):
         assert flag in detailed_reference
     assert "empty_export: true" in detailed_reference
-    assert "Usage: `gpd:export-logs --command execute-phase --phase 3 --category workflow`" in detailed_reference
+    assert "- `gpd:export-logs --command execute-phase --phase 3 --category workflow`" in detailed_reference
     _assert_anchor(
         detailed_reference,
         "export logs passthrough filter semantics",
@@ -325,7 +334,7 @@ def test_help_workflow_labels_observe_trace_side_effects_and_export_commit_opt_i
     detailed_reference = _rendered_detailed_reference()
 
     assert "**`gpd:export [--format html|latex|zip|all] [--commit]`**" in detailed_reference
-    assert "Usage: `gpd:export --format latex --commit`" in detailed_reference
+    assert "- `gpd:export --format latex --commit`" in detailed_reference
     _assert_anchor(
         detailed_reference,
         "observe and trace read/write boundary",
@@ -368,7 +377,7 @@ def test_help_workflow_error_patterns_uses_pattern_library_categories() -> None:
 
     for category in expected_categories:
         assert category in error_patterns_section
-    assert "Usage: `gpd:error-patterns sign-error`" in error_patterns_section
+    assert "- `gpd:error-patterns sign-error`" in error_patterns_section
     assert "Usage: `gpd:error-patterns sign`" not in error_patterns_section
     assert "boundary, gauge, combinatorial" not in error_patterns_section
 
@@ -480,7 +489,6 @@ def test_help_workflow_files_and_structure_and_knowledge_lifecycle_coverages() -
         "`gpd:digest-knowledge GPD/knowledge/K-renormalization-group-fixed-points.md`",
     ):
         assert sample in digest_detail
-    assert "arXiv identifier with accepted prefixes" in digest_detail
     assert "legacy arxiv" not in digest_detail.lower()
     _assert_anchor(
         detailed_reference,

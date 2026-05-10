@@ -20,7 +20,9 @@ A result quoted as "E = 3.7 +/- 0.2 eV" is incomplete without knowing what drive
 <process>
 
 <step name="initialize" priority="first">
-Load workspace-bound supporting context first. Sensitivity analysis may use project data when it exists in the invoking workspace, but it must not silently reenter a different recent project.
+Load workspace-bound supporting context first. Sensitivity analysis may use
+project data when it exists in the invoking workspace, but it must not silently
+reenter a different recent project.
 
 ```bash
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
@@ -32,10 +34,17 @@ fi
 
 Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `parallelization`, `project_exists`, `state_exists`, `roadmap_exists`.
 
-- If `state_exists` is true: Read `STATE.md` for project conventions, unit system, and active approximations. Extract `convention_lock` for unit conventions and parameter definitions. Extract `intermediate_results` for previously computed parameter values and their uncertainties. If `GPD/analysis/PARAMETERS.md` exists, use it as the parameter registry (see `{GPD_INSTALL_DIR}/templates/parameter-table.md` for the template).
-- If `state_exists` is false: Proceed in standalone/current-workspace mode with explicit parameter declarations required from the user. Standalone outputs still live under `GPD/analysis/` in the invoking workspace, but do not mutate `STATE.md` or `state.json`.
+- If `state_exists=true`: extract conventions, active approximations,
+  `convention_lock`, parameter definitions, and `intermediate_results`; use
+  `GPD/analysis/PARAMETERS.md` as the parameter registry when present.
+- If `state_exists=false`: require explicit parameter declarations from the
+  user; standalone outputs stay under `GPD/analysis/` and do not mutate
+  `STATE.md` or `state.json`.
 
-Resolve authoritative phase-backed persistence only after the target quantity is known. If the target resolves to a canonical stored result with phase metadata, or the user explicitly anchors the run to a current-workspace phase, then load phase context explicitly:
+Resolve authoritative phase-backed persistence only after the target quantity is
+known. If the target resolves to a canonical stored result with phase metadata,
+or the user explicitly anchors the run to a current-workspace phase, load phase
+context explicitly:
 
 ```bash
 PHASE_INIT=$(gpd --raw init phase-op --include state,config "{phase_number}")
@@ -71,10 +80,10 @@ Identify the target quantity and the parameters to analyze.
 
 Determine what output quantity f we are analyzing the sensitivity of:
 
-- Load project state via `gpd --raw init progress --include state,config --no-project-reentry` and check `intermediate_results` for computed quantities. If you need to locate the canonical target or one of its upstream results first, use `gpd result search`; once a canonical `result_id` is known, use `gpd result show "{result_id}"` for the direct stored-result view before `gpd result deps "{result_id}"` for the recorded upstream dependency chain. Keep `gpd query search` for SUMMARY/frontmatter lookup.
-- Read from phase SUMMARY.md files for key results
-- If `--target` is specified, use that quantity directly
-- If the canonical target resolves to authoritative phase metadata, record `phase_found`, `phase_dir`, `phase_number`, and `phase_slug` before deciding the persistence path
+- Check `intermediate_results` for computed quantities.
+- For canonical target lookup, use `gpd result search`; once a canonical `result_id` is known, use `gpd result show "{result_id}"` for the direct stored-result view before `gpd result deps "{result_id}"` for the recorded upstream dependency chain. Keep `gpd query search` for SUMMARY/frontmatter lookup.
+- Use `--target` directly when supplied; otherwise inspect phase SUMMARY.md files for key results.
+- If the canonical target resolves to authoritative phase metadata, record `phase_found`, `phase_dir`, `phase_number`, and `phase_slug` before choosing persistence.
 - Never recover phase-backed persistence from `${PHASE_ARG:-}`, recent-project state, or a guessed current phase. Phase-backed writes are allowed only after an authoritative current-workspace phase resolution.
 
 ```markdown
@@ -95,7 +104,9 @@ Identify all input parameters that f depends on:
 3. **Approximation controls:** expansion orders, truncation levels, regime boundaries
 4. **Measured inputs:** experimental values used in the calculation
 
-If project state exists, read from `GPD/STATE.md` to identify active approximations and their controlling parameters. Where structured data is needed, load via `gpd --raw init progress --include state,config --no-project-reentry`. In standalone mode, require the user to declare any approximations or validity bounds that should be analyzed.
+If project state exists, use it for active approximations and controlling
+parameters. In standalone mode, require the user to declare any approximations
+or validity bounds to analyze.
 
 ```markdown
 ## Parameters
@@ -112,92 +123,18 @@ If `--params` is specified, restrict analysis to those parameters. Otherwise ana
 <step name="choose_method">
 **Step 2: Choose Method**
 
-Select the sensitivity analysis method based on the nature of the problem.
+Select the method per parameter and record the reason:
 
-### 2a. Analytical method
+| Method | Use when | Required evidence |
+| --- | --- | --- |
+| analytical | closed-form `f(p_1,...,p_N)` exists | compute `partial f / partial p_i` from the derivation chain |
+| numerical | dependence is only through a pipeline/code path | central finite difference: perturb `p_i` by `+/-delta`, rerun, compute `(f_plus-f_minus)/(2 delta)` |
+| combined | some dependencies are analytic and others are computational | table listing the method used for each parameter |
 
-Best when closed-form expressions exist for f(p_1, ..., p_N).
-
-Compute partial derivatives symbolically from the derivation chain:
-
-```python
-# Symbolic sensitivity computation
-import sympy as sp
-
-# Define symbols
-p1, p2, p3 = sp.symbols('p1 p2 p3', positive=True)
-
-# The target function (from the derivation)
-f = ...  # symbolic expression
-
-# Partial derivatives
-for p in [p1, p2, p3]:
-    df_dp = sp.diff(f, p)
-    S = sp.simplify(df_dp * p / f)  # dimensionless sensitivity
-    print(f"df/d{p} = {df_dp}")
-    print(f"S_{p} = {S}")
-```
-
-**When to use:** The functional form f(p_1, ..., p_N) is available as a closed-form expression.
-
-### 2b. Numerical method
-
-Best for complex computation chains where no single closed-form expression exists.
-
-Finite-difference approximation: perturb each parameter by +/-delta, measure output change:
-
-```python
-import numpy as np
-
-def compute_f(params):
-    """The full computation pipeline."""
-    ...
-    return value
-
-def numerical_sensitivity(compute_fn, params, param_names, delta_frac=0.01):
-    """Compute sensitivity by central finite differences."""
-    f0 = compute_fn(params)
-    sensitivities = {}
-
-    for i, name in enumerate(param_names):
-        params_plus = params.copy()
-        params_minus = params.copy()
-        delta = abs(params[i]) * delta_frac if params[i] != 0 else delta_frac
-
-        params_plus[i] += delta
-        params_minus[i] -= delta
-
-        f_plus = compute_fn(params_plus)
-        f_minus = compute_fn(params_minus)
-
-        # Central difference derivative
-        df_dp = (f_plus - f_minus) / (2 * delta)
-
-        # Dimensionless sensitivity coefficient
-        S = df_dp * params[i] / f0 if f0 != 0 else df_dp * params[i]
-
-        sensitivities[name] = {
-            'df_dp': df_dp,
-            'S': S,
-            'f_plus': f_plus,
-            'f_minus': f_minus,
-        }
-
-    return f0, sensitivities
-```
-
-**When to use:** The computation is a pipeline of steps without a single closed-form expression, or the expression is too complex for symbolic differentiation.
-
-### 2c. Combined method
-
-Use analytical derivatives where closed-form expressions exist and numerical derivatives where they do not. This is the default when `--method` is not specified.
-
-For each parameter:
-
-- If the dependence is through a known formula: use analytical
-- If the dependence is through a numerical computation: use numerical
-- Document which method was used for each parameter
-  </step>
+Default to combined when `--method` is omitted. For numerical derivatives, use a
+small relative step, record `f_plus`, `f_minus`, and reject steps that leave the
+validity domain.
+</step>
 
 <step name="compute_sensitivity">
 **Step 3: Compute Sensitivity Coefficients**
@@ -210,74 +147,18 @@ S_i = (partial f / partial p_i) * (p_i / f)
 
 This is the fractional change in the output per fractional change in the input. A sensitivity of S_i = 2 means a 1% change in p_i produces a 2% change in f.
 
-### 3a. Evaluate at nominal values
+For every parameter record:
 
-Compute S_i at the nominal (best-estimate) parameter values:
+| Field | Meaning |
+| --- | --- |
+| `df_dp` | analytical or finite-difference derivative at the nominal value |
+| `S_i` | dimensionless sensitivity |
+| `delta_f_i = abs(df_dp) * delta_p` | absolute contribution to output uncertainty |
+| `% total` | `delta_f_i / total_uncertainty` |
+| boundary check | `S_i` at the validity-range endpoints |
 
-```python
-# For each parameter p_i
-for i, (name, p_nom, delta_p) in enumerate(parameters):
-    # Compute df/dp_i at nominal values
-    df_dp = ...  # analytical or numerical
-
-    # Dimensionless sensitivity
-    S_i = df_dp * p_nom / f_nominal
-
-    # Absolute sensitivity (contribution to output uncertainty)
-    delta_f_i = abs(df_dp) * delta_p
-
-    # Fractional contribution to output uncertainty
-    frac_contribution_i = delta_f_i / total_uncertainty
-
-    print(f"Parameter: {name}")
-    print(f"  S_i = {S_i:.4f}")
-    print(f"  delta_f from delta_{name} = {delta_f_i:.6e}")
-    print(f"  Fraction of total uncertainty: {frac_contribution_i:.1%}")
-```
-
-### 3b. Evaluate at boundary values
-
-For each parameter, also compute the sensitivity at the boundaries of the validity regime:
-
-```python
-# Check sensitivity stability across the parameter range
-for name, p_nom, delta_p, p_min, p_max in parameters:
-    S_at_nominal = compute_S(p_nom)
-    S_at_lower = compute_S(p_min)
-    S_at_upper = compute_S(p_max)
-
-    variation = max(abs(S_at_lower - S_at_nominal), abs(S_at_upper - S_at_nominal))
-    relative_variation = variation / abs(S_at_nominal) if S_at_nominal != 0 else float('inf')
-
-    print(f"Parameter: {name}")
-    print(f"  S(nominal) = {S_at_nominal:.4f}")
-    print(f"  S(lower)   = {S_at_lower:.4f}")
-    print(f"  S(upper)   = {S_at_upper:.4f}")
-    print(f"  Variation:   {relative_variation:.1%}")
-
-    if relative_variation > 0.5:
-        print(f"  WARNING: Sensitivity varies by >{relative_variation:.0%} across range -- nonlinear regime")
-```
-
-### 3c. Flag divergent sensitivities
-
-Check for parameters where the sensitivity diverges or becomes very large:
-
-```python
-DIVERGENCE_THRESHOLD = 100  # |S| > 100 is almost certainly a problem
-
-for name, S_values in sensitivity_scan.items():
-    max_S = max(abs(s) for s in S_values)
-
-    if max_S > DIVERGENCE_THRESHOLD:
-        print(f"CRITICAL: |S_{name}| = {max_S:.1f} -- sensitivity divergence detected")
-        print(f"  This may indicate:")
-        print(f"  - Critical point (phase transition, resonance)")
-        print(f"  - Cancellation (result is small difference of large terms)")
-        print(f"  - Ill-conditioned formulation")
-```
-
-Divergent sensitivity near a specific parameter value often indicates:
+Flag nonlinear behavior when endpoint sensitivities differ from nominal by more
+than 50%. Flag divergent sensitivity when `|S| > 100`; likely causes:
 
 | Pattern                         | Likely cause                | Prescription                                                                  |
 | ------------------------------- | --------------------------- | ----------------------------------------------------------------------------- |
@@ -291,72 +172,14 @@ Divergent sensitivity near a specific parameter value often indicates:
 <step name="rank_parameters">
 **Step 4: Rank Parameters**
 
-### 4a. Sort by absolute sensitivity
+Rank by `abs(df_dp * delta_p)` and report cumulative uncertainty share. Then
+classify:
 
-Rank parameters by their impact on the output uncertainty:
-
-```python
-# Sort by contribution to output uncertainty
-ranked = sorted(parameters, key=lambda p: abs(p['df_dp'] * p['delta']), reverse=True)
-
-print("Parameter Ranking (by contribution to output uncertainty):")
-print(f"{'Rank':>4} {'Parameter':>20} {'|S_i|':>10} {'delta_f_i':>12} {'% of total':>10}")
-print("-" * 60)
-
-cumulative = 0.0
-for rank, p in enumerate(ranked, 1):
-    delta_f = abs(p['df_dp'] * p['delta'])
-    pct = delta_f / total_uncertainty * 100
-    cumulative += pct
-    print(f"{rank:4d} {p['name']:>20} {abs(p['S']):.4f} {delta_f:.6e} {pct:8.1f}%  (cumul: {cumulative:.0f}%)")
-```
-
-### 4b. Identify stiff directions
-
-Look for large sensitivity ratios between parameters (stiff parameter space):
-
-```python
-S_values = [abs(p['S']) for p in ranked]
-if len(S_values) >= 2:
-    stiffness_ratio = S_values[0] / S_values[-1] if S_values[-1] != 0 else float('inf')
-    print(f"\nStiffness ratio (max/min sensitivity): {stiffness_ratio:.1f}")
-
-    if stiffness_ratio > 100:
-        print("STIFF: Parameter space has widely separated sensitivity scales.")
-        print(f"  Most sensitive:  {ranked[0]['name']} (|S| = {S_values[0]:.4f})")
-        print(f"  Least sensitive: {ranked[-1]['name']} (|S| = {S_values[-1]:.6f})")
-        print("  Implication: effort should focus almost entirely on the most sensitive parameters.")
-```
-
-### 4c. Identify null directions
-
-Find parameter combinations that do not affect the result:
-
-```python
-# Check for near-zero sensitivities
-NULL_THRESHOLD = 1e-4  # |S| below this is effectively zero
-
-null_params = [p for p in ranked if abs(p['S']) < NULL_THRESHOLD]
-if null_params:
-    print(f"\nNull directions ({len(null_params)} parameters with negligible sensitivity):")
-    for p in null_params:
-        print(f"  {p['name']}: |S| = {abs(p['S']):.2e} -- result is insensitive to this parameter")
-    print("  These parameters can be set to convenient values without affecting the output.")
-```
-
-Also check for correlated null directions -- parameter combinations that cancel:
-
-```python
-# For pairs of parameters, check if their effects cancel
-for i in range(len(ranked)):
-    for j in range(i + 1, len(ranked)):
-        p_i, p_j = ranked[i], ranked[j]
-        # If sensitivities are nearly equal and opposite, there is a null direction
-        if abs(p_i['S'] + p_j['S']) < 0.1 * max(abs(p_i['S']), abs(p_j['S'])):
-            print(f"  Correlated null direction: {p_i['name']} and {p_j['name']}")
-            print(f"  S_{p_i['name']} = {p_i['S']:.4f}, S_{p_j['name']} = {p_j['S']:.4f}")
-            print(f"  The result depends on their difference, not individual values.")
-```
+| Check | Threshold | Action |
+| --- | --- | --- |
+| stiff parameter space | max/min `|S| > 100` | focus follow-up effort on the stiff directions |
+| null direction | `|S| < 1e-4` | mark parameter as practically irrelevant |
+| correlated null | paired sensitivities nearly equal and opposite | record the cancelling combination |
 
 </step>
 

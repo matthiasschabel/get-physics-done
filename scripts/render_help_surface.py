@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import difflib
-import re
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 
 if __package__ in {None, ""}:
@@ -19,20 +16,21 @@ from gpd.core.help_renderer import (
     render_detailed_command_reference_markdown,
     render_quick_start_markdown,
 )
+from scripts.generated_region_support import (
+    GeneratedRegionDiff,
+    GeneratedRegionSpec,
+    marker_pair,
+    render_region,
+    replace_regions,
+    unified_diff_text,
+    write_stale_check_result,
+)
+
+HelpSurfaceDiff = GeneratedRegionDiff
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HELP_WORKFLOW_PATH = Path("src/gpd/specs/workflows/help.md")
 MARKER_PREFIX = "gpd-help"
-_BLOCK_ID_PATTERN = r"[a-z0-9][a-z0-9-]*"
-_START_MARKER_RE = re.compile(rf"<!-- {MARKER_PREFIX}:(?P<block_id>{_BLOCK_ID_PATTERN}):start -->")
-_END_MARKER_RE = re.compile(rf"<!-- {MARKER_PREFIX}:(?P<block_id>{_BLOCK_ID_PATTERN}):end -->")
-
-
-@dataclass(frozen=True, slots=True)
-class HelpSurfaceDiff:
-    path: Path | None
-    block_id: str
-    diff: str
 
 
 _HELP_BLOCK_RENDERERS: dict[str, Callable[[], str]] = {
@@ -46,75 +44,32 @@ def help_surface_block_ids() -> tuple[str, ...]:
     return tuple(_HELP_BLOCK_RENDERERS)
 
 
+_HELP_REGION_SPEC = GeneratedRegionSpec(
+    marker_prefix=MARKER_PREFIX,
+    known_block_ids=help_surface_block_ids,
+    block_label="help surface block",
+)
+
+
 def help_surface_markers(block_id: str) -> tuple[str, str]:
     if block_id not in _HELP_BLOCK_RENDERERS:
         raise ValueError(f"Unknown help surface block {block_id!r}")
-    return (
-        f"<!-- {MARKER_PREFIX}:{block_id}:start -->",
-        f"<!-- {MARKER_PREFIX}:{block_id}:end -->",
-    )
+    return marker_pair(_HELP_REGION_SPEC, block_id)
 
 
 def render_help_surface_region(block_id: str) -> str:
-    start_marker, end_marker = help_surface_markers(block_id)
-    body = _HELP_BLOCK_RENDERERS[block_id]().rstrip() + "\n"
-    return f"{start_marker}\n{body}{end_marker}"
-
-
-def _diff(expected: str, actual: str, *, path: Path | None, block_id: str) -> str:
-    label = path.as_posix() if path is not None else "<text>"
-    return "".join(
-        difflib.unified_diff(
-            actual.splitlines(keepends=True),
-            expected.splitlines(keepends=True),
-            fromfile=f"{label}:{block_id} (current)",
-            tofile=f"{label}:{block_id} (expected)",
-        )
-    )
+    if block_id not in _HELP_BLOCK_RENDERERS:
+        raise ValueError(f"Unknown help surface block {block_id!r}")
+    return render_region(_HELP_REGION_SPEC, block_id, _HELP_BLOCK_RENDERERS[block_id]())
 
 
 def _replace_help_surface_regions_in_text(text: str, *, path: Path | None = None) -> tuple[str, tuple[str, ...]]:
-    output_parts: list[str] = []
-    replaced_block_ids: list[str] = []
-    cursor = 0
-
-    while True:
-        start_match = _START_MARKER_RE.search(text, cursor)
-        orphan_end_match = _END_MARKER_RE.search(text, cursor)
-        if start_match is None:
-            if orphan_end_match is not None:
-                block_id = orphan_end_match.group("block_id")
-                label = f" in {path.as_posix()}" if path is not None else ""
-                raise ValueError(f"Orphan end marker for help surface block {block_id!r}{label}")
-            output_parts.append(text[cursor:])
-            break
-        if orphan_end_match is not None and orphan_end_match.start() < start_match.start():
-            block_id = orphan_end_match.group("block_id")
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Orphan end marker for help surface block {block_id!r}{label}")
-
-        block_id = start_match.group("block_id")
-        if block_id not in _HELP_BLOCK_RENDERERS:
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Unknown help surface block {block_id!r}{label}")
-
-        _start_marker, end_marker = help_surface_markers(block_id)
-        end_index = text.find(end_marker, start_match.end())
-        if end_index < 0:
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Missing end marker for help surface block {block_id!r}{label}")
-
-        next_start = _START_MARKER_RE.search(text, start_match.end())
-        if next_start is not None and next_start.start() < end_index:
-            label = f" in {path.as_posix()}" if path is not None else ""
-            raise ValueError(f"Nested help surface block before {block_id!r} ends{label}")
-
-        output_parts.append(text[cursor : start_match.start()])
-        output_parts.append(render_help_surface_region(block_id))
-        cursor = end_index + len(end_marker)
-        replaced_block_ids.append(block_id)
-
-    return "".join(output_parts), tuple(replaced_block_ids)
+    return replace_regions(
+        text,
+        spec=_HELP_REGION_SPEC,
+        render_body=lambda block_id: _HELP_BLOCK_RENDERERS[block_id](),
+        path=path,
+    )
 
 
 def replace_help_surface_text(text: str) -> str:
@@ -144,7 +99,7 @@ def check_help_surface_text(text: str, *, path: Path | None = None) -> tuple[Hel
         HelpSurfaceDiff(
             path=path,
             block_id=", ".join(dict.fromkeys(block_ids)),
-            diff=_diff(updated, text, path=path, block_id="help-surface-regions"),
+            diff=unified_diff_text(updated, text, path=path, block_id="help-surface-regions"),
         ),
     )
 
@@ -195,12 +150,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.check:
         diffs = check_help_surface_file(args.path)
         if diffs:
-            sys.stderr.write(
-                "Help surface generated regions are stale. "
-                "Run `uv run python scripts/render_help_surface.py` and commit the result.\n\n"
+            return write_stale_check_result(
+                diffs,
+                heading="Help surface generated regions are stale.",
+                regenerate_command="uv run python scripts/render_help_surface.py",
             )
-            sys.stderr.write("\n".join(diff.diff for diff in diffs))
-            return 1
         return 0
 
     if update_help_surface_file(args.path):

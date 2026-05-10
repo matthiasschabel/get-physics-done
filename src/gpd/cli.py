@@ -1258,7 +1258,7 @@ def help_bridge(
     if command_name:
         canonical = canonical_command_label(command_name)
         try:
-            detail_payload = command_detail_payload(canonical, minimal=minimal)
+            detail_payload = command_detail_payload(canonical, minimal=minimal, include_markdown=True)
         except KeyError:
             payload.update(
                 {

@@ -16,11 +16,17 @@ __all__ = [
     "MarkdownSection",
     "ParsedMarkdownLink",
     "ParsedMarkdownTable",
+    "ParsedContractFinding",
     "ParsedYamlFence",
     "assert_markdown_link",
+    "assert_contract_finding",
+    "assert_contract_relation_finding",
     "assert_forbidden_fragments",
+    "assert_no_contract_finding",
+    "assert_no_contract_relation_finding",
     "assert_ordered_fragments",
     "assert_required_fragments",
+    "parse_contract_findings",
     "extract_marker_range",
     "extract_markdown_section",
     "has_line_with_terms",
@@ -85,6 +91,15 @@ class ParsedMarkdownLink:
 
     label: str
     href: str
+
+
+@dataclass(frozen=True, slots=True)
+class ParsedContractFinding:
+    """A path-prefixed contract finding split into stable path and reason."""
+
+    message: str
+    path: str
+    reason: str
 
 
 def normalize_text(text: str) -> str:
@@ -238,6 +253,136 @@ def _normalize_fragment(fragment: str, *, normalize: bool) -> str:
 
 def _format_fragment_list(fragments: Iterable[str]) -> str:
     return "\n".join(f"- {fragment!r}" for fragment in fragments)
+
+
+_CONTRACT_FINDING_PATH_RE = re.compile(
+    r"^(?P<path>[A-Za-z_][A-Za-z0-9_-]*(?:[.](?:[A-Za-z_][A-Za-z0-9_-]*|[0-9]+)|\[[0-9]+\])*)"
+    r"(?::\s*|\s+(?=(?:is|must|references|targets|has|contains|uses|requires|missing)\b))"
+    r"(?P<reason>.+)$"
+)
+_CONTRACT_TOP_LEVEL_FIELDS = {
+    "schema_version",
+    "scope",
+    "context_intake",
+    "uncertainty_markers",
+    "observables",
+    "claims",
+    "deliverables",
+    "acceptance_tests",
+    "references",
+    "forbidden_proxies",
+    "links",
+    "approach_policy",
+    "legacy_notes",
+    "contract_results",
+}
+
+
+def _looks_like_contract_path(path: str) -> bool:
+    return "." in path or "[" in path or "_" in path or path in _CONTRACT_TOP_LEVEL_FIELDS
+
+
+def parse_contract_findings(messages: Iterable[str]) -> tuple[ParsedContractFinding, ...]:
+    """Return path-prefixed contract findings, ignoring free-form relation prose."""
+
+    parsed: list[ParsedContractFinding] = []
+    for message in messages:
+        for candidate in _contract_finding_candidates(message):
+            match = _CONTRACT_FINDING_PATH_RE.match(candidate)
+            if match is None:
+                continue
+            path = match.group("path")
+            if not _looks_like_contract_path(path):
+                continue
+            parsed.append(ParsedContractFinding(message=message, path=path, reason=match.group("reason")))
+            break
+    return tuple(parsed)
+
+
+def _contract_finding_candidates(message: str) -> tuple[str, ...]:
+    stripped = message.strip()
+    candidates = [stripped]
+    for marker in ("Invalid contract payload: ", "Value error, "):
+        if marker in stripped:
+            candidates.append(stripped.split(marker, 1)[1].strip())
+    return tuple(candidates)
+
+
+def assert_contract_finding(
+    messages: Iterable[str],
+    *,
+    path: str,
+    contains: Iterable[str] | str = (),
+    context: str = "contract findings",
+) -> ParsedContractFinding:
+    """Assert a path-prefixed contract finding without pinning the full prose."""
+
+    required_terms = _coerce_fragments(contains) if contains else ()
+    findings = parse_contract_findings(messages)
+    for finding in findings:
+        if finding.path == path and all(term in finding.message for term in required_terms):
+            return finding
+    raise AssertionError(
+        f"missing {context} finding for path {path!r} with terms {required_terms!r}; "
+        f"parsed={findings!r}; messages={tuple(messages)!r}"
+    )
+
+
+def assert_no_contract_finding(
+    messages: Iterable[str],
+    *,
+    path: str,
+    contains: Iterable[str] | str = (),
+    context: str = "contract findings",
+) -> None:
+    """Assert a path-prefixed contract finding is absent."""
+
+    required_terms = _coerce_fragments(contains) if contains else ()
+    for finding in parse_contract_findings(messages):
+        if finding.path == path and all(term in finding.message for term in required_terms):
+            raise AssertionError(f"unexpected {context} finding: {finding.message!r}")
+
+
+def assert_contract_relation_finding(
+    messages: Iterable[str],
+    *,
+    subject_kind: str,
+    subject_id: str,
+    relation_terms: Iterable[str] | str,
+    target_id: str | None = None,
+    context: str = "contract findings",
+) -> str:
+    """Assert a non-path contract relation finding by typed subject and target terms."""
+
+    required_terms = (subject_kind, subject_id, *_coerce_fragments(relation_terms))
+    if target_id is not None:
+        required_terms = (*required_terms, target_id)
+    for message in messages:
+        if all(term in message for term in required_terms):
+            return message
+    raise AssertionError(
+        f"missing {context} relation finding for {subject_kind} {subject_id} "
+        f"with terms {required_terms[2:]!r}; messages={tuple(messages)!r}"
+    )
+
+
+def assert_no_contract_relation_finding(
+    messages: Iterable[str],
+    *,
+    subject_kind: str,
+    subject_id: str,
+    relation_terms: Iterable[str] | str,
+    target_id: str | None = None,
+    context: str = "contract findings",
+) -> None:
+    """Assert a non-path contract relation finding is absent."""
+
+    required_terms = (subject_kind, subject_id, *_coerce_fragments(relation_terms))
+    if target_id is not None:
+        required_terms = (*required_terms, target_id)
+    for message in messages:
+        if all(term in message for term in required_terms):
+            raise AssertionError(f"unexpected {context} relation finding: {message!r}")
 
 
 def assert_required_fragments(

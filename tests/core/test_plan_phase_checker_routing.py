@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_lifecycle_prose as _assert_absent,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_semantic_contract as _assert_semantic,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLAN_PHASE = REPO_ROOT / "src/gpd/specs/workflows/plan-phase.md"
 PLAN_PHASE_STAGE_DIR = REPO_ROOT / "src/gpd/specs/workflows/plan-phase"
@@ -29,10 +36,19 @@ def test_plan_phase_separates_planner_checkpoint_handling_from_checker_revision(
     source = _stage_text("planner-authoring.md")
 
     assert "## 9b. Handle Planner Checkpoint" in source
-    assert "spawn a fresh `gpd-planner` continuation handoff" in source
-    assert "Do not route planner checkpoints into the checker revision loop." in source
-    assert "Only after the planner returns `completed` should the workflow advance to checker review." in source
-    assert "Present to user, get response, spawn continuation (step 12)" not in source
+    _assert_semantic(
+        source,
+        "plan-phase planner checkpoint is fresh continuation not checker revision",
+        "fresh `gpd-planner` continuation handoff",
+        "Do not route planner checkpoints into the checker revision loop.",
+        "planner returns `completed`",
+        "advance to checker review",
+    )
+    _assert_absent(
+        source,
+        "plan-phase stale planner checkpoint continuation wording",
+        "Present to user, get response, spawn continuation (step 12)",
+    )
 
 
 def test_plan_phase_routes_checker_statuses_through_structured_fields() -> None:
@@ -42,11 +58,19 @@ def test_plan_phase_routes_checker_statuses_through_structured_fields() -> None:
     assert "`gpd_return.status: checkpoint`" in source
     assert "`gpd_return.status: blocked`" in source
     assert "`gpd_return.status: failed`" in source
-    assert "Record approved plans from the structured `approved_plans` list only." in source
-    assert "Record blocked plans from the structured `blocked_plans` list only." in source
-    assert "Approved Plans (ready for execution)" not in source
-    assert 'Approved Plans" table' not in source
-    assert "plan-ID reconciliation" in source
+    _assert_semantic(
+        source,
+        "plan-phase checker structured fields are authoritative",
+        "structured `approved_plans` list only",
+        "structured `blocked_plans` list only",
+        "plan-ID reconciliation",
+    )
+    _assert_absent(
+        source,
+        "plan-phase checker presentation table is non-authority",
+        "Approved Plans (ready for execution)",
+        'Approved Plans" table',
+    )
 
 
 def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_success() -> None:
@@ -55,11 +79,15 @@ def test_plan_phase_fails_closed_on_plan_id_mismatch_before_accepting_checker_su
     assert "`approved_plans` names only readable `*-PLAN.md` artifacts in `FRESH_PLAN_FILES`" in source
     assert "`blocked_plans` is empty" in source
     assert "every approved plan file still exists and matches the approved plan IDs" in source
-    assert (
-        "Reject the return if any listed plan ID does not map to a readable `*-PLAN.md` file in `FRESH_PLAN_FILES`."
-        in source
+    _assert_semantic(
+        source,
+        "plan-phase checker rejects plan id mismatch before success",
+        "Reject the return",
+        "plan ID",
+        "readable `*-PLAN.md` file",
+        "FRESH_PLAN_FILES",
+        "fail-closed mismatch",
     )
-    assert "send the checker output back through the revision loop as a fail-closed mismatch" in source
 
 
 def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> None:
@@ -80,52 +108,81 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
     assert source.index("PLANNER_RETURN=$(") < source.index(
         "Before checker/final status, validate only fresh `FRESH_PLAN_FILES`"
     )
-    assert "derive that list from the typed `PLANNER_RETURN`" in source
-    assert "gpd return skeleton --role planner --status completed" in source
-    assert "one `--file` entry per newly written plan" in source
-    assert "Then run the planner child_gate tuple once" in source
-    assert "printf '```yaml\\ngpd_return:\\n'" not in source
-    assert "printf '  status: completed\\n  files_written:\\n'" not in source
-    assert "printf '%s\\n' \"$PLAN_RETURN_MARKDOWN\"" not in source
-    assert 'FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c' not in source
-    assert 'json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}})' not in source
+    _assert_semantic(
+        source,
+        "plan-phase uses typed planner return and skeleton for main-context fallback",
+        "typed `PLANNER_RETURN`",
+        "gpd return skeleton --role planner --status completed",
+        "one `--file` entry per newly written plan",
+        "planner child_gate tuple once",
+    )
+    _assert_absent(
+        source,
+        "plan-phase no synthetic files-only planner return",
+        "printf '```yaml\\ngpd_return:\\n'",
+        "printf '  status: completed\\n  files_written:\\n'",
+        "printf '%s\\n' \"$PLAN_RETURN_MARKDOWN\"",
+        'FRESH_PLAN_FILES="$FRESH_PLAN_FILES" python3 -c',
+        'json.dumps({"gpd_return":{"files_written":os.getenv("FRESH_PLAN_FILES","").split()}})',
+    )
     assert "gpd validate handoff-artifacts -" in source
     assert "allowed-root" in source
     assert "expected-glob" in source
     assert "--required-suffix=-PLAN.md" in source
     assert '[ -f "$plan_file" ] || continue' not in source
-    assert "all files are readable `${PHASE_DIR}/*-PLAN.md` paths" in source
-    assert "every file passes `gpd validate plan-contract`" in source
-    assert "every file passes the structured plan preflight validator" in source
-    assert "Read each fresh plan artifact into `PLANS_CONTENT` only after the planner gate passes" in source
-    assert (
-        "Before checker/final status, validate only fresh `FRESH_PLAN_FILES` from the planner or manual branch."
-    ) in source
+    _assert_semantic(
+        source,
+        "plan-phase fresh plan validators before checker or final status",
+        "readable `${PHASE_DIR}/*-PLAN.md` paths",
+        "gpd validate plan-contract",
+        "structured plan preflight validator",
+        "fresh plan artifact",
+        "after the planner gate passes",
+        "FRESH_PLAN_FILES",
+    )
 
 
 def test_plan_phase_does_not_synthesize_files_only_json_planner_return() -> None:
     source = _stage_text("planner-authoring.md")
 
-    assert "The shared child artifact gate owns the no-synthetic-child-return rule" in source
-    assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in source
-    assert "gpd return skeleton --role planner --status completed" in source
-    assert "printf '```yaml\\ngpd_return:\\n'" not in source
-    assert '{"gpd_return":{"files_written"' not in source
-    assert "${PLANNER_RETURN:-$(" not in source
+    _assert_semantic(
+        source,
+        "plan-phase main-context return uses skeleton not synthetic child return",
+        "shared child artifact gate",
+        "no-synthetic-child-return rule",
+        "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`",
+        "gpd return skeleton --role planner --status completed",
+    )
+    _assert_absent(
+        source,
+        "plan-phase does not synthesize files-only JSON planner return",
+        "printf '```yaml\\ngpd_return:\\n'",
+        '{"gpd_return":{"files_written"',
+        "${PLANNER_RETURN:-$(",
+    )
 
 
 def test_plan_phase_manual_plan_fallback_cannot_skip_fresh_plan_validators() -> None:
     source = _plan_phase_authority_text()
 
-    assert "Main-context plan or any manual bounded authoring branch" in source
-    assert "set `FRESH_PLAN_FILES` to the newly created path(s)" in source
-    assert "No full planner/checker loop is required for this fallback unless requested" in source
-    assert "a failing gate means `status: blocked`, not `planned_ready`/`green`" in source
-    assert "and no `gpd:execute-phase` route" in source
+    _assert_semantic(
+        source,
+        "plan-phase manual fallback still uses fresh plan gate",
+        "Main-context plan",
+        "manual bounded authoring branch",
+        "FRESH_PLAN_FILES",
+        "newly created path",
+        "failing gate means `status: blocked`",
+        "no `gpd:execute-phase` route",
+    )
     assert "gpd validate plan-contract" in source
     assert "structured plan preflight validator" in source
-    assert (
-        "The `PHASE PLANNED` offer and `gpd:execute-phase` route require the fresh-plan validator gate above." in source
+    _assert_semantic(
+        source,
+        "plan-phase planned offer requires fresh plan validator gate",
+        "PHASE PLANNED",
+        "gpd:execute-phase",
+        "fresh-plan validator gate",
     )
 
 
@@ -141,14 +198,22 @@ def test_plan_phase_researcher_checkpoint_path_is_a_fresh_continuation_handoff()
     source = _stage_text("research-routing.md")
 
     assert "## 5.1 Handle Researcher Checkpoint" in source
-    assert "Continue research as a fresh continuation handoff for Phase {phase_number}: {phase_name}" in source
+    _assert_semantic(
+        source,
+        "plan-phase researcher checkpoint fresh continuation",
+        "fresh continuation handoff",
+        "Phase {phase_number}: {phase_name}",
+    )
     assert "<checkpoint_response>" in source
     assert 'description="Continue research Phase {phase_number}"' in source
     assert "{phase_dir}/{phase_number}-RESEARCH.md" in source
     assert "{phase_dir}/{phase}-RESEARCH.md" not in source
-    assert (
-            "After the continuation returns, rerun the same researcher `child_gate` before advancing."
-        in source
+    _assert_semantic(
+        source,
+        "plan-phase researcher continuation reruns child gate",
+        "After the continuation returns",
+        "rerun the same researcher `child_gate`",
+        "before advancing",
     )
 
 

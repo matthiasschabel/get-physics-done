@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -57,12 +59,16 @@ def test_peer_review_reliability_reference_uses_selected_review_roots() -> None:
     assert "${selected_publication_root}/CONSISTENCY-REPORT.md" in reliability
     assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in reliability
     assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in reliability
-    assert "paired response artifacts are present" in reliability
-    assert "Stage 6 Artifact Boundary" in reliability
-    assert "fresh `gpd_return.files_written`" in reliability
-    assert "gpd_return.status: blocked" in reliability
-    assert "read-only upstream artifacts during Stage 6" in reliability
-    assert "Stage 6 repaired upstream artifacts" in reliability
+    _assert_semantic(
+        reliability,
+        "peer-review reliability Stage 6 behavior contract",
+        "paired response artifacts are present",
+        "Stage 6 Artifact Boundary",
+        "fresh `gpd_return.files_written`",
+        "gpd_return.status: blocked",
+        "read-only upstream artifacts during Stage 6",
+        "Stage 6 repaired upstream artifacts",
+    )
     assert "gpd validate review-claim-index ${selected_review_root}/CLAIMS{round_suffix}.json" in reliability
     assert "gpd validate review-stage-report ${selected_review_root}/STAGE-<stage_id>{round_suffix}.json" in reliability
     assert "gpd validate review-ledger ${selected_review_root}/REVIEW-LEDGER{round_suffix}.json" in reliability
@@ -75,6 +81,12 @@ def test_peer_review_reliability_reference_uses_selected_review_roots() -> None:
     assert "proof_audits[]" in reliability
     assert "theorem-bearing claims" in reliability
     assert "claim record itself" in reliability
+    _assert_semantic(
+        reliability,
+        "peer-review reliability claim proof-bearing status source",
+        "theorem-bearing claims",
+        "claim record itself",
+    )
     assert "detects prior reports and author responses to increment the round number automatically" not in reliability
     assert "theorem_assumptions" not in reliability
     assert "theorem_parameters" not in reliability
@@ -190,35 +202,79 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
     ):
         assert artifact in referee
 
-    assert "gpd_return.files_written stays within Stage 6 write_allowlist" in workflow
-    assert "fresh `gpd_return.files_written`" in reliability
-    assert "fresh `gpd_return.files_written`" in boundary
-    assert "fresh `gpd_return.files_written`" in referee
+    _assert_semantic(
+        workflow,
+        "peer-review workflow Stage 6 files-written write allowlist",
+        "gpd_return.files_written",
+        "Stage 6 write_allowlist",
+    )
+    for label, source in (
+        ("reliability", reliability),
+        ("boundary", boundary),
+        ("referee", referee),
+    ):
+        _assert_semantic(
+            source,
+            f"peer-review Stage 6 {label} fresh files-written",
+            "fresh `gpd_return.files_written`",
+        )
 
-    assert (
-        "Do not modify `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, any `${REVIEW_ROOT}/STAGE-*.json`, "
-        "or `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`."
-    ) in workflow
-    assert (
-        "Treat `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, every `${REVIEW_ROOT}/STAGE-*.json`, and "
-        "`${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` as read-only upstream evidence."
-    ) in panel
-    assert (
-        "Treat `${selected_review_root}/CLAIMS{round_suffix}.json`, any `${selected_review_root}/STAGE-*.json`, "
-        "and `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md` as read-only upstream artifacts during Stage 6."
-    ) in reliability
-    assert "Never create, rewrite, patch, rename, backfill, or list in `files_written`:" in boundary
-    assert "Never modify upstream staged-review inputs" in referee
+    _assert_semantic(
+        workflow,
+        "peer-review workflow Stage 6 does not modify upstream artifacts",
+        "Do not modify",
+        "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-*.json",
+        "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+    )
+    _assert_semantic(
+        panel,
+        "peer-review panel Stage 6 upstream artifacts are evidence",
+        "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-*.json",
+        "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+        "read-only upstream evidence",
+    )
+    _assert_semantic(
+        reliability,
+        "peer-review reliability Stage 6 selected upstream roots",
+        "${selected_review_root}/CLAIMS{round_suffix}.json",
+        "${selected_review_root}/STAGE-*.json",
+        "${selected_review_root}/PROOF-REDTEAM{round_suffix}.md",
+        "read-only upstream artifacts during Stage 6",
+    )
+    _assert_semantic(
+        boundary,
+        "peer-review Stage 6 boundary never lists upstream repairs in files-written",
+        "Never create, rewrite, patch, rename, backfill, or list in `files_written`",
+    )
+    _assert_semantic(
+        referee,
+        "referee never modifies upstream staged-review inputs",
+        "Never modify upstream staged-review inputs",
+    )
     assert "CLAIMS{round_suffix}.json" in referee
     assert "STAGE-*.json" in referee
     assert "PROOF-REDTEAM{round_suffix}.md" in referee
 
-    assert "return `gpd_return.status: blocked`" in workflow
-    assert "route the inconsistency back to the earliest failing upstream stage" in panel
-    assert "gpd_return.status: blocked" in reliability
-    assert "return `gpd_return.status: blocked`" in boundary
-    assert "return `gpd_return.status: blocked`" in referee
-    assert "Stage 6 repaired upstream artifacts" in reliability
+    _assert_semantic(workflow, "peer-review workflow Stage 6 blocked return", "gpd_return.status: blocked")
+    _assert_semantic(
+        panel,
+        "peer-review panel routes Stage 6 inconsistency upstream",
+        "route the inconsistency back",
+        "earliest failing upstream stage",
+    )
+    for label, source in (
+        ("reliability", reliability),
+        ("boundary", boundary),
+        ("referee", referee),
+    ):
+        _assert_semantic(source, f"peer-review {label} Stage 6 blocked return", "gpd_return.status: blocked")
+    _assert_semantic(
+        reliability,
+        "peer-review reliability names failed Stage 6 upstream repair",
+        "Stage 6 repaired upstream artifacts",
+    )
 
 
 def test_peer_review_reliability_reference_documents_runtime_neutral_stage_cleanup() -> None:
@@ -226,18 +282,33 @@ def test_peer_review_reliability_reference_documents_runtime_neutral_stage_clean
     reliability = (REFERENCES_DIR / "publication" / "peer-review-reliability.md").read_text(encoding="utf-8")
     recovery = (REFERENCES_DIR / "publication" / "stage-recovery-gate.md").read_text(encoding="utf-8")
 
-    assert "Each stage runs in a fresh subagent context" in workflow
-    assert "writes a compact artifact" in workflow
+    _assert_semantic(
+        workflow,
+        "peer-review stages are fresh one-shot artifact writers",
+        "Each stage runs in a fresh subagent context",
+        "writes a compact artifact",
+    )
     assert "stage-recovery-gate.md" in workflow
 
-    assert "Runtime-Neutral Stage Cleanup" in reliability
+    _assert_semantic(
+        reliability,
+        "peer-review reliability runtime-neutral cleanup section",
+        "Runtime-Neutral Stage Cleanup",
+        "stage-recovery-gate.md",
+    )
     assert "stage-recovery-gate.md" in reliability
-    assert "Treat every spawned publication child as one-shot." in recovery
-    assert "validate or classify every promised artifact" in recovery
-    assert "persisted artifacts plus declared carry-forward inputs" in recovery
-    assert "Do not use prose success text, live child memory" in recovery
-    assert "For parallel waves" in recovery
-    assert "If a retry is allowed, it is a fresh child run from persisted inputs, not a resumed live child." in recovery
+    _assert_semantic(
+        recovery,
+        "publication stage recovery one-shot fresh retry behavior",
+        "spawned publication child",
+        "one-shot",
+        "validate or classify every promised artifact",
+        "persisted artifacts",
+        "prose success text",
+        "live child memory",
+        "fresh child run from persisted inputs",
+        "not a resumed live child",
+    )
 
 
 def test_peer_review_references_keep_generic_claim_kind_out_of_default_theorem_bearing_classification() -> None:

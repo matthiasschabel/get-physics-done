@@ -19,15 +19,12 @@ import pytest
 
 import gpd.cli as cli_module
 import gpd.runtime_cli as runtime_cli
+import tests.helpers.cli as cli_helpers
 from gpd.adapters import get_adapter, list_runtimes
 from gpd.cli import app
 from gpd.core import cli_args as cli_args_module
-from gpd.core.constants import STATE_JSON_BACKUP_FILENAME, ProjectLayout
+from gpd.core.constants import ProjectLayout
 from gpd.core.costs import (
-    CostBudgetThresholdSummary,
-    CostProjectSummary,
-    CostSessionSummary,
-    CostSummary,
     _profile_tier_mix,
 )
 from gpd.core.frontmatter import FrontmatterParseError, extract_frontmatter, validate_frontmatter
@@ -53,18 +50,8 @@ from gpd.core.public_surface_contract import (
     local_cli_validate_command_context_command,
 )
 from gpd.core.recent_projects import record_recent_project
-from gpd.core.reproducibility import compute_sha256
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown, save_state_json, save_state_markdown
-from tests.helpers.cli import (
-    StableCliRunner,
-    invoke_help_text,
-    json_output_from_result,
-)
-from tests.helpers.cli import (
-    assert_no_top_level_resume_aliases as _assert_no_top_level_resume_aliases,
-)
-from tests.helpers.cli import normalize_cli_output as _normalize_cli_output
 from tests.latex_test_support import latex_capability_payload as _latex_capability_payload
 from tests.latex_test_support import toolchain_capability as _toolchain_capability
 from tests.runtime_test_support import (
@@ -77,7 +64,31 @@ from tests.runtime_test_support import (
     runtime_with_permissions_surface,
 )
 
-runner = StableCliRunner()
+_PermissionsTargetAdapter = cli_helpers.PermissionsTargetAdapter
+_artifact_manifest_payload = cli_helpers.artifact_manifest_payload
+_assert_forbidden_verification_fields_absent = cli_helpers.assert_forbidden_verification_fields_absent
+_assert_no_top_level_resume_aliases = cli_helpers.assert_no_top_level_resume_aliases
+_bootstrap_publication_project = cli_helpers.bootstrap_publication_project
+_compact_plan_with_missing_must_surface_benchmark = cli_helpers.compact_plan_with_missing_must_surface_benchmark
+_make_checkout = cli_helpers.make_checkout
+_mark_verified_project_root = cli_helpers.mark_verified_project_root
+_normalize_cli_output = cli_helpers.normalize_cli_output
+_proof_redteam_markdown = cli_helpers.proof_redteam_markdown
+_raw_payload_from_result = cli_helpers.raw_payload_from_result
+_return_skeleton_error_payload = cli_helpers.return_skeleton_error_payload
+_sample_cost_summary = cli_helpers.sample_cost_summary
+_valid_checkpoint_return_markdown = cli_helpers.valid_checkpoint_return_markdown
+_write_install_manifest = cli_helpers.write_install_manifest
+_write_managed_publication_manuscript = cli_helpers.write_managed_publication_manuscript
+_write_markdown_recoverable_result_state = cli_helpers.write_markdown_recoverable_result_state
+_write_recoverable_result_state = cli_helpers.write_recoverable_result_state
+_write_stale_refresh_skeleton_plan = cli_helpers.write_stale_refresh_skeleton_plan
+_write_verification_body_file = cli_helpers.write_verification_body_file
+_write_write_paper_authoring_input = cli_helpers.write_write_paper_authoring_input
+invoke_help_text = cli_helpers.invoke_help_text
+json_output_from_result = cli_helpers.json_output_from_result
+
+runner = cli_helpers.StableCliRunner()
 
 
 def _help_text(*args: str, expect_exit: int = 0, **kwargs) -> str:
@@ -94,170 +105,6 @@ _CONFIG_FILE_RUNTIME = runtime_with_permissions_surface("config-file")
 _CONFIG_FILE_PROMPT_FREE_MODE = runtime_prompt_free_mode_value(_CONFIG_FILE_RUNTIME)
 _LAUNCH_WRAPPER_RUNTIME = runtime_with_permissions_surface("launch-wrapper")
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
-
-
-def _make_checkout(tmp_path: Path, version: str = "9.9.9") -> Path:
-    """Create a minimal GPD source checkout for CLI version tests."""
-    repo_root = tmp_path / "checkout"
-    repo_root.mkdir(parents=True, exist_ok=True)
-    (repo_root / "package.json").write_text(
-        json.dumps(
-            {
-                "name": "get-physics-done",
-                "version": version,
-                "gpdPythonVersion": version,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (repo_root / "pyproject.toml").write_text(
-        f'[project]\nname = "get-physics-done"\nversion = "{version}"\n',
-        encoding="utf-8",
-    )
-    gpd_root = repo_root / "src" / "gpd"
-    for subdir in ("commands", "agents", "hooks", "specs"):
-        (gpd_root / subdir).mkdir(parents=True, exist_ok=True)
-    return repo_root
-
-
-def _artifact_manifest_payload(
-    manuscript: Path,
-    *,
-    title: str = "Curvature Flow Bounds",
-    journal: str = "prl",
-    artifact_id: str = "tex-paper",
-    artifact_path: str | None = None,
-) -> dict[str, object]:
-    digest = compute_sha256(manuscript)
-    return {
-        "version": 1,
-        "paper_title": title,
-        "journal": journal,
-        "created_at": "2026-04-02T00:00:00+00:00",
-        "manuscript_sha256": digest,
-        "manuscript_mtime_ns": manuscript.stat().st_mtime_ns,
-        "artifacts": [
-            {
-                "artifact_id": artifact_id,
-                "category": "tex",
-                "path": artifact_path or manuscript.name,
-                "sha256": digest,
-                "produced_by": "test",
-                "sources": [],
-                "metadata": {},
-            }
-        ],
-    }
-
-
-def _write_managed_publication_manuscript(
-    project_root: Path,
-    *,
-    subject_slug: str = "curvature-flow",
-    stem: str = "managed_manuscript",
-) -> Path:
-    manuscript_dir = project_root / "GPD" / "publication" / subject_slug / "manuscript"
-    manuscript_dir.mkdir(parents=True, exist_ok=True)
-    manuscript = manuscript_dir / f"{stem}.tex"
-    manuscript.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}\n", encoding="utf-8")
-    (manuscript_dir / "PAPER-CONFIG.json").write_text(
-        json.dumps(
-            {
-                "title": "Managed Manuscript",
-                "output_filename": stem,
-                "authors": [{"name": "A. Researcher"}],
-                "abstract": "Abstract.",
-                "sections": [{"title": "Intro", "content": "Hello."}],
-                "figures": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-    return manuscript
-
-
-def _bootstrap_publication_project(project_root: Path) -> None:
-    planning = project_root / "GPD"
-    planning.mkdir(parents=True, exist_ok=True)
-    state = default_state_dict()
-    save_state_json(project_root, state)
-    save_state_markdown(project_root, generate_state_markdown(state))
-    (planning / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
-    (planning / "CONVENTIONS.md").write_text("# Conventions\n", encoding="utf-8")
-
-
-def _mark_verified_project_root(project_root: Path) -> None:
-    planning = project_root / "GPD"
-    planning.mkdir(parents=True, exist_ok=True)
-    save_state_json(project_root, default_state_dict())
-    (planning / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
-
-
-def _write_write_paper_authoring_input(
-    workspace: Path,
-    *,
-    file_name: str = "write-paper-authoring-input.json",
-    subject_slug: str = "external-authoring-test",
-) -> Path:
-    intake_path = workspace / file_name
-    intake_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "title": "External Authoring Bounds",
-                "authors": [{"name": "A. Researcher"}],
-                "target_journal": "prl",
-                "subject_slug": subject_slug,
-                "central_claim": "The controlled benchmark supports a stable external-authoring draft.",
-                "claims": [
-                    {
-                        "id": "CLM-main",
-                        "statement": "The benchmarked bound is stable across the resolved regime.",
-                        "evidence": {
-                            "source_note_ids": ["NOTE-main"],
-                            "result_ids": ["RES-main"],
-                            "figure_ids": ["FIG-main"],
-                            "citation_source_ids": ["cite-main"],
-                        },
-                    }
-                ],
-                "source_notes": [
-                    {
-                        "id": "NOTE-main",
-                        "path": "notes/main-result.md",
-                        "summary": "Summarizes the decisive benchmark and fit stability.",
-                    }
-                ],
-                "results": [
-                    {
-                        "id": "RES-main",
-                        "summary": "Main fitted bound with uncertainty band.",
-                        "source_note_ids": ["NOTE-main"],
-                    }
-                ],
-                "figures": [
-                    {
-                        "id": "FIG-main",
-                        "path": "figures/main-bound.pdf",
-                        "caption": "Benchmark comparison supporting the main bound.",
-                        "source_note_ids": ["NOTE-main"],
-                    }
-                ],
-                "citation_sources": [
-                    {
-                        "source_type": "paper",
-                        "reference_id": "cite-main",
-                        "title": "Benchmark Recovery in a Controlled Regime",
-                        "authors": ["A. Author"],
-                        "year": "2024",
-                    }
-                ],
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    return intake_path
 
 
 class _ExecutionSnapshot(SimpleNamespace):
@@ -726,77 +573,6 @@ def test_workflow_preset_apply_dry_run_projectless_does_not_create_gpd_dir(tmp_p
     assert not (tmp_path / "GPD").exists()
 
 
-def _sample_cost_summary(workspace: Path) -> CostSummary:
-    workspace_text = str(workspace)
-    project = CostProjectSummary(
-        project_root=workspace_text,
-        record_count=2,
-        usage_status="measured",
-        cost_status="unavailable",
-        interpretation="tokens measured; USD unavailable",
-        input_tokens=1200,
-        output_tokens=300,
-        total_tokens=1500,
-        cost_usd=None,
-        last_recorded_at="2026-03-27T00:00:00+00:00",
-        runtimes=[_COST_TEST_RUNTIME],
-        models=[_COST_TEST_MODEL],
-    )
-    current_session = CostSessionSummary(
-        session_id="session-123",
-        project_root=workspace_text,
-        record_count=1,
-        usage_status="measured",
-        cost_status="unavailable",
-        interpretation="tokens measured; USD unavailable",
-        input_tokens=800,
-        output_tokens=200,
-        total_tokens=1000,
-        cost_usd=None,
-        last_recorded_at="2026-03-27T00:00:00+00:00",
-        runtimes=[_COST_TEST_RUNTIME],
-        models=[_COST_TEST_MODEL],
-    )
-    return CostSummary(
-        project_root=workspace_text,
-        active_runtime=_COST_TEST_RUNTIME,
-        active_runtime_capabilities={
-            "permissions_surface": "config-file",
-            "statusline_surface": "none",
-            "notify_surface": "explicit",
-            "telemetry_source": "notify-hook",
-            "telemetry_completeness": "best-effort",
-        },
-        model_profile="review",
-        runtime_model_selection="runtime defaults",
-        profile_tier_mix=_profile_tier_mix("review"),
-        current_session_id="session-123",
-        project=project,
-        current_session=current_session,
-        recent_sessions=[current_session],
-        budget_thresholds=[
-            CostBudgetThresholdSummary(
-                scope="project",
-                config_key="project_usd_budget",
-                budget_usd=1.0,
-                spent_usd=0.85,
-                remaining_usd=0.15,
-                percent_used=85.0,
-                cost_status="measured",
-                comparison_exact=True,
-                state="near_budget",
-                message=(
-                    "Configured project USD budget is nearing budget based on measured local USD telemetry; "
-                    "it stays advisory only and never stops work automatically."
-                ),
-            )
-        ],
-        guidance=[
-            f"Current model posture: profile `review` with {_COST_TEST_RUNTIME} runtime defaults. Use `gpd:set-tier-models` to pin explicit tier-1, tier-2, and tier-3 model IDs.",
-        ],
-    )
-
-
 def _assert_cost_posture_semantics(output: str) -> None:
     assert _COST_TEST_RUNTIME in output
     assert "review" in output
@@ -1131,66 +907,6 @@ def test_runtime_permissions_sync_payload_surfaces_launch_wrapper_scope() -> Non
     assert payload["requested_surface"] == "prompt-free"
     assert payload["status_scope"] == "next-launch"
     assert payload["current_session_verified"] is False
-
-
-def _write_install_manifest(
-    config_dir: Path, *, runtime: str, install_scope: str = "local", raw: str | None = None
-) -> None:
-    config_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path = config_dir / "gpd-file-manifest.json"
-    if raw is not None:
-        manifest_path.write_text(raw, encoding="utf-8")
-        return
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "runtime": runtime,
-                "install_scope": install_scope,
-                "explicit_target": False,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-class _PermissionsTargetAdapter:
-    def __init__(
-        self,
-        *,
-        local_target: Path,
-        global_target: Path,
-        missing_install_artifacts: tuple[str, ...] = (),
-    ) -> None:
-        self.runtime_name = PRIMARY_RUNTIME
-        self.display_name = runtime_display_name(PRIMARY_RUNTIME)
-        self._local_target = local_target
-        self._global_target = global_target
-        self._missing_install_artifacts = missing_install_artifacts
-
-    def resolve_target_dir(self, is_global: bool, cwd: Path) -> Path:
-        return self._global_target if is_global else self._local_target
-
-    def validate_target_runtime(self, target_dir: Path, *, action: str) -> None:
-        return None
-
-    def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
-        if target_dir == self._local_target:
-            return self._missing_install_artifacts
-        return ()
-
-    def runtime_permissions_status(self, target_dir: Path, *, autonomy: str) -> dict[str, object]:
-        return {
-            "runtime": self.runtime_name,
-            "desired_mode": autonomy,
-            "configured_mode": "default",
-            "config_aligned": True,
-            "requires_relaunch": False,
-            "managed_by_gpd": False,
-            "message": "configured",
-        }
-
-    def sync_runtime_permissions(self, target_dir: Path, *, autonomy: str) -> dict[str, object]:
-        return self.runtime_permissions_status(target_dir, autonomy=autonomy)
 
 
 def test_permissions_status_reports_incomplete_owned_install_instead_of_generic_missing(
@@ -2795,165 +2511,6 @@ def test_validate_comparison_contract_help_surfaces_verdict_ledger_visibility() 
     normalized_output = _help_text("validate", "comparison-contract")
     assert "Validate standalone comparison artifact frontmatter and comparison_verdicts" in normalized_output
     assert "GPD/comparisons/*-COMPARISON.md" in normalized_output
-
-
-def _compact_plan_with_missing_must_surface_benchmark() -> str:
-    return (
-        "---\n"
-        "phase: 01-baseline\n"
-        "plan: 01\n"
-        "type: execute\n"
-        "wave: 1\n"
-        "depends_on: []\n"
-        "files_modified: []\n"
-        "interactive: false\n"
-        "conventions:\n"
-        "  units: natural\n"
-        "contract:\n"
-        "  schema_version: 1\n"
-        "  scope:\n"
-        "    question: Verify the fresh result against the decisive benchmark.\n"
-        "    in_scope: [stale verification refresh]\n"
-        "  context_intake:\n"
-        "    must_read_refs: [ref-stale-verification-benchmark]\n"
-        "    must_include_prior_outputs: [GPD/phases/00-baseline/00-SUMMARY.md]\n"
-        "    context_gaps: [The decisive benchmark artifact is intentionally absent.]\n"
-        "  claims:\n"
-        "    - id: claim-stale-verification\n"
-        "      statement: Current result agrees with the decisive benchmark.\n"
-        "      deliverables: [deliv-stale-verification-data]\n"
-        "      acceptance_tests: [test-stale-verification-decisive]\n"
-        "      references: [ref-stale-verification-benchmark]\n"
-        "  deliverables:\n"
-        "    - id: deliv-stale-verification-data\n"
-        "      kind: data\n"
-        "      path: artifacts/phase4/result.json\n"
-        "      description: Fresh numerical result to compare against the benchmark.\n"
-        "  references:\n"
-        "    - id: ref-stale-verification-benchmark\n"
-        "      kind: dataset\n"
-        "      locator: artifacts/benchmark/reference.json\n"
-        "      role: benchmark\n"
-        "      why_it_matters: Decisive benchmark for stale verification detection.\n"
-        "      applies_to: [claim-stale-verification]\n"
-        "      must_surface: true\n"
-        "      required_actions: [read, compare]\n"
-        "  acceptance_tests:\n"
-        "    - id: test-stale-verification-decisive\n"
-        "      subject: claim-stale-verification\n"
-        "      kind: benchmark\n"
-        "      procedure: Read and compare the decisive benchmark reference.\n"
-        "      pass_condition: Current result matches the benchmark within tolerance.\n"
-        "      evidence_required: [deliv-stale-verification-data, ref-stale-verification-benchmark]\n"
-        "  forbidden_proxies:\n"
-        "    - id: fp-stale-verification-prose-only\n"
-        "      subject: claim-stale-verification\n"
-        "      proxy: Prose-only pass without reading the decisive benchmark.\n"
-        "      reason: Would miss stale or absent benchmark evidence.\n"
-        "  uncertainty_markers:\n"
-        "    weakest_anchors: [Missing benchmark reference]\n"
-        "    disconfirming_observations: [Benchmark file is absent]\n"
-        "---\n\n"
-        "Plan body.\n"
-    )
-
-
-def _assert_forbidden_verification_fields_absent(value: object) -> None:
-    forbidden_fields = {"runtime", "computational_oracle", "gpd_return"}
-    if isinstance(value, dict):
-        assert not forbidden_fields.intersection(value)
-        for child in value.values():
-            _assert_forbidden_verification_fields_absent(child)
-    elif isinstance(value, list):
-        for child in value:
-            _assert_forbidden_verification_fields_absent(child)
-
-
-def _write_stale_refresh_skeleton_plan(project_root: Path) -> Path:
-    phase_dir = project_root / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
-    return plan_path
-
-
-def _write_verification_body_file(tmp_path: Path, body: str, *, name: str = "verification-body.md") -> Path:
-    body_path = tmp_path / name
-    body_path.write_text(body, encoding="utf-8")
-    return body_path
-
-
-def _raw_payload_from_result(result) -> dict[str, object]:
-    candidates = [result.output]
-    try:
-        stderr = result.stderr
-    except ValueError:
-        stderr = ""
-    if stderr:
-        candidates.append(stderr)
-    for candidate in candidates:
-        text = candidate.strip()
-        if not text:
-            continue
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        assert isinstance(payload, dict)
-        return payload
-    raise AssertionError(f"result did not contain a JSON object:\n{result.output}")
-
-
-def _proof_redteam_markdown(*, claim_id: str, claim_text: str, status: str) -> str:
-    return (
-        "---\n"
-        f"status: {status}\n"
-        "reviewer: proof-redteam\n"
-        "claim_ids:\n"
-        f"  - {claim_id}\n"
-        "proof_artifact_paths:\n"
-        "  - paper/main.tex\n"
-        "missing_parameter_symbols: []\n"
-        "missing_hypothesis_ids: []\n"
-        "coverage_gaps:\n"
-        "  - unresolved coverage pending human review\n"
-        "scope_status: unclear\n"
-        "quantifier_status: unclear\n"
-        "counterexample_status: not_attempted\n"
-        "---\n\n"
-        "# Proof Redteam\n\n"
-        "## Proof Inventory\n\n"
-        f"- Exact claim / theorem text: {claim_text}\n\n"
-        "## Coverage Ledger\n\n"
-        "### Named-Parameter Coverage\n\n"
-        "| Parameter | Role / Domain | Proof Location | Status | Notes |\n"
-        "| --- | --- | --- | --- | --- |\n"
-        "| `r_0` | target radius | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
-        "### Hypothesis Coverage\n\n"
-        "| Hypothesis | Proof Location | Status | Notes |\n"
-        "| --- | --- | --- | --- |\n"
-        "| `H1` | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
-        "### Quantifier / Domain Coverage\n\n"
-        "| Obligation | Proof Location | Status | Notes |\n"
-        "| --- | --- | --- | --- |\n"
-        "| for every r_0 > 0 | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
-        "### Conclusion-Clause Coverage\n\n"
-        "| Clause | Proof Location | Status | Notes |\n"
-        "| --- | --- | --- | --- |\n"
-        "| target annulus is reached | paper/main.tex:1 | human_needed | Needs audit. |\n\n"
-        "## Adversarial Probe\n\n"
-        "- Probe type: dropped-parameter test\n"
-        "- Result: Human audit still required.\n\n"
-        "## Verdict\n\n"
-        "- Scope status: `unclear`\n"
-        "- Quantifier status: `unclear`\n"
-        "- Counterexample status: `not_attempted`\n\n"
-        "## Required Follow-Up\n\n"
-        "- Complete the proof-redteam audit.\n"
-    )
 
 
 def test_validate_proof_redteam_calls_public_validator(
@@ -6094,21 +5651,6 @@ def test_result_downstream_help_surfaces_required_result_id_argument() -> None:
     assert "Show the direct and transitive dependents of a canonical result." in normalized_output
     assert "RESULT_ID" in normalized_output
     assert "Canonical result ID [required]" in normalized_output
-
-
-def _write_recoverable_result_state(tmp_path: Path, state: dict[str, object]) -> None:
-    planning = tmp_path / "GPD"
-    planning.mkdir(parents=True, exist_ok=True)
-    (planning / "state.json").write_text("{not valid json", encoding="utf-8")
-    (planning / STATE_JSON_BACKUP_FILENAME).write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-
-
-def _write_markdown_recoverable_result_state(tmp_path: Path, state: dict[str, object]) -> None:
-    save_state_json(tmp_path, state)
-    save_state_markdown(tmp_path, generate_state_markdown(state))
-    planning = tmp_path / "GPD"
-    (planning / "state.json").write_text("{not valid json", encoding="utf-8")
-    (planning / STATE_JSON_BACKUP_FILENAME).write_text("{also not valid json", encoding="utf-8")
 
 
 @patch("gpd.core.results.result_upsert", create=True)
@@ -10409,22 +9951,6 @@ def test_sync_phase_checkpoints_uses_ancestor_project_root_from_nested_cwd(mock_
 
     assert result.exit_code == 0, result.output
     mock_sync.assert_called_once_with(project_root.resolve())
-
-
-def _return_skeleton_error_payload(result) -> dict[str, object]:
-    text = result.output.strip() or getattr(result, "stderr", "").strip()
-    return json.loads(text)
-
-
-def _valid_checkpoint_return_markdown() -> str:
-    return (
-        "# Summary\n\n```yaml\ngpd_return:\n"
-        "  status: checkpoint\n"
-        "  files_written: []\n"
-        "  issues: []\n"
-        "  next_actions: [gpd resume-work]\n"
-        "```\n"
-    )
 
 
 def test_return_skeleton_default_prints_markdown_not_rich_table() -> None:

@@ -10,15 +10,10 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXACTNESS_TOTAL_BUDGETS = {
-    "brittle_prose_assertions": 1_479,
-    "exact_assertion_count": 7_049,
+    "brittle_prose_assertions": 1_170,
+    "exact_assertion_count": 6_450,
 }
-HIGH_SEVERITY_BASELINES = {
-    "tests/core/test_prompt_wiring.py": {"exact": 409, "brittle": 66},
-    "tests/core/test_contract_validation.py": {"exact": 100, "brittle": 69},
-    "tests/test_release_consistency.py": {"exact": 184, "brittle": 49},
-    "tests/mcp/test_tool_contract_visibility.py": {"exact": 39, "brittle": 23},
-}
+HIGH_SEVERITY_BASELINES: dict[str, dict[str, int]] = {}
 
 
 @lru_cache

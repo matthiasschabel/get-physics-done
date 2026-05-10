@@ -6,8 +6,12 @@ import pytest
 
 from tests.markdown_test_support import (
     MarkdownSection,
+    assert_contract_finding,
+    assert_contract_relation_finding,
     assert_forbidden_fragments,
     assert_markdown_link,
+    assert_no_contract_finding,
+    assert_no_contract_relation_finding,
     assert_ordered_fragments,
     assert_required_fragments,
     extract_markdown_section,
@@ -17,6 +21,7 @@ from tests.markdown_test_support import (
     markdown_section,
     markdown_sections,
     normalize_text,
+    parse_contract_findings,
     parse_frontmatter_mapping,
     parse_markdown_links,
     parse_markdown_table,
@@ -220,6 +225,67 @@ def test_forbidden_fragments_failure_lists_present_fragments() -> None:
     assert "forbidden fragments present in sample" in message
     assert "- 'stale_alias'" in message
     assert "other" not in message
+
+
+def test_parse_contract_findings_extracts_path_prefixed_issues_only() -> None:
+    findings = parse_contract_findings(
+        (
+            "context_intake.must_read_refs must be a list, not str",
+            "Invalid contract payload: scope.in_scope must include at least one non-empty string",
+            "references.0.notes: Extra inputs are not permitted",
+            "claim claim-benchmark references unknown observable obs-missing",
+            "no references recorded yet",
+        )
+    )
+
+    assert [(finding.path, finding.reason) for finding in findings] == [
+        ("context_intake.must_read_refs", "must be a list, not str"),
+        ("scope.in_scope", "must include at least one non-empty string"),
+        ("references.0.notes", "Extra inputs are not permitted"),
+    ]
+
+
+def test_contract_finding_assertions_match_path_and_reason_terms() -> None:
+    messages = (
+        "context_intake.must_read_refs must be a list, not str",
+        "references.0.notes: Extra inputs are not permitted",
+    )
+
+    finding = assert_contract_finding(messages, path="context_intake.must_read_refs", contains=("list", "str"))
+
+    assert finding.path == "context_intake.must_read_refs"
+    assert_no_contract_finding(messages, path="references.0.notes", contains="boolean")
+    with pytest.raises(AssertionError, match="missing project contract finding"):
+        assert_contract_finding(messages, path="references.0.notes", contains="boolean", context="project contract")
+
+
+def test_contract_relation_assertions_match_typed_subjects_and_targets() -> None:
+    messages = (
+        "claim claim-benchmark references unknown observable obs-missing",
+        "reference ref-benchmark is must_surface but missing required_actions",
+    )
+
+    assert_contract_relation_finding(
+        messages,
+        subject_kind="claim",
+        subject_id="claim-benchmark",
+        relation_terms=("unknown observable",),
+        target_id="obs-missing",
+    )
+    assert_no_contract_relation_finding(
+        messages,
+        subject_kind="reference",
+        subject_id="ref-benchmark",
+        relation_terms="missing applies_to",
+    )
+    with pytest.raises(AssertionError, match="missing contract findings relation finding"):
+        assert_contract_relation_finding(
+            messages,
+            subject_kind="claim",
+            subject_id="claim-benchmark",
+            relation_terms="unknown deliverable",
+            target_id="deliv-missing",
+        )
 
 
 def test_ordered_fragments_accept_normalized_order() -> None:

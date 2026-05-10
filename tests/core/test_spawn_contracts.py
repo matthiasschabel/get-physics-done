@@ -7,7 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
-from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
+from tests.lifecycle_contract_test_support import (
+    artifact_paths as _gate_artifact_paths,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_semantic_contract as _assert_semantic,
+)
+from tests.lifecycle_contract_test_support import (
+    child_gate_from_text,
+)
 from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -43,7 +51,6 @@ MODEL_OMISSION_FRAGMENT = (
 )
 READONLY_FALSE_FRAGMENT = "readonly=false"
 READONLY_RUNTIME_NOTE_FRAGMENT = "Always pass `readonly=false` for file-producing agents."
-_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,19 +65,12 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
-    for match in _YAML_BLOCK_RE.finditer(text):
-        body = match.group("body")
-        if "child_gate:" not in body:
-            continue
-        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
-        if gate.id == gate_id:
-            return gate
-    raise AssertionError(f"missing child_gate {gate_id}")
+def _child_gate(text: str, gate_id: str):
+    return child_gate_from_text(text, gate_id)
 
 
-def _artifact_paths(gate: ChildGateTuple) -> tuple[str, ...]:
-    return tuple(artifact.path for artifact in gate.expected_artifacts)
+def _artifact_paths(gate) -> tuple[str, ...]:
+    return _gate_artifact_paths(gate)
 
 
 def _extract_task_blocks(text: str) -> list[TaskBlock]:
@@ -202,31 +202,39 @@ def test_agent_delegation_reference_defines_canonical_task_contract() -> None:
     assert READONLY_FALSE_FRAGMENT in canonical
     assert 'description="{short description}"' in canonical
     assert "First, read {GPD_AGENTS_DIR}/gpd-{agent}.md for your role and instructions." in canonical
-    assert "Do not use `@...` references inside task() prompt strings." in content
-    assert "Assign an explicit write scope for every subagent." in content
-    assert "Always set `readonly=false` for file-producing agents." in content
-    assert "Fresh context:" in content
-    assert "Model semantics:" in content
-    assert "Write access:" in content
-    assert "Write-scope isolation:" in content
-    assert "Blocking completion semantics:" in content
-    assert "Success-path artifact gate:" in content
-    assert "Return-envelope parity:" in content
+    _assert_semantic(
+        content,
+        "agent-delegation task and write-scope contract",
+        "Do not use `@...` references inside task() prompt strings.",
+        "Assign an explicit write scope for every subagent.",
+        "Always set `readonly=false` for file-producing agents.",
+        "Fresh context:",
+        "Write-scope isolation:",
+    )
+    _assert_semantic(
+        content,
+        "agent-delegation lifecycle gates",
+        "Blocking completion semantics:",
+        "Success-path artifact gate:",
+        "Return-envelope parity:",
+    )
     assert "child-artifact-gate.md" in content
     assert "write_scope:" in content
     assert "expected_artifacts:" in content
     assert "shared_state_policy:" in content
     assert "effective installed runtime" in content
     assert "SKILL.md" not in content
-    assert "discoverable action/tool surface" in content
-    assert "installed agent prompt instructions" in content
-    assert "Artifact Recovery Protocol" in content
-    assert "literal child-authored file contents" in content
-    assert "Write those file contents directly in the main orchestrator context" in content
-    assert "Do not synthesize, patch, or paste a child `gpd_return`" in content
-    assert "A missing or invalid `gpd_return` envelope is an incomplete handoff" in content
-    assert "Re-run the child artifact gate before accepting success" in content
-    assert "Never silently proceed" in content
+    _assert_semantic(
+        content,
+        "agent-delegation no synthesized child return recovery",
+        "Artifact Recovery Protocol",
+        "literal child-authored file contents",
+        "main orchestrator context",
+        "Do not synthesize, patch, or paste a child `gpd_return`",
+        "missing or invalid `gpd_return` envelope",
+        "Re-run the child artifact gate before accepting success",
+        "Never silently proceed",
+    )
 
 
 def test_representative_workflows_keep_runtime_note_and_agent_prompt_bootstrap() -> None:
@@ -334,13 +342,10 @@ def test_new_milestone_roadmapper_spawn_contract_keeps_return_only_shared_state_
     assert "Active references: {active_reference_context}" in task.text
     assert "Effective reference intake: {effective_reference_intake}" in task.text
     assert "expected_artifacts:" in content
-    assert "freshness_marker: \"after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT\"" in content
+    assert 'freshness_marker: "after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT"' in content
     assert "Do not write STATE.md directly" in task.text
     assert "GPD/REQUIREMENTS.md" in content
-    assert (
-        "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md"
-        in content
-    )
+    assert "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md" in content
     assert "artifact gate passes, apply accepted state changes in the main workflow" in content
 
 
@@ -418,7 +423,7 @@ def test_execute_phase_initial_verification_spawns_verifier_agent() -> None:
 
     assert len(verifier_tasks) == 1
     verifier = verifier_tasks[0].text
-    assert 'readonly=false' in verifier
+    assert "readonly=false" in verifier
     assert 'description="Verify Phase {PHASE_NUMBER} goal"' in verifier
     assert "Re-verify Phase" not in verifier
     assert "{phase_dir}/{phase_number}-VERIFICATION.md" in verifier
@@ -485,8 +490,8 @@ def test_new_project_parallel_researchers_write_to_disjoint_artifacts() -> None:
     assert "GPD/PROJECT.md" in synth.text
     assert "GPD/config.json" in synth.text
     assert "GPD/literature/SUMMARY.md (if re-synthesizing an existing survey)" in synth.text
-    assert "child_gate:\n  id: \"literature_scouts\"" in content
-    assert "child_gate:\n  id: \"literature_synthesizer\"" in content
+    assert 'child_gate:\n  id: "literature_scouts"' in content
+    assert 'child_gate:\n  id: "literature_synthesizer"' in content
     assert "gpd validate handoff-artifacts - --expected GPD/literature/SUMMARY.md" in content
     assert "Do not proceed with a partial literature survey" in content
 
@@ -513,9 +518,13 @@ def test_map_research_parallel_mappers_use_spawn_contracts_and_return_only_artif
     assert content.count("<spawn_contract>") >= 4
     assert "task tool parameters:" not in content
     assert "Prompt:" not in content
-    assert (
-        "Route on `gpd_return.status`, then verify `gpd_return.files_written` against the expected artifacts before accepting the run."
-        in content
+    _assert_semantic(
+        content,
+        "map-research routes on status and files-written artifacts",
+        "gpd_return.status",
+        "gpd_return.files_written",
+        "expected artifacts",
+        "before accepting the run",
     )
     assert "gpd --raw config get research_mode" not in content
     assert 'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)' in content
@@ -571,19 +580,26 @@ def test_validate_conventions_uses_one_shot_delegation_and_artifact_gating_for_r
 
     assert content.count('subagent_type="gpd-consistency-checker"') == 1
     assert content.count('subagent_type="gpd-notation-coordinator"') == 0
-    assert "Thin wrapper around `gpd-consistency-checker` for convention validation." in content
-    assert "Spawn `gpd-consistency-checker` once and let it own convention policy." in content
-    assert "Runtime delegation rule: this is a one-shot handoff." in content
-    assert "Route only on the canonical `gpd_return.status`:" in content
-    assert "Do not route on checker-local text markers or headings." in content
-    assert "gpd-notation-coordinator" in content
-    assert (
-        "If the checker's `next_actions` call for notation repair, spawn `gpd-notation-coordinator` with the checker report and the same scope."
-        in content
+    _assert_semantic(
+        content,
+        "validate-conventions one-shot checker lifecycle",
+        "Thin wrapper around `gpd-consistency-checker`",
+        "Spawn `gpd-consistency-checker` once",
+        "one-shot handoff",
+        "canonical `gpd_return.status`",
+        "Do not route on checker-local text markers or headings.",
     )
-    assert "Keep that handoff thin: the coordinator owns the repair policy, not this workflow." in content
-    assert "If the checker returns `gpd_return.status: completed`, accept success only after verifying that:" in content
-    assert "The same path appears in `gpd_return.files_written`." in content
+    assert "gpd-notation-coordinator" in content
+    _assert_semantic(
+        content,
+        "validate-conventions coordinator and files-written gate",
+        "next_actions",
+        "gpd-notation-coordinator",
+        "same scope",
+        "coordinator owns the repair policy",
+        "gpd_return.status: completed",
+        "gpd_return.files_written",
+    )
 
 
 def test_new_milestone_research_and_roadmapper_gate_success_path_artifacts() -> None:
@@ -592,17 +608,9 @@ def test_new_milestone_research_and_roadmapper_gate_success_path_artifacts() -> 
 
     assert content.count("<spawn_contract>") >= 3
     assert _artifact_paths(gate) == ("GPD/ROADMAP.md", "GPD/REQUIREMENTS.md")
-    assert (
-        "child_gate:\n  id: \"milestone_literature_scouts\"" in content
-    )
-    assert (
-        "child_gate:\n  id: \"milestone_literature_synthesizer\""
-        in content
-    )
-    assert (
-        "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md"
-        in content
-    )
+    assert 'child_gate:\n  id: "milestone_literature_scouts"' in content
+    assert 'child_gate:\n  id: "milestone_literature_synthesizer"' in content
+    assert "gpd validate handoff-artifacts - --expected GPD/ROADMAP.md --expected GPD/REQUIREMENTS.md" in content
     assert "artifact gate passes, apply accepted state changes in the main workflow" in content
     assert "GPD/REQUIREMENTS.md" in content
     assert "require-files-written" in content

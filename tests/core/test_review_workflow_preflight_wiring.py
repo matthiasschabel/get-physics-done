@@ -2,21 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 PUBLICATION_REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references/publication"
-PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE = (
-    "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
-)
+PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
 PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE = (
     "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 )
-PUBLICATION_ROUND_ARTIFACTS_INCLUDE = (
-    "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md"
-)
+PUBLICATION_ROUND_ARTIFACTS_INCLUDE = "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md"
 PUBLICATION_REVIEW_RELIABILITY_INCLUDE = "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md"
 PUBLICATION_REVIEW_RELIABILITY_INLINE = "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md"
 PEER_REVIEW_STAGE_FILES = (
@@ -56,34 +53,45 @@ def _publication_reference_text(name: str) -> str:
 
 def test_write_paper_workflow_runs_centralized_review_preflight() -> None:
     workflow = _workflow_text("write-paper.md")
-    shared_preflight = (
-        REPO_ROOT / "src/gpd/specs/templates/paper/publication-manuscript-root-preflight.md"
-    ).read_text(encoding="utf-8")
+    shared_preflight = (REPO_ROOT / "src/gpd/specs/templates/paper/publication-manuscript-root-preflight.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "gpd validate review-preflight write-paper --strict" in workflow
-    assert "Run centralized command-context preflight for `write-paper` before continuing." in workflow
+    _assert_semantic(
+        workflow,
+        "write-paper centralized command-context preflight",
+        "centralized command-context preflight",
+        "write-paper",
+        "before continuing",
+    )
     assert "publication-bootstrap-preflight.md" in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
     assert PUBLICATION_ROUND_ARTIFACTS_INCLUDE in workflow
-    assert "artifacts copied from another manuscript root" in shared_preflight
-    assert "Do not use ad hoc wildcard discovery or first-match filename scans." in shared_preflight
+    _assert_semantic(
+        shared_preflight,
+        "publication preflight rejects copied artifacts and wildcard scans",
+        "artifacts copied from another manuscript root",
+        "Do not use ad hoc wildcard discovery",
+        "first-match filename scans",
+    )
     assert "gpd paper-build" in shared_preflight
     assert "bibliography_audit_clean" in shared_preflight
     assert "reproducibility_ready" in shared_preflight
     assert "missing manuscript" not in workflow
     assert "`PAPER_DIR` to `publication_bootstrap_root`" in workflow
-    assert '${PAPER_DIR}/{topic_specific_stem}.tex' in workflow
+    assert "${PAPER_DIR}/{topic_specific_stem}.tex" in workflow
 
 
 def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> None:
     workflow = _workflow_text("respond-to-referees.md")
     command = _command_text("respond-to-referees.md")
-    shared_preflight = (
-        REPO_ROOT / "src/gpd/specs/templates/paper/publication-manuscript-root-preflight.md"
-    ).read_text(encoding="utf-8")
+    shared_preflight = (REPO_ROOT / "src/gpd/specs/templates/paper/publication-manuscript-root-preflight.md").read_text(
+        encoding="utf-8"
+    )
 
     assert "context_mode: project-aware" in command
-    assert "argument-hint: \"[--manuscript PATH] (--report PATH [--report PATH...] | paste)\"" in command
+    assert 'argument-hint: "[--manuscript PATH] (--report PATH [--report PATH...] | paste)"' in command
     assert "command-policy:" in command
     assert "subject_kind: publication" in command
     assert "explicit_input_kinds:" in command
@@ -95,10 +103,22 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
     assert "default_output_subtree: GPD" in command
     assert "scope_variants:" in command
     assert "scope: explicit_external_manuscript" in command
-    assert "Project-backed response rounds keep the current global `GPD/` / `GPD/review/` ownership." in command
-    assert "subject-owned publication root at `GPD/publication/{subject_slug}`" in command
-    assert "Set `PREFLIGHT_ARGUMENTS` to the validator-safe normalized intake string before shelling out." in workflow
-    assert "Preferred explicit intake: `gpd:respond-to-referees --manuscript path/to/main.tex --report reviews/ref1.md --report reviews/ref2.md`" in workflow
+    _assert_semantic(
+        command,
+        "respond-to-referees publication root mode ownership",
+        "Project-backed response rounds",
+        "global `GPD/` / `GPD/review/` ownership",
+        "subject-owned publication root",
+        "GPD/publication/{subject_slug}",
+    )
+    _assert_semantic(
+        workflow,
+        "respond-to-referees preflight arguments are normalized before shell",
+        "PREFLIGHT_ARGUMENTS",
+        "validator-safe normalized intake string",
+        "before shelling out",
+        "gpd:respond-to-referees --manuscript",
+    )
     assert 'gpd --raw validate command-context respond-to-referees -- "$PREFLIGHT_ARGUMENTS"' in workflow
     assert 'gpd validate review-preflight respond-to-referees "$ARGUMENTS" --strict' in workflow
     assert 'gpd validate review-preflight respond-to-referees --strict -- "$PREFLIGHT_ARGUMENTS"' in workflow
@@ -108,13 +128,29 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
     assert 'gpd --raw init respond-to-referees --stage revision_planning -- "$PREFLIGHT_ARGUMENTS"' in workflow
     assert 'gpd --raw init respond-to-referees --stage response_authoring -- "$PREFLIGHT_ARGUMENTS"' in workflow
     assert 'gpd --raw init respond-to-referees --stage finalize -- "$PREFLIGHT_ARGUMENTS"' in workflow
-    assert "Treat a bare positional path as a referee-report source only." in workflow
-    assert "the end-of-options marker is mandatory in both validator calls" in workflow
-    assert "missing referee report source when provided as a path" in workflow
-    assert "In explicit external-manuscript mode, `project_state` and `conventions` are advisory only." in workflow
-    assert "Any spawned agent that needs user input follows the publication stage-recovery gate checkpoint semantics." in workflow
-    assert "If a spawned paper-writer returns `status: checkpoint`, apply the publication stage-recovery gate" in workflow
-    assert "Apply the shared publication bootstrap preflight exactly:" in workflow
+    _assert_semantic(
+        workflow,
+        "respond-to-referees intake and external subject preflight contract",
+        "bare positional path",
+        "referee-report source only",
+        "end-of-options marker",
+        "mandatory",
+        "missing referee report source",
+        "external-manuscript mode",
+        "advisory only",
+    )
+    _assert_semantic(
+        workflow,
+        "respond-to-referees spawned writer checkpoint uses stage recovery",
+        "spawned agent",
+        "needs user input",
+        "publication stage-recovery gate",
+        "checkpoint semantics",
+        "status: checkpoint",
+    )
+    _assert_semantic(
+        workflow, "respond-to-referees shared bootstrap preflight", "shared publication bootstrap preflight"
+    )
     assert PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
     assert "bibliography_audit_clean" in shared_preflight
@@ -124,21 +160,35 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
         "import or normalize it into `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` before parsing comments"
         in workflow
     )
-    assert "Do not write `AUTHOR-RESPONSE*` or `REFEREE_RESPONSE*` beside `${PAPER_DIR}` or beside the imported report source." in workflow
-    assert "keep auxiliary response outputs under the selected GPD roots" in workflow
+    _assert_semantic(
+        workflow,
+        "respond-to-referees response outputs stay under selected GPD roots",
+        "AUTHOR-RESPONSE",
+        "REFEREE_RESPONSE",
+        "beside `${PAPER_DIR}`",
+        "imported report source",
+        "selected GPD roots",
+    )
     assert "selected_publication_root` / `selected_review_root" in workflow
-    assert 'find "${RESPONSE_REVIEW_ROOT}" -maxdepth 1 -type f -name \'REVIEW-LEDGER*.json\' -print' in workflow
-    assert 'find GPD/review -maxdepth 1 -type f -name \'REVIEW-LEDGER*.json\'' not in workflow
-    assert "Do not duplicate the pair into both the subject-owned root and the global project root in one run." in workflow
+    assert "find \"${RESPONSE_REVIEW_ROOT}\" -maxdepth 1 -type f -name 'REVIEW-LEDGER*.json' -print" in workflow
+    assert "find GPD/review -maxdepth 1 -type f -name 'REVIEW-LEDGER*.json'" not in workflow
+    _assert_semantic(
+        workflow,
+        "respond-to-referees does not duplicate response pair across roots",
+        "Do not duplicate the pair",
+        "subject-owned root",
+        "global project root",
+        "one run",
+    )
     assert "${PAPER_DIR}/response-letter.tex" in workflow
     assert "${PAPER_DIR}/{section}.tex" in workflow
 
 
 def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
     workflow = _workflow_text("arxiv-submission.md")
-    shared_preflight = (
-        REPO_ROOT / "src/gpd/specs/templates/paper/publication-manuscript-root-preflight.md"
-    ).read_text(encoding="utf-8")
+    shared_preflight = (REPO_ROOT / "src/gpd/specs/templates/paper/publication-manuscript-root-preflight.md").read_text(
+        encoding="utf-8"
+    )
 
     assert 'gpd --raw validate review-preflight arxiv-submission --strict -- "${ARGUMENTS}"' in workflow
     assert "gpd --raw validate review-preflight arxiv-submission --strict" in workflow
@@ -155,20 +205,33 @@ def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE not in workflow
     assert (
         "For a resumed manuscript, strict preflight reads `ARTIFACT-MANIFEST.json`, `BIBLIOGRAPHY-AUDIT.json`, and "
-        "`reproducibility-manifest.json` from the resolved manuscript directory itself."
-        in shared_preflight
+        "`reproducibility-manifest.json` from the resolved manuscript directory itself." in shared_preflight
     )
     assert "bibliography_audit_clean" in shared_preflight
     assert "reproducibility_ready" in shared_preflight
-    assert "Strict preflight also requires `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json` beside the resolved manuscript entry point." in workflow
-    assert "Strict preflight also requires the latest round-specific staged `REVIEW-LEDGER*.json` / `REFEREE-DECISION*.json` pair as authoritative submission-gate input." in workflow
-    assert "latest recommendation is `accept` or `minor_revision` and there are no unresolved blocking issues" in workflow
+    assert (
+        "Strict preflight also requires `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json` beside the resolved manuscript entry point."
+        in workflow
+    )
+    assert (
+        "Strict preflight also requires the latest round-specific staged `REVIEW-LEDGER*.json` / `REFEREE-DECISION*.json` pair as authoritative submission-gate input."
+        in workflow
+    )
+    assert (
+        "latest recommendation is `accept` or `minor_revision` and there are no unresolved blocking issues" in workflow
+    )
     assert "`manuscript_proof_review` must also already be cleared" in workflow
     assert "The same resolved manuscript root is also the strict preflight source of truth" in workflow
     assert "Set `resolved_main_tex` from `manuscript_entrypoint` and `resolved_dir` from `manuscript_root`" in workflow
-    assert "it must match that resolved entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`." in workflow
+    assert (
+        "it must match that resolved entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`."
+        in workflow
+    )
     assert "the centralized preflight-resolved entrypoint under that directory is authoritative" in workflow
-    assert "Do not accept arbitrary external directories or standalone `.tex` entrypoints outside those supported roots." in workflow
+    assert (
+        "Do not accept arbitrary external directories or standalone `.tex` entrypoints outside those supported roots."
+        in workflow
+    )
     assert 'MAIN_SOURCE="${resolved_main_tex}"' in workflow
     assert 'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"' in workflow
     assert 'SUBMISSION_DIR="${PACKAGE_ROOT}/submission"' in workflow
@@ -178,7 +241,10 @@ def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
         in workflow
     )
     assert "Use `PACKAGE_VALIDATION` from `gpd --raw validate arxiv-package --materialize`" in workflow
-    assert "Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself." in workflow
+    assert (
+        "Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself."
+        in workflow
+    )
 
 
 def test_peer_review_workflow_runs_centralized_review_preflight_with_explicit_arguments() -> None:
@@ -190,7 +256,10 @@ def test_peer_review_workflow_runs_centralized_review_preflight_with_explicit_ar
     assert "gpd validate review-preflight peer-review --strict" not in preflight
     assert "stage-recovery-gate.md" in panel
     assert "checkpoint continuation" in panel
-    assert "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree." in final
+    assert (
+        "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree."
+        in final
+    )
 
 
 def test_peer_review_prompts_do_not_route_managed_subjects_to_global_review_root() -> None:
@@ -203,7 +272,10 @@ def test_peer_review_prompts_do_not_route_managed_subjects_to_global_review_root
     assert "Never write managed-subject review artifacts to the global `GPD/review` fallback." in command
     assert "not under the default global `GPD/review` path" in command
     assert "while still writing review artifacts under `GPD/` in the invoking workspace" not in reliability_reference
-    assert "Write review artifacts under the target-aware `selected_review_root`, falling back to `GPD/review`." not in workflow
+    assert (
+        "Write review artifacts under the target-aware `selected_review_root`, falling back to `GPD/review`."
+        not in workflow
+    )
 
     for text in (workflow, round_reference, reliability_reference):
         assert "selected_publication_root" in text

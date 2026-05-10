@@ -56,6 +56,11 @@ from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict
 from gpd.core.utils import file_lock
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.workflow_stage_test_support import (
+    assert_staged_payload_matches_manifest,
+    install_fake_plan_phase_manifest,
+    install_fake_stage_manifest,
+)
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 _RUNTIME_DESCRIPTORS = iter_runtime_descriptors()
@@ -199,247 +204,6 @@ def _create_config(tmp_path: Path, config: dict) -> Path:
 
 def _state_lock_path(tmp_path: Path) -> Path:
     return tmp_path / "GPD" / "state.json.lock"
-
-
-_PLAN_PHASE_STAGE_BOOTSTRAP_FIELDS = [
-    "researcher_model",
-    "planner_model",
-    "checker_model",
-    "research_enabled",
-    "plan_checker_enabled",
-    "commit_docs",
-    "autonomy",
-    "research_mode",
-    "phase_found",
-    "phase_dir",
-    "phase_number",
-    "phase_name",
-    "phase_slug",
-    "padded_phase",
-    "has_research",
-    "has_context",
-    "has_plans",
-    "plan_count",
-    "planning_exists",
-    "roadmap_exists",
-    "project_contract",
-    "project_contract_gate",
-    "project_contract_load_info",
-    "project_contract_validation",
-    "platform",
-]
-
-_PLAN_PHASE_STAGE_AUTHORING_FIELDS = _PLAN_PHASE_STAGE_BOOTSTRAP_FIELDS + [
-    "contract_intake",
-    "effective_reference_intake",
-    "selected_protocol_bundle_ids",
-    "protocol_bundle_count",
-    "protocol_bundle_load_manifest",
-    "protocol_bundle_context",
-    "protocol_bundle_verifier_extensions",
-    "active_reference_context",
-    "reference_artifact_files",
-    "reference_artifacts_content",
-    "literature_review_files",
-    "literature_review_count",
-    "research_map_reference_files",
-    "research_map_reference_count",
-    "derived_manuscript_proof_review_status",
-    "state_content",
-    "roadmap_content",
-    "requirements_content",
-    "context_content",
-    "research_content",
-    "experiment_design_content",
-    "verification_content",
-    "validation_content",
-]
-
-_PLAN_PHASE_STAGE_CHECKER_AUDIT_FIELDS = [
-    "checker_model",
-    "research_enabled",
-    "plan_checker_enabled",
-    "commit_docs",
-    "autonomy",
-    "research_mode",
-    "phase_found",
-    "phase_dir",
-    "phase_number",
-    "phase_name",
-    "phase_slug",
-    "padded_phase",
-    "has_research",
-    "has_context",
-    "has_plans",
-    "plan_count",
-    "planning_exists",
-    "roadmap_exists",
-    "project_contract",
-    "project_contract_gate",
-    "project_contract_load_info",
-    "project_contract_validation",
-    "contract_intake",
-    "effective_reference_intake",
-    "selected_protocol_bundle_ids",
-    "protocol_bundle_count",
-    "protocol_bundle_load_manifest",
-    "protocol_bundle_context",
-    "protocol_bundle_verifier_extensions",
-    "active_reference_context",
-    "reference_artifact_files",
-    "reference_artifacts_content",
-    "literature_review_files",
-    "literature_review_count",
-    "research_map_reference_files",
-    "research_map_reference_count",
-    "derived_manuscript_proof_review_status",
-    "requirements_content",
-    "context_content",
-    "research_content",
-    "verification_content",
-    "validation_content",
-    "platform",
-]
-
-_PLAN_PHASE_STAGE_PLANNER_REVISION_FIELDS = [
-    "planner_model",
-    "research_enabled",
-    "plan_checker_enabled",
-    "commit_docs",
-    "autonomy",
-    "research_mode",
-    "phase_found",
-    "phase_dir",
-    "phase_number",
-    "phase_name",
-    "phase_slug",
-    "padded_phase",
-    "has_research",
-    "has_context",
-    "has_plans",
-    "plan_count",
-    "planning_exists",
-    "roadmap_exists",
-    "project_contract",
-    "project_contract_gate",
-    "project_contract_load_info",
-    "project_contract_validation",
-    "contract_intake",
-    "effective_reference_intake",
-    "selected_protocol_bundle_ids",
-    "protocol_bundle_count",
-    "protocol_bundle_load_manifest",
-    "protocol_bundle_context",
-    "protocol_bundle_verifier_extensions",
-    "active_reference_context",
-    "reference_artifact_files",
-    "reference_artifacts_content",
-    "literature_review_files",
-    "literature_review_count",
-    "research_map_reference_files",
-    "research_map_reference_count",
-    "derived_manuscript_proof_review_status",
-    "state_content",
-    "context_content",
-    "research_content",
-    "verification_content",
-    "validation_content",
-    "platform",
-]
-
-
-class _FakePlanPhaseStage:
-    def __init__(self, stage_id: str, required_init_fields: list[str]) -> None:
-        self.id = stage_id
-        self.required_init_fields = required_init_fields
-        self.init_spec_id: str | None = None
-
-
-class _FakePlanPhaseManifest:
-    def __init__(self) -> None:
-        self.workflow_id = "plan-phase"
-        self._stages = {
-            "phase_bootstrap": _FakePlanPhaseStage("phase_bootstrap", _PLAN_PHASE_STAGE_BOOTSTRAP_FIELDS),
-            "research_routing": _FakePlanPhaseStage("research_routing", _PLAN_PHASE_STAGE_BOOTSTRAP_FIELDS),
-            "planner_authoring": _FakePlanPhaseStage("planner_authoring", _PLAN_PHASE_STAGE_AUTHORING_FIELDS),
-            "checker_revision": _FakePlanPhaseStage("checker_revision", _PLAN_PHASE_STAGE_CHECKER_AUDIT_FIELDS),
-        }
-
-    def stage_by_id(self, stage_id: str) -> _FakePlanPhaseStage:
-        return self._stages[stage_id]
-
-    def stage_ids(self) -> list[str]:
-        return list(self._stages)
-
-    def staged_loading_payload(self, stage_id: str) -> dict[str, object]:
-        return {"workflow_id": self.workflow_id, "stage_id": stage_id}
-
-
-def _install_fake_plan_phase_manifest(monkeypatch: pytest.MonkeyPatch) -> _FakePlanPhaseManifest:
-    manifest = _FakePlanPhaseManifest()
-
-    def fake_load_workflow_stage_manifest(
-        workflow_id: str,
-        allowed_tools: set[str] | None = None,
-        known_init_fields: set[str] | None = None,
-    ) -> _FakePlanPhaseManifest:
-        assert workflow_id == "plan-phase"
-        return manifest
-
-    monkeypatch.setattr("gpd.core.workflow_staging.load_workflow_stage_manifest", fake_load_workflow_stage_manifest)
-    return manifest
-
-
-class _FakeStageManifest:
-    def __init__(self, workflow_id: str, stages: dict[str, list[str]]) -> None:
-        self.workflow_id = workflow_id
-        self._stages = {stage_id: _FakePlanPhaseStage(stage_id, fields) for stage_id, fields in stages.items()}
-
-    def stage_by_id(self, stage_id: str) -> _FakePlanPhaseStage:
-        return self._stages[stage_id]
-
-    def stage_ids(self) -> list[str]:
-        return list(self._stages)
-
-    def staged_loading_payload(self, stage_id: str) -> dict[str, object]:
-        return {"workflow_id": self.workflow_id, "stage_id": stage_id}
-
-
-def _install_fake_stage_manifest(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    workflow_id: str,
-    stages: dict[str, list[str]],
-) -> _FakeStageManifest:
-    manifest = _FakeStageManifest(workflow_id, stages)
-
-    def fake_load_workflow_stage_manifest(
-        requested_workflow_id: str,
-        allowed_tools: set[str] | None = None,
-        known_init_fields: set[str] | None = None,
-    ) -> _FakeStageManifest:
-        assert requested_workflow_id == workflow_id
-        return manifest
-
-    monkeypatch.setattr("gpd.core.workflow_staging.load_workflow_stage_manifest", fake_load_workflow_stage_manifest)
-    return manifest
-
-
-def _assert_staged_payload_matches_manifest(
-    payload: dict[str, object],
-    manifest: object,
-    *,
-    workflow_id: str,
-    stage_id: str,
-) -> None:
-    stage = manifest.stage_by_id(stage_id)
-
-    assert "staged_loading" in payload
-    assert tuple(field for field in payload if field != "staged_loading") == stage.required_init_fields
-    assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
-    assert payload["staged_loading"]["workflow_id"] == workflow_id
-    assert payload["staged_loading"]["stage_id"] == stage_id
-    assert payload["staged_loading"] == manifest.staged_loading_payload(stage_id)
 
 
 def _fail_if_context_builder_runs(name: str):
@@ -1700,7 +1464,7 @@ class TestInitExecutePhaseStagedWiring:
             ctx = init_execute_phase(tmp_path, "2", stage=stage_id)
             stage = manifest.stage_by_id(stage_id)
 
-            _assert_staged_payload_matches_manifest(
+            assert_staged_payload_matches_manifest(
                 ctx,
                 manifest,
                 workflow_id="execute-phase",
@@ -1779,7 +1543,7 @@ class TestInitPlanPhase:
             ctx = init_plan_phase(tmp_path, "2", stage=stage_id)
             stage = manifest.stage_by_id(stage_id)
 
-            _assert_staged_payload_matches_manifest(
+            assert_staged_payload_matches_manifest(
                 ctx,
                 manifest,
                 workflow_id="plan-phase",
@@ -1844,7 +1608,7 @@ class TestInitPlanPhase:
             """,
         )
         _write_project_contract_state(tmp_path)
-        _install_fake_plan_phase_manifest(monkeypatch)
+        install_fake_plan_phase_manifest(monkeypatch)
 
         ctx = init_plan_phase(tmp_path, "", stage="phase_bootstrap")
 
@@ -1879,7 +1643,7 @@ class TestInitPlanPhase:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "02-analysis")
         _write_project_contract_state(tmp_path)
-        _install_fake_plan_phase_manifest(monkeypatch)
+        install_fake_plan_phase_manifest(monkeypatch)
 
         ctx = init_plan_phase(tmp_path, "2", stage="phase_bootstrap")
 
@@ -1912,7 +1676,7 @@ class TestInitPlanPhase:
         (phase_dir / "02-RESEARCH.md").write_text("# Research\nMethod comparison.\n", encoding="utf-8")
         (phase_dir / "02-VERIFICATION.md").write_text("# Verification\nGap notes.\n", encoding="utf-8")
         (phase_dir / "02-VALIDATION.md").write_text("# Validation\nChecks.\n", encoding="utf-8")
-        manifest = _install_fake_plan_phase_manifest(monkeypatch)
+        manifest = install_fake_plan_phase_manifest(monkeypatch)
 
         ctx = init_plan_phase(tmp_path, "2", stage="planner_authoring")
         stage = manifest.stage_by_id("planner_authoring")
@@ -1940,7 +1704,7 @@ class TestInitPlanPhase:
         (phase_dir / "02-RESEARCH.md").write_text("# Research\nMethod comparison.\n", encoding="utf-8")
         (phase_dir / "02-VERIFICATION.md").write_text("# Verification\nGap notes.\n", encoding="utf-8")
         (phase_dir / "02-VALIDATION.md").write_text("# Validation\nChecks.\n", encoding="utf-8")
-        manifest = _install_fake_plan_phase_manifest(monkeypatch)
+        manifest = install_fake_plan_phase_manifest(monkeypatch)
 
         ctx = init_plan_phase(tmp_path, "2", stage="checker_revision")
         stage = manifest.stage_by_id("checker_revision")
@@ -1962,7 +1726,7 @@ class TestInitPlanPhase:
     def test_plan_phase_stage_rejects_include_mix(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "02-analysis")
-        _install_fake_plan_phase_manifest(monkeypatch)
+        install_fake_plan_phase_manifest(monkeypatch)
 
         with pytest.raises(ValueError, match="does not allow --include together with --stage"):
             init_plan_phase(tmp_path, "2", includes={"state"}, stage="phase_bootstrap")
@@ -1970,7 +1734,7 @@ class TestInitPlanPhase:
     def test_plan_phase_stage_rejects_unknown_stage(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "02-analysis")
-        _install_fake_plan_phase_manifest(monkeypatch)
+        install_fake_plan_phase_manifest(monkeypatch)
 
         with pytest.raises(ValueError, match="Unknown plan-phase stage 'bogus'"):
             init_plan_phase(tmp_path, "2", stage="bogus")
@@ -2725,23 +2489,20 @@ class TestInitNewProject:
         assert ctx["project_recovery_status"] == "partial"
 
     def test_new_project_stage_scope_intake_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("new-project")
-        stage = manifest.get_stage("scope_intake")
 
         ctx = init_new_project(tmp_path, stage="scope_intake")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="new-project",
+            stage_id="scope_intake",
+        )
         assert ctx["research_file_samples"] == []
-        assert ctx["staged_loading"]["workflow_id"] == "new-project"
-        assert ctx["staged_loading"]["stage_id"] == "scope_intake"
-        assert ctx["staged_loading"]["order"] == 1
-        assert ctx["staged_loading"]["loaded_authorities"] == ["workflows/new-project/scope-intake.md"]
-        assert ctx["staged_loading"]["eager_authorities"] == ["workflows/new-project/scope-intake.md"]
         assert "researcher_model" not in ctx
         assert "synthesizer_model" not in ctx
         assert "roadmapper_model" not in ctx
@@ -2752,28 +2513,21 @@ class TestInitNewProject:
             "surface the first scoping question",
             "preserve contract gate visibility without assuming approval-stage authority",
         ]
-        assert ctx["staged_loading"]["next_stages"] == ["scope_approval"]
 
     def test_new_project_stage_scope_approval_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("new-project")
-        stage = manifest.get_stage("scope_approval")
 
         ctx = init_new_project(tmp_path, stage="scope_approval")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "new-project"
-        assert ctx["staged_loading"]["stage_id"] == "scope_approval"
-        assert ctx["staged_loading"]["loaded_authorities"] == [
-            "workflows/new-project/scope-approval.md",
-            "templates/project-contract-schema.md",
-            "templates/project-contract-grounding-linkage.md",
-            "references/shared/canonical-schema-discipline.md",
-        ]
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="new-project",
+            stage_id="scope_approval",
+        )
         assert "templates/project.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert "templates/requirements.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert ctx["staged_loading"]["checkpoints"] == [
@@ -2795,24 +2549,19 @@ class TestInitNewProject:
         ),
     )
     def test_new_project_post_approval_stages_filter_payload(self, tmp_path: Path, stage_id: str) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("new-project")
-        stage = manifest.get_stage(stage_id)
 
         ctx = init_new_project(tmp_path, stage=stage_id)
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "new-project"
-        assert ctx["staged_loading"]["stage_id"] == stage_id
-        assert ctx["staged_loading"]["order"] == stage.order
-        assert ctx["staged_loading"]["loaded_authorities"] == list(stage.loaded_authorities)
-        assert ctx["staged_loading"]["eager_authorities"] == list(stage.loaded_authorities)
-        assert ctx["staged_loading"]["writes_allowed"] == list(stage.writes_allowed)
-        assert ctx["staged_loading"]["next_stages"] == list(stage.next_stages)
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="new-project",
+            stage_id=stage_id,
+        )
         assert "workflows/new-project.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert "reference_artifacts_content" not in ctx
         assert "active_reference_context" not in ctx
@@ -2878,20 +2627,18 @@ class TestInitNewProject:
         assert ctx["project_contract_validation"]["valid"] is True
 
     def test_stage_scope_intake_returns_only_manifest_required_fields(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         (tmp_path / "calc.py").write_text("import numpy\n", encoding="utf-8")
         manifest = load_workflow_stage_manifest("new-project")
-        stage = manifest.get_stage("scope_intake")
 
         ctx = init_new_project(tmp_path, stage="scope_intake")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="new-project",
+            stage_id="scope_intake",
+        )
         assert ctx["research_file_samples"] == ["calc.py"]
-        assert ctx["staged_loading"]["workflow_id"] == "new-project"
-        assert ctx["staged_loading"]["stage_id"] == "scope_intake"
-        assert ctx["staged_loading"]["order"] == 1
-        assert ctx["staged_loading"]["loaded_authorities"] == ["workflows/new-project/scope-intake.md"]
         assert "researcher_model" not in ctx
         assert "synthesizer_model" not in ctx
         assert "roadmapper_model" not in ctx
@@ -2945,37 +2692,39 @@ class TestInitNewProject:
             init_new_project(tmp_path, stage="does-not-exist")
 
     def test_resume_work_stage_resume_bootstrap_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
         _write_literature_review_anchor_file(tmp_path)
 
         manifest = load_workflow_stage_manifest("resume-work")
-        stage = manifest.get_stage("resume_bootstrap")
 
         ctx = init_resume(tmp_path, stage="resume_bootstrap")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "resume-work"
-        assert ctx["staged_loading"]["stage_id"] == "resume_bootstrap"
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="resume-work",
+            stage_id="resume_bootstrap",
+        )
         assert "templates/state-json-schema.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert "reference_artifacts_content" not in ctx
         assert "active_reference_context" not in ctx
         assert "project_contract_gate" not in ctx
 
     def test_resume_work_stage_state_restore_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("resume-work")
-        stage = manifest.get_stage("state_restore")
 
         ctx = init_resume(tmp_path, stage="state_restore")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="resume-work",
+            stage_id="state_restore",
+        )
         assert ctx["project_contract_gate"]["visible"] is True
         assert "reference_artifacts_content" not in ctx
 
@@ -3001,18 +2750,18 @@ class TestInitNewProject:
         assert calls == []
 
     def test_sync_state_stage_sync_bootstrap_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
 
         manifest = load_workflow_stage_manifest("sync-state")
-        stage = manifest.get_stage("sync_bootstrap")
 
         ctx = init_sync_state(tmp_path, stage="sync_bootstrap")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "sync-state"
-        assert ctx["staged_loading"]["stage_id"] == "sync_bootstrap"
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="sync-state",
+            stage_id="sync_bootstrap",
+        )
         assert "templates/state-json-schema.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert "state_md_content" not in ctx
         assert "state_json_content" not in ctx
@@ -3053,17 +2802,19 @@ class TestInitNewProject:
         assert not (nested / "GPD").exists()
 
     def test_sync_state_stage_conflict_analysis_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("sync-state")
-        stage = manifest.get_stage("conflict_analysis")
 
         ctx = init_sync_state(tmp_path, stage="conflict_analysis")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="sync-state",
+            stage_id="conflict_analysis",
+        )
         assert ctx["project_contract_gate"]["visible"] is True
         assert "state_json_content" in ctx
         assert "state_md_content" in ctx
@@ -3133,13 +2884,15 @@ class TestInitNewProject:
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("write-paper", known_init_fields=_WRITE_PAPER_INIT_FIELDS)
-        stage = manifest.get_stage("paper_bootstrap")
 
         ctx = init_write_paper(tmp_path, stage="paper_bootstrap")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "write-paper"
-        assert ctx["staged_loading"]["stage_id"] == "paper_bootstrap"
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="write-paper",
+            stage_id="paper_bootstrap",
+        )
         assert "reference_artifacts_content" not in ctx
         assert "state_content" not in ctx
         assert "derived_convention_lock" not in ctx
@@ -3222,12 +2975,15 @@ class TestInitNewProject:
         _write_structured_state_memory(tmp_path)
 
         manifest = load_workflow_stage_manifest("write-paper", known_init_fields=_WRITE_PAPER_INIT_FIELDS)
-        stage = manifest.get_stage("outline_and_scaffold")
 
         ctx = init_write_paper(tmp_path, stage="outline_and_scaffold")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["stage_id"] == "outline_and_scaffold"
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="write-paper",
+            stage_id="outline_and_scaffold",
+        )
         assert "Reference and Anchor Map" in ctx["reference_artifacts_content"]
         assert "Universal crossing window" in ctx["reference_artifacts_content"]
         assert "Milestone v1.0" in ctx["roadmap_content"]
@@ -3380,10 +3136,14 @@ class TestInitNewProject:
         )
 
         manifest = load_workflow_stage_manifest("peer-review")
-        stage = manifest.get_stage("bootstrap")
         ctx = init_peer_review(tmp_path, stage="bootstrap")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="peer-review",
+            stage_id="bootstrap",
+        )
         assert ctx["publication_subject_slug"]
         assert ctx["publication_lane_kind"] == "canonical_project_manuscript"
         assert ctx["publication_lane_owner"] == "project_managed"
@@ -3642,10 +3402,14 @@ class TestInitNewProject:
         )
 
         manifest = load_workflow_stage_manifest("arxiv-submission")
-        stage = manifest.get_stage("bootstrap")
         ctx = init_arxiv_submission(tmp_path, stage="bootstrap")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="arxiv-submission",
+            stage_id="bootstrap",
+        )
         assert ctx["publication_subject_slug"] == "curvature-flow-bounds"
         assert ctx["publication_lane_kind"] == "managed_publication_manuscript"
         assert ctx["publication_lane_owner"] == "project_managed"
@@ -3784,21 +3548,20 @@ class TestInitNewMilestone:
         assert "GPD/research-map/REFERENCES.md" in ctx["reference_artifact_files"]
 
     def test_new_milestone_stage_bootstrap_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _create_roadmap(tmp_path, "## Milestone v1.0: Setup Phase\n")
         _write_project_contract_state(tmp_path)
 
         manifest = load_workflow_stage_manifest("new-milestone")
-        stage = manifest.get_stage("milestone_bootstrap")
 
         ctx = init_new_milestone(tmp_path, stage="milestone_bootstrap")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "new-milestone"
-        assert ctx["staged_loading"]["stage_id"] == "milestone_bootstrap"
-        assert ctx["staged_loading"]["writes_allowed"] == []
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="new-milestone",
+            stage_id="milestone_bootstrap",
+        )
         assert "planning_exists" not in ctx
         assert "roadmapper_model" not in ctx
 
@@ -3865,8 +3628,6 @@ class TestInitNewMilestone:
         assert "project_contract_validation" in ctx
 
     def test_new_milestone_stage_survey_objectives_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _create_roadmap(tmp_path, "## Milestone v1.0: Setup Phase\n")
         _write_project_contract_state(tmp_path)
@@ -3874,23 +3635,15 @@ class TestInitNewMilestone:
         _write_research_map_anchor_files(tmp_path)
 
         manifest = load_workflow_stage_manifest("new-milestone")
-        stage = manifest.get_stage("survey_objectives")
 
         ctx = init_new_milestone(tmp_path, stage="survey_objectives")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "new-milestone"
-        assert ctx["staged_loading"]["stage_id"] == "survey_objectives"
-        assert ctx["staged_loading"]["loaded_authorities"] == [
-            "workflows/new-milestone/survey-objectives.md",
-            "references/orchestration/runtime-delegation-note.md",
-            "references/research/questioning.md",
-        ]
-        assert ctx["staged_loading"]["writes_allowed"] == [
-            "GPD/PROJECT.md",
-            "GPD/STATE.md",
-            "GPD/literature",
-        ]
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="new-milestone",
+            stage_id="survey_objectives",
+        )
         assert ctx["staged_loading"]["checkpoints"] == [
             "prior milestone context reviewed",
             "survey choice and objective scope captured",
@@ -3902,8 +3655,6 @@ class TestInitNewMilestone:
         assert "roadmapper_model" not in ctx
 
     def test_new_milestone_stage_roadmap_authoring_filters_payload(self, tmp_path: Path) -> None:
-        from gpd.core.workflow_staging import load_workflow_stage_manifest
-
         _setup_project(tmp_path)
         _create_roadmap(tmp_path, "## Milestone v1.0: Setup Phase\n")
         (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n\nMilestone context.\n", encoding="utf-8")
@@ -3915,25 +3666,15 @@ class TestInitNewMilestone:
         _write_research_map_anchor_files(tmp_path)
 
         manifest = load_workflow_stage_manifest("new-milestone")
-        stage = manifest.get_stage("roadmap_authoring")
 
         ctx = init_new_milestone(tmp_path, stage="roadmap_authoring")
 
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
-        assert ctx["staged_loading"]["workflow_id"] == "new-milestone"
-        assert ctx["staged_loading"]["stage_id"] == "roadmap_authoring"
-        assert ctx["staged_loading"]["loaded_authorities"] == [
-            "workflows/new-milestone/roadmap-authoring.md",
-            "references/orchestration/runtime-delegation-note.md",
-            "templates/project.md",
-            "templates/requirements.md",
-        ]
-        assert ctx["staged_loading"]["writes_allowed"] == [
-            "GPD/PROJECT.md",
-            "GPD/STATE.md",
-            "GPD/REQUIREMENTS.md",
-            "GPD/ROADMAP.md",
-        ]
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="new-milestone",
+            stage_id="roadmap_authoring",
+        )
         assert ctx["staged_loading"]["checkpoints"] == [
             "objectives finalized",
             "roadmap authored",
@@ -4007,10 +3748,13 @@ class TestInitQuick:
         manifest = load_workflow_stage_manifest("quick")
 
         ctx = init_quick(tmp_path, "Quick dimensional check", stage="task_authoring")
-        stage = manifest.stage_by_id("task_authoring")
 
-        assert ctx["staged_loading"]["stage_id"] == "task_authoring"
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="quick",
+            stage_id="task_authoring",
+        )
         assert "project_contract_gate" in ctx
         for reference_heavy_field in (
             "active_reference_context",
@@ -4072,11 +3816,14 @@ class TestInitQuick:
         manifest = load_workflow_stage_manifest("quick")
 
         ctx = init_quick(tmp_path, "Look up benchmark source", stage="reference_context")
-        stage = manifest.stage_by_id("reference_context")
 
         assert calls == [tmp_path]
-        assert ctx["staged_loading"]["stage_id"] == "reference_context"
-        assert set(ctx) == set(stage.required_init_fields) | {"staged_loading"}
+        assert_staged_payload_matches_manifest(
+            ctx,
+            manifest,
+            workflow_id="quick",
+            stage_id="reference_context",
+        )
         assert ctx["contract_intake"] == {"must_read_refs": ["ref-benchmark"]}
         assert ctx["effective_reference_intake"] == {"must_read_refs": ["ref-benchmark"]}
         assert ctx["selected_protocol_bundle_ids"] == ["core"]
@@ -4095,7 +3842,7 @@ class TestInitQuick:
         _setup_project(tmp_path)
         (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
         _write_project_contract_state(tmp_path)
-        _install_fake_stage_manifest(
+        install_fake_stage_manifest(
             monkeypatch,
             workflow_id="quick",
             stages={
@@ -5442,7 +5189,7 @@ class TestInitMapResearch:
     ) -> None:
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
-        _install_fake_stage_manifest(
+        install_fake_stage_manifest(
             monkeypatch,
             workflow_id="map-research",
             stages={
@@ -5532,7 +5279,7 @@ class TestInitLiteratureReview:
         _setup_project(tmp_path)
         _write_project_contract_state(tmp_path)
         _write_literature_review_anchor_file(tmp_path)
-        _install_fake_stage_manifest(
+        install_fake_stage_manifest(
             monkeypatch,
             workflow_id="literature-review",
             stages={
@@ -6494,7 +6241,7 @@ class TestInitPhaseOp:
         _create_phase_dir(tmp_path, "01-test")
         _write_structured_state_payload(tmp_path)
         _write_project_contract_state(tmp_path)
-        _install_fake_stage_manifest(
+        manifest = install_fake_stage_manifest(
             monkeypatch,
             workflow_id="research-phase",
             stages={
@@ -6519,25 +6266,12 @@ class TestInitPhaseOp:
 
         result = init_phase_op(tmp_path, phase="1", stage="bootstrap")
 
-        assert result["staged_loading"]["workflow_id"] == "research-phase"
-        assert result["staged_loading"]["stage_id"] == "bootstrap"
-        assert set(result) == {
-            "executor_model",
-            "verifier_model",
-            "commit_docs",
-            "research_mode",
-            "phase_found",
-            "phase_dir",
-            "phase_number",
-            "phase_name",
-            "project_contract",
-            "project_contract_gate",
-            "project_contract_load_info",
-            "project_contract_validation",
-            "active_reference_context",
-            "reference_artifacts_content",
-            "staged_loading",
-        }
+        assert_staged_payload_matches_manifest(
+            result,
+            manifest,
+            workflow_id="research-phase",
+            stage_id="bootstrap",
+        )
 
     def test_stage_phase_bootstrap_defers_heavy_context_builders(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -6631,7 +6365,7 @@ class TestInitPhaseOp:
     ) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "01-test")
-        _install_fake_stage_manifest(
+        manifest = install_fake_stage_manifest(
             monkeypatch,
             workflow_id="research-phase",
             stages={
@@ -6648,24 +6382,19 @@ class TestInitPhaseOp:
 
         result = init_research_phase(tmp_path, phase="1", stage="bootstrap")
 
-        assert result["staged_loading"]["workflow_id"] == "research-phase"
-        assert result["staged_loading"]["stage_id"] == "bootstrap"
-        assert set(result) == {
-            "phase_found",
-            "phase_dir",
-            "phase_number",
-            "phase_name",
-            "commit_docs",
-            "research_mode",
-            "staged_loading",
-        }
+        assert_staged_payload_matches_manifest(
+            result,
+            manifest,
+            workflow_id="research-phase",
+            stage_id="bootstrap",
+        )
 
     def test_stage_research_handoff_returns_only_manifest_required_fields(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "01-test")
-        _install_fake_stage_manifest(
+        manifest = install_fake_stage_manifest(
             monkeypatch,
             workflow_id="research-phase",
             stages={
@@ -6707,34 +6436,12 @@ class TestInitPhaseOp:
 
         result = init_research_phase(tmp_path, phase="1", stage="research_handoff")
 
-        assert result["staged_loading"]["workflow_id"] == "research-phase"
-        assert result["staged_loading"]["stage_id"] == "research_handoff"
-        assert set(result) == {
-            "commit_docs",
-            "autonomy",
-            "review_cadence",
-            "research_mode",
-            "phase_found",
-            "phase_dir",
-            "phase_number",
-            "phase_name",
-            "phase_slug",
-            "padded_phase",
-            "contract_intake",
-            "effective_reference_intake",
-            "active_reference_context",
-            "reference_artifact_files",
-            "reference_artifacts_content",
-            "selected_protocol_bundle_ids",
-            "protocol_bundle_load_manifest",
-            "protocol_bundle_context",
-            "protocol_bundle_verifier_extensions",
-            "current_execution",
-            "config_content",
-            "state_content",
-            "roadmap_content",
-            "staged_loading",
-        }
+        assert_staged_payload_matches_manifest(
+            result,
+            manifest,
+            workflow_id="research-phase",
+            stage_id="research_handoff",
+        )
 
 
 # ─── contract_alignment surfacing on gate dicts ───────────────────────────────

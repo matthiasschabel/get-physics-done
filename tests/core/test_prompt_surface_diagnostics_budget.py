@@ -12,16 +12,16 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 52_500, "chars": 2_259_999}
+PROMPT_TOTAL_BUDGET = {"lines": 51_500, "chars": 2_205_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 22_700, "chars": 900_000},
-    "agent": {"lines": 10_200, "chars": 499_999},
-    "workflow": {"lines": 19_700, "chars": 815_000},
+    "command": {"lines": 22_600, "chars": 900_000},
+    "agent": {"lines": 9_300, "chars": 490_000},
+    "workflow": {"lines": 19_600, "chars": 813_500},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_500, "chars": 171_390}
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_500, "chars": 171_200}
 # Phase 4 scaffolding guard. Keep first-turn active content flat while Phase 6
 # ratchets the integrated agent aggregate separately.
-STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_500, "chars": 141_500}
+STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_500, "chars": 141_300}
 STAGE_SELECTED_INIT_FIELD_BUDGET = 2_937
 STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 58
 REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 15
@@ -89,21 +89,21 @@ SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
 TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 2
 TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 3
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
-    "status_handling": 100,
-    "files_written_freshness": 22,
+    "status_handling": 80,
+    "files_written_freshness": 15,
     "stale_artifact_rejection": 25,
-    "fresh_continuation": 28,
-    "heading_prose_non_authority": 16,
+    "fresh_continuation": 24,
+    "heading_prose_non_authority": 14,
     "no_synthesized_child_gpd_return": 2,
 }
 # Future Phase 4 ratchet targets. These are asserted as exposed diagnostics only
 # until prompt cuts are integrated and measured in the current workspace.
 PHASE4_NON_REFERENCE_SEMANTIC_DUPLICATE_TARGETS = {
-    "status_handling": 100,
-    "fresh_continuation": 28,
-    "files_written_freshness": 22,
+    "status_handling": 80,
+    "fresh_continuation": 24,
+    "files_written_freshness": 15,
     "stale_artifact_rejection": 25,
-    "heading_prose_non_authority": 16,
+    "heading_prose_non_authority": 14,
     "no_synthesized_child_gpd_return": 2,
 }
 ZERO_SAFETY_TOTAL_FIELDS = (

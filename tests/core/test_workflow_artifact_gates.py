@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
-from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_anchor
+from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
+from tests.lifecycle_contract_test_support import child_gate_from_text
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
-_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def _read(name: str) -> str:
@@ -20,22 +18,8 @@ def _read(name: str) -> str:
     return (WORKFLOWS_DIR / name).read_text(encoding="utf-8")
 
 
-def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
-    for match in _YAML_BLOCK_RE.finditer(text):
-        body = match.group("body")
-        if "child_gate:" not in body:
-            continue
-        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
-        if gate.id == gate_id:
-            return gate
-    raise AssertionError(f"missing child_gate {gate_id}")
-
-
-def _assert_semantic(text: str, label: str, *fragments: str) -> None:
-    assert_prompt_contracts(
-        text,
-        semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
-    )
+def _child_gate(text: str, gate_id: str):
+    return child_gate_from_text(text, gate_id)
 
 
 def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
@@ -134,8 +118,12 @@ def test_validate_conventions_requires_artifact_and_lock_before_success() -> Non
     validate_conventions = _read("validate-conventions.md")
 
     _assert_semantic(validate_conventions, "validate-conventions one-shot delegation", "one-shot handoff")
-    assert "gpd_return.status: completed" in validate_conventions
-    assert "gpd_return.files_written" in validate_conventions
+    _assert_semantic(
+        validate_conventions,
+        "validate-conventions completed status and files-written gate",
+        "gpd_return.status: completed",
+        "gpd_return.files_written",
+    )
     _assert_semantic(validate_conventions, "validate-conventions disk artifact gate", "expected artifact", "disk")
     _assert_semantic(
         validate_conventions,

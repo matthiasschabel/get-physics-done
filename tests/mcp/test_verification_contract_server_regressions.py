@@ -7,6 +7,8 @@ from pathlib import Path
 import anyio
 import pytest
 
+from tests.markdown_test_support import assert_contract_finding
+
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 
 
@@ -310,7 +312,7 @@ def test_suggest_contract_checks_rejects_placeholder_only_context_intake(tmp_pat
 
     result = suggest_contract_checks(contract, project_dir=tmp_path.resolve(strict=False).as_posix())
 
-    assert "context_intake must not be empty" in result["error"]
+    assert_contract_finding([result["error"]], path="context_intake", contains="empty")
 
 
 def test_contract_tools_warn_when_references_lack_must_surface_anchor(tmp_path: Path) -> None:
@@ -332,10 +334,10 @@ def test_contract_tools_warn_when_references_lack_must_surface_anchor(tmp_path: 
     rooted = run_contract_check(request, project_dir=tmp_path.resolve(strict=False).as_posix())
 
     assert rooted["status"] == "pass"
-    assert "references must include at least one must_surface=true anchor" in rooted["contract_warnings"]
+    assert_contract_finding(rooted["contract_warnings"], path="references", contains="must_surface=true")
 
     suggested = suggest_contract_checks(contract, project_dir=tmp_path.resolve(strict=False).as_posix())
-    assert "references must include at least one must_surface=true anchor" in suggested["contract_warnings"]
+    assert_contract_finding(suggested["contract_warnings"], path="references", contains="must_surface=true")
 
 
 def test_contract_tools_warn_for_non_concrete_must_surface_locator(tmp_path: Path) -> None:
@@ -1297,10 +1299,12 @@ def test_contract_tools_salvage_lossy_singleton_section(
     if expected_salvage_success:
         assert run_result["status"] == "pass"
         assert run_result["contract_salvaged"] is True
-        assert "approach_policy must be an object, not list" in run_result["contract_salvage_findings"]
+        assert_contract_finding(
+            run_result["contract_salvage_findings"], path="approach_policy", contains=("object", "list")
+        )
         assert suggest_result["contract_salvaged"] is True
-        assert any(
-            "approach_policy must be an object, not list" in warning for warning in suggest_result["contract_warnings"]
+        assert_contract_finding(
+            suggest_result["contract_warnings"], path="approach_policy", contains=("object", "list")
         )
         return
 
@@ -2582,9 +2586,17 @@ def test_run_contract_check_schema_and_runtime_stay_in_lockstep_for_recoverable_
     assert schema_messages != []
     assert result["status"] == "pass"
     assert result["contract_salvaged"] is True
-    assert "context_intake.must_read_refs must be a list, not str" in result["contract_salvage_findings"]
-    assert "deliverables.0.kind must use exact canonical value: figure" in result["contract_salvage_findings"]
-    assert "references.0.required_actions must be a list, not str" in result["contract_salvage_findings"]
+    assert_contract_finding(
+        result["contract_salvage_findings"],
+        path="context_intake.must_read_refs",
+        contains=("list", "str"),
+    )
+    assert_contract_finding(result["contract_salvage_findings"], path="deliverables.0.kind", contains="figure")
+    assert_contract_finding(
+        result["contract_salvage_findings"],
+        path="references.0.required_actions",
+        contains=("list", "str"),
+    )
 
 
 def test_suggest_contract_checks_schema_and_runtime_stay_in_lockstep_for_nested_proof_field_salvage() -> None:
@@ -2601,11 +2613,20 @@ def test_suggest_contract_checks_schema_and_runtime_stay_in_lockstep_for_nested_
     assert schema_messages != []
     assert result["suggested_count"] > 0
     assert result["contract_salvaged"] is True
-    assert "claims.0.parameters.0.aliases must be a list, not str" in result["contract_salvage_findings"]
-    assert "claims.0.hypotheses.0.symbols must be a list, not str" in result["contract_salvage_findings"]
-    assert (
-        "acceptance_tests.0.kind must use exact canonical value: proof_parameter_coverage"
-        in result["contract_salvage_findings"]
+    assert_contract_finding(
+        result["contract_salvage_findings"],
+        path="claims.0.parameters.0.aliases",
+        contains=("list", "str"),
+    )
+    assert_contract_finding(
+        result["contract_salvage_findings"],
+        path="claims.0.hypotheses.0.symbols",
+        contains=("list", "str"),
+    )
+    assert_contract_finding(
+        result["contract_salvage_findings"],
+        path="acceptance_tests.0.kind",
+        contains="proof_parameter_coverage",
     )
 
 

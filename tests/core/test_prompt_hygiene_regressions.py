@@ -7,6 +7,7 @@ from gpd.core.model_visible_text import (
     review_contract_visibility_note,
     skeptical_rigor_guardrails_section,
 )
+from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
 from tests.workflow_authority_support import workflow_authority_text
 
 WORKFLOWS_DIR = Path("src/gpd/specs/workflows")
@@ -50,7 +51,12 @@ def test_help_resume_boundary_note_is_concise_and_contract_aligned() -> None:
         "/runtime/",
     ).lower()
 
-    assert "canonical continuation fields define the public resume vocabulary" in expanded_help_workflow
+    _assert_semantic(
+        expanded_help_workflow,
+        "help resume boundary uses canonical public vocabulary",
+        "canonical continuation fields",
+        "public resume vocabulary",
+    )
     assert "public top-level resume vocabulary" not in help_workflow
 
 
@@ -58,7 +64,11 @@ def test_transition_workflow_stays_runtime_neutral() -> None:
     transition_workflow = (WORKFLOWS_DIR / "transition.md").read_text(encoding="utf-8")
 
     assert "slash_command(" not in transition_workflow
-    assert "installed runtime command surface" in transition_workflow
+    _assert_semantic(
+        transition_workflow,
+        "transition workflow stays on installed runtime command surface",
+        "installed runtime command surface",
+    )
 
 
 def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_state_table() -> None:
@@ -68,13 +78,22 @@ def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_st
     assert "context_mode: project-required" in quick_command
     assert "Quick Tasks Completed" not in quick_command
     assert "Quick Tasks Completed" not in quick_workflow
-    assert "Records completion through structured `gpd state` commands" in quick_command
+    _assert_semantic(
+        quick_command,
+        "quick command records completion through structured state commands",
+        "Records completion",
+        "structured `gpd state` commands",
+    )
     assert "project_exists" in quick_workflow
     assert "**Project Exists:** {project_exists}" in quick_workflow
-    assert "Quick tasks can run mid-phase and do NOT require ROADMAP.md." in quick_workflow
-    assert (
-        "They still require an initialized project workspace with `GPD/PROJECT.md` and the `GPD/` directory."
-        in quick_workflow
+    _assert_semantic(
+        quick_workflow,
+        "quick workflow project gate without roadmap requirement",
+        "Quick tasks can run mid-phase",
+        "do NOT require ROADMAP.md",
+        "initialized project workspace",
+        "GPD/PROJECT.md",
+        "GPD/",
     )
     assert "They only need `GPD/` to exist for directory structure." not in quick_workflow
 
@@ -82,7 +101,12 @@ def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_st
 def test_peer_review_init_fields_are_manifest_owned_and_interestingness_stage_bullets_are_space_indented() -> None:
     peer_review = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
-    assert "Parse only fields named by `staged_loading.required_init_fields`" in peer_review
+    _assert_semantic(
+        peer_review,
+        "peer-review init fields are manifest-owned",
+        "Parse only fields named by",
+        "staged_loading.required_init_fields",
+    )
     assert "stage field-access peer-review" in peer_review
     assert "Parse bootstrap JSON for: `project_exists`" not in peer_review
     assert "Parse target-aware init JSON for: `project_exists`" not in peer_review

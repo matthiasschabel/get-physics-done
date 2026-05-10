@@ -200,10 +200,11 @@ def test_ci_represents_documented_default_full_suite_without_duplicate_full_suit
     run_pytest_shard = workflow_step_by_name(workflow, "pytest", "Run pytest shard")
     env = run_pytest_shard["env"]
     run_command = run_pytest_shard["run"]
+    shard_pytest_prefix = 'timeout "${GPD_FULL_SUITE_SHARD_BUDGET_SECONDS}s" uv run pytest -q'
 
     assert env["GPD_DEFAULT_FULL_SUITE_COMMAND"] == "uv run pytest tests/ -q"
     assert int(env["GPD_FULL_SUITE_SHARD_BUDGET_SECONDS"]) <= 180
-    assert 'timeout "${GPD_FULL_SUITE_SHARD_BUDGET_SECONDS}s" uv run pytest -q' in run_command
+    assert shard_pytest_prefix in run_command
     assert "${PYTEST_TARGETS[@]}" in run_command
 
     direct_default_suite_pattern = re.compile(r"(?m)^\s*(?:timeout\s+[^\n]+\s+)?uv run pytest tests/ -q\b")
@@ -252,12 +253,13 @@ def test_ci_workflow_runs_lightweight_python_compatibility_matrix() -> None:
     targeted_tests = workflow_step_by_name(
         workflow, "python-compatibility", "Run installer and runtime compatibility tests"
     )["run"]
+    default_full_suite_command = "uv run pytest -q tests/"
     assert "tests/test_runtime_catalog_bootstrap_contract.py" in targeted_tests
     assert "tests/test_runtime_install_smoke.py" in targeted_tests
     assert "tests/test_install_lifecycle.py::test_markdown_command_runtime_lifecycle_round_trip" in targeted_tests
     assert "test_bootstrap_prefers_versioned_python_when_generic_alias_is_newer" in targeted_tests
     assert "test_bootstrap_recreates_managed_env_when_selected_minor_changes" in targeted_tests
-    assert "uv run pytest -q tests/" not in targeted_tests
+    assert default_full_suite_command not in targeted_tests
     assert_run_step_uses_isolated_uv_build_env(build_step, context="test.yml python-compatibility Build wheel")
     assert "uv build --wheel --out-dir dist/compat-${{ matrix.python-version }}" in build_step["run"]
 

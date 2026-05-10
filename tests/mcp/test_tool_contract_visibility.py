@@ -353,9 +353,6 @@ def _assert_contract_schema_sections_closed(contract_schema: dict[str, object]) 
     claims = contract_schema["properties"]["claims"]["items"]
     _assert_closed_object(claims, label="contract.claims[]")
     assert claims["required"] == ["id", "statement", "deliverables", "acceptance_tests"]
-    assert "Proof-bearing claims must set an explicit proof-oriented `claim_kind`" in claims["description"]
-    assert "preserve `quantifiers` when explicit quantifier or domain obligations exist" in claims["description"]
-    assert "proof-specific acceptance test id" in claims["description"]
     assert claims["properties"]["id"]["minLength"] == 1
     assert claims["properties"]["id"]["pattern"] == r"\S"
     _assert_recoverable_enum_string_schema(
@@ -371,10 +368,6 @@ def _assert_contract_schema_sections_closed(contract_schema: dict[str, object]) 
             "other",
         ],
     )
-    assert "Claims are proof-bearing not only when `claim_kind` is theorem-like" in claims["description"]
-    assert "when the statement is theorem-like" in claims["description"]
-    assert "when proof-specific fields are already populated" in claims["description"]
-    assert "when `observables` references a `proof_obligation` target" in claims["description"]
     for field_name in (
         "observables",
         "deliverables",
@@ -413,9 +406,6 @@ def _assert_contract_schema_sections_closed(contract_schema: dict[str, object]) 
     assert proof_claim_condition["then"]["properties"]["parameters"]["minItems"] == 1
     assert proof_claim_condition["then"]["properties"]["hypotheses"]["minItems"] == 1
     assert proof_claim_condition["then"]["properties"]["conclusion_clauses"]["minItems"] == 1
-    assert "statement is theorem-like" in claims["description"]
-    assert "`proof_obligation` target" in claims["description"]
-    assert "Do not rely on runtime inference" in claims["description"]
     proof_field_condition = next(clause for clause in claims["allOf"] if "anyOf" in clause.get("if", {}))
     proof_field_triggers = {
         required[0]
@@ -791,9 +781,6 @@ def test_contract_tools_list_tools_expose_structured_request_schemas() -> None:
     references = contract_schema["properties"]["references"]
     reference_item = references["items"]
     assert "Closed reference-anchor object." in reference_item["description"]
-    assert "`must_surface` must stay boolean" in reference_item["description"]
-    assert "`applies_to` and `required_actions` must both be non-empty lists" in reference_item["description"]
-    assert "`carry_forward_to` names workflow scope labels" in reference_item["description"]
     reference_surface_rule = reference_item["allOf"][0]
     assert reference_surface_rule["if"]["required"] == ["must_surface"]
     assert reference_surface_rule["if"]["properties"]["must_surface"]["const"] is True

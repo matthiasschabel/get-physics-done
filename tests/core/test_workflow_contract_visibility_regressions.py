@@ -8,6 +8,7 @@ from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.public_surface_contract import resume_authority_fields
 from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.doc_surface_contracts import resume_authority_public_vocabulary_intro, resume_backend_only_fields
+from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,14 +28,29 @@ def test_contract_authority_gate_reference_defines_shared_boundary() -> None:
     reference = (ORCHESTRATION_REFS_DIR / "contract-authority-gate.md").read_text(encoding="utf-8")
 
     assert "project_contract_gate.authoritative" in reference
-    assert "diagnostic context, not planning, execution, verification" in reference
-    assert "obey the lifecycle preflight and stop fail-closed" in reference
-    assert "do not infer approved scope from roadmap, state, manuscript, reference context, or user prose" in reference
-    assert "The local workflow still owns its subject, artifacts, validators, and failure route." in reference
+    _assert_semantic(
+        reference,
+        "contract authority gate diagnostic-only lifecycle boundary",
+        "diagnostic context",
+        "not planning, execution, verification",
+        "lifecycle preflight",
+        "stop fail-closed",
+        "do not infer approved scope",
+        "local workflow still owns",
+        "artifacts",
+        "validators",
+        "failure route",
+    )
     assert "## Blocked Lifecycle Stop Phrase" in reference
     assert BLOCKED_LIFECYCLE_STOP_PROHIBITION in reference
     assert "references/orchestration/stage-stop-envelope.md" in reference
-    assert "the owning workflow rerun command after repair" in reference
+    _assert_semantic(
+        reference,
+        "contract authority gate owns repair rerun command",
+        "owning workflow",
+        "rerun command",
+        "after repair",
+    )
 
 
 def _assert_contract_gate_stop_tuple(
@@ -233,10 +249,20 @@ def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() ->
     contract_stop = workflow.index("**If `project_contract_load_info.status` starts with `blocked`")
     first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
 
-    assert "inspect only the project worktree" in workflow
-    assert "Show the dirty paths" in workflow
-    assert "`git status --short`, `gpd commit`, or an explicitly approved project-local cleanup path" in workflow
-    assert "`plan-phase` never stashes, resets, cleans, overwrites, or hides user work" in workflow
+    _assert_semantic(
+        workflow,
+        "plan-phase dirty gate stops before hiding user work",
+        "inspect only the project worktree",
+        "Show the dirty paths",
+        "git status --short",
+        "gpd commit",
+        "project-local cleanup path",
+        "never stashes",
+        "resets",
+        "cleans",
+        "overwrites",
+        "hides user work",
+    )
     assert dirty_gate < dirty_stop < contract_stop < first_authoring_reload
 
 
@@ -253,8 +279,15 @@ def test_plan_phase_missing_contract_gate_blocks_scope_substitution_and_authorin
     lifecycle_gate = workflow.index("LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate plan-phase")
     first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
 
-    assert "Planning requires an approved scoping contract in `GPD/state.json`" in workflow
-    assert "do not infer phase scope from `ROADMAP.md` or `REQUIREMENTS.md` alone" in workflow
+    _assert_semantic(
+        workflow,
+        "plan-phase missing contract cannot infer scope from roadmap",
+        "approved scoping contract",
+        "GPD/state.json",
+        "do not infer phase scope",
+        "ROADMAP.md",
+        "REQUIREMENTS.md",
+    )
     _assert_contract_gate_stop_tuple(
         workflow,
         workflow_id="plan-phase",

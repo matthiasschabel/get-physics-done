@@ -5,6 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_lifecycle_prose as _assert_absent,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_semantic_contract as _assert_semantic,
+)
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,7 +61,13 @@ def test_plan_and_execute_phase_require_proof_redteam_gates() -> None:
     assert "sibling `{plan_id}-PROOF-REDTEAM.md` artifact" in execute_phase
     assert "`gpd-check-proof` is the canonical owner" in execute_phase
     assert 'subagent_type="gpd-check-proof"' in execute_phase
-    assert "If any executed plan is proof-bearing, proof verification still runs" in execute_phase
+    _assert_semantic(
+        execute_phase,
+        "execute-phase proof-bearing work still runs proof verification",
+        "executed plan",
+        "proof-bearing",
+        "proof verification still runs",
+    )
 
 
 def test_verification_workflows_fail_closed_on_missing_proof_coverage() -> None:
@@ -71,26 +83,52 @@ def test_verification_workflows_fail_closed_on_missing_proof_coverage() -> None:
     assert PROOF_GATE_REF in verify_work_raw
     assert PROOF_GATE_REF in derive_equation_raw
 
-    assert "theorem-to-proof audit plus an adversarial special-case" in verify_phase
+    _assert_semantic(
+        verify_phase,
+        "verify-phase proof obligation gate requires theorem audit and adversarial case",
+        "theorem-to-proof audit",
+        "adversarial special-case",
+    )
     assert '<step name="proof_obligation_gate">' in verify_phase
-    assert "Missing artifact, missing theorem inventory, or `status != passed` is a blocking gap" in verify_phase
-    assert "spawn `gpd-check-proof` once to repair that gap" in verify_phase
-    assert "wait for user confirmation" not in verify_phase
-    assert "ask the user then continue" not in verify_phase
-    assert "pause here for approval" not in verify_phase
+    _assert_semantic(
+        verify_phase,
+        "verify-phase missing proof coverage is blocking and repair is one-shot",
+        "Missing artifact",
+        "missing theorem inventory",
+        "status != passed",
+        "blocking gap",
+        "spawn `gpd-check-proof` once",
+    )
+    _assert_absent(
+        verify_phase,
+        "verify-phase no inline user waiting for proof repair",
+        "wait for user confirmation",
+        "ask the user then continue",
+        "pause here for approval",
+    )
 
-    assert "Targeted flags narrow the optional check mix only." in verify_work
-    assert "require a canonical `*-PROOF-REDTEAM.md` artifact" in verify_work
+    _assert_semantic(
+        verify_work,
+        "verify-work proof flags cannot waive canonical artifact",
+        "Targeted flags narrow",
+        "optional check mix only",
+        "canonical `*-PROOF-REDTEAM.md` artifact",
+    )
     assert "CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)" in verify_work
     assert 'task(\n  subagent_type="gpd-check-proof"' in verify_work
-    assert "additional mandatory floor applies" in verify_work
+    _assert_semantic(verify_work, "verify-work proof floor remains mandatory", "additional mandatory floor applies")
 
     assert '<step name="proof_obligation_screen">' in derive_equation
     assert "DERIVATION-{slug}-PROOF-REDTEAM.md" in derive_equation
     assert "gpd-check-proof" in derive_equation
     assert "CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)" in derive_equation
     assert 'task(\n  subagent_type="gpd-check-proof"' in derive_equation
-    assert "Proof-bearing derivations fail closed" in derive_equation
+    _assert_semantic(
+        derive_equation,
+        "derive-equation proof-bearing derivations fail closed",
+        "Proof-bearing derivations",
+        "fail closed",
+    )
 
 
 def test_proof_redteam_handoffs_delegate_checkpoint_semantics_to_shared_contracts() -> None:
@@ -98,8 +136,11 @@ def test_proof_redteam_handoffs_delegate_checkpoint_semantics_to_shared_contract
 
     combined = "\n".join((*(_read(name) for name in workflow_names), _peer_review_stage_text("panel-stages.md")))
 
-    for phrase in REPEATED_PROOF_CHECKPOINT_LINES:
-        assert phrase not in combined
+    _assert_absent(
+        combined,
+        "proof-redteam handoffs use shared checkpoint semantics",
+        *REPEATED_PROOF_CHECKPOINT_LINES,
+    )
 
     assert combined.count("proof-redteam protocol's one-shot return semantics") == 3
     assert combined.count("typed proof-redteam handoff contract") == 2
@@ -113,14 +154,27 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
     peer_review_raw = _peer_review_stage_text()
     settings = _read("settings.md")
 
-    assert "Quick mode is NOT authorized to close theorem-style or `proof_obligation` work." in quick
-    assert "Proof-obligation command block:" in quick
-    assert "quick mode is blocked pending the full proof-redteam workflow" in quick
+    _assert_semantic(
+        quick,
+        "quick blocks proof obligation bypass",
+        "Quick mode",
+        "NOT authorized",
+        "theorem-style",
+        "proof_obligation",
+        "blocked pending the full proof-redteam workflow",
+    )
 
     assert "proof-obligation coverage" in write_paper
     assert "GPD/review/PROOF-REDTEAM{round_suffix}.md" in write_paper
-    assert "must not strengthen, generalize, or rhetorically smooth" in write_paper
-    assert "theorem-style claims beyond passed proof-redteam scope" in write_paper
+    _assert_semantic(
+        write_paper,
+        "write-paper cannot smooth beyond proof-redteam scope",
+        "must not strengthen",
+        "generalize",
+        "rhetorically smooth",
+        "theorem-style claims",
+        "passed proof-redteam scope",
+    )
 
     assert "<proof_bearing_routing>" in peer_review
     assert PROOF_GATE_PATH not in peer_review_raw
@@ -149,7 +203,10 @@ def test_peer_review_final_decision_guardrail_requires_same_round_proof_redteam(
     )
     assert "Stage-review validation alone is not proof-redteam clearance" in peer_review
     assert "aligned `proof_audits[]` entries in `${REVIEW_ROOT}/STAGE-math{round_suffix}.json`" in peer_review
-    assert "do not by themselves clear a favorable final decision without the same-round proof-redteam artifact" in peer_review
+    assert (
+        "do not by themselves clear a favorable final decision without the same-round proof-redteam artifact"
+        in peer_review
+    )
     assert (
         "gpd validate referee-decision ${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json --strict "
         "--ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json" in peer_review

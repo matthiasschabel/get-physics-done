@@ -72,11 +72,13 @@ def _catalog_runtime_adapter_test_relpaths() -> tuple[str, ...]:
 def test_root_conftest_keeps_default_collection_as_full_suite() -> None:
     root_conftest = _read("conftest.py")
     core_conftest = _read("core/conftest.py")
+    full_suite_header = "test suite mode: full default suite"
+    targeted_suite_header = "test suite mode: targeted/sharded args"
 
     assert "_isolate_machine_local_gpd_data" in root_conftest
     assert "pytest_xdist_auto_num_workers" in root_conftest
-    assert "test suite mode: full default suite" in root_conftest
-    assert "test suite mode: targeted/sharded args" in root_conftest
+    assert full_suite_header in root_conftest
+    assert targeted_suite_header in root_conftest
     assert not hasattr(tests_conftest, "FAST_SUITE_EXCLUDES")
     assert not hasattr(tests_conftest, "pytest_ignore_collect")
     assert "FAST_SUITE_EXCLUDES" not in root_conftest
@@ -303,8 +305,7 @@ def _assert_ci_shards_cover_inventory_without_overlap_or_empty_shards(
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         planned_shards = plan_category_ci_shards(category=category, inventory=inventory, work_units=work_units)
         expanded_targets = [
-            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory)
-            for shard_targets in planned_shards
+            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory) for shard_targets in planned_shards
         ]
         category_nodeids = tuple(
             nodeid
@@ -347,29 +348,22 @@ def _assert_expected_ci_matrix_rows_resolve_live_non_empty_targets(
         assert not missing_target_relpaths, f"{display_name} resolved missing files: {sorted(missing_target_relpaths)}"
         expanded_nodeids = expand_ci_targets_to_nodeids(shard_targets, inventory=inventory)
         assert expanded_nodeids, f"{display_name} resolved no collected tests"
-        assert {
-            category_for_test_relpath(relpath) for relpath in target_relpaths
-        } == {category}, f"{display_name} resolved targets outside category {category!r}"
+        assert {category_for_test_relpath(relpath) for relpath in target_relpaths} == {category}, (
+            f"{display_name} resolved targets outside category {category!r}"
+        )
 
 
 def _assert_live_ci_shard_weight_spread_stays_tight(
     inventory: dict[str, tuple[str, ...]],
 ) -> None:
     work_units = build_ci_work_units(inventory)
-    per_target_weight = {
-        target: unit.weight / len(unit.targets)
-        for unit in work_units
-        for target in unit.targets
-    }
+    per_target_weight = {target: unit.weight / len(unit.targets) for unit in work_units for target in unit.targets}
 
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         if shard_total == 1:
             continue
         planned_shards = plan_category_ci_shards(category=category, inventory=inventory, work_units=work_units)
-        shard_weights = [
-            sum(per_target_weight[target] for target in shard_targets)
-            for shard_targets in planned_shards
-        ]
+        shard_weights = [sum(per_target_weight[target] for target in shard_targets) for shard_targets in planned_shards]
         average_weight = sum(shard_weights) / len(shard_weights)
 
         assert max(shard_weights) - min(shard_weights) <= average_weight * CI_SHARD_WEIGHT_SPREAD_TOLERANCE
@@ -519,8 +513,7 @@ def test_synthetic_category_shard_layout_covers_every_nodeid_without_overlap() -
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         planned_shards = plan_category_ci_shards(category=category, work_units=work_units)
         expanded_targets = [
-            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory)
-            for shard_targets in planned_shards
+            expand_ci_targets_to_nodeids(shard_targets, inventory=inventory) for shard_targets in planned_shards
         ]
         category_nodeids = tuple(
             nodeid
@@ -542,20 +535,13 @@ def test_synthetic_category_shard_layout_covers_every_nodeid_without_overlap() -
 def test_synthetic_split_categories_keep_runtime_informed_weight_spread_tight() -> None:
     inventory = synthetic_test_inventory()
     work_units = build_ci_work_units(inventory)
-    per_target_weight = {
-        target: unit.weight / len(unit.targets)
-        for unit in work_units
-        for target in unit.targets
-    }
+    per_target_weight = {target: unit.weight / len(unit.targets) for unit in work_units for target in unit.targets}
 
     for category, shard_total in CI_CATEGORY_SHARD_COUNTS.items():
         if shard_total == 1:
             continue
         planned_shards = plan_category_ci_shards(category=category, work_units=work_units)
-        shard_weights = [
-            sum(per_target_weight[target] for target in shard_targets)
-            for shard_targets in planned_shards
-        ]
+        shard_weights = [sum(per_target_weight[target] for target in shard_targets) for shard_targets in planned_shards]
         average_weight = sum(shard_weights) / len(shard_weights)
 
         assert max(shard_weights) - min(shard_weights) <= average_weight * CI_SHARD_WEIGHT_SPREAD_TOLERANCE

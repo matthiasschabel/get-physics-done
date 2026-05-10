@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
 from gpd.core.context import (
     _build_proof_redteam_finalizer_bridge,
     _build_verification_report_finalizer_bridge,
     _build_verification_report_skeleton_bridge,
 )
-from tests.assertion_taxonomy_support import (
-    MatchMode,
-    assert_prompt_contracts,
-    semantic_anchor,
-    semantic_concept,
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_lifecycle_prose as _assert_absent,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_semantic_contract as _assert_semantic,
+)
+from tests.lifecycle_contract_test_support import (
+    child_gate_from_text,
 )
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -23,7 +24,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
-_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def _read(path: Path) -> str:
@@ -32,29 +32,8 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def _child_gate(text: str, gate_id: str) -> ChildGateTuple:
-    for match in _YAML_BLOCK_RE.finditer(text):
-        body = match.group("body")
-        if "child_gate:" not in body:
-            continue
-        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
-        if gate.id == gate_id:
-            return gate
-    raise AssertionError(f"missing child_gate {gate_id}")
-
-
-def _assert_semantic(text: str, label: str, *fragments: str) -> None:
-    assert_prompt_contracts(
-        text,
-        semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
-    )
-
-
-def _assert_absent(text: str, label: str, *fragments: str) -> None:
-    assert_prompt_contracts(
-        text,
-        *semantic_concept(label, forbidden=fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
-    )
+def _child_gate(text: str, gate_id: str):
+    return child_gate_from_text(text, gate_id)
 
 
 def test_verify_work_inventory_bridge_exposes_writer_command_and_preview_command(tmp_path: Path) -> None:
@@ -185,9 +164,15 @@ def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_rout
         "failed": "non-green stop with validator errors",
     }
     assert 'gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"' in workflow
-    assert (
-        'Any verifier-written canonical `VERIFICATION.md`, including gap reports and `blocked`/`failed` handoffs, must pass `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before this wrapper accepts it as canonical.'
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work verifier canonical report gate",
+        "Any verifier-written canonical",
+        "including gap reports",
+        "blocked",
+        "failed",
+        "gpd validate verification-contract",
+        "before this wrapper accepts it as canonical",
     )
     assert "Missing/unreadable/unnamed/invalid artifacts use the tuple failure route" in workflow
     _assert_semantic(
@@ -197,14 +182,22 @@ def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_rout
         "canonical verification status",
     )
     _assert_semantic(workflow, "verify-work preexisting reports non-authority", "preexisting reports", "not authority")
-    assert (
-        "If a canonical verification file already exists, preserve its authoritative frontmatter and append only the session-local overlay here."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work existing canonical report preservation",
+        "canonical verification file already exists",
+        "preserve its authoritative frontmatter",
+        "session-local overlay",
     )
     assert "Write to `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`." in workflow
-    assert (
-        'Run `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before committing it; invalid reports stop non-green and do not advance state.'
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work report validator blocks invalid state advance",
+        "gpd validate verification-contract",
+        "before committing it",
+        "invalid reports",
+        "stop non-green",
+        "do not advance state",
     )
     assert (
         workflow.count(
@@ -285,13 +278,21 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
         "planner",
         "checker routing",
     )
-    assert (
-        "If the checker returns a structured `gpd_return`, route on `gpd_return.status` and the structured plan lists, not on presentation text:"
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap checker routes on structured return",
+        "structured `gpd_return`",
+        "gpd_return.status",
+        "structured plan lists",
+        "not on presentation text",
     )
-    assert (
-        "- `completed`: treat the fresh fix plans as verified only after the on-disk files still match the planner's `files_written` set."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap checker completed requires fresh planner files",
+        "completed",
+        "fresh fix plans",
+        "on-disk files",
+        "planner's `files_written` set",
     )
     _assert_semantic(
         workflow,
@@ -354,9 +355,13 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
     assert gate.freshness is not None
     assert gate.freshness.marker == "$GAP_PLANNER_HANDOFF_STARTED_AT"
     assert "gpd validate plan-contract <each fresh gap plan>" in gate.validators
-    assert (
-        "If the planner fails to spawn or returns an error, keep the session fail-closed and offer retry or manual plan creation. Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work gap planner failure cannot use preexisting plan files",
+        "planner fails to spawn",
+        "keep the session fail-closed",
+        "retry or manual plan creation",
+        "preexisting `PLAN.md` files alone",
     )
     assert gate.status_route == {
         "checkpoint": "fresh gap-planner continuation after user response",
@@ -382,13 +387,19 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
 
     assert "Planner runs must return a structured `gpd_return` envelope." in planner_prompt
     assert "Do not route on them; route on `gpd_return.status` and the artifact gate below." in planner_prompt
-    assert (
-        "- `gpd_return.status: completed` means the planner wrote the expected PLAN.md artifacts and they passed the on-disk artifact check."
-        in planner_prompt
+    _assert_semantic(
+        planner_prompt,
+        "planner prompt completed status requires expected disk artifacts",
+        "gpd_return.status: completed",
+        "expected PLAN.md artifacts",
+        "on-disk artifact check",
     )
-    assert (
-        "Always verify `gpd_return.files_written` against the expected plan artifacts before accepting completion."
-        in planner_prompt
+    _assert_semantic(
+        planner_prompt,
+        "planner prompt files-written freshness gate",
+        "gpd_return.files_written",
+        "expected plan artifacts",
+        "before accepting completion",
     )
 
 
@@ -456,13 +467,24 @@ def test_verify_work_proof_check_handoff_uses_structured_freshness_and_fail_clos
         "fail-closed",
         "fresh proof continuation",
     )
-    assert (
-        "After the proof critic returns, re-open `${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and is `passed` after a successful `gpd proof-redteam finalize ...` and `gpd validate proof-redteam` run before finalizing the gap ledger."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work proof critic disk re-open and validator gate",
+        "${PHASE_DIR_ABS}/${phase_number}-PROOF-REDTEAM.md",
+        "re-open",
+        "exists",
+        "passed",
+        "gpd proof-redteam finalize",
+        "gpd validate proof-redteam",
+        "before finalizing the gap ledger",
     )
-    assert (
-        "If `gpd-check-proof` still cannot produce a passed audit, keep the verification status fail-closed."
-        in workflow
+    _assert_semantic(
+        workflow,
+        "verify-work proof critic non-passing fail-closed status",
+        "gpd-check-proof",
+        "cannot produce a passed audit",
+        "verification status",
+        "fail-closed",
     )
     _assert_semantic(
         workflow,

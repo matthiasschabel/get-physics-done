@@ -15,10 +15,8 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
-import subprocess
 import sys
 import tarfile
-import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,7 +33,42 @@ from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.state import StateUpdateResult, default_state_dict, generate_state_markdown
 from gpd.registry import _parse_command_file
-from tests.helpers.cli import StableCliRunner, invoke_cli, invoke_help_text, json_output_from_result
+from tests.helpers.cli import (
+    StableCliRunner,
+    invoke_cli,
+    invoke_help_text,
+    json_output_from_result,
+)
+from tests.helpers.cli import (
+    fake_pypdf_failure_module as _fake_pypdf_failure_module,
+)
+from tests.helpers.cli import (
+    fake_pypdf_module as _fake_pypdf_module,
+)
+from tests.helpers.cli import (
+    refresh_artifact_manifest_for_manuscript as _refresh_artifact_manifest_for_manuscript,
+)
+from tests.helpers.cli import (
+    write_binary_pdf as _write_binary_pdf,
+)
+from tests.helpers.cli import (
+    write_internal_publication_artifacts as _write_internal_publication_artifacts,
+)
+from tests.helpers.cli import (
+    write_managed_publication_manuscript as _write_managed_publication_manuscript,
+)
+from tests.helpers.cli import (
+    write_minimal_docx as _write_minimal_docx,
+)
+from tests.helpers.cli import (
+    write_minimal_xlsx as _write_minimal_xlsx,
+)
+from tests.helpers.cli import (
+    write_secondary_manuscript_root as _write_secondary_manuscript_root,
+)
+from tests.helpers.cli import (
+    write_write_paper_authoring_input as _write_write_paper_authoring_input,
+)
 from tests.manuscript_test_support import (
     CANONICAL_MANUSCRIPT_STEM,
     write_proof_review_package,
@@ -469,49 +502,6 @@ def _invoke(*args: str, expect_ok: bool = True) -> None:
     invoke_cli(runner, app, args, expect_exit=0 if expect_ok else None, catch_exceptions=False)
 
 
-def _refresh_artifact_manifest_for_manuscript(
-    project_root: Path,
-    manuscript: Path | None = None,
-) -> None:
-    """Keep the publication manifest fresh after tests rewrite the active manuscript."""
-    manuscript = manuscript or canonical_manuscript_path(project_root)
-    manifest_path = manuscript.parent / "ARTIFACT-MANIFEST.json"
-    manifest = (
-        json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest_path.exists()
-        else {
-            "version": 1,
-            "paper_title": "Test",
-            "journal": "prl",
-            "created_at": "2026-03-10T00:00:00+00:00",
-            "artifacts": [],
-        }
-    )
-    manuscript_sha256 = compute_sha256(manuscript)
-    manifest["manuscript_sha256"] = manuscript_sha256
-    manifest["manuscript_mtime_ns"] = manuscript.stat().st_mtime_ns
-    tex_artifacts = [
-        artifact
-        for artifact in manifest.get("artifacts", [])
-        if isinstance(artifact, dict) and artifact.get("category") == "tex"
-    ]
-    if not tex_artifacts:
-        tex_artifacts = [
-            {
-                "artifact_id": "manuscript",
-                "category": "tex",
-                "produced_by": "tests.test_cli_commands",
-                "sources": [],
-                "metadata": {"role": "manuscript"},
-            }
-        ]
-        manifest.setdefault("artifacts", []).extend(tex_artifacts)
-    for artifact in tex_artifacts:
-        artifact["path"] = manuscript.name
-        artifact["sha256"] = manuscript_sha256
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-
 def _manuscript_entrypoint_path(
     project_root: Path,
     *,
@@ -527,264 +517,6 @@ def _manuscript_entrypoint_relpath(
     suffix: str = ".tex",
 ) -> str:
     return f"{root_name}/{CANONICAL_MANUSCRIPT_STEM}{suffix}"
-
-
-def _write_write_paper_authoring_input(
-    workspace: Path,
-    *,
-    file_name: str = "write-paper-authoring-input.json",
-    subject_slug: str = "external-authoring-test",
-) -> Path:
-    intake_path = workspace / file_name
-    intake_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "title": "External Authoring Bounds",
-                "authors": [
-                    {
-                        "name": "A. Researcher",
-                        "affiliation": "Example University",
-                    }
-                ],
-                "target_journal": "prl",
-                "subject_slug": subject_slug,
-                "central_claim": "The controlled benchmark supports a stable external-authoring draft.",
-                "claims": [
-                    {
-                        "id": "CLM-main",
-                        "statement": "The benchmarked bound is stable across the resolved regime.",
-                        "evidence": {
-                            "source_note_ids": ["NOTE-main"],
-                            "result_ids": ["RES-main"],
-                            "figure_ids": ["FIG-main"],
-                            "citation_source_ids": ["cite-main"],
-                        },
-                    }
-                ],
-                "source_notes": [
-                    {
-                        "id": "NOTE-main",
-                        "path": "notes/main-result.md",
-                        "summary": "Summarizes the decisive benchmark and fit stability.",
-                    }
-                ],
-                "results": [
-                    {
-                        "id": "RES-main",
-                        "summary": "Main fitted bound with uncertainty band.",
-                        "source_note_ids": ["NOTE-main"],
-                    }
-                ],
-                "figures": [
-                    {
-                        "id": "FIG-main",
-                        "path": "figures/main-bound.pdf",
-                        "caption": "Benchmark comparison supporting the main bound.",
-                        "source_note_ids": ["NOTE-main"],
-                    }
-                ],
-                "citation_sources": [
-                    {
-                        "source_type": "paper",
-                        "reference_id": "cite-main",
-                        "title": "Benchmark Recovery in a Controlled Regime",
-                        "authors": ["A. Author", "B. Author"],
-                        "year": "2024",
-                        "arxiv_id": "2401.12345",
-                    }
-                ],
-                "notation_note": "Use c = ħ = 1 throughout the draft.",
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    return intake_path
-
-
-def _write_binary_pdf(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(
-        b"%PDF-1.7\n%\xe2\xe3\xcf\xd3\n"
-        b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
-        b"2 0 obj\n<< /Length 5 >>\nstream\n\x80\x81\xff\x00\xfe\nendstream\nendobj\n"
-        b"trailer\n<< /Root 1 0 R >>\n%%EOF\n"
-    )
-    return path
-
-
-def _write_minimal_docx(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(
-            "[Content_Types].xml",
-            (
-                '<?xml version="1.0" encoding="UTF-8"?>'
-                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-                '<Override PartName="/word/document.xml" '
-                'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-                "</Types>"
-            ),
-        )
-        archive.writestr(
-            "word/document.xml",
-            (
-                '<?xml version="1.0" encoding="UTF-8"?>'
-                '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-                "<w:body><w:p><w:r><w:t>Theorem. Standalone OOXML intake.</w:t></w:r></w:p></w:body>"
-                "</w:document>"
-            ),
-        )
-    return path
-
-
-def _write_minimal_xlsx(path: Path) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(
-            "[Content_Types].xml",
-            (
-                '<?xml version="1.0" encoding="UTF-8"?>'
-                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-                '<Override PartName="/xl/workbook.xml" '
-                'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-                '<Override PartName="/xl/worksheets/sheet1.xml" '
-                'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-                "</Types>"
-            ),
-        )
-        archive.writestr(
-            "xl/workbook.xml",
-            (
-                '<?xml version="1.0" encoding="UTF-8"?>'
-                '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
-                'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-                '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>'
-                "</workbook>"
-            ),
-        )
-        archive.writestr(
-            "xl/_rels/workbook.xml.rels",
-            (
-                '<?xml version="1.0" encoding="UTF-8"?>'
-                '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-                '<Relationship Id="rId1" '
-                'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
-                'Target="worksheets/sheet1.xml"/>'
-                "</Relationships>"
-            ),
-        )
-        archive.writestr(
-            "xl/worksheets/sheet1.xml",
-            (
-                '<?xml version="1.0" encoding="UTF-8"?>'
-                '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-                "<sheetData>"
-                '<row r="1"><c r="A1" t="inlineStr"><is><t>claim</t></is></c>'
-                '<c r="B1" t="inlineStr"><is><t>evidence</t></is></c></row>'
-                '<row r="2"><c r="A2" t="inlineStr"><is><t>main</t></is></c>'
-                '<c r="B2" t="inlineStr"><is><t>table</t></is></c></row>'
-                "</sheetData>"
-                "</worksheet>"
-            ),
-        )
-    return path
-
-
-def _fake_pypdf_module(extracted_text: str):
-    """Return a fake pypdf module whose PdfReader yields one page with *extracted_text*."""
-    import sys
-    import types
-
-    class _FakePage:
-        def __init__(self, text: str) -> None:
-            self._text = text
-
-        def extract_text(self) -> str:
-            return self._text
-
-    class _FakeReader:
-        def __init__(self, _path: object) -> None:
-            self.pages = [_FakePage(extracted_text)]
-
-    fake = types.ModuleType("pypdf")
-    fake.PdfReader = _FakeReader  # type: ignore[attr-defined]
-
-    def _install() -> None:
-        sys.modules["pypdf"] = fake
-
-    def _uninstall() -> None:
-        sys.modules.pop("pypdf", None)
-
-    return fake, _install, _uninstall
-
-
-def _fake_pypdf_failure_module(error_message: str):
-    """Return a fake pypdf module whose PdfReader raises *error_message*."""
-    import sys
-    import types
-
-    class _FailingReader:
-        def __init__(self, _path: object) -> None:
-            raise RuntimeError(error_message)
-
-    fake = types.ModuleType("pypdf")
-    fake.PdfReader = _FailingReader  # type: ignore[attr-defined]
-
-    def _install() -> None:
-        sys.modules["pypdf"] = fake
-
-    def _uninstall() -> None:
-        sys.modules.pop("pypdf", None)
-
-    return fake, _install, _uninstall
-
-
-def _fake_pdftotext_run(extracted_text: str):
-    def _run(
-        command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-        assert Path(command[0]).name == "pdftotext"
-
-        output_arg = next(
-            (
-                Path(str(argument))
-                for argument in command[1:]
-                if isinstance(argument, str) and argument not in {"-"} and str(argument).endswith(".txt")
-            ),
-            None,
-        )
-        if output_arg is not None:
-            output_arg.parent.mkdir(parents=True, exist_ok=True)
-            output_arg.write_text(extracted_text, encoding="utf-8")
-
-        text_mode = bool(kwargs.get("text"))
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout=extracted_text if text_mode else extracted_text.encode("utf-8"),
-            stderr="" if text_mode else b"",
-        )
-
-    return _run
-
-
-def _fake_pdftotext_failure_run(stderr_text: str, *, returncode: int = 1):
-    def _run(
-        command: list[str], **kwargs: object
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-        assert Path(command[0]).name == "pdftotext"
-
-        text_mode = bool(kwargs.get("text"))
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=returncode,
-            stdout="" if text_mode else b"",
-            stderr=stderr_text if text_mode else stderr_text.encode("utf-8"),
-        )
-
-    return _run
 
 
 def _write_review_stage_artifacts(
@@ -975,157 +707,6 @@ def _write_review_stage_artifacts(
                 ),
                 encoding="utf-8",
             )
-
-
-def _write_internal_publication_artifacts(project_root: Path, artifact_names: tuple[str, ...]) -> None:
-    """Mirror publication review artifacts into the removed internal planning location."""
-    internal_dir = project_root / "GPD" / "paper"
-    internal_dir.mkdir(parents=True, exist_ok=True)
-    paper_dir = project_root / "paper"
-    for artifact_name in artifact_names:
-        source = paper_dir / artifact_name
-        (internal_dir / artifact_name).write_bytes(source.read_bytes())
-
-
-def _write_secondary_manuscript_root(project_root: Path, *, root_name: str = "manuscript") -> Path:
-    manuscript_dir = project_root / root_name
-    manuscript_dir.mkdir(parents=True, exist_ok=True)
-    manuscript = manuscript_dir / _CANONICAL_MANUSCRIPT_BASENAME
-    manuscript.write_text(
-        "\\documentclass{article}\n\\begin{document}\nSecondary manuscript.\n\\end{document}\n",
-        encoding="utf-8",
-    )
-    (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "prl",
-                "created_at": "2026-03-10T00:00:00+00:00",
-                "manuscript_sha256": compute_sha256(manuscript),
-                "manuscript_mtime_ns": manuscript.stat().st_mtime_ns,
-                "artifacts": [
-                    {
-                        "artifact_id": f"manuscript-{root_name}",
-                        "category": "tex",
-                        "path": _CANONICAL_MANUSCRIPT_BASENAME,
-                        "sha256": compute_sha256(manuscript),
-                        "produced_by": "tests.test_cli_commands",
-                        "sources": [],
-                        "metadata": {"role": "manuscript"},
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    return manuscript
-
-
-def _write_managed_publication_manuscript(
-    project_root: Path,
-    *,
-    subject_slug: str = "curvature-flow",
-    stem: str = "managed_manuscript",
-) -> Path:
-    manuscript_dir = project_root / "GPD" / "publication" / subject_slug / "manuscript"
-    manuscript_dir.mkdir(parents=True, exist_ok=True)
-    manuscript = manuscript_dir / f"{stem}.tex"
-    manuscript.write_text(
-        "\\documentclass{article}\n\\begin{document}\nManaged manuscript.\n\\end{document}\n",
-        encoding="utf-8",
-    )
-    compiled_manuscript = manuscript.with_suffix(".pdf")
-    compiled_manuscript.write_bytes(b"%PDF-1.4\n% fake managed arxiv submission pdf\n")
-    (manuscript_dir / "PAPER-CONFIG.json").write_text(
-        json.dumps(
-            {
-                "title": "Managed Manuscript",
-                "output_filename": stem,
-                "authors": [{"name": "A. Researcher"}],
-                "abstract": "Abstract.",
-                "sections": [{"heading": "Introduction", "content": "Managed manuscript."}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Managed Manuscript",
-                "journal": "prl",
-                "created_at": "2026-03-10T00:00:00+00:00",
-                "manuscript_sha256": compute_sha256(manuscript),
-                "manuscript_mtime_ns": manuscript.stat().st_mtime_ns,
-                "artifacts": [
-                    {
-                        "artifact_id": "managed-manuscript",
-                        "category": "tex",
-                        "path": f"{stem}.tex",
-                        "sha256": compute_sha256(manuscript),
-                        "produced_by": "tests.test_cli_commands",
-                        "sources": [],
-                        "metadata": {"role": "manuscript"},
-                    },
-                    {
-                        "artifact_id": "managed-compiled-manuscript",
-                        "category": "pdf",
-                        "path": f"{stem}.pdf",
-                        "sha256": compute_sha256(compiled_manuscript),
-                        "produced_by": "tests.test_cli_commands",
-                        "sources": [{"path": f"{stem}.tex", "role": "compiled_from"}],
-                        "metadata": {"role": "compiled_manuscript"},
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (manuscript_dir / "BIBLIOGRAPHY-AUDIT.json").write_text(
-        json.dumps(
-            {
-                "generated_at": "2026-03-10T00:00:00+00:00",
-                "total_sources": 0,
-                "resolved_sources": 0,
-                "partial_sources": 0,
-                "unverified_sources": 0,
-                "failed_sources": 0,
-                "entries": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (manuscript_dir / "reproducibility-manifest.json").write_text(
-        json.dumps(
-            {
-                "paper_title": "Managed Manuscript",
-                "date": "2026-03-10",
-                "environment": {
-                    "python_version": "3.12.1",
-                    "package_manager": "uv",
-                    "required_packages": [{"package": "numpy", "version": "1.26.4"}],
-                    "lock_file": "pyproject.toml",
-                    "system_requirements": {},
-                },
-                "execution_steps": [{"name": "run", "command": "python scripts/run.py"}],
-                "expected_results": [
-                    {"quantity": "x", "expected_value": "1", "tolerance": "0.1", "script": "scripts/run.py"}
-                ],
-                "output_files": [{"path": "results/out.json", "checksum_sha256": "a" * 64}],
-                "resource_requirements": [{"step": "run", "cpu_cores": 1, "memory_gb": 1.0}],
-                "verification_steps": ["rerun", "compare", "inspect"],
-                "minimum_viable": "1 core",
-                "recommended": "2 cores",
-                "last_verified": "2026-03-10T00:00:00+00:00",
-                "last_verified_platform": "macOS-15-arm64",
-                "random_seeds": [],
-                "seeding_strategy": "",
-            }
-        ),
-        encoding="utf-8",
-    )
-    return manuscript
 
 
 def _write_publication_response_round(

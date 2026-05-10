@@ -50,6 +50,7 @@ from gpd.core.workflow_staging import (
     resolve_workflow_stage_manifest_path,
     validate_workflow_stage_manifest_payload,
 )
+from tests.workflow_stage_test_support import assert_staged_payload_matches_manifest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NEW_PROJECT_ROOT_AUTHORITY = "workflows/new-project.md"
@@ -154,21 +155,6 @@ def _staged_init_payload_for_workflow(cwd: Path, workflow_id: str, stage_id: str
     if workflow_id == "peer-review":
         return init_peer_review(cwd, stage=stage_id)
     raise AssertionError(f"Unhandled staged init workflow {workflow_id}")
-
-
-def _assert_staged_init_payload_matches_manifest(
-    payload: dict[str, object],
-    *,
-    workflow_id: str,
-    stage_id: str,
-) -> None:
-    manifest = load_workflow_stage_manifest(workflow_id)
-    stage = manifest.stage(stage_id)
-
-    assert "staged_loading" in payload
-    assert tuple(field for field in payload if field != "staged_loading") == stage.required_init_fields
-    assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
-    assert payload["staged_loading"] == manifest.staged_loading_payload(stage_id)
 
 
 @pytest.mark.parametrize(
@@ -921,8 +907,9 @@ def test_staged_init_payloads_match_manifest_required_fields_and_loading_metadat
     for stage_id in manifest.stage_ids():
         payload = _staged_init_payload_for_workflow(tmp_path, workflow_id, stage_id)
 
-        _assert_staged_init_payload_matches_manifest(
+        assert_staged_payload_matches_manifest(
             payload,
+            manifest,
             workflow_id=workflow_id,
             stage_id=stage_id,
         )

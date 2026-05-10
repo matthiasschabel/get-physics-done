@@ -1,15 +1,15 @@
 <purpose>
-Close the phase only after execution, verification, and readiness gates have passed.
+Close the phase only after execution, verification, gap re-verification if needed, consistency checking, and read-only closeout readiness have all passed.
 </purpose>
 
 <stage_boundary>
-This stage owns roadmap/state completion, transition handoff, checkpoint cleanup, and concrete next-command rendering.
+This stage owns readiness-gated phase completion, helper-owned checkpoint cleanup after successful closeout, and final runtime next-command rendering. It does not spawn verifiers, close gaps, run consistency checks, or decide scientific status.
 </stage_boundary>
 
 <process>
 
-<step name="update_roadmap">
-Mark phase complete in ROADMAP.md (date, status).
+<step name="closeout_readiness_gate">
+Refresh only this stage before reading closeout fields:
 
 ```bash
 CLOSEOUT_INIT=$(gpd --raw init execute-phase "${PHASE_ARG}" --stage closeout)
@@ -17,55 +17,63 @@ if [ $? -ne 0 ] || [ -z "$CLOSEOUT_INIT" ]; then
   echo "ERROR: closeout init failed: $CLOSEOUT_INIT"
   exit 1
 fi
+```
+
+Use `gpd --raw stage field-access execute-phase --stage closeout --style instruction` before reading `CLOSEOUT_INIT`.
+
+Before any roadmap/state transition, confirm:
+
+- `verification_handoff` or `gap_reverification` produced a validated canonical verification report
+- canonical verification status is `passed`
+- proof-bearing work has fresh proof-redteam artifacts with `status: passed`
+- `consistency_check` completed through its child_gate
+- no bounded execution segment is active
+
+Then run the read-only readiness helper:
+
+```bash
 CLOSEOUT_READINESS=$(gpd --raw phase closeout-readiness "${phase_number}" --require-verification)
 if [ $? -ne 0 ]; then
   echo "$CLOSEOUT_READINESS"
   exit 1
 fi
+```
+
+The readiness helper is read-only. If it reports missing summaries, missing/malformed/non-passing verification, active bounded segments, proof-redteam blockers, recovery preservation, or any other blocker, stop and surface its next action. Do not repair blockers, update roadmap/state, or clean checkpoints from this stage.
+</step>
+
+<step name="complete_phase">
+Only after the gates above pass:
+
+```bash
 gpd phase complete "${phase_number}"
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage closeout --style instruction` before reading `CLOSEOUT_INIT`; closeout fields remain scoped to the manifest-selected payload.
-
-Follow `{GPD_INSTALL_DIR}/workflows/transition.md` for PROJECT.md, DECISIONS.md, and parallel phase detection. Pre-check and commit `GPD/ROADMAP.md`, `GPD/STATE.md`, the phase verification artifacts, and `GPD/REQUIREMENTS.md` with a phase-completion message.
-
+The completion helper owns the roadmap/state transition. Load broader transition policy references only after readiness is green and only if the helper reports a transition ambiguity that needs policy interpretation.
 </step>
 
 <step name="cleanup_phase_checkpoints">
-**After successful phase completion (all plans passed + verification passed):**
+After successful phase completion, ask the helper to remove only helper-owned checkpoint tags for this phase:
 
-Ask the helper to remove only helper-owned checkpoint tags for this phase. The helper preserves tags when closeout readiness reports blockers, recovery artifacts, or a preservation policy.
+```bash
+gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace phase --policy successful-closeout
+```
 
-Run `gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace phase --policy successful-closeout`. If it exits nonzero, print the helper JSON and stop; otherwise surface the helper JSON in the closeout notes.
+If cleanup exits nonzero, print the helper JSON and stop. Keep checkpoint tags when closeout readiness reported blockers, recovery artifacts, failed/skipped/rolled-back plans, verification gaps, or preservation policy.
 
-**If there were ANY failures during the phase** (even if subsequently resolved via re-execution), keep all checkpoint tags. They provide audit trail and enable future rollback if issues surface later.
-
-**Decision logic:**
-
-| Condition                               | Action                                             |
-| --------------------------------------- | -------------------------------------------------- |
-| All plans passed + verification passed  | Delete all `gpd-checkpoint-phase-{X}-*` tags       |
-| Any plans failed (even if kept partial) | Keep all checkpoint tags                           |
-| Verification found gaps                 | Keep all checkpoint tags                           |
-| Phase marked complete after gap closure | Delete checkpoint tags from successful re-run only |
-
+| Condition | Action |
+| --- | --- |
+| All plans passed, verification passed, consistency gate passed, and no recovery preservation | Delete helper-owned successful-run checkpoint tags. |
+| Any failure, skip, rollback, verification gap, active bounded segment, or recovery artifact | Keep checkpoint tags. |
+| Phase completed after gap closure | Delete checkpoint tags only for the successful re-run segment; preserve earlier audit tags. |
 </step>
 
 <step name="offer_next">
+Never end with only "ready to plan/continue" prose. After successful closeout, choose one matching variant, choose exactly one primary command, populate `stage_stop.next_runtime_command`, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print raw staged-init or field-access commands in the final answer.
 
-<continuation_routing>
-After phase completion, check the project's autonomy mode. If yolo or balanced with no pending checkpoint, auto-route to the next phase. If supervised, or if a checkpoint requires review, pause with a clear status message showing: current phase completed, why execution paused, exact next command to continue, and key artifacts to review. See `{GPD_INSTALL_DIR}/references/orchestration/continuous-execution.md` for the standard checkpoint protocol.
-</continuation_routing>
+If the next phase has no context, choose `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:discuss-phase {X+1}` and list `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:plan-phase {X+1}` as the direct-plan alternative. If the next phase already has context, choose `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`. Always list `gpd:suggest-next` as the recovery/confirmation command.
 
-Never end with only "ready to plan/continue" prose. After a successful closeout, choose exactly one matching variant, populate `stage_stop.next_runtime_command`, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print conditional "if context is missing/exists" labels or raw staged-init/field-access commands in the final answer.
-
-- If the next phase has no `*-CONTEXT.md`, make `gpd:discuss-phase {X+1}` the primary command and show `gpd:plan-phase {X+1}` as the direct-plan alternative.
-- If the next phase already has context, make `gpd:plan-phase {X+1}` the primary command.
-- Always include `gpd:suggest-next` as the shortest recovery/confirmation command when the user only wants the next action.
-
-**If more phases:**
-
-Populate the stop envelope before rendering:
+For more phases:
 
 ```yaml
 stage_stop:
@@ -81,10 +89,9 @@ stage_stop:
     - "gpd:suggest-next"
 ```
 
-```
 ## > Next Up
 
-**Phase {X+1}: {Name}** -- {Goal}
+**Phase {PHASE_NUMBER_PLUS_ONE}: {Name}** -- {Goal}
 
 Primary: `{chosen primary command}`
 
@@ -93,11 +100,8 @@ Primary: `{chosen primary command}`
 - `gpd:suggest-next` -- confirm the next action
 
 <sub>Start a fresh context window, then run the primary command above.</sub>
-```
 
-**If milestone complete:**
-
-Populate the stop envelope before rendering:
+If the milestone is complete:
 
 ```yaml
 stage_stop:
@@ -112,7 +116,6 @@ stage_stop:
     - "gpd:suggest-next"
 ```
 
-```
 ## > Next Up
 
 MILESTONE COMPLETE!
@@ -125,8 +128,6 @@ Primary: `gpd:complete-milestone`
 - `gpd:suggest-next` -- confirm the next action
 
 <sub>Start a fresh context window, then run the primary command above.</sub>
-```
-
 </step>
 
 </process>

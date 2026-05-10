@@ -29,6 +29,29 @@ PHASE_NAME = "analysis"
 PHASE_DIR = f"GPD/phases/{PHASE}-{PHASE_NAME}"
 SUMMARY_PATH = f"{PHASE_DIR}/{PHASE}-{PLAN}-SUMMARY.md"
 RESUME_PATH = f"{PHASE_DIR}/.continue-here.md"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+WAVE_RETURN_CHECKPOINT_OWNER = "src/gpd/specs/workflows/execute-phase/wave-return-checkpoint.md"
+VERIFICATION_HANDOFF_OWNER = "src/gpd/specs/workflows/execute-phase/verification-handoff.md"
+CHECKPOINT_RESUME_OWNER = "src/gpd/specs/workflows/execute-phase/checkpoint-resume.md"
+CLOSEOUT_OWNER = "src/gpd/specs/workflows/execute-phase/closeout.md"
+
+_SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO = {
+    "valid_final_plan_ready_to_execute": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "invalid_gpd_verify_work_surface": (VERIFICATION_HANDOFF_OWNER,),
+    "invalid_gpd_verify_phase_surface": (VERIFICATION_HANDOFF_OWNER,),
+    "prose_success_no_return": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "multiple_gpd_returns": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "unfenced_raw_return_candidate": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "empty_files_written_required_artifact": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "omitted_files_written_field": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "stale_artifact": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "wrong_sibling_artifact": (WAVE_RETURN_CHECKPOINT_OWNER,),
+    "checkpoint_missing_bounded_context": (WAVE_RETURN_CHECKPOINT_OWNER, CHECKPOINT_RESUME_OWNER),
+    "checkpoint_with_bounded_context": (WAVE_RETURN_CHECKPOINT_OWNER, CHECKPOINT_RESUME_OWNER),
+    "intermediate_plan_cannot_complete_phase": (WAVE_RETURN_CHECKPOINT_OWNER, CLOSEOUT_OWNER),
+    "applicator_result_prose_only": (WAVE_RETURN_CHECKPOINT_OWNER,),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,7 +233,7 @@ _EXECUTION_ROWS = (
 
 def execution_replay_rows() -> tuple[ExecutionReplayRow, ...]:
     canonical_rows = _canonical_rows_by_exact_contract()
-    return tuple(_with_canonical_metadata(row, canonical_rows) for row in _EXECUTION_ROWS)
+    return tuple(_with_split_stage_source_owners(_with_canonical_metadata(row, canonical_rows)) for row in _EXECUTION_ROWS)
 
 
 def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
@@ -270,6 +293,17 @@ def _with_canonical_metadata(
         ),
         metadata_source="canonical_fixture",
     )
+
+
+def _with_split_stage_source_owners(row: ExecutionReplayRow) -> ExecutionReplayRow:
+    split_stage_owners = tuple(
+        owner
+        for owner in _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO.get(row.scenario, ())
+        if (REPO_ROOT / owner).is_file()
+    )
+    if not split_stage_owners:
+        return row
+    return replace(row, source_owners=tuple(dict.fromkeys((*split_stage_owners, *row.source_owners))))
 
 
 def _with_behavior_contract_defaults(row: ExecutionReplayRow) -> ExecutionReplayRow:
@@ -510,8 +544,10 @@ def _score_invalid_verify_command_surface(row: ExecutionReplayRow, command: str)
     assert hint is not None
     assert hint["execution"] == "not_executed"
     assert command_token not in public_verify_tokens
+    command_failure_class = str(hint["kind"])
     if command == "gpd verify phase 02":
         assert hint["kind"] == "unknown_display_only"
+        command_failure_class = "structural_verify_phase"
 
     return ExecutionReplayOutcome(
         row_id=row.row_id,
@@ -519,7 +555,7 @@ def _score_invalid_verify_command_surface(row: ExecutionReplayRow, command: str)
         result_class="blocked",
         accepted=False,
         mutated=False,
-        failure_classes=("invalid_verify_command_surface", str(hint["kind"])),
+        failure_classes=("invalid_verify_command_surface", command_failure_class, str(hint["kind"])),
     )
 
 

@@ -23,6 +23,7 @@ def _execute_phase_combined() -> str:
         "wave-planning.md",
         "pre-execution-specialists.md",
         "wave-dispatch.md",
+        "executor-dispatch.md",
         "checkpoint-resume.md",
         "aggregate-and-verify.md",
         "closeout.md",
@@ -41,40 +42,48 @@ def test_execute_phase_has_no_commented_pre_execution_specialist_task_spawns() -
     assert commented_task_lines == []
 
 
-def test_execute_phase_still_owns_wave_risk_and_artifact_gate_routing() -> None:
+def test_execute_phase_routes_wave_risk_without_acceptance_side_effects() -> None:
     workflow_text = _execute_phase_stage("wave-dispatch.md")
 
     assert "probe_then_fanout" in workflow_text
-    assert "artifact gate" in workflow_text.lower()
     assert "fanout" in workflow_text.lower()
+    assert "executor_dispatch" in workflow_text
+    assert "wave_return_checkpoint" in workflow_text
+    assert "proof_critic_dispatch" in workflow_text
+    assert "child_gate:" not in workflow_text
+    assert "apply-return-updates" not in workflow_text
+    assert "artifact-surfacing.md" not in workflow_text
 
 
-def test_execute_phase_gate_callsite_prose_stays_compact_without_hiding_tuple_semantics() -> None:
-    workflow_text = _execute_phase_stage("wave-dispatch.md") + "\n" + _execute_phase_stage("aggregate-and-verify.md")
+def test_executor_dispatch_owns_executor_fanout_but_not_child_acceptance() -> None:
+    dispatch = _execute_phase_stage("wave-dispatch.md")
+    executor = _execute_phase_stage("executor-dispatch.md")
 
-    assert "child artifact gate: apply" not in workflow_text
-    assert "checkpoint handling applies" not in workflow_text
-    assert workflow_text.count("run the local `child_gate` below") >= 5
-    assert workflow_text.count("This callsite owns") >= 5
-    assert 'command: "gpd --raw apply-return-updates ${SUMMARY_FILE}"' in workflow_text
-    assert "frontmatter status: passed before executor wave success" in workflow_text
-    assert "phase closeout/update_roadmap only after verifier gate and status route" in workflow_text
-    assert "mark phase complete/update_roadmap only after verifier gate and passed verdict" in workflow_text
-    assert 'failure_route: "blocked -> gpd:validate-conventions | repair_prompt_once | retry_fresh_execute_continuation | retry_once"' in workflow_text
+    assert 'subagent_type="gpd-executor"' not in dispatch
+    assert 'subagent_type="gpd-executor"' in executor
+    assert "child-readable workflow path" in executor
+    assert "- Workflow: {GPD_INSTALL_DIR}/workflows/execute-plan.md" in executor
+    assert "@{GPD_INSTALL_DIR}/workflows/execute-plan.md" not in executor
+    assert "child_gate:" not in executor
+    assert "apply-return-updates" not in executor
+    assert "wave_return_checkpoint" in executor
+    assert "proof_critic_dispatch" in executor
 
 
 def test_execute_phase_explicitly_defers_plan_local_semantics_to_execute_plan() -> None:
     workflow_text = _execute_phase_stage("wave-planning.md")
+    executor_dispatch = _execute_phase_stage("executor-dispatch.md")
     execute_plan_text = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
 
     assert "execute-plan.md owns plan-local execution semantics" in workflow_text
+    assert "`workflows/execute-plan.md` is a child-readable workflow path" in executor_dispatch
     assert "autonomy` changes who is asked and when" in execute_plan_text
     assert "first-result" in execute_plan_text
     assert "pre-fanout" in execute_plan_text
 
 
 def test_execute_workflow_fallback_defaults_match_project_config_defaults() -> None:
-    execute_phase = _execute_phase_stage("wave-planning.md") + "\n" + _execute_phase_stage("wave-dispatch.md")
+    execute_phase = _execute_phase_stage("wave-planning.md") + "\n" + _execute_phase_stage("executor-dispatch.md")
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     defaults = GPDProjectConfig()
 

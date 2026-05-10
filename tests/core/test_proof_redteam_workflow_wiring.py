@@ -54,7 +54,7 @@ def test_plan_and_execute_phase_require_proof_redteam_gates() -> None:
     assert "workflow.verifier=false" in execute_phase
     assert "sibling `{plan_id}-PROOF-REDTEAM.md` artifact" in execute_phase
     assert "`gpd-check-proof` is the canonical owner" in execute_phase
-    assert 'task(\n     subagent_type="gpd-check-proof"' in execute_phase
+    assert 'subagent_type="gpd-check-proof"' in execute_phase
     assert "If any executed plan is proof-bearing, proof verification still runs" in execute_phase
 
 

@@ -18,8 +18,15 @@ EXECUTE_PHASE_STAGE_FILES = (
     "wave-planning.md",
     "pre-execution-specialists.md",
     "wave-dispatch.md",
+    "executor-dispatch.md",
+    "proof-critic-dispatch.md",
+    "wave-return-checkpoint.md",
+    "wave-failure-menu.md",
     "checkpoint-resume.md",
     "aggregate-and-verify.md",
+    "verification-handoff.md",
+    "gap-reverification.md",
+    "consistency-check.md",
     "closeout.md",
 )
 EXECUTE_PHASE = "\n\n".join(
@@ -117,23 +124,22 @@ def test_precheck_proceed_does_not_reprompt_in_same_session() -> None:
 def test_precheck_fails_closed_when_fingerprints_are_missing() -> None:
     assert _PRECHECK_BODY, "precheck step body could not be extracted"
 
-    assert "Fail closed if either fingerprint command fails or resolves to an empty value" in _PRECHECK_BODY
+    assert "fail closed if either fingerprint command fails or resolves to an empty value" in _PRECHECK_BODY
     assert 'if [ -z "$CONTRACT_HASH" ] || [ -z "$CONTEXT_HASH" ]; then' in _PRECHECK_BODY
-    assert "do not call `gpd contract record-alignment` on this path" in _PRECHECK_BODY
-    assert "Next Up: gpd:execute-phase {N}" in _PRECHECK_BODY
+    assert "call `gpd contract record-alignment` on this path" in _PRECHECK_BODY
+    assert "branch/checkpoint writes, scripts, numerical computations, dispatches, subagents, or artifacts" in _PRECHECK_BODY
 
 
 def test_precheck_requires_explicit_interactive_answer_before_recording_alignment() -> None:
     assert _PRECHECK_BODY, "precheck step body could not be extracted"
 
     assert "Only an explicit `ask_user` answer of `Y: proceed`" in _PRECHECK_BODY
-    assert "The command invocation" in _PRECHECK_BODY
+    assert "A command invocation" in _PRECHECK_BODY
     assert "missing `ask_user` support" in _PRECHECK_BODY
-    assert "any noninteractive run is not an alignment answer" in _PRECHECK_BODY
-    assert "STOP before `gpd contract record-alignment`" in _PRECHECK_BODY
-    assert "scripts/numerical computations" in _PRECHECK_BODY
-    assert "Blocked: claim-deliverable alignment needs an explicit user answer." in _PRECHECK_BODY
-    assert 'On "Y: proceed" (or Enter from that `ask_user` prompt)' in _PRECHECK_BODY
+    assert "noninteractive run is not an alignment answer" in _PRECHECK_BODY
+    assert "STOP before branch/checkpoint writes" in _PRECHECK_BODY
+    assert "scripts, numerical computations" in _PRECHECK_BODY
+    assert "On `Y: proceed` record alignment and continue" in _PRECHECK_BODY
 
     block_idx = _PRECHECK_BODY.index("Only an explicit `ask_user` answer")
     record_idx = _PRECHECK_BODY.index(
@@ -144,11 +150,11 @@ def test_precheck_requires_explicit_interactive_answer_before_recording_alignmen
 
 def test_wave_checkpoint_authority_is_established_before_execution_work() -> None:
     checkpoint_idx = EXECUTE_PHASE.index("This is the rollback authority gate for the wave.")
-    describe_idx = EXECUTE_PHASE.index("3. **Describe what's being done (BEFORE spawning):**")
-    spawn_idx = EXECUTE_PHASE.index("4. **Spawn executor agents:**")
+    describe_idx = EXECUTE_PHASE.index("Read each selected plan's `<objective>`")
+    spawn_idx = EXECUTE_PHASE.index("Choose exactly one immediate route after the checkpoint")
 
     assert checkpoint_idx < describe_idx < spawn_idx
-    assert "before scripts, numerical computation, dispatch, subagents, artifacts" in EXECUTE_PHASE
+    assert "No scripts, numerical computation, executor dispatch, proof critic dispatch, artifact writes" in EXECUTE_PHASE
     assert "Do not run computation and then checkpoint afterward." in EXECUTE_PHASE
     assert 'gpd --raw phase checkpoint create --phase "${phase_number}" --wave "${WAVE_NUM}"' in EXECUTE_PHASE
     assert "safe_to_execute_wave: true" in EXECUTE_PHASE

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ from gpd.core.handoff_artifacts import HandoffFailureClass
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+_YAML_BLOCK_RE = re.compile(r"```ya?ml\n(?P<body>.*?)\n```", re.DOTALL)
 
 
 def _planner_gate() -> ChildGateTuple:
@@ -49,6 +51,18 @@ def _planner_gate() -> ChildGateTuple:
 
 def _gate_markdown(gate: ChildGateTuple) -> str:
     return render_child_gate_markdown(gate)
+
+
+def _workflow_child_gate(relative_path: str, gate_id: str) -> ChildGateTuple:
+    text = (WORKFLOWS_DIR / relative_path).read_text(encoding="utf-8")
+    for match in _YAML_BLOCK_RE.finditer(text):
+        body = match.group("body")
+        if "child_gate:" not in body:
+            continue
+        gate = parse_child_gate_markdown(f"```yaml\n{body}\n```")
+        if gate.id == gate_id:
+            return gate
+    raise AssertionError(f"missing child_gate {gate_id} in {relative_path}")
 
 
 def _renderer_gate() -> ChildGateTuple:
@@ -202,6 +216,33 @@ def test_child_gate_tuple_accepts_compact_prompt_tuple_shape() -> None:
     assert gate.applicator.command == "none"
     assert gate.write_allowlist == ("${PAPER_DIR}/intro.tex",)
     assert set(gate.failure_route) == set(HandoffFailureClass)
+
+
+def test_execute_phase_split_child_gates_use_canonical_tuple_fields() -> None:
+    proof_text = (WORKFLOWS_DIR / "execute-phase/proof-critic-dispatch.md").read_text(encoding="utf-8")
+    return_text = (WORKFLOWS_DIR / "execute-phase/wave-return-checkpoint.md").read_text(encoding="utf-8")
+    proof_gate = _workflow_child_gate("execute-phase/proof-critic-dispatch.md", "proof_critic_wave_audit")
+    executor_gate = _workflow_child_gate("execute-phase/wave-return-checkpoint.md", "wave_executor_plan_result")
+
+    assert "freshness_marker" not in proof_text
+    assert "freshness_marker" not in return_text
+    assert "allowed_write_paths" not in proof_text
+    assert "allowed_write_paths" not in return_text
+
+    assert proof_gate.expected_artifacts[0].path == "{phase_dir}/{plan_id}-PROOF-REDTEAM.md"
+    assert proof_gate.expected_artifacts[0].must_be_named_in_files_written is True
+    assert proof_gate.freshness is not None
+    assert proof_gate.freshness.marker == "$PROOF_HANDOFF_STARTED_AT"
+    assert proof_gate.write_allowlist == ("{phase_dir}/{plan_id}-PROOF-REDTEAM.md",)
+    assert proof_gate.status_route["checkpoint"] == "checkpoint_resume"
+
+    assert executor_gate.expected_artifacts[0].path == "${SUMMARY_FILE}"
+    assert executor_gate.expected_artifacts[0].must_be_named_in_files_written is True
+    assert executor_gate.freshness is not None
+    assert executor_gate.freshness.marker == "$EXECUTOR_HANDOFF_STARTED_AT"
+    assert executor_gate.applicator.require_passed_true is True
+    assert executor_gate.write_allowlist == ("${SUMMARY_FILE}", "{phase_dir}/**")
+    assert executor_gate.status_route["checkpoint"] == "checkpoint_resume"
 
 
 def test_parse_child_gate_markdown_accepts_raw_and_fenced_payloads() -> None:

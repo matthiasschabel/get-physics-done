@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.phase4_persona.behavior_metrics import score_behavior_metrics
 from tests.helpers.phase4_persona.execution import (
     ExecutionReplayRow,
     execution_replay_rows,
@@ -24,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_phase4_execution_replay_rows_are_provider_free_and_owned() -> None:
     rows = execution_replay_rows()
+    rows_by_scenario = {row.scenario: row for row in rows}
 
     assert len(rows) == 14
     assert len({row.row_id for row in rows}) == len(rows)
@@ -62,6 +64,12 @@ def test_phase4_execution_replay_rows_are_provider_free_and_owned() -> None:
         assert all((REPO_ROOT / owner).exists() for owner in row.source_owners)
         assert all((REPO_ROOT / owner).exists() for owner in row.test_owners)
 
+    split_owner = "src/gpd/specs/workflows/execute-phase/wave-return-checkpoint.md"
+    if (REPO_ROOT / split_owner).is_file():
+        assert split_owner in rows_by_scenario["prose_success_no_return"].source_owners
+        assert split_owner in rows_by_scenario["stale_artifact"].source_owners
+        assert split_owner in rows_by_scenario["checkpoint_missing_bounded_context"].source_owners
+
 
 @pytest.mark.parametrize("row", execution_replay_rows(), ids=lambda row: f"{row.row_id}-{row.scenario}")
 def test_phase4_persona_execution_replay(
@@ -95,6 +103,45 @@ def test_phase4_persona_execution_replay(
         assert _next_up_specificity_class(outcome.next_action_class) == row.expected_next_up_specificity_class
     assert _mutation_guard_class(row, outcome) == row.expected_mutation_guard_class
     _assert_metric_bounds(row, outcome)
+    _assert_behavior_score(row, outcome)
+
+
+def test_phase4_execution_replay_rows_pin_high_risk_behavior_classes(tmp_path: Path) -> None:
+    rows = {row.scenario: row for row in execution_replay_rows()}
+
+    for scenario in {
+        "prose_success_no_return",
+        "multiple_gpd_returns",
+        "unfenced_raw_return_candidate",
+        "omitted_files_written_field",
+        "applicator_result_prose_only",
+    }:
+        outcome = score_execution_replay_row(rows[scenario], tmp_path / scenario)
+        score = score_behavior_metrics(rows[scenario], outcome)
+
+        assert outcome.accepted is False
+        assert outcome.mutated is False
+        assert score.metric_counts["schema_repair_loop_count"] >= 1
+        assert "return_envelope" in score.structured_authority_sources
+        assert "return_repair_classifier" in score.structured_authority_sources
+
+    for scenario in {"stale_artifact", "wrong_sibling_artifact"}:
+        outcome = score_execution_replay_row(rows[scenario], tmp_path / scenario)
+        score = score_behavior_metrics(rows[scenario], outcome)
+
+        assert outcome.accepted is False
+        assert outcome.mutated is False
+        assert score.metric_counts["stale_artifact_trust_count"] == 0
+        assert "artifact_gate" in score.structured_authority_sources
+
+    invalid_phase = score_execution_replay_row(rows["invalid_gpd_verify_phase_surface"], tmp_path / "invalid-phase")
+    assert "structural_verify_phase" in invalid_phase.failure_classes
+
+    checkpoint = score_execution_replay_row(rows["checkpoint_missing_bounded_context"], tmp_path / "checkpoint")
+    checkpoint_score = score_behavior_metrics(rows["checkpoint_missing_bounded_context"], checkpoint)
+    assert checkpoint.accepted is False
+    assert checkpoint.mutated is False
+    assert "bounded_continuation" in checkpoint_score.structured_authority_sources
 
 
 def _smoothness_class(row: ExecutionReplayRow, outcome) -> str:
@@ -140,8 +187,29 @@ def _mutation_guard_class(row: ExecutionReplayRow, outcome) -> str:
 
 
 def _assert_metric_bounds(row: ExecutionReplayRow, outcome) -> None:
+    score = score_behavior_metrics(row, outcome)
     for metric_name, expected_count in row.expected_metric_bounds:
-        assert _observed_metric_count(metric_name, row, outcome) == expected_count
+        observed = _observed_metric_count(metric_name, row, outcome)
+        shared_observed = score.metric_counts[metric_name]
+        if expected_count == 0:
+            assert observed == expected_count
+            assert shared_observed == expected_count
+        else:
+            assert observed >= expected_count
+            assert shared_observed >= expected_count
+
+
+def _assert_behavior_score(row: ExecutionReplayRow, outcome) -> None:
+    score = score_behavior_metrics(row, outcome)
+
+    assert score.row_id == row.row_id
+    assert score.surface == row.surface
+    assert score.scenario == row.scenario
+    assert score.metric_classes["schema_wrestling_class"] == row.expected_schema_wrestling_class
+    assert score.metric_classes["next_up_specificity_class"] == row.expected_next_up_specificity_class
+    assert score.metric_classes["mutation_guard_class"] == row.expected_mutation_guard_class
+    assert all(isinstance(value, int) for value in score.metric_counts.values())
+    assert all(isinstance(value, str) for value in score.metric_classes.values())
 
 
 def _observed_metric_count(metric_name: str, row: ExecutionReplayRow, outcome) -> int:

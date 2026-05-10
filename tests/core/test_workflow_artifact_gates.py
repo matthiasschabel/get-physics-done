@@ -52,6 +52,28 @@ def test_plan_phase_requires_plan_artifacts_before_accepting_success() -> None:
     assert "complete orchestrator-owned fenced YAML `MAIN_CONTEXT_PLAN_RETURN`" in plan_phase
 
 
+def test_execute_phase_wave_return_artifacts_surface_only_after_executor_gate() -> None:
+    wave_return = _read("execute-phase/wave-return-checkpoint.md")
+    gate = _child_gate(wave_return, "wave_executor_plan_result")
+
+    assert gate.expected_artifacts[0].path == "${SUMMARY_FILE}"
+    assert gate.allowed_roots == ("{phase_dir}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$EXECUTOR_HANDOFF_STARTED_AT"
+    assert any("--require-files-written" in validator for validator in gate.validators)
+    assert any('--fresh-after "$EXECUTOR_HANDOFF_STARTED_AT"' in validator for validator in gate.validators)
+    assert "proof-redteam artifact exists and reports status: passed when proof-bearing" in gate.validators
+    assert gate.applicator.command == "gpd --raw apply-return-updates ${SUMMARY_FILE}"
+    assert gate.applicator.require_passed_true is True
+
+    gate_idx = wave_return.index('id: "wave_executor_plan_result"')
+    artifact_idx = wave_return.index("## Artifacts: Wave {N}")
+    assert gate_idx < artifact_idx
+    assert "Surface artifacts only after the executor gate and applicator have passed." in wave_return
+    assert "artifact-surfacing.md` for artifact class definitions and review priority rules." in wave_return
+    assert "contract deliverable that is the `subject` of an acceptance test" in wave_return
+
+
 def test_verify_work_rechecks_proof_redteam_artifact_after_repair() -> None:
     verify_work = _read("verify-work.md")
 

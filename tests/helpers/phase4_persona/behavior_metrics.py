@@ -103,6 +103,7 @@ _ARTIFACT_STALE_OR_MISSING_CLASSES = frozenset(
 )
 _UNSUPPORTED_COMPLETION_CLASSES = frozenset(
     {
+        "applicator_output_only",
         "canonical_verification_missing",
         "closeout_authority_blocks_premature_completion",
         "missing_verification",
@@ -112,6 +113,24 @@ _UNSUPPORTED_COMPLETION_CLASSES = frozenset(
         "return_missing",
         "verification_missing",
         "verification_non_passing",
+    }
+)
+_PREMATURE_COMPLETION_ATTEMPT_CLASSES = frozenset(
+    {
+        "applicator_output_only",
+        "closeout_bypass",
+        "closeout_authority_blocks_premature_completion",
+        "intermediate_plan_completion_blocked",
+        "unsupported_completion_claim",
+    }
+)
+_PROSE_CLAIM_ATTEMPT_CLASSES = frozenset(
+    {
+        "ambiguous_multiple_returns",
+        "applicator_output_only",
+        "prose_success_no_return",
+        "return_malformed_blocking",
+        "return_missing",
     }
 )
 _QUESTION_CLASSES = frozenset(
@@ -224,7 +243,7 @@ def score_behavior_metrics(
     source_repair_classes = _source_repair_classes(source_text)
     schema_classes = _unique_tokens((*failure_classes, *source_repair_classes))
 
-    commands = _tokens(outcome_view.get("commands"))
+    commands = _command_strings(outcome_view.get("commands"))
     next_action_class = _string_or_none(outcome_view.get("next_action_class")) or _string_or_none(
         row_view.get("expected_next_action_class")
     )
@@ -266,6 +285,7 @@ def score_behavior_metrics(
     )
     unsupported_completion_count = _unsupported_completion_claim_count(
         failure_classes,
+        scenario=str(row_view.get("scenario", "")),
         result_class=result_class,
         accepted=accepted,
         ready=ready,
@@ -304,9 +324,10 @@ def score_behavior_metrics(
     danger_classes = []
     if stale_trust_count:
         danger_classes.append("stale_artifact_trust")
-    if prose_mismatch_count:
+    unsafe_success = accepted is True or ready is True or mutated or _is_ready_or_accepted_result(result_class)
+    if prose_mismatch_count and unsafe_success:
         danger_classes.append("prose_state_mismatch")
-    if unsupported_completion_count:
+    if unsupported_completion_count and unsafe_success:
         danger_classes.append("unsupported_completion_claim")
     if unexpected_write_count:
         danger_classes.append(mutation_guard_class)
@@ -405,11 +426,9 @@ def classify_smoothness(
     mutation_guard = metric_classes.get("mutation_guard_class", "no_write")
     hard_regression_keys = (
         "invalid_command_suggestion_count",
-        "prose_claim_mismatch_count",
         "stale_artifact_trust_count",
         "post_stop_activity_count",
         "unexpected_write_count",
-        "unsupported_completion_claim_count",
     )
     if any(int(metric_counts.get(key, 0)) > 0 for key in hard_regression_keys):
         return "regressed"
@@ -507,16 +526,23 @@ def _invalid_command_suggestion_count(
     count = 0
     for command in commands:
         command_class = classify_command_suggestion(command, expected_action=expected_action, phase=None)
-        if command_class in {KIND_UNKNOWN_DISPLAY_ONLY, "structural_verify_phase"} and _expects_command_route(
-            next_action_class
+        if command_class == "structural_verify_phase" and expected_action == "verify-work":
+            count += 1
+        elif (
+            command_class == KIND_UNKNOWN_DISPLAY_ONLY
+            and expected_action is not None
+            and _expects_command_route(next_action_class)
         ):
             count += 1
     runtime_failures = {
         failure
         for failure in failure_classes
-        if failure.endswith("_unexpected_runtime_command")
-        or failure.endswith("_structural_verify_phase")
-        or failure.endswith("_missing_verify_work_token")
+        if not failure.startswith("no_")
+        and (
+            failure.endswith("_unexpected_runtime_command")
+            or failure.endswith("_structural_verify_phase")
+            or failure.endswith("_missing_verify_work_token")
+        )
     }
     return count + len(runtime_failures)
 
@@ -560,6 +586,8 @@ def _prose_state_mismatch_count(
     ready: bool | None,
     state_status_class: str | None,
 ) -> int:
+    if set(failure_classes) & _PROSE_CLAIM_ATTEMPT_CLASSES:
+        return 1
     if not (accepted is True or ready is True or _is_ready_or_accepted_result(result_class)):
         return 0
     if set(failure_classes) & (_UNSUPPORTED_COMPLETION_CLASSES | _ARTIFACT_STALE_OR_MISSING_CLASSES):
@@ -572,10 +600,15 @@ def _prose_state_mismatch_count(
 def _unsupported_completion_claim_count(
     failure_classes: tuple[str, ...],
     *,
+    scenario: str,
     result_class: str,
     accepted: bool | None,
     ready: bool | None,
 ) -> int:
+    if scenario == "intermediate_plan_cannot_complete_phase":
+        return 1
+    if set(failure_classes) & _PREMATURE_COMPLETION_ATTEMPT_CLASSES:
+        return 1
     if not (accepted is True or ready is True or _is_ready_or_accepted_result(result_class)):
         return 0
     return 1 if set(failure_classes) & _UNSUPPORTED_COMPLETION_CLASSES else 0
@@ -677,6 +710,12 @@ def _structured_authority_sources(
 
 
 def _classify_next_up_from_commands(commands: tuple[str, ...], next_action_class: str | None) -> str:
+    normalized_next_action = _normalize_token(next_action_class)
+    next_action_specificity = classify_next_up_specificity(next_action_class)
+    if normalized_next_action == "verify_work":
+        return "concrete_command"
+    if next_action_specificity == "bounded_resume":
+        return "bounded_resume"
     if commands:
         command_classes = tuple(
             classify_command_suggestion(command, expected_action=_expected_command_action(next_action_class))
@@ -697,8 +736,8 @@ def _classify_next_up_from_commands(commands: tuple[str, ...], next_action_class
             command_class in {KIND_UNKNOWN_DISPLAY_ONLY, "structural_verify_phase", "none"}
             for command_class in command_classes
         ):
-            return "none"
-    return classify_next_up_specificity(next_action_class)
+            return next_action_specificity
+    return next_action_specificity
 
 
 def _source_repair_classes(source_text: str | None) -> tuple[str, ...]:
@@ -748,6 +787,20 @@ def _tokens(value: object) -> tuple[str, ...]:
     if isinstance(value, Iterable):
         return tuple(_normalize_token(item) for item in value if _normalize_token(item))
     return (_normalize_token(value),)
+
+
+def _command_strings(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        command = value.strip()
+        return (command,) if command else ()
+    if isinstance(value, Mapping):
+        return tuple(str(key).strip() for key in value if str(key).strip())
+    if isinstance(value, Iterable):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    command = str(value).strip()
+    return (command,) if command else ()
 
 
 def _unique_tokens(values: Iterable[object]) -> tuple[str, ...]:

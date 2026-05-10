@@ -21,6 +21,8 @@ class _StableCliRunner(CliRunner):
 
 
 RUNNER = _StableCliRunner()
+REPO_ROOT = Path(__file__).resolve().parents[2]
+EXECUTE_PHASE_STAGE_DIR = REPO_ROOT / "src/gpd/specs/workflows/execute-phase"
 
 
 def _write_phase_project(
@@ -246,3 +248,18 @@ def test_phase_help_lists_closeout_readiness_not_removed_verification_summary() 
     assert result.exit_code == 0
     assert "closeout-readiness" in result.output
     assert "verification-summary" not in result.output
+
+
+def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
+    workflow = (EXECUTE_PHASE_STAGE_DIR / "closeout.md").read_text(encoding="utf-8")
+
+    assert "does not spawn verifiers, close gaps, run consistency checks, or decide scientific status" in workflow
+    assert "`verification_handoff` or `gap_reverification` produced a validated canonical verification report" in workflow
+    assert "`consistency_check` completed through its child_gate" in workflow
+    assert "gpd --raw phase closeout-readiness" in workflow
+    assert "--require-verification" in workflow
+    assert 'gpd phase complete "${phase_number}"' in workflow
+    assert workflow.index("gpd --raw phase closeout-readiness") < workflow.index('gpd phase complete "${phase_number}"')
+    assert "Do not repair blockers, update roadmap/state, or clean checkpoints from this stage." in workflow
+    assert "workflows/transition.md" not in workflow
+    assert "templates/state-machine.md" not in workflow

@@ -88,3 +88,20 @@ def test_next_up_blocks_do_not_expose_raw_stage_reload_commands() -> None:
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}:{fragment}")
 
     assert offenders == []
+
+
+def test_next_up_blocks_use_runtime_verify_work_not_structural_verify_commands() -> None:
+    forbidden_fragments = (
+        "gpd verify phase",
+        "gpd:verify-phase",
+        "gpd-verify-work",
+    )
+    offenders: list[str] = []
+
+    for path in _prompt_markdown_paths(include_references=True):
+        for line_number, block in _next_up_blocks(path):
+            for fragment in forbidden_fragments:
+                if fragment in block:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}:{fragment}")
+
+    assert offenders == []

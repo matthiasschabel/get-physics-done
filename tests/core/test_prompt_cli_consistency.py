@@ -1189,8 +1189,8 @@ def test_new_project_prompt_surfaces_discuss_phase_before_planning_in_command_an
 def test_execute_phase_failure_recovery_counts_only_top_level_verification_statuses() -> None:
     workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
 
-    assert "FAILED_COUNT=$(rg -c '^status: (gaps_found|expert_needed|human_needed)$'" in workflow
-    assert "TOTAL_COUNT=$(rg -c '^status: (passed|gaps_found|expert_needed|human_needed)$'" in workflow
+    assert "Count only top-level report status and structured gap ledgers" in workflow
+    assert "do not use unanchored text search over nested `status:` fields" in workflow
     assert 'grep -c "status: failed"' not in workflow
     assert 'grep -c "status:"' not in workflow
 
@@ -1206,8 +1206,8 @@ def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None
                 "stage_stop.next_runtime_command",
                 "one matching variant",
                 "exactly one `Primary:` line",
-                "gpd:discuss-phase {X+1}",
-                "gpd:plan-phase {X+1}",
+                "gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}",
+                "gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}",
                 "gpd:suggest-next",
                 "Primary: `{chosen primary command}`",
                 "gpd:complete-milestone",

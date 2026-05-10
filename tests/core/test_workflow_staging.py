@@ -253,12 +253,27 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
         "wave_planning",
         "pre_execution_specialists",
         "wave_dispatch",
+        "executor_dispatch",
+        "proof_critic_dispatch",
+        "wave_return_checkpoint",
+        "wave_failure_menu",
         "checkpoint_resume",
         "aggregate_and_verify",
+        "verification_handoff",
+        "gap_reverification",
+        "consistency_check",
         "closeout",
     )
+    assert execute_phase_manifest.stage("wave_dispatch").next_stages == ("executor_dispatch",)
+    assert execute_phase_manifest.stage("executor_dispatch").next_stages == ("proof_critic_dispatch",)
+    assert execute_phase_manifest.stage("proof_critic_dispatch").next_stages == ("wave_return_checkpoint",)
+    assert execute_phase_manifest.stage("wave_return_checkpoint").next_stages == ("wave_failure_menu",)
+    assert execute_phase_manifest.stage("wave_failure_menu").next_stages == ("checkpoint_resume",)
     assert execute_phase_manifest.stage("checkpoint_resume").next_stages == ("aggregate_and_verify",)
-    assert execute_phase_manifest.stage("aggregate_and_verify").next_stages == ("closeout",)
+    assert execute_phase_manifest.stage("aggregate_and_verify").next_stages == ("verification_handoff",)
+    assert execute_phase_manifest.stage("verification_handoff").next_stages == ("gap_reverification",)
+    assert execute_phase_manifest.stage("gap_reverification").next_stages == ("consistency_check",)
+    assert execute_phase_manifest.stage("consistency_check").next_stages == ("closeout",)
     assert execute_phase_manifest.stage("closeout").next_stages == ()
     assert execute_phase_manifest.stage("pre_execution_specialists").loaded_authorities == (
         "workflows/execute-phase/pre-execution-specialists.md",
@@ -266,21 +281,56 @@ def test_load_workflow_stage_manifest_is_cached() -> None:
         "references/orchestration/runtime-delegation-note.md",
     )
     assert execute_phase_manifest.stage("pre_execution_specialists").next_stages == ("wave_dispatch",)
+    assert "workflows/execute-plan.md" not in execute_phase_manifest.stage("executor_dispatch").loaded_authorities
+    assert "workflows/execute-plan.md" in execute_phase_manifest.stage("executor_dispatch").must_not_eager_load
+    assert "references/orchestration/checkpoints.md" not in execute_phase_manifest.stage("wave_dispatch").loaded_authorities
+    assert "references/orchestration/agent-infrastructure.md" not in execute_phase_manifest.stage(
+        "wave_failure_menu"
+    ).loaded_authorities
     assert "templates/summary.md" in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
     assert (
         "templates/contract-results-schema.md"
-        in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
+        not in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
     )
+    assert "templates/contract-results-schema.md" in execute_phase_manifest.stage(
+        "verification_handoff"
+    ).must_not_eager_load
     assert "templates/calculation-log.md" in execute_phase_manifest.stage("aggregate_and_verify").loaded_authorities
-    assert "verification_report_skeleton_bridge" in execute_phase_manifest.stage(
+    assert "templates/paper/figure-tracker.md" not in execute_phase_manifest.stage(
+        "aggregate_and_verify"
+    ).loaded_authorities
+    assert "templates/paper/experimental-comparison.md" not in execute_phase_manifest.stage(
+        "aggregate_and_verify"
+    ).loaded_authorities
+    assert "workflows/verify-phase.md" not in execute_phase_manifest.stage("verification_handoff").loaded_authorities
+    assert "workflows/verify-phase.md" in execute_phase_manifest.stage("verification_handoff").must_not_eager_load
+    assert "references/verification/core/verification-core.md" not in execute_phase_manifest.stage(
+        "verification_handoff"
+    ).loaded_authorities
+    assert "references/verification/core/verification-core.md" in execute_phase_manifest.stage(
+        "verification_handoff"
+    ).must_not_eager_load
+    assert "verification_report_skeleton_bridge" not in execute_phase_manifest.stage(
         "aggregate_and_verify"
     ).required_init_fields
-    assert "verification_report_finalizer_bridge" in execute_phase_manifest.stage(
+    assert "verification_report_finalizer_bridge" not in execute_phase_manifest.stage(
         "aggregate_and_verify"
+    ).required_init_fields
+    assert "verification_report_skeleton_bridge" in execute_phase_manifest.stage(
+        "verification_handoff"
+    ).required_init_fields
+    assert "verification_report_finalizer_bridge" in execute_phase_manifest.stage(
+        "verification_handoff"
     ).required_init_fields
     assert "verification_report_skeleton_bridge" not in execute_phase_manifest.stage(
         "phase_bootstrap"
     ).required_init_fields
+    assert execute_phase_manifest.stage("wave_dispatch").writes_allowed == ("GPD/phases",)
+    assert execute_phase_manifest.stage("executor_dispatch").writes_allowed == ("GPD/phases",)
+    assert execute_phase_manifest.stage("wave_return_checkpoint").writes_allowed == ("GPD/phases",)
+    assert execute_phase_manifest.stage("aggregate_and_verify").writes_allowed == ("GPD/phases",)
+    assert execute_phase_manifest.stage("verification_handoff").writes_allowed == ("GPD/phases", "GPD/STATE.md")
+    assert execute_phase_manifest.stage("gap_reverification").writes_allowed == ("GPD/phases", "GPD/STATE.md")
 
 
 def test_new_project_split_stages_do_not_load_root_index_as_authority() -> None:

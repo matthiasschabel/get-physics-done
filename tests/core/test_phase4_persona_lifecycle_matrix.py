@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.phase4_persona.behavior_metrics import score_behavior_metrics
 from tests.helpers.phase4_persona.replay import (
     PersonaRow,
     load_phase4_rows,
@@ -45,3 +46,12 @@ def test_phase4_persona_lifecycle_matrix(
         assert outcome.state_status_class == row.expected_state_status_class
     if row.expected_next_action_class is not None:
         assert outcome.next_action_class == row.expected_next_action_class
+
+    score = score_behavior_metrics(row, outcome)
+    assert score.row_id == row.row_id
+    assert score.surface == row.surface
+    assert score.scenario == row.scenario
+    assert score.metric_counts["unexpected_write_count"] == 0
+    if row.expected_next_action_class == "runtime_verify_work":
+        assert score.metric_counts["invalid_command_suggestion_count"] == 0
+        assert score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"

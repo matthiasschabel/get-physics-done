@@ -31,7 +31,26 @@ SCHEMA_VERSION = PHASE4_PERSONA_SCHEMA_VERSION
 PHASE = "02"
 PHASE_NAME = "analysis"
 PHASE_READY_STATUS = "Phase complete \u2014 ready for verification"
+REPO_ROOT = Path(__file__).resolve().parents[3]
 _NON_PASSING_VERIFICATION_STATUSES = ("gaps_found", "human_needed", "expert_needed")
+
+VERIFICATION_HANDOFF_OWNER = "src/gpd/specs/workflows/execute-phase/verification-handoff.md"
+GAP_REVERIFICATION_OWNER = "src/gpd/specs/workflows/execute-phase/gap-reverification.md"
+PROOF_CRITIC_DISPATCH_OWNER = "src/gpd/specs/workflows/execute-phase/proof-critic-dispatch.md"
+CHECKPOINT_RESUME_OWNER = "src/gpd/specs/workflows/execute-phase/checkpoint-resume.md"
+CLOSEOUT_OWNER = "src/gpd/specs/workflows/execute-phase/closeout.md"
+
+_SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO = {
+    "missing_verification_blocks_required_closeout": (VERIFICATION_HANDOFF_OWNER, CLOSEOUT_OWNER),
+    "gaps_found_verification_blocks": (GAP_REVERIFICATION_OWNER, VERIFICATION_HANDOFF_OWNER),
+    "human_needed_verification_blocks": (GAP_REVERIFICATION_OWNER, VERIFICATION_HANDOFF_OWNER),
+    "expert_needed_verification_blocks": (GAP_REVERIFICATION_OWNER, VERIFICATION_HANDOFF_OWNER),
+    "passed_verification_closeout_ready": (VERIFICATION_HANDOFF_OWNER, CLOSEOUT_OWNER),
+    "bounded_segment_blocks_closeout": (CHECKPOINT_RESUME_OWNER, CLOSEOUT_OWNER),
+    "proof_bearing_without_passed_proof_redteam_blocks_closeout": (PROOF_CRITIC_DISPATCH_OWNER, CLOSEOUT_OWNER),
+    "completed_phase_suggests_runtime_verify_work": (VERIFICATION_HANDOFF_OWNER,),
+    "closeout_readiness_read_only_no_mutation": (CLOSEOUT_OWNER,),
+}
 
 
 class _MonkeyPatch(Protocol):
@@ -180,7 +199,7 @@ def completion_replay_rows() -> tuple[CompletionReplayRow, ...]:
     """Return the provider-free Phase 4 completion replay matrix."""
 
     canonical_rows = _canonical_rows_by_exact_contract()
-    return tuple(_with_canonical_metadata(row, canonical_rows) for row in _ROWS)
+    return tuple(_with_split_stage_source_owners(_with_canonical_metadata(row, canonical_rows)) for row in _ROWS)
 
 
 def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
@@ -240,6 +259,17 @@ def _with_canonical_metadata(
         ),
         metadata_source="canonical_fixture",
     )
+
+
+def _with_split_stage_source_owners(row: CompletionReplayRow) -> CompletionReplayRow:
+    split_stage_owners = tuple(
+        owner
+        for owner in _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO.get(row.scenario, ())
+        if (REPO_ROOT / owner).is_file()
+    )
+    if not split_stage_owners:
+        return row
+    return replace(row, source_owners=tuple(dict.fromkeys((*split_stage_owners, *row.source_owners))))
 
 
 def _with_behavior_contract_defaults(row: CompletionReplayRow) -> CompletionReplayRow:
@@ -527,6 +557,7 @@ def _score_non_passing_verification_blocks(root: Path, verification_status: str)
         result_class="blocked_verification",
         failure_classes=(
             verification_status,
+            *((f"{verification_status}_stop",) if verification_status in {"human_needed", "expert_needed"} else ()),
             "non_passing_verification",
             "recorded_blocked" if record_result.recorded else "record_failed",
             *_closeout_failure_classes(readiness),
@@ -570,17 +601,40 @@ def _score_bounded_segment_blocks_closeout(root: Path) -> CompletionReplayOutcom
 
 
 def _score_proof_bearing_without_passed_proof_redteam_blocks_closeout(root: Path) -> CompletionReplayOutcome:
-    phase_dir = _write_phase_project(root, verification_status="passed", proof_bearing=True)
-    skeleton = build_proof_redteam_skeleton(
-        claim_id="claim-a",
-        proof_artifact_paths=[f"GPD/phases/{PHASE}-{PHASE_NAME}/{PHASE}-01-PLAN.md"],
-        status="gaps_found",
+    missing = _score_proof_redteam_case(root / "proof-redteam-missing", proof_redteam_status=None)
+    non_passing = _score_proof_redteam_case(root / "proof-redteam-non-passing", proof_redteam_status="gaps_found")
+
+    return replace(
+        non_passing,
+        failure_classes=tuple(
+            dict.fromkeys(
+                (
+                    *missing.failure_classes,
+                    "proof_redteam_missing",
+                    *non_passing.failure_classes,
+                    "proof_redteam_non_passing",
+                )
+            )
+        ),
     )
-    (phase_dir / f"{PHASE}-01-PROOF-REDTEAM.md").write_text(skeleton.markdown_draft, encoding="utf-8")
+
+
+def _score_proof_redteam_case(root: Path, *, proof_redteam_status: str | None) -> CompletionReplayOutcome:
+    phase_dir = _write_phase_project(root, verification_status="passed", proof_bearing=True)
+    if proof_redteam_status is not None:
+        skeleton = build_proof_redteam_skeleton(
+            claim_id="claim-a",
+            proof_artifact_paths=[f"GPD/phases/{PHASE}-{PHASE_NAME}/{PHASE}-01-PLAN.md"],
+            status=proof_redteam_status,
+        )
+        (phase_dir / f"{PHASE}-01-PROOF-REDTEAM.md").write_text(skeleton.markdown_draft, encoding="utf-8")
     before = _snapshot_tree(root / "GPD")
 
     result = phase_closeout_readiness(root, PHASE, require_verification=True)
 
+    assert result.ready is False
+    assert result.proof_redteam_required is True
+    assert result.proof_redteam_ready is False
     return _readiness_outcome(
         result=result,
         finding_id="proof_redteam_not_passed_blocks_closeout",

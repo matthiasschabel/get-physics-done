@@ -18,9 +18,61 @@ STAGE_AUTHORITY_BY_ID = {
     "wave_planning": "workflows/execute-phase/wave-planning.md",
     "pre_execution_specialists": "workflows/execute-phase/pre-execution-specialists.md",
     "wave_dispatch": "workflows/execute-phase/wave-dispatch.md",
+    "executor_dispatch": "workflows/execute-phase/executor-dispatch.md",
+    "proof_critic_dispatch": "workflows/execute-phase/proof-critic-dispatch.md",
+    "wave_return_checkpoint": "workflows/execute-phase/wave-return-checkpoint.md",
+    "wave_failure_menu": "workflows/execute-phase/wave-failure-menu.md",
     "checkpoint_resume": "workflows/execute-phase/checkpoint-resume.md",
     "aggregate_and_verify": "workflows/execute-phase/aggregate-and-verify.md",
+    "verification_handoff": "workflows/execute-phase/verification-handoff.md",
+    "gap_reverification": "workflows/execute-phase/gap-reverification.md",
+    "consistency_check": "workflows/execute-phase/consistency-check.md",
     "closeout": "workflows/execute-phase/closeout.md",
+}
+
+TARGET_STAGE_EDGES = {
+    "phase_bootstrap": ("phase_classification",),
+    "phase_classification": ("wave_planning",),
+    "wave_planning": ("pre_execution_specialists",),
+    "pre_execution_specialists": ("wave_dispatch",),
+    "wave_dispatch": ("executor_dispatch",),
+    "executor_dispatch": ("proof_critic_dispatch",),
+    "proof_critic_dispatch": ("wave_return_checkpoint",),
+    "wave_return_checkpoint": ("wave_failure_menu",),
+    "wave_failure_menu": ("checkpoint_resume",),
+    "checkpoint_resume": ("aggregate_and_verify",),
+    "aggregate_and_verify": ("verification_handoff",),
+    "verification_handoff": ("gap_reverification",),
+    "gap_reverification": ("consistency_check",),
+    "consistency_check": ("closeout",),
+    "closeout": (),
+}
+
+HEAVY_AUTHORITIES = {
+    "workflows/execute-plan.md",
+    "workflows/verify-phase.md",
+    "references/orchestration/checkpoints.md",
+    "references/orchestration/agent-infrastructure.md",
+    "references/verification/core/verification-core.md",
+    "references/execution/github-lifecycle.md",
+    "templates/recovery-plan.md",
+    "templates/paper/figure-tracker.md",
+    "templates/paper/experimental-comparison.md",
+}
+
+WAVE_FAMILY_STAGES = {
+    "wave_dispatch",
+    "executor_dispatch",
+    "proof_critic_dispatch",
+    "wave_return_checkpoint",
+    "wave_failure_menu",
+}
+
+VERIFICATION_FAMILY_STAGES = {
+    "aggregate_and_verify",
+    "verification_handoff",
+    "gap_reverification",
+    "consistency_check",
 }
 
 
@@ -45,6 +97,61 @@ def test_execute_phase_manifest_uses_stage_authorities_without_root_eager_loads(
         assert (WORKFLOWS_DIR / authority.removeprefix("workflows/")).is_file()
 
 
+def test_execute_phase_manifest_uses_phase4_stage_topology() -> None:
+    manifest = load_workflow_stage_manifest("execute-phase")
+
+    assert manifest.stage_ids() == tuple(TARGET_STAGE_EDGES)
+    for stage_id, next_stages in TARGET_STAGE_EDGES.items():
+        assert manifest.stage(stage_id).next_stages == next_stages
+
+
+def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_unconditional() -> None:
+    manifest = load_workflow_stage_manifest("execute-phase")
+
+    for stage in manifest.stages:
+        assert not HEAVY_AUTHORITIES.intersection(stage.loaded_authorities), stage.id
+
+    executor_dispatch = manifest.stage("executor_dispatch")
+    verification_handoff = manifest.stage("verification_handoff")
+    aggregate = manifest.stage("aggregate_and_verify")
+    closeout = manifest.stage("closeout")
+
+    conditional_by_stage = {
+        stage.id: {
+            authority
+            for conditional in stage.conditional_authorities
+            for authority in conditional.authorities
+        }
+        for stage in manifest.stages
+    }
+
+    assert "workflows/execute-plan.md" in conditional_by_stage["executor_dispatch"]
+    assert "workflows/verify-phase.md" in conditional_by_stage["verification_handoff"]
+    assert "references/verification/core/verification-core.md" in conditional_by_stage["verification_handoff"]
+    assert "templates/paper/figure-tracker.md" in conditional_by_stage["aggregate_and_verify"]
+    assert "templates/paper/experimental-comparison.md" in conditional_by_stage["aggregate_and_verify"]
+    assert "templates/recovery-plan.md" in conditional_by_stage["aggregate_and_verify"]
+    assert "references/execution/github-lifecycle.md" in conditional_by_stage["closeout"]
+
+    assert "workflows/execute-plan.md" in executor_dispatch.must_not_eager_load
+    assert "workflows/verify-phase.md" in verification_handoff.must_not_eager_load
+    assert "references/verification/core/verification-core.md" in verification_handoff.must_not_eager_load
+    assert "templates/recovery-plan.md" in aggregate.must_not_eager_load
+    assert "references/execution/github-lifecycle.md" in closeout.must_not_eager_load
+
+
+def test_execute_phase_split_stage_write_scopes_are_narrow() -> None:
+    manifest = load_workflow_stage_manifest("execute-phase")
+
+    for stage_id in ("phase_bootstrap", "phase_classification", "wave_planning", "pre_execution_specialists"):
+        assert manifest.stage(stage_id).writes_allowed == ()
+    for stage_id in (*WAVE_FAMILY_STAGES, "checkpoint_resume", "aggregate_and_verify", "consistency_check"):
+        assert manifest.stage(stage_id).writes_allowed == ("GPD/phases",)
+    for stage_id in ("verification_handoff", "gap_reverification"):
+        assert manifest.stage(stage_id).writes_allowed == ("GPD/phases", "GPD/STATE.md")
+    assert manifest.stage("closeout").writes_allowed == ("GPD/ROADMAP.md", "GPD/STATE.md", "GPD/phases")
+
+
 def test_execute_phase_command_bootstraps_only_first_stage_authority() -> None:
     command = COMMAND_PATH.read_text(encoding="utf-8")
 
@@ -64,7 +171,14 @@ def test_execute_phase_bootstrap_defers_late_authorities() -> None:
         "workflows/execute-phase.md",
         "workflows/execute-phase/wave-planning.md",
         "workflows/execute-phase/wave-dispatch.md",
+        "workflows/execute-phase/executor-dispatch.md",
+        "workflows/execute-phase/proof-critic-dispatch.md",
+        "workflows/execute-phase/wave-return-checkpoint.md",
+        "workflows/execute-phase/wave-failure-menu.md",
         "workflows/execute-phase/aggregate-and-verify.md",
+        "workflows/execute-phase/verification-handoff.md",
+        "workflows/execute-phase/gap-reverification.md",
+        "workflows/execute-phase/consistency-check.md",
         "workflows/execute-phase/closeout.md",
         "references/verification/core/proof-redteam-workflow-gate.md",
         "references/orchestration/runtime-delegation-note.md",
@@ -92,34 +206,42 @@ def test_execute_phase_bootstrap_defers_late_authorities() -> None:
 
 def test_execute_phase_late_authorities_live_in_owning_stages() -> None:
     wave_planning = _stage_text("wave-planning.md")
-    wave_dispatch = _stage_text("wave-dispatch.md")
+    executor_dispatch = _stage_text("executor-dispatch.md")
+    proof_critic_dispatch = _stage_text("proof-critic-dispatch.md")
     aggregate = _stage_text("aggregate-and-verify.md")
+    verification_handoff = _stage_text("verification-handoff.md")
+    gap_reverification = _stage_text("gap-reverification.md")
     closeout = _stage_text("closeout.md")
 
     assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" in wave_planning
-    assert "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md" in wave_dispatch
-    assert "gpd-check-proof" in wave_dispatch
-    assert "verification_report_skeleton_bridge" in aggregate
-    assert "verification_report_finalizer_bridge" in aggregate
-    assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in aggregate
+    assert "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md" in executor_dispatch
+    assert "{GPD_INSTALL_DIR}/workflows/execute-plan.md" in executor_dispatch
+    assert "gpd-check-proof" in proof_critic_dispatch
+    assert "verification_report_skeleton_bridge" in verification_handoff
+    assert "verification_report_finalizer_bridge" in verification_handoff
+    assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in verification_handoff
+    assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in gap_reverification
     assert "{GPD_INSTALL_DIR}/templates/recovery-plan.md" in aggregate
-    assert "{GPD_INSTALL_DIR}/workflows/transition.md" in closeout
+    assert "gpd:complete-milestone" in closeout
 
 
 def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> None:
     checkpoint = _stage_text("checkpoint-resume.md")
-    aggregate = _stage_text("aggregate-and-verify.md")
+    verification_handoff = _stage_text("verification-handoff.md")
+    gap_reverification = _stage_text("gap-reverification.md")
+    consistency_check = _stage_text("consistency-check.md")
     closeout = _stage_text("closeout.md")
 
     assert "stage: checkpoint_resume" in checkpoint
     assert 'next_runtime_command: "gpd:resume-work"' in checkpoint
-    assert "stage: aggregate_and_verify" in aggregate
-    assert 'next_runtime_command: "gpd:plan-phase {X} --gaps"' in aggregate
-    assert "stage_stop.next_runtime_command" in aggregate
+    assert "stage: verification_handoff" in verification_handoff
+    assert 'next_runtime_command: "gpd:plan-phase {PHASE_NUMBER} --gaps"' in verification_handoff
+    assert "stage: gap_reverification" in gap_reverification
+    assert "stage_stop.next_runtime_command" in consistency_check
     assert "stage: closeout" in closeout
     assert 'next_runtime_command: "gpd:complete-milestone"' in closeout
 
-    for block in _next_up_blocks(checkpoint + "\n" + aggregate + "\n" + closeout):
+    for block in _next_up_blocks(checkpoint + "\n" + verification_handoff + "\n" + consistency_check + "\n" + closeout):
         assert block.count("Primary:") == 1
         assert "gpd --raw init" not in block
         assert "field-access" not in block

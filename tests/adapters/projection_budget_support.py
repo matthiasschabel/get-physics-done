@@ -20,9 +20,9 @@ STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
     },
     "execute-phase": {
         "claude-code": 3_426,
-        "codex": 5_987,
-        "gemini": 6_478,
-        "opencode": 5_902,
+        "codex": 6_005,
+        "gemini": 6_496,
+        "opencode": 5_920,
     },
     "new-project": {
         "claude-code": 9_740,

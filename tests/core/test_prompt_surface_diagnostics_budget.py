@@ -19,6 +19,19 @@ PROMPT_KIND_BUDGETS = {
     "workflow": {"lines": 24_500, "chars": 1_000_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_800, "chars": 185_000}
+EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_707
+EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 95_000
+EXECUTE_PHASE_SPLIT_FAMILY_STAGES = (
+    "wave_dispatch",
+    "executor_dispatch",
+    "proof_critic_dispatch",
+    "wave_return_checkpoint",
+    "wave_failure_menu",
+    "aggregate_and_verify",
+    "verification_handoff",
+    "gap_reverification",
+    "consistency_check",
+)
 MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET = 0
 MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET = 1
 ROOT_WORKFLOW_AUTHORITY_STAGE_BUDGET = 0
@@ -54,8 +67,8 @@ TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 25
 TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 45
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
     "status_handling": 110,
-    "files_written_freshness": 26,
-    "stale_artifact_rejection": 30,
+    "files_written_freshness": 28,
+    "stale_artifact_rejection": 33,
     "fresh_continuation": 38,
     "heading_prose_non_authority": 20,
     "no_synthesized_child_gpd_return": 3,
@@ -197,6 +210,16 @@ def _stage_diagnostic_count(stage_diagnostics: dict[str, object], *field_names: 
     raise AssertionError(f"stage diagnostics missing expected count field from {field_names}")
 
 
+def _workflow_stage_diagnostics(payload: dict[str, object], workflow_id: str) -> dict[str, object]:
+    workflows = payload["stage_diagnostics"]
+    assert isinstance(workflows, list)
+    for workflow in workflows:
+        assert isinstance(workflow, dict)
+        if workflow.get("workflow_id") == workflow_id:
+            return workflow
+    raise AssertionError(f"{workflow_id} staged diagnostics were not reported")
+
+
 def test_prompt_surface_aggregate_budgets_stay_under_ceilings() -> None:
     payload = _prompt_surface_payload(("all",), (), False)
     totals = payload["totals"]
@@ -263,6 +286,34 @@ def test_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings() -> No
         "stage_diagnostics first-turn char budget exceeded: "
         f"observed={first_turn_chars} max={STAGE_FIRST_TURN_BUDGET['chars']}"
     )
+
+
+def test_execute_phase_split_stage_budgets_stay_under_phase4_caps() -> None:
+    payload = _prompt_surface_payload(("command",), (), False)
+    workflow = _workflow_stage_diagnostics(payload, "execute-phase")
+
+    first_turn_chars = workflow["first_turn_char_count"]
+    assert isinstance(first_turn_chars, int)
+    assert first_turn_chars <= EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET, (
+        "execute-phase first-turn char budget exceeded: "
+        f"observed={first_turn_chars} max={EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET}"
+    )
+
+    violation_count = workflow["violation_count"]
+    assert isinstance(violation_count, int)
+    assert violation_count <= MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
+
+    stages = workflow["stages"]
+    assert isinstance(stages, list)
+    stage_by_id = {stage["stage_id"]: stage for stage in stages if isinstance(stage, dict)}
+    for stage_id in EXECUTE_PHASE_SPLIT_FAMILY_STAGES:
+        stage = stage_by_id[stage_id]
+        observed = stage["eager_char_count"]
+        assert isinstance(observed, int)
+        assert observed < EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET, (
+            f"{stage_id} eager char budget exceeded: "
+            f"observed={observed} max<{EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET}"
+        )
 
 
 def test_root_workflow_authority_frontload_stays_within_advisory_budget() -> None:

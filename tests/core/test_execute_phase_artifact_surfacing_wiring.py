@@ -13,13 +13,16 @@ EXECUTION_REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references/execution"
 
 
 def test_execute_phase_loads_artifact_surfacing_before_using_it() -> None:
-    execute_phase = (EXECUTE_PHASE_STAGE_DIR / "wave-dispatch.md").read_text(encoding="utf-8")
+    execute_phase = (EXECUTE_PHASE_STAGE_DIR / "wave-return-checkpoint.md").read_text(encoding="utf-8")
     manifest = load_workflow_stage_manifest("execute-phase")
 
     required_reading = "references/orchestration/artifact-surfacing.md"
     later_reference = "artifact-surfacing.md` for artifact class definitions and review priority rules."
 
-    assert required_reading in manifest.stage("wave_dispatch").loaded_authorities
+    assert any(
+        required_reading in group.authorities
+        for group in manifest.stage("wave_return_checkpoint").conditional_authorities
+    )
     assert later_reference in execute_phase
     assert "contract deliverable that is the `subject` of an acceptance test" in execute_phase
     assert "contract deliverable tagged as an acceptance test" not in execute_phase

@@ -7,6 +7,9 @@ checks. It is not a CI runner.
 
 - Manual live is opt-in. Pull request, push, release, and publish jobs must not
   launch provider CLIs or receive provider secret environment names.
+- CI coverage for Phase 4 persona behavior is provider-free replay and
+  sanitized-summary validation only. CI may validate class-only evidence, but it
+  must not create live provider artifacts or start a provider runtime.
 - The operator chooses the row set, budget, provider account, runtime homes, and
   isolated workspace before any provider process is started.
 - Raw live artifacts stay ignored and operator-local under a repo-local root like
@@ -18,7 +21,8 @@ checks. It is not a CI runner.
   redaction status, and finding classes. It must not contain raw prompts,
   provider replies, stdout/stderr, transcripts, argv/env values, auth/account
   data, absolute paths, hashes, provider secret env names, command lines, or
-  token-like values.
+  token-like values. Use command/action classes and behavior metric counts
+  instead of copied prompt prose or live transcript excerpts.
 - CI may validate an already-produced sanitized summary with
   `scripts/validate_phase4_persona_summary.py`. CI must not create live provider
   artifacts or execute a provider launcher.

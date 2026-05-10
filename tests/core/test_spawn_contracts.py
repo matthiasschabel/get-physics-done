@@ -409,8 +409,8 @@ def test_execute_phase_requires_state_return_envelope_and_handoff_spot_checks() 
 
 def test_execute_phase_initial_verification_spawns_verifier_agent() -> None:
     content = _read(WORKFLOWS_DIR / "execute-phase.md")
-    start = content.index('<step name="verify_phase_goal">')
-    end = content.index("**If human_needed:**", start)
+    start = content.index('<step name="spawn_verifier">')
+    end = content.index('<step name="verifier_child_gate">', start)
     verification_step = content[start:end]
     verifier_tasks = [
         block for block in _extract_task_blocks(verification_step) if 'subagent_type="gpd-verifier"' in block.text

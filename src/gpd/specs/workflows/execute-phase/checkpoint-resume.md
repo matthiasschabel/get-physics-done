@@ -3,7 +3,7 @@ Handle checkpoint presentation, continuation prompt generation, and bounded exec
 </purpose>
 
 <stage_boundary>
-This stage owns continuation and resume state. Do not reuse wave-dispatch fields blindly, aggregate results, or perform closeout here.
+This stage owns bounded continuation and resume transport after a child returned `gpd_return.status: checkpoint`. Do not reuse wave-dispatch fields blindly, accept SUMMARY returns, run child gates, apply return updates, choose retry/skip/rollback/stop paths, aggregate results, or perform closeout here.
 </stage_boundary>
 
 <process>
@@ -23,9 +23,9 @@ Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --styl
 
 **Flow:**
 
-1. Spawn agent for checkpoint plan
-2. Agent runs until checkpoint task or validation gate -> returns structured state
-3. Agent return includes completed tasks, current blocker, awaited item, and bounded execution segment; first-result/pre-fanout pauses add gate flags, skeptical re-questioning fields, and `downstream_locked`.
+1. Receive a checkpoint return from the wave-return child gate.
+2. Confirm the return includes completed tasks, current blocker, awaited item, and bounded execution segment; first-result/pre-fanout pauses add gate flags, skeptical re-questioning fields, and `downstream_locked`.
+3. Record the bounded continuation payload; do not accept it as completed work.
 4. **Present to user:** populate the stop envelope, then render the canonical block.
 
    ```yaml

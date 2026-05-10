@@ -1,0 +1,132 @@
+<purpose>
+Run the rapid cross-phase consistency checker after verification passes and before closeout readiness can transition state.
+</purpose>
+
+<stage_boundary>
+This stage owns rapid consistency checker spawn, consistency artifact validation, malformed checker output handling, convention-repair routing, and fail-closed stops. It does not verify physics, repair conventions inline, or close the phase.
+</stage_boundary>
+
+<process>
+
+<step name="load_consistency_stage">
+Refresh only this stage before reading consistency-check fields:
+
+```bash
+CONSISTENCY_CHECK_INIT=$(gpd --raw init execute-phase "${PHASE_ARG}" --stage consistency_check)
+if [ $? -ne 0 ] || [ -z "$CONSISTENCY_CHECK_INIT" ]; then
+  echo "ERROR: consistency-check stage refresh failed: $CONSISTENCY_CHECK_INIT"
+  exit 1
+fi
+```
+
+Use `gpd --raw stage field-access execute-phase --stage consistency_check --style instruction` before reading `CONSISTENCY_CHECK_INIT`.
+</step>
+
+<step name="spawn_rapid_checker">
+Resolve the checker model and set a freshness marker immediately before spawning:
+
+```bash
+CONSISTENCY_MODEL=$(gpd resolve-model gpd-consistency-checker)
+CONSISTENCY_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+```
+
+Spawn a single rapid checker:
+
+```
+task(
+  subagent_type="gpd-consistency-checker",
+  model="{consistency_model}",
+  readonly=false,
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-consistency-checker.md for your role and instructions.
+
+<mode>rapid</mode>
+<phase>{PHASE_NUMBER}</phase>
+
+Check phase {PHASE_NUMBER} results against the conventions ledger and accumulated project state.
+Use CONSISTENCY_CHECK_INIT fields first: convention_lock, derived_convention_lock, SUMMARY frontmatter convention fields, state_load_source, and state_integrity_issues.
+Use `gpd convention list` and file_read GPD/STATE.md / GPD/state.json only if the payload is missing or inconsistent.
+
+<spawn_contract>
+write_scope:
+  mode: scoped_write
+  allowed_paths:
+    - "{phase_dir}/CONSISTENCY-CHECK.md"
+expected_artifacts:
+  - "{phase_dir}/CONSISTENCY-CHECK.md"
+shared_state_policy: return_only
+</spawn_contract>
+
+Return exactly one typed gpd_return envelope, include files_written, and write {phase_dir}/CONSISTENCY-CHECK.md. Append the same typed YAML gpd_return block to the artifact before returning so the durable report can be validated.",
+  description="Rapid consistency check for Phase {PHASE_NUMBER}"
+)
+```
+</step>
+
+<step name="consistency_child_gate">
+Run the local child_gate before accepting the checker output. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`.
+
+```yaml
+child_gate:
+  id: "rapid_consistency_check"
+  role: "gpd-consistency-checker"
+  return_profile: "consistency_checker"
+  required_status: "completed"
+  expected_artifacts:
+    - "{phase_dir}/CONSISTENCY-CHECK.md"
+  allowed_roots:
+    - "{phase_dir}"
+  freshness_marker: "after $CONSISTENCY_HANDOFF_STARTED_AT"
+  validators:
+    - "gpd validate handoff-artifacts - --expected {phase_dir}/CONSISTENCY-CHECK.md --allowed-root {phase_dir} --required-suffix=CONSISTENCY-CHECK.md --require-status completed --require-files-written --fresh-after \"$CONSISTENCY_HANDOFF_STARTED_AT\""
+    - "readable artifact check"
+  applicator: none
+  failure_route: "fail_closed -> gpd:validate-conventions | repair_prompt_once | retry_once"
+```
+
+Also check the artifact exists before routing:
+
+```bash
+CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"
+if [ ! -r "$CONSISTENCY_REPORT" ]; then
+  echo "ERROR: consistency-check artifact missing: $CONSISTENCY_REPORT"
+  exit 1
+fi
+```
+</step>
+
+<step name="typed_status_route">
+Handle the checker response through `gpd_return.status`:
+
+- `completed`: accept only if the child_gate passes. Surface issues as warnings, then continue to `closeout`.
+- `checkpoint`: stop, surface the checkpoint payload, and route to `gpd:resume-work`.
+- `blocked`: stop and route to `gpd:validate-conventions`.
+- `failed`: stop and route to `gpd:validate-conventions`.
+
+If the checker fails to spawn, returns an error, omits `gpd_return.status`, omits `files_written`, writes no readable `CONSISTENCY-CHECK.md`, or returns malformed output, treat the consistency check as blocked. Do not infer success from prose headings or untyped routing. Do not hand-author or paste a synthetic `gpd_return` into the checker artifact from the parent stage.
+</step>
+
+<step name="convention_repair_route">
+Convention repair is out-of-line. Do not spawn `gpd-notation-coordinator` from execute-phase, do not route on checker-local prose markers, and do not accept a stale convention document as proof of repair.
+
+For every consistency-check stop, populate `stage_stop` before rendering. Do not print raw staged-init or field-access commands in `## > Next Up`; those remain runtime mechanics.
+
+| Stop | `stage_stop.status` | `reason` | `checkpoint` | `next_runtime_command` | `also_available` |
+| --- | --- | --- | --- | --- | --- |
+| checker spawn/error | `blocked` | `consistency_checker_unavailable` | `consistency_check` | `gpd:validate-conventions` | `gpd:resume-work`; `gpd:execute-phase {PHASE_NUMBER}`; `gpd:suggest-next` |
+| checker checkpoint | `checkpoint` | `consistency_checker_checkpoint` | `consistency_check` | `gpd:resume-work` | `gpd:validate-conventions`; `gpd:suggest-next` |
+| checker blocked | `blocked` | `consistency_checker_blocked` | `consistency_check` | `gpd:validate-conventions` | `gpd:resume-work`; `gpd:suggest-next` |
+| checker failed | `failed` | `consistency_checker_failed` | `consistency_check` | `gpd:validate-conventions` | `gpd:resume-work`; `gpd:suggest-next` |
+| malformed output | `blocked` | `consistency_checker_malformed_output` | `consistency_check` | `gpd:validate-conventions` | `gpd:verify-work {PHASE_NUMBER}`; `gpd:suggest-next` |
+
+## > Next Up
+
+Primary: `{stage_stop.next_runtime_command}`
+
+**Also available:**
+- `{secondary command}` -- route-specific recovery
+- `gpd:suggest-next` -- confirm the next action
+
+<sub>Start a fresh context window, then run the primary command above.</sub>
+</step>
+
+</process>

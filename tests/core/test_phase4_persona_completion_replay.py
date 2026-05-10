@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.phase4_persona.behavior_metrics import score_behavior_metrics
 from tests.helpers.phase4_persona.completion import (
     SCHEMA_VERSION,
     CompletionReplayRow,
@@ -23,6 +24,7 @@ from tests.helpers.phase4_persona.matrix import (
 
 def test_phase4_completion_replay_rows_are_provider_free_and_owned() -> None:
     rows = completion_replay_rows()
+    rows_by_scenario = {row.scenario: row for row in rows}
 
     assert len(rows) == 9
     assert {row.row_id for row in rows} == {
@@ -57,6 +59,19 @@ def test_phase4_completion_replay_rows_are_provider_free_and_owned() -> None:
     for row in rows:
         for owner in (*row.source_owners, *row.test_owners):
             assert (repo_root / owner).exists(), f"{row.row_id} owner missing: {owner}"
+
+    split_owner_by_scenario = {
+        "missing_verification_blocks_required_closeout": "src/gpd/specs/workflows/execute-phase/verification-handoff.md",
+        "gaps_found_verification_blocks": "src/gpd/specs/workflows/execute-phase/gap-reverification.md",
+        "proof_bearing_without_passed_proof_redteam_blocks_closeout": (
+            "src/gpd/specs/workflows/execute-phase/proof-critic-dispatch.md"
+        ),
+        "bounded_segment_blocks_closeout": "src/gpd/specs/workflows/execute-phase/checkpoint-resume.md",
+        "closeout_readiness_read_only_no_mutation": "src/gpd/specs/workflows/execute-phase/closeout.md",
+    }
+    for scenario, split_owner in split_owner_by_scenario.items():
+        if (repo_root / split_owner).is_file():
+            assert split_owner in rows_by_scenario[scenario].source_owners
 
 
 def test_phase4_completion_replay_rows_cover_required_completion_cases() -> None:
@@ -104,6 +119,7 @@ def test_phase4_persona_completion_replay(
         assert _next_up_specificity_class(outcome.next_action_class) == row.expected_next_up_specificity_class
     assert _mutation_guard_class(row, outcome) == row.expected_mutation_guard_class
     _assert_metric_bounds(row, outcome)
+    _assert_behavior_score(row, outcome)
 
 
 def test_phase4_completion_runtime_verify_work_row_rejects_structural_verify_phase(
@@ -118,6 +134,9 @@ def test_phase4_completion_runtime_verify_work_row_rejects_structural_verify_pha
     assert all("verify-work" in command for command in outcome.commands)
     assert all("gpd verify phase" not in command for command in outcome.commands)
     assert outcome.failure_classes == ("runtime_verify_work", "no_structural_verify_phase", "read_only")
+    score = score_behavior_metrics(row, outcome)
+    assert score.metric_counts["invalid_command_suggestion_count"] == 0
+    assert score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
 
 
 def test_phase4_completion_readiness_row_does_not_mutate_state_roadmap_or_checkpoint_surface(
@@ -132,6 +151,52 @@ def test_phase4_completion_readiness_row_does_not_mutate_state_roadmap_or_checkp
     assert outcome.mutated is False
     assert outcome.result_class == "read_only_ready_closeout"
     assert outcome.next_action_class == "phase_complete"
+
+
+def test_phase4_completion_replay_rows_pin_closeout_stop_classes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = {row.scenario: row for row in completion_replay_rows()}
+
+    missing = score_completion_replay_row(
+        rows["missing_verification_blocks_required_closeout"],
+        tmp_path / "missing-verification",
+        monkeypatch,
+    )
+    missing_score = score_behavior_metrics(rows["missing_verification_blocks_required_closeout"], missing)
+    assert missing.ready is False
+    assert missing.mutated is False
+    assert "missing_verification" in missing.failure_classes
+    assert "phase_closeout_readiness" in missing_score.structured_authority_sources
+    assert missing_score.metric_counts["unsupported_completion_claim_count"] == 0
+
+    proof = score_completion_replay_row(
+        rows["proof_bearing_without_passed_proof_redteam_blocks_closeout"],
+        tmp_path / "proof-redteam",
+        monkeypatch,
+    )
+    proof_score = score_behavior_metrics(rows["proof_bearing_without_passed_proof_redteam_blocks_closeout"], proof)
+    assert proof.ready is False
+    assert proof.mutated is False
+    assert {"proof_redteam_missing", "proof_redteam_non_passing", "proof_redteam_not_passed"} <= set(
+        proof.failure_classes
+    )
+    assert "phase_closeout_readiness" in proof_score.structured_authority_sources
+
+    for scenario, stop_class in {
+        "human_needed_verification_blocks": "human_needed_stop",
+        "expert_needed_verification_blocks": "expert_needed_stop",
+    }.items():
+        outcome = score_completion_replay_row(rows[scenario], tmp_path / scenario, monkeypatch)
+        score = score_behavior_metrics(rows[scenario], outcome)
+
+        assert outcome.ready is False
+        assert outcome.state_status_class == "blocked"
+        assert stop_class in outcome.failure_classes
+        assert outcome.next_action_class == "verify_work"
+        assert all("phase complete" not in command for command in outcome.commands)
+        assert "verification_status" in score.structured_authority_sources
 
 
 def _smoothness_class(row: CompletionReplayRow, outcome) -> str:
@@ -171,8 +236,29 @@ def _mutation_guard_class(row: CompletionReplayRow, outcome) -> str:
 
 
 def _assert_metric_bounds(row: CompletionReplayRow, outcome) -> None:
+    score = score_behavior_metrics(row, outcome)
     for metric_name, expected_count in row.expected_metric_bounds:
-        assert _observed_metric_count(metric_name, row, outcome) == expected_count
+        observed = _observed_metric_count(metric_name, row, outcome)
+        shared_observed = score.metric_counts[metric_name]
+        if expected_count == 0:
+            assert observed == expected_count
+            assert shared_observed == expected_count
+        else:
+            assert observed >= expected_count
+            assert shared_observed >= expected_count
+
+
+def _assert_behavior_score(row: CompletionReplayRow, outcome) -> None:
+    score = score_behavior_metrics(row, outcome)
+
+    assert score.row_id == row.row_id
+    assert score.surface == row.surface
+    assert score.scenario == row.scenario
+    assert score.metric_classes["schema_wrestling_class"] == row.expected_schema_wrestling_class
+    assert score.metric_classes["next_up_specificity_class"] == row.expected_next_up_specificity_class
+    assert score.metric_classes["mutation_guard_class"] == row.expected_mutation_guard_class
+    assert all(isinstance(value, int) for value in score.metric_counts.values())
+    assert all(isinstance(value, str) for value in score.metric_classes.values())
 
 
 def _observed_metric_count(metric_name: str, row: CompletionReplayRow, outcome) -> int:

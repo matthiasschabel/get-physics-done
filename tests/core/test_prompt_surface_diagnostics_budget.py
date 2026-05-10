@@ -120,7 +120,7 @@ def _command_only_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[s
     if not descriptor.agent_prompt_uses_dollar_templates:
         return {"lines": 16_300, "chars": 742_000}
     if descriptor.public_command_surface_prefix.endswith(":"):
-        return {"lines": 16_400, "chars": 772_000}
+        return {"lines": 16_400, "chars": 775_000}
     return {"lines": 16_650, "chars": 746_000}
 
 

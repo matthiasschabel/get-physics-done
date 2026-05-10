@@ -5,12 +5,26 @@ from __future__ import annotations
 import pytest
 
 from gpd.core.workflow_init_specs import (
+    WORKFLOW_INIT_SPECS,
     StagedInitPayloadValidationError,
     StagedInitSpecLookupError,
     get_staged_init_spec,
     validate_staged_init_payload,
 )
-from gpd.core.workflow_staging import load_workflow_stage_manifest
+from gpd.core.workflow_staging import (
+    WORKFLOW_STAGE_MANIFEST_DIR,
+    WORKFLOW_STAGE_MANIFEST_SUFFIX,
+    load_workflow_stage_manifest,
+)
+
+
+def _manifest_workflow_ids() -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            path.name.removesuffix(WORKFLOW_STAGE_MANIFEST_SUFFIX)
+            for path in WORKFLOW_STAGE_MANIFEST_DIR.glob(f"*{WORKFLOW_STAGE_MANIFEST_SUFFIX}")
+        )
+    )
 
 
 def _quick_task_payload() -> dict[str, object]:
@@ -79,6 +93,23 @@ def test_quick_registry_lookup_matches_manifest_active_fields(stage_id: str, ini
     assert spec.init_spec_id == init_spec_id
     assert spec.field_names == manifest.stage(stage_id).required_init_fields
     assert "staged_loading" not in spec.field_names
+
+
+def test_registered_specs_match_manifest_init_spec_ids() -> None:
+    registry_keys = [(spec.workflow_id, spec.stage_id, spec.init_spec_id) for spec in WORKFLOW_INIT_SPECS]
+    manifest_spec_fields: dict[tuple[str, str, str], tuple[str, ...]] = {}
+    for workflow_id in _manifest_workflow_ids():
+        manifest = load_workflow_stage_manifest(workflow_id)
+        for stage_id in manifest.stage_ids():
+            stage = manifest.stage(stage_id)
+            if stage.init_spec_id is not None:
+                manifest_spec_fields[(workflow_id, stage_id, stage.init_spec_id)] = stage.required_init_fields
+
+    assert len(registry_keys) == len(set(registry_keys))
+    assert set(registry_keys) == set(manifest_spec_fields)
+    for spec in WORKFLOW_INIT_SPECS:
+        assert spec.field_names == manifest_spec_fields[(spec.workflow_id, spec.stage_id, spec.init_spec_id)]
+        assert "staged_loading" not in spec.field_names
 
 
 def test_registry_lookup_rejects_unknown_spec_ids() -> None:

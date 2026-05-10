@@ -152,6 +152,20 @@ def test_execute_phase_split_stage_write_scopes_are_narrow() -> None:
     assert manifest.stage("closeout").writes_allowed == ("GPD/ROADMAP.md", "GPD/STATE.md", "GPD/phases")
 
 
+def test_execute_phase_early_reference_content_boundaries_are_explicit() -> None:
+    manifest = load_workflow_stage_manifest("execute-phase")
+    phase_classification = manifest.stage("phase_classification")
+    wave_planning = manifest.stage("wave_planning")
+
+    assert "reference_artifacts_content" not in phase_classification.required_init_fields
+    assert "protocol_bundle_context" not in phase_classification.required_init_fields
+    assert "active_reference_context" in phase_classification.required_init_fields
+
+    assert "reference_artifact_files" in wave_planning.required_init_fields
+    assert "reference_artifacts_content" in wave_planning.required_init_fields
+    assert "protocol_bundle_context" in wave_planning.required_init_fields
+
+
 def test_execute_phase_command_bootstraps_only_first_stage_authority() -> None:
     command = COMMAND_PATH.read_text(encoding="utf-8")
 

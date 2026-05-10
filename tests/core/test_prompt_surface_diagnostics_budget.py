@@ -19,6 +19,10 @@ PROMPT_KIND_BUDGETS = {
     "workflow": {"lines": 24_500, "chars": 1_000_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_800, "chars": 185_000}
+STAGE_SELECTED_INIT_FIELD_BUDGET = 3_227
+STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 73
+STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 743
+STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 743
 EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_707
 EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 95_000
 PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
@@ -216,6 +220,12 @@ def _stage_diagnostic_count(stage_diagnostics: dict[str, object], *field_names: 
     raise AssertionError(f"stage diagnostics missing expected count field from {field_names}")
 
 
+def _required_stage_diagnostic_count(stage_diagnostics: dict[str, object], field_name: str) -> int:
+    value = stage_diagnostics[field_name]
+    assert isinstance(value, int)
+    return value
+
+
 def _workflow_stage_diagnostics(payload: dict[str, object], workflow_id: str) -> dict[str, object]:
     workflows = payload["stage_diagnostics"]
     assert isinstance(workflows, list)
@@ -259,18 +269,41 @@ def test_prompt_surface_safety_floors_stay_within_current_budgets() -> None:
     assert isinstance(stage_diagnostics, dict)
     violation_count = _stage_diagnostic_count(stage_diagnostics, "must_not_eager_load_violation_count")
     assert violation_count <= MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
-    actionable_violation_count = _stage_diagnostic_count(
+    actionable_violation_count = _required_stage_diagnostic_count(
         stage_diagnostics,
         "must_not_eager_load_actionable_violation_count",
-        "must_not_eager_load_violation_count",
     )
     assert actionable_violation_count <= MUST_NOT_EAGER_LOAD_VIOLATION_BUDGET
-    prior_stage_residue_count = _stage_diagnostic_count(
+    prior_stage_residue_count = _required_stage_diagnostic_count(
         stage_diagnostics,
         "must_not_eager_load_prior_stage_residue_count",
-        "prior_stage_residue_count",
     )
     assert prior_stage_residue_count <= MUST_NOT_EAGER_LOAD_PRIOR_STAGE_RESIDUE_BUDGET
+
+
+def test_staged_init_field_pressure_totals_do_not_grow_from_phase6_baseline() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    totals = payload["totals"]
+    assert isinstance(totals, dict)
+
+    stage_diagnostics = totals["stage_diagnostics"]
+    assert isinstance(stage_diagnostics, dict)
+    budgets = {
+        "selected_init_field_count": STAGE_SELECTED_INIT_FIELD_BUDGET,
+        "selected_init_content_field_count": STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET,
+        "high_pressure_init_field_count": STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET,
+        "likely_bulky_init_field_count": STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET,
+    }
+
+    observed = {
+        field_name: _required_stage_diagnostic_count(stage_diagnostics, field_name)
+        for field_name in budgets
+    }
+    for field_name, budget in budgets.items():
+        assert observed[field_name] <= budget, (
+            f"{field_name} budget exceeded: observed={observed[field_name]} max={budget}; "
+            "move bulky staged-init payload fields to later stages or cheap handles"
+        )
 
 
 def test_shell_parsing_and_staged_first_turn_budgets_stay_under_ceilings() -> None:

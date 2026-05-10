@@ -12,9 +12,11 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_diagnostics.py"
 PROMPT_MARKDOWN_SCAN_PATH = REPO_ROOT / "src" / "gpd" / "core" / "prompt_markdown_scan.py"
+STAGE_PROMPT_DIAGNOSTICS_PATH = REPO_ROOT / "src" / "gpd" / "core" / "stage_prompt_diagnostics.py"
 PROMPT_DIAGNOSTICS_TOTAL_LOC_CAP = 3_850
 PROMPT_DIAGNOSTICS_SPLIT_FACADE_LOC_CAP = 3_200
 PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP = 1_200
+STAGE_PROMPT_DIAGNOSTICS_LOC_CAP = 1_250
 
 
 def _diagnostics():
@@ -623,6 +625,11 @@ def test_prompt_diagnostics_modules_stay_small_enough_for_phase_6_split() -> Non
             line_count <= PROMPT_DIAGNOSTICS_SUPPORT_MODULE_LOC_CAP
             for line_count in support_module_loc.values()
         ), support_module_loc
+
+    stage_prompt_diagnostics_loc = _source_line_count(STAGE_PROMPT_DIAGNOSTICS_PATH)
+    assert stage_prompt_diagnostics_loc <= STAGE_PROMPT_DIAGNOSTICS_LOC_CAP, {
+        STAGE_PROMPT_DIAGNOSTICS_PATH.name: stage_prompt_diagnostics_loc
+    }
 
 
 def test_prompt_diagnostics_does_not_define_local_stage_manifest_parser() -> None:

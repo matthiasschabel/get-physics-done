@@ -12,24 +12,35 @@ from gpd.cli import app
 from gpd.core.context import init_execute_phase, init_new_project, init_plan_phase, init_write_paper
 from gpd.core.staged_field_access import build_staged_field_access
 from gpd.core.state import default_state_dict
-from gpd.core.workflow_staging import load_workflow_stage_manifest
+from gpd.core.workflow_staging import (
+    WORKFLOW_STAGE_MANIFEST_DIR,
+    WORKFLOW_STAGE_MANIFEST_SUFFIX,
+    load_workflow_stage_manifest,
+)
 from tests.workflow_authority_support import workflow_authority_text
 
 runner = CliRunner()
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures" / "stage0"
-FIELD_ACCESS_WORKFLOWS = (
+
+
+def _manifest_workflow_ids() -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            path.name.removesuffix(WORKFLOW_STAGE_MANIFEST_SUFFIX)
+            for path in WORKFLOW_STAGE_MANIFEST_DIR.glob(f"*{WORKFLOW_STAGE_MANIFEST_SUFFIX}")
+        )
+    )
+
+
+FIELD_ACCESS_WORKFLOWS = _manifest_workflow_ids()
+PAYLOAD_WORKFLOWS = (
     "plan-phase",
     "execute-phase",
     "new-project",
     "write-paper",
-    "new-milestone",
-    "quick",
-    "map-research",
-    "literature-review",
 )
-PAYLOAD_WORKFLOWS = ("plan-phase", "execute-phase", "new-project", "write-paper")
 STAGED_PROMPT_HYGIENE_WORKFLOWS = ("new-milestone", "quick", "map-research", "literature-review")
 EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
     "plan-phase": ("phase_bootstrap", "planner_authoring", "checker_revision"),
@@ -138,7 +149,7 @@ def test_default_instruction_style_is_shell_free_and_manifest_backed() -> None:
 
 
 @pytest.mark.parametrize("workflow_id", FIELD_ACCESS_WORKFLOWS)
-def test_instruction_style_matches_manifest_for_all_target_workflow_stages(workflow_id: str) -> None:
+def test_instruction_style_matches_manifest_for_all_staged_workflow_stages(workflow_id: str) -> None:
     manifest = load_workflow_stage_manifest(workflow_id)
 
     for stage_id in manifest.stage_ids():
@@ -152,6 +163,7 @@ def test_instruction_style_matches_manifest_for_all_target_workflow_stages(workf
         assert payload["selected_fields"] == list(stage.required_init_fields)
         assert payload["aliases"] == []
         assert "shell_bindings" not in payload
+        assert payload["selected_fields"] == manifest.staged_loading_payload(stage_id)["required_init_fields"]
 
 
 @pytest.mark.parametrize("workflow_id", PAYLOAD_WORKFLOWS)

@@ -199,6 +199,8 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "managed_publication_root",
         "managed_manuscript_root",
     } <= set(bootstrap.required_init_fields)
+    assert "reference_artifacts_content" not in bootstrap.required_init_fields
+    assert {"active_reference_context", "protocol_bundle_context"} <= set(bootstrap.required_init_fields)
     assert bootstrap.writes_allowed == ()
     for stage in (bootstrap, outline, authoring, consistency, publication_review):
         assert "write_paper_argument_input" in stage.required_init_fields
@@ -260,6 +262,8 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
         "selected_publication_root",
         "selected_review_root",
     } <= set(bootstrap.required_init_fields)
+    assert "reference_artifacts_content" not in bootstrap.required_init_fields
+    assert {"active_reference_context", "protocol_bundle_context"} <= set(bootstrap.required_init_fields)
 
     assert preflight.loaded_authorities[0] == "workflows/peer-review/preflight.md"
     assert {
@@ -348,6 +352,10 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
     assert "selected_publication_root" in bootstrap.required_init_fields
     assert "selected_review_root" in bootstrap.required_init_fields
     assert "latest_response_artifacts" in bootstrap.required_init_fields
+    assert "reference_artifacts_content" not in bootstrap.required_init_fields
+    assert "reference_artifacts_content" not in report_triage.required_init_fields
+    assert {"active_reference_context", "protocol_bundle_context"} <= set(bootstrap.required_init_fields)
+    assert {"active_reference_context", "protocol_bundle_context"} <= set(report_triage.required_init_fields)
 
     assert bootstrap.mode_paths == ("workflows/respond-to-referees/bootstrap.md",)
     assert bootstrap.loaded_authorities == (

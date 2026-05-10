@@ -352,6 +352,7 @@ class _FakePlanPhaseStage:
     def __init__(self, stage_id: str, required_init_fields: list[str]) -> None:
         self.id = stage_id
         self.required_init_fields = required_init_fields
+        self.init_spec_id: str | None = None
 
 
 class _FakePlanPhaseManifest:

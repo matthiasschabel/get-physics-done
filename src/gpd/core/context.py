@@ -123,6 +123,12 @@ from gpd.core.root_resolution import (
     resolve_project_roots,
     resolve_state_json_root,
 )
+from gpd.core.staged_init_assembly import (
+    StagedInitProvider as _StagedInitProvider,
+)
+from gpd.core.staged_init_assembly import (
+    assemble_staged_init_payload as _assemble_staged_init_payload,
+)
 from gpd.core.state import _current_machine_identity, _finalize_project_contract_gate, backup_only_state_guidance
 from gpd.core.state import peek_state_json as _peek_state_json
 from gpd.core.utils import (
@@ -3915,57 +3921,61 @@ def init_execute_phase(
     from gpd.core.workflow_staging import load_execute_phase_stage_contract
 
     manifest = load_execute_phase_stage_contract()
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown execute-phase stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(result)
+    def build_execute_reference(assembly_context: object) -> Mapping[str, object]:
+        reference_fields = assembly_context.required_fields & _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS
+        return _build_staged_reference_runtime_context(cwd, reference_fields)
 
-    if required_fields & _EXECUTE_PHASE_CONTRACT_GATE_FIELDS:
-        staged_source.update(_build_new_project_contract_runtime_context(cwd))
-
-    reference_fields = required_fields & _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS
-    if reference_fields:
-        staged_source.update(_build_staged_reference_runtime_context(cwd, reference_fields))
-
-    if required_fields & _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS:
-        staged_source.update(_build_structured_state_runtime_context(cwd))
-
-    if required_fields & _EXECUTE_PHASE_STATE_MEMORY_FIELDS:
-        staged_source.update(_build_state_memory_runtime_context(cwd))
-
-    if required_fields & _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS:
-        staged_source.update(_build_execution_runtime_context(cwd))
-
-    if required_fields & _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS:
+    def build_execute_schema_bridges(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
         if phase_info is None:
             raise ValueError(
                 f"execute-phase stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
             )
+        bridges: dict[str, object] = {}
         if "verification_report_skeleton_bridge" in required_fields:
-            staged_source["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
+            bridges["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
                 cwd,
                 phase_info,
             )
         if "verification_report_finalizer_bridge" in required_fields:
-            staged_source["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
+            bridges["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
                 cwd,
                 phase_info,
             )
+        return bridges
 
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(
-            f"execute-phase stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}"
-        )
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="execute-phase",
+        stage_id=stage,
+        cwd=cwd,
+        base_payload=result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "contract_gate",
+                _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
+                lambda _assembly_context: _build_new_project_contract_runtime_context(cwd),
+            ),
+            _StagedInitProvider("reference_runtime", _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS, build_execute_reference),
+            _StagedInitProvider(
+                "structured_state",
+                _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS,
+                lambda _assembly_context: _build_structured_state_runtime_context(cwd),
+            ),
+            _StagedInitProvider(
+                "state_memory",
+                _EXECUTE_PHASE_STATE_MEMORY_FIELDS,
+                lambda _assembly_context: _build_state_memory_runtime_context(cwd),
+            ),
+            _StagedInitProvider(
+                "execution_runtime",
+                _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
+                lambda _assembly_context: _build_execution_runtime_context(cwd),
+            ),
+            _StagedInitProvider("schema_bridges", _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS, build_execute_schema_bridges),
+        ),
+    )
 
 
 def _build_plan_phase_file_context(
@@ -4337,52 +4347,53 @@ def init_plan_phase(
         allowed_tools=_PLAN_PHASE_STAGE_ALLOWED_TOOLS,
         known_init_fields=_PLAN_PHASE_INIT_FIELDS,
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown plan-phase stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(result)
-    needs_full_reference_context = bool(required_fields & _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS)
-    needs_contract_gate_context = bool(required_fields & _PLAN_PHASE_CONTRACT_GATE_FIELDS)
+    def build_plan_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        if required_fields & _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS:
+            return _build_reference_runtime_context(effective_cwd)
+        return _build_new_project_contract_runtime_context(effective_cwd)
 
-    if needs_full_reference_context:
-        staged_source.update(_build_reference_runtime_context(effective_cwd))
-    elif needs_contract_gate_context:
-        staged_source.update(_build_new_project_contract_runtime_context(effective_cwd))
-
-    if required_fields & _PLAN_PHASE_STATE_MEMORY_FIELDS:
-        staged_source.update(_build_state_memory_runtime_context(effective_cwd))
-
-    if required_fields & _PLAN_PHASE_STRUCTURED_STATE_FIELDS:
-        staged_source.update(_build_structured_state_runtime_context(effective_cwd))
-
-    if required_fields & _PLAN_PHASE_FILE_CONTENT_FIELDS:
-        staged_source.update(
-            _build_plan_phase_file_context(
-                effective_cwd,
-                phase_info,
-                include_state="state_content" in required_fields,
-                include_roadmap="roadmap_content" in required_fields,
-                include_requirements="requirements_content" in required_fields,
-                include_context="context_content" in required_fields,
-                include_research="research_content" in required_fields,
-                include_experiment_design="experiment_design_content" in required_fields,
-                include_verification="verification_content" in required_fields,
-                include_validation="validation_content" in required_fields,
-            )
+    def build_plan_file_content(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        return _build_plan_phase_file_context(
+            effective_cwd,
+            phase_info,
+            include_state="state_content" in required_fields,
+            include_roadmap="roadmap_content" in required_fields,
+            include_requirements="requirements_content" in required_fields,
+            include_context="context_content" in required_fields,
+            include_research="research_content" in required_fields,
+            include_experiment_design="experiment_design_content" in required_fields,
+            include_verification="verification_content" in required_fields,
+            include_validation="validation_content" in required_fields,
         )
 
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"plan-phase stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="plan-phase",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_contract",
+                _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS | _PLAN_PHASE_CONTRACT_GATE_FIELDS,
+                build_plan_reference_or_contract,
+            ),
+            _StagedInitProvider(
+                "state_memory",
+                _PLAN_PHASE_STATE_MEMORY_FIELDS,
+                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider(
+                "structured_state",
+                _PLAN_PHASE_STRUCTURED_STATE_FIELDS,
+                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider("file_content", _PLAN_PHASE_FILE_CONTENT_FIELDS, build_plan_file_content),
+        ),
+    )
 
 
 def init_new_project(cwd: Path, stage: str | None = None) -> dict:
@@ -4457,39 +4468,39 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
         "new-project",
         allowed_tools={"ask_user", "file_read", "file_write", "shell", "task"},
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown new-project stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
-
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(base_result)
-
-    if "researcher_model" in required_fields:
-        staged_source["researcher_model"] = _resolve_model(project_cwd, "gpd-project-researcher", config)
-    if "synthesizer_model" in required_fields:
-        staged_source["synthesizer_model"] = _resolve_model(project_cwd, "gpd-research-synthesizer", config)
-    if "roadmapper_model" in required_fields:
-        staged_source["roadmapper_model"] = _resolve_model(project_cwd, "gpd-roadmapper", config)
-
-    contract_gate_fields = {
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-    }
-    if required_fields & contract_gate_fields:
-        staged_source.update(_build_new_project_contract_runtime_context(project_cwd))
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"new-project stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="new-project",
+        stage_id=stage,
+        cwd=project_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "researcher_model",
+                {"researcher_model"},
+                lambda _assembly_context: {
+                    "researcher_model": _resolve_model(project_cwd, "gpd-project-researcher", config)
+                },
+            ),
+            _StagedInitProvider(
+                "synthesizer_model",
+                {"synthesizer_model"},
+                lambda _assembly_context: {
+                    "synthesizer_model": _resolve_model(project_cwd, "gpd-research-synthesizer", config)
+                },
+            ),
+            _StagedInitProvider(
+                "roadmapper_model",
+                {"roadmapper_model"},
+                lambda _assembly_context: {"roadmapper_model": _resolve_model(project_cwd, "gpd-roadmapper", config)},
+            ),
+            _StagedInitProvider(
+                "contract_gate",
+                _PROJECT_CONTRACT_GATE_FIELDS,
+                lambda _assembly_context: _build_new_project_contract_runtime_context(project_cwd),
+            ),
+        ),
+    )
 
 
 def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
@@ -4536,53 +4547,69 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
         allowed_tools=_NEW_MILESTONE_STAGE_ALLOWED_TOOLS,
         known_init_fields=_NEW_MILESTONE_INIT_FIELDS,
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown new-milestone stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(base_result)
-    staged_source["researcher_model"] = _resolve_model(effective_cwd, "gpd-project-researcher", config)
-    if "synthesizer_model" in required_fields:
-        staged_source["synthesizer_model"] = _resolve_model(effective_cwd, "gpd-research-synthesizer", config)
-    if "roadmapper_model" in required_fields:
-        staged_source["roadmapper_model"] = _resolve_model(effective_cwd, "gpd-roadmapper", config)
+    def build_new_milestone_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        if required_fields & _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS:
+            return _build_reference_runtime_context(effective_cwd)
+        return _build_new_project_contract_runtime_context(effective_cwd)
 
-    needs_full_reference_context = bool(required_fields & _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS)
-    needs_contract_gate_context = bool(required_fields & _NEW_MILESTONE_CONTRACT_GATE_FIELDS)
-
-    if needs_full_reference_context:
-        staged_source.update(_build_reference_runtime_context(effective_cwd))
-    elif needs_contract_gate_context:
-        staged_source.update(_build_new_project_contract_runtime_context(effective_cwd))
-
-    if required_fields & _NEW_MILESTONE_STATE_MEMORY_FIELDS:
-        staged_source.update(_build_state_memory_runtime_context(effective_cwd))
-
-    if required_fields & _NEW_MILESTONE_FILE_CONTENT_FIELDS:
-        staged_source.update(
-            _build_new_milestone_file_context(
-                effective_cwd,
-                include_project="project_content" in required_fields,
-                include_state="state_content" in required_fields,
-                include_milestones="milestones_content" in required_fields,
-                include_requirements="requirements_content" in required_fields,
-                include_roadmap="roadmap_content" in required_fields,
-            )
+    def build_new_milestone_file_content(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        return _build_new_milestone_file_context(
+            effective_cwd,
+            include_project="project_content" in required_fields,
+            include_state="state_content" in required_fields,
+            include_milestones="milestones_content" in required_fields,
+            include_requirements="requirements_content" in required_fields,
+            include_roadmap="roadmap_content" in required_fields,
         )
 
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(
-            f"new-milestone stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}"
-        )
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="new-milestone",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "researcher_model",
+                {"researcher_model"},
+                lambda _assembly_context: {
+                    "researcher_model": _resolve_model(effective_cwd, "gpd-project-researcher", config)
+                },
+            ),
+            _StagedInitProvider(
+                "synthesizer_model",
+                {"synthesizer_model"},
+                lambda _assembly_context: {
+                    "synthesizer_model": _resolve_model(effective_cwd, "gpd-research-synthesizer", config)
+                },
+            ),
+            _StagedInitProvider(
+                "roadmapper_model",
+                {"roadmapper_model"},
+                lambda _assembly_context: {
+                    "roadmapper_model": _resolve_model(effective_cwd, "gpd-roadmapper", config)
+                },
+            ),
+            _StagedInitProvider(
+                "reference_or_contract",
+                _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS | _NEW_MILESTONE_CONTRACT_GATE_FIELDS,
+                build_new_milestone_reference_or_contract,
+            ),
+            _StagedInitProvider(
+                "state_memory",
+                _NEW_MILESTONE_STATE_MEMORY_FIELDS,
+                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider(
+                "file_content",
+                _NEW_MILESTONE_FILE_CONTENT_FIELDS,
+                build_new_milestone_file_content,
+            ),
+        ),
+    )
 
 
 def init_quick(cwd: Path, description: str | None = None, stage: str | None = None) -> dict:
@@ -4654,37 +4681,27 @@ def init_quick(cwd: Path, description: str | None = None, stage: str | None = No
         allowed_tools=_QUICK_STAGE_ALLOWED_TOOLS,
         known_init_fields=_QUICK_INIT_FIELDS,
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(f"Unknown quick stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}.") from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(result)
+    def build_quick_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        if required_fields & _QUICK_REFERENCE_RUNTIME_FIELDS:
+            return _build_reference_runtime_context(cwd)
+        return _build_new_project_contract_runtime_context(cwd)
 
-    if required_fields & _QUICK_REFERENCE_RUNTIME_FIELDS:
-        staged_source.update(_build_reference_runtime_context(cwd))
-    elif required_fields & _QUICK_CONTRACT_GATE_FIELDS:
-        staged_source.update(_build_new_project_contract_runtime_context(cwd))
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"quick stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    init_spec_id = getattr(stage_def, "init_spec_id", None)
-    if init_spec_id:
-        from gpd.core.workflow_init_specs import validate_staged_init_payload
-
-        try:
-            validate_staged_init_payload("quick", stage_def.id, init_spec_id, staged_payload)
-        except (ValueError, PydanticValidationError) as exc:
-            raise ValueError(
-                "quick staged init payload validation failed "
-                f"(workflow=quick, stage={stage_def.id}, init_spec_id={init_spec_id}): {exc}"
-            ) from exc
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="quick",
+        stage_id=stage,
+        cwd=cwd,
+        base_payload=result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_contract",
+                _QUICK_REFERENCE_RUNTIME_FIELDS | _QUICK_CONTRACT_GATE_FIELDS,
+                build_quick_reference_or_contract,
+            ),
+        ),
+    )
 
 
 def init_resume(cwd: Path, *, data_root: Path | None = None, stage: str | None = None) -> dict:
@@ -4835,50 +4852,57 @@ def init_resume(cwd: Path, *, data_root: Path | None = None, stage: str | None =
         "resume-work",
         allowed_tools={"ask_user", "file_read", "file_write", "shell"},
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown resume-work stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(base_result)
-    reference_fields = required_fields & _RESUME_REFERENCE_RUNTIME_FIELDS
-    needs_contract_gate_context = bool(required_fields & _RESUME_CONTRACT_GATE_FIELDS)
+    def build_resume_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        reference_fields = required_fields & _RESUME_REFERENCE_RUNTIME_FIELDS
+        if reference_fields:
+            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
+        return _build_new_project_contract_runtime_context(effective_cwd)
 
-    if reference_fields:
-        staged_source.update(_build_staged_reference_runtime_context(effective_cwd, reference_fields))
-    elif needs_contract_gate_context:
-        staged_source.update(_build_new_project_contract_runtime_context(effective_cwd))
-
-    if required_fields & _RESUME_STRUCTURED_STATE_FIELDS:
-        staged_source.update(_build_structured_state_runtime_context(effective_cwd))
-
-    if required_fields & _RESUME_STATE_MEMORY_FIELDS:
-        staged_source.update(_build_state_memory_runtime_context(effective_cwd))
-
-    if required_fields & _RESUME_FILE_CONTENT_FIELDS:
-        staged_source.update(
-            _build_resume_file_context(
-                effective_cwd,
-                continuity_handoff_file=continuity_handoff_file,
-                include_state="state_content" in required_fields,
-                include_project="project_content" in required_fields,
-                include_roadmap="roadmap_content" in required_fields,
-                include_derivation_state="derivation_state_content" in required_fields,
-                include_continuity_handoff="continuity_handoff_content" in required_fields,
-            )
+    def build_resume_file_content(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        return _build_resume_file_context(
+            effective_cwd,
+            continuity_handoff_file=continuity_handoff_file,
+            include_state="state_content" in required_fields,
+            include_project="project_content" in required_fields,
+            include_roadmap="roadmap_content" in required_fields,
+            include_derivation_state="derivation_state_content" in required_fields,
+            include_continuity_handoff="continuity_handoff_content" in required_fields,
         )
 
-    staged_source = canonicalize_resume_public_payload(staged_source)
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"resume-work stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
+    def canonicalize_resume_staged_payload(_assembly_context: object, staged_source: dict[str, object]) -> None:
+        canonical = canonicalize_resume_public_payload(staged_source)
+        staged_source.clear()
+        staged_source.update(canonical)
 
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="resume-work",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_contract",
+                _RESUME_REFERENCE_RUNTIME_FIELDS | _RESUME_CONTRACT_GATE_FIELDS,
+                build_resume_reference_or_contract,
+            ),
+            _StagedInitProvider(
+                "structured_state",
+                _RESUME_STRUCTURED_STATE_FIELDS,
+                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider(
+                "state_memory",
+                _RESUME_STATE_MEMORY_FIELDS,
+                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider("file_content", _RESUME_FILE_CONTENT_FIELDS, build_resume_file_content),
+        ),
+        postprocessors=(canonicalize_resume_staged_payload,),
+    )
 
 
 def init_sync_state(cwd: Path, *, stage: str | None = None) -> dict:
@@ -4926,39 +4950,36 @@ def init_sync_state(cwd: Path, *, stage: str | None = None) -> dict:
         "sync-state",
         allowed_tools={"ask_user", "file_read", "file_write", "shell", "find_files", "search_files"},
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown sync-state stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(base_result)
-
-    if required_fields & _SYNC_STATE_STRUCTURED_STATE_FIELDS:
-        staged_source.update(_build_structured_state_runtime_context(effective_cwd))
-
-    if required_fields & _SYNC_STATE_CONTRACT_GATE_FIELDS:
-        staged_source.update(_build_new_project_contract_runtime_context(effective_cwd))
-
-    if required_fields & _SYNC_STATE_FILE_CONTENT_FIELDS:
-        staged_source.update(
-            _build_sync_state_file_context(
-                effective_cwd,
-                include_state_md="state_md_content" in required_fields,
-                include_state_json="state_json_content" in required_fields,
-                include_state_json_backup="state_json_backup_content" in required_fields,
-            )
+    def build_sync_state_file_content(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        return _build_sync_state_file_context(
+            effective_cwd,
+            include_state_md="state_md_content" in required_fields,
+            include_state_json="state_json_content" in required_fields,
+            include_state_json_backup="state_json_backup_content" in required_fields,
         )
 
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"sync-state stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="sync-state",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "structured_state",
+                _SYNC_STATE_STRUCTURED_STATE_FIELDS,
+                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider(
+                "contract_gate",
+                _SYNC_STATE_CONTRACT_GATE_FIELDS,
+                lambda _assembly_context: _build_new_project_contract_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider("file_content", _SYNC_STATE_FILE_CONTENT_FIELDS, build_sync_state_file_content),
+        ),
+    )
 
 
 def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> dict:
@@ -5022,57 +5043,63 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
         allowed_tools=_VERIFY_WORK_STAGE_ALLOWED_TOOLS,
         known_init_fields=_VERIFY_WORK_INIT_FIELDS,
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown verify-work stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(base_result)
-    reference_fields = required_fields & _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS
-    needs_contract_gate_context = bool(required_fields & _VERIFY_WORK_CONTRACT_GATE_FIELDS)
+    def build_verify_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        reference_fields = required_fields & _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS
+        if reference_fields:
+            return _build_staged_reference_runtime_context(cwd, reference_fields)
+        return _build_new_project_contract_runtime_context(cwd)
 
-    if reference_fields:
-        staged_source.update(_build_staged_reference_runtime_context(cwd, reference_fields))
-    elif needs_contract_gate_context:
-        staged_source.update(_build_new_project_contract_runtime_context(cwd))
-
-    if required_fields & _VERIFY_WORK_STRUCTURED_STATE_FIELDS:
-        staged_source.update(_build_structured_state_runtime_context(cwd))
-
-    if required_fields & _VERIFY_WORK_STATE_MEMORY_FIELDS:
-        staged_source.update(_build_state_memory_runtime_context(cwd))
-
-    if required_fields & _VERIFY_WORK_SCHEMA_BRIDGE_FIELDS:
+    def build_verify_schema_bridges(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
         if phase_info is None:
             raise ValueError(
                 f"verify-work stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
             )
+        bridges: dict[str, object] = {}
         if "verification_report_skeleton_bridge" in required_fields:
-            staged_source["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
+            bridges["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
                 cwd,
                 phase_info,
             )
         if "verification_report_finalizer_bridge" in required_fields:
-            staged_source["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
+            bridges["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
                 cwd,
                 phase_info,
             )
         if "proof_redteam_finalizer_bridge" in required_fields:
-            staged_source["proof_redteam_finalizer_bridge"] = _build_proof_redteam_finalizer_bridge(
+            bridges["proof_redteam_finalizer_bridge"] = _build_proof_redteam_finalizer_bridge(
                 cwd,
                 phase_info,
             )
+        return bridges
 
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"verify-work stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="verify-work",
+        stage_id=stage,
+        cwd=cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_contract",
+                _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS | _VERIFY_WORK_CONTRACT_GATE_FIELDS,
+                build_verify_reference_or_contract,
+            ),
+            _StagedInitProvider(
+                "structured_state",
+                _VERIFY_WORK_STRUCTURED_STATE_FIELDS,
+                lambda _assembly_context: _build_structured_state_runtime_context(cwd),
+            ),
+            _StagedInitProvider(
+                "state_memory",
+                _VERIFY_WORK_STATE_MEMORY_FIELDS,
+                lambda _assembly_context: _build_state_memory_runtime_context(cwd),
+            ),
+            _StagedInitProvider("schema_bridges", _VERIFY_WORK_SCHEMA_BRIDGE_FIELDS, build_verify_schema_bridges),
+        ),
+    )
 
 
 def _resolve_write_paper_external_authoring_intake_for_init(
@@ -5121,6 +5148,9 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
         "research_mode": config["research_mode"],
         "platform": _detect_platform(effective_cwd),
     }
+    base_result["write_paper_argument_input"] = subject.strip() if isinstance(subject, str) else ""
+    if launch_subject:
+        base_result["write_paper_launch_subject"] = launch_subject
     if stage is None:
         result = dict(base_result)
         result.update(
@@ -5131,9 +5161,6 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
         )
         if external_authoring_intake is None:
             result.update(_build_publication_runtime_snapshot_context(effective_cwd))
-        result["write_paper_argument_input"] = subject.strip() if isinstance(subject, str) else ""
-        if launch_subject:
-            result["write_paper_launch_subject"] = launch_subject
         return result
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
@@ -5143,61 +5170,64 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
         allowed_tools=_WRITE_PAPER_STAGE_ALLOWED_TOOLS,
         known_init_fields=_WRITE_PAPER_INIT_FIELDS,
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown write-paper stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(base_result)
-    needs_full_reference_context = bool(required_fields & _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS)
-    needs_bootstrap_reference_context = bool(required_fields & _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS)
-    needs_contract_gate_context = bool(required_fields & _WRITE_PAPER_CONTRACT_GATE_FIELDS)
-    needs_publication_bootstrap_context = bool(required_fields & _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS)
-
-    if needs_full_reference_context:
-        staged_source.update(_build_reference_runtime_context(effective_cwd))
-    elif needs_bootstrap_reference_context or needs_contract_gate_context or needs_publication_bootstrap_context:
-        staged_source.update(
-            _build_publication_bootstrap_runtime_context(
-                effective_cwd,
-                external_authoring_intake=external_authoring_intake,
+    def build_write_paper_reference_or_bootstrap(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        needs_full_reference_context = bool(required_fields & _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS)
+        needs_bootstrap_reference_context = bool(required_fields & _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS)
+        needs_contract_gate_context = bool(required_fields & _WRITE_PAPER_CONTRACT_GATE_FIELDS)
+        needs_publication_bootstrap_context = bool(required_fields & _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS)
+        payload: dict[str, object] = {}
+        if needs_full_reference_context:
+            payload.update(_build_reference_runtime_context(effective_cwd))
+        elif needs_bootstrap_reference_context or needs_contract_gate_context or needs_publication_bootstrap_context:
+            payload.update(
+                _build_publication_bootstrap_runtime_context(
+                    effective_cwd,
+                    external_authoring_intake=external_authoring_intake,
+                )
             )
-        )
-    if needs_full_reference_context and needs_publication_bootstrap_context:
-        staged_source.update(
-            _build_publication_bootstrap_runtime_context(
-                effective_cwd,
-                external_authoring_intake=external_authoring_intake,
+        if needs_full_reference_context and needs_publication_bootstrap_context:
+            payload.update(
+                _build_publication_bootstrap_runtime_context(
+                    effective_cwd,
+                    external_authoring_intake=external_authoring_intake,
+                )
             )
-        )
+        return payload
 
-    if required_fields & _WRITE_PAPER_STATE_MEMORY_FIELDS:
-        staged_source.update(_build_state_memory_runtime_context(effective_cwd))
-
-    if required_fields & _WRITE_PAPER_FILE_CONTENT_FIELDS:
-        staged_source.update(
-            _build_publication_file_context(
-                effective_cwd,
-                include_state="state_content" in required_fields,
-                include_roadmap="roadmap_content" in required_fields,
-                include_requirements="requirements_content" in required_fields,
-            )
+    def build_write_paper_file_content(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        return _build_publication_file_context(
+            effective_cwd,
+            include_state="state_content" in required_fields,
+            include_roadmap="roadmap_content" in required_fields,
+            include_requirements="requirements_content" in required_fields,
         )
 
-    staged_source["write_paper_argument_input"] = subject.strip() if isinstance(subject, str) else ""
-    if launch_subject:
-        staged_source["write_paper_launch_subject"] = launch_subject
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"write-paper stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="write-paper",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_publication_bootstrap",
+                _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS
+                | _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS
+                | _WRITE_PAPER_CONTRACT_GATE_FIELDS
+                | _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS,
+                build_write_paper_reference_or_bootstrap,
+            ),
+            _StagedInitProvider(
+                "state_memory",
+                _WRITE_PAPER_STATE_MEMORY_FIELDS,
+                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider("file_content", _WRITE_PAPER_FILE_CONTENT_FIELDS, build_write_paper_file_content),
+        ),
+    )
 
 
 def init_peer_review(cwd: Path, subject: str | None = None, stage: str | None = None) -> dict:
@@ -5226,23 +5256,24 @@ def init_peer_review(cwd: Path, subject: str | None = None, stage: str | None = 
         allowed_tools=_PEER_REVIEW_STAGE_ALLOWED_TOOLS,
         known_init_fields=PEER_REVIEW_INIT_FIELDS,
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown peer-review stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
-
-    staged_source = dict(base_result)
-    staged_source.update(_build_peer_review_runtime_context(effective_cwd, subject, launch_cwd=launch_cwd))
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(f"peer-review stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="peer-review",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "peer_review_runtime",
+                PEER_REVIEW_INIT_FIELDS - frozenset(base_result),
+                lambda _assembly_context: _build_peer_review_runtime_context(
+                    effective_cwd,
+                    subject,
+                    launch_cwd=launch_cwd,
+                ),
+            ),
+        ),
+    )
 
 
 def init_respond_to_referees(cwd: Path, subject: str | None = None, stage: str | None = None) -> dict:
@@ -5260,6 +5291,7 @@ def init_respond_to_referees(cwd: Path, subject: str | None = None, stage: str |
         "research_mode": config["research_mode"],
         "platform": _detect_platform(effective_cwd),
     }
+    base_result["response_intake_input"] = subject.strip() if isinstance(subject, str) else ""
     if stage is None:
         result = dict(base_result)
         result.update(
@@ -5270,7 +5302,6 @@ def init_respond_to_referees(cwd: Path, subject: str | None = None, stage: str |
                 preserve_standalone_publication_roots=True,
             )
         )
-        result["response_intake_input"] = subject.strip() if isinstance(subject, str) else ""
         return result
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
@@ -5279,33 +5310,25 @@ def init_respond_to_referees(cwd: Path, subject: str | None = None, stage: str |
         "respond-to-referees",
         known_init_fields=PEER_REVIEW_INIT_FIELDS,
     )
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown respond-to-referees stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
-
-    staged_source = dict(base_result)
-    staged_source.update(
-        _build_peer_review_runtime_context(
-            effective_cwd,
-            manuscript_subject,
-            launch_cwd=launch_cwd,
-            preserve_standalone_publication_roots=True,
-        )
+    return _assemble_staged_init_payload(
+        workflow_id="respond-to-referees",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "peer_review_runtime",
+                PEER_REVIEW_INIT_FIELDS - frozenset(base_result),
+                lambda _assembly_context: _build_peer_review_runtime_context(
+                    effective_cwd,
+                    manuscript_subject,
+                    launch_cwd=launch_cwd,
+                    preserve_standalone_publication_roots=True,
+                ),
+            ),
+        ),
     )
-    staged_source["response_intake_input"] = subject.strip() if isinstance(subject, str) else ""
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(
-            f"respond-to-referees stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}"
-        )
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
 
 
 def init_arxiv_submission(cwd: Path, subject: str | None = None, stage: str | None = None) -> dict:
@@ -5350,39 +5373,31 @@ def init_arxiv_submission(cwd: Path, subject: str | None = None, stage: str | No
         return result
 
     manifest = load_arxiv_submission_stage_contract()
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown arxiv-submission stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(base_result)
-
-    if required_fields & ARXIV_SUBMISSION_BOOTSTRAP_FIELDS:
-        staged_source.update(_build_publication_bootstrap_runtime_context(effective_cwd))
-    if required_fields & ARXIV_SUBMISSION_SNAPSHOT_FIELDS:
+    def build_arxiv_snapshot(_assembly_context: object) -> Mapping[str, object]:
         if invalid_external_subject_context is not None:
-            staged_source.update(invalid_external_subject_context)
-        else:
-            staged_source.update(
-                _build_publication_runtime_snapshot_context(
-                    effective_cwd,
-                    subject=resolved_subject,
-                    pin_response_to_review_round=False,
-                )
-            )
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(
-            f"arxiv-submission stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}"
+            return invalid_external_subject_context
+        return _build_publication_runtime_snapshot_context(
+            effective_cwd,
+            subject=resolved_subject,
+            pin_response_to_review_round=False,
         )
 
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="arxiv-submission",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "publication_bootstrap",
+                ARXIV_SUBMISSION_BOOTSTRAP_FIELDS,
+                lambda _assembly_context: _build_publication_bootstrap_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider("publication_snapshot", ARXIV_SUBMISSION_SNAPSHOT_FIELDS, build_arxiv_snapshot),
+        ),
+    )
 
 
 def init_phase_op(
@@ -5458,53 +5473,59 @@ def init_phase_op(
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
     manifest = load_workflow_stage_manifest("research-phase", known_init_fields=_RESEARCH_PHASE_INIT_FIELDS)
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown research-phase stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(result)
-    needs_full_reference_context = bool(required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS)
-    needs_reference_summary_context = bool(required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS)
-    needs_contract_gate_context = bool(required_fields & _EXECUTE_PHASE_CONTRACT_GATE_FIELDS)
+    def build_research_phase_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        if required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS:
+            return _build_reference_runtime_context(effective_cwd)
+        if required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS:
+            return _build_contract_reference_runtime_context(effective_cwd)
+        return _build_new_project_contract_runtime_context(effective_cwd)
 
-    if needs_full_reference_context:
-        staged_source.update(_build_reference_runtime_context(effective_cwd))
-    elif needs_reference_summary_context:
-        staged_source.update(_build_contract_reference_runtime_context(effective_cwd))
-    elif needs_contract_gate_context:
-        staged_source.update(_build_new_project_contract_runtime_context(effective_cwd))
-
-    if required_fields & _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS:
-        staged_source.update(_build_structured_state_runtime_context(effective_cwd))
-
-    if required_fields & _EXECUTE_PHASE_STATE_MEMORY_FIELDS:
-        staged_source.update(_build_state_memory_runtime_context(effective_cwd))
-
-    if required_fields & _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS:
-        staged_source.update(_build_execution_runtime_context(effective_cwd))
-
-    if required_fields & _RESEARCH_PHASE_FILE_CONTENT_FIELDS:
+    def build_research_phase_file_content(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
         planning = effective_cwd / PLANNING_DIR_NAME
+        payload: dict[str, object] = {}
         if "state_content" in required_fields:
-            staged_source["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
+            payload["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
         if "config_content" in required_fields:
-            staged_source["config_content"] = _safe_read_file_truncated(planning / CONFIG_FILENAME)
+            payload["config_content"] = _safe_read_file_truncated(planning / CONFIG_FILENAME)
         if "roadmap_content" in required_fields:
-            staged_source["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
+            payload["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
+        return payload
 
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(
-            f"research-phase stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}"
-        )
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="research-phase",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_contract",
+                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS
+                | _STAGED_REFERENCE_SUMMARY_FIELDS
+                | _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
+                build_research_phase_reference_or_contract,
+            ),
+            _StagedInitProvider(
+                "structured_state",
+                _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS,
+                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider(
+                "state_memory",
+                _EXECUTE_PHASE_STATE_MEMORY_FIELDS,
+                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider(
+                "execution_runtime",
+                _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
+                lambda _assembly_context: _build_execution_runtime_context(effective_cwd),
+            ),
+            _StagedInitProvider("file_content", _RESEARCH_PHASE_FILE_CONTENT_FIELDS, build_research_phase_file_content),
+        ),
+    )
 
 
 def init_research_phase(
@@ -5550,35 +5571,31 @@ def init_literature_review(cwd: Path, topic: str | None = None, stage: str | Non
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
     manifest = load_workflow_stage_manifest("literature-review", known_init_fields=_LITERATURE_REVIEW_INIT_FIELDS)
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown literature-review stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(result)
-    needs_full_reference_context = bool(required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS)
-    needs_reference_summary_context = bool(required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS)
-    needs_contract_gate_context = bool(required_fields & _EXECUTE_PHASE_CONTRACT_GATE_FIELDS)
+    def build_literature_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        if required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS:
+            return _build_reference_runtime_context(effective_cwd)
+        if required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS:
+            return _build_contract_reference_runtime_context(effective_cwd)
+        return _build_new_project_contract_runtime_context(effective_cwd)
 
-    if needs_full_reference_context:
-        staged_source.update(_build_reference_runtime_context(effective_cwd))
-    elif needs_reference_summary_context:
-        staged_source.update(_build_contract_reference_runtime_context(effective_cwd))
-    elif needs_contract_gate_context:
-        staged_source.update(_build_new_project_contract_runtime_context(effective_cwd))
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(
-            f"literature-review stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}"
-        )
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="literature-review",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_contract",
+                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS
+                | _STAGED_REFERENCE_SUMMARY_FIELDS
+                | _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
+                build_literature_reference_or_contract,
+            ),
+        ),
+    )
 
 
 def init_todos(cwd: Path, area: str | None = None) -> dict:
@@ -5827,20 +5844,13 @@ def init_autonomous(
     from gpd.core.workflow_staging import load_autonomous_stage_contract
 
     manifest = load_autonomous_stage_contract()
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown autonomous stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in base_result]
-    if missing_fields:
-        raise ValueError(f"autonomous stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}")
-
-    staged_payload = {field: base_result[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="autonomous",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=base_result,
+        manifest=manifest,
+    )
 
 
 def init_milestone_op(cwd: Path) -> dict:
@@ -5944,35 +5954,31 @@ def init_map_research(cwd: Path, focus: str | None = None, stage: str | None = N
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
     manifest = load_workflow_stage_manifest("map-research", known_init_fields=_MAP_RESEARCH_INIT_FIELDS)
-    try:
-        stage_def = manifest.stage_by_id(stage)
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown map-research stage {stage!r}. Allowed values: {', '.join(manifest.stage_ids())}."
-        ) from exc
 
-    required_fields = set(stage_def.required_init_fields)
-    staged_source = dict(result)
-    needs_full_reference_context = bool(required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS)
-    needs_reference_summary_context = bool(required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS)
-    needs_contract_gate_context = bool(required_fields & _EXECUTE_PHASE_CONTRACT_GATE_FIELDS)
+    def build_map_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
+        required_fields = assembly_context.required_fields
+        if required_fields & _STAGED_FULL_REFERENCE_RUNTIME_FIELDS:
+            return _build_reference_runtime_context(effective_cwd)
+        if required_fields & _STAGED_REFERENCE_SUMMARY_FIELDS:
+            return _build_contract_reference_runtime_context(effective_cwd)
+        return _build_new_project_contract_runtime_context(effective_cwd)
 
-    if needs_full_reference_context:
-        staged_source.update(_build_reference_runtime_context(effective_cwd))
-    elif needs_reference_summary_context:
-        staged_source.update(_build_contract_reference_runtime_context(effective_cwd))
-    elif needs_contract_gate_context:
-        staged_source.update(_build_new_project_contract_runtime_context(effective_cwd))
-
-    missing_fields = [field for field in stage_def.required_init_fields if field not in staged_source]
-    if missing_fields:
-        raise ValueError(
-            f"map-research stage {stage!r} requires unavailable init field(s): {', '.join(missing_fields)}"
-        )
-
-    staged_payload = {field: staged_source[field] for field in stage_def.required_init_fields}
-    staged_payload["staged_loading"] = manifest.staged_loading_payload(stage_def.id)
-    return staged_payload
+    return _assemble_staged_init_payload(
+        workflow_id="map-research",
+        stage_id=stage,
+        cwd=effective_cwd,
+        base_payload=result,
+        manifest=manifest,
+        providers=(
+            _StagedInitProvider(
+                "reference_or_contract",
+                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS
+                | _STAGED_REFERENCE_SUMMARY_FIELDS
+                | _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
+                build_map_reference_or_contract,
+            ),
+        ),
+    )
 
 
 def init_progress(

@@ -117,13 +117,6 @@
         "contract_gate_status"
       ],
       "required_init_fields": [
-        "roadmap_content",
-        "requirements_content",
-        "context_content",
-        "research_content",
-        "experiment_design_content",
-        "verification_content",
-        "validation_content",
         "platform"
       ],
       "loaded_authorities": [

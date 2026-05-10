@@ -11,10 +11,13 @@ from gpd.core import context as context_module
 from gpd.core.context import (
     init_arxiv_submission,
     init_autonomous,
+    init_execute_phase,
     init_literature_review,
     init_map_research,
     init_new_milestone,
     init_new_project,
+    init_peer_review,
+    init_plan_phase,
     init_quick,
     init_research_phase,
     init_respond_to_referees,
@@ -94,15 +97,38 @@ def _with_protocol_bundle_load_manifest(fields: list[str]) -> list[str]:
 def _setup_generic_staged_init_project(cwd: Path) -> None:
     gpd_dir = cwd / "GPD"
     phase_dir = gpd_dir / "phases" / "01-test"
+    manuscript_dir = cwd / "paper"
     phase_dir.mkdir(parents=True, exist_ok=True)
+    manuscript_dir.mkdir(parents=True, exist_ok=True)
     (gpd_dir / "config.json").write_text("{}", encoding="utf-8")
     (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
     (gpd_dir / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
     (gpd_dir / "ROADMAP.md").write_text("## Milestone\n\n### Phase 1: Test\n", encoding="utf-8")
     (gpd_dir / "STATE.md").write_text("# State\n", encoding="utf-8")
+    manuscript = manuscript_dir / "main.tex"
+    manuscript.write_text(
+        "\\documentclass{article}\\begin{document}Draft manuscript.\\end{document}\n",
+        encoding="utf-8",
+    )
+    (manuscript_dir / "ARTIFACT-MANIFEST.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "title": "Generic Staged Init Test",
+                "manuscript": "main.tex",
+                "artifacts": [{"path": "main.tex", "kind": "tex", "role": "manuscript"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _staged_init_payload_for_workflow(cwd: Path, workflow_id: str, stage_id: str) -> dict[str, object]:
+    if workflow_id == "execute-phase":
+        return init_execute_phase(cwd, "1", stage=stage_id)
+    if workflow_id == "plan-phase":
+        return init_plan_phase(cwd, "1", stage=stage_id)
     if workflow_id == "autonomous":
         return init_autonomous(cwd, stage=stage_id)
     if workflow_id == "new-project":
@@ -125,6 +151,8 @@ def _staged_init_payload_for_workflow(cwd: Path, workflow_id: str, stage_id: str
         return init_sync_state(cwd, stage=stage_id)
     if workflow_id == "write-paper":
         return init_write_paper(cwd, stage=stage_id)
+    if workflow_id == "peer-review":
+        return init_peer_review(cwd, stage=stage_id)
     raise AssertionError(f"Unhandled staged init workflow {workflow_id}")
 
 
@@ -818,11 +846,14 @@ def test_known_init_fields_for_verify_work_include_proof_gate_and_artifact_conte
 @pytest.mark.parametrize(
     "workflow_id",
     [
+        "autonomous",
+        "execute-phase",
         "literature-review",
         "map-research",
-        "autonomous",
-        "new-milestone",
         "new-project",
+        "new-milestone",
+        "peer-review",
+        "plan-phase",
         "quick",
         "research-phase",
         "resume-work",
@@ -846,6 +877,13 @@ def test_staged_init_payloads_match_manifest_required_fields_and_loading_metadat
             workflow_id=workflow_id,
             stage_id=stage_id,
         )
+
+
+def test_new_milestone_known_init_fields_match_context_assembly_fields() -> None:
+    known_init_fields = known_init_fields_for_workflow("new-milestone")
+
+    assert known_init_fields == context_module._NEW_MILESTONE_INIT_FIELDS
+    assert "init_root_policy" in known_init_fields
 
 
 def test_validate_workflow_stage_manifest_payload_loads_plan_phase_manifest() -> None:
@@ -1246,6 +1284,7 @@ def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
                 "synthesizer_model",
                 "commit_docs",
                 "autonomy",
+                "init_root_policy",
                 "research_mode",
                 "research_enabled",
                 "current_milestone",

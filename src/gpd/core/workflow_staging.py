@@ -185,6 +185,7 @@ NEW_MILESTONE_INIT_FIELDS = frozenset(
         "roadmapper_model",
         "commit_docs",
         "autonomy",
+        "init_root_policy",
         "research_mode",
         "research_enabled",
         "current_milestone",

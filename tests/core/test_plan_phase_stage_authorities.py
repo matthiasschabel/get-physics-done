@@ -74,6 +74,27 @@ def test_plan_phase_bootstrap_defers_late_authorities() -> None:
         assert late_fragment not in bootstrap_text
 
 
+def test_plan_phase_research_routing_defers_phase_file_content_to_authoring() -> None:
+    manifest = load_workflow_stage_manifest("plan-phase")
+    research_routing = manifest.stage("research_routing")
+    planner_authoring = manifest.stage("planner_authoring")
+
+    phase_file_content_fields = {
+        "roadmap_content",
+        "requirements_content",
+        "context_content",
+        "research_content",
+        "experiment_design_content",
+        "verification_content",
+        "validation_content",
+    }
+
+    assert {field for field in research_routing.required_init_fields if field.endswith("_content")} == set()
+    assert phase_file_content_fields.isdisjoint(research_routing.required_init_fields)
+    assert phase_file_content_fields.issubset(planner_authoring.required_init_fields)
+    assert "platform" in research_routing.required_init_fields
+
+
 def test_plan_phase_late_authorities_live_in_owning_stages() -> None:
     research = _stage_text("research-routing.md")
     planner = _stage_text("planner-authoring.md")

@@ -96,6 +96,19 @@ def invoke_json(
     return json_output_from_result(invoke_cli(runner, app, args, expect_exit=None, **kwargs), expect_exit=expect_exit)
 
 
+def invoke_raw_json(
+    runner: CliRunner,
+    app: object,
+    args: Sequence[str],
+    *,
+    expect_exit: int = 0,
+    **kwargs: object,
+) -> dict[str, object]:
+    payload = invoke_json(runner, app, args, expect_exit=expect_exit, **kwargs)
+    assert isinstance(payload, dict)
+    return payload
+
+
 def invoke_help_text(
     runner: CliRunner,
     app: object,
@@ -106,6 +119,54 @@ def invoke_help_text(
 ) -> str:
     result = invoke_cli(runner, app, [*args, "--help"], expect_exit=expect_exit, **kwargs)
     return normalize_cli_output(result.output)
+
+
+def checks_by_name(payload: dict[str, object], *, key: str = "checks") -> dict[str, dict[str, object]]:
+    checks = payload[key]
+    assert isinstance(checks, list)
+    return {str(check["name"]): check for check in checks if isinstance(check, dict)}
+
+
+def assert_check(
+    payload: dict[str, object],
+    name: str,
+    *,
+    passed: bool | None = None,
+    blocking: bool | None = None,
+    detail: str | None = None,
+    detail_contains: str | Sequence[str] = (),
+    detail_startswith: str | None = None,
+) -> dict[str, object]:
+    check = checks_by_name(payload)[name]
+    if passed is not None:
+        assert check["passed"] is passed
+    if blocking is not None:
+        assert check["blocking"] is blocking
+    check_detail = str(check.get("detail", ""))
+    if detail is not None:
+        assert check_detail == detail
+    if detail_startswith is not None:
+        assert check_detail.startswith(detail_startswith)
+    fragments = (detail_contains,) if isinstance(detail_contains, str) else detail_contains
+    for fragment in fragments:
+        assert fragment in check_detail
+    return check
+
+
+def assert_checks_pass(payload: dict[str, object], *names: str) -> None:
+    for name in names:
+        assert_check(payload, name, passed=True)
+
+
+def assert_checks_fail(payload: dict[str, object], *names: str) -> None:
+    for name in names:
+        assert_check(payload, name, passed=False)
+
+
+def assert_no_checks(payload: dict[str, object], *names: str) -> None:
+    checks = checks_by_name(payload)
+    for name in names:
+        assert name not in checks
 
 
 def artifact_manifest_payload(

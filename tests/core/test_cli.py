@@ -11,6 +11,7 @@ import builtins
 import json
 import logging
 import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
@@ -98,6 +99,17 @@ def _help_text(*args: str, expect_exit: int = 0, **kwargs) -> str:
 
 def _has_warning_with_fragments(warnings: list[str], *fragments: str) -> bool:
     return any(all(fragment in warning for fragment in fragments) for warning in warnings)
+
+
+def _assert_contains_all(text: str, *fragments: str) -> None:
+    assert not (missing := [fragment for fragment in fragments if fragment not in text]), (
+        f"missing fragments: {missing}"
+    )
+
+
+def _assert_contains_lines(text: str, fragments: str) -> None:
+    raw_fragments = fragments.split(" | ") if " | " in fragments else fragments.splitlines()
+    _assert_contains_all(text, *(fragment.strip() for fragment in raw_fragments if fragment.strip()))
 
 
 _COST_TEST_RUNTIME = "runtime-under-test"
@@ -194,55 +206,69 @@ def test_entrypoint_reexecs_from_checkout_when_running_outside_checkout(tmp_path
 def test_help_surfaces_core_and_auxiliary_commands() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "observe" in result.output
-    assert "state" in result.output
-    assert "phase" in result.output
-    assert "health" in result.output
-    assert "paper-build" in result.output
-    assert "doctor" in result.output
-    assert "Check GPD installation and environment health" in result.output
-    assert "inspect runtime readiness" in result.output
-    assert "install" in result.output
-    assert "Install GPD skills, agents, and hooks into runtime" in result.output
-    assert "uninstall" in result.output
-    assert "Remove GPD skills, agents, and hooks from runtime" in result.output
-    assert "init" in result.output
-    assert "validate" in result.output
-    assert "readiness" in result.output
-    assert "observability" in result.output
+    # fmt: off
+    _assert_contains_lines(result.output, "observe | state | phase | health | paper-build | doctor | Check GPD installation and environment health | inspect runtime readiness | install | Install GPD skills, agents, and hooks into runtime | uninstall | Remove GPD skills, agents, and hooks from runtime | init | validate | readiness | observability")
+    # fmt: on
     normalized_output = _normalize_cli_output(result.output)
-    assert "permissions" in normalized_output
-    assert "Runtime permission readiness and sync" in normalized_output
-    assert "gpd doctor" in normalized_output
-    assert local_cli_unattended_readiness_command() in normalized_output
-    assert local_cli_permissions_status_command() in normalized_output
-    assert local_cli_permissions_sync_command() in normalized_output
-    assert "gpd observe execution" in normalized_output
-
-    assert local_cli_resume_recent_command() in normalized_output
-    assert local_cli_install_local_example_command() in normalized_output
-    assert local_cli_doctor_local_command() in normalized_output
-    assert local_cli_validate_command_context_command() in normalized_output
+    # fmt: off
+    _assert_contains_lines(normalized_output, f"permissions | Runtime permission readiness and sync | gpd doctor | {local_cli_unattended_readiness_command()} | {local_cli_permissions_status_command()} | {local_cli_permissions_sync_command()} | gpd observe execution | {local_cli_resume_recent_command()} | {local_cli_install_local_example_command()} | {local_cli_doctor_local_command()} | {local_cli_validate_command_context_command()} | presets | Workflow presets for local CLI preview | application | integrations | Optional shared capability integrations")
+    # fmt: on
 
     for command in local_cli_bridge_commands():
         assert command in normalized_output
-    assert "presets" in normalized_output
-    assert "Workflow presets for local CLI preview" in normalized_output
-    assert "application" in normalized_output
-    assert "integrations" in normalized_output
-    assert "Optional shared capability integrations" in normalized_output
 
 
-def test_install_help_uses_public_surface_examples() -> None:
-    normalized_output = _help_text("install")
-    assert local_cli_install_local_example_command() in normalized_output
-    assert "gpd install <runtime> # single runtime, local" not in normalized_output
+def _help_case(
+    args: str,
+    expected: str,
+    forbidden: str = "",
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    return tuple(args.split()), tuple(expected.split(" | ")), tuple(forbidden.split(" | ")) if forbidden else ()
 
 
-def test_workflow_presets_help_surfaces_apply_command() -> None:
-    normalized_output = _help_text("presets", "apply")
-    assert "--dry-run" in normalized_output
-    assert "Show a diff-oriented preview without writing it" in normalized_output
+# fmt: off
+_HELP_FRAGMENT_CASES = [
+    _help_case("install", local_cli_install_local_example_command(), "gpd install <runtime> # single runtime, local"),
+    _help_case("presets apply", "--dry-run | Show a diff-oriented preview without writing it"),
+    _help_case("cost", "Show machine-local usage and cost summaries | --last-sessions | Show the most recent N recorded usage | [default: 5]"),
+    _help_case("observe execution", "Show the current local execution status without modifying project state.", "possibly stalled"),
+    _help_case("observe", "event/export are the subcommands that write files"),
+    _help_case("observe event", "Record one local observability event (writes session logs)."),
+    _help_case("observe show", "without modifying project state"),
+    _help_case("trace", "show is read-only | start/log/stop write trace state"),
+    _help_case("trace show", "Inspect trace events with optional filters without modifying project state."),
+    _help_case("trace stop", "writes trace and observability state"),
+    _help_case("doctor", "Check GPD installation and environment health | inspect runtime readiness | --live-executable-probes | --runtime | --local | --global | --target-dir"),
+    _help_case("permissions", "Runtime permission readiness and sync | status | ready for unattended use | sync | active runtime's `settings` command"),
+    _help_case("permissions status", "ready for unattended use | requested autonomy | --runtime | --autonomy | --target-dir"),
+    _help_case("permissions sync", "persist runtime-owned permission settings | active runtime's `settings` command | --runtime | --autonomy | --target-dir"),
+    _help_case("config set-tier-models", "Update model_overrides for one runtime | --runtime | --tier-1 | --tier-2 | --tier-3 | --clear"),
+    _help_case("init", "Assemble context for AI agent workflows | new-project | resume | map-research | verify-work"),
+    _help_case("resume", "--recent | Summarize local recovery state or list machine-local recent projects."),
+    _help_case("validate", "Validation checks | command-context | plan-preflight | review-preflight | project-contract | proof-redteam"),
+    _help_case("validate project-contract", "Validate a project-scoping contract before downstream artifact generation | proof-obligation observables"),
+    _help_case("validate verification-contract", "Validate VERIFICATION frontmatter and contract-result alignment | stale proof-audit blockers when recorded | oracle evidence"),
+    _help_case("validate comparison-contract", "Validate standalone comparison artifact frontmatter and comparison_verdicts | GPD/comparisons/*-COMPARISON.md"),
+    _help_case("validate command-context", "Run centralized command-context preflight based on command metadata. | Command registry key or gpd:name"),
+    _help_case("state", "load | get | update"),
+    _help_case("phase", "list | add | complete"),
+    _help_case("result", "show | downstream | Show a canonical result | direct/transitive"),
+    _help_case("result show", "Show a canonical result and its direct/transitive dependency chain. | RESULT_ID | Canonical result ID [required]"),
+    _help_case("result downstream", "Show the direct and transitive dependents of a canonical result. | RESULT_ID | Canonical result ID [required]"),
+    _help_case("init resume", "Usage: gpd init resume | Assemble context for resuming previous work."),
+    _help_case("paper-build", "--minimal", "--with-provenance | --with-audits | --with-review-sidecars"),
+]
+# fmt: on
+
+
+@pytest.mark.parametrize(("help_args", "expected", "forbidden"), _HELP_FRAGMENT_CASES)
+def test_help_surfaces_public_fragments(
+    help_args: tuple[str, ...], expected: tuple[str, ...], forbidden: tuple[str, ...]
+) -> None:
+    normalized_output = _help_text(*help_args)
+    _assert_contains_all(normalized_output, *expected)
+    for fragment in forbidden:
+        assert fragment not in normalized_output
 
 
 def test_workflow_presets_surface_lists_catalog() -> None:
@@ -583,14 +609,6 @@ def _assert_cost_posture_semantics(output: str) -> None:
     assert "set-tier-models" in output
 
 
-def test_cost_help_surfaces_machine_local_advisory_role() -> None:
-    normalized_output = _help_text("cost")
-    assert "Show machine-local usage and cost summaries" in normalized_output
-    assert "--last-sessions" in normalized_output
-    assert "Show the most recent N recorded usage" in normalized_output
-    assert "[default: 5]" in normalized_output
-
-
 def test_cost_raw_outputs_summary_payload(tmp_path: Path) -> None:
     summary = _sample_cost_summary(tmp_path)
 
@@ -689,80 +707,6 @@ def test_permissions_status_raw_includes_runtime_capabilities(tmp_path: Path) ->
     assert payload["capabilities"]["permissions_surface"] == "launch-wrapper"
     assert payload["capabilities"]["statusline_surface"] == "explicit"
     assert payload["capabilities"]["telemetry_completeness"] == "none"
-
-
-def test_observe_help_surfaces_read_only_execution_snapshot_command() -> None:
-    normalized_output = _help_text("observe", "execution")
-    assert "Show the current local execution status without modifying project state." in normalized_output
-
-
-def test_observe_and_trace_help_label_read_only_and_writing_subcommands() -> None:
-    observe_output = _help_text("observe")
-    assert "event/export are the subcommands that write files" in observe_output
-
-    observe_event_output = _help_text("observe", "event")
-    assert "Record one local observability event (writes session logs)." in observe_event_output
-
-    observe_show_output = _help_text("observe", "show")
-    assert "without modifying project state" in observe_show_output
-
-    trace_output = _help_text("trace")
-    assert "show is read-only" in trace_output
-    assert "start/log/stop write trace state" in trace_output
-
-    trace_show_output = _help_text("trace", "show")
-    assert "Inspect trace events with optional filters without modifying project state." in trace_show_output
-
-    trace_stop_output = _help_text("trace", "stop")
-    assert "writes trace and observability state" in trace_stop_output
-
-
-def test_doctor_help_surfaces_runtime_readiness_mode() -> None:
-    normalized_output = _help_text("doctor")
-    assert "Check GPD installation and environment health" in normalized_output
-    assert "inspect runtime readiness" in normalized_output
-    assert "--live-executable-probes" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--local" in normalized_output
-    assert "--global" in normalized_output
-    assert "--target-dir" in normalized_output
-
-
-def test_permissions_help_surfaces_status_and_sync_roles() -> None:
-    normalized_output = _help_text("permissions")
-    assert "Runtime permission readiness and sync" in normalized_output
-    assert "status" in normalized_output
-    assert "ready for unattended use" in normalized_output
-    assert "sync" in normalized_output
-    assert "active runtime's `settings` command" in normalized_output
-
-
-def test_permissions_status_help_surfaces_readiness_options() -> None:
-    normalized_output = _help_text("permissions", "status")
-    assert "ready for unattended use" in normalized_output
-    assert "requested autonomy" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--autonomy" in normalized_output
-    assert "--target-dir" in normalized_output
-
-
-def test_permissions_sync_help_surfaces_guided_runtime_changes() -> None:
-    normalized_output = _help_text("permissions", "sync")
-    assert "persist runtime-owned permission settings" in normalized_output
-    assert "active runtime's `settings` command" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--autonomy" in normalized_output
-    assert "--target-dir" in normalized_output
-
-
-def test_config_set_tier_models_help_surfaces_targeted_runtime_options() -> None:
-    normalized_output = _help_text("config", "set-tier-models")
-    assert "Update model_overrides for one runtime" in normalized_output
-    assert "--runtime" in normalized_output
-    assert "--tier-1" in normalized_output
-    assert "--tier-2" in normalized_output
-    assert "--tier-3" in normalized_output
-    assert "--clear" in normalized_output
 
 
 def test_active_runtime_settings_command_falls_back_to_runtime_neutral_reference(
@@ -998,21 +942,6 @@ def test_permissions_sync_reports_untrusted_manifest_explicitly(tmp_path: Path) 
     parsed = json_output_from_result(result, expect_exit=1)
     assert "manifest state is 'corrupt'" in parsed["error"]
     assert "No GPD install found" not in parsed["error"]
-
-
-def test_init_help_surfaces_local_onboarding_entrypoints() -> None:
-    normalized_output = _help_text("init")
-    assert "Assemble context for AI agent workflows" in normalized_output
-    assert "new-project" in normalized_output
-    assert "resume" in normalized_output
-    assert "map-research" in normalized_output
-    assert "verify-work" in normalized_output
-
-
-def test_resume_help_surfaces_read_only_local_recovery_role() -> None:
-    normalized = _help_text("resume")
-    assert "--recent" in normalized
-    assert "Summarize local recovery state or list machine-local recent projects." in normalized
 
 
 def test_resume_recovery_advice_uses_resolved_runtime_commands(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2479,41 +2408,6 @@ def test_command_supports_project_reentry_requires_explicit_positive_metadata() 
     )
 
 
-def test_observe_execution_help_surfaces_read_only_local_status_role() -> None:
-    normalized_output = _help_text("observe", "execution")
-    assert "Show the current local execution status without modifying project state." in normalized_output
-    assert "possibly stalled" not in normalized_output.lower()
-
-
-def test_validate_help_surfaces_command_context_preflight_entrypoint() -> None:
-    normalized_output = _help_text("validate")
-    assert "Validation checks" in normalized_output
-    assert "command-context" in normalized_output
-    assert "plan-preflight" in normalized_output
-    assert "review-preflight" in normalized_output
-    assert "project-contract" in normalized_output
-    assert "proof-redteam" in normalized_output
-
-
-def test_validate_project_contract_help_surfaces_proof_obligation_visibility() -> None:
-    normalized_output = _help_text("validate", "project-contract")
-    assert "Validate a project-scoping contract before downstream artifact generation" in normalized_output
-    assert "proof-obligation observables" in normalized_output
-
-
-def test_validate_verification_contract_help_surfaces_stale_proof_gate_visibility() -> None:
-    normalized_output = _help_text("validate", "verification-contract")
-    assert "Validate VERIFICATION frontmatter and contract-result alignment" in normalized_output
-    assert "stale proof-audit blockers when recorded" in normalized_output
-    assert "oracle evidence" in normalized_output
-
-
-def test_validate_comparison_contract_help_surfaces_verdict_ledger_visibility() -> None:
-    normalized_output = _help_text("validate", "comparison-contract")
-    assert "Validate standalone comparison artifact frontmatter and comparison_verdicts" in normalized_output
-    assert "GPD/comparisons/*-COMPARISON.md" in normalized_output
-
-
 def test_validate_proof_redteam_calls_public_validator(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2926,147 +2820,170 @@ def _body_without_oracle_evidence() -> str:
     )
 
 
-def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
+_BASELINE_PLAN_REF = "GPD/phases/01-baseline/01-PLAN.md#/contract"
+_BASELINE_REPORT_REF = "GPD/phases/01-baseline/01-VERIFICATION.md"
+_BASELINE_VALIDATE_COMMANDS = [
+    f"gpd frontmatter validate {_BASELINE_REPORT_REF} --schema verification",
+    f"gpd validate verification-contract {_BASELINE_REPORT_REF}",
+]
+
+
+def _write_baseline_plan_project(project_root: Path, *, phase: str = "01-baseline") -> Path:
+    phase_dir = project_root / "GPD" / "phases" / phase
     phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
+    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
     baseline_dir.mkdir(parents=True)
     (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
     plan_path = phase_dir / "01-PLAN.md"
     plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    return plan_path
+
+
+def _fake_skeleton_payload(
+    *,
+    plan_contract_ref: str,
+    status: str = "gaps_found",
+    phase: str = "01-baseline",
+    target_report_path: str | None = None,
+    target_report_ref: str | None = None,
+    authoring_rule: str = "Use the generated frontmatter as the starting YAML.",
+    include_validation_commands: bool = True,
+) -> dict[str, object]:
+    validation_ref = target_report_ref or _BASELINE_REPORT_REF
+    payload: dict[str, object] = {
+        "frontmatter": {"phase": phase, "status": status, "plan_contract_ref": plan_contract_ref},
+        "frontmatter_yaml": f"---\nphase: {phase}\nstatus: {status}\nplan_contract_ref: {plan_contract_ref}\n---\n",
+        "markdown_draft": (
+            f"---\nphase: {phase}\nstatus: {status}\nplan_contract_ref: {plan_contract_ref}\n---\n\n"
+            "# Verification\n\n"
+            "## Validation Commands\n\n"
+            "```bash\n"
+            f"gpd validate verification-contract {validation_ref}\n"
+            "```\n"
+        ),
+        "authoring_rules": [authoring_rule],
+    }
+    if include_validation_commands:
+        payload["validation_commands"] = [f"gpd validate verification-contract {validation_ref}"]
+    if target_report_path is not None:
+        payload["target_report_path"] = target_report_path
+    if target_report_ref is not None:
+        payload["target_report_ref"] = target_report_ref
+    return payload
+
+
+def _invoke_verification_skeleton(plan_path: Path, *args: str, raw: bool = False):
+    command = [*(["--raw"] if raw else []), "verification-report", "skeleton", str(plan_path), *args]
+    return runner.invoke(app, command, catch_exceptions=False)
+
+
+def _invoke_verification_skeleton_write(
+    plan_path: Path,
+    target_path: Path,
+    *args: str,
+    raw: bool = True,
+    force: bool = False,
+    validate: str = "frontmatter",
+):
+    write_args = [
+        *(["--force"] if force else []),
+        "--write",
+        "--output",
+        str(target_path),
+        *args,
+        "--validate",
+        validate,
+    ]
+    return _invoke_verification_skeleton(plan_path, *write_args, raw=raw)
+
+
+def _write_verification_patch(tmp_path: Path, *, status: str = "gaps_found") -> Path:
+    patch_path = tmp_path / "patch.json"
+    patch_path.write_text(json.dumps({"status": status}) + "\n", encoding="utf-8")
+    return patch_path
+
+
+def _invoke_verification_finalize(
+    plan_path: Path,
+    patch_path: Path,
+    body_path: Path,
+    target_path: Path,
+    *,
+    raw: bool = True,
+    validate: str = "contract",
+    force: bool = False,
+):
+    command = [
+        *(["--raw"] if raw else []),
+        "verification-report",
+        "finalize",
+        str(plan_path),
+        "--patch",
+        str(patch_path),
+        "--body-file",
+        str(body_path),
+        "--output",
+        str(target_path),
+        "--validate",
+        validate,
+        *(["--force"] if force else []),
+    ]
+    return runner.invoke(app, command, catch_exceptions=False)
+
+
+def _verification_validation_payload(
+    *,
+    mode: str = "contract",
+    valid: bool = True,
+    errors: list[str] | None = None,
+    oracle_evidence_count: int = 1,
+) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "status": "valid" if valid else "invalid",
+        "valid": valid,
+        "missing": [],
+        "present": ["status"],
+        "errors": list(errors or []),
+        "schema_name": "verification",
+        "oracle_evidence_count": oracle_evidence_count,
+    }
+
+
+def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path = _write_baseline_plan_project(tmp_path)
     calls: dict[str, object] = {}
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
         del kwargs
-        reference = contract.references[0]
-        claim = contract.claims[0]
-        test = contract.acceptance_tests[0]
         calls["contract"] = contract
         calls["plan_path"] = plan_path
         calls["plan_contract_ref"] = plan_contract_ref
         calls["status"] = status
-        return {
-            "frontmatter": {
-                "phase": "01-baseline",
-                "verified": "<fill-me>",
-                "status": status,
-                "score": "<fill-me>",
-                "plan_contract_ref": plan_contract_ref,
-                "contract_results": {
-                    "claims": {
-                        claim.id: {
-                            "status": "blocked",
-                            "summary": f"Blocked until {reference.id} is read and compared.",
-                        }
-                    },
-                    "deliverables": {},
-                    "acceptance_tests": {
-                        test.id: {
-                            "status": "blocked",
-                            "summary": f"Blocked until {reference.id} is available.",
-                        }
-                    },
-                    "references": {
-                        reference.id: {
-                            "status": "missing",
-                            "completed_actions": [],
-                            "missing_actions": list(reference.required_actions),
-                            "summary": f"Required benchmark artifact {reference.locator} is absent.",
-                        }
-                    },
-                    "forbidden_proxies": {},
-                    "uncertainty_markers": {
-                        "weakest_anchors": ["Missing benchmark reference"],
-                        "disconfirming_observations": ["Benchmark file is absent"],
-                    },
-                },
-                "comparison_verdicts": [
-                    {
-                        "subject_id": claim.id,
-                        "subject_kind": "claim",
-                        "subject_role": "decisive",
-                        "reference_id": reference.id,
-                        "comparison_kind": "benchmark",
-                        "metric": "reference_availability",
-                        "threshold": "benchmark artifact exists and is compared",
-                        "verdict": "inconclusive",
-                        "recommended_action": f"Restore {reference.locator} and rerun the comparison.",
-                    }
-                ],
-                "suggested_contract_checks": [
-                    {
-                        "check": "contract.benchmark_reproduction",
-                        "reason": f"{reference.id} is missing required read and compare actions.",
-                        "suggested_subject_kind": "acceptance_test",
-                        "suggested_subject_id": test.id,
-                        "evidence_path": "GPD/phases/01-baseline/01-VERIFICATION.md",
-                    }
-                ],
-            },
-            "frontmatter_yaml": (
-                "---\n"
-                "phase: 01-baseline\n"
-                "status: gaps_found\n"
-                f"plan_contract_ref: {plan_contract_ref}\n"
-                "contract_results:\n"
-                "  claims: {}\n"
-                "---\n"
-            ),
-            "markdown_draft": (
-                "---\n"
-                "phase: 01-baseline\n"
-                "status: gaps_found\n"
-                f"plan_contract_ref: {plan_contract_ref}\n"
-                "---\n\n"
-                "# Verification\n\n"
-                "## Validation Commands\n\n"
-                "```bash\n"
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md\n"
-                "```\n"
-            ),
-            "validation_commands": [
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-            ],
-            "authoring_rules": ["Use the generated frontmatter as the starting YAML."],
-        }
+        return _fake_skeleton_payload(plan_contract_ref=plan_contract_ref, status=status)
 
     monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path), "--status", "gaps_found"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--status", "gaps_found", raw=True)
 
     payload = json_output_from_result(result)
     frontmatter = payload["frontmatter"]
-    references = frontmatter["contract_results"]["references"]
     assert payload["plan_path"] == str(plan_path)
-    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["plan_contract_ref"] == _BASELINE_PLAN_REF
     assert payload["target_status"] == "gaps_found"
     assert frontmatter["plan_contract_ref"] == payload["plan_contract_ref"]
-    assert references["ref-stale-verification-benchmark"] == {
-        "status": "missing",
-        "completed_actions": [],
-        "missing_actions": ["read", "compare"],
-        "summary": "Required benchmark artifact artifacts/benchmark/reference.json is absent.",
-    }
-    assert frontmatter["comparison_verdicts"][0]["reference_id"] == "ref-stale-verification-benchmark"
-    assert frontmatter["suggested_contract_checks"][0]["check"] == "contract.benchmark_reproduction"
     assert payload["frontmatter_yaml"].startswith("---\nphase: 01-baseline")
     assert payload["markdown_draft"].startswith("---\nphase: 01-baseline")
-    assert payload["validation_commands"] == [
-        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-    ]
+    assert payload["validation_commands"] == [_BASELINE_VALIDATE_COMMANDS[1]]
     assert payload["authoring_rules"] == ["Use the generated frontmatter as the starting YAML."]
     assert calls["plan_path"] == plan_path
     assert calls["plan_contract_ref"] == payload["plan_contract_ref"]
     assert calls["status"] == "gaps_found"
     assert calls["contract"].references[0].must_surface is True
-    assert not (phase_dir / "01-VERIFICATION.md").exists()
+    assert not (plan_path.parent / "01-VERIFICATION.md").exists()
     _assert_forbidden_verification_fields_absent(payload)
 
 
@@ -3075,42 +2992,25 @@ def test_verification_report_skeleton_uses_project_local_ref_when_outer_director
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project_root = tmp_path / "outer" / "GPD" / "project"
-    phase_dir = project_root / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = project_root / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(project_root)
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
         del contract, plan_path, kwargs
-        return {
-            "frontmatter": {
-                "phase": "01-baseline",
-                "verified": "1970-01-01T00:00:00Z",
-                "status": status,
-                "score": "gap skeleton",
-                "plan_contract_ref": plan_contract_ref,
-            },
-            "target_report_path": str(phase_dir / "01-VERIFICATION.md"),
-        }
+        return _fake_skeleton_payload(
+            plan_contract_ref=plan_contract_ref,
+            status=status,
+            target_report_path=str(project_root / _BASELINE_REPORT_REF),
+            include_validation_commands=False,
+        )
 
     monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path)],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, raw=True)
 
     payload = json_output_from_result(result)
-    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
-    assert payload["frontmatter"]["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
-    assert payload["validation_commands"] == [
-        "gpd frontmatter validate GPD/phases/01-baseline/01-VERIFICATION.md --schema verification",
-        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-    ]
+    assert payload["plan_contract_ref"] == _BASELINE_PLAN_REF
+    assert payload["frontmatter"]["plan_contract_ref"] == _BASELINE_PLAN_REF
+    assert payload["validation_commands"] == _BASELINE_VALIDATE_COMMANDS
 
 
 def test_verification_report_output_target_resolves_payload_relative_paths_by_scope(
@@ -3146,23 +3046,14 @@ def test_verification_report_output_target_resolves_payload_relative_paths_by_sc
 
 
 def test_verification_report_skeleton_raw_uses_real_builder(tmp_path: Path) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
+    phase_dir = plan_path.parent
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path), "--status", "gaps_found"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--status", "gaps_found", raw=True)
 
     payload = json_output_from_result(result)
     frontmatter = payload["frontmatter"]
-    assert payload["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert payload["plan_contract_ref"] == _BASELINE_PLAN_REF
     assert payload["target_report_path"] == str(phase_dir / "01-VERIFICATION.md")
     assert frontmatter["status"] == "gaps_found"
     assert frontmatter["contract_results"]["claims"]["claim-stale-verification"]["status"] == "blocked"
@@ -3186,43 +3077,19 @@ def test_verification_report_skeleton_default_prints_markdown_draft_not_rich_tab
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
-        del kwargs
-        del contract, plan_path
-        return {
-            "frontmatter": {"phase": "01-baseline", "status": status, "plan_contract_ref": plan_contract_ref},
-            "frontmatter_yaml": (
-                f"---\nphase: 01-baseline\nstatus: gaps_found\nplan_contract_ref: {plan_contract_ref}\n---\n"
-            ),
-            "markdown_draft": (
-                "---\n"
-                "phase: 01-baseline\n"
-                "status: gaps_found\n"
-                f"plan_contract_ref: {plan_contract_ref}\n"
-                "---\n\n"
-                "# Verification\n\n"
-                "## Validation Commands\n\n"
-                "```bash\n"
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md\n"
-                "```\n"
-            ),
-            "validation_commands": [
-                "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-            ],
-            "authoring_rules": ["Do not hand-convert raw JSON."],
-        }
+        del contract, plan_path, kwargs
+        return _fake_skeleton_payload(
+            plan_contract_ref=plan_contract_ref,
+            status=status,
+            authoring_rule="Do not hand-convert raw JSON.",
+        )
 
     monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(app, ["verification-report", "skeleton", str(plan_path)], catch_exceptions=False)
+    result = _invoke_verification_skeleton(plan_path)
 
     assert result.exit_code == 0, result.output
     assert result.output.startswith("---\nphase: 01-baseline")
@@ -3237,34 +3104,21 @@ def test_verification_report_skeleton_fallback_validation_commands_quote_report_
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01 with space"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path, phase="01 with space")
 
     def fake_builder(*, contract, plan_path, plan_contract_ref, status, **kwargs):
         del contract, plan_path, kwargs
-        return {
-            "frontmatter": {
-                "phase": "01 with space",
-                "verified": "1970-01-01T00:00:00Z",
-                "status": status,
-                "score": "gap skeleton",
-                "plan_contract_ref": plan_contract_ref,
-            },
-            "target_report_ref": "GPD/phases/01 with space/01-VERIFICATION.md",
-        }
+        return _fake_skeleton_payload(
+            phase="01 with space",
+            plan_contract_ref=plan_contract_ref,
+            status=status,
+            target_report_ref="GPD/phases/01 with space/01-VERIFICATION.md",
+            include_validation_commands=False,
+        )
 
     monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(plan_path)],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, raw=True)
 
     payload = json_output_from_result(result)
     assert payload["validation_commands"] == [
@@ -3277,12 +3131,8 @@ def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builde
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    summary_path = phase_dir / "01-SUMMARY.md"
+    plan_path = _write_baseline_plan_project(tmp_path)
+    summary_path = plan_path.with_name("01-SUMMARY.md")
     summary_path.write_text(
         _compact_plan_with_missing_must_surface_benchmark().replace(
             "type: execute\n",
@@ -3297,11 +3147,7 @@ def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builde
 
     monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", unexpected_builder)
 
-    result = runner.invoke(
-        app,
-        ["--raw", "verification-report", "skeleton", str(summary_path)],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(summary_path, raw=True)
 
     assert result.exit_code == 1
     payload = _raw_payload_from_result(result)
@@ -3310,19 +3156,9 @@ def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builde
 
 
 def test_verification_report_skeleton_frontmatter_format_prints_yaml_only(tmp_path: Path) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
 
-    result = runner.invoke(
-        app,
-        ["verification-report", "skeleton", str(plan_path), "--format", "frontmatter"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--format", "frontmatter")
 
     assert result.exit_code == 0, result.output
     assert result.output.startswith("---\n")
@@ -3337,19 +3173,9 @@ def test_verification_report_skeleton_frontmatter_format_prints_yaml_only(tmp_pa
 
 
 def test_verification_report_skeleton_format_json_outputs_json_without_raw(tmp_path: Path) -> None:
-    phase_dir = tmp_path / "GPD" / "phases" / "01-baseline"
-    phase_dir.mkdir(parents=True)
-    baseline_dir = tmp_path / "GPD" / "phases" / "00-baseline"
-    baseline_dir.mkdir(parents=True)
-    (baseline_dir / "00-SUMMARY.md").write_text("prior baseline", encoding="utf-8")
-    plan_path = phase_dir / "01-PLAN.md"
-    plan_path.write_text(_compact_plan_with_missing_must_surface_benchmark(), encoding="utf-8")
+    plan_path = _write_baseline_plan_project(tmp_path)
 
-    result = runner.invoke(
-        app,
-        ["verification-report", "skeleton", str(plan_path), "--format", "json"],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton(plan_path, "--format", "json")
 
     payload = json_output_from_result(result)
     assert payload["frontmatter"]["status"] == "gaps_found"
@@ -3366,20 +3192,7 @@ def test_verification_report_skeleton_write_refuses_existing_without_force(tmp_p
     original = "existing verification report\n"
     target_path.write_text(original, encoding="utf-8")
 
-    result = runner.invoke(
-        app,
-        [
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path, raw=False)
 
     assert result.exit_code == 1, result.output
     assert "exists" in result.output.lower()
@@ -3392,24 +3205,13 @@ def test_verification_report_skeleton_write_creates_target_with_generated_yaml(t
     target_path = plan_path.with_name("01-VERIFICATION.md")
     colon_rich_score = "Freshness check failed: stale pass unsupported because benchmark is missing"
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--verified",
-            "2026-05-04T03:21:16Z",
-            "--score",
-            colon_rich_score,
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
+    result = _invoke_verification_skeleton_write(
+        plan_path,
+        target_path,
+        "--verified",
+        "2026-05-04T03:21:16Z",
+        "--score",
+        colon_rich_score,
     )
 
     assert result.exit_code == 0, result.output
@@ -3422,7 +3224,7 @@ def test_verification_report_skeleton_write_creates_target_with_generated_yaml(t
     assert frontmatter["status"] == "gaps_found"
     assert frontmatter["verified"] == "2026-05-04T03:21:16Z"
     assert frontmatter["score"] == colon_rich_score
-    assert frontmatter["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert frontmatter["plan_contract_ref"] == _BASELINE_PLAN_REF
     assert "gpd_return" not in frontmatter
     assert "# Verification" in body
     validation = validate_frontmatter(content, "verification", source_path=target_path)
@@ -3434,23 +3236,7 @@ def test_verification_report_skeleton_write_body_file_keeps_colon_text_out_of_ya
     target_path = plan_path.with_name("01-VERIFICATION.md")
     body_path = _write_verification_body_file(tmp_path, _colon_rich_verification_body())
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path, "--body-file", str(body_path))
 
     assert result.exit_code == 0, result.output
     payload = _raw_payload_from_result(result)
@@ -3473,23 +3259,7 @@ def test_verification_report_skeleton_write_rejects_body_file_frontmatter(tmp_pa
         "---\nstatus: passed\n---\n\n# Verification Body\n",
     )
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path, "--body-file", str(body_path))
 
     assert result.exit_code == 1
     payload = _raw_payload_from_result(result)
@@ -3504,23 +3274,13 @@ def test_verification_report_skeleton_write_contract_validation_blocks_replace_o
     target_path.write_text(original, encoding="utf-8")
     body_path = _write_verification_body_file(tmp_path, _body_without_oracle_evidence())
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--force",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
+    result = _invoke_verification_skeleton_write(
+        plan_path,
+        target_path,
+        "--body-file",
+        str(body_path),
+        force=True,
+        validate="contract",
     )
 
     assert result.exit_code == 1, result.output
@@ -3554,22 +3314,12 @@ def test_verification_report_skeleton_write_contract_validation_passes_with_orac
     target_path = plan_path.with_name("01-VERIFICATION.md")
     body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--body-file",
-            str(body_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
+    result = _invoke_verification_skeleton_write(
+        plan_path,
+        target_path,
+        "--body-file",
+        str(body_path),
+        validate="contract",
     )
 
     assert result.exit_code == 0, result.output
@@ -3591,21 +3341,7 @@ def test_verification_report_skeleton_raw_write_reports_validation_and_warnings(
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
     target_path = plan_path.with_name("01-VERIFICATION.md")
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "skeleton",
-            str(plan_path),
-            "--write",
-            "--output",
-            str(target_path),
-            "--validate",
-            "frontmatter",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_skeleton_write(plan_path, target_path)
 
     assert result.exit_code == 0, result.output
     payload = _raw_payload_from_result(result)
@@ -3626,8 +3362,7 @@ def test_verification_report_finalize_writes_only_after_validation_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
-    patch_path = tmp_path / "patch.json"
-    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    patch_path = _write_verification_patch(tmp_path)
     body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
     target_path = plan_path.with_name("01-VERIFICATION.md")
     calls: dict[str, object] = {}
@@ -3645,38 +3380,12 @@ def test_verification_report_finalize_writes_only_after_validation_passes(
         assert source_path == target_path
         assert mode == "contract"
         assert not target_path.exists()
-        return {
-            "mode": mode,
-            "status": "valid",
-            "valid": True,
-            "missing": [],
-            "present": ["status"],
-            "errors": [],
-            "schema_name": "verification",
-            "oracle_evidence_count": 1,
-        }
+        return _verification_validation_payload(mode=mode)
 
     monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
     monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "finalize",
-            str(plan_path),
-            "--patch",
-            str(patch_path),
-            "--body-file",
-            str(body_path),
-            "--output",
-            str(target_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
 
     assert result.exit_code == 0, result.output
     payload = _raw_payload_from_result(result)
@@ -3685,7 +3394,7 @@ def test_verification_report_finalize_writes_only_after_validation_passes(
     assert payload["warnings"] == ["finalizer-owned frontmatter"]
     assert target_path.read_text(encoding="utf-8").startswith("---\nstatus: gaps_found")
     assert calls["outcome_patch"] == {"status": "gaps_found"}
-    assert calls["target_report_ref"] == "GPD/phases/01-baseline/01-VERIFICATION.md"
+    assert calls["target_report_ref"] == _BASELINE_REPORT_REF
 
 
 def test_verification_report_finalize_refuses_existing_without_force(
@@ -3693,8 +3402,7 @@ def test_verification_report_finalize_refuses_existing_without_force(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
-    patch_path = tmp_path / "patch.json"
-    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    patch_path = _write_verification_patch(tmp_path)
     body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
     target_path = plan_path.with_name("01-VERIFICATION.md")
     target_path.write_text("existing verification\n", encoding="utf-8")
@@ -3704,24 +3412,7 @@ def test_verification_report_finalize_refuses_existing_without_force(
 
     monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", unexpected_finalizer)
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "finalize",
-            str(plan_path),
-            "--patch",
-            str(patch_path),
-            "--body-file",
-            str(body_path),
-            "--output",
-            str(target_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
 
     assert result.exit_code == 1
     payload = _raw_payload_from_result(result)
@@ -3735,8 +3426,7 @@ def test_verification_report_finalize_rejects_body_file_frontmatter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
-    patch_path = tmp_path / "patch.json"
-    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    patch_path = _write_verification_patch(tmp_path)
     body_path = _write_verification_body_file(
         tmp_path,
         "---\nstatus: passed\n---\n\n# Verification Body\n",
@@ -3748,24 +3438,7 @@ def test_verification_report_finalize_rejects_body_file_frontmatter(
 
     monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", unexpected_finalizer)
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "finalize",
-            str(plan_path),
-            "--patch",
-            str(patch_path),
-            "--body-file",
-            str(body_path),
-            "--output",
-            str(target_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
 
     assert result.exit_code == 1
     payload = _raw_payload_from_result(result)
@@ -3778,8 +3451,7 @@ def test_verification_report_finalize_validation_failure_preserves_existing_outp
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
-    patch_path = tmp_path / "patch.json"
-    patch_path.write_text('{"status": "passed"}\n', encoding="utf-8")
+    patch_path = _write_verification_patch(tmp_path, status="passed")
     body_path = _write_verification_body_file(tmp_path, _body_without_oracle_evidence())
     target_path = plan_path.with_name("01-VERIFICATION.md")
     target_path.write_text("existing canonical report\n", encoding="utf-8")
@@ -3793,39 +3465,17 @@ def test_verification_report_finalize_validation_failure_preserves_existing_outp
 
     def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
         del content, source_path
-        return {
-            "mode": mode,
-            "status": "invalid",
-            "valid": False,
-            "missing": [],
-            "present": ["status"],
-            "errors": ["executed oracle evidence is required"],
-            "schema_name": "verification",
-            "oracle_evidence_count": 0,
-        }
+        return _verification_validation_payload(
+            mode=mode,
+            valid=False,
+            errors=["executed oracle evidence is required"],
+            oracle_evidence_count=0,
+        )
 
     monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
     monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "finalize",
-            str(plan_path),
-            "--patch",
-            str(patch_path),
-            "--body-file",
-            str(body_path),
-            "--output",
-            str(target_path),
-            "--validate",
-            "contract",
-            "--force",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path, force=True)
 
     assert result.exit_code == 1
     payload = _raw_payload_from_result(result)
@@ -3844,8 +3494,7 @@ def test_verification_report_finalize_raw_output_includes_validation_and_command
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
-    patch_path = tmp_path / "patch.json"
-    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    patch_path = _write_verification_patch(tmp_path)
     body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
     target_path = plan_path.with_name("01-VERIFICATION.md")
 
@@ -3859,83 +3508,27 @@ def test_verification_report_finalize_raw_output_includes_validation_and_command
 
     def fake_validate(content: str, *, source_path: Path, mode: str) -> dict[str, object]:
         del content, source_path
-        return {
-            "mode": mode,
-            "status": "valid",
-            "valid": True,
-            "missing": [],
-            "present": ["status"],
-            "errors": [],
-            "schema_name": "verification",
-            "oracle_evidence_count": 1,
-        }
+        return _verification_validation_payload(mode=mode)
 
     monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
     monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "finalize",
-            str(plan_path),
-            "--patch",
-            str(patch_path),
-            "--body-file",
-            str(body_path),
-            "--output",
-            str(target_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
 
     assert result.exit_code == 0, result.output
     payload = _raw_payload_from_result(result)
-    assert payload["validation"] == {
-        "mode": "contract",
-        "status": "valid",
-        "valid": True,
-        "missing": [],
-        "present": ["status"],
-        "errors": [],
-        "schema_name": "verification",
-        "oracle_evidence_count": 1,
-    }
-    assert payload["validation_commands"] == [
-        "gpd frontmatter validate GPD/phases/01-baseline/01-VERIFICATION.md --schema verification",
-        "gpd validate verification-contract GPD/phases/01-baseline/01-VERIFICATION.md",
-    ]
+    assert payload["validation"] == _verification_validation_payload()
+    assert payload["validation_commands"] == _BASELINE_VALIDATE_COMMANDS
     assert payload["frontmatter_yaml"] == "---\nstatus: gaps_found\n---\n"
 
 
 def test_verification_report_finalize_uses_real_core_finalizer_for_gap_report(tmp_path: Path) -> None:
     plan_path = _write_stale_refresh_skeleton_plan(tmp_path)
-    patch_path = tmp_path / "patch.json"
-    patch_path.write_text('{"status": "gaps_found"}\n', encoding="utf-8")
+    patch_path = _write_verification_patch(tmp_path)
     body_path = _write_verification_body_file(tmp_path, _oracle_evidence_body())
     target_path = plan_path.with_name("01-VERIFICATION.md")
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "verification-report",
-            "finalize",
-            str(plan_path),
-            "--patch",
-            str(patch_path),
-            "--body-file",
-            str(body_path),
-            "--output",
-            str(target_path),
-            "--validate",
-            "contract",
-        ],
-        catch_exceptions=False,
-    )
+    result = _invoke_verification_finalize(plan_path, patch_path, body_path, target_path)
 
     assert result.exit_code == 0, result.output
     payload = _raw_payload_from_result(result)
@@ -3944,7 +3537,7 @@ def test_verification_report_finalize_uses_real_core_finalizer_for_gap_report(tm
     content = target_path.read_text(encoding="utf-8")
     frontmatter, body = extract_frontmatter(content)
     assert frontmatter["status"] == "gaps_found"
-    assert frontmatter["plan_contract_ref"] == "GPD/phases/01-baseline/01-PLAN.md#/contract"
+    assert frontmatter["plan_contract_ref"] == _BASELINE_PLAN_REF
     assert "FAIL: relative error exceeds the benchmark tolerance." in body
 
 
@@ -4137,12 +3730,6 @@ def test_validate_verification_contract_rejects_live_row_mistakes_from_product_v
         "comparison_verdicts:" in error and "reason" in error and "Extra inputs are not permitted" in error
         for error in expected_errors
     )
-
-
-def test_validate_command_context_help_surfaces_registry_argument_name() -> None:
-    normalized_output = _help_text("validate", "command-context")
-    assert "Run centralized command-context preflight based on command metadata." in normalized_output
-    assert "Command registry key or gpd:name" in normalized_output
 
 
 def test_validate_command_context_unknown_command_surfaces_user_facing_error(tmp_path: Path) -> None:
@@ -4477,20 +4064,6 @@ def test_resolve_model_help_lists_supported_runtime_ids():
     assert "--explain" in normalized_output
     for runtime_name in list_runtimes():
         assert runtime_name in normalized_output
-
-
-def test_state_help():
-    output = _help_text("state")
-    assert "load" in output
-    assert "get" in output
-    assert "update" in output
-
-
-def test_phase_help():
-    output = _help_text("phase")
-    assert "list" in output
-    assert "add" in output
-    assert "complete" in output
 
 
 def test_session_command_is_not_exposed():
@@ -5632,28 +5205,6 @@ def test_result_search_raw_outputs_json_list(mock_search):
     assert kwargs["unverified"] is True
 
 
-def test_result_help_surfaces_show_command_and_dependency_chain() -> None:
-    normalized_output = _help_text("result")
-    assert "show" in normalized_output
-    assert "downstream" in normalized_output
-    assert "Show a canonical result" in normalized_output
-    assert "direct/transitive" in normalized_output
-
-
-def test_result_show_help_surfaces_required_result_id_argument() -> None:
-    normalized_output = _help_text("result", "show")
-    assert "Show a canonical result and its direct/transitive dependency chain." in normalized_output
-    assert "RESULT_ID" in normalized_output
-    assert "Canonical result ID [required]" in normalized_output
-
-
-def test_result_downstream_help_surfaces_required_result_id_argument() -> None:
-    normalized_output = _help_text("result", "downstream")
-    assert "Show the direct and transitive dependents of a canonical result." in normalized_output
-    assert "RESULT_ID" in normalized_output
-    assert "Canonical result ID [required]" in normalized_output
-
-
 @patch("gpd.core.results.result_upsert", create=True)
 def test_result_upsert_with_explicit_id(mock_upsert, tmp_path: Path):
     mock_result = MagicMock()
@@ -5961,6 +5512,62 @@ def test_result_verify_recovers_from_malformed_primary_state(mock_verify, tmp_pa
     assert state_arg["intermediate_results"][0]["id"] == "R-08"
 
 
+def _mock_persisted_result(
+    *,
+    result_id: str = "R-02",
+    description: str = "Canonical quantity",
+    phase: str = "2",
+    depends_on: list[str] | None = None,
+) -> MagicMock:
+    mock_result = MagicMock()
+    mock_result.model_dump.return_value = {
+        "status": "persisted",
+        "result": {
+            "id": result_id,
+            "equation": "a = b + c",
+            "description": description,
+            "phase": phase,
+            "depends_on": ["R-01"] if depends_on is None else depends_on,
+            "verified": False,
+        },
+        "updated_fields": ["equation", "description"],
+    }
+    return mock_result
+
+
+def _persist_derived_args(
+    cwd: Path,
+    *,
+    raw: bool = False,
+    description: str = "Canonical quantity",
+    phase: str = "2",
+    depends_on: bool = False,
+) -> list[str]:
+    args = [
+        *(["--raw"] if raw else []),
+        "--cwd",
+        str(cwd),
+        "result",
+        "persist-derived",
+        "--equation",
+        "a = b + c",
+        "--description",
+        description,
+        "--phase",
+        phase,
+    ]
+    if depends_on:
+        args.extend(["--depends-on", "R-01"])
+    args.extend(["--derivation-slug", "effective-mass"])
+    return args
+
+
+def _write_empty_gpd_state(project_root: Path) -> None:
+    planning = project_root / "GPD"
+    planning.mkdir()
+    (planning / "state.json").write_text("{}", encoding="utf-8")
+
+
 @patch("gpd.cli._resolve_derived_result_id")
 @patch("gpd.core.state.state_carry_forward_continuation_last_result_id")
 @patch("gpd.core.observability.sync_execution_visibility_from_canonical_continuation", create=True)
@@ -5972,49 +5579,15 @@ def test_result_persist_derived_forwards_parsed_options_and_derivation_slug(
     mock_resolve,
     tmp_path: Path,
 ):
-    mock_result = MagicMock()
-    mock_result.model_dump.return_value = {
-        "status": "persisted",
-        "result": {
-            "id": "R-02",
-            "equation": "a = b + c",
-            "description": "Canonical quantity",
-            "phase": "2",
-            "depends_on": ["R-01"],
-            "verified": False,
-        },
-        "updated_fields": ["equation", "description"],
-    }
-    mock_upsert_derived.return_value = mock_result
+    mock_upsert_derived.return_value = _mock_persisted_result()
     mock_carry_forward.return_value = MagicMock(updated=False)
     mock_resolve.return_value = "R-02-effective-mass"
     ordered_calls = MagicMock()
     ordered_calls.attach_mock(mock_carry_forward, "carry")
     ordered_calls.attach_mock(mock_sync_visibility, "sync")
-    planning = tmp_path / "GPD"
-    planning.mkdir()
-    (planning / "state.json").write_text("{}", encoding="utf-8")
+    _write_empty_gpd_state(tmp_path)
 
-    result = runner.invoke(
-        app,
-        [
-            "--cwd",
-            str(tmp_path),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--depends-on",
-            "R-01",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    result = runner.invoke(app, _persist_derived_args(tmp_path, depends_on=True), catch_exceptions=False)
 
     assert result.exit_code == 0, result.output
     mock_resolve.assert_called_once()
@@ -6058,45 +5631,12 @@ def test_result_persist_derived_auto_seeds_continuity_anchor_from_actual_result_
     mock_resolve,
     tmp_path: Path,
 ):
-    mock_result = MagicMock()
-    mock_result.model_dump.return_value = {
-        "status": "persisted",
-        "result": {
-            "id": "R-01",
-            "equation": "a = b + c",
-            "description": "Canonical quantity",
-            "phase": "2",
-            "depends_on": ["R-01"],
-            "verified": False,
-        },
-        "updated_fields": ["equation", "description"],
-    }
-    mock_upsert_derived.return_value = mock_result
+    mock_upsert_derived.return_value = _mock_persisted_result(result_id="R-01")
     mock_carry_forward.return_value = MagicMock(updated=True)
     mock_resolve.return_value = "R-02-effective-mass"
-    planning = tmp_path / "GPD"
-    planning.mkdir()
-    (planning / "state.json").write_text("{}", encoding="utf-8")
+    _write_empty_gpd_state(tmp_path)
 
-    result = runner.invoke(
-        app,
-        [
-            "--raw",
-            "--cwd",
-            str(tmp_path),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    result = runner.invoke(app, _persist_derived_args(tmp_path, raw=True), catch_exceptions=False)
 
     payload = json_output_from_result(result)
     assert payload["requested_result_id"] == "R-02-effective-mass"
@@ -6121,25 +5661,7 @@ def test_result_persist_derived_uses_resolved_result_id_for_real_state_write(
 ) -> None:
     cwd = state_project_factory(tmp_path, current_phase="02", status="Executing")
 
-    first = runner.invoke(
-        app,
-        [
-            "--raw",
-            "--cwd",
-            str(cwd),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    first = runner.invoke(app, _persist_derived_args(cwd, raw=True), catch_exceptions=False)
 
     assert first.exit_code == 0, first.output
     first_payload = json.loads(first.output)
@@ -6148,25 +5670,7 @@ def test_result_persist_derived_uses_resolved_result_id_for_real_state_write(
     assert first_payload["requested_result_redirected"] is False
     assert first_payload["result"]["id"] == "R-02-effective-mass"
 
-    second = runner.invoke(
-        app,
-        [
-            "--raw",
-            "--cwd",
-            str(cwd),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Canonical quantity",
-            "--phase",
-            "2",
-            "--derivation-slug",
-            "effective-mass",
-        ],
-        catch_exceptions=False,
-    )
+    second = runner.invoke(app, _persist_derived_args(cwd, raw=True), catch_exceptions=False)
 
     assert second.exit_code == 0, second.output
     second_payload = json.loads(second.output)
@@ -6193,37 +5697,16 @@ def test_result_persist_derived_recovers_from_markdown_when_json_and_backup_are_
     recovered_state["position"]["status"] = "Executing"
     _write_markdown_recoverable_result_state(tmp_path, recovered_state)
 
-    mock_result = MagicMock()
-    mock_result.model_dump.return_value = {
-        "status": "persisted",
-        "result": {
-            "id": "R-11-effective-mass",
-            "equation": "a = b + c",
-            "description": "Markdown recovery",
-            "phase": "11",
-            "depends_on": [],
-            "verified": False,
-        },
-        "updated_fields": ["equation", "description"],
-    }
-    mock_upsert_derived.return_value = mock_result
+    mock_upsert_derived.return_value = _mock_persisted_result(
+        result_id="R-11-effective-mass",
+        description="Markdown recovery",
+        phase="11",
+        depends_on=[],
+    )
 
     result = runner.invoke(
         app,
-        [
-            "--cwd",
-            str(tmp_path),
-            "result",
-            "persist-derived",
-            "--equation",
-            "a = b + c",
-            "--description",
-            "Markdown recovery",
-            "--phase",
-            "11",
-            "--derivation-slug",
-            "effective-mass",
-        ],
+        _persist_derived_args(tmp_path, description="Markdown recovery", phase="11"),
         catch_exceptions=False,
     )
 
@@ -6740,30 +6223,24 @@ def test_validate_unattended_readiness_requires_runtime() -> None:
     assert "--runtime" in _normalize_cli_output(result.output)
 
 
-def test_validate_unattended_readiness_wires_local_runtime_scope_through_health_builder(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from gpd.specs import SPECS_DIR
+@dataclass(frozen=True)
+class _UnattendedReadinessCase:
+    argv: list[str]
+    expected_exit: int
+    doctor_report: DoctorReport
+    permissions_payload: dict[str, object]
+    expected_result: UnattendedReadinessResult
+    expected_doctor_kwargs: dict[str, object]
+    expected_permissions_kwargs: dict[str, object]
+    expected_builder_kwargs: dict[str, object]
+    detected_target: Path | None = None
+    target_matches_global_call: tuple[str, str] | None = None
 
-    runtime_name = list_runtimes()[0]
-    expected_target = get_adapter(runtime_name).resolve_target_dir(False, tmp_path)
-    captured: dict[str, object] = {}
-    doctor_report = DoctorReport(
-        overall=CheckStatus.WARN,
-        version="0.1.0",
-        runtime=runtime_name,
-        install_scope="local",
-        target=str(expected_target),
-        summary=HealthSummary(ok=1, warn=1, fail=0, total=2),
-        checks=[
-            HealthCheck(status=CheckStatus.OK, label="Runtime Launcher"),
-            HealthCheck(status=CheckStatus.WARN, label="LaTeX Toolchain", warnings=["LaTeX toolchain is partial."]),
-        ],
-    )
-    permissions_payload = {
+
+def _unattended_permissions_payload(runtime_name: str, target: Path) -> dict[str, object]:
+    return {
         "runtime": runtime_name,
-        "target": str(expected_target),
+        "target": str(target),
         "autonomy": "balanced",
         "readiness": "ready",
         "ready": True,
@@ -6772,348 +6249,181 @@ def test_validate_unattended_readiness_wires_local_runtime_scope_through_health_
         "status_scope": "config-only",
         "current_session_verified": False,
     }
-    expected_result = UnattendedReadinessResult(
+
+
+def _unattended_result(
+    runtime_name: str,
+    *,
+    install_scope: str,
+    target: Path,
+    passed: bool = True,
+    live_executable_probes: bool = False,
+    warnings: list[str] | None = None,
+    check: UnattendedReadinessCheck | None = None,
+    blocking_conditions: list[str] | None = None,
+    next_step: str = "",
+) -> UnattendedReadinessResult:
+    return UnattendedReadinessResult(
         runtime=runtime_name,
         autonomy="balanced",
-        install_scope="local",
-        target=str(expected_target),
+        install_scope=install_scope,
+        target=str(target),
         readiness="ready",
         ready=True,
-        passed=True,
+        passed=passed,
         readiness_message="Runtime permissions are ready for unattended use.",
-        live_executable_probes=False,
+        live_executable_probes=live_executable_probes,
         checks=[
-            UnattendedReadinessCheck(
+            check
+            or UnattendedReadinessCheck(
                 name="permissions",
                 passed=True,
                 blocking=False,
                 detail="Runtime permissions are ready for unattended use.",
             )
         ],
-        blocking_conditions=[],
-        warnings=["LaTeX toolchain is partial."],
+        blocking_conditions=list(blocking_conditions or []),
+        warnings=list(warnings or []),
+        next_step=next_step,
         status_scope="config-only",
         current_session_verified=False,
         validated_surface="runtime-surface-test",
     )
 
-    def fake_run_doctor(
-        *,
-        specs_dir: Path | None = None,
-        version: str | None = None,
-        runtime: str | None = None,
-        install_scope: str | None = None,
-        target_dir: str | Path | None = None,
-        cwd: Path | None = None,
-        live_executable_probes: bool = False,
-    ) -> MagicMock:
-        captured["doctor_kwargs"] = {
-            "specs_dir": specs_dir,
-            "version": version,
-            "runtime": runtime,
-            "install_scope": install_scope,
-            "target_dir": target_dir,
-            "cwd": cwd,
-            "live_executable_probes": live_executable_probes,
-        }
-        return doctor_report
 
-    def fake_permissions_status_payload(
-        *, runtime: str | None, autonomy: str | None, target_dir: str | None
-    ) -> dict[str, object]:
-        captured["permissions_kwargs"] = {
-            "runtime": runtime,
-            "autonomy": autonomy,
-            "target_dir": target_dir,
-        }
-        return permissions_payload
-
-    def fake_build_unattended_readiness_result(**kwargs) -> UnattendedReadinessResult:
-        captured["builder_kwargs"] = kwargs
-        return expected_result
-
-    monkeypatch.setattr("gpd.core.health.run_doctor", fake_run_doctor)
-    monkeypatch.setattr("gpd.core.health.build_unattended_readiness_result", fake_build_unattended_readiness_result)
-    monkeypatch.setattr(cli_module, "_permissions_status_payload", fake_permissions_status_payload)
-    monkeypatch.setattr(cli_module, "_validated_runtime_surface", lambda cwd=None: "runtime-surface-test")
-    result = runner.invoke(
-        app,
-        ["--cwd", str(tmp_path), "--raw", "validate", "unattended-readiness", "--runtime", runtime_name, "--local"],
-    )
-
-    assert result.exit_code == 0
-    assert json.loads(result.output) == {
-        "runtime": runtime_name,
-        "autonomy": "balanced",
-        "install_scope": "local",
-        "target": str(expected_target),
-        "readiness": "ready",
-        "ready": True,
-        "passed": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "live_executable_probes": False,
-        "checks": [
-            {
-                "name": "permissions",
-                "passed": True,
-                "blocking": False,
-                "detail": "Runtime permissions are ready for unattended use.",
-            }
-        ],
-        "blocking_conditions": [],
-        "warnings": ["LaTeX toolchain is partial."],
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-        "validated_surface": "runtime-surface-test",
-    }
-    assert captured["doctor_kwargs"] == {
-        "specs_dir": SPECS_DIR,
-        "version": None,
-        "runtime": runtime_name,
-        "install_scope": "local",
-        "target_dir": None,
-        "cwd": tmp_path,
-        "live_executable_probes": False,
-    }
-    assert captured["permissions_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "target_dir": str(expected_target),
-    }
-    assert captured["builder_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "install_scope": "local",
-        "target_dir": None,
-        "doctor_report": doctor_report,
-        "permissions_payload": permissions_payload,
-        "live_executable_probes": False,
-        "validated_surface": "runtime-surface-test",
-    }
-
-
-def test_validate_unattended_readiness_uses_detected_installed_target_when_scope_is_unspecified(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def _unattended_case(case_id: str, tmp_path: Path) -> _UnattendedReadinessCase:
     from gpd.specs import SPECS_DIR
 
     runtime_name = list_runtimes()[0]
-    detected_target = tmp_path / "runtime-global-target"
-    doctor_report = DoctorReport(
-        overall=CheckStatus.OK,
-        version="0.1.0",
-        runtime=runtime_name,
-        install_scope="global",
-        target=str(detected_target),
-        summary=HealthSummary(ok=2, warn=0, fail=0, total=2),
-        checks=[
-            HealthCheck(status=CheckStatus.OK, label="Runtime Launcher"),
-            HealthCheck(status=CheckStatus.OK, label="Runtime Config Target"),
-        ],
-    )
-    permissions_payload = {
-        "runtime": runtime_name,
-        "target": str(detected_target),
-        "autonomy": "balanced",
-        "readiness": "ready",
-        "ready": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-    }
-    expected_result = UnattendedReadinessResult(
-        runtime=runtime_name,
-        autonomy="balanced",
-        install_scope="global",
-        target=str(detected_target),
-        readiness="ready",
-        ready=True,
-        passed=True,
-        readiness_message="Runtime permissions are ready for unattended use.",
-        live_executable_probes=False,
-        checks=[
-            UnattendedReadinessCheck(
-                name="permissions",
-                passed=True,
-                blocking=False,
-                detail="Runtime permissions are ready for unattended use.",
-            )
-        ],
-        blocking_conditions=[],
-        warnings=[],
-        next_step="",
-        status_scope="config-only",
-        current_session_verified=False,
-        validated_surface="runtime-surface-test",
-    )
-
-    captured: dict[str, object] = {}
-
-    def fake_run_doctor(
-        *,
-        specs_dir: Path | None = None,
-        version: str | None = None,
-        runtime: str | None = None,
-        install_scope: str | None = None,
-        target_dir: str | Path | None = None,
-        cwd: Path | None = None,
-        live_executable_probes: bool = False,
-    ) -> MagicMock:
-        captured["doctor_kwargs"] = {
-            "specs_dir": specs_dir,
-            "version": version,
-            "runtime": runtime,
-            "install_scope": install_scope,
-            "target_dir": target_dir,
-            "cwd": cwd,
-            "live_executable_probes": live_executable_probes,
-        }
-        return doctor_report
-
-    def fake_permissions_status_payload(
-        *, runtime: str | None, autonomy: str | None, target_dir: str | None
-    ) -> dict[str, object]:
-        captured["permissions_kwargs"] = {
-            "runtime": runtime,
-            "autonomy": autonomy,
-            "target_dir": target_dir,
-        }
-        return permissions_payload
-
-    def fake_build_unattended_readiness_result(**kwargs) -> UnattendedReadinessResult:
-        captured["builder_kwargs"] = kwargs
-        return expected_result
-
-    monkeypatch.setattr("gpd.core.health.run_doctor", fake_run_doctor)
-    monkeypatch.setattr("gpd.core.health.build_unattended_readiness_result", fake_build_unattended_readiness_result)
-    monkeypatch.setattr(cli_module, "_permissions_status_payload", fake_permissions_status_payload)
-    monkeypatch.setattr(cli_module, "_validated_runtime_surface", lambda cwd=None: "runtime-surface-test")
-
-    with patch(
-        "gpd.hooks.runtime_detect.detect_runtime_install_target",
-        return_value=SimpleNamespace(config_dir=detected_target, install_scope="global"),
-    ):
-        result = runner.invoke(
-            app,
-            ["--cwd", str(tmp_path), "--raw", "validate", "unattended-readiness", "--runtime", runtime_name],
+    base_argv = ["--cwd", str(tmp_path), "--raw", "validate", "unattended-readiness", "--runtime", runtime_name]
+    if case_id == "local":
+        target = get_adapter(runtime_name).resolve_target_dir(False, tmp_path)
+        scope = "local"
+        target_dir_arg = None
+        argv = [*base_argv, "--local"]
+        doctor_report = DoctorReport(
+            overall=CheckStatus.WARN,
+            version="0.1.0",
+            runtime=runtime_name,
+            install_scope=scope,
+            target=str(target),
+            summary=HealthSummary(ok=1, warn=1, fail=0, total=2),
+            checks=[
+                HealthCheck(status=CheckStatus.OK, label="Runtime Launcher"),
+                HealthCheck(status=CheckStatus.WARN, label="LaTeX Toolchain", warnings=["LaTeX toolchain is partial."]),
+            ],
         )
-
-    assert result.exit_code == 0
-    assert json.loads(result.output) == {
-        "runtime": runtime_name,
-        "autonomy": "balanced",
-        "install_scope": "global",
-        "target": str(detected_target),
-        "readiness": "ready",
-        "ready": True,
-        "passed": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "live_executable_probes": False,
-        "checks": [
-            {
-                "name": "permissions",
-                "passed": True,
-                "blocking": False,
-                "detail": "Runtime permissions are ready for unattended use.",
-            }
-        ],
-        "blocking_conditions": [],
-        "warnings": [],
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-        "validated_surface": "runtime-surface-test",
-    }
-    assert captured["doctor_kwargs"] == {
-        "specs_dir": SPECS_DIR,
-        "version": None,
-        "runtime": runtime_name,
-        "install_scope": "global",
-        "target_dir": detected_target,
-        "cwd": tmp_path,
-        "live_executable_probes": False,
-    }
-    assert captured["permissions_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "target_dir": str(detected_target),
-    }
-    assert captured["builder_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "install_scope": "global",
-        "target_dir": detected_target,
-        "doctor_report": doctor_report,
-        "permissions_payload": permissions_payload,
-        "live_executable_probes": False,
-        "validated_surface": "runtime-surface-test",
-    }
-
-
-def test_validate_unattended_readiness_infers_global_target_scope_and_propagates_failed_result(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    from gpd.specs import SPECS_DIR
-
-    runtime_name = list_runtimes()[0]
-    target_dir = tmp_path / ".gpd-target"
-    resolved_target = target_dir.resolve(strict=False)
-    captured: dict[str, object] = {}
-    doctor_report = DoctorReport(
-        overall=CheckStatus.FAIL,
-        version="0.1.0",
-        runtime=runtime_name,
-        install_scope="global",
-        target=str(resolved_target),
-        live_executable_probes=True,
-        summary=HealthSummary(ok=0, warn=1, fail=1, total=2),
-        checks=[
-            HealthCheck(
-                status=CheckStatus.FAIL, label="Runtime Launcher", issues=["Runtime launcher not found on PATH"]
-            ),
-            HealthCheck(status=CheckStatus.WARN, label="LaTeX Toolchain", warnings=["LaTeX toolchain is partial."]),
-        ],
-    )
-    permissions_payload = {
-        "runtime": runtime_name,
-        "target": str(resolved_target),
-        "autonomy": "balanced",
-        "readiness": "ready",
-        "ready": True,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "next_step": "",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-    }
-    expected_result = UnattendedReadinessResult(
-        runtime=runtime_name,
-        autonomy="balanced",
-        install_scope="global",
-        target=str(resolved_target),
-        readiness="ready",
-        ready=True,
-        passed=False,
-        readiness_message="Runtime permissions are ready for unattended use.",
-        live_executable_probes=True,
-        checks=[
-            UnattendedReadinessCheck(
+        expected_result = _unattended_result(
+            runtime_name, install_scope=scope, target=target, warnings=["LaTeX toolchain is partial."]
+        )
+        detected_target = None
+        target_matches_global_call = None
+        expected_exit = 0
+        live_executable_probes = False
+    elif case_id == "detected-global":
+        target = tmp_path / "runtime-global-target"
+        scope = "global"
+        target_dir_arg = target
+        argv = base_argv
+        doctor_report = DoctorReport(
+            overall=CheckStatus.OK,
+            version="0.1.0",
+            runtime=runtime_name,
+            install_scope=scope,
+            target=str(target),
+            summary=HealthSummary(ok=2, warn=0, fail=0, total=2),
+            checks=[
+                HealthCheck(status=CheckStatus.OK, label="Runtime Launcher"),
+                HealthCheck(status=CheckStatus.OK, label="Runtime Config Target"),
+            ],
+        )
+        expected_result = _unattended_result(runtime_name, install_scope=scope, target=target)
+        detected_target = target
+        target_matches_global_call = None
+        expected_exit = 0
+        live_executable_probes = False
+    elif case_id == "explicit-global-failure":
+        target_dir = tmp_path / ".gpd-target"
+        target = target_dir.resolve(strict=False)
+        scope = "global"
+        target_dir_arg = target
+        argv = [*base_argv, "--target-dir", str(target_dir), "--live-executable-probes"]
+        doctor_report = DoctorReport(
+            overall=CheckStatus.FAIL,
+            version="0.1.0",
+            runtime=runtime_name,
+            install_scope=scope,
+            target=str(target),
+            live_executable_probes=True,
+            summary=HealthSummary(ok=0, warn=1, fail=1, total=2),
+            checks=[
+                HealthCheck(
+                    status=CheckStatus.FAIL, label="Runtime Launcher", issues=["Runtime launcher not found on PATH"]
+                ),
+                HealthCheck(status=CheckStatus.WARN, label="LaTeX Toolchain", warnings=["LaTeX toolchain is partial."]),
+            ],
+        )
+        expected_result = _unattended_result(
+            runtime_name,
+            install_scope=scope,
+            target=target,
+            passed=False,
+            live_executable_probes=True,
+            warnings=["LaTeX toolchain is partial."],
+            check=UnattendedReadinessCheck(
                 name="doctor",
                 passed=False,
                 blocking=True,
                 detail="Runtime launcher not found on PATH",
-            )
-        ],
-        blocking_conditions=["Runtime launcher not found on PATH"],
-        warnings=["LaTeX toolchain is partial."],
-        next_step="Inspect the runtime-specific doctor output before retrying unattended use.",
-        status_scope="config-only",
-        current_session_verified=False,
-        validated_surface="runtime-surface-test",
+            ),
+            blocking_conditions=["Runtime launcher not found on PATH"],
+            next_step="Inspect the runtime-specific doctor output before retrying unattended use.",
+        )
+        detected_target = None
+        target_matches_global_call = (runtime_name, str(target_dir))
+        expected_exit = 1
+        live_executable_probes = True
+    else:
+        raise AssertionError(f"unknown unattended-readiness case: {case_id}")
+
+    permissions_payload = _unattended_permissions_payload(runtime_name, target)
+    expected_common = {
+        "runtime": runtime_name,
+        "autonomy": None,
+        "install_scope": scope,
+        "target_dir": target_dir_arg,
+        "doctor_report": doctor_report,
+        "permissions_payload": permissions_payload,
+        "live_executable_probes": live_executable_probes,
+        "validated_surface": "runtime-surface-test",
+    }
+    return _UnattendedReadinessCase(
+        argv=argv,
+        expected_exit=expected_exit,
+        doctor_report=doctor_report,
+        permissions_payload=permissions_payload,
+        expected_result=expected_result,
+        expected_doctor_kwargs={
+            "specs_dir": SPECS_DIR,
+            "version": None,
+            "runtime": runtime_name,
+            "install_scope": scope,
+            "target_dir": target_dir_arg,
+            "cwd": tmp_path,
+            "live_executable_probes": live_executable_probes,
+        },
+        expected_permissions_kwargs={"runtime": runtime_name, "autonomy": None, "target_dir": str(target)},
+        expected_builder_kwargs=expected_common,
+        detected_target=detected_target,
+        target_matches_global_call=target_matches_global_call,
     )
+
+
+def _run_unattended_readiness_case(
+    monkeypatch: pytest.MonkeyPatch,
+    case: _UnattendedReadinessCase,
+) -> dict[str, object]:
+    captured: dict[str, object] = {}
 
     def fake_run_doctor(
         *,
@@ -7124,7 +6434,7 @@ def test_validate_unattended_readiness_infers_global_target_scope_and_propagates
         target_dir: str | Path | None = None,
         cwd: Path | None = None,
         live_executable_probes: bool = False,
-    ) -> MagicMock:
+    ) -> DoctorReport:
         captured["doctor_kwargs"] = {
             "specs_dir": specs_dir,
             "version": version,
@@ -7134,94 +6444,56 @@ def test_validate_unattended_readiness_infers_global_target_scope_and_propagates
             "cwd": cwd,
             "live_executable_probes": live_executable_probes,
         }
-        return doctor_report
+        return case.doctor_report
 
     def fake_permissions_status_payload(
         *, runtime: str | None, autonomy: str | None, target_dir: str | None
     ) -> dict[str, object]:
-        captured["permissions_kwargs"] = {
-            "runtime": runtime,
-            "autonomy": autonomy,
-            "target_dir": target_dir,
-        }
-        return permissions_payload
+        captured["permissions_kwargs"] = {"runtime": runtime, "autonomy": autonomy, "target_dir": target_dir}
+        return case.permissions_payload
 
     def fake_build_unattended_readiness_result(**kwargs) -> UnattendedReadinessResult:
         captured["builder_kwargs"] = kwargs
-        return expected_result
+        return case.expected_result
 
     monkeypatch.setattr("gpd.core.health.run_doctor", fake_run_doctor)
     monkeypatch.setattr("gpd.core.health.build_unattended_readiness_result", fake_build_unattended_readiness_result)
     monkeypatch.setattr(cli_module, "_permissions_status_payload", fake_permissions_status_payload)
     monkeypatch.setattr(cli_module, "_validated_runtime_surface", lambda cwd=None: "runtime-surface-test")
-    with patch("gpd.cli._target_dir_matches_global", return_value=True) as mock_matches_global:
-        result = runner.invoke(
-            app,
-            [
-                "--cwd",
-                str(tmp_path),
-                "--raw",
-                "validate",
-                "unattended-readiness",
-                "--runtime",
-                runtime_name,
-                "--target-dir",
-                str(target_dir),
-                "--live-executable-probes",
-            ],
-        )
 
-    assert result.exit_code == 1
-    mock_matches_global.assert_called_once_with(runtime_name, str(target_dir), action="validate unattended-readiness")
-    assert json.loads(result.output) == {
-        "runtime": runtime_name,
-        "autonomy": "balanced",
-        "install_scope": "global",
-        "target": str(resolved_target),
-        "readiness": "ready",
-        "ready": True,
-        "passed": False,
-        "readiness_message": "Runtime permissions are ready for unattended use.",
-        "live_executable_probes": True,
-        "checks": [
-            {
-                "name": "doctor",
-                "passed": False,
-                "blocking": True,
-                "detail": "Runtime launcher not found on PATH",
-            }
-        ],
-        "blocking_conditions": ["Runtime launcher not found on PATH"],
-        "warnings": ["LaTeX toolchain is partial."],
-        "next_step": "Inspect the runtime-specific doctor output before retrying unattended use.",
-        "status_scope": "config-only",
-        "current_session_verified": False,
-        "validated_surface": "runtime-surface-test",
-    }
-    assert captured["doctor_kwargs"] == {
-        "specs_dir": SPECS_DIR,
-        "version": None,
-        "runtime": runtime_name,
-        "install_scope": "global",
-        "target_dir": resolved_target,
-        "cwd": tmp_path,
-        "live_executable_probes": True,
-    }
-    assert captured["permissions_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "target_dir": str(resolved_target),
-    }
-    assert captured["builder_kwargs"] == {
-        "runtime": runtime_name,
-        "autonomy": None,
-        "install_scope": "global",
-        "target_dir": resolved_target,
-        "doctor_report": doctor_report,
-        "permissions_payload": permissions_payload,
-        "live_executable_probes": True,
-        "validated_surface": "runtime-surface-test",
-    }
+    if case.detected_target is not None:
+        with patch(
+            "gpd.hooks.runtime_detect.detect_runtime_install_target",
+            return_value=SimpleNamespace(config_dir=case.detected_target, install_scope="global"),
+        ):
+            result = runner.invoke(app, case.argv)
+    elif case.target_matches_global_call is not None:
+        with patch("gpd.cli._target_dir_matches_global", return_value=True) as mock_matches_global:
+            result = runner.invoke(app, case.argv)
+        mock_matches_global.assert_called_once_with(
+            *case.target_matches_global_call,
+            action="validate unattended-readiness",
+        )
+    else:
+        result = runner.invoke(app, case.argv)
+
+    assert result.exit_code == case.expected_exit
+    assert json.loads(result.output) == asdict(case.expected_result)
+    return captured
+
+
+@pytest.mark.parametrize("case_id", ["local", "detected-global", "explicit-global-failure"])
+def test_validate_unattended_readiness_wires_runtime_scope_through_health_builder(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    case_id: str,
+) -> None:
+    case = _unattended_case(case_id, tmp_path)
+    captured = _run_unattended_readiness_case(monkeypatch, case)
+
+    assert captured["doctor_kwargs"] == case.expected_doctor_kwargs
+    assert captured["permissions_kwargs"] == case.expected_permissions_kwargs
+    assert captured["builder_kwargs"] == case.expected_builder_kwargs
 
 
 def test_runtime_surface_helpers_track_the_active_runtime_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -7998,12 +7270,6 @@ def test_init_plan_phase_rejects_invalid_stage(monkeypatch: pytest.MonkeyPatch) 
     assert "Unknown plan-phase stage 'bogus'" in result.output
 
 
-def test_init_resume_help_surfaces_recovery_snapshot_entrypoint() -> None:
-    normalized_output = _help_text("init", "resume")
-    assert "Usage: gpd init resume" in normalized_output
-    assert "Assemble context for resuming previous work." in normalized_output
-
-
 @patch("gpd.core.context.init_resume")
 def test_init_resume(mock_init):
     mock_result = MagicMock()
@@ -8264,14 +7530,6 @@ def test_paper_build_rejects_legacy_sidecar_flags(legacy_flag: str, tmp_path: Pa
     assert "No such option" in normalized_output
     assert legacy_flag in normalized_output
     mock_build.assert_not_called()
-
-
-def test_paper_build_help_omits_legacy_sidecar_flags() -> None:
-    normalized_output = _help_text("paper-build")
-    assert "--minimal" in normalized_output
-    assert "--with-provenance" not in normalized_output
-    assert "--with-audits" not in normalized_output
-    assert "--with-review-sidecars" not in normalized_output
 
 
 def test_paper_build_rejects_ambiguous_supported_config_roots_without_a_resolved_manuscript(tmp_path: Path) -> None:

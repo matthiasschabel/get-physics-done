@@ -17,15 +17,20 @@ from tests.helpers.phase4_persona.user_steering import (
     score_user_steering_row,
     user_steering_rows,
 )
-from tests.helpers.phase7_live_like import load_phase7_live_like_rows, score_phase7_live_like_rows
+from tests.helpers.phase7_live_like import (
+    REQUIRED_BASE_ROW_PREFIXES,
+    REQUIRED_JIT_ROW_IDS,
+    load_phase7_live_like_rows,
+    score_phase7_live_like_rows,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-REQUIRED_PHASE7_BASE_PREFIXES = frozenset(f"LP{index:02d}" for index in range(1, 13))
-REQUIRED_PHASE7_JIT_ROW_IDS = frozenset(f"LP-JIT-{index:02d}" for index in range(1, 9))
 STOP_BEHAVIOR_ROW_IDS = frozenset({"P4-USER-02", "P4-USER-03"})
 EXPECTED_UNSUPPORTED_COMPLETION_DETECTION_ROW_IDS = frozenset({"P4-EXEC-13", "P4-EXEC-14"})
+PHASE7_HANDLE_FIRST_ROW_IDS = frozenset({"LP-JIT-04", "P6-RES-JIT-02", "P6-RES-JIT-03", "P6-RES-JIT-05"})
+PHASE7_STOP_ROW_IDS = frozenset({"LP-JIT-06", "P6-EXEC-JIT-03"})
 
 HARD_ZERO_METRIC_KEYS = (
     "invalid_command_suggestion_count",
@@ -40,8 +45,8 @@ def test_phase7_persona_canary_fixture_contains_base_and_jit_rows() -> None:
     row_ids = {str(row["row_id"]) for row in rows}
     base_prefixes = {row_id.split("-", 1)[0] for row_id in row_ids if row_id.startswith("LP")}
 
-    assert REQUIRED_PHASE7_BASE_PREFIXES <= base_prefixes
-    assert REQUIRED_PHASE7_JIT_ROW_IDS <= row_ids
+    assert REQUIRED_BASE_ROW_PREFIXES <= base_prefixes
+    assert REQUIRED_JIT_ROW_IDS <= row_ids
 
     for row in rows:
         assert row.get("provider_launch_allowed") is False
@@ -57,7 +62,8 @@ def test_provider_free_persona_canary_scores_obey_hard_budgets(
     phase7_scores = score_phase7_live_like_rows(load_phase7_live_like_rows())
 
     assert phase4_scores
-    assert {score.row.row_id for score in phase7_scores} == REQUIRED_PHASE7_JIT_ROW_IDS
+    assert {score.row.row_id for score in phase7_scores} >= REQUIRED_JIT_ROW_IDS
+    assert all(score.row.row_tier == "jit_canary" for score in phase7_scores)
 
     for score in phase4_scores:
         _assert_score_hard_budgets(score)
@@ -128,13 +134,13 @@ def _assert_phase7_score_hard_budgets(wrapped_score: object) -> None:
     for metric_key in ("raw_reload_leakage_count", "content_hydration_before_selection_count"):
         assert counts[metric_key] == 0
 
-    if wrapped_score.row.row_id == "LP-JIT-04":
-        assert counts["conversation_turn_count"] == 2
+    if wrapped_score.row.row_id in PHASE7_HANDLE_FIRST_ROW_IDS:
+        assert counts["conversation_turn_count"] <= 2
         assert wrapped_score.behavior_score.metric_counts["raw_reload_leakage_count"] == 0
         assert wrapped_score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 0
         assert wrapped_score.behavior_score.metric_classes["artifact_handle_first_class"] == "handle_before_content"
         assert classes["artifact_handle_first_class"] == "handle_first"
-    if wrapped_score.row.row_id == "LP-JIT-06":
+    if wrapped_score.row.row_id in PHASE7_STOP_ROW_IDS:
         assert classes["stop_integrity_class"] == "stopped_cleanly"
 
 

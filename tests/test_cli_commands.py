@@ -16,7 +16,6 @@ import dataclasses
 import importlib
 import json
 import sys
-import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,8 +34,12 @@ from gpd.core.state import StateUpdateResult, default_state_dict, generate_state
 from gpd.registry import _parse_command_file
 from tests.helpers.cli import (
     StableCliRunner,
+    assert_check,
+    assert_checks_pass,
+    checks_by_name,
     invoke_cli,
     invoke_help_text,
+    invoke_raw_json,
     json_output_from_result,
 )
 from tests.helpers.cli import (
@@ -77,10 +80,37 @@ from tests.manuscript_test_support import (
     manuscript_path as canonical_manuscript_path,
 )
 from tests.manuscript_test_support import (
-    manuscript_pdf_path as canonical_manuscript_pdf_path,
-)
-from tests.manuscript_test_support import (
     manuscript_relpath as canonical_manuscript_relpath,
+)
+from tests.project_test_support import write_cli_smoke_project
+from tests.review_contract_test_support import (
+    PEER_REVIEW_COMMON_PREFLIGHT_CHECKS,
+    PROJECT_BACKED_PEER_REVIEW_CONDITIONAL,
+    THEOREM_BEARING_PEER_REVIEW_CONDITIONAL,
+)
+from tests.review_test_support import (
+    move_publication_review_outcome_to_subject_review as _move_publication_review_outcome_to_subject_review,
+)
+from tests.review_test_support import (
+    prepare_accepted_managed_arxiv_subject as _prepare_accepted_managed_arxiv_subject,
+)
+from tests.review_test_support import (
+    update_claim_index_claim as _update_claim_index_claim,
+)
+from tests.review_test_support import (
+    write_draft_knowledge_document as _write_draft_knowledge_document,
+)
+from tests.review_test_support import (
+    write_managed_arxiv_submission_package as _write_managed_arxiv_submission_package,
+)
+from tests.review_test_support import (
+    write_publication_response_round as _write_publication_response_round,
+)
+from tests.review_test_support import (
+    write_publication_review_outcome as _write_publication_review_outcome,
+)
+from tests.review_test_support import (
+    write_review_stage_artifacts as _write_review_stage_artifacts,
 )
 
 runner = StableCliRunner()
@@ -241,63 +271,6 @@ _SLASH_COMMAND_DESCRIPTOR = next(
     if descriptor.validated_command_surface == "public_runtime_slash_command"
     and descriptor.runtime_name != _DOLLAR_COMMAND_DESCRIPTOR.runtime_name
 )
-PEER_REVIEW_COMMON_PREFLIGHT_CHECKS = [
-    "command_context",
-    "manuscript",
-    "manuscript_proof_review",
-]
-PROJECT_BACKED_PEER_REVIEW_CONDITIONAL = {
-    "when": "project-backed manuscript review",
-    "required_outputs": [],
-    "required_evidence": [
-        "phase summaries or milestone digest",
-        "verification reports",
-        "manuscript-root bibliography audit",
-        "manuscript-root artifact manifest",
-        "manuscript-root reproducibility manifest",
-        "manuscript-root publication artifacts",
-    ],
-    "blocking_conditions": [
-        "missing project state",
-        "missing roadmap",
-        "missing conventions",
-        "no research artifacts",
-    ],
-    "preflight_checks": [
-        "project_state",
-        "roadmap",
-        "conventions",
-        "research_artifacts",
-        "verification_reports",
-        "artifact_manifest",
-        "bibliography_audit",
-        "bibliography_audit_clean",
-        "reproducibility_manifest",
-        "reproducibility_ready",
-    ],
-    "blocking_preflight_checks": [
-        "project_state",
-        "roadmap",
-        "conventions",
-        "research_artifacts",
-        "verification_reports",
-        "artifact_manifest",
-        "bibliography_audit",
-        "bibliography_audit_clean",
-        "reproducibility_manifest",
-        "reproducibility_ready",
-    ],
-    "stage_artifacts": [],
-}
-THEOREM_BEARING_PEER_REVIEW_CONDITIONAL = {
-    "when": "theorem-bearing claims are present",
-    "required_outputs": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-    "required_evidence": [],
-    "blocking_conditions": [],
-    "preflight_checks": [],
-    "blocking_preflight_checks": [],
-    "stage_artifacts": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-}
 
 
 @pytest.fixture()
@@ -316,189 +289,7 @@ def slash_command_prefix(monkeypatch: pytest.MonkeyPatch) -> str:
 
 @pytest.fixture()
 def gpd_project(tmp_path: Path) -> Path:
-    """Create a minimal GPD project with all files commands might touch."""
-    planning = tmp_path / "GPD"
-    planning.mkdir()
-
-    state = default_state_dict()
-    state["position"].update(
-        {
-            "current_phase": "01",
-            "current_phase_name": "Test Phase",
-            "total_phases": 2,
-            "status": "Planning",
-        }
-    )
-    state["convention_lock"].update(
-        {
-            "metric_signature": "(-,+,+,+)",
-            "coordinate_system": "Cartesian",
-            "custom_conventions": {"my_custom": "value"},
-        }
-    )
-    (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
-    (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
-    (planning / "PROJECT.md").write_text(
-        "# Test Project\n\n## Core Research Question\nWhat is physics?\n", encoding="utf-8"
-    )
-    (planning / "REQUIREMENTS.md").write_text("# Requirements\n\n- [ ] **REQ-01**: Do the thing\n", encoding="utf-8")
-    (planning / "ROADMAP.md").write_text(
-        "# Roadmap\n\n## Phase 1: Test Phase\nGoal: Test\nRequirements: REQ-01\n"
-        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n",
-        encoding="utf-8",
-    )
-    (planning / "CONVENTIONS.md").write_text(
-        "# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n", encoding="utf-8"
-    )
-    (planning / "config.json").write_text(
-        json.dumps(
-            {
-                "autonomy": "yolo",
-                "research_mode": "balanced",
-                "parallelization": True,
-                "commit_docs": True,
-                "model_profile": "review",
-                "workflow": {
-                    "research": True,
-                    "plan_checker": True,
-                    "verifier": True,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    # Phase directories
-    p1 = planning / "phases" / "01-test-phase"
-    p1.mkdir(parents=True)
-    (p1 / "README.md").write_text("# Phase 1: Test Phase\n", encoding="utf-8")
-    (p1 / "01-SUMMARY.md").write_text(
-        "---\n"
-        "phase: 01-test-phase\n"
-        "plan: 01\n"
-        "depth: full\n"
-        "provides: [executed plan summary]\n"
-        "completed: 2026-03-10\n"
-        "---\n\n"
-        "# Summary\n\nExecuted plan summary.\n",
-        encoding="utf-8",
-    )
-    (p1 / "01-VERIFICATION.md").write_text(
-        "---\n"
-        "phase: 01-test-phase\n"
-        "verified: 2026-03-10T00:00:00Z\n"
-        "status: passed\n"
-        "score: 1/1 checks passed\n"
-        "---\n\n"
-        "# Verification\n\nVerified result.\n",
-        encoding="utf-8",
-    )
-    p2 = planning / "phases" / "02-phase-two"
-    p2.mkdir(parents=True)
-    (p2 / "README.md").write_text("# Phase 2: Phase Two\n", encoding="utf-8")
-
-    paper_dir = tmp_path / "paper"
-    paper_dir.mkdir()
-    manuscript = canonical_manuscript_path(tmp_path)
-    manuscript.write_text(
-        "\\documentclass{article}\n\\begin{document}\nTest manuscript.\n\\end{document}\n",
-        encoding="utf-8",
-    )
-    compiled_manuscript = canonical_manuscript_pdf_path(tmp_path)
-    compiled_manuscript.write_bytes(b"%PDF-1.4\n% fake arxiv submission pdf\n")
-    (paper_dir / "PAPER-CONFIG.json").write_text(
-        json.dumps(
-            {
-                "title": "Curvature Flow Bounds",
-                "authors": [{"name": "A. Researcher"}],
-                "abstract": "Abstract.",
-                "sections": [{"heading": "Introduction", "content": "Test manuscript."}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (paper_dir / "ARTIFACT-MANIFEST.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Test",
-                "journal": "prl",
-                "created_at": "2026-03-10T00:00:00+00:00",
-                "manuscript_sha256": compute_sha256(manuscript),
-                "manuscript_mtime_ns": manuscript.stat().st_mtime_ns,
-                "artifacts": [
-                    {
-                        "artifact_id": "manuscript",
-                        "category": "tex",
-                        "path": _CANONICAL_MANUSCRIPT_BASENAME,
-                        "sha256": compute_sha256(manuscript),
-                        "produced_by": "tests.test_cli_commands",
-                        "sources": [],
-                        "metadata": {"role": "manuscript"},
-                    },
-                    {
-                        "artifact_id": "compiled-manuscript",
-                        "category": "pdf",
-                        "path": _CANONICAL_MANUSCRIPT_PDF_BASENAME,
-                        "sha256": compute_sha256(compiled_manuscript),
-                        "produced_by": "tests.test_cli_commands",
-                        "sources": [{"path": _CANONICAL_MANUSCRIPT_BASENAME, "role": "compiled_from"}],
-                        "metadata": {"role": "compiled_manuscript"},
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (paper_dir / "BIBLIOGRAPHY-AUDIT.json").write_text(
-        json.dumps(
-            {
-                "generated_at": "2026-03-10T00:00:00+00:00",
-                "total_sources": 0,
-                "resolved_sources": 0,
-                "partial_sources": 0,
-                "unverified_sources": 0,
-                "failed_sources": 0,
-                "entries": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (paper_dir / "reproducibility-manifest.json").write_text(
-        json.dumps(
-            {
-                "paper_title": "Test",
-                "date": "2026-03-10",
-                "environment": {
-                    "python_version": "3.12.1",
-                    "package_manager": "uv",
-                    "required_packages": [{"package": "numpy", "version": "1.26.4"}],
-                    "lock_file": "pyproject.toml",
-                    "system_requirements": {},
-                },
-                "execution_steps": [{"name": "run", "command": "python scripts/run.py"}],
-                "expected_results": [
-                    {"quantity": "x", "expected_value": "1", "tolerance": "0.1", "script": "scripts/run.py"}
-                ],
-                "output_files": [{"path": "results/out.json", "checksum_sha256": "a" * 64}],
-                "resource_requirements": [{"step": "run", "cpu_cores": 1, "memory_gb": 1.0}],
-                "verification_steps": ["rerun", "compare", "inspect"],
-                "minimum_viable": "1 core",
-                "recommended": "2 cores",
-                "last_verified": "2026-03-10T00:00:00+00:00",
-                "last_verified_platform": "macOS-15-arm64",
-                "random_seeds": [],
-                "seeding_strategy": "",
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    reports_dir = tmp_path / "reports"
-    reports_dir.mkdir()
-    (reports_dir / "referee-report.md").write_text("# Referee Report\n\n1. Clarify the derivation.\n", encoding="utf-8")
-
-    return tmp_path
+    return write_cli_smoke_project(tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -510,6 +301,10 @@ def _chdir(gpd_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 def _invoke(*args: str, expect_ok: bool = True) -> None:
     """Invoke a gpd CLI command and assert it doesn't crash."""
     invoke_cli(runner, app, args, expect_exit=0 if expect_ok else None, catch_exceptions=False)
+
+
+def _raw_json(args: list[str], *, expect_exit: int = 0, **kwargs: object) -> dict[str, object]:
+    return invoke_raw_json(runner, app, args, expect_exit=expect_exit, catch_exceptions=False, **kwargs)
 
 
 def _manuscript_entrypoint_path(
@@ -527,412 +322,6 @@ def _manuscript_entrypoint_relpath(
     suffix: str = ".tex",
 ) -> str:
     return f"{root_name}/{CANONICAL_MANUSCRIPT_STEM}{suffix}"
-
-
-def _write_review_stage_artifacts(
-    project_root: Path,
-    artifact_names: tuple[str, ...] | None = None,
-    *,
-    manuscript_path: str = _CANONICAL_MANUSCRIPT_REL,
-    proof_bearing: bool = False,
-    write_proof_redteam: bool = False,
-    proof_redteam_status: str = "passed",
-) -> None:
-    review_dir = project_root / "GPD" / "review"
-    review_dir.mkdir(parents=True, exist_ok=True)
-    manuscript_abspath = (project_root / manuscript_path).resolve(strict=False)
-    manuscript_sha256 = compute_sha256(manuscript_abspath) if manuscript_abspath.exists() else "a" * 64
-    written_claim_indexes: set[str] = set()
-    for artifact_name in artifact_names or (
-        "STAGE-reader.json",
-        "STAGE-literature.json",
-        "STAGE-math.json",
-        "STAGE-physics.json",
-        "STAGE-interestingness.json",
-    ):
-        artifact_path = review_dir / artifact_name
-        if not artifact_name.startswith("STAGE-") or not artifact_name.endswith(".json"):
-            artifact_path.write_text("{}", encoding="utf-8")
-            continue
-
-        artifact_stem = artifact_name[len("STAGE-") : -len(".json")]
-        if "-R" in artifact_stem:
-            stage_id, round_text = artifact_stem.rsplit("-R", 1)
-            if not round_text.isdigit():
-                artifact_path.write_text("{}", encoding="utf-8")
-                continue
-            round_number = int(round_text)
-            round_suffix = f"-R{round_number}"
-        else:
-            stage_id = artifact_stem
-            round_number = 1
-            round_suffix = ""
-
-        if stage_id not in {"reader", "literature", "math", "physics", "interestingness"}:
-            artifact_path.write_text("{}", encoding="utf-8")
-            continue
-
-        if round_suffix not in written_claim_indexes:
-            (review_dir / f"CLAIMS{round_suffix}.json").write_text(
-                json.dumps(
-                    {
-                        "version": 1,
-                        "manuscript_path": manuscript_path,
-                        "manuscript_sha256": manuscript_sha256,
-                        "claims": [
-                            {
-                                "claim_id": "CLM-001",
-                                "claim_type": "main_result",
-                                "text": (
-                                    "For every r_0 > 0, the orbit intersects the target annulus."
-                                    if proof_bearing
-                                    else "The manuscript makes a test claim."
-                                ),
-                                "artifact_path": manuscript_path,
-                                "section": "Conclusion",
-                                "equation_refs": [],
-                                "figure_refs": [],
-                                "supporting_artifacts": [],
-                                "theorem_assumptions": ["chi > 0"] if proof_bearing else [],
-                                "theorem_parameters": ["r_0"] if proof_bearing else [],
-                            }
-                        ],
-                    }
-                ),
-                encoding="utf-8",
-            )
-            written_claim_indexes.add(round_suffix)
-
-        artifact_path.write_text(
-            json.dumps(
-                {
-                    "version": 1,
-                    "round": round_number,
-                    "stage_id": stage_id,
-                    "stage_kind": stage_id,
-                    "manuscript_path": manuscript_path,
-                    "manuscript_sha256": manuscript_sha256,
-                    "claims_reviewed": ["CLM-001"],
-                    "summary": f"{stage_id} review summary.",
-                    "strengths": ["Structured review artifact emitted."],
-                    "findings": [
-                        {
-                            "issue_id": "REF-001",
-                            "claim_ids": ["CLM-001"],
-                            "severity": "minor",
-                            "summary": "Minor concern.",
-                            "rationale": "",
-                            "evidence_refs": [f"{manuscript_path}#Conclusion"],
-                            "manuscript_locations": [],
-                            "support_status": "unclear",
-                            "blocking": False,
-                            "required_action": "",
-                        }
-                    ],
-                    "proof_audits": (
-                        [
-                            {
-                                "claim_id": "CLM-001",
-                                "theorem_assumptions_checked": ["chi > 0"],
-                                "theorem_parameters_checked": ["r_0"],
-                                "proof_locations": [f"{manuscript_path}:1"],
-                                "uncovered_assumptions": [],
-                                "uncovered_parameters": [],
-                                "coverage_gaps": [],
-                                "alignment_status": "aligned",
-                                "notes": "Reviewed against theorem inventory.",
-                            }
-                        ]
-                        if proof_bearing and stage_id == "math"
-                        else []
-                    ),
-                    "confidence": "medium",
-                    "recommendation_ceiling": "major_revision",
-                }
-            ),
-            encoding="utf-8",
-        )
-
-    if write_proof_redteam:
-        for round_suffix in written_claim_indexes:
-            (review_dir / f"PROOF-REDTEAM{round_suffix}.md").write_text(
-                (
-                    "---\n"
-                    f"status: {proof_redteam_status}\n"
-                    "reviewer: gpd-check-proof\n"
-                    "claim_ids:\n"
-                    "  - CLM-001\n"
-                    "proof_artifact_paths:\n"
-                    f"  - {manuscript_path}\n"
-                    f"manuscript_path: {manuscript_path}\n"
-                    f"manuscript_sha256: {manuscript_sha256}\n"
-                    f"round: {1 if not round_suffix else int(round_suffix.removeprefix('-R'))}\n"
-                    "missing_parameter_symbols: []\n"
-                    "missing_hypothesis_ids: []\n"
-                    "coverage_gaps: []\n"
-                    "scope_status: matched\n"
-                    "quantifier_status: matched\n"
-                    "counterexample_status: none_found\n"
-                    "---\n\n"
-                    "# Proof Redteam\n"
-                    "## Proof Inventory\n"
-                    "- Exact claim / theorem text: For every r_0 > 0, the orbit intersects the target annulus.\n"
-                    "- Claim / theorem target: Annulus intersection for every target radius.\n"
-                    "- Named parameters:\n"
-                    "  - `r_0`: target radius\n"
-                    "- Hypotheses:\n"
-                    "  - `H1`: chi > 0\n"
-                    "- Quantifier / domain obligations:\n"
-                    "  - for every r_0 > 0\n"
-                    "- Conclusion clauses:\n"
-                    "  - annulus intersection holds\n"
-                    "## Coverage Ledger\n"
-                    "### Named-Parameter Coverage\n"
-                    "| Parameter | Role / Domain | Proof Location | Status | Notes |\n"
-                    "| --- | --- | --- | --- |\n"
-                    f"| `r_0` | target radius | {manuscript_path}:1 | covered | Tracked explicitly. |\n"
-                    "### Hypothesis Coverage\n"
-                    "| Hypothesis | Proof Location | Status | Notes |\n"
-                    "| --- | --- | --- | --- |\n"
-                    f"| `H1` | {manuscript_path}:1 | covered | Used in the proof. |\n"
-                    "### Quantifier / Domain Coverage\n"
-                    "| Obligation | Proof Location | Status | Notes |\n"
-                    "| --- | --- | --- | --- |\n"
-                    f"| `for every r_0 > 0` | {manuscript_path}:1 | covered | No narrowing introduced. |\n"
-                    "### Conclusion-Clause Coverage\n"
-                    "| Clause | Proof Location | Status | Notes |\n"
-                    "| --- | --- | --- | --- |\n"
-                    f"| annulus intersection holds | {manuscript_path}:1 | covered | Final theorem statement matches. |\n"
-                    "## Adversarial Probe\n"
-                    "- Probe type: dropped-parameter test\n"
-                    "- Result: The proof still references r_0, so the full claim survives.\n"
-                    "## Verdict\n"
-                    "- Scope status: `matched`\n"
-                    "- Quantifier status: `matched`\n"
-                    "- Counterexample status: `none_found`\n"
-                    "- Blocking gaps:\n"
-                    "  - None.\n"
-                    "## Required Follow-Up\n"
-                    "- None.\n"
-                ),
-                encoding="utf-8",
-            )
-
-
-def _write_publication_response_round(
-    project_root: Path,
-    *,
-    round_number: int,
-    subject_slug: str = "curvature-flow",
-) -> None:
-    round_suffix = "" if round_number <= 1 else f"-R{round_number}"
-    subject_root = project_root / "GPD" / "publication" / subject_slug
-    review_dir = subject_root / "review"
-    review_dir.mkdir(parents=True, exist_ok=True)
-    (subject_root / f"AUTHOR-RESPONSE{round_suffix}.md").write_text(
-        "# Author Response\n",
-        encoding="utf-8",
-    )
-    (review_dir / f"REFEREE_RESPONSE{round_suffix}.md").write_text(
-        "# Referee Response\n",
-        encoding="utf-8",
-    )
-
-
-def _write_draft_knowledge_document(
-    workspace: Path,
-    *,
-    knowledge_id: str = "K-renormalization-group-fixed-points",
-    relative_dir: str = "GPD/knowledge",
-) -> Path:
-    """Create a minimal reviewable knowledge document in one workspace."""
-    knowledge_dir = workspace / relative_dir
-    knowledge_dir.mkdir(parents=True, exist_ok=True)
-    knowledge_path = knowledge_dir / f"{knowledge_id}.md"
-    knowledge_path.write_text(
-        "---\n"
-        "knowledge_schema_version: 1\n"
-        f"knowledge_id: {knowledge_id}\n"
-        "title: Renormalization Group Fixed Points\n"
-        "topic: renormalization-group\n"
-        "status: draft\n"
-        "created_at: 2026-04-07T12:00:00Z\n"
-        "updated_at: 2026-04-07T12:00:00Z\n"
-        "sources:\n"
-        "  - source_id: source-main\n"
-        "    kind: paper\n"
-        "    locator: Doe et al., 2024\n"
-        "    title: Renormalization Group Fixed Points\n"
-        "    why_it_matters: Trusted source for the topic\n"
-        "coverage_summary:\n"
-        "  covered_topics: [fixed points]\n"
-        "  excluded_topics: [implementation]\n"
-        "  open_gaps: [review approval]\n"
-        "---\n\n"
-        "Draft knowledge body.\n",
-        encoding="utf-8",
-    )
-    return knowledge_path
-
-
-def _write_publication_review_outcome(
-    project_root: Path,
-    *,
-    final_recommendation: str = "accept",
-    round_number: int = 1,
-    blocking_issue_ids: list[str] | None = None,
-    manuscript_path: str = _CANONICAL_MANUSCRIPT_REL,
-    proof_bearing: bool = False,
-    write_proof_redteam: bool = False,
-    proof_redteam_status: str = "passed",
-) -> None:
-    review_dir = project_root / "GPD" / "review"
-    review_dir.mkdir(parents=True, exist_ok=True)
-    round_suffix = "" if round_number <= 1 else f"-R{round_number}"
-    _write_review_stage_artifacts(
-        project_root,
-        artifact_names=(
-            f"STAGE-reader{round_suffix}.json",
-            f"STAGE-literature{round_suffix}.json",
-            f"STAGE-math{round_suffix}.json",
-            f"STAGE-physics{round_suffix}.json",
-            f"STAGE-interestingness{round_suffix}.json",
-        ),
-        manuscript_path=manuscript_path,
-        proof_bearing=proof_bearing,
-        write_proof_redteam=write_proof_redteam,
-        proof_redteam_status=proof_redteam_status,
-    )
-    unresolved_blocking_issue_ids = blocking_issue_ids or []
-    (review_dir / f"REVIEW-LEDGER{round_suffix}.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "round": round_number,
-                "manuscript_path": manuscript_path,
-                "issues": [
-                    {
-                        "issue_id": issue_id,
-                        "opened_by_stage": "reader",
-                        "severity": "major",
-                        "blocking": True,
-                        "claim_ids": ["CLM-001"],
-                        "summary": "Blocking review issue.",
-                        "rationale": "",
-                        "evidence_refs": [],
-                        "required_action": "Revise the manuscript.",
-                        "status": "open",
-                    }
-                    for issue_id in unresolved_blocking_issue_ids
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (review_dir / f"REFEREE-DECISION{round_suffix}.json").write_text(
-        json.dumps(
-            {
-                "manuscript_path": manuscript_path,
-                "target_journal": "jhep",
-                "final_recommendation": final_recommendation,
-                "final_confidence": "medium",
-                "stage_artifacts": [
-                    f"GPD/review/STAGE-reader{round_suffix}.json",
-                    f"GPD/review/STAGE-literature{round_suffix}.json",
-                    f"GPD/review/STAGE-math{round_suffix}.json",
-                    f"GPD/review/STAGE-physics{round_suffix}.json",
-                    f"GPD/review/STAGE-interestingness{round_suffix}.json",
-                ],
-                "central_claims_supported": True,
-                "claim_scope_proportionate_to_evidence": True,
-                "physical_assumptions_justified": True,
-                "unsupported_claims_are_central": False,
-                "reframing_possible_without_new_results": True,
-                "proof_audit_coverage_complete": True,
-                "theorem_proof_alignment_adequate": True,
-                "mathematical_correctness": "adequate",
-                "novelty": "adequate",
-                "significance": "adequate",
-                "venue_fit": "adequate",
-                "literature_positioning": "adequate",
-                "unresolved_major_issues": len(unresolved_blocking_issue_ids),
-                "unresolved_minor_issues": 0,
-                "blocking_issue_ids": unresolved_blocking_issue_ids,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def _move_publication_review_outcome_to_subject_review(
-    project_root: Path,
-    *,
-    subject_slug: str,
-    round_number: int = 1,
-) -> None:
-    round_suffix = "" if round_number <= 1 else f"-R{round_number}"
-    global_review_dir = project_root / "GPD" / "review"
-    subject_review_dir = project_root / "GPD" / "publication" / subject_slug / "review"
-    subject_review_dir.mkdir(parents=True, exist_ok=True)
-    stage_names = [
-        f"STAGE-reader{round_suffix}.json",
-        f"STAGE-literature{round_suffix}.json",
-        f"STAGE-math{round_suffix}.json",
-        f"STAGE-physics{round_suffix}.json",
-        f"STAGE-interestingness{round_suffix}.json",
-    ]
-    for name in (
-        *stage_names,
-        f"CLAIMS{round_suffix}.json",
-        f"REVIEW-LEDGER{round_suffix}.json",
-        f"REFEREE-DECISION{round_suffix}.json",
-    ):
-        source = global_review_dir / name
-        target = subject_review_dir / name
-        target.write_bytes(source.read_bytes())
-        source.unlink()
-    decision_path = subject_review_dir / f"REFEREE-DECISION{round_suffix}.json"
-    decision_payload = json.loads(decision_path.read_text(encoding="utf-8"))
-    decision_payload["stage_artifacts"] = [f"GPD/publication/{subject_slug}/review/{name}" for name in stage_names]
-    decision_path.write_text(json.dumps(decision_payload), encoding="utf-8")
-
-
-def _write_managed_arxiv_submission_package(
-    project_root: Path,
-    *,
-    subject_slug: str = "curvature-flow",
-    entrypoint_name: str = "managed_manuscript.tex",
-    tex_body: str = "\\documentclass{article}\n\\begin{document}\nManaged manuscript.\n\\end{document}\n",
-    extra_files: dict[str, str] | None = None,
-) -> tuple[Path, Path]:
-    arxiv_root = project_root / "GPD" / "publication" / subject_slug / "arxiv"
-    submission_dir = arxiv_root / "submission"
-    submission_dir.mkdir(parents=True, exist_ok=True)
-    (submission_dir / entrypoint_name).write_text(tex_body, encoding="utf-8")
-    for relative_path, content in (extra_files or {}).items():
-        target = submission_dir / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-
-    tarball = arxiv_root / "arxiv-submission.tar.gz"
-    with tarfile.open(tarball, "w:gz") as archive:
-        for path in sorted(submission_dir.rglob("*")):
-            if path.is_file():
-                archive.add(path, arcname=path.relative_to(submission_dir).as_posix(), recursive=False)
-    return submission_dir, tarball
-
-
-def _update_claim_index_claim(
-    project_root: Path,
-    *,
-    round_number: int = 1,
-    **overrides: object,
-) -> None:
-    round_suffix = "" if round_number <= 1 else f"-R{round_number}"
-    claims_path = project_root / "GPD" / "review" / f"CLAIMS{round_suffix}.json"
-    claims_payload = json.loads(claims_path.read_text(encoding="utf-8"))
-    claims_payload["claims"][0].update(overrides)
-    claims_path.write_text(json.dumps(claims_payload), encoding="utf-8")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -970,13 +359,9 @@ class TestStateCommands:
         contract_path = gpd_project / "warning-contract.json"
         contract_path.write_text(json.dumps(contract), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--cwd", str(gpd_project), "--raw", "state", "set-project-contract", str(contract_path)],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["updated"] is True
         assert any(
             "references must include at least one must_surface=true anchor" in warning
@@ -990,13 +375,10 @@ class TestStateCommands:
         contract_path = gpd_project / "invalid-contract.json"
         contract_path.write_text(json.dumps(contract), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "state", "set-project-contract", str(contract_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("weakest_anchors" in error for error in payload["errors"])
 
@@ -1006,13 +388,10 @@ class TestStateCommands:
         contract_path = gpd_project / "invalid-contract.json"
         contract_path.write_text(json.dumps(contract), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "state", "set-project-contract", str(contract_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["updated"] is False
         assert (
             payload["reason"]
@@ -1042,13 +421,10 @@ class TestStateCommands:
 
         monkeypatch.setattr("gpd.core.state.state_set_project_contract", _reject_contract)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--cwd", str(gpd_project), "--raw", "state", "set-project-contract", str(contract_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["updated"] is False
         assert payload["reason"] == "Backend rejected project contract: missing required anchor"
 
@@ -1072,13 +448,9 @@ class TestStateCommands:
 
         monkeypatch.setattr("gpd.core.state.state_set_project_contract", _noop_contract)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--cwd", str(gpd_project), "--raw", "state", "set-project-contract", str(contract_path)],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["updated"] is False
         assert payload["reason"] == "Project contract already matches requested value"
 
@@ -1106,13 +478,10 @@ class TestStateCommands:
 
         monkeypatch.setattr("gpd.core.state.state_set_project_contract", _unexpected_backend_call)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--cwd", str(gpd_project), "--raw", "state", "set-project-contract", str(contract_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert payload["mode"] == "approved"
         assert any("approved project contract requires" in error for error in payload["errors"])
@@ -1124,13 +493,9 @@ class TestContractCommands:
     def test_lifecycle_contract_gate_accepts_authoritative_project_contract(self, gpd_project: Path) -> None:
         _write_project_contract_to_state(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "lifecycle-contract-gate", "plan-phase", "1"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["passed"] is True
         assert payload["project_contract_gate"]["authoritative"] is True
         assert payload["project_contract_validation"]["valid"] is True
@@ -1138,13 +503,10 @@ class TestContractCommands:
     def test_lifecycle_contract_gate_rejects_recoverably_normalized_contract(self, gpd_project: Path) -> None:
         _write_project_contract_to_state(gpd_project, recoverable_schema_drift=True)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "lifecycle-contract-gate", "execute-phase", "1"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
         assert payload["project_contract_load_info"]["status"] == "loaded_with_schema_normalization"
         assert payload["project_contract_validation"]["valid"] is True
@@ -1179,13 +541,10 @@ class TestContractCommands:
 
 class TestInitCommands:
     def test_progress_include_rejects_unknown_values(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "init", "progress", "--include", "state, bogus"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["error"] == (
             "Unknown --include value(s) for gpd init progress: bogus. "
             "Allowed values: config, project, protocols, references, roadmap, state."
@@ -1200,13 +559,9 @@ class TestInitCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "resume"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["planning_exists"] is True
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
@@ -1263,13 +618,9 @@ class TestInitCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), *command_args],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         for key, expected in expected_keys.items():
             assert payload[key] == expected
 
@@ -1282,13 +633,9 @@ class TestInitCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "progress"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
         assert payload["state_exists"] is True
@@ -1302,13 +649,9 @@ class TestInitCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "progress", "--no-project-reentry"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["workspace_root"] == nested.resolve().as_posix()
         assert payload["project_root"] == gpd_project.resolve().as_posix()
         assert payload["init_root_policy"] == "project_scoped"
@@ -1325,13 +668,9 @@ class TestInitCommands:
         workspace.mkdir(parents=True)
         (workspace / "notes.py").write_text("print('local notes')\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_intake"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["project_exists"] is False
         assert payload["state_exists"] is False
         assert payload["roadmap_exists"] is False
@@ -1350,13 +689,9 @@ class TestInitCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "phase-op", "1"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["planning_exists"] is True
         assert payload["roadmap_exists"] is True
         assert payload["state_exists"] is True
@@ -1373,13 +708,9 @@ class TestInitCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "new-milestone", "--stage", "milestone_bootstrap"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
         assert payload["state_exists"] is True
@@ -1394,13 +725,9 @@ class TestInitCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "milestone-op"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["init_root_policy"] == "project_scoped"
         assert payload["project_exists"] is True
         assert payload["roadmap_exists"] is True
@@ -1419,13 +746,9 @@ class TestInitCommands:
         (literature_dir / "benchmark-REVIEW.md").write_text("# Benchmark Review\n", encoding="utf-8")
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "literature-review", "Curvature", "flow", "bounds"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["topic"] == "Curvature flow bounds"
         assert payload["slug"] == "curvature-flow-bounds"
         assert payload["project_exists"] is True
@@ -1445,13 +768,9 @@ class TestInitCommands:
         (map_dir / "theory.md").write_text("# Theory Map\n", encoding="utf-8")
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "map-research"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["workspace_root"] == nested.resolve().as_posix()
         assert payload["project_root"] == gpd_project.resolve().as_posix()
         assert payload["project_root_source"] == "workspace"
@@ -1474,13 +793,9 @@ class TestInitCommands:
         root_map_dir = gpd_project / "GPD" / "research-map"
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "init", "map-research", "--stage", "map_bootstrap"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["workspace_root"] == nested.resolve().as_posix()
         assert payload["project_root"] == gpd_project.resolve().as_posix()
         assert payload["project_root_source"] == "workspace"
@@ -1495,8 +810,7 @@ class TestInitCommands:
         assert not (nested / "GPD").exists()
 
     def test_init_map_research_stage_preserves_focus_argument(self, gpd_project: Path) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -1507,10 +821,7 @@ class TestInitCommands:
                 "--stage",
                 "map_bootstrap",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["map_focus"] == "Hamiltonian sector"
         assert payload["map_focus_provided"] is True
         assert payload["staged_loading"]["stage_id"] == "map_bootstrap"
@@ -1705,13 +1016,9 @@ review_summary:
         workspace.mkdir()
         (workspace / "analysis.py").write_text("print('existing result')\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_intake"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["has_git"] is False
         assert payload["has_research_files"] is True
         assert payload["needs_research_map"] is True
@@ -1729,13 +1036,9 @@ review_summary:
         workspace.mkdir()
         (workspace / "analysis.py").write_text("print('existing result')\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "start-context"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["schema_version"] == "start_context.v1"
         assert payload["folder_state"] == "existing_research"
         assert payload["classification"] == "existing_research"
@@ -1771,13 +1074,9 @@ review_summary:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "start-context"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["folder_state"] == "partial_project"
         assert payload["recoverable_project_exists"] is True
         assert payload["partial_project_exists"] is True
@@ -1804,13 +1103,9 @@ review_summary:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(interrupted_only), "init", "start-context"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["folder_state"] == "partial_project"
         assert payload["recoverable_project_exists"] is False
         assert payload["partial_project_exists"] is False
@@ -1903,13 +1198,9 @@ review_summary:
 
         monkeypatch.setattr(context_module, "_resolve_model", _fail_if_resolved)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_intake"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert resolved_agents == []
         assert "researcher_model" not in payload
         assert "synthesizer_model" not in payload
@@ -1926,13 +1217,9 @@ review_summary:
         (progress_dir / "PROJECT.md").write_text("# Partial Project\n", encoding="utf-8")
         (progress_dir / "ROADMAP.md").write_text("# Partial Roadmap\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_intake"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["init_progress_exists"] is True
         assert payload["init_progress_status"] == "interrupted_init_progress"
         assert payload["init_progress_valid"] is True
@@ -1951,13 +1238,9 @@ review_summary:
         progress_dir.mkdir(parents=True)
         (progress_dir / "init-progress.json").write_text("{bad json\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_intake"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["init_progress_exists"] is True
         assert payload["init_progress_status"] == "corrupt_init_progress"
         assert payload["init_progress_valid"] is False
@@ -1971,13 +1254,9 @@ review_summary:
         workspace = tmp_path.parent / f"{tmp_path.name}-candidate-scope-approval"
         workspace.mkdir()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_approval"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["staged_loading"]["writes_allowed"] == [
             "GPD/state.json",
             "GPD/STATE.md",
@@ -1996,12 +1275,9 @@ review_summary:
         manifest = load_workflow_stage_manifest("new-project")
         stage = manifest.get_stage("literature_survey")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "init", "new-project", "--stage", "literature_survey"],
-            catch_exceptions=False,
         )
-        payload = json_output_from_result(result)
 
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"]["workflow_id"] == "new-project"
@@ -2109,8 +1385,7 @@ review_summary:
         workspace = tmp_path / "quick-without-project"
         (workspace / "GPD").mkdir(parents=True)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -2121,10 +1396,8 @@ review_summary:
                 "--stage",
                 "task_bootstrap",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "quick staged init requires an initialized GPD project" in payload["error"]
 
     def test_phase_op_surfaces_contract_load_and_validation_gates(self, gpd_project: Path) -> None:
@@ -2160,13 +1433,9 @@ review_summary:
         state["project_contract"] = json.loads((FIXTURES_DIR / "project_contract.json").read_text(encoding="utf-8"))
         (gpd_project / "GPD" / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "init", "write-paper", "--stage", "paper_bootstrap"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["staged_loading"]["workflow_id"] == "write-paper"
         assert payload["staged_loading"]["stage_id"] == "paper_bootstrap"
         assert "reference_artifacts_content" not in payload
@@ -2252,14 +1521,11 @@ class TestMilestoneCommands:
 
         monkeypatch.setattr("gpd.core.phases.milestone_complete", _milestone_complete)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "milestone", "complete", "v1.0", "--name", "Test"],
-            catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, result.output
-        assert json.loads(result.output) == {"cwd": str(project_root), "version": "v1.0", "name": "Test"}
+        assert payload == {"cwd": str(project_root), "version": "v1.0", "name": "Test"}
         assert seen["cwd"] == project_root
         assert not (nested / "GPD").exists()
 
@@ -2550,13 +1816,9 @@ class TestReadOnlyStateBackedLists:
 
 class TestReviewValidationCommands:
     def test_review_contract_uses_typed_registry_surface(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-contract", "write-paper"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:write-paper"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "publication"
@@ -2633,13 +1895,9 @@ class TestReviewValidationCommands:
         ]
 
     def test_review_contract_peer_review_uses_typed_registry_surface(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-contract", "peer-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "publication"
@@ -2681,13 +1939,9 @@ class TestReviewValidationCommands:
         assert "max_review_rounds" not in payload["review_contract"]
 
     def test_review_contract_review_knowledge_supports_strict_standalone_canonical_targets(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-contract", "review-knowledge"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "review"
@@ -2713,24 +1967,16 @@ class TestReviewValidationCommands:
         assert "stale approved review evidence" in payload["review_contract"]["blocking_conditions"]
 
     def test_review_contract_accepts_public_command_label(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-contract", "/gpd:peer-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["review_contract"]["review_mode"] == "publication"
 
     def test_review_contract_respond_to_referees_uses_typed_registry_surface(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-contract", "respond-to-referees"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["context_mode"] == "project-aware"
         assert payload["review_contract"]["review_mode"] == "publication"
@@ -2831,13 +2077,10 @@ class TestReviewValidationCommands:
         monkeypatch.setenv("GPD_DATA_DIR", str(tmp_path / "data"))
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "progress"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:progress"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is False
@@ -2856,14 +2099,10 @@ class TestReviewValidationCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "validate", "command-context", "progress"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:progress"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is True
@@ -2875,14 +2114,10 @@ class TestReviewValidationCommands:
         self,
         gpd_project: Path,
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "command-context", "progress", "--reconcile"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:progress"
         assert payload["passed"] is True
         assert checks["reconcile_confirmation"]["passed"] is True
@@ -2895,14 +2130,11 @@ class TestReviewValidationCommands:
         gpd_project: Path,
         command_args: list[str],
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "command-context", *command_args],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:progress"
         assert payload["passed"] is False
         assert payload["guidance"].endswith("use `gpd progress json --watch` from a terminal.")
@@ -2916,14 +2148,11 @@ class TestReviewValidationCommands:
         gpd_project: Path,
         command_name: str,
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "command-context", command_name],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is False
@@ -2938,14 +2167,10 @@ class TestReviewValidationCommands:
         gpd_project: Path,
         command_name: str,
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "command-context", command_name, "1"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is True
@@ -2962,14 +2187,10 @@ class TestReviewValidationCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "validate", "command-context", "resume-work"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:resume-work"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is True
@@ -2984,8 +2205,7 @@ class TestReviewValidationCommands:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -2995,11 +2215,8 @@ class TestReviewValidationCommands:
                 "literature-review",
                 "Curvature flow bounds",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:literature-review"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -3010,14 +2227,11 @@ class TestReviewValidationCommands:
     def test_command_context_resume_work_requires_literal_files_in_project_root(self, gpd_project: Path) -> None:
         (gpd_project / "GPD" / "ROADMAP.md").unlink()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "command-context", "resume-work"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:resume-work"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is False
@@ -3071,14 +2285,11 @@ class TestReviewValidationCommands:
     def test_command_context_plan_milestone_gaps_requires_globbed_files_in_project_root(
         self, gpd_project: Path
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "command-context", "plan-milestone-gaps"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:plan-milestone-gaps"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is False
@@ -3092,14 +2303,10 @@ class TestReviewValidationCommands:
         nested.mkdir(parents=True)
         (gpd_project / "GPD" / "v1-MILESTONE-AUDIT.md").write_text("# Audit\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "validate", "command-context", "plan-milestone-gaps"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:plan-milestone-gaps"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is True
@@ -3140,7 +2347,7 @@ class TestReviewValidationCommands:
         )
 
         payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert checks["project_reentry"]["passed"] is True
         assert "auto-selected recoverable recent project" in checks["project_reentry"]["detail"]
@@ -3210,7 +2417,7 @@ class TestReviewValidationCommands:
 
         assert validate_result.exit_code == 1, validate_result.output
         validate_payload = json.loads(validate_result.output)
-        checks = {check["name"]: check for check in validate_payload["checks"]}
+        checks = checks_by_name(validate_payload)
         assert validate_payload["passed"] is False
         assert checks["project_reentry"]["passed"] is True
         assert checks["project_reentry"]["detail"] == "current workspace or ancestor project root is recoverable"
@@ -3276,14 +2483,11 @@ class TestReviewValidationCommands:
             store_root=data_root,
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "command-context", "resume-work"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is False
         assert checks["project_reentry"]["passed"] is False
         assert "resume-work will not switch runtime workspaces silently" in checks["project_reentry"]["detail"]
@@ -3322,14 +2526,11 @@ class TestReviewValidationCommands:
                 store_root=data_root,
             )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "command-context", "resume-work"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is False
         assert checks["project_reentry"]["passed"] is False
         assert "multiple recoverable recent GPD projects" in payload["guidance"]
@@ -3360,18 +2561,14 @@ class TestReviewValidationCommands:
         empty_dir.mkdir()
         monkeypatch.chdir(empty_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(empty_dir), "validate", "command-context", command_name],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == context_mode
         assert payload["passed"] is True
         if expects_project_context_check:
-            checks = {check["name"]: check for check in payload["checks"]}
+            checks = checks_by_name(payload)
             assert checks["project_context"]["passed"] is True
         if expects_runtime_dispatch_note:
             assert payload["public_runtime_command_prefix"] == dollar_command_prefix
@@ -3381,13 +2578,9 @@ class TestReviewValidationCommands:
     def test_command_context_surfaces_runtime_command_dispatch_note(
         self, dollar_command_prefix: str, command_name: str
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "command-context", command_name],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == command_name
         assert payload["validated_surface"] == "public_runtime_dollar_command"
         assert payload["public_runtime_command_prefix"] == dollar_command_prefix
@@ -3403,13 +2596,9 @@ class TestReviewValidationCommands:
             "gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: _SLASH_COMMAND_DESCRIPTOR.runtime_name
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "command-context", command_name],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == command_name
         assert payload["validated_surface"] == "public_runtime_slash_command"
         assert payload["public_runtime_command_prefix"] == slash_command_prefix
@@ -3431,13 +2620,9 @@ class TestReviewValidationCommands:
         else:
             monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "command-context", command_name],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == command_name
         assert payload["validated_surface"] == "public_runtime_command_surface"
         assert payload["public_runtime_command_prefix"] == ""
@@ -3450,13 +2635,9 @@ class TestReviewValidationCommands:
     ) -> None:
         monkeypatch.chdir(tmp_path)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "config", "set", "autonomy", '"balanced"'],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["guided_path"] == (
             f"Use `{dollar_command_prefix}settings` inside the runtime for guided autonomy changes."
         )
@@ -3518,13 +2699,9 @@ class TestReviewValidationCommands:
         empty_dir.mkdir()
         monkeypatch.chdir(empty_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(empty_dir), "validate", "command-context", "slides"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:slides"
         assert payload["context_mode"] == "projectless"
         assert payload["passed"] is True
@@ -3536,13 +2713,10 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "digest-knowledge"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -3553,13 +2727,9 @@ class TestReviewValidationCommands:
         )
 
     def test_review_preflight_propagates_runtime_surface_metadata(self, dollar_command_prefix: str) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["validated_surface"] == "public_runtime_dollar_command"
         assert payload["public_runtime_command_prefix"] == dollar_command_prefix
         assert payload["local_cli_equivalence_guaranteed"] is False
@@ -3568,7 +2738,7 @@ class TestReviewValidationCommands:
             PROJECT_BACKED_PEER_REVIEW_CONDITIONAL,
             THEOREM_BEARING_PEER_REVIEW_CONDITIONAL,
         ]
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert "same-name local `gpd` subcommand" in checks["command_context"]["detail"]
         assert checks["artifact_manifest"]["passed"] is True
         assert checks["bibliography_audit"]["passed"] is True
@@ -3630,13 +2800,9 @@ class TestReviewValidationCommands:
         external_txt = gpd_project / "external-review.txt"
         external_txt.write_text("Standalone review surface.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "init", "peer-review", external_txt.name],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["review_target_input"] == external_txt.name
         assert payload["review_target_mode"] == "standalone explicit-artifact review"
         assert "standalone explicit-artifact intake applies" in payload["review_target_mode_reason"]
@@ -3663,8 +2829,7 @@ class TestReviewValidationCommands:
         external_txt = gpd_project / "external-review-stage.txt"
         external_txt.write_text("Standalone stage review surface.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -3675,10 +2840,7 @@ class TestReviewValidationCommands:
                 "--stage",
                 "bootstrap",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["review_target_input"] == external_txt.name
         assert payload["review_target_mode"] == "standalone explicit-artifact review"
         assert payload["resolved_review_target"] == str(external_txt)
@@ -3707,8 +2869,7 @@ class TestReviewValidationCommands:
     ) -> None:
         manuscript = _write_managed_publication_manuscript(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -3717,10 +2878,7 @@ class TestReviewValidationCommands:
                 "peer-review",
                 review_target,
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["review_target_mode"] == "project-backed manuscript review"
         assert payload["publication_target_mode"] == "project_explicit_manuscript"
         assert payload["publication_target_project_context_role"] == "authoritative"
@@ -3746,8 +2904,7 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -3762,10 +2919,7 @@ class TestReviewValidationCommands:
                 "--report",
                 "reports/referee-report.md",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["publication_lane_kind"] == "external_artifact"
         assert payload["managed_publication_root"] == f"GPD/publication/{payload['publication_subject_slug']}"
         assert payload["selected_publication_root"] == payload["managed_publication_root"]
@@ -3784,13 +2938,9 @@ class TestReviewValidationCommands:
         math_stage_payload["manuscript_path"] = "paper/other.tex"
         math_stage_path.write_text(json.dumps(math_stage_payload), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "init", "peer-review", str(package.manuscript_path)],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         detail = payload["derived_manuscript_proof_review_status"]["detail"]
         assert payload["latest_review_artifacts"] is None
         assert "active manuscript" in detail
@@ -3800,13 +2950,9 @@ class TestReviewValidationCommands:
         self,
         gpd_project: Path,
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "review-preflight", "peer-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["resolved_mode"] == "project-backed manuscript review"
         assert payload["effective_required_evidence"] == [
             "existing manuscript or explicit external artifact target",
@@ -3835,8 +2981,7 @@ class TestReviewValidationCommands:
         external_txt = gpd_project / "external-review-preflight.txt"
         external_txt.write_text("Standalone review surface.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -3846,10 +2991,7 @@ class TestReviewValidationCommands:
                 "peer-review",
                 external_txt.name,
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["resolved_mode"] == "standalone explicit-artifact review"
         assert payload["effective_required_evidence"] == [
             "existing manuscript or explicit external artifact target",
@@ -3977,14 +3119,10 @@ class TestReviewValidationCommands:
             lambda command_name: (command, "gpd:custom-publication-review"),
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "command-context", "custom-publication-review", "notes.txt"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:custom-publication-review"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4059,8 +3197,7 @@ class TestReviewValidationCommands:
             lambda command_name: (command, "gpd:custom-publication-review"),
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -4070,11 +3207,8 @@ class TestReviewValidationCommands:
                 "custom-publication-review",
                 "notes.txt",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:custom-publication-review"
         assert payload["passed"] is True
         assert payload["required_outputs"] == ["GPD/review/ARTIFACT-REPORT.md"]
@@ -4094,13 +3228,9 @@ class TestReviewValidationCommands:
     def test_review_preflight_falls_back_when_runtime_resolution_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["validated_surface"] == "public_runtime_command_surface"
         assert payload["public_runtime_command_prefix"] == ""
         assert payload["local_cli_equivalence_guaranteed"] is False
@@ -4136,14 +3266,10 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", command_name, *args],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4183,14 +3309,10 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", command_name, *args],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4246,13 +3368,10 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", command_name],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -4272,8 +3391,7 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -4287,11 +3405,9 @@ class TestReviewValidationCommands:
                 "--range",
                 "0:1:20",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:parameter-sweep"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -4432,14 +3548,10 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", command_name, *args],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == f"gpd:{command_name}"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4461,14 +3573,11 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "literature-review"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:literature-review"
         assert payload["passed"] is False
         assert payload["project_exists"] is False
@@ -4482,14 +3591,10 @@ class TestReviewValidationCommands:
         self,
         gpd_project: Path,
     ) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "command-context", "literature-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert payload["project_exists"] is True
         assert checks["explicit_inputs"]["passed"] is True
@@ -4504,14 +3609,11 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "digest-knowledge"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -4525,8 +3627,7 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -4536,11 +3637,8 @@ class TestReviewValidationCommands:
                 "digest-knowledge",
                 "renormalization group fixed points",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4558,8 +3656,7 @@ class TestReviewValidationCommands:
         knowledge_file.write_text("knowledge doc\n", encoding="utf-8")
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -4569,11 +3666,8 @@ class TestReviewValidationCommands:
                 "digest-knowledge",
                 knowledge_file.relative_to(outside_dir).as_posix(),
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4587,14 +3681,10 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "digest-knowledge", "2401.12345v2"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4608,14 +3698,10 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "digest-knowledge", "hep-th/9901001"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:digest-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4629,14 +3715,11 @@ class TestReviewValidationCommands:
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "review-knowledge"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -4668,8 +3751,7 @@ class TestReviewValidationCommands:
         knowledge_file.write_text("knowledge doc\n", encoding="utf-8")
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -4679,11 +3761,8 @@ class TestReviewValidationCommands:
                 "review-knowledge",
                 knowledge_file.relative_to(outside_dir).as_posix(),
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4701,8 +3780,7 @@ class TestReviewValidationCommands:
         knowledge_file.write_text("knowledge doc\n", encoding="utf-8")
         monkeypatch.chdir(outside_dir)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -4712,11 +3790,8 @@ class TestReviewValidationCommands:
                 "review-knowledge",
                 "K-renormalization-group-fixed-points",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -4736,14 +3811,10 @@ class TestReviewValidationCommands:
         monkeypatch.chdir(workspace)
         subject = knowledge_path.relative_to(workspace).as_posix() if subject_kind == "path" else knowledge_path.stem
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "review-preflight", "review-knowledge", subject, "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["review_mode"] == "review"
         assert payload["strict"] is True
@@ -4772,14 +3843,11 @@ class TestReviewValidationCommands:
         )
         monkeypatch.chdir(workspace)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "review-preflight", "review-knowledge", "K-bad", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is False
         assert checks["knowledge_target"]["passed"] is True
         assert checks["knowledge_document"]["passed"] is False
@@ -4795,8 +3863,7 @@ class TestReviewValidationCommands:
         knowledge_path = _write_draft_knowledge_document(workspace, relative_dir="notes")
         monkeypatch.chdir(workspace)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -4807,27 +3874,21 @@ class TestReviewValidationCommands:
                 knowledge_path.relative_to(workspace).as_posix(),
                 "--strict",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:review-knowledge"
         assert payload["passed"] is False
         assert checks["knowledge_target"]["passed"] is False
         assert "GPD/knowledge/" in checks["knowledge_target"]["detail"]
 
     def test_review_preflight_write_paper_strict(self, gpd_project: Path) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:write-paper"
         assert payload["passed"] is True
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         check_names = set(checks)
         assert {
             "project_state",
@@ -4846,14 +3907,10 @@ class TestReviewValidationCommands:
         workspace = gpd_project / "nested-write-paper"
         workspace.mkdir()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:write-paper"
         assert payload["passed"] is True
         assert checks["command_context"]["passed"] is True
@@ -4869,14 +3926,10 @@ class TestReviewValidationCommands:
     ) -> None:
         _write_review_stage_artifacts(gpd_project, artifact_names=("STAGE-math.json",))
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is True
         assert (gpd_project / "paper" / "PROOF-REVIEW-MANIFEST.json").exists()
 
@@ -4886,14 +3939,11 @@ class TestReviewValidationCommands:
     ) -> None:
         _write_review_stage_artifacts(gpd_project, artifact_names=("STAGE-math.json",))
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is True
         assert not (gpd_project / "paper" / "PROOF-REVIEW-MANIFEST.json").exists()
 
@@ -4903,14 +3953,10 @@ class TestReviewValidationCommands:
     ) -> None:
         write_proof_review_package(gpd_project, theorem_bearing=True, review_report=False)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "review-preflight", "write-paper"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert "PROOF-REDTEAM.md" in checks["manuscript_proof_review"]["detail"]
@@ -4922,13 +3968,10 @@ class TestReviewValidationCommands:
     ) -> None:
         write_proof_review_package(gpd_project, theorem_bearing=True, review_report=False)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "review-preflight", "peer-review"],
-            catch_exceptions=False,
         )
 
-        payload = json.loads(result.output)
         assert payload["active_conditional_requirements"] == payload["conditional_requirements"]
         assert payload["active_conditional_requirements"] == [
             PROJECT_BACKED_PEER_REVIEW_CONDITIONAL,
@@ -4948,13 +3991,9 @@ class TestReviewValidationCommands:
             theorem_parameters=[],
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(gpd_project), "validate", "review-preflight", "peer-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["passed"] is True
         assert payload["active_conditional_requirements"] == [PROJECT_BACKED_PEER_REVIEW_CONDITIONAL]
 
@@ -4969,14 +4008,10 @@ class TestReviewValidationCommands:
             write_proof_redteam=False,
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert (
@@ -4998,14 +4033,10 @@ class TestReviewValidationCommands:
         )
         _refresh_artifact_manifest_for_manuscript(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert (
@@ -5031,14 +4062,10 @@ class TestReviewValidationCommands:
         )
         _refresh_artifact_manifest_for_manuscript(gpd_project, manuscript_path)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert (
@@ -5066,14 +4093,10 @@ class TestReviewValidationCommands:
         )
         _refresh_artifact_manifest_for_manuscript(gpd_project, manuscript)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert "stale" in checks["manuscript_proof_review"]["detail"]
@@ -5088,14 +4111,10 @@ class TestReviewValidationCommands:
             proof_bearing=True,
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert "PROOF-REDTEAM.md" in checks["manuscript_proof_review"]["detail"]
@@ -5111,14 +4130,10 @@ class TestReviewValidationCommands:
             write_proof_redteam=True,
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is True
 
     def test_review_preflight_peer_review_reports_stale_manuscript_proof_review_without_blocking(
@@ -5141,14 +4156,10 @@ class TestReviewValidationCommands:
         )
         _refresh_artifact_manifest_for_manuscript(gpd_project, manuscript)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is False
         assert payload["passed"] is True
@@ -5158,17 +4169,13 @@ class TestReviewValidationCommands:
     ) -> None:
         canonical_manuscript_path(gpd_project).unlink()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:write-paper"
         assert payload["passed"] is True
         assert payload["active_conditional_requirements"] == []
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert "fresh bootstrap is allowed" in checks["manuscript"]["detail"]
         assert "reproducibility_manifest" not in checks
@@ -5191,15 +4198,12 @@ class TestReviewValidationCommands:
     ) -> None:
         _write_secondary_manuscript_root(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", command, *extra_args, "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert "ambiguous or inconsistent manuscript roots" in checks["manuscript"]["detail"]
         if command == "write-paper":
@@ -5234,15 +4238,12 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", command, *extra_args, "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert "ambiguous or inconsistent manuscript roots" in checks["manuscript"]["detail"]
 
@@ -5253,14 +4254,10 @@ class TestReviewValidationCommands:
         markdown_manuscript.write_text("# Markdown manuscript\n", encoding="utf-8")
         _refresh_artifact_manifest_for_manuscript(gpd_project, markdown_manuscript)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert f"paper/{_CANONICAL_MARKDOWN_BASENAME}" in checks["manuscript"]["detail"]
         assert checks["artifact_manifest"]["passed"] is True
@@ -5304,14 +4301,10 @@ class TestReviewValidationCommands:
                 artifact["path"] = _CANONICAL_MANUSCRIPT_BASENAME
         (resume_dir / "ARTIFACT-MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert f"{resume_dir_name}/{_CANONICAL_MANUSCRIPT_BASENAME}" in checks["manuscript"]["detail"]
         assert checks["artifact_manifest"]["passed"] is True
@@ -5336,14 +4329,10 @@ class TestReviewValidationCommands:
             ("PAPER-CONFIG.json", "ARTIFACT-MANIFEST.json", "BIBLIOGRAPHY-AUDIT.json", "reproducibility-manifest.json"),
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert "fresh bootstrap is allowed" in checks["manuscript"]["detail"]
         assert "artifact_manifest" not in checks
@@ -5357,13 +4346,9 @@ class TestReviewValidationCommands:
     ) -> None:
         monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:help"
         assert payload["ok"] is True
         assert payload["default_sections"] == ["quick_start_extract", "wrapper_owned_all_hint"]
@@ -5375,13 +4360,9 @@ class TestReviewValidationCommands:
         assert payload["canonical_recommended_commands"] == ["gpd:help --all"]
         assert payload["local_cli_equivalence_guaranteed"] is False
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help", "--all"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         commands = {entry["command"] for entry in payload["command_index"]}
         assert {"gpd:new-project", "gpd:help"} <= commands
         assert payload["rendered_sections"] == ["quick_start", "command_index", "detailed_help_follow_up"]
@@ -5406,13 +4387,9 @@ class TestReviewValidationCommands:
         descriptor = _DOLLAR_COMMAND_DESCRIPTOR
         monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: descriptor.runtime_name)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["public_runtime_command_prefix"] == "$gpd-"
         _assert_text_contains(
             payload["quick_start"]["markdown"],
@@ -5422,13 +4399,9 @@ class TestReviewValidationCommands:
         assert payload["recommended_commands"] == ["$gpd-help --all"]
         assert payload["canonical_recommended_commands"] == ["gpd:help --all"]
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help", "--all"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         _assert_text_contains(
             payload["command_index_markdown"],
             ("`$gpd-help`", "`$gpd-new-project --minimal`", "`gpd --help`"),
@@ -5452,13 +4425,9 @@ class TestReviewValidationCommands:
     ) -> None:
         monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: descriptor.runtime_name)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help", "--command", "progress", "--minimal"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["validated_surface"] == descriptor.validated_command_surface
         assert payload["public_runtime_command_prefix"] == descriptor.public_command_surface_prefix
         _assert_text_contains(payload["detail_markdown"], (f"`{descriptor.public_command_surface_prefix}progress",))
@@ -5467,39 +4436,28 @@ class TestReviewValidationCommands:
         assert payload["command_context"]["public_runtime_command_prefix"] == descriptor.public_command_surface_prefix
 
     def test_raw_help_bridge_command_specific_payload(self, tmp_path: Path) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help", "--command", "new-project", "--minimal"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["ok"] is True
         assert payload["canonical_command"] == "gpd:new-project"
         assert payload["context_mode"] == "projectless"
         assert payload["command_context"]["passed"] is True
         assert payload["command_context"]["command"] == "gpd:new-project"
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help", "--command", "gpd:new-project --minimal", "--minimal"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["ok"] is True
         assert payload["requested_command"] == "gpd:new-project --minimal"
         assert payload["canonical_command"] == "gpd:new-project"
         assert payload["command_context"]["command"] == "gpd:new-project"
 
     def test_raw_help_bridge_unknown_command_fails_closed(self, tmp_path: Path) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(tmp_path), "help", "--command", "does-not-exist"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["ok"] is False
         assert payload["error"] == "unknown_command"
         assert payload["canonical_command"] == "gpd:does-not-exist"
@@ -5512,14 +4470,10 @@ class TestReviewValidationCommands:
         outside_dir = tmp_path.parent / f"{tmp_path.name}-outside-aware-explicit"
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "discover", "7"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:discover"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is True
@@ -5534,30 +4488,23 @@ class TestReviewValidationCommands:
         outside_dir = tmp_path.parent / f"{tmp_path.name}-outside-required"
         outside_dir.mkdir()
         monkeypatch.chdir(outside_dir)
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(outside_dir), "validate", "command-context", "quick"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:quick"
         assert payload["context_mode"] == "project-required"
         assert payload["passed"] is False
         assert checks["project_exists"]["passed"] is False
 
     def test_review_preflight_peer_review_strict(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is True
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["project_state"]["passed"] is True
         assert checks["state_integrity"]["passed"] is True
         assert checks["roadmap"]["passed"] is True
@@ -5577,16 +4524,12 @@ class TestReviewValidationCommands:
         markdown_manuscript.write_text("# Markdown manuscript\n", encoding="utf-8")
         _refresh_artifact_manifest_for_manuscript(gpd_project, markdown_manuscript)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is True
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert f"paper/{_CANONICAL_MARKDOWN_BASENAME}" in checks["manuscript"]["detail"]
         assert checks["artifact_manifest"]["passed"] is True
@@ -5607,14 +4550,11 @@ class TestReviewValidationCommands:
         ]
         (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["state_integrity"]["passed"] is False
 
     def test_review_preflight_strict_blocks_semantically_invalid_project_contract(self, gpd_project: Path) -> None:
@@ -5626,14 +4566,11 @@ class TestReviewValidationCommands:
         state["project_contract"] = contract
         (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["state_integrity"]["passed"] is False
         assert "project_contract:" in checks["state_integrity"]["detail"]
 
@@ -5643,14 +4580,11 @@ class TestReviewValidationCommands:
         (phase_dir / "01-SUMMARY.md").write_text("# Summary\n\nMissing frontmatter.\n", encoding="utf-8")
         (phase_dir / "01-VERIFICATION.md").write_text("# Verification\n\nMissing frontmatter.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "write-paper", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["summary_frontmatter"]["passed"] is False
         assert checks["verification_frontmatter"]["passed"] is False
 
@@ -5661,31 +4595,24 @@ class TestReviewValidationCommands:
         (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
         (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "verify-work", "1"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:verify-work"
         assert payload["passed"] is True
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["phase_lookup"]["passed"] is True
         assert checks["phase_summaries"]["passed"] is True
         assert checks["required_state"]["passed"] is True
 
     def test_review_preflight_verify_work_fails_from_planning_state(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "verify-work", "1"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:verify-work"
         assert payload["passed"] is False
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["phase_lookup"]["passed"] is True
         assert checks["phase_summaries"]["passed"] is True
         assert checks["required_state"]["passed"] is False
@@ -5696,15 +4623,12 @@ class TestReviewValidationCommands:
         lock_path = gpd_project / "GPD" / "state.json.lock"
         assert not lock_path.exists()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "verify-work", "1", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["passed"] is False
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["required_state"]["passed"] is False
         assert not lock_path.exists()
 
@@ -5716,31 +4640,24 @@ class TestReviewValidationCommands:
         (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
         (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "verify-work"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:verify-work"
         assert payload["passed"] is False
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["phase_summaries"]["passed"] is False
         assert 'current phase "02" has no SUMMARY artifacts' in checks["phase_summaries"]["detail"]
         assert checks["required_state"]["passed"] is True
 
     def test_review_preflight_respond_to_referees_checks_report_path(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "respond-to-referees", "reports/referee-report.md"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is True
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert checks["referee_report_source"]["passed"] is True
         assert "artifact_manifest" not in checks
@@ -5754,8 +4671,7 @@ class TestReviewValidationCommands:
         nested.mkdir(parents=True)
         (nested / "local-referee-report.md").write_text("# Local Report\n\nClarify the proof.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -5765,11 +4681,8 @@ class TestReviewValidationCommands:
                 "respond-to-referees",
                 "local-referee-report.md",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["referee_report_source"]["passed"] is True
         assert "./local-referee-report.md present" in checks["referee_report_source"]["detail"]
 
@@ -5781,8 +4694,7 @@ class TestReviewValidationCommands:
         nested.mkdir(parents=True)
         (nested / "flagged-referee-report.md").write_text("# Flagged Report\n\nClarify notation.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -5794,11 +4706,8 @@ class TestReviewValidationCommands:
                 "--report",
                 "flagged-referee-report.md",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["referee_report_source"]["passed"] is True
         assert "./flagged-referee-report.md present" in checks["referee_report_source"]["detail"]
 
@@ -5807,45 +4716,35 @@ class TestReviewValidationCommands:
         (paper_dir / _CANONICAL_MANUSCRIPT_BASENAME).unlink()
         (paper_dir / _CANONICAL_MARKDOWN_BASENAME).write_text("# Markdown manuscript\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "respond-to-referees", "reports/referee-report.md"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert f"paper/{_CANONICAL_MARKDOWN_BASENAME}" in checks["manuscript"]["detail"]
 
     def test_review_preflight_peer_review_fails_without_manuscript(self, gpd_project: Path) -> None:
         canonical_manuscript_path(gpd_project).unlink()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is False
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
 
     def test_review_preflight_fails_without_manuscript(self, gpd_project: Path) -> None:
         canonical_manuscript_path(gpd_project).unlink()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "respond-to-referees", "reports/referee-report.md"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is False
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["command_context"]["passed"] is True
         assert checks["referee_report_source"]["passed"] is True
         assert checks["manuscript"]["passed"] is False
@@ -5858,14 +4757,10 @@ class TestReviewValidationCommands:
         nested = gpd_project / "workspace" / "notes"
         nested.mkdir(parents=True)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is True
@@ -5885,8 +4780,7 @@ class TestReviewValidationCommands:
         target = nested_repo / "standalone-review.txt"
         target.write_text("Standalone manuscript surface.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -5897,11 +4791,8 @@ class TestReviewValidationCommands:
                 target.name,
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["resolved_mode"] == "standalone explicit-artifact review"
         assert checks["command_context"]["passed"] is True
@@ -5916,28 +4807,22 @@ class TestReviewValidationCommands:
         paper_dir = gpd_project / "paper"
         (paper_dir / "ARTIFACT-MANIFEST.json").unlink()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["artifact_manifest"]["passed"] is False
 
     def test_review_preflight_peer_review_strict_rejects_invalid_artifact_manifest(self, gpd_project: Path) -> None:
         paper_dir = gpd_project / "paper"
         (paper_dir / "ARTIFACT-MANIFEST.json").write_text("{not json", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert "ARTIFACT-MANIFEST.json is invalid" in checks["manuscript"]["detail"]
 
@@ -5947,100 +4832,73 @@ class TestReviewValidationCommands:
         manifest["paper_title"] = "   "
         (paper_dir / "ARTIFACT-MANIFEST.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert "ARTIFACT-MANIFEST.json is invalid" in checks["manuscript"]["detail"]
         assert "paper_title" in checks["manuscript"]["detail"]
 
-    def test_review_preflight_peer_review_strict_rejects_stale_artifact_manifest_checksum(
+    @pytest.mark.parametrize(
+        ("case", "expected_fragments"),
+        [
+            (
+                "stale_checksum",
+                (
+                    "artifact manifest is stale",
+                    "manuscript_sha256 does not match the active manuscript snapshot",
+                ),
+            ),
+            ("missing_checksum", ("artifact manifest is stale", "manifest is missing manuscript_sha256")),
+            (
+                "tex_path_mismatch",
+                (
+                    "artifact manifest integrity failed",
+                    "tex artifact path does not resolve to the selected manuscript",
+                ),
+            ),
+            ("duplicate_tex", ("artifact manifest integrity failed", "must contain exactly one tex artifact")),
+        ],
+    )
+    def test_review_preflight_peer_review_strict_rejects_artifact_manifest_semantic_drift(
         self,
         gpd_project: Path,
+        case: str,
+        expected_fragments: tuple[str, ...],
     ) -> None:
         paper_dir = gpd_project / "paper"
         manuscript = canonical_manuscript_path(gpd_project)
         manifest_path = paper_dir / "ARTIFACT-MANIFEST.json"
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["manuscript_sha256"] = "0" * 64
+        if case == "stale_checksum":
+            manifest["manuscript_sha256"] = "0" * 64
+        elif case == "missing_checksum":
+            manifest.pop("manuscript_sha256", None)
+            manifest.pop("manuscript_mtime_ns", None)
+        else:
+            alternate_manuscript = paper_dir / "alternate-manuscript.tex"
+            alternate_manuscript.write_text(manuscript.read_text(encoding="utf-8"), encoding="utf-8")
+            tex_artifact = next(artifact for artifact in manifest["artifacts"] if artifact["category"] == "tex")
+            if case == "tex_path_mismatch":
+                tex_artifact["path"] = alternate_manuscript.name
+                tex_artifact["sha256"] = compute_sha256(alternate_manuscript)
+            else:
+                manifest["artifacts"].append(
+                    dict(
+                        tex_artifact,
+                        artifact_id="tex-duplicate",
+                        path=alternate_manuscript.name,
+                        sha256=compute_sha256(alternate_manuscript),
+                    )
+                )
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
         passed, detail = cli_module._validate_artifact_manifest_semantics(manifest_path, manuscript)
 
         assert passed is False
-        assert "artifact manifest is stale" in detail
-        assert "manuscript_sha256 does not match the active manuscript snapshot" in detail
-
-    def test_review_preflight_peer_review_strict_rejects_artifact_manifest_without_manuscript_checksum(
-        self,
-        gpd_project: Path,
-    ) -> None:
-        paper_dir = gpd_project / "paper"
-        manuscript = canonical_manuscript_path(gpd_project)
-        manifest_path = paper_dir / "ARTIFACT-MANIFEST.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest.pop("manuscript_sha256", None)
-        manifest.pop("manuscript_mtime_ns", None)
-        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-        passed, detail = cli_module._validate_artifact_manifest_semantics(manifest_path, manuscript)
-
-        assert passed is False
-        assert "artifact manifest is stale" in detail
-        assert "manifest is missing manuscript_sha256" in detail
-
-    def test_review_preflight_peer_review_strict_rejects_manifest_tex_path_mismatch(
-        self,
-        gpd_project: Path,
-    ) -> None:
-        paper_dir = gpd_project / "paper"
-        manuscript = canonical_manuscript_path(gpd_project)
-        alternate_manuscript = paper_dir / "alternate-manuscript.tex"
-        alternate_manuscript.write_text(manuscript.read_text(encoding="utf-8"), encoding="utf-8")
-        manifest_path = paper_dir / "ARTIFACT-MANIFEST.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        tex_artifact = next(artifact for artifact in manifest["artifacts"] if artifact["category"] == "tex")
-        tex_artifact["path"] = alternate_manuscript.name
-        tex_artifact["sha256"] = compute_sha256(alternate_manuscript)
-        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-        passed, detail = cli_module._validate_artifact_manifest_semantics(manifest_path, manuscript)
-
-        assert passed is False
-        assert "artifact manifest integrity failed" in detail
-        assert "tex artifact path does not resolve to the selected manuscript" in detail
-
-    def test_review_preflight_peer_review_strict_rejects_duplicate_tex_artifacts(
-        self,
-        gpd_project: Path,
-    ) -> None:
-        paper_dir = gpd_project / "paper"
-        manuscript = canonical_manuscript_path(gpd_project)
-        alternate_manuscript = paper_dir / "alternate-manuscript.tex"
-        alternate_manuscript.write_text(manuscript.read_text(encoding="utf-8"), encoding="utf-8")
-        manifest_path = paper_dir / "ARTIFACT-MANIFEST.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        tex_artifact = next(artifact for artifact in manifest["artifacts"] if artifact["category"] == "tex")
-        manifest["artifacts"].append(
-            dict(
-                tex_artifact,
-                artifact_id="tex-duplicate",
-                path=alternate_manuscript.name,
-                sha256=compute_sha256(alternate_manuscript),
-            )
-        )
-        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-
-        passed, detail = cli_module._validate_artifact_manifest_semantics(manifest_path, manuscript)
-
-        assert passed is False
-        assert "artifact manifest integrity failed" in detail
-        assert "must contain exactly one tex artifact" in detail
+        _assert_text_contains(detail, expected_fragments)
 
     @pytest.mark.parametrize(
         ("category", "artifact_path"),
@@ -6141,8 +4999,7 @@ class TestReviewValidationCommands:
                 (paper_dir / artifact_name).read_text(encoding="utf-8"), encoding="utf-8"
             )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -6151,13 +5008,10 @@ class TestReviewValidationCommands:
                 _manuscript_entrypoint_relpath(root_name="submission"),
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["command"] == "gpd:peer-review"
         assert payload["passed"] is True
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert checks["manuscript"]["detail"] == f"./submission/{_CANONICAL_MANUSCRIPT_BASENAME} present"
         assert "artifact_manifest" not in checks
@@ -6177,8 +5031,7 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -6187,12 +5040,9 @@ class TestReviewValidationCommands:
                 _manuscript_entrypoint_relpath(root_name="submission"),
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["passed"] is True
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert "artifact_manifest" not in checks
         assert "bibliography_audit" not in checks
@@ -6214,8 +5064,7 @@ class TestReviewValidationCommands:
     ) -> None:
         manuscript = _write_managed_publication_manuscript(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -6224,11 +5073,8 @@ class TestReviewValidationCommands:
                 review_target,
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["resolved_mode"] == "project-backed manuscript review"
         assert checks["manuscript"]["passed"] is True
         assert cli_module._format_display_path(manuscript) in checks["manuscript"]["detail"]
@@ -6238,14 +5084,10 @@ class TestReviewValidationCommands:
         assert "manuscript-root publication artifacts" in payload["effective_required_evidence"]
 
     def test_review_preflight_peer_review_accepts_explicit_manuscript_directory(self, gpd_project: Path) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "paper", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert "resolved to" in checks["manuscript"]["detail"]
 
@@ -6258,15 +5100,12 @@ class TestReviewValidationCommands:
     ) -> None:
         _write_secondary_manuscript_root(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", command, *extra_args, "--strict"],
-            catch_exceptions=False,
+            expect_exit=1 if command == "arxiv-submission" else 0,
         )
 
-        assert result.exit_code == (1 if command == "arxiv-submission" else 0), result.output
-        payload = json.loads(result.output)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert "resolved to ./paper/curvature_flow_bounds.tex" in checks["manuscript"]["detail"]
 
@@ -6291,8 +5130,7 @@ class TestReviewValidationCommands:
                 artifact["sources"] = [{"path": f"sections/{manuscript.name}", "role": "compiled_from"}]
         (paper_dir / "ARTIFACT-MANIFEST.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -6301,11 +5139,8 @@ class TestReviewValidationCommands:
                 f"paper/sections/{manuscript.name}",
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert checks["manuscript"]["passed"] is True
         assert checks["artifact_manifest"]["passed"] is True
@@ -6322,14 +5157,11 @@ class TestReviewValidationCommands:
         (paper_dir / "z-notes.tex").write_text("\\section{Notes}\n", encoding="utf-8")
         (paper_dir / "a-appendix.md").write_text("# Appendix\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "paper", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert "no manuscript entry point found under ./paper" == checks["manuscript"]["detail"]
 
@@ -6367,14 +5199,11 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["bibliography_audit_clean"]["passed"] is False
 
@@ -6412,14 +5241,11 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["bibliography_audit_clean"]["passed"] is False
         assert "bibliography audit is invalid" in checks["bibliography_audit_clean"]["detail"]
         assert "summary counts do not match entries" in checks["bibliography_audit_clean"]["detail"]
@@ -6443,14 +5269,11 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["bibliography_audit_clean"]["passed"] is False
         assert "bibliography audit is invalid" in checks["bibliography_audit_clean"]["detail"]
@@ -6464,14 +5287,11 @@ class TestReviewValidationCommands:
         manifest["last_verified_platform"] = ""
         (paper_dir / "reproducibility-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "peer-review", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["reproducibility_manifest"]["passed"] is True
         assert checks["reproducibility_ready"]["passed"] is False
 
@@ -6498,14 +5318,8 @@ class TestReviewValidationCommands:
         paper_dir = gpd_project / "paper"
         (paper_dir / "ARTIFACT-MANIFEST.json").unlink()
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["artifact_manifest"]["passed"] is False
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["compiled_manuscript"]["passed"] is True
@@ -6514,14 +5328,8 @@ class TestReviewValidationCommands:
         paper_dir = gpd_project / "paper"
         (paper_dir / "BIBLIOGRAPHY-AUDIT.json").unlink()
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["artifact_manifest"]["passed"] is True
         assert checks["bibliography_audit"]["passed"] is False
         assert checks["compiled_manuscript"]["passed"] is True
@@ -6537,14 +5345,8 @@ class TestReviewValidationCommands:
             write_proof_redteam=False,
         )
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["artifact_manifest"]["passed"] is True
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["review_ledger"]["passed"] is True
@@ -6553,9 +5355,63 @@ class TestReviewValidationCommands:
         assert checks["manuscript_proof_review"]["blocking"] is True
         assert "PROOF-REDTEAM.md" in checks["manuscript_proof_review"]["detail"]
 
-    def test_review_preflight_arxiv_submission_bypasses_auxiliary_proof_review_for_non_theorem_manuscripts(
+    @pytest.mark.parametrize(
+        ("claim_updates", "expect_exit", "proof_check_passed", "forbidden_detail"),
+        [
+            (None, 0, True, "PROOF-REDTEAM"),
+            (
+                {
+                    "claim_kind": "claim",
+                    "text": "The manuscript reports a descriptive result.",
+                    "theorem_assumptions": [],
+                    "theorem_parameters": [],
+                },
+                0,
+                True,
+                "PROOF-REDTEAM",
+            ),
+            (
+                {
+                    "claim_kind": "claim",
+                    "text": "The manuscript reports a descriptive result.",
+                    "theorem_assumptions": ["chi > 0"],
+                    "theorem_parameters": ["r_0"],
+                },
+                1,
+                False,
+                "not required",
+            ),
+            (
+                {
+                    "claim_kind": "claim",
+                    "text": "For every r_0 > 0, the orbit intersects the target annulus.",
+                    "theorem_assumptions": [],
+                    "theorem_parameters": [],
+                },
+                1,
+                False,
+                "not required",
+            ),
+            (
+                {
+                    "claim_kind": "theorem",
+                    "text": "For every r_0 > 0, the orbit intersects the target annulus.",
+                    "theorem_assumptions": ["chi > 0"],
+                    "theorem_parameters": ["r_0"],
+                },
+                1,
+                False,
+                "not required",
+            ),
+        ],
+    )
+    def test_review_preflight_arxiv_submission_classifies_theorem_bearing_claim_inventory(
         self,
         gpd_project: Path,
+        claim_updates: dict[str, object] | None,
+        expect_exit: int,
+        proof_check_passed: bool,
+        forbidden_detail: str,
     ) -> None:
         _write_publication_review_outcome(
             gpd_project,
@@ -6563,146 +5419,19 @@ class TestReviewValidationCommands:
             proof_bearing=False,
             write_proof_redteam=False,
         )
+        if claim_updates is not None:
+            _update_claim_index_claim(gpd_project, **claim_updates)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
+            expect_exit=expect_exit,
         )
 
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert checks["manuscript_proof_review"]["passed"] is True
-        assert checks["manuscript_proof_review"]["blocking"] is False
-        assert "PROOF-REDTEAM" not in checks["manuscript_proof_review"]["detail"]
-
-    def test_review_preflight_arxiv_submission_bypasses_auxiliary_proof_review_for_generic_claim_kind_without_theorem_metadata(
-        self,
-        gpd_project: Path,
-    ) -> None:
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            proof_bearing=False,
-            write_proof_redteam=False,
-        )
-        _update_claim_index_claim(
-            gpd_project,
-            claim_kind="claim",
-            text="The manuscript reports a descriptive result.",
-            theorem_assumptions=[],
-            theorem_parameters=[],
-        )
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert checks["review_ledger"]["passed"] is True
-        assert checks["referee_decision"]["passed"] is True
-        assert checks["manuscript_proof_review"]["passed"] is True
-        assert checks["manuscript_proof_review"]["blocking"] is False
-        assert "PROOF-REDTEAM" not in checks["manuscript_proof_review"]["detail"]
-
-    def test_review_preflight_arxiv_submission_uses_theorem_metadata_from_generic_claim_kind(
-        self,
-        gpd_project: Path,
-    ) -> None:
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            proof_bearing=False,
-            write_proof_redteam=False,
-        )
-        _update_claim_index_claim(
-            gpd_project,
-            claim_kind="claim",
-            text="The manuscript reports a descriptive result.",
-            theorem_assumptions=["chi > 0"],
-            theorem_parameters=["r_0"],
-        )
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert checks["review_ledger"]["passed"] is True
-        assert checks["referee_decision"]["passed"] is True
-        assert checks["manuscript_proof_review"]["passed"] is False
-        assert checks["manuscript_proof_review"]["blocking"] is True
-        assert "not required" not in checks["manuscript_proof_review"]["detail"]
-
-    def test_review_preflight_arxiv_submission_uses_theorem_like_text_from_generic_claim_kind(
-        self,
-        gpd_project: Path,
-    ) -> None:
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            proof_bearing=False,
-            write_proof_redteam=False,
-        )
-        _update_claim_index_claim(
-            gpd_project,
-            claim_kind="claim",
-            text="For every r_0 > 0, the orbit intersects the target annulus.",
-            theorem_assumptions=[],
-            theorem_parameters=[],
-        )
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert checks["review_ledger"]["passed"] is True
-        assert checks["referee_decision"]["passed"] is True
-        assert checks["manuscript_proof_review"]["passed"] is False
-        assert checks["manuscript_proof_review"]["blocking"] is True
-        assert "not required" not in checks["manuscript_proof_review"]["detail"]
-
-    def test_review_preflight_arxiv_submission_uses_theorem_bearing_claim_inventory_when_math_anchor_is_not_theorem_bearing(
-        self,
-        gpd_project: Path,
-    ) -> None:
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            proof_bearing=False,
-            write_proof_redteam=False,
-        )
-        claims_path = gpd_project / "GPD" / "review" / "CLAIMS.json"
-        claims_payload = json.loads(claims_path.read_text(encoding="utf-8"))
-        claims_payload["claims"][0]["claim_kind"] = "theorem"
-        claims_payload["claims"][0]["text"] = "For every r_0 > 0, the orbit intersects the target annulus."
-        claims_payload["claims"][0]["theorem_assumptions"] = ["chi > 0"]
-        claims_payload["claims"][0]["theorem_parameters"] = ["r_0"]
-        claims_path.write_text(json.dumps(claims_payload), encoding="utf-8")
-
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
-        assert checks["review_ledger"]["passed"] is True
-        assert checks["referee_decision"]["passed"] is True
-        assert checks["manuscript_proof_review"]["passed"] is False
-        assert checks["manuscript_proof_review"]["blocking"] is True
-        assert "not required" not in checks["manuscript_proof_review"]["detail"]
+        if claim_updates is not None:
+            assert_checks_pass(payload, "review_ledger", "referee_decision")
+        check = assert_check(payload, "manuscript_proof_review", passed=proof_check_passed)
+        assert check["blocking"] is (not proof_check_passed)
+        assert forbidden_detail not in check["detail"]
 
     def test_review_preflight_arxiv_submission_detects_theorem_bearing_manuscript_text_without_theorem_claim_inventory(
         self,
@@ -6732,14 +5461,8 @@ class TestReviewValidationCommands:
                 artifact["sha256"] = compute_sha256(manuscript)
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is True
         assert "not required" not in checks["manuscript_proof_review"]["detail"]
@@ -6767,14 +5490,8 @@ class TestReviewValidationCommands:
         math_stage_payload["proof_audits"] = []
         math_stage_path.write_text(json.dumps(math_stage_payload), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["manuscript_proof_review"]["passed"] is False
         assert checks["manuscript_proof_review"]["blocking"] is True
         assert "claims_reviewed" in checks["manuscript_proof_review"]["detail"]
@@ -6798,14 +5515,8 @@ class TestReviewValidationCommands:
             write_proof_redteam=False,
         )
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert "round 2" in checks["review_ledger"]["detail"]
         assert "round 2" in checks["referee_decision"]["detail"]
         assert checks["manuscript_proof_review"]["passed"] is False
@@ -6828,14 +5539,8 @@ class TestReviewValidationCommands:
         )
         _refresh_artifact_manifest_for_manuscript(gpd_project, manuscript_path)
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["referee_decision_valid"]["passed"] is False
         assert (
             "manuscript_sha256 does not match the active manuscript snapshot"
@@ -6879,14 +5584,8 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["bibliography_audit"]["passed"] is True
         assert checks["bibliography_audit_clean"]["passed"] is False
         assert "bibliography audit still has unresolved" in checks["bibliography_audit_clean"]["detail"]
@@ -6898,14 +5597,8 @@ class TestReviewValidationCommands:
         (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
         (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["compiled_manuscript"]["passed"] is True
         assert checks["publication_blockers"]["passed"] is False
         assert checks["publication_blockers"]["blocking"] is True
@@ -6916,14 +5609,8 @@ class TestReviewValidationCommands:
     ) -> None:
         _write_publication_review_outcome(gpd_project, final_recommendation="major_revision")
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["review_ledger"]["passed"] is True
         assert checks["referee_decision"]["passed"] is True
         assert checks["review_ledger_valid"]["passed"] is True
@@ -6941,14 +5628,8 @@ class TestReviewValidationCommands:
             blocking_issue_ids=["REF-001"],
         )
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["review_ledger_valid"]["passed"] is True
         assert checks["referee_decision_valid"]["passed"] is False
         assert "publication_review_outcome" not in checks
@@ -6960,14 +5641,8 @@ class TestReviewValidationCommands:
         _write_publication_review_outcome(gpd_project, final_recommendation="accept", round_number=1)
         _write_publication_review_outcome(gpd_project, final_recommendation="major_revision", round_number=2)
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert "round 2" in checks["review_ledger"]["detail"]
         assert "round 2" in checks["referee_decision"]["detail"]
         assert checks["publication_review_outcome"]["passed"] is False
@@ -6980,14 +5655,8 @@ class TestReviewValidationCommands:
         _write_publication_review_outcome(gpd_project, final_recommendation="accept", round_number=2)
         (gpd_project / "GPD" / "review" / "REVIEW-LEDGER-R2.json").unlink()
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["review_ledger"]["passed"] is False
         assert "round 2" in checks["review_ledger"]["detail"]
 
@@ -7002,14 +5671,8 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["response_freshness"]["passed"] is False
         assert checks["response_freshness"]["blocking"] is True
         assert "checkpoint=response_gate" in checks["response_freshness"]["detail"]
@@ -7033,8 +5696,7 @@ class TestReviewValidationCommands:
         )
         _write_publication_response_round(gpd_project, round_number=2)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -7043,11 +5705,9 @@ class TestReviewValidationCommands:
                 "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex",
                 "--strict",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["publication_subject_slug"] == "curvature-flow"
         assert payload["publication_lane_kind"] == "managed_publication_manuscript"
         assert payload["managed_publication_root"] == "GPD/publication/curvature-flow"
@@ -7074,14 +5734,8 @@ class TestReviewValidationCommands:
             manuscript_path=_manuscript_entrypoint_relpath(root_name="submission"),
         )
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["review_ledger_valid"]["passed"] is False
         assert checks["referee_decision_valid"]["passed"] is False
 
@@ -7094,14 +5748,8 @@ class TestReviewValidationCommands:
         (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
         (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["publication_blockers"]["passed"] is True
         assert checks["review_ledger"]["passed"] is False
         assert checks["referee_decision"]["passed"] is False
@@ -7117,14 +5765,11 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-preflight", "arxiv-submission", "submission", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert (
             checks["manuscript"]["detail"]
@@ -7144,8 +5789,7 @@ class TestReviewValidationCommands:
     ) -> None:
         manuscript = _write_managed_publication_manuscript(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -7154,11 +5798,9 @@ class TestReviewValidationCommands:
                 review_target,
                 "--strict",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert checks["artifact_manifest"]["passed"] is True
         assert checks["bibliography_audit"]["passed"] is True
@@ -7191,8 +5833,7 @@ class TestReviewValidationCommands:
             manuscript_path=_CANONICAL_MANUSCRIPT_REL,
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -7201,11 +5842,8 @@ class TestReviewValidationCommands:
                 managed_manuscript_path,
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert checks["manuscript"]["detail"] == f"{cli_module._format_display_path(manuscript)} present"
         assert checks["review_ledger"]["passed"] is True
@@ -7217,24 +5855,13 @@ class TestReviewValidationCommands:
         self,
         gpd_project: Path,
     ) -> None:
-        managed_manuscript_path = "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex"
-        _write_managed_publication_manuscript(gpd_project)
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            manuscript_path=managed_manuscript_path,
-        )
-        _move_publication_review_outcome_to_subject_review(gpd_project, subject_slug="curvature-flow")
+        managed_manuscript_path, _manuscript = _prepare_accepted_managed_arxiv_subject(gpd_project)
         _write_managed_arxiv_submission_package(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "arxiv-package", managed_manuscript_path],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert payload["preflight_passed"] is True
         assert payload["subject_slug"] == "curvature-flow"
@@ -7251,19 +5878,11 @@ class TestReviewValidationCommands:
         self,
         gpd_project: Path,
     ) -> None:
-        managed_manuscript_path = "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex"
-        _write_managed_publication_manuscript(gpd_project)
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            manuscript_path=managed_manuscript_path,
-        )
-        _move_publication_review_outcome_to_subject_review(gpd_project, subject_slug="curvature-flow")
+        managed_manuscript_path, _manuscript = _prepare_accepted_managed_arxiv_subject(gpd_project)
         submission_dir, tarball = _write_managed_arxiv_submission_package(gpd_project)
         tarball.unlink()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -7275,11 +5894,8 @@ class TestReviewValidationCommands:
                 "--tarball",
                 str(tarball),
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["materialized"] is True
         assert tarball.exists()
         assert checks["tarball_materialized"]["passed"] is True
@@ -7289,20 +5905,12 @@ class TestReviewValidationCommands:
         self,
         gpd_project: Path,
     ) -> None:
-        managed_manuscript_path = "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex"
-        _write_managed_publication_manuscript(gpd_project)
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            manuscript_path=managed_manuscript_path,
-        )
-        _move_publication_review_outcome_to_subject_review(gpd_project, subject_slug="curvature-flow")
+        managed_manuscript_path, _manuscript = _prepare_accepted_managed_arxiv_subject(gpd_project)
         _submission_dir, tarball = _write_managed_arxiv_submission_package(gpd_project)
         escaped_tarball = gpd_project / "arxiv-submission.tar.gz"
         escaped_tarball.write_bytes(tarball.read_bytes())
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -7311,11 +5919,9 @@ class TestReviewValidationCommands:
                 "--tarball",
                 str(escaped_tarball),
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["tarball_under_managed_arxiv_root"]["passed"] is False
         assert "escapes managed arXiv root" in checks["tarball_under_managed_arxiv_root"]["detail"]
 
@@ -7323,14 +5929,7 @@ class TestReviewValidationCommands:
         self,
         gpd_project: Path,
     ) -> None:
-        managed_manuscript_path = "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex"
-        _write_managed_publication_manuscript(gpd_project)
-        _write_publication_review_outcome(
-            gpd_project,
-            final_recommendation="accept",
-            manuscript_path=managed_manuscript_path,
-        )
-        _move_publication_review_outcome_to_subject_review(gpd_project, subject_slug="curvature-flow")
+        managed_manuscript_path, _manuscript = _prepare_accepted_managed_arxiv_subject(gpd_project)
         _write_managed_arxiv_submission_package(
             gpd_project,
             tex_body=(
@@ -7342,14 +5941,10 @@ class TestReviewValidationCommands:
             extra_files={"refs.bib": "@article{einstein1905,title={Relativity}}\n"},
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "arxiv-package", managed_manuscript_path],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["submission_tree_excludes_auxiliary_files"]["passed"] is True
         assert checks["submission_tex_ready"]["passed"] is True
         assert checks["tarball_entries_safe"]["passed"] is True
@@ -7372,16 +5967,13 @@ class TestReviewValidationCommands:
         _write_publication_response_round(gpd_project, round_number=2)
         _write_managed_arxiv_submission_package(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "arxiv-package", managed_manuscript_path],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["preflight_passed"] is False
         assert payload["checks"][0]["name"] == "strict_review_preflight"
-        review_checks = {check["name"]: check for check in payload["review_preflight"]["checks"]}
+        review_checks = checks_by_name(payload["review_preflight"])
         assert review_checks["response_freshness"]["passed"] is False
         assert "checkpoint=response_gate" in review_checks["response_freshness"]["detail"]
         assert review_checks["review_ledger"]["passed"] is False
@@ -7399,14 +5991,11 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "command-context", "arxiv-submission", "submission"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
         assert payload["guidance"] == (
@@ -7450,7 +6039,7 @@ class TestReviewValidationCommands:
         )
 
         payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
         assert (
@@ -7487,14 +6076,10 @@ class TestReviewValidationCommands:
 
         manuscript = _write_managed_publication_manuscript(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "command-context", "arxiv-submission"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
         assert checks["project_exists"]["passed"] is True
@@ -7516,8 +6101,7 @@ class TestReviewValidationCommands:
         report.parent.mkdir()
         report.write_text("# Referee 1\n\nPlease clarify the proof.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -7531,10 +6115,7 @@ class TestReviewValidationCommands:
                 "--report",
                 report.relative_to(gpd_project).as_posix(),
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["selected_publication_root"] == "GPD/publication/curvature-flow"
         assert payload["selected_review_root"] == "GPD/publication/curvature-flow/review"
 
@@ -7547,8 +6128,7 @@ class TestReviewValidationCommands:
         report.parent.mkdir()
         report.write_text("# Referee 1\n\nPlease clarify the proof.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -7563,10 +6143,7 @@ class TestReviewValidationCommands:
                 "--report",
                 report.relative_to(gpd_project).as_posix(),
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["required_outputs"] == [
             "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md",
             "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md",
@@ -7579,8 +6156,7 @@ class TestReviewValidationCommands:
         nested = gpd_project / "notes"
         nested.mkdir()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -7590,11 +6166,8 @@ class TestReviewValidationCommands:
                 "peer-review",
                 f"../paper/{_CANONICAL_MANUSCRIPT_BASENAME}",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
         assert checks["project_exists"]["passed"] is True
@@ -7616,8 +6189,7 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -7625,11 +6197,8 @@ class TestReviewValidationCommands:
                 "peer-review",
                 _manuscript_entrypoint_relpath(root_name="submission"),
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
         assert checks["project_exists"]["passed"] is True
@@ -7646,14 +6215,10 @@ class TestReviewValidationCommands:
         workspace = tmp_path / "standalone-review"
         workspace.mkdir()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "command-context", "peer-review"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert checks["project_exists"]["blocking"] is False
         assert checks["explicit_inputs"]["passed"] is True
@@ -7670,14 +6235,10 @@ class TestReviewValidationCommands:
         workspace.mkdir()
         _write_minimal_xlsx(workspace / "standalone.xlsm")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "command-context", "peer-review", "standalone.xlsm"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
         assert payload["resolved_mode"] == "standalone explicit-artifact review"
@@ -7694,14 +6255,11 @@ class TestReviewValidationCommands:
         workspace = tmp_path.parent / f"{tmp_path.name}-standalone-write-paper"
         workspace.mkdir()
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "command-context", "write-paper"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:write-paper"
         assert payload["context_mode"] == "project-aware"
         assert payload["passed"] is False
@@ -7724,14 +6282,10 @@ class TestReviewValidationCommands:
         nested.mkdir(parents=True)
         (nested / "PROJECT.md").write_text("# Nested note\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(nested), "validate", "command-context", "write-paper"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:write-paper"
         assert checks["project_exists"]["passed"] is True
         assert payload["resolved_subject"]["status"] == "resolved"
@@ -7746,8 +6300,7 @@ class TestReviewValidationCommands:
         workspace.mkdir()
         intake_path = _write_write_paper_authoring_input(workspace)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -7757,11 +6310,8 @@ class TestReviewValidationCommands:
                 "write-paper",
                 f"--intake {intake_path.name}",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["command"] == "gpd:write-paper"
         assert payload["context_mode"] == "project-aware"
@@ -7785,8 +6335,7 @@ class TestReviewValidationCommands:
     ) -> None:
         intake_path = _write_write_paper_authoring_input(gpd_project)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -7796,11 +6345,9 @@ class TestReviewValidationCommands:
                 "write-paper",
                 f"--intake {intake_path.name}",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is False
         assert payload["selected_publication_root"] is None
@@ -7833,8 +6380,7 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -7844,11 +6390,9 @@ class TestReviewValidationCommands:
                 "write-paper",
                 f"--intake {intake_path.name}",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is False
         assert checks["explicit_inputs"]["passed"] is False
@@ -7868,14 +6412,10 @@ class TestReviewValidationCommands:
             "--report reports/referee-1.md --report reports/referee-2.md"
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "command-context", "respond-to-referees", explicit_intake],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["command"] == "gpd:respond-to-referees"
         assert payload["passed"] is True
         assert payload["explicit_inputs"] == ["manuscript path", "path to referee report", "`paste`"]
@@ -7888,14 +6428,10 @@ class TestReviewValidationCommands:
         artifact = workspace / "notes.txt"
         artifact.write_text("Standalone manuscript notes.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "review-preflight", "peer-review", "notes.txt", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["passed"] is True
         assert "project_state" not in checks
@@ -7914,8 +6450,7 @@ class TestReviewValidationCommands:
         workspace.mkdir()
         intake_path = _write_write_paper_authoring_input(workspace)
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -7926,11 +6461,8 @@ class TestReviewValidationCommands:
                 f"--intake {intake_path.name}",
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         resolved_subject = payload["resolved_subject"]
         assert payload["command"] == "gpd:write-paper"
         assert payload["passed"] is True
@@ -8142,8 +6674,7 @@ class TestReviewValidationCommands:
         workspace.mkdir()
         (workspace / artifact_name).write_text(content, encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -8154,11 +6685,8 @@ class TestReviewValidationCommands:
                 artifact_name,
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert "project_state" not in checks
         assert checks["manuscript"]["passed"] is True
@@ -8208,8 +6736,7 @@ class TestReviewValidationCommands:
         if isinstance(maybe_path, Path):
             artifact = maybe_path
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "--cwd",
@@ -8220,11 +6747,8 @@ class TestReviewValidationCommands:
                 artifact.name,
                 "--strict",
             ],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert "project_state" not in checks
         assert checks["manuscript"]["passed"] is True
@@ -8266,14 +6790,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "review-preflight", "peer-review", "submission", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert checks["manuscript"]["passed"] is True
         assert (
@@ -8342,14 +6862,11 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "review-preflight", "peer-review", "submission", "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is False
         assert checks["artifact_manifest"]["passed"] is False
         assert checks["artifact_manifest"]["blocking"] is True
@@ -8364,14 +6881,10 @@ class TestReviewValidationCommands:
         _write_binary_pdf(artifact)
         (workspace / "draft.txt").write_text("Extracted PDF text.\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "--cwd", str(workspace), "validate", "review-preflight", "peer-review", "draft.pdf", "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is True
         assert checks["manuscript"]["passed"] is True
         assert (
@@ -8419,7 +6932,7 @@ class TestReviewValidationCommands:
                 _sys.modules["pypdf"] = _original_pypdf
 
         payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is False
         assert checks["manuscript"]["passed"] is False
         detail = checks["manuscript"]["detail"]
@@ -8455,7 +6968,7 @@ class TestReviewValidationCommands:
             uninstall()
 
         payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert payload["passed"] is False
         assert checks["manuscript"]["passed"] is False
         assert "malformed trailer" in checks["manuscript"]["detail"]
@@ -8513,7 +7026,7 @@ class TestReviewValidationCommands:
 
         preflight_payload = json.loads(preflight.output)
         materialized_payload = json.loads(materialized.output)
-        checks = {check["name"]: check for check in preflight_payload["checks"]}
+        checks = checks_by_name(preflight_payload)
 
         assert preflight_payload["passed"] is True
         assert checks["manuscript"]["passed"] is True
@@ -8643,8 +7156,7 @@ class TestReviewValidationCommands:
             ("PAPER-CONFIG.json", "ARTIFACT-MANIFEST.json", "BIBLIOGRAPHY-AUDIT.json"),
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -8653,11 +7165,9 @@ class TestReviewValidationCommands:
                 "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex",
                 "--strict",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is True
         assert checks["manuscript"]["detail"] == f"{cli_module._format_display_path(manuscript)} present"
         assert checks["artifact_manifest"]["detail"].startswith("no ARTIFACT-MANIFEST.json found near the manuscript")
@@ -8676,8 +7186,7 @@ class TestReviewValidationCommands:
         manuscript_dir.mkdir(parents=True, exist_ok=True)
         (manuscript_dir / _CANONICAL_MARKDOWN_BASENAME).write_text("# Markdown manuscript\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -8686,11 +7195,9 @@ class TestReviewValidationCommands:
                 f"GPD/publication/curvature-flow/manuscript/{_CANONICAL_MARKDOWN_BASENAME}",
                 "--strict",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert (
             checks["manuscript"]["detail"]
@@ -8705,8 +7212,7 @@ class TestReviewValidationCommands:
         manuscript_dir.mkdir(parents=True, exist_ok=True)
         (manuscript_dir / _CANONICAL_MARKDOWN_BASENAME).write_text("# Markdown manuscript\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -8715,11 +7221,9 @@ class TestReviewValidationCommands:
                 "GPD/publication/curvature-flow/manuscript",
                 "--strict",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert checks["manuscript"]["detail"] == (
             "no manuscript entry point found under ./GPD/publication/curvature-flow/manuscript"
@@ -8737,8 +7241,7 @@ class TestReviewValidationCommands:
         )
         (manuscript_dir / "alt.pdf").write_bytes(b"%PDF-1.4\n% fake arxiv submission pdf\n")
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -8747,11 +7250,9 @@ class TestReviewValidationCommands:
                 "GPD/publication/curvature-flow/manuscript",
                 "--strict",
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert checks["manuscript"]["detail"] == (
             "no manuscript entry point found under ./GPD/publication/curvature-flow/manuscript"
@@ -8765,14 +7266,8 @@ class TestReviewValidationCommands:
         (paper_dir / _CANONICAL_MANUSCRIPT_BASENAME).unlink()
         (paper_dir / _CANONICAL_MARKDOWN_BASENAME).write_text("# Markdown manuscript\n", encoding="utf-8")
 
-        result = runner.invoke(
-            app,
-            ["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"],
-            catch_exceptions=False,
-        )
-
-        payload = json_output_from_result(result, expect_exit=1)
-        checks = {check["name"]: check for check in payload["checks"]}
+        payload = _raw_json(["--raw", "validate", "review-preflight", "arxiv-submission", "--strict"], expect_exit=1)
+        checks = checks_by_name(payload)
         assert checks["manuscript"]["passed"] is False
         assert (
             "no LaTeX manuscript entrypoint found under paper/, manuscript/, or draft/"
@@ -8861,13 +7356,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "paper-quality", str(quality_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["ready_for_submission"] is False
 
     def test_validate_paper_quality_command_blocks_invalid_ledger_integrity_flags(self, gpd_project: Path) -> None:
@@ -8925,13 +7417,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "paper-quality", str(quality_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         blocker_checks = {issue["check"] for issue in payload["blocking_issues"]}
         assert "decisive_artifacts_with_explicit_verdicts" in blocker_checks
 
@@ -9046,13 +7535,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "paper-quality", "--from-project", str(gpd_project)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["journal"] == "jhep"
         assert payload["categories"]["verification"]["checks"]["contract_targets_verified"] > 0
         assert payload["categories"]["results"]["checks"]["comparison_with_prior_work_present"] > 0
@@ -9130,13 +7616,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path), "--strict", "--ledger", str(ledger_path)],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["valid"] is True
         assert payload["most_positive_allowed_recommendation"] == "major_revision"
 
@@ -9167,13 +7649,10 @@ class TestReviewValidationCommands:
             ),
             encoding="utf-8",
         )
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path), "--strict"],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "Strict referee-decision validation requires --ledger" in payload["error"]
 
     def test_validate_referee_decision_command_accepts_round_suffixed_stage_artifacts(self, gpd_project: Path) -> None:
@@ -9235,13 +7714,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path), "--strict", "--ledger", str(ledger_path)],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["valid"] is True
 
     def test_validate_referee_decision_command_rejects_wrong_existing_artifact_set(self, gpd_project: Path) -> None:
@@ -9286,13 +7761,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path), "--strict", "--ledger", str(ledger_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("canonical five specialist stage artifacts" in reason for reason in payload["reasons"])
 
@@ -9332,13 +7804,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path), "--strict", "--ledger", str(ledger_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("rejects noncanonical stage artifacts" in reason for reason in payload["reasons"])
         assert any("STAGE-meta.json" in reason for reason in payload["reasons"])
@@ -9379,13 +7848,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path), "--strict", "--ledger", str(ledger_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert payload["most_positive_allowed_recommendation"] == "reject"
 
@@ -9421,13 +7887,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path), "--strict", "--ledger", str(ledger_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("listed staged review artifacts do not exist" in reason for reason in payload["reasons"])
 
@@ -9477,8 +7940,7 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -9488,22 +7950,17 @@ class TestReviewValidationCommands:
                 "--ledger",
                 str(ledger_path),
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any("blocking_issue_ids not found in review ledger" in reason for reason in payload["reasons"])
 
     def test_validate_referee_decision_command_rejects_dual_stdin_inputs(self) -> None:
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", "-", "--ledger", "-"],
             input="{}\n",
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "Cannot read both referee-decision and review-ledger from stdin" in payload["error"]
 
     def test_validate_referee_decision_command_rejects_omitted_unresolved_blocking_ledger_issues(
@@ -9551,8 +8008,7 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             [
                 "--raw",
                 "validate",
@@ -9562,10 +8018,8 @@ class TestReviewValidationCommands:
                 "--ledger",
                 str(ledger_path),
             ],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any(
             "unresolved blocking review-ledger issues missing from blocking_issue_ids" in reason
@@ -9591,13 +8045,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "paper-quality", str(input_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "paper-quality input.equations must be an object, not str" in payload["error"]
 
     def test_validate_paper_quality_command_rejects_unknown_fields_without_traceback(self, gpd_project: Path) -> None:
@@ -9619,13 +8070,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "paper-quality", str(input_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "paper-quality input.verification.report_exists: Extra inputs are not permitted" in payload["error"]
         assert "templates/paper/paper-quality-input-schema.md" in payload["error"]
 
@@ -9643,13 +8091,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "referee-decision", str(decision_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "referee-decision.stage_artifacts must be an array, not str" in payload["error"]
 
     def test_validate_review_ledger_command_accepts_valid_ledger(self, gpd_project: Path) -> None:
@@ -9677,13 +8122,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-ledger", str(ledger_path)],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["issues"][0]["issue_id"] == "REF-001"
 
     def test_validate_review_ledger_command_reports_shape_errors_without_traceback(self, gpd_project: Path) -> None:
@@ -9700,13 +8141,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "review-ledger", str(ledger_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "review-ledger.issues must be an array, not str" in payload["error"]
 
     def test_validate_plan_contract_command_accepts_valid_plan(self, gpd_project: Path) -> None:
@@ -9718,13 +8156,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "plan-contract", str(plan_path)],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["valid"] is True
 
     def test_validate_plan_contract_command_rejects_ambiguous_contract_target_ids(self, gpd_project: Path) -> None:
@@ -9744,13 +8178,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "plan-contract", str(plan_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert any(
             "contract: contract id claim-benchmark is reused across claim, deliverable; "
@@ -9831,13 +8262,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--cwd", str(gpd_project), "list-servers", "--json"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         serialized = json.dumps(payload)
         assert "${" not in serialized
         assert "test-secret" not in serialized
@@ -9871,13 +8298,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--cwd", str(gpd_project), "list-servers", "--json", "--binary", "/opt/gpd"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload[WOLFRAM_MANAGED_SERVER_KEY] == {
             "command": "/opt/gpd",
             "args": ["mcp-serve", "wolfram"],
@@ -9899,13 +8322,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "summary-contract", str(summary_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert any("Unknown claim contract_results entry: claim-unknown" in error for error in payload["errors"])
 
     def test_validate_summary_contract_command_reports_unresolved_plan_contract_ref(self, gpd_project: Path) -> None:
@@ -9917,13 +8337,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "summary-contract", str(summary_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "plan_contract_ref: could not resolve matching plan contract" in payload["errors"]
 
     def test_validate_verification_contract_command_requires_contract_results(self, gpd_project: Path) -> None:
@@ -9946,13 +8363,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "verification-contract", str(verification_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert "contract_results: required for contract-backed plan" in payload["errors"]
 
     def test_validate_reproducibility_manifest_strict_command(self, gpd_project: Path) -> None:
@@ -10002,13 +8416,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "reproducibility-manifest", str(manifest_path), "--strict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["valid"] is True
         assert payload["reproducibility_ready"] is True
         assert "ready_for_review" not in payload
@@ -10020,13 +8430,10 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "reproducibility-manifest", str(manifest_path)],
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is False
         assert payload["schema_reference"].endswith("paper/reproducibility-manifest.md")
         assert any(
@@ -10057,14 +8464,11 @@ class TestReviewValidationCommands:
             "last_verified_platform": "",
         }
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "reproducibility-manifest", "-", "--strict"],
             input=json.dumps(manifest),
-            catch_exceptions=False,
+            expect_exit=1,
         )
-
-        payload = json_output_from_result(result, expect_exit=1)
         assert payload["valid"] is True
         assert payload["reproducibility_ready"] is False
         assert payload["schema_reference"].endswith("paper/reproducibility-manifest.md")
@@ -10102,13 +8506,9 @@ class TestReviewValidationCommands:
             encoding="utf-8",
         )
 
-        result = runner.invoke(
-            app,
+        payload = _raw_json(
             ["--raw", "validate", "reproducibility-manifest", str(manifest_path), "--kernel-verdict"],
-            catch_exceptions=False,
         )
-
-        payload = json_output_from_result(result)
         assert payload["validation"]["valid"] is True
         assert payload["validation"]["reproducibility_ready"] is True
         assert "ready_for_review" not in payload["validation"]

@@ -21,10 +21,13 @@ from gpd.core.workflow_staging import (
     load_workflow_stage_manifest,
 )
 from tests.helpers import phase7_live_like
-from tests.helpers.phase4_persona.interaction_events import FakePersonaTrace, FakePersonaTurn
+from tests.helpers.persona_trace import FakePersonaTrace, FakePersonaTurn
 from tests.helpers.phase7_live_like import (
-    LP_JIT_ROW_IDS,
     PHASE7_LIVE_PERSONA_MATRIX_PATH,
+    REQUIRED_JIT_ROW_IDS,
+    REQUIRED_LP_JIT_ROW_IDS,
+    REQUIRED_P6_JIT_ROW_IDS,
+    ROW_TIERS,
     Phase7LiveLikeRow,
     load_phase7_live_like_rows,
     score_phase7_live_like_row,
@@ -39,6 +42,8 @@ def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
     rows = load_phase7_live_like_rows()
 
     assert {row.row_id for row in rows} >= {"LP01-START-PROJECTLESS-READONLY", "LP12-GEMINI-POLICY-DENIAL"}
+    assert {row.row_id for row in rows} >= REQUIRED_JIT_ROW_IDS
+    assert {row.row_tier for row in rows} <= ROW_TIERS
     assert all(row.provider_launch_allowed is False for row in rows)
     assert all(row.network_allowed is False for row in rows)
 
@@ -69,12 +74,13 @@ def test_phase7_live_like_matrix_has_no_raw_transcripts_or_provider_launch_field
         assert row.get("raw_artifacts_allowed", False) is False
 
 
-def test_phase7_live_like_scores_lp_jit_rows_with_hard_budgets() -> None:
+def test_phase7_live_like_scores_jit_canary_rows_with_hard_budgets() -> None:
     rows = load_phase7_live_like_rows()
     scores = score_phase7_live_like_rows(rows)
-    scores_by_prefix = {"-".join(score.row.row_id.split("-", 3)[:3]): score for score in scores}
+    scores_by_id = {score.row.row_id: score for score in scores}
 
-    assert tuple(scores_by_prefix) == LP_JIT_ROW_IDS
+    assert REQUIRED_JIT_ROW_IDS <= set(scores_by_id)
+    assert all(score.row.row_tier == "jit_canary" for score in scores)
     assert all(score.passed for score in scores)
     assert all(score.hard_budget_failures == () for score in scores)
     assert all(score.behavior_score.metric_counts["unexpected_write_count"] == 0 for score in scores)
@@ -83,11 +89,18 @@ def test_phase7_live_like_scores_lp_jit_rows_with_hard_budgets() -> None:
         score.phase7_metric_counts["schema_surface_count"] <= score.phase7_metric_counts["physics_progress_count"] + 1
         for score in scores
     )
-    assert scores_by_prefix["LP-JIT-03"].behavior_score.metric_counts["stale_artifact_trust_count"] == 0
-    assert scores_by_prefix["LP-JIT-04"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
-    assert scores_by_prefix["LP-JIT-06"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
-    assert scores_by_prefix["LP-JIT-07"].behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
-    assert scores_by_prefix["LP-JIT-08"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
+    assert REQUIRED_LP_JIT_ROW_IDS <= set(scores_by_id)
+    assert REQUIRED_P6_JIT_ROW_IDS <= set(scores_by_id)
+    assert scores_by_id["LP-JIT-03"].behavior_score.metric_counts["stale_artifact_trust_count"] == 0
+    assert scores_by_id["LP-JIT-04"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+    assert scores_by_id["LP-JIT-06"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
+    assert scores_by_id["LP-JIT-07"].behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
+    assert scores_by_id["LP-JIT-08"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
+    assert scores_by_id["P6-EXEC-JIT-02"].behavior_score.metric_counts["stale_artifact_trust_count"] == 0
+    assert scores_by_id["P6-EXEC-JIT-03"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
+    assert scores_by_id["P6-EXEC-JIT-04"].behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
+    assert scores_by_id["P6-COMP-JIT-01"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
+    assert scores_by_id["P6-RES-JIT-02"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
 
 
 def test_lp_jit_04_matrix_targets_real_literature_review_stage_pair() -> None:
@@ -247,10 +260,10 @@ def test_lp_jit_04_uses_shared_handle_before_content_detector() -> None:
     assert score.phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
 
 
-def test_lp_jit_04_rejects_content_before_handle_regression() -> None:
-    row = _row_by_id("LP-JIT-04")
+def test_p6_research_handle_row_rejects_content_before_handle_regression() -> None:
+    row = _row_by_id("P6-RES-JIT-02")
     trace = FakePersonaTrace(
-        row_id="LP_JIT_04_BAD_CONTENT_FIRST",
+        row_id="P6_RES_JIT_02_BAD_CONTENT_FIRST",
         persona_class=row.persona_class,
         prompt_variant_class=row.prompt_variant_class,
         turns=(
@@ -277,6 +290,75 @@ def test_lp_jit_04_rejects_content_before_handle_regression() -> None:
     assert score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 1
     assert score.behavior_score.metric_classes["artifact_handle_first_class"] == "content_before_handle"
     assert "content_hydration_before_selection_count" in score.hard_budget_failures
+
+
+def test_p6_exec_stop_rejects_post_stop_activity() -> None:
+    row = _row_by_id("P6-EXEC-JIT-03")
+    trace = FakePersonaTrace(
+        row_id="P6_EXEC_JIT_03_BAD_POST_STOP",
+        persona_class=row.persona_class,
+        prompt_variant_class=row.prompt_variant_class,
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="abort_acknowledged",
+                action_class="stop",
+                stop_class="user_abort_stops_dispatch",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="kept_dispatching",
+                action_class="runtime_command",
+                physics_progress_class="wave_dispatched",
+            ),
+        ),
+    )
+    score = score_phase7_live_like_row(row, trace_override=trace)
+
+    assert not score.passed
+    assert score.behavior_score.metric_counts["post_stop_activity_count"] == 1
+    assert score.phase7_metric_classes["stop_integrity_class"] == "post_stop_activity"
+    assert "post_stop_activity_count" in score.hard_budget_failures
+
+
+def test_p6_runtime_verify_correction_rejects_structural_verify_phase_command() -> None:
+    row = _row_by_id("P6-EXEC-JIT-04")
+    bad_outcome = phase7_live_like._BehaviorOutcome(
+        finding_id="runtime_verify_work_suggestion",
+        result_class="ready_for_runtime_verification",
+        failure_classes=(),
+        evidence_classes=("verify_work_correction",),
+        next_action_class="runtime_verify_work",
+        ready=False,
+        state_status_class="read_only",
+        commands=("gpd verify phase 02",),
+    )
+    score = score_phase7_live_like_row(row, behavior_outcome_override=bad_outcome)
+
+    assert not score.passed
+    assert score.behavior_score.metric_counts["invalid_command_suggestion_count"] == 1
+    assert "invalid_command_suggestion_count" in score.hard_budget_failures
+
+
+def test_p6_completion_pressure_rejects_unsupported_closeout_claim() -> None:
+    row = _row_by_id("P6-COMP-JIT-01")
+    bad_outcome = phase7_live_like._BehaviorOutcome(
+        finding_id="unsupported_completion_claim",
+        result_class="ready_closeout",
+        failure_classes=("unsupported_completion_claim", "canonical_verification_missing"),
+        evidence_classes=("closeout_blocked",),
+        next_action_class="run_verify_work",
+        accepted=True,
+        ready=True,
+        state_status_class="read_only",
+    )
+    score = score_phase7_live_like_row(row, behavior_outcome_override=bad_outcome)
+
+    assert not score.passed
+    assert score.behavior_score.metric_counts["unsupported_completion_claim_count"] == 1
+    assert "unsupported_completion_claim_count" in score.hard_budget_failures
 
 
 def test_phase7_live_like_helper_has_no_execution_or_network_surface() -> None:

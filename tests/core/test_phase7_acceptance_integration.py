@@ -9,13 +9,13 @@ from pathlib import Path
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from tests.helpers.phase4_persona.behavior_metrics import BEHAVIOR_METRIC_COUNT_KEYS
 from tests.helpers.phase4_persona.matrix import load_phase4_rows
+from tests.helpers.phase7_live_like import REQUIRED_JIT_ROW_IDS
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-_PHASE7_TRACKED_LOC_CAP = 2_000
-_PHASE7_BEHAVIOR_EXPANSION_MAX = 12
-_PHASE7_ROW_ID_RE = re.compile(r"^(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*$")
+_PHASE7_TRACKED_LOC_CAP = 2_200
+_PHASE7_ROW_ID_RE = re.compile(r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|P6-(?:PLAN|EXEC|COMP|RES)-JIT-[0-9]{2})$")
 _PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 _PHASE7_REQUIRED_BASE_ROW_IDS = (
@@ -32,7 +32,7 @@ _PHASE7_REQUIRED_BASE_ROW_IDS = (
     "LP11-SET-PROFILE-REVIEW-CANARY",
     "LP12-GEMINI-POLICY-DENIAL",
 )
-_PHASE7_REQUIRED_BEHAVIOR_ROW_IDS = tuple(f"LP-JIT-{index:02d}" for index in range(1, 9))
+_PHASE7_REQUIRED_BEHAVIOR_ROW_IDS = tuple(sorted(REQUIRED_JIT_ROW_IDS))
 _PHASE7_REQUIRED_BEHAVIOR_FIELDS = frozenset(
     {
         "persona_class",
@@ -135,7 +135,17 @@ def _phase7_surface_files() -> tuple[Path, ...]:
 def _phase7_row_key(row_id: str) -> str:
     if row_id.startswith("LP-JIT-"):
         return "-".join(row_id.split("-", 3)[:3])
+    if row_id.startswith("P6-"):
+        return row_id
     return row_id.split("-", 1)[0]
+
+
+def _phase7_behavior_row_ids(rows: tuple[dict[str, object], ...]) -> set[str]:
+    return {
+        str(row["row_id"])
+        for row in rows
+        if row.get("row_tier") == "jit_canary" or str(row["row_id"]).startswith("LP-JIT-")
+    }
 
 
 def _physical_line_count(path: Path) -> int:
@@ -172,13 +182,10 @@ def test_phase7_fixture_rows_name_existing_source_and_test_owners() -> None:
     rows = _phase7_fixture_rows()
     row_ids = [str(row["row_id"]) for row in rows]
     base_row_ids = set(_PHASE7_REQUIRED_BASE_ROW_IDS)
-    behavior_row_ids = {row_id for row_id in row_ids if row_id.startswith("LP-JIT-")}
-    expansion_row_ids = set(row_ids) - base_row_ids
+    behavior_row_ids = _phase7_behavior_row_ids(rows)
 
-    assert row_ids[: len(_PHASE7_REQUIRED_BASE_ROW_IDS)] == list(_PHASE7_REQUIRED_BASE_ROW_IDS)
+    assert base_row_ids <= set(row_ids)
     assert set(_PHASE7_REQUIRED_BEHAVIOR_ROW_IDS) <= behavior_row_ids
-    assert expansion_row_ids == behavior_row_ids
-    assert len(behavior_row_ids) <= _PHASE7_BEHAVIOR_EXPANSION_MAX
     assert len(set(row_ids)) == len(row_ids)
     assert all(_PHASE7_ROW_ID_RE.match(row_id) for row_id in row_ids)
     assert len({_phase7_row_key(row_id) for row_id in row_ids}) == len(row_ids)

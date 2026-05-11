@@ -9,6 +9,15 @@ from gpd.adapters.install_utils import parse_at_include_path
 from gpd.core.frontmatter import validate_frontmatter
 from scripts.render_help_surface import help_surface_markers
 from tests.core.test_spawn_contracts import _find_single_task
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_contract as _assert_forbidden,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_machine_contract as _assert_machine,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_semantic_contract as _assert_semantic,
+)
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -55,14 +64,26 @@ def test_discover_managed_outputs_have_write_capability_and_documented_route() -
     command_text = _read(COMMANDS_DIR / "discover.md")
     workflow_text = _read(WORKFLOWS_DIR / "discover.md")
 
-    assert "output_policy:" in command_text
-    assert "output_mode: managed" in command_text
-    assert "managed_root_kind: gpd_managed_durable" in command_text
-    assert "default_output_subtree: GPD/analysis" in command_text
-    assert "  - file_write" in command_text
-    assert "documented write route" in command_text
-    assert "workflow-owned Level 2-3 discovery artifact path" in command_text
-    assert "This workflow is the documented write route for `gpd:discover` managed outputs." in workflow_text
+    _assert_machine(
+        command_text,
+        "discover managed output policy",
+        "output_policy:",
+        "output_mode: managed",
+        "managed_root_kind: gpd_managed_durable",
+        "default_output_subtree: GPD/analysis",
+        "  - file_write",
+    )
+    _assert_semantic(
+        command_text,
+        "discover documented write route command",
+        "documented write route",
+        "workflow-owned Level 2-3 discovery artifact path",
+    )
+    _assert_semantic(
+        workflow_text,
+        "discover documented write route workflow",
+        "This workflow is the documented write route for `gpd:discover` managed outputs.",
+    )
 
 
 def test_owned_project_aware_commands_use_validated_context_instead_of_raw_gpd_includes() -> None:
@@ -75,21 +96,31 @@ def test_owned_project_aware_commands_use_validated_context_instead_of_raw_gpd_i
 
     for command_file in command_files:
         text = _read(COMMANDS_DIR / command_file)
-        assert "@GPD/" not in text, command_file
-        assert "Validated command-context" in text, command_file
+        _assert_forbidden(text, f"{command_file} no raw GPD include", "@GPD/")
+        _assert_machine(text, f"{command_file} validated command context", "Validated command-context")
 
 
 def test_help_reference_stays_static_and_delegates_next_action_routing() -> None:
     help_workflow = _read(WORKFLOWS_DIR / "help.md")
     success_criteria = _between(help_workflow, "<success_criteria>", "</success_criteria>")
 
-    assert "Next action guidance provided based on current project state" not in success_criteria
-    assert "Static reference stays project-independent" in success_criteria
-    assert (
-        "current-state routing is delegated to `gpd:start`, `gpd:progress`, or `gpd:suggest-next`" in success_criteria
+    _assert_forbidden(
+        success_criteria,
+        "help reference no dynamic next action routing",
+        "Next action guidance provided based on current project state",
     )
-    assert "Run `gpd:start` when you need the safest route for this folder" in help_workflow
-    assert "Run `gpd:suggest-next` when you only need the next action" in help_workflow
+    _assert_semantic(
+        success_criteria,
+        "help reference static routing delegation",
+        "Static reference stays project-independent",
+        "current-state routing is delegated to `gpd:start`, `gpd:progress`, or `gpd:suggest-next`",
+    )
+    _assert_machine(
+        help_workflow,
+        "help workflow start and suggest-next labels",
+        "Run `gpd:start` when you need the safest route for this folder",
+        "Run `gpd:suggest-next` when you only need the next action",
+    )
 
 
 def test_help_wrapper_uses_stable_section_markers_for_extracts() -> None:
@@ -103,24 +134,34 @@ def test_help_wrapper_uses_stable_section_markers_for_extracts() -> None:
     )
     for marker_name, heading in marker_pairs:
         start_marker, end_marker = help_surface_markers(marker_name)
-        assert start_marker in help_workflow
-        assert end_marker in help_workflow
+        _assert_machine(help_workflow, f"help workflow {marker_name} markers", start_marker, end_marker)
         assert help_workflow.index(start_marker) < help_workflow.index(heading) < help_workflow.index(end_marker)
-        assert start_marker in help_command
-        assert end_marker in help_command
+        _assert_machine(help_command, f"help command {marker_name} markers", start_marker, end_marker)
 
-    assert "Use the workflow-owned stable markers as the extraction boundaries" in help_command
-    assert "never print the HTML marker comments themselves" in help_command
+    _assert_semantic(
+        help_command,
+        "help command marker extraction semantics",
+        "Use the workflow-owned stable markers as the extraction boundaries",
+        "never print the HTML marker comments themselves",
+    )
     bridge_rule = _single_line_starting(help_command, "Bridge command rule:")
     for bridge_token in ("local CLI", "JSON", "renderer-backed"):
         assert bridge_token in bridge_rule
     for detail_token in ("`detail_markdown`", "`canonical_command`", "`allowed_tools`"):
-        assert detail_token in help_command
-    assert "`@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path" in help_command
+        _assert_machine(help_command, f"help command detail token {detail_token}", detail_token)
+    _assert_machine(
+        help_command,
+        "help command fallback marker source path",
+        "`@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path",
+    )
     assert all(parse_at_include_path(line.strip()) is None for line in help_command.splitlines())
-    assert "Start at the workflow-owned" not in help_command
-    assert "Stop before `## Command Index`" not in help_command
-    assert "Stop before `## Detailed Command Reference`" not in help_command
+    _assert_forbidden(
+        help_command,
+        "help command stale marker extraction prose",
+        "Start at the workflow-owned",
+        "Stop before `## Command Index`",
+        "Stop before `## Detailed Command Reference`",
+    )
 
 
 def test_set_profile_workflow_does_not_copy_agent_tier_tables() -> None:
@@ -128,8 +169,12 @@ def test_set_profile_workflow_does_not_copy_agent_tier_tables() -> None:
 
     copied_table = re.compile(r"^\|\s*Agent\s*\|\s*Tier\s*\|", re.MULTILINE)
     assert copied_table.search(set_profile) is None
-    assert "Canonical per-agent tier assignments live in `MODEL_PROFILES`" in set_profile
-    assert "references/orchestration/model-profiles.md" in set_profile
+    _assert_semantic(
+        set_profile,
+        "set-profile model profile assignment source",
+        "Canonical per-agent tier assignments live in `MODEL_PROFILES`",
+    )
+    _assert_machine(set_profile, "set-profile model profile reference path", "references/orchestration/model-profiles.md")
 
 
 def test_plan_checker_profile_docs_avoid_stale_dimension_counts() -> None:
@@ -144,7 +189,7 @@ def test_plan_checker_profile_docs_avoid_stale_dimension_counts() -> None:
     for path in docs:
         text = _read(path)
         for phrase in stale_phrases:
-            assert phrase not in text, path.relative_to(REPO_ROOT)
+            _assert_forbidden(text, f"{path.relative_to(REPO_ROOT)} stale dimension counts", phrase)
 
 
 def test_peer_review_file_producing_stage_prompts_carry_stage_child_tuples() -> None:
@@ -157,29 +202,40 @@ def test_peer_review_file_producing_stage_prompts_carry_stage_child_tuples() -> 
         "gpd-review-physics",
         "gpd-review-significance",
     ):
-        assert f"role: {agent_name}" in workflow, agent_name
-    assert "Spawn `gpd-referee`" in workflow
+        _assert_machine(workflow, f"peer-review stage role {agent_name}", f"role: {agent_name}")
+    _assert_machine(workflow, "peer-review referee spawn", "Spawn `gpd-referee`")
     assert workflow.count("expected_artifacts:") >= 7
-    assert "gpd_return.files_written" in workflow
-    assert "stage-recovery-gate.md" in workflow
+    _assert_machine(workflow, "peer-review child tuple fields", "gpd_return.files_written", "stage-recovery-gate.md")
 
 
 def test_delegation_reference_requires_contract_or_tight_exemption() -> None:
     text = _read(REFERENCES_DIR / "orchestration/agent-delegation.md")
 
-    assert "File-producing or state-sensitive spawned prompts must include this block directly" in text
-    assert "adjacent documented exemption" in text
-    assert "read-only, produces no artifacts, and returns no shared-state update" in text
+    _assert_semantic(
+        text,
+        "delegation reference contract exemption boundary",
+        "File-producing or state-sensitive spawned prompts must include this block directly",
+        "adjacent documented exemption",
+        "read-only, produces no artifacts, and returns no shared-state update",
+    )
 
 
 def test_public_local_cli_examples_use_prefixless_command_labels() -> None:
     contract = _read(PUBLIC_SURFACE_CONTRACT)
     help_workflow = _read(WORKFLOWS_DIR / "help.md")
 
-    assert "gpd validate command-context <name>" in contract
-    assert "gpd validate command-context <name>" in help_workflow
-    assert "gpd validate command-context gpd:<name>" not in contract
-    assert "gpd validate command-context gpd:<name>" not in help_workflow
+    _assert_machine(contract, "public surface prefixless command context example", "gpd validate command-context <name>")
+    _assert_machine(help_workflow, "help workflow prefixless command context example", "gpd validate command-context <name>")
+    _assert_forbidden(
+        contract,
+        "public surface no prefixed command context example",
+        "gpd validate command-context gpd:<name>",
+    )
+    _assert_forbidden(
+        help_workflow,
+        "help workflow no prefixed command context example",
+        "gpd validate command-context gpd:<name>",
+    )
 
 
 def test_start_workflow_routes_choices_by_stable_option_ids() -> None:
@@ -198,11 +254,15 @@ def test_start_workflow_routes_choices_by_stable_option_ids() -> None:
         "reopen_recent",
     }
 
-    assert "Do not route directly on the mutable English label" in offer_step
-    assert "Normalize the reply to one stable `option_id`" in route_step
+    _assert_semantic(
+        offer_step,
+        "start workflow stable option routing offer",
+        "Do not route directly on the mutable English label",
+    )
+    _assert_semantic(route_step, "start workflow stable option routing route", "Normalize the reply to one stable `option_id`")
     for option_id in option_ids:
-        assert f"`{option_id}`" in offer_step
-        assert f"option_id `{option_id}`" in route_step
+        _assert_machine(offer_step, f"start workflow offer option {option_id}", f"`{option_id}`")
+        _assert_machine(route_step, f"start workflow route option {option_id}", f"option_id `{option_id}`")
 
 
 def test_readme_generic_command_surface_stays_prefixless_and_uninstall_requires_scope() -> None:
@@ -210,23 +270,36 @@ def test_readme_generic_command_surface_stays_prefixless_and_uninstall_requires_
     key_paths = _between(readme, "## Key GPD Paths", "## System Requirements")
     uninstall = _between(readme, "## Uninstall", "## Inspiration")
 
-    assert "`write-paper` supports current-project manuscripts" in key_paths
-    assert "The full in-runtime reference is runtime-specific; the shared examples here stay prefixless." in key_paths
-    assert "gpd:write-paper" not in key_paths
-    assert "gpd:peer-review" not in key_paths
-    assert "gpd:pause-work" not in key_paths
-    assert "Claude Code / Gemini CLI syntax" not in key_paths
-    assert "For non-interactive uninstall, select both the runtime and scope explicitly" in uninstall
-    assert "npx -y get-physics-done --uninstall --codex --local" in uninstall
-    assert "npx -y get-physics-done --uninstall --claude --global" in uninstall
+    _assert_machine(key_paths, "readme write-paper prefixless label", "`write-paper` supports current-project manuscripts")
+    _assert_semantic(
+        key_paths,
+        "readme prefixless shared examples",
+        "The full in-runtime reference is runtime-specific; the shared examples here stay prefixless.",
+    )
+    _assert_forbidden(key_paths, "readme key paths runtime-specific labels", "gpd:write-paper", "gpd:peer-review", "gpd:pause-work", "Claude Code / Gemini CLI syntax")
+    _assert_semantic(
+        uninstall,
+        "readme uninstall non-interactive scope",
+        "For non-interactive uninstall, select both the runtime and scope explicitly",
+    )
+    _assert_machine(
+        uninstall,
+        "readme uninstall scoped commands",
+        "npx -y get-physics-done --uninstall --codex --local",
+        "npx -y get-physics-done --uninstall --claude --global",
+    )
 
 
 def test_linux_docs_warn_distro_node_packages_still_need_node_20() -> None:
     text = _read(LINUX_DOC)
     install_section = _between(text, "## Install or update missing tools", "## Linux-specific notes")
 
-    assert "do not continue unless `node --version` reports `v20` or newer" in install_section
-    assert "Seeing `nodejs`, `npm`, and `npx` on your PATH is not sufficient" in install_section
+    _assert_semantic(
+        install_section,
+        "linux docs node 20 requirement",
+        "do not continue unless `node --version` reports `v20` or newer",
+        "Seeing `nodejs`, `npm`, and `npx` on your PATH is not sufficient",
+    )
 
 
 def test_export_logs_uses_raw_prefixless_command_context_preflight() -> None:
@@ -234,21 +307,24 @@ def test_export_logs_uses_raw_prefixless_command_context_preflight() -> None:
     workflow = _read(WORKFLOWS_DIR / "export-logs.md")
 
     for text in (command, workflow):
-        assert 'CONTEXT=$(gpd --raw validate command-context export-logs "$ARGUMENTS")' in text
-        assert "gpd validate command-context gpd:export-logs" not in text
-    assert "export-logs --command execute-phase --phase 3 --category workflow" in workflow
-    assert "gpd:export-logs --command gpd:execute-phase" not in workflow
+        _assert_machine(text, "export-logs raw command context preflight", 'CONTEXT=$(gpd --raw validate command-context export-logs "$ARGUMENTS")')
+        _assert_forbidden(text, "export-logs no prefixed command context", "gpd validate command-context gpd:export-logs")
+    _assert_machine(workflow, "export-logs prefixless command example", "export-logs --command execute-phase --phase 3 --category workflow")
+    _assert_forbidden(workflow, "export-logs no runtime-prefixed command example", "gpd:export-logs --command gpd:execute-phase")
 
 
 def test_execute_phase_routes_convention_repair_to_validate_conventions_not_inline_notation() -> None:
     workflow = _read(WORKFLOWS_DIR / "execute-phase.md")
 
-    assert 'subagent_type="gpd-notation-coordinator"' not in workflow
-    assert "Do not spawn `gpd-notation-coordinator` from `execute-phase`" in workflow
-    assert "route through `gpd:validate-conventions`" in workflow
-    assert "fresh continuation handoff owns any notation-coordinator work" in workflow
-    assert "CONVENTION UPDATE" not in workflow
-    assert "CONVENTION CONFLICT" not in workflow
+    _assert_forbidden(workflow, "execute-phase no inline notation spawn", 'subagent_type="gpd-notation-coordinator"')
+    _assert_machine(workflow, "execute-phase notation repair command route", "route through `gpd:validate-conventions`")
+    _assert_semantic(
+        workflow,
+        "execute-phase notation repair boundary",
+        "Do not spawn `gpd-notation-coordinator` from `execute-phase`",
+        "fresh continuation handoff owns any notation-coordinator work",
+    )
+    _assert_forbidden(workflow, "execute-phase no stale convention markers", "CONVENTION UPDATE", "CONVENTION CONFLICT")
 
 
 def test_response_writer_handoff_is_included_once_in_respond_to_referees() -> None:
@@ -257,10 +333,18 @@ def test_response_writer_handoff_is_included_once_in_respond_to_referees() -> No
     raw_include = "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
     literal_reference = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 
-    assert raw_include not in workflow
-    assert literal_reference in workflow
-    assert "Apply `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` from this stage exactly." in staged_workflow
-    assert "The loaded publication response-writer\nhandoff owns pair freshness and binding." in staged_workflow
+    _assert_forbidden(workflow, "respond-to-referees response writer raw include", raw_include)
+    _assert_machine(workflow, "respond-to-referees response writer path reference", literal_reference)
+    _assert_machine(
+        staged_workflow,
+        "respond-to-referees response writer stage handoff path",
+        "Apply `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` from this stage exactly.",
+    )
+    _assert_semantic(
+        staged_workflow,
+        "respond-to-referees response writer freshness ownership",
+        "The loaded publication response-writer\nhandoff owns pair freshness and binding.",
+    )
 
 
 def test_write_paper_response_writer_handoff_stays_deferred_to_stage_authority() -> None:
@@ -268,8 +352,8 @@ def test_write_paper_response_writer_handoff_stays_deferred_to_stage_authority()
     raw_include = "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
     literal_reference = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 
-    assert raw_include not in workflow
-    assert literal_reference in workflow
+    _assert_forbidden(workflow, "write-paper response writer raw include", raw_include)
+    _assert_machine(workflow, "write-paper response writer path reference", literal_reference)
 
 
 def test_inline_install_dir_paths_do_not_use_at_include_form() -> None:
@@ -320,22 +404,36 @@ def test_public_templates_do_not_expose_internal_verify_phase_wording() -> None:
     roadmap = _read(TEMPLATES_DIR / "roadmap.md")
     state_machine = _read(TEMPLATES_DIR / "state-machine.md")
 
-    assert "verify-phase" not in roadmap
-    assert "verify-phase" not in state_machine
-    assert "Verified by the phase verification workflow after execution" in roadmap
-    assert "**Automated verification:**" in state_machine
+    _assert_forbidden(roadmap, "roadmap no verify-phase wording", "verify-phase")
+    _assert_forbidden(state_machine, "state machine no verify-phase wording", "verify-phase")
+    _assert_semantic(
+        roadmap,
+        "roadmap phase verification wording",
+        "Verified by the phase verification workflow after execution",
+    )
+    _assert_machine(state_machine, "state machine automated verification label", "**Automated verification:**")
 
 
 def test_research_verification_template_defers_schema_rules_to_canonical_sources() -> None:
     research_verification = _read(TEMPLATES_DIR / "research-verification.md")
 
     assert research_verification.count("```markdown") == 1
-    assert "{GPD_INSTALL_DIR}/templates/verification-report.md" in research_verification
-    assert "{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in research_verification
-    assert "do not restate their closed schema here" in research_verification
-    assert "suggested_contract_checks: []" not in research_verification
-    assert "only `check`, `reason`, `suggested_subject_kind`, `suggested_subject_id`, and `evidence_path`" not in (
-        research_verification
+    _assert_machine(
+        research_verification,
+        "research verification canonical schema references",
+        "{GPD_INSTALL_DIR}/templates/verification-report.md",
+        "{GPD_INSTALL_DIR}/templates/contract-results-schema.md",
+    )
+    _assert_semantic(
+        research_verification,
+        "research verification defers schema rules",
+        "do not restate their closed schema here",
+    )
+    _assert_forbidden(
+        research_verification,
+        "research verification stale inline schema aliases",
+        "suggested_contract_checks: []",
+        "only `check`, `reason`, `suggested_subject_kind`, `suggested_subject_id`, and `evidence_path`",
     )
 
     result = validate_frontmatter(_first_markdown_fence(research_verification), "verification")
@@ -349,11 +447,15 @@ def test_proof_redteam_repair_handoffs_carry_inline_spawn_contracts() -> None:
         ("verify-phase.md", "${phase_dir}/${phase_number}-PROOF-REDTEAM.md"),
     ):
         task = _find_single_task(WORKFLOWS_DIR / workflow_name, "gpd-check-proof")
-        assert "<spawn_contract>" in task.text
-        assert "write_scope:" in task.text
-        assert "expected_artifacts:" in task.text
-        assert "shared_state_policy: return_only" in task.text
-        assert expected_path in task.text
+        _assert_machine(
+            task.text,
+            f"{workflow_name} proof redteam spawn contract",
+            "<spawn_contract>",
+            "write_scope:",
+            "expected_artifacts:",
+            "shared_state_policy: return_only",
+            expected_path,
+        )
 
 
 def test_prompt_markdown_does_not_route_on_stale_prose_return_markers() -> None:

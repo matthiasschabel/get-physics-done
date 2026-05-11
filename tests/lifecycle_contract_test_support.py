@@ -8,6 +8,9 @@ from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
 from tests.assertion_taxonomy_support import (
     MatchMode,
     assert_prompt_contracts,
+    forbidden_duplicate,
+    machine_exact,
+    public_exact,
     semantic_anchor,
     semantic_concept,
 )
@@ -36,6 +39,24 @@ def assert_semantic_contract(text: str, label: str, *fragments: str) -> None:
     assert_prompt_contracts(
         text,
         semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
+
+
+def assert_machine_contract(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(text, machine_exact(label, fragments, context=label))
+
+
+def assert_public_contract(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(text, public_exact(label, fragments, context=label))
+
+
+def assert_forbidden_contract(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(
+        text,
+        *(
+            forbidden_duplicate(f"{label} forbidden fragment {index}", fragment, max_count=0, context=label)
+            for index, fragment in enumerate(fragments, start=1)
+        ),
     )
 
 

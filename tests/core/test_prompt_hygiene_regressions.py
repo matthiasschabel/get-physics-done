@@ -7,6 +7,12 @@ from gpd.core.model_visible_text import (
     review_contract_visibility_note,
     skeptical_rigor_guardrails_section,
 )
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_contract as _assert_forbidden,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_machine_contract as _assert_machine,
+)
 from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
 from tests.workflow_authority_support import workflow_authority_text
 
@@ -57,13 +63,13 @@ def test_help_resume_boundary_note_is_concise_and_contract_aligned() -> None:
         "canonical continuation fields",
         "public resume vocabulary",
     )
-    assert "public top-level resume vocabulary" not in help_workflow
+    _assert_forbidden(help_workflow, "help resume stale public vocabulary prose", "public top-level resume vocabulary")
 
 
 def test_transition_workflow_stays_runtime_neutral() -> None:
     transition_workflow = (WORKFLOWS_DIR / "transition.md").read_text(encoding="utf-8")
 
-    assert "slash_command(" not in transition_workflow
+    _assert_forbidden(transition_workflow, "transition workflow no runtime-specific slash commands", "slash_command(")
     _assert_semantic(
         transition_workflow,
         "transition workflow stays on installed runtime command surface",
@@ -75,17 +81,16 @@ def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_st
     quick_command = (COMMANDS_DIR / "quick.md").read_text(encoding="utf-8")
     quick_workflow = workflow_authority_text(WORKFLOWS_DIR, "quick")
 
-    assert "context_mode: project-required" in quick_command
-    assert "Quick Tasks Completed" not in quick_command
-    assert "Quick Tasks Completed" not in quick_workflow
+    _assert_machine(quick_command, "quick command context mode", "context_mode: project-required")
+    _assert_forbidden(quick_command, "quick command no custom completion table", "Quick Tasks Completed")
+    _assert_forbidden(quick_workflow, "quick workflow no custom completion table", "Quick Tasks Completed")
     _assert_semantic(
         quick_command,
         "quick command records completion through structured state commands",
         "Records completion",
         "structured `gpd state` commands",
     )
-    assert "project_exists" in quick_workflow
-    assert "**Project Exists:** {project_exists}" in quick_workflow
+    _assert_machine(quick_workflow, "quick workflow project gate field", "project_exists", "**Project Exists:** {project_exists}")
     _assert_semantic(
         quick_workflow,
         "quick workflow project gate without roadmap requirement",
@@ -95,7 +100,11 @@ def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_st
         "GPD/PROJECT.md",
         "GPD/",
     )
-    assert "They only need `GPD/` to exist for directory structure." not in quick_workflow
+    _assert_forbidden(
+        quick_workflow,
+        "quick workflow stale directory-only project gate",
+        "They only need `GPD/` to exist for directory structure.",
+    )
 
 
 def test_peer_review_init_fields_are_manifest_owned_and_interestingness_stage_bullets_are_space_indented() -> None:
@@ -107,9 +116,13 @@ def test_peer_review_init_fields_are_manifest_owned_and_interestingness_stage_bu
         "Parse only fields named by",
         "staged_loading.required_init_fields",
     )
-    assert "stage field-access peer-review" in peer_review
-    assert "Parse bootstrap JSON for: `project_exists`" not in peer_review
-    assert "Parse target-aware init JSON for: `project_exists`" not in peer_review
+    _assert_machine(peer_review, "peer-review stage field access", "stage field-access peer-review")
+    _assert_forbidden(
+        peer_review,
+        "peer-review stale project_exists init parsing",
+        "Parse bootstrap JSON for: `project_exists`",
+        "Parse target-aware init JSON for: `project_exists`",
+    )
 
     stage_5_start = peer_review.index("Stage 5 judges")
     stage_5_end = peer_review.index("Stage 6", stage_5_start)
@@ -130,58 +143,68 @@ def test_paper_writer_response_paths_are_orchestrator_supplied_not_global_author
         "selected_publication_root",
         "selected_review_root",
     ):
-        assert token in author_response
+        _assert_machine(author_response, f"paper writer author response token {token}", token)
 
-    assert "`GPD/AUTHOR-RESPONSE{round_suffix}.md` is the canonical internal tracker" not in author_response
-    assert (
-        "`GPD/review/REFEREE_RESPONSE{round_suffix}.md` is the synchronized journal-facing sibling"
-        not in author_response
+    _assert_forbidden(
+        author_response,
+        "paper writer no globally anchored response artifacts",
+        "`GPD/AUTHOR-RESPONSE{round_suffix}.md` is the canonical internal tracker",
+        "`GPD/review/REFEREE_RESPONSE{round_suffix}.md` is the synchronized journal-facing sibling",
+        "GPD/review/REVIEW-LEDGER{round_suffix}.json",
+        "GPD/review/REFEREE-DECISION{round_suffix}.json",
     )
-    assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" not in author_response
-    assert "GPD/review/REFEREE-DECISION{round_suffix}.json" not in author_response
 
 
 def test_research_project_templates_point_existing_artifact_analysis_to_map_research() -> None:
     for path in sorted((TEMPLATES_DIR / "research-project").glob("*.md")):
         content = path.read_text(encoding="utf-8")
-        assert "templates/analysis/" not in content, path.name
-        assert "GPD/research/" not in content, path.name
-        assert f"`GPD/literature/{path.name}`" in content, path.name
-        assert "use `map-research`" in content, path.name
-        assert "`GPD/research-map/`" in content, path.name
-        assert "`references/templates/research-mapper/`" in content, path.name
+        _assert_forbidden(content, f"{path.name} stale analysis paths", "templates/analysis/", "GPD/research/")
+        _assert_machine(
+            content,
+            f"{path.name} map-research artifact paths",
+            f"`GPD/literature/{path.name}`",
+            "use `map-research`",
+            "`GPD/research-map/`",
+            "`references/templates/research-mapper/`",
+        )
 
     shared_protocols = (REFERENCES_DIR / "shared" / "shared-protocols.md").read_text(encoding="utf-8")
-    assert "GPD/research/ (5 files)" not in shared_protocols
-    assert "GPD/literature/ (5 files)" in shared_protocols
+    _assert_forbidden(shared_protocols, "shared protocols stale research artifact path", "GPD/research/ (5 files)")
+    _assert_machine(shared_protocols, "shared protocols literature artifact path", "GPD/literature/ (5 files)")
 
 
 def test_knowledge_schema_uses_existing_knowledge_review_workflow_id() -> None:
     knowledge_schema = (TEMPLATES_DIR / "knowledge-schema.md").read_text(encoding="utf-8")
 
-    assert "reviewer_kind: workflow" in knowledge_schema
-    assert "reviewer_id: gpd-review-knowledge" in knowledge_schema
-    assert "gpd-knowledge-reviewer" not in knowledge_schema
+    _assert_machine(
+        knowledge_schema,
+        "knowledge schema review workflow id",
+        "reviewer_kind: workflow",
+        "reviewer_id: gpd-review-knowledge",
+    )
+    _assert_forbidden(knowledge_schema, "knowledge schema stale agent reviewer id", "gpd-knowledge-reviewer")
 
 
 def test_branch_hypothesis_and_transition_workflows_keep_state_updates_structured() -> None:
     branch_hypothesis = (WORKFLOWS_DIR / "branch-hypothesis.md").read_text(encoding="utf-8")
     transition_workflow = (WORKFLOWS_DIR / "transition.md").read_text(encoding="utf-8")
 
-    assert "Active Hypothesis" not in branch_hypothesis
-    assert "file_edit tool" not in branch_hypothesis
-    assert "gpd state add-decision" in branch_hypothesis
-    assert "save_state_markdown" not in transition_workflow
-    assert "STATE.md directly" not in transition_workflow
-    assert "gpd state update-progress" in transition_workflow
-    assert "gpd state update" in transition_workflow
-    assert "gpd state patch" in transition_workflow
+    _assert_forbidden(branch_hypothesis, "branch hypothesis stale state editing", "Active Hypothesis", "file_edit tool")
+    _assert_machine(branch_hypothesis, "branch hypothesis structured state command", "gpd state add-decision")
+    _assert_forbidden(transition_workflow, "transition workflow no direct state save", "save_state_markdown", "STATE.md directly")
+    _assert_machine(
+        transition_workflow,
+        "transition workflow structured state commands",
+        "gpd state update-progress",
+        "gpd state update",
+        "gpd state patch",
+    )
 
 
 def test_write_paper_workflow_drops_authoring_note_placeholders() -> None:
     write_paper = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
-    assert "Default bootstrap wording:" not in write_paper
+    _assert_forbidden(write_paper, "write-paper workflow no bootstrap note placeholders", "Default bootstrap wording:")
 
 
 def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrappers() -> None:
@@ -191,20 +214,29 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         encoding="utf-8"
     )
 
-    assert (
+    _assert_semantic(
+        shared_preflight,
+        "publication preflight resolved manuscript directory strictness",
         "strict preflight reads `ARTIFACT-MANIFEST.json`, `BIBLIOGRAPHY-AUDIT.json`, and "
-        "`reproducibility-manifest.json` from the resolved manuscript directory itself." in shared_preflight
+        "`reproducibility-manifest.json` from the resolved manuscript directory itself.",
+        "Do not use ad hoc wildcard discovery or first-match filename scans.",
     )
-    assert "Do not use ad hoc wildcard discovery or first-match filename scans." in shared_preflight
-    assert "bibliography_audit_clean" in shared_preflight
-    assert "reproducibility_ready" in shared_preflight
-    assert "publication-manuscript-root-preflight.md" in bootstrap_preflight
-    assert "publication-review-round-artifacts.md" in bootstrap_preflight
-    assert "publication-response-artifacts.md" in bootstrap_preflight
-    assert PUBLICATION_PIPELINE_MODES_INLINE in publication_artifact_gates
-    assert PUBLICATION_PIPELINE_MODES_INCLUDE not in publication_artifact_gates
-    assert "claim full publication-root migration" not in publication_artifact_gates.lower()
-    assert "current global `gpd/` / `gpd/review/` round-artifact layout" not in publication_artifact_gates.lower()
+    _assert_machine(shared_preflight, "publication preflight blocker keys", "bibliography_audit_clean", "reproducibility_ready")
+    _assert_machine(
+        bootstrap_preflight,
+        "publication bootstrap preflight references",
+        "publication-manuscript-root-preflight.md",
+        "publication-review-round-artifacts.md",
+        "publication-response-artifacts.md",
+    )
+    _assert_machine(publication_artifact_gates, "publication artifact gates pipeline modes path", PUBLICATION_PIPELINE_MODES_INLINE)
+    _assert_forbidden(
+        publication_artifact_gates,
+        "publication artifact gates no at include or migration claim",
+        PUBLICATION_PIPELINE_MODES_INCLUDE,
+        "claim full publication-root migration",
+        "current global `gpd/` / `gpd/review/` round-artifact layout",
+    )
 
     for path in (
         COMMANDS_DIR / "write-paper.md",
@@ -218,9 +250,13 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         assert text.count(PUBLICATION_RESPONSE_ARTIFACTS_INCLUDE) == 0, path
         assert text.count(PUBLICATION_REVIEW_RELIABILITY_INCLUDE) == 0, path
         if path.name in {"write-paper.md", "peer-review.md"}:
-            assert "publication-pipeline-modes.md" in text, path
-            assert "embedded review/submission parity" not in text, path
-            assert "current global `GPD/` / `GPD/review/` round-artifact layout" not in text, path
+            _assert_machine(text, f"{path.name} publication pipeline modes path", "publication-pipeline-modes.md")
+            _assert_forbidden(
+                text,
+                f"{path.name} no embedded review parity or global layout prose",
+                "embedded review/submission parity",
+                "current global `GPD/` / `GPD/review/` round-artifact layout",
+            )
 
     for path in (
         WORKFLOWS_DIR / "write-paper.md",
@@ -237,7 +273,7 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         }
         assert text.count(PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE) == expected_bootstrap_counts[path.name], path
         if path.name == "write-paper.md":
-            assert "publication-bootstrap-preflight.md" in text, path
+            _assert_machine(text, "write-paper publication bootstrap reference", "publication-bootstrap-preflight.md")
         expected_round_counts = {
             "write-paper.md": 0,
             "peer-review.md": 0,
@@ -252,7 +288,7 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
 
         assert text.count(PUBLICATION_ROUND_ARTIFACTS_INCLUDE) >= expected_round_counts[path.name], path
         if path.name == "write-paper.md":
-            assert "publication-review-round-artifacts.md" in text, path
+            _assert_machine(text, "write-paper publication round artifacts reference", "publication-review-round-artifacts.md")
         if path.name in expected_response_artifact_counts:
             assert text.count(PUBLICATION_RESPONSE_ARTIFACTS_INCLUDE) >= expected_response_artifact_counts[path.name], (
                 path
@@ -266,8 +302,8 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         else:
             assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE not in text, path
         if path.name == "arxiv-submission.md":
-            assert PUBLICATION_REVIEW_RELIABILITY_INCLUDE not in text, path
-            assert "staged `peer-review-reliability.md` reference" in text, path
+            _assert_forbidden(text, "arxiv submission no inline reliability include", PUBLICATION_REVIEW_RELIABILITY_INCLUDE)
+            _assert_semantic(text, "arxiv submission staged reliability reference", "staged `peer-review-reliability.md` reference")
         elif path.name in {"peer-review.md", "respond-to-referees.md"}:
             assert text.count(PUBLICATION_REVIEW_RELIABILITY_INLINE) >= 1, path
         else:
@@ -278,15 +314,31 @@ def test_literature_and_research_commands_trim_inline_methodology_blocks() -> No
     literature = (COMMANDS_DIR / "literature-review.md").read_text(encoding="utf-8")
     research_phase = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
-    assert "Run the literature-review workflow as a thin wrapper" in literature
-    assert "Read the included literature-review bootstrap authority first." in literature
-    assert "The staged workflow owns scope fixing, artifact gating, citation verification" in literature
-    assert "A physics literature review is not a bibliography." not in literature
-    assert "Method A lineage: paper1 -> paper2 -> paper3" not in literature
-    assert "What do I not know that I don't know?" not in research_phase
-    assert "What mathematical methods and computational tools form the standard approach?" not in research_phase
-    assert "Research depth follows the workflow-owned `research_mode`." in research_phase
-    assert "Active Anchor Registry" not in literature
+    _assert_semantic(
+        literature,
+        "literature command thin staged workflow wrapper",
+        "Run the literature-review workflow as a thin wrapper",
+        "Read the included literature-review bootstrap authority first.",
+        "The staged workflow owns scope fixing, artifact gating, citation verification",
+    )
+    _assert_forbidden(
+        literature,
+        "literature command no inline methodology block",
+        "A physics literature review is not a bibliography.",
+        "Method A lineage: paper1 -> paper2 -> paper3",
+        "Active Anchor Registry",
+    )
+    _assert_forbidden(
+        research_phase,
+        "research phase no inline literature-review question block",
+        "What do I not know that I don't know?",
+        "What mathematical methods and computational tools form the standard approach?",
+    )
+    _assert_semantic(
+        research_phase,
+        "research phase workflow-owned depth",
+        "Research depth follows the workflow-owned `research_mode`.",
+    )
 
 
 def test_shared_context_budget_guidance_stays_runtime_neutral() -> None:
@@ -310,12 +362,12 @@ def test_owned_commands_keep_a_single_concise_subagent_rationale() -> None:
     for path in OWNED_COMMANDS:
         text = path.read_text(encoding="utf-8")
         if path in THIN_WORKFLOW_DELEGATOR_COMMANDS:
-            assert "Why subagent:" not in text, path
-            assert "Follow the included " in text, path
+            _assert_forbidden(text, f"{path.name} thin delegator no subagent rationale", "Why subagent:")
+            _assert_machine(text, f"{path.name} thin delegator include instruction", "Follow the included ")
             continue
         assert text.count("Why subagent:") == 1, path
         if path in FRESH_CONTEXT_PHRASE_EXEMPTIONS:
-            assert "Fresh context" not in text, path
+            _assert_forbidden(text, f"{path.name} fresh context exemption", "Fresh context")
         else:
             assert text.count("Fresh context") == 1, path
 
@@ -323,31 +375,45 @@ def test_owned_commands_keep_a_single_concise_subagent_rationale() -> None:
 def test_research_phase_command_drops_dead_command_local_mode_labels() -> None:
     research_phase = (COMMANDS_DIR / "research-phase.md").read_text(encoding="utf-8")
 
-    assert "Research modes: literature (default), feasibility, methodology, comparison." not in research_phase
-    assert "Mode: literature" not in research_phase
-    assert "Research depth follows the workflow-owned `research_mode`." in research_phase
+    _assert_forbidden(
+        research_phase,
+        "research phase no command-local mode labels",
+        "Research modes: literature (default), feasibility, methodology, comparison.",
+        "Mode: literature",
+    )
+    _assert_semantic(
+        research_phase,
+        "research phase workflow-owned mode depth",
+        "Research depth follows the workflow-owned `research_mode`.",
+    )
 
 
 def test_write_paper_command_defers_the_route_list_to_the_workflow() -> None:
     write_paper = (COMMANDS_DIR / "write-paper.md").read_text(encoding="utf-8")
     write_paper_workflow = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
-    assert "Routes to the write-paper workflow:" not in write_paper
-    assert "@{GPD_INSTALL_DIR}/workflows/write-paper/paper-bootstrap.md" in write_paper
-    assert "@{GPD_INSTALL_DIR}/workflows/write-paper.md" not in write_paper
-    assert "publication-bootstrap-preflight.md" in write_paper_workflow
-    assert "publication-review-round-artifacts.md" in write_paper_workflow
-    assert (
-        "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md" not in write_paper_workflow
+    _assert_forbidden(write_paper, "write-paper command no route list", "Routes to the write-paper workflow:")
+    _assert_machine(write_paper, "write-paper command staged bootstrap include", "@{GPD_INSTALL_DIR}/workflows/write-paper/paper-bootstrap.md")
+    _assert_forbidden(write_paper, "write-paper command no monolithic workflow include", "@{GPD_INSTALL_DIR}/workflows/write-paper.md")
+    _assert_machine(
+        write_paper_workflow,
+        "write-paper workflow publication references",
+        "publication-bootstrap-preflight.md",
+        "publication-review-round-artifacts.md",
+        "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md",
     )
-    assert "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md" in write_paper_workflow
+    _assert_forbidden(
+        write_paper_workflow,
+        "write-paper workflow no response writer at include",
+        "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md",
+    )
 
 
 def test_debug_workflow_path_note_is_not_self_contradictory() -> None:
     debug_workflow = (WORKFLOWS_DIR / "debug.md").read_text(encoding="utf-8")
 
-    assert "Debug files use the `GPD/debug/` path." in debug_workflow
-    assert "hidden directory with leading dot" not in debug_workflow
+    _assert_machine(debug_workflow, "debug workflow GPD debug path", "Debug files use the `GPD/debug/` path.")
+    _assert_forbidden(debug_workflow, "debug workflow no hidden directory contradiction", "hidden directory with leading dot")
 
 
 def test_debugger_session_paths_keep_the_active_and_resolved_lifecycles_separate() -> None:
@@ -355,32 +421,57 @@ def test_debugger_session_paths_keep_the_active_and_resolved_lifecycles_separate
     debug_agent = (AGENTS_DIR / "gpd-debugger.md").read_text(encoding="utf-8")
     debug_workflow = (WORKFLOWS_DIR / "debug.md").read_text(encoding="utf-8")
 
-    assert "Debug session artifact: `GPD/debug/{slug}.md`" in debug_command
-    assert "the child reads `GPD/debug/{slug}.md` before continuing" in debug_command
-    assert "files_written:\n    - GPD/debug/root-cause.md" in debug_agent
-    assert "session_file: GPD/debug/root-cause.md" in debug_agent
-    assert "**Troubleshooting Session:** GPD/debug/resolved/{slug}.md" in debug_agent
-    assert "session_status: diagnosed" in debug_workflow
-    assert "Do not route on heading markers in the returned text" in debug_workflow
-    assert "typed `gpd_return` envelope and the session file instead" in debug_workflow
+    _assert_machine(
+        debug_command,
+        "debug command active session path",
+        "Debug session artifact: `GPD/debug/{slug}.md`",
+        "the child reads `GPD/debug/{slug}.md` before continuing",
+    )
+    _assert_machine(
+        debug_agent,
+        "debug agent active and resolved session paths",
+        "files_written:\n    - GPD/debug/root-cause.md",
+        "session_file: GPD/debug/root-cause.md",
+        "**Troubleshooting Session:** GPD/debug/resolved/{slug}.md",
+    )
+    _assert_machine(debug_workflow, "debug workflow session status field", "session_status: diagnosed")
+    _assert_semantic(
+        debug_workflow,
+        "debug workflow typed return routing",
+        "Do not route on heading markers in the returned text",
+        "typed `gpd_return` envelope and the session file instead",
+    )
 
 
 def test_settings_workflow_reuses_one_terminal_follow_up_list() -> None:
     settings_workflow = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
+    terminal_follow_up_marker = "For normal-terminal follow-up around these settings:"
 
-    assert settings_workflow.count("For normal-terminal follow-up around these settings:") == 1
-    assert "reuse the normal-terminal follow-up list from the `present_settings` step" in settings_workflow
+    assert settings_workflow.count(terminal_follow_up_marker) == 1
+    _assert_semantic(
+        settings_workflow,
+        "settings workflow terminal follow-up reuse",
+        "reuse the normal-terminal follow-up list from the `present_settings` step",
+    )
     assert settings_workflow.count("gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>") == 1
 
 
 def test_sync_state_workflow_keeps_optional_commit_outside_core_reconcile_path() -> None:
     sync_state = workflow_authority_text(WORKFLOWS_DIR, "sync-state")
 
-    assert "This workflow is intentionally fail-closed" in sync_state
-    assert "No state files found. Run gpd:new-project" in sync_state
-    assert "Proceed with reconciliation? (y/n)" not in sync_state
-    assert "determine which source is more recent" not in sync_state
-    assert "Only if the operator explicitly asks to commit the reconciled state" in sync_state
+    _assert_semantic(
+        sync_state,
+        "sync-state fail-closed optional commit path",
+        "This workflow is intentionally fail-closed",
+        "Only if the operator explicitly asks to commit the reconciled state",
+    )
+    _assert_machine(sync_state, "sync-state no-state recovery command", "No state files found. Run gpd:new-project")
+    _assert_forbidden(
+        sync_state,
+        "sync-state no interactive recency reconciliation",
+        "Proceed with reconciliation? (y/n)",
+        "determine which source is more recent",
+    )
     assert sync_state.index('<step name="reconcile">') < sync_state.index('<step name="optional_commit">')
     assert sync_state.index('gpd --raw --cwd "$PROJECT_ROOT" state validate') < sync_state.index(
         '<step name="optional_commit">'
@@ -395,9 +486,17 @@ def test_model_visible_yaml_notes_do_not_duplicate_scientific_rigor_guardrails()
         review_contract_visibility_note(),
     )
 
-    assert "## Scientific Rigor Guardrails" in guardrail_section
-    assert "Use scientific skepticism and critical thinking" in guardrail_section
+    _assert_machine(guardrail_section, "scientific rigor guardrail heading", "## Scientific Rigor Guardrails")
+    _assert_semantic(
+        guardrail_section,
+        "scientific rigor guardrail skepticism wording",
+        "Use scientific skepticism and critical thinking",
+    )
     for note in yaml_notes:
-        assert "Use scientific skepticism and critical thinking" not in note
-        assert "Prefer skeptical verification" not in note
-        assert "inventing fallback content" not in note
+        _assert_forbidden(
+            note,
+            "model-visible yaml note no duplicated rigor guardrail prose",
+            "Use scientific skepticism and critical thinking",
+            "Prefer skeptical verification",
+            "inventing fallback content",
+        )

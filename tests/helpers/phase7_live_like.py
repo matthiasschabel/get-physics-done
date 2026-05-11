@@ -7,13 +7,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests.helpers.phase4_persona.behavior_metrics import (
-    BEHAVIOR_METRIC_CLASS_KEYS,
-    BEHAVIOR_METRIC_COUNT_KEYS,
-    BehaviorScore,
-    score_behavior_metrics,
-)
-from tests.helpers.phase4_persona.interaction_events import (
+from tests.helpers.persona_trace import (
     FakePersonaTrace,
     FakePersonaTurn,
     artifact_handle_first_class,
@@ -25,9 +19,40 @@ from tests.helpers.phase4_persona.interaction_events import (
     schema_surface_count,
     stop_integrity_class,
 )
+from tests.helpers.phase4_persona.behavior_metrics import (
+    BEHAVIOR_METRIC_CLASS_KEYS,
+    BEHAVIOR_METRIC_COUNT_KEYS,
+    BehaviorScore,
+    score_behavior_metrics,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_LIVE_PERSONA_MATRIX_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
+ROW_TIERS = frozenset({"required_base", "jit_canary", "experimental"})
+REQUIRED_BASE_ROW_PREFIXES = frozenset(f"LP{index:02d}" for index in range(1, 13))
+REQUIRED_LP_JIT_ROW_IDS = frozenset(f"LP-JIT-{index:02d}" for index in range(1, 9))
+REQUIRED_P6_JIT_ROW_IDS = frozenset(
+    {
+        "P6-PLAN-JIT-01",
+        "P6-PLAN-JIT-02",
+        "P6-PLAN-JIT-03",
+        "P6-PLAN-JIT-04",
+        "P6-EXEC-JIT-01",
+        "P6-EXEC-JIT-02",
+        "P6-EXEC-JIT-03",
+        "P6-EXEC-JIT-04",
+        "P6-COMP-JIT-01",
+        "P6-COMP-JIT-02",
+        "P6-COMP-JIT-03",
+        "P6-COMP-JIT-04",
+        "P6-RES-JIT-01",
+        "P6-RES-JIT-02",
+        "P6-RES-JIT-03",
+        "P6-RES-JIT-04",
+        "P6-RES-JIT-05",
+    }
+)
+REQUIRED_JIT_ROW_IDS = REQUIRED_LP_JIT_ROW_IDS | REQUIRED_P6_JIT_ROW_IDS
 LP_JIT_ROW_IDS = tuple(f"LP-JIT-{index:02d}" for index in range(1, 9))
 
 _PREFIX_CASES = {
@@ -57,6 +82,7 @@ class Phase7LiveLikeRow:
     runtime_scope: tuple[str, ...]
     source_owners: tuple[str, ...]
     test_owners: tuple[str, ...]
+    row_tier: str = "required_base"
     provider_launch_allowed: bool = False
     network_allowed: bool = False
     raw_artifacts_allowed: bool = False
@@ -119,6 +145,23 @@ _BEHAVIOR_CASES = {
     "clean_stop": ("user_steering", "clean_stop", "user_abort_stops_dispatch", "stopped_before_dispatch", "stop", ("user_abort_stops_dispatch", "executor_dispatch_blocked")),
     "verify_work_command_correction": ("execution", "verify_work_command_correction", "invalid_verify_command_surface", "blocked_no_mutation", "active_runtime_verify_work", ("invalid_verify_command_surface", "verify_work_correction")),
     "unsupported_completion_block": ("completion", "unsupported_completion_block", "verification_missing", "blocked_no_mutation", "run_verify_work", ("canonical_verification_missing", "closeout_blocked")),
+    "p6_plan_schema_averse_phase_bootstrap": ("planning", "p6_plan_schema_averse_phase_bootstrap", "phase_bootstrap_jit", "routed_no_write", "concrete_command", ("workflow_stage_manifest", "phase_bootstrap")),
+    "p6_plan_blocker_next_action": ("planning", "p6_plan_blocker_next_action", "blocker_next_action", "blocked_no_mutation", "concrete_command", ("phase_blocker", "no_plan_invention")),
+    "p6_plan_proof_checker_deferred": ("planning", "p6_plan_proof_checker_deferred", "proof_checker_deferred_to_checker_stage", "routed_no_write", "concrete_command", ("proof_bearing_visibility", "checker_stage_only")),
+    "p6_plan_context_recovery_handles": ("planning", "p6_plan_context_recovery_handles", "state_handles_first", "routed_no_write", "concrete_command", ("state_handles", "no_raw_reload")),
+    "p6_exec_wave_planning_before_dispatch": ("execution", "p6_exec_wave_planning_before_dispatch", "wave_planning_before_dispatch", "accepted", "runtime_verify_work", ("wave_planning", "valid_return_required")),
+    "p6_exec_stale_artifact_rejection": ("execution", "p6_exec_stale_artifact_rejection", "artifact_stale", "blocked_no_mutation", "retry_fresh_artifact", ("artifact_stale",)),
+    "p6_exec_stop_after_first_result": ("user_steering", "p6_exec_stop_after_first_result", "user_abort_stops_dispatch", "stopped_before_dispatch", "bounded_segment_resume", ("user_abort_stops_dispatch", "bounded_segment_required")),
+    "p6_exec_runtime_verify_work_correction": ("execution", "p6_exec_runtime_verify_work_correction", "invalid_verify_command_surface", "blocked_no_mutation", "active_runtime_verify_work", ("invalid_verify_command_surface", "verify_work_correction")),
+    "p6_comp_missing_verification_blocks": ("completion", "p6_comp_missing_verification_blocks", "verification_missing", "blocked_no_mutation", "run_verify_work", ("canonical_verification_missing", "closeout_blocked")),
+    "p6_comp_nonpassing_verification_blocks": ("completion", "p6_comp_nonpassing_verification_blocks", "verification_non_passing", "blocked_no_mutation", "run_verify_work", ("verification_non_passing", "closeout_blocked")),
+    "p6_comp_proof_redteam_required": ("completion", "p6_comp_proof_redteam_required", "proof_redteam_not_passed", "blocked_no_mutation", "run_verify_work", ("proof_redteam_not_passed", "closeout_blocked")),
+    "p6_comp_clean_closeout_smallest_step": ("completion", "p6_comp_clean_closeout_smallest_step", "closeout_readiness_read_only", "ready_closeout", "local_phase_complete", ("phase_closeout_readiness", "local_transition")),
+    "p6_res_existing_work_mapper_bootstrap": ("planning", "p6_res_existing_work_mapper_bootstrap", "existing_work_routed_first", "routed_no_write", "concrete_command", ("map_bootstrap", "existing_work_handles")),
+    "p6_res_reference_handle_first": ("planning", "p6_res_reference_handle_first", "artifact_handle_selected", "routed_no_write", "select_artifact_handle", ("reference_handles", "content_deferred")),
+    "p6_res_phase_gap_closer": ("planning", "p6_res_phase_gap_closer", "phase_research_handoff_only", "routed_no_write", "concrete_command", ("research_phase_handoff", "single_research_artifact")),
+    "p6_res_contract_blocked_diagnostic": ("planning", "p6_res_contract_blocked_diagnostic", "planning_authority_blocked", "blocked_no_mutation", "concrete_command", ("project_contract_blocked", "no_downstream_spawn")),
+    "p6_res_publication_gap_handles": ("planning", "p6_res_publication_gap_handles", "publication_gap_handles_first", "routed_no_write", "concrete_command", ("publication_gap", "reference_handles")),
 }
 # fmt: on
 
@@ -133,6 +176,8 @@ def load_phase7_live_like_rows(
     schema_version = str(payload.get("schema_version", ""))
     rows = tuple(_row_from_mapping(row, schema_version) for row in payload["rows"])
     for row in rows:
+        if row.row_tier not in ROW_TIERS:
+            raise AssertionError(f"{row.row_id} has invalid row_tier {row.row_tier}")
         if row.provider_launch_allowed or row.network_allowed or row.raw_artifacts_allowed:
             raise AssertionError(f"{row.row_id} must stay provider-free and class-only")
         if validate_owners:
@@ -155,10 +200,13 @@ def score_phase7_live_like_row(
     row: Phase7LiveLikeRow,
     *,
     trace_override: FakePersonaTrace | None = None,
+    behavior_outcome_override: _BehaviorOutcome | None = None,
 ) -> Phase7LiveLikeScore:
     case = _case_for_row(row)
     trace = trace_override or build_phase7_live_like_trace(row)
     behavior_row, outcome = _phase4_inputs(row, case)
+    if behavior_outcome_override is not None:
+        outcome = behavior_outcome_override
     counts, classes = _trace_metrics(trace, case)
     behavior_score = _score_behavior(behavior_row, outcome, trace)
     failures = _hard_budget_failures(behavior_score, counts, classes, case)
@@ -166,7 +214,7 @@ def score_phase7_live_like_row(
 
 
 def score_phase7_live_like_rows(rows: Sequence[Phase7LiveLikeRow]) -> tuple[Phase7LiveLikeScore, ...]:
-    return tuple(score_phase7_live_like_row(row) for row in rows if row.row_id.startswith("LP-JIT-"))
+    return tuple(score_phase7_live_like_row(row) for row in rows if row.row_tier == "jit_canary")
 
 
 def _row_from_mapping(row: Mapping[str, object], schema_version: str) -> Phase7LiveLikeRow:
@@ -176,6 +224,7 @@ def _row_from_mapping(row: Mapping[str, object], schema_version: str) -> Phase7L
         runtime_scope=_str_tuple(row["runtime_scope"]),
         source_owners=_str_tuple(row["source_owners"]),
         test_owners=_str_tuple(row["test_owners"]),
+        row_tier=str(row.get("row_tier") or _default_row_tier(str(row["row_id"]))),
         provider_launch_allowed=bool(row.get("provider_launch_allowed", False)),
         network_allowed=bool(row.get("network_allowed", False)),
         raw_artifacts_allowed=bool(row.get("raw_artifacts_allowed", False)),
@@ -194,12 +243,30 @@ def _case_for_row(row: Phase7LiveLikeRow) -> str:
     return _PREFIX_CASES["-".join(row.row_id.split("-", 3)[:3])]
 
 
+def _default_row_tier(row_id: str) -> str:
+    if row_id.startswith("LP-JIT-") or (row_id.startswith("P6-") and "-JIT-" in row_id):
+        return "jit_canary"
+    if row_id.split("-", 1)[0] in REQUIRED_BASE_ROW_PREFIXES:
+        return "required_base"
+    return "experimental"
+
+
 def _phase4_inputs(row: Phase7LiveLikeRow, case: str) -> tuple[_BehaviorRow, _BehaviorOutcome]:
     surface, scenario, finding, result, next_action, failures = _BEHAVIOR_CASES[case]
+    accepted = result == "accepted"
+    ready = True if result == "ready_closeout" else (False if surface == "completion" else None)
+    state_status_class = "accepted_no_write" if accepted else ("read_only" if ready else "unchanged")
     return (
         _BehaviorRow(row.row_id, surface, scenario, result, next_action),
         _BehaviorOutcome(
-            finding, result, failures, failures, next_action, ready=False if surface == "completion" else None
+            finding,
+            result,
+            failures,
+            failures,
+            next_action,
+            accepted=accepted,
+            ready=ready,
+            state_status_class=state_status_class,
         ),
     )
 
@@ -278,6 +345,23 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
         "clean_stop": (turn(0, "abort_acknowledged", "stop", "stop_acknowledged", stop_class="user_abort_stops_dispatch"),),
         "verify_work_command_correction": (turn(0, "verify_work_command_correction", "concrete_command", "verification_route"),),
         "unsupported_completion_block": (turn(0, "unsupported_completion_block", "concrete_command", "verification_gate", schema_surface_class="schema_summary"),),
+        "p6_plan_schema_averse_phase_bootstrap": (turn(0, "phase_bootstrap", "concrete_command", "phase_bootstrap"),),
+        "p6_plan_blocker_next_action": (turn(0, "blocker_next_action", "concrete_command", "blocker_diagnosed"),),
+        "p6_plan_proof_checker_deferred": (turn(0, "proof_checker_visibility", "concrete_command", "proof_stage_routed"),),
+        "p6_plan_context_recovery_handles": (turn(0, "state_handle_recovery", "concrete_command", "state_handles"),),
+        "p6_exec_wave_planning_before_dispatch": (turn(0, "wave_planning", "runtime_verify_work", "wave_planned"),),
+        "p6_exec_stale_artifact_rejection": (turn(0, "stale_artifact_rejection", "concrete_command", "artifact_status"),),
+        "p6_exec_stop_after_first_result": (turn(0, "abort_acknowledged", "stop", "stop_acknowledged", stop_class="user_abort_stops_dispatch"),),
+        "p6_exec_runtime_verify_work_correction": (turn(0, "verify_work_command_correction", "concrete_command", "verification_route"),),
+        "p6_comp_missing_verification_blocks": (turn(0, "missing_verification_gate", "concrete_command", "verification_gate", schema_surface_class="schema_summary"),),
+        "p6_comp_nonpassing_verification_blocks": (turn(0, "nonpassing_verification_gate", "concrete_command", "verification_gate", schema_surface_class="schema_summary"),),
+        "p6_comp_proof_redteam_required": (turn(0, "proof_redteam_gate", "concrete_command", "verification_gate", schema_surface_class="schema_summary"),),
+        "p6_comp_clean_closeout_smallest_step": (turn(0, "clean_closeout", "concrete_command", "closeout_ready"),),
+        "p6_res_existing_work_mapper_bootstrap": (turn(0, "existing_work_mapping", "concrete_command", "existing_work_mapped"),),
+        "p6_res_reference_handle_first": (turn(0, "reference_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "reference_review", "concrete_command", "artifact_verified", content_hydration_class="content_loaded")),
+        "p6_res_phase_gap_closer": (turn(0, "research_handoff_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "research_gap_closure", "concrete_command", "research_handoff", content_hydration_class="content_loaded")),
+        "p6_res_contract_blocked_diagnostic": (turn(0, "contract_blocked_diagnostic", "concrete_command", "contract_diagnostic"),),
+        "p6_res_publication_gap_handles": (turn(0, "publication_gap_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "publication_gap_research", "concrete_command", "publication_gap", content_hydration_class="content_loaded")),
     }[case]
     # fmt: on
 
@@ -321,9 +405,16 @@ def _hard_budget_failures(
 ) -> tuple[str, ...]:
     failures = [key for key in _HARD_ZERO_BEHAVIOR_KEYS if behavior_score.metric_counts[key] != 0]
     failures.extend(key for key in _HARD_ZERO_PHASE7_KEYS if phase7_counts[key] != 0)
-    if case == "handles_before_content" and phase7_classes["artifact_handle_first_class"] != "handle_first":
+    handle_first_cases = {
+        "handles_before_content",
+        "p6_res_reference_handle_first",
+        "p6_res_phase_gap_closer",
+        "p6_res_publication_gap_handles",
+    }
+    clean_stop_cases = {"clean_stop", "p6_exec_stop_after_first_result"}
+    if case in handle_first_cases and phase7_classes["artifact_handle_first_class"] != "handle_first":
         failures.append("artifact_handle_first_class")
-    if case == "clean_stop" and phase7_classes["stop_integrity_class"] != "stopped_cleanly":
+    if case in clean_stop_cases and phase7_classes["stop_integrity_class"] != "stopped_cleanly":
         failures.append("stop_integrity_class")
     if phase7_classes["physics_to_schema_ratio_class"] == "schema_heavy":
         failures.append("physics_to_schema_ratio_class")

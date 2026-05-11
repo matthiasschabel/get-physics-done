@@ -12,6 +12,7 @@ import pytest
 from gpd.command_labels import runtime_public_command_prefixes
 from gpd.core.command_run_hints import KIND_RUNTIME_COMMAND_LABEL, KIND_UNKNOWN_DISPLAY_ONLY
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
+from tests.helpers.persona_trace import FakePersonaTrace, FakePersonaTurn
 from tests.helpers.phase4_persona.behavior_metrics import (
     BEHAVIOR_METRIC_CLASS_KEYS,
     BEHAVIOR_METRIC_COUNT_KEYS,
@@ -24,7 +25,6 @@ from tests.helpers.phase4_persona.behavior_metrics import (
     merge_behavior_scores,
     score_behavior_metrics,
 )
-from tests.helpers.phase4_persona.interaction_events import FakePersonaTrace, FakePersonaTurn
 
 
 @dataclass(frozen=True, slots=True)

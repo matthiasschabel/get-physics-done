@@ -31,6 +31,12 @@ from tests.helpers.github_actions import load_github_actions_workflow
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS_ROOT = REPO_ROOT / "tests"
 TOP_LEVEL_CONFTEST = TESTS_ROOT / "conftest.py"
+PHASE8_LARGE_TEST_FILE_LOC_BUDGETS = {
+    "tests/core/test_cli.py": 9_500,
+    "tests/test_cli_commands.py": 9_500,
+    "tests/core/test_prompt_wiring.py": 7_400,
+    "tests/core/test_context.py": 6_000,
+}
 
 
 def _read(relpath: str) -> str:
@@ -227,6 +233,13 @@ def test_no_untracked_non_ignored_tests_can_bypass_checked_in_inventory() -> Non
     assert not offenders, "Untracked non-ignored tests are invisible to checked-in CI inventory:\n" + "\n".join(
         f"- tests/{relpath}" for relpath in offenders
     )
+
+
+def test_phase8_large_test_files_stay_under_loc_targets() -> None:
+    for relpath, budget in PHASE8_LARGE_TEST_FILE_LOC_BUDGETS.items():
+        observed = len((REPO_ROOT / relpath).read_text(encoding="utf-8").splitlines())
+
+        assert observed <= budget, f"{relpath} LOC budget exceeded: observed={observed} max={budget}"
 
 
 def _assert_hotspot_metadata_references_live_relpaths(all_relpaths: tuple[str, ...]) -> None:

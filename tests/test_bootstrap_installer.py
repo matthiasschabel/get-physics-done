@@ -20,6 +20,15 @@ from tests.doc_surface_contracts import (
     assert_install_summary_runtime_follow_up_contract,
     assert_recovery_ladder_contract,
 )
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_contract as _assert_forbidden,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_machine_contract as _assert_machine,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_public_contract as _assert_public,
+)
 from tests.runtime_test_support import PRIMARY_RUNTIME, runtime_install_flag, runtime_with_multiword_alias
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -975,22 +984,32 @@ def test_bootstrap_help_uses_catalog_driven_example_runtimes() -> None:
             "latest unreleased GitHub main source",
         ),
     )
-    assert f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}" in result.stdout
-    assert "Runtime surface: run the selected runtime's help command" in result.stdout
-    assert (
+    _assert_public(
+        result.stdout,
+        "bootstrap help public installer guidance",
+        f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}",
+        "Runtime surface: run the selected runtime's help command",
         "Override the runtime config directory; defaults to local scope unless the path resolves to that runtime's "
-        "canonical global config dir"
-    ) in result.stdout
-    assert "First-run order:" not in result.stdout
-    assert "first-run order is `help -> start -> tour -> new-project / map-research -> resume-work`" in result.stdout
-    assert "`gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>`" in result.stdout
-    assert "Open your runtime, run its help command first" not in result.stdout
-    assert "Supervised autonomy (`supervised`) is the default" not in result.stdout
-    assert "Opt into Balanced autonomy (`balanced`)" not in result.stdout
-    assert "Workflow presets:" not in result.stdout
-    assert "Recommended unattended default: Balanced" not in result.stdout
-    assert "matching tagged GitHub source" not in result.stdout
-    assert 'startsWith("$")' not in result.stdout
+        "canonical global config dir",
+        "first-run order is `help -> start -> tour -> new-project / map-research -> resume-work`",
+    )
+    _assert_machine(
+        result.stdout,
+        "bootstrap help unattended readiness command",
+        "`gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>`",
+    )
+    _assert_forbidden(
+        result.stdout,
+        "bootstrap help stale onboarding and source text",
+        "First-run order:",
+        "Open your runtime, run its help command first",
+        "Supervised autonomy (`supervised`) is the default",
+        "Opt into Balanced autonomy (`balanced`)",
+        "Workflow presets:",
+        "Recommended unattended default: Balanced",
+        "matching tagged GitHub source",
+        'startsWith("$")',
+    )
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is required for bootstrap installer tests")
@@ -1475,12 +1494,24 @@ def test_bootstrap_does_not_add_after_install_guidance_when_python_install_fails
         and entry["argv"] == ["-m", "gpd.cli", "install", "--all", "--global", "--skip-readiness-check"]
     ]
     assert len(managed_runtime_installs) == 1
-    assert "Install failures:" in result.stdout
-    assert "Installation failed. Check the output above for details." in result.stderr
-    assert "After install" not in result.stdout
-    assert f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}" not in result.stdout
-    assert f"Docs hub: {_BEGINNER_ONBOARDING_HUB_URL}" not in result.stdout
-    assert "Diagnostics: use gpd --help for local diagnostics and later setup." not in result.stdout
+    _assert_public(
+        result.stdout,
+        "bootstrap runtime install failure summary",
+        "Install failures:",
+    )
+    _assert_public(
+        result.stderr,
+        "bootstrap runtime install failure stderr",
+        "Installation failed. Check the output above for details.",
+    )
+    _assert_forbidden(
+        result.stdout,
+        "bootstrap no after-install guidance on install failure",
+        "After install",
+        f"Beginner path: {_BEGINNER_ONBOARDING_HUB_URL}",
+        f"Docs hub: {_BEGINNER_ONBOARDING_HUB_URL}",
+        "Diagnostics: use gpd --help for local diagnostics and later setup.",
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -1662,8 +1693,12 @@ def test_bootstrap_requires_explicit_runtime_with_target_dir_non_interactively(t
     )
 
     assert result.returncode == 1
-    assert "Specify exactly one runtime with" in result.stderr
-    assert "when using --target-dir non-interactively." in result.stderr
+    _assert_public(
+        result.stderr,
+        "bootstrap target-dir requires one runtime",
+        "Specify exactly one runtime with",
+        "when using --target-dir non-interactively.",
+    )
     for flag in _RUNTIME_INSTALL_FLAGS:
         assert flag in result.stderr
     assert not log_path.exists()
@@ -1752,7 +1787,11 @@ def test_bootstrap_upgrade_falls_back_to_main_git_checkout(tmp_path: Path) -> No
         MAIN_ARCHIVE_SPEC,
         MAIN_HTTPS_GIT_SPEC,
     ]
-    assert "current main branch source archive failed. Falling back to HTTPS git checkout of main..." in result.stdout
+    _assert_public(
+        result.stdout,
+        "bootstrap main archive fallback message",
+        "current main branch source archive failed. Falling back to HTTPS git checkout of main...",
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")
@@ -1787,11 +1826,21 @@ def test_bootstrap_upgrade_prefers_preflighted_git_checkout_when_archive_is_inac
     ]
 
     assert managed_pip_targets == [MAIN_HTTPS_GIT_SPEC]
-    assert "Detected that current main branch source archive is unavailable: HTTP 404." in result.stdout
-    assert "Using HTTPS git checkout of main for the main-branch upgrade." in result.stdout
-    assert "HTTP error 404 while getting branch archive" not in result.stderr
-    assert (
-        "current main branch source archive failed. Falling back to HTTPS git checkout of main..." not in result.stdout
+    _assert_public(
+        result.stdout,
+        "bootstrap preflighted main git checkout fallback",
+        "Detected that current main branch source archive is unavailable: HTTP 404.",
+        "Using HTTPS git checkout of main for the main-branch upgrade.",
+    )
+    _assert_forbidden(
+        result.stderr,
+        "bootstrap no raw HTTP branch archive error",
+        "HTTP error 404 while getting branch archive",
+    )
+    _assert_forbidden(
+        result.stdout,
+        "bootstrap no unpreflighted main archive fallback wording",
+        "current main branch source archive failed. Falling back to HTTPS git checkout of main...",
     )
 
 
@@ -1826,7 +1875,7 @@ def test_bootstrap_upgrade_fails_closed_without_falling_back_to_release_sources(
     assert TAG_ARCHIVE_SPEC not in managed_pip_targets
     assert TAG_HTTPS_GIT_SPEC not in managed_pip_targets
     assert managed_runtime_installs == []
-    assert "git checkout could not resolve branch main" in result.stderr
+    _assert_public(result.stderr, "bootstrap main git checkout failure", "git checkout could not resolve branch main")
     assert (
         f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the latest unreleased GitHub main source."
         in result.stderr
@@ -1884,7 +1933,7 @@ def test_bootstrap_falls_back_to_tag_git_when_tag_archive_install_fails(tmp_path
         TAG_ARCHIVE_SPEC,
         TAG_HTTPS_GIT_SPEC,
     ]
-    assert "PyPI install failed. Falling back to GitHub source..." in result.stdout
+    _assert_public(result.stdout, "bootstrap PyPI fallback to GitHub source", "PyPI install failed. Falling back to GitHub source...")
     assert (
         f"GitHub source archive for v{PYTHON_PACKAGE_VERSION} failed. Falling back to HTTPS git checkout for v{PYTHON_PACKAGE_VERSION}..."
         in result.stdout
@@ -1924,7 +1973,7 @@ def test_bootstrap_prefers_preflighted_tag_git_candidate_when_tag_archive_is_ina
 
     assert managed_pip_targets == [PYPI_SPEC, TAG_HTTPS_GIT_SPEC]
     combined_output = result.stdout + result.stderr
-    assert "PyPI install failed. Falling back to GitHub source..." in combined_output
+    _assert_public(combined_output, "bootstrap preflighted tag git PyPI fallback", "PyPI install failed. Falling back to GitHub source...")
     assert (
         f"Detected that GitHub source archive for v{PYTHON_PACKAGE_VERSION} is unavailable: HTTP 404."
         in combined_output
@@ -2042,12 +2091,16 @@ def test_bootstrap_fails_closed_when_all_release_sources_fail(tmp_path: Path) ->
         TAG_ARCHIVE_SPEC,
         TAG_HTTPS_GIT_SPEC,
     ]
-    assert "current main branch source archive" not in result.stdout
+    _assert_forbidden(result.stdout, "bootstrap release failure no main fallback", "current main branch source archive")
     assert (
         f"Failed to install GPD v{PYTHON_PACKAGE_VERSION} from the PyPI pinned release or tagged GitHub release sources."
         in result.stderr
     )
-    assert "Could not find a version that satisfies the requirement" not in result.stderr
+    _assert_forbidden(
+        result.stderr,
+        "bootstrap release failure hides raw pip resolver noise",
+        "Could not find a version that satisfies the requirement",
+    )
 
 
 @pytest.mark.skipif(os.name == "nt", reason="bootstrap installer harness uses POSIX-style fake Python shims")

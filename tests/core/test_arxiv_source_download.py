@@ -7,13 +7,16 @@ from unittest.mock import patch
 import pytest
 
 from gpd.core.arxiv_source_download import (
+    ARXIV_PROJECT_LOCAL_CACHE_DIRNAME,
     ARXIV_SOURCE_MAX_BYTES,
+    ARXIV_SOURCE_STORAGE_ENV_VAR,
     ArxivSourceDownload,
     arxiv_source_user_agent,
     build_source_download_url,
     default_arxiv_source_storage_path,
     download_arxiv_source_archive,
     normalize_arxiv_id,
+    resolve_default_arxiv_storage_path,
     resolve_source_storage_dir,
 )
 from gpd.version import resolve_active_version
@@ -244,3 +247,71 @@ def test_download_arxiv_source_archive_rejects_streams_that_grow_too_large(tmp_p
     with patch("gpd.core.arxiv_source_download.urlopen", return_value=response):
         with pytest.raises(ConnectionError, match="exceeds size limit"):
             download_arxiv_source_archive("2401.12345", storage_path=tmp_path)
+
+
+def _make_verified_gpd_project(root: Path) -> Path:
+    """Create the minimum set of markers that ``resolve_project_root`` accepts."""
+
+    gpd_dir = root / "GPD"
+    gpd_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text("# project\n", encoding="utf-8")
+    return root
+
+
+def test_resolve_default_storage_path_honors_env_var_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    override = tmp_path / "override-cache"
+    monkeypatch.setenv(ARXIV_SOURCE_STORAGE_ENV_VAR, str(override))
+
+    # Even when called from inside a verified GPD project, the env var wins.
+    project = _make_verified_gpd_project(tmp_path / "proj")
+    monkeypatch.chdir(project)
+
+    resolved = resolve_default_arxiv_storage_path()
+
+    assert resolved == override
+    # Sanity: env var override is independent of the legacy home cache.
+    assert resolved != default_arxiv_source_storage_path()
+
+
+def test_resolve_default_storage_path_uses_project_local_cache_when_inside_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(ARXIV_SOURCE_STORAGE_ENV_VAR, raising=False)
+    project = _make_verified_gpd_project(tmp_path / "physics-paper")
+
+    resolved = resolve_default_arxiv_storage_path(project)
+
+    assert resolved == project / ARXIV_PROJECT_LOCAL_CACHE_DIRNAME
+
+
+def test_resolve_default_storage_path_falls_back_to_home_outside_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv(ARXIV_SOURCE_STORAGE_ENV_VAR, raising=False)
+    home = tmp_path / "home"
+    monkeypatch.setattr("gpd.core.arxiv_source_download.Path.home", lambda: home)
+
+    bare = tmp_path / "no-project-here"
+    bare.mkdir()
+
+    resolved = resolve_default_arxiv_storage_path(bare)
+
+    assert resolved == home / ".arxiv-mcp-server" / "papers"
+
+
+def test_resolve_default_storage_path_ignores_blank_env_var(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(ARXIV_SOURCE_STORAGE_ENV_VAR, "   ")
+    home = tmp_path / "home"
+    monkeypatch.setattr("gpd.core.arxiv_source_download.Path.home", lambda: home)
+
+    bare = tmp_path / "no-project-here"
+    bare.mkdir()
+
+    resolved = resolve_default_arxiv_storage_path(bare)
+
+    assert resolved == home / ".arxiv-mcp-server" / "papers"

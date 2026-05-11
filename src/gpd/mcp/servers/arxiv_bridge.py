@@ -19,6 +19,7 @@ from mcp.server.stdio import stdio_server
 from gpd.core.arxiv_source_download import (
     default_arxiv_source_storage_path,
     download_arxiv_source_archive,
+    resolve_default_arxiv_storage_path,
 )
 from gpd.mcp.servers import mutating_tool_annotations
 from gpd.version import __version__ as GPD_VERSION
@@ -77,10 +78,26 @@ class ArxivBridgeConfig:
     storage_path: Path = field(default_factory=default_arxiv_source_storage_path)
 
 
-def load_settings(*, storage_path: str | Path | None = None) -> ArxivBridgeConfig:
-    """Load bridge settings for the upstream server and local source archive storage."""
+def load_settings(
+    *,
+    storage_path: str | Path | None = None,
+    workspace: str | Path | None = None,
+) -> ArxivBridgeConfig:
+    """Load bridge settings for the upstream server and local source archive storage.
 
-    resolved = default_arxiv_source_storage_path() if storage_path is None else Path(storage_path)
+    When *storage_path* is not supplied, the storage root is resolved from
+    :func:`gpd.core.arxiv_source_download.resolve_default_arxiv_storage_path`,
+    which honors ``GPD_ARXIV_SOURCE_DIR`` first, then a project-local
+    ``<project_root>/.arxiv-cache`` directory when invoked inside a verified
+    GPD project, and finally falls back to the legacy
+    ``~/.arxiv-mcp-server/papers`` cache so callers running outside any
+    project remain backward-compatible.
+    """
+
+    if storage_path is None:
+        resolved = resolve_default_arxiv_storage_path(workspace)
+    else:
+        resolved = Path(storage_path)
     return ArxivBridgeConfig(storage_path=resolved.expanduser().resolve(strict=False))
 
 
@@ -265,12 +282,23 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="GPD arXiv MCP bridge")
     parser.add_argument("--transport", choices=["stdio"], default="stdio")
     parser.add_argument("--storage-path", default=None)
+    parser.add_argument(
+        "--workspace",
+        default=None,
+        help=(
+            "Workspace hint used when --storage-path is not supplied. "
+            "Defaults to the current working directory; the bridge prefers a "
+            "project-local <project_root>/.arxiv-cache when the workspace "
+            "resolves to a verified GPD project, and falls back to "
+            "~/.arxiv-mcp-server/papers otherwise."
+        ),
+    )
     return parser.parse_args()
 
 
 async def _run() -> None:
     args = _parse_args()
-    config = load_settings(storage_path=args.storage_path)
+    config = load_settings(storage_path=args.storage_path, workspace=args.workspace)
     server, _bridge = build_server(config)
     async with stdio_server() as (read_stream, write_stream):
         await server.run(

@@ -70,20 +70,17 @@ If the invoking prompt, resume state, or `gpd:execute-phase` result says this au
 
 Checkpoint reached means execute-phase returned `checkpoint`, returned a bounded-stop payload, or produced the expected execution checkpoint artifact while verification remains absent or pending. Do not run redundant read-only probing after that evidence is known.
 
-At this stop, do not invoke verification, convention checks, milestone audit, completion, or another phase. Render exactly one primary next runtime command:
-
-- `gpd:resume-work` when execute-phase requested a resume continuation;
-- otherwise `gpd:verify-work ${PHASE_NUM}` when the execution checkpoint is ready for verification.
+At this stop, do not invoke verification, convention checks, milestone audit, completion, or another phase. Primary is `gpd:resume-work` for resume continuations, otherwise `gpd:verify-work ${PHASE_NUM}`.
 
 ```yaml
-stage_stop:
-  workflow: autonomous
-  stage: plan_execute_child_cycle
-  status: checkpoint
-  reason: bounded_execution_checkpoint
-  user_decision_needed: false
-  next_runtime_command: "gpd:resume-work"
+stage_stop: {workflow: autonomous, stage: plan_execute_child_cycle, status: checkpoint, reason: bounded_execution_checkpoint, checkpoint: bounded_execution, user_decision_needed: false, next_runtime_command: "gpd:resume-work", also_available: ["gpd:verify-work ${PHASE_NUM}", "gpd:suggest-next"]}
 ```
+
+## > Next Up
+
+Primary: `gpd:resume-work`
+
+Also: `gpd:verify-work ${PHASE_NUM}`, `gpd:suggest-next`
 </step>
 
 <stage_transition>

@@ -127,7 +127,10 @@ Route by observed child state:
 - `wave_failure_menu` when a spawn failure, route conflict, or user choice blocks safe continuation.
 
 ## > Next Up
-Primary: continue `gpd:execute-phase {N}` through `wave_return_checkpoint`, `proof_critic_dispatch`, or `wave_failure_menu` according to child state.
+
+Primary: `gpd:execute-phase {N}`
+
+**Route:** continue through `wave_return_checkpoint`, `proof_critic_dispatch`, or `wave_failure_menu` according to child state.
 </step>
 
 </process>

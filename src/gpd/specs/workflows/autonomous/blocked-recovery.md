@@ -59,8 +59,9 @@ stage_stop:
   stage: blocked_recovery
   status: blocked
   reason: "{structured reason}"
+  checkpoint: none
   user_decision_needed: true
-  next_runtime_command: "{primary public command}"
+  next_runtime_command: "gpd:{primary-command}"
   also_available:
     - "gpd:suggest-next"
 ```
@@ -70,13 +71,15 @@ Then render:
 ```markdown
 ## > Next Up
 
-Primary: `{primary public command}`
+Primary: `gpd:{primary-command}`
 
 **Also available:**
 - `gpd:suggest-next` -- confirm the next action
 ```
 
-The `## > Next Up` block must contain exactly one `Primary:` line and no raw staged-init commands.
+Replace `{primary-command}` with the selected public runtime command. The
+`## > Next Up` block must contain exactly one `Primary:` line and no raw
+staged-init commands.
 </step>
 
 </process>

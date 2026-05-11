@@ -1230,18 +1230,25 @@ def help_bridge(
         command_detail_payload,
         command_groups_payload,
         command_index_payload,
+        format_detailed_help_follow_up,
+        format_help_all_command,
+        render_command_detail_markdown,
         render_command_index_markdown,
         render_quick_start_markdown,
     )
 
-    quick_start_markdown = render_quick_start_markdown()
-    command_index_markdown = render_command_index_markdown()
     runtime_cwd = _get_cwd()
+    active_public_prefix = _active_runtime_command_prefix(cwd=runtime_cwd) or ""
+    public_prefix = active_public_prefix or "gpd:"
+    canonical_quick_start_markdown = render_quick_start_markdown()
+    quick_start_markdown = render_quick_start_markdown(public_prefix=public_prefix)
+    canonical_command_index_markdown = render_command_index_markdown()
+    command_index_markdown = render_command_index_markdown(public_prefix=public_prefix)
     payload: dict[str, object] = {
         "command": "gpd:help",
         "surface": "local_cli_raw_help_bridge",
         "validated_surface": _validated_runtime_surface(cwd=runtime_cwd),
-        "public_runtime_command_prefix": _active_runtime_command_prefix(cwd=runtime_cwd) or "",
+        "public_runtime_command_prefix": active_public_prefix,
         "local_cli_equivalence_guaranteed": False,
         "dispatch_note": (
             "Runtime commands are installed into configured agent surfaces; "
@@ -1251,8 +1258,10 @@ def help_bridge(
         "quick_start": {
             "heading": "Quick Start",
             "markdown": quick_start_markdown,
+            "canonical_markdown": canonical_quick_start_markdown,
         },
-        "recommended_commands": ["gpd:help --all"],
+        "recommended_commands": [format_help_all_command(public_prefix=public_prefix)],
+        "canonical_recommended_commands": ["gpd:help --all"],
         "read_only": True,
     }
     if command_name:
@@ -1271,6 +1280,10 @@ def help_bridge(
             )
             _output(payload)
             raise typer.Exit(code=1) from None
+        canonical_detail_markdown = detail_payload.get("detail_markdown")
+        detail_payload["detail_markdown"] = render_command_detail_markdown(canonical, public_prefix=public_prefix)
+        if isinstance(canonical_detail_markdown, str):
+            detail_payload["canonical_detail_markdown"] = canonical_detail_markdown
         preflight = _build_command_context_preflight(canonical)
         preflight_payload = dataclasses.asdict(preflight) if dataclasses.is_dataclass(preflight) else preflight
         payload.update(
@@ -1287,8 +1300,10 @@ def help_bridge(
                 "ok": True,
                 "rendered_sections": ["quick_start", "command_index", "detailed_help_follow_up"],
                 "command_index_markdown": command_index_markdown,
+                "canonical_command_index_markdown": canonical_command_index_markdown,
                 "command_groups": command_groups_payload(),
-                "detailed_help_follow_up": DETAILED_HELP_FOLLOW_UP,
+                "detailed_help_follow_up": format_detailed_help_follow_up(public_prefix=public_prefix),
+                "canonical_detailed_help_follow_up": DETAILED_HELP_FOLLOW_UP,
                 "command_index": command_index_payload(),
             }
         )
@@ -5492,6 +5507,18 @@ def init_new_project(
             payload = _init_new_project(_get_cwd())
         else:
             payload = _init_new_project(_get_cwd(), stage=stage)
+    except ValueError as exc:
+        _error(str(exc))
+    _output(payload)
+
+
+@init_app.command("start-context")
+def init_start_context() -> None:
+    """Assemble thin context for the start chooser."""
+    from gpd.core.context import init_start_context as _init_start_context
+
+    try:
+        payload = _init_start_context(_get_cwd())
     except ValueError as exc:
         _error(str(exc))
     _output(payload)

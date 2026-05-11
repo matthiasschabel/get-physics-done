@@ -869,6 +869,7 @@ __all__ = [
     "init_peer_review",
     "init_new_milestone",
     "init_new_project",
+    "init_start_context",
     "init_phase_op",
     "init_research_phase",
     "init_plan_phase",
@@ -960,6 +961,70 @@ def _new_project_init_progress_context(cwd: Path) -> dict[str, object]:
         }
     )
     return result
+
+
+def _workspace_start_classifier_context(cwd: Path) -> tuple[Path, Path, dict[str, object]]:
+    """Return the read-only workspace classifier facts shared by start/new-project."""
+
+    requested_cwd = cwd.expanduser().resolve(strict=False)
+    project_cwd = _resolve_workspace_locked_cwd(requested_cwd)
+
+    research_file_samples = _discover_research_file_samples(requested_cwd)
+    has_research_files = bool(research_file_samples)
+    has_research_map = _path_exists(project_cwd, f"{PLANNING_DIR_NAME}/{RESEARCH_MAP_DIR_NAME}")
+
+    has_project_manifest = (
+        _path_exists(requested_cwd, "requirements.txt")
+        or _path_exists(requested_cwd, "pyproject.toml")
+        or _path_exists(requested_cwd, "Makefile")
+        or resolve_current_manuscript_entrypoint(requested_cwd) is not None
+    )
+
+    state_exists, roadmap_exists, project_file_exists = recoverable_project_context(project_cwd)
+    recoverable_project_exists = state_exists or roadmap_exists or project_file_exists
+    partial_project_exists = recoverable_project_exists and not project_file_exists
+    if project_file_exists:
+        project_recovery_status = "initialized"
+    elif recoverable_project_exists:
+        project_recovery_status = "partial"
+    else:
+        project_recovery_status = "none"
+
+    return (
+        requested_cwd,
+        project_cwd,
+        {
+            "project_exists": project_file_exists,
+            "state_exists": state_exists,
+            "roadmap_exists": roadmap_exists,
+            "recoverable_project_exists": recoverable_project_exists,
+            "partial_project_exists": partial_project_exists,
+            "project_recovery_status": project_recovery_status,
+            **_new_project_init_progress_context(project_cwd),
+            "has_research_map": has_research_map,
+            "planning_exists": _path_exists(project_cwd, PLANNING_DIR_NAME),
+            "has_research_files": has_research_files,
+            "research_file_samples": research_file_samples,
+            "has_project_manifest": has_project_manifest,
+            "needs_research_map": (has_research_files or has_project_manifest) and not has_research_map,
+            "has_git": _path_exists(project_cwd, ".git"),
+            "platform": _detect_platform(project_cwd),
+        },
+    )
+
+
+def _start_folder_state(classifier: Mapping[str, object]) -> str:
+    """Return the normalized start-router state for a classifier payload."""
+
+    if classifier.get("project_exists") is True:
+        return "initialized_project"
+    if classifier.get("partial_project_exists") is True or classifier.get("init_progress_exists") is True:
+        return "partial_project"
+    if classifier.get("has_research_map") is True:
+        return "research_map"
+    if classifier.get("needs_research_map") is True:
+        return "existing_research"
+    return "fresh"
 
 
 def _resolve_project_scoped_cwd(cwd: Path) -> Path:
@@ -4445,55 +4510,14 @@ def init_plan_phase(
 
 def init_new_project(cwd: Path, stage: str | None = None) -> dict:
     """Assemble context for new project creation."""
-    requested_cwd = cwd.expanduser().resolve(strict=False)
-    project_cwd = _resolve_workspace_locked_cwd(requested_cwd)
+    _requested_cwd, project_cwd, base_result = _workspace_start_classifier_context(cwd)
     config = load_config(project_cwd)
 
-    research_file_samples = _discover_research_file_samples(requested_cwd)
-    has_research_files = bool(research_file_samples)
-
-    has_project_manifest = (
-        _path_exists(requested_cwd, "requirements.txt")
-        or _path_exists(requested_cwd, "pyproject.toml")
-        or _path_exists(requested_cwd, "Makefile")
-        or resolve_current_manuscript_entrypoint(requested_cwd) is not None
-    )
-
-    state_exists, roadmap_exists, project_file_exists = recoverable_project_context(project_cwd)
-    recoverable_project_exists = state_exists or roadmap_exists or project_file_exists
-    partial_project_exists = recoverable_project_exists and not project_file_exists
-    if project_file_exists:
-        project_recovery_status = "initialized"
-    elif recoverable_project_exists:
-        project_recovery_status = "partial"
-    else:
-        project_recovery_status = "none"
-
     base_result = {
-        # Config
         "commit_docs": config["commit_docs"],
         "autonomy": config["autonomy"],
         "research_mode": config["research_mode"],
-        # Existing state
-        "project_exists": project_file_exists,
-        "state_exists": state_exists,
-        "roadmap_exists": roadmap_exists,
-        "recoverable_project_exists": recoverable_project_exists,
-        "partial_project_exists": partial_project_exists,
-        "project_recovery_status": project_recovery_status,
-        **_new_project_init_progress_context(project_cwd),
-        "has_research_map": _path_exists(project_cwd, f"{PLANNING_DIR_NAME}/{RESEARCH_MAP_DIR_NAME}"),
-        "planning_exists": _path_exists(project_cwd, PLANNING_DIR_NAME),
-        # Existing project detection
-        "has_research_files": has_research_files,
-        "research_file_samples": research_file_samples,
-        "has_project_manifest": has_project_manifest,
-        "needs_research_map": (has_research_files or has_project_manifest)
-        and not _path_exists(project_cwd, f"{PLANNING_DIR_NAME}/{RESEARCH_MAP_DIR_NAME}"),
-        # Git state
-        "has_git": _path_exists(project_cwd, ".git"),
-        # Platform
-        "platform": _detect_platform(project_cwd),
+        **base_result,
     }
 
     if stage is None:
@@ -4548,6 +4572,32 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
             ),
         ),
     )
+
+
+def init_start_context(cwd: Path) -> dict[str, object]:
+    """Assemble the thin read-only start-router context."""
+
+    _requested_cwd, project_cwd, classifier = _workspace_start_classifier_context(cwd)
+    init_progress = {
+        "exists": classifier["init_progress_exists"],
+        "status": classifier["init_progress_status"],
+        "valid": classifier["init_progress_valid"],
+        "corrupt": classifier["init_progress_corrupt"],
+        "step": classifier["init_progress_step"],
+        "description": classifier["init_progress_description"],
+        "path": classifier["init_progress_path"],
+    }
+    folder_state = _start_folder_state(classifier)
+
+    return {
+        "schema_version": "start_context.v1",
+        "workspace_root": project_cwd.as_posix(),
+        "folder_state": folder_state,
+        "classification": folder_state,
+        **classifier,
+        "init_progress": init_progress,
+        "raw_diagnostics_command": "gpd --raw init new-project",
+    }
 
 
 def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:

@@ -82,6 +82,15 @@ stage_stop:
 ```
 
 Do not spawn `gpd-notation-coordinator` from `execute-phase`. The next step is `gpd:validate-conventions`; the fresh continuation handoff owns any notation-coordinator work. Use a fresh `gpd:execute-phase {PHASE_NUMBER}` continuation after that workflow reports a typed result, or re-enter `gpd:execute-phase {PHASE_NUMBER} --gaps-only`.
+
+## > Next Up
+
+Primary: `gpd:validate-conventions`
+
+**Also available:**
+- `gpd:execute-phase {PHASE_NUMBER} --gaps-only` -- re-enter targeted gap execution after convention repair
+- `gpd:verify-work {PHASE_NUMBER}` -- rerun verification
+- `gpd:suggest-next` -- confirm the next action
 </step>
 
 <step name="debugger_diagnosis">

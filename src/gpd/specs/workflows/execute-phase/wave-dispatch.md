@@ -105,7 +105,10 @@ stage_route:
 ```
 
 ## > Next Up
-Primary: continue `gpd:execute-phase {N}` through the routed execute-phase stage.
+
+Primary: `gpd:execute-phase {N}`
+
+**Route:** continue through the routed execute-phase stage.
 </step>
 
 </process>

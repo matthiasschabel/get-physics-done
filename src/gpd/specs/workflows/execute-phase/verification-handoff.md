@@ -158,7 +158,6 @@ stage_stop:
   user_decision_needed: true
   next_runtime_command: "gpd:plan-phase {PHASE_NUMBER} --gaps"
   also_available:
-    - "cat {phase_dir}/{phase_number}-VERIFICATION.md"
     - "gpd:verify-work {PHASE_NUMBER}"
     - "gpd:suggest-next"
 ```
@@ -167,8 +166,10 @@ stage_stop:
 
 Primary: `gpd:plan-phase {PHASE_NUMBER} --gaps`
 
+**Report:**
+- `{phase_dir}/{phase_number}-VERIFICATION.md` -- canonical verification report path
+
 **Also available:**
-- `cat {phase_dir}/{phase_number}-VERIFICATION.md` -- inspect the canonical report
 - `gpd:verify-work {PHASE_NUMBER}` -- rerun or continue verification
 - `gpd:suggest-next` -- confirm the next action
 

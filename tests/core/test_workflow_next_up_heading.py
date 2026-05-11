@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -10,6 +11,21 @@ AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references"
+STAGE_STOP_STRICT_NEXT_UP_PATHS = (
+    REFERENCES_DIR / "orchestration/stage-stop-envelope.md",
+    WORKFLOWS_DIR / "execute-phase/checkpoint-resume.md",
+    WORKFLOWS_DIR / "execute-phase/verification-handoff.md",
+    WORKFLOWS_DIR / "execute-phase/gap-reverification.md",
+    WORKFLOWS_DIR / "execute-phase/wave-dispatch.md",
+    WORKFLOWS_DIR / "execute-phase/executor-dispatch.md",
+    WORKFLOWS_DIR / "execute-phase/closeout.md",
+    WORKFLOWS_DIR / "autonomous/blocked-recovery.md",
+    WORKFLOWS_DIR / "autonomous/plan-execute-child-cycle.md",
+    WORKFLOWS_DIR / "verify-work/session-router.md",
+)
+PRIMARY_COMMAND_RE = re.compile(r"(?m)^[ \t]*Primary(?P<label> local transition)?: `(?P<command>[^`]+)`$")
+PUBLIC_RUNTIME_COMMAND_RE = re.compile(r"^gpd:[^\s`]+(?:\s+.*)?$")
+LOCAL_TRANSITION_COMMAND_RE = re.compile(r"^gpd phase complete\b")
 
 
 def _prompt_markdown_paths(*, include_references: bool = False) -> list[Path]:
@@ -47,6 +63,25 @@ def _next_up_blocks(path: Path) -> list[tuple[int, str]]:
             block_lines.append(following)
         blocks.append((index + 1, "\n".join(block_lines)))
     return blocks
+
+
+def _primary_line_error(block: str) -> str | None:
+    matches = list(PRIMARY_COMMAND_RE.finditer(block))
+    if len(matches) != 1:
+        return "expected exactly one command-only Primary line"
+
+    label = matches[0].group("label")
+    command = matches[0].group("command")
+    if label == " local transition":
+        if not LOCAL_TRANSITION_COMMAND_RE.match(command):
+            return f"invalid local transition primary: {command}"
+        if "**After this completes:**" not in block:
+            return "local transition primary missing After this completes route"
+        return None
+
+    if not PUBLIC_RUNTIME_COMMAND_RE.match(command):
+        return f"invalid runtime primary: {command}"
+    return None
 
 
 def test_prompt_markdown_uses_canonical_next_up_heading() -> None:
@@ -103,5 +138,19 @@ def test_next_up_blocks_use_runtime_verify_work_not_structural_verify_commands()
             for fragment in forbidden_fragments:
                 if fragment in block:
                     offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}:{fragment}")
+
+    assert offenders == []
+
+
+def test_stage_stop_owned_next_up_primary_lines_are_command_only() -> None:
+    offenders: list[str] = []
+
+    for path in STAGE_STOP_STRICT_NEXT_UP_PATHS:
+        blocks = _next_up_blocks(path)
+        assert blocks, path
+        for line_number, block in blocks:
+            error = _primary_line_error(block)
+            if error is not None:
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}:{error}")
 
     assert offenders == []

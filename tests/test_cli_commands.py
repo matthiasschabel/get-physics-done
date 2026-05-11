@@ -86,6 +86,16 @@ from tests.manuscript_test_support import (
 runner = StableCliRunner()
 
 
+def _assert_text_contains(text: str, fragments: tuple[str, ...]) -> None:
+    for fragment in fragments:
+        assert fragment in text
+
+
+def _assert_text_excludes(text: str, fragments: tuple[str, ...]) -> None:
+    for fragment in fragments:
+        assert fragment not in text
+
+
 def _help_text(*args: str, expect_exit: int = 0, **kwargs) -> str:
     return invoke_help_text(runner, app, args, expect_exit=expect_exit, **kwargs)
 
@@ -1713,6 +1723,167 @@ review_summary:
         assert payload["staged_loading"]["writes_allowed"] == []
         assert not (workspace / ".git").exists()
         assert not (workspace / "GPD").exists()
+
+    def test_start_context_is_thin_workspace_classifier_for_existing_research(self, tmp_path: Path) -> None:
+        workspace = tmp_path.parent / f"{tmp_path.name}-candidate-start-context"
+        workspace.mkdir()
+        (workspace / "analysis.py").write_text("print('existing result')\n", encoding="utf-8")
+
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(workspace), "init", "start-context"],
+            catch_exceptions=False,
+        )
+
+        payload = json_output_from_result(result)
+        assert payload["schema_version"] == "start_context.v1"
+        assert payload["folder_state"] == "existing_research"
+        assert payload["classification"] == "existing_research"
+        assert payload["has_git"] is False
+        assert payload["has_research_files"] is True
+        assert payload["research_file_samples"] == ["analysis.py"]
+        assert payload["needs_research_map"] is True
+        assert payload["raw_diagnostics_command"] == "gpd --raw init new-project"
+        for omitted_key in (
+            "researcher_model",
+            "synthesizer_model",
+            "roadmapper_model",
+            "project_contract",
+            "project_contract_gate",
+            "project_contract_load_info",
+            "project_contract_validation",
+            "staged_loading",
+            "commit_docs",
+            "autonomy",
+            "research_mode",
+        ):
+            assert omitted_key not in payload
+        assert not (workspace / ".git").exists()
+        assert not (workspace / "GPD").exists()
+
+    def test_start_context_preserves_partial_project_init_progress_diagnostics(self, tmp_path: Path) -> None:
+        workspace = tmp_path.parent / f"{tmp_path.name}-start-context-interrupted-init"
+        progress_dir = workspace / "GPD"
+        progress_dir.mkdir(parents=True)
+        (progress_dir / "ROADMAP.md").write_text("# Partial Roadmap\n", encoding="utf-8")
+        (progress_dir / "init-progress.json").write_text(
+            json.dumps({"step": "M3", "description": "Requirements drafted"}) + "\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(workspace), "init", "start-context"],
+            catch_exceptions=False,
+        )
+
+        payload = json_output_from_result(result)
+        assert payload["folder_state"] == "partial_project"
+        assert payload["recoverable_project_exists"] is True
+        assert payload["partial_project_exists"] is True
+        assert payload["project_exists"] is False
+        assert payload["roadmap_exists"] is True
+        assert payload["init_progress"] == {
+            "exists": True,
+            "status": "interrupted_init_progress",
+            "valid": True,
+            "corrupt": False,
+            "step": "M3",
+            "description": "Requirements drafted",
+            "path": "GPD/init-progress.json",
+        }
+        assert payload["init_progress_exists"] is True
+        assert payload["init_progress_valid"] is True
+        assert not (progress_dir / "state.json.lock").exists()
+
+        interrupted_only = tmp_path.parent / f"{tmp_path.name}-start-context-init-progress-only"
+        interrupted_only_dir = interrupted_only / "GPD"
+        interrupted_only_dir.mkdir(parents=True)
+        (interrupted_only_dir / "init-progress.json").write_text(
+            json.dumps({"step": "M1", "description": "Scope intake started"}) + "\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(interrupted_only), "init", "start-context"],
+            catch_exceptions=False,
+        )
+
+        payload = json_output_from_result(result)
+        assert payload["folder_state"] == "partial_project"
+        assert payload["recoverable_project_exists"] is False
+        assert payload["partial_project_exists"] is False
+        assert payload["init_progress"]["exists"] is True
+
+    def test_start_context_matches_new_project_classifier_booleans(self, tmp_path: Path) -> None:
+        def make_workspace(name: str) -> Path:
+            workspace = tmp_path / name
+            workspace.mkdir()
+            return workspace
+
+        fresh = make_workspace("fresh")
+        existing_research = make_workspace("existing-research")
+        (existing_research / "analysis.py").write_text("print('existing result')\n", encoding="utf-8")
+        research_map = make_workspace("research-map")
+        (research_map / "GPD" / "research-map").mkdir(parents=True)
+        partial_project = make_workspace("partial-project")
+        (partial_project / "GPD").mkdir()
+        (partial_project / "GPD" / "ROADMAP.md").write_text("# Roadmap\n", encoding="utf-8")
+        initialized_project = make_workspace("initialized-project")
+        (initialized_project / "GPD").mkdir()
+        (initialized_project / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+
+        shared_keys = {
+            "project_exists",
+            "state_exists",
+            "roadmap_exists",
+            "recoverable_project_exists",
+            "partial_project_exists",
+            "project_recovery_status",
+            "init_progress_exists",
+            "init_progress_status",
+            "init_progress_valid",
+            "init_progress_corrupt",
+            "init_progress_step",
+            "init_progress_description",
+            "init_progress_path",
+            "has_research_map",
+            "planning_exists",
+            "has_research_files",
+            "research_file_samples",
+            "has_project_manifest",
+            "needs_research_map",
+            "has_git",
+            "platform",
+        }
+
+        cases = (
+            (fresh, "fresh"),
+            (existing_research, "existing_research"),
+            (research_map, "research_map"),
+            (partial_project, "partial_project"),
+            (initialized_project, "initialized_project"),
+        )
+        for workspace, expected_folder_state in cases:
+            start_result = runner.invoke(
+                app,
+                ["--raw", "--cwd", str(workspace), "init", "start-context"],
+                catch_exceptions=False,
+            )
+            new_project_result = runner.invoke(
+                app,
+                ["--raw", "--cwd", str(workspace), "init", "new-project", "--stage", "scope_intake"],
+                catch_exceptions=False,
+            )
+
+            start_payload = json_output_from_result(start_result)
+            new_project_payload = json_output_from_result(new_project_result)
+            assert start_payload["folder_state"] == expected_folder_state
+            assert start_payload["classification"] == expected_folder_state
+            for key in shared_keys:
+                assert start_payload[key] == new_project_payload[key], (workspace.name, key)
+            assert "staged_loading" not in start_payload
 
     def test_new_project_init_scope_intake_does_not_resolve_late_models(
         self,
@@ -5179,7 +5350,13 @@ class TestReviewValidationCommands:
         assert "bibliography_audit" not in checks
         assert "reproducibility_manifest" not in checks
 
-    def test_raw_help_bridge_default_and_all_are_machine_readable(self, tmp_path: Path) -> None:
+    def test_raw_help_bridge_default_and_all_are_machine_readable(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: None)
+
         result = runner.invoke(
             app,
             ["--raw", "--cwd", str(tmp_path), "help"],
@@ -5191,9 +5368,11 @@ class TestReviewValidationCommands:
         assert payload["ok"] is True
         assert payload["default_sections"] == ["quick_start_extract", "wrapper_owned_all_hint"]
         assert payload["quick_start"]["heading"] == "Quick Start"
-        assert "gpd:start" in payload["quick_start"]["markdown"]
-        assert "<!--" not in payload["quick_start"]["markdown"]
+        _assert_text_contains(payload["quick_start"]["markdown"], ("gpd:start",))
+        assert payload["quick_start"]["canonical_markdown"] == help_renderer.render_quick_start_markdown()
+        _assert_text_excludes(payload["quick_start"]["markdown"], ("<!--",))
         assert payload["recommended_commands"] == ["gpd:help --all"]
+        assert payload["canonical_recommended_commands"] == ["gpd:help --all"]
         assert payload["local_cli_equivalence_guaranteed"] is False
 
         result = runner.invoke(
@@ -5204,19 +5383,61 @@ class TestReviewValidationCommands:
 
         payload = json_output_from_result(result)
         commands = {entry["command"] for entry in payload["command_index"]}
-        assert "gpd:new-project" in commands
-        assert "gpd:help" in commands
+        assert {"gpd:new-project", "gpd:help"} <= commands
         assert payload["rendered_sections"] == ["quick_start", "command_index", "detailed_help_follow_up"]
         assert payload["quick_start"]["markdown"] == help_renderer.render_quick_start_markdown()
+        assert payload["quick_start"]["canonical_markdown"] == help_renderer.render_quick_start_markdown()
         assert payload["command_index_markdown"] == help_renderer.render_command_index_markdown()
-        assert "## Command Index" in payload["command_index_markdown"]
-        assert "<!--" not in payload["command_index_markdown"]
+        assert payload["canonical_command_index_markdown"] == help_renderer.render_command_index_markdown()
+        _assert_text_contains(payload["command_index_markdown"], ("## Command Index",))
+        _assert_text_excludes(payload["command_index_markdown"], ("<!--",))
         assert payload["command_groups"] == help_renderer.command_groups_payload()
         assert payload["command_groups"][0]["name"] == "Starter commands"
         starter_commands = {entry["command"] for entry in payload["command_groups"][0]["commands"]}
-        assert "gpd:help" in starter_commands
-        assert "gpd:new-project --minimal" in starter_commands
+        assert {"gpd:help", "gpd:new-project --minimal"} <= starter_commands
         assert payload["detailed_help_follow_up"] == help_renderer.DETAILED_HELP_FOLLOW_UP
+        assert payload["canonical_detailed_help_follow_up"] == help_renderer.DETAILED_HELP_FOLLOW_UP
+
+    def test_raw_help_bridge_display_markdown_uses_active_runtime_prefix(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        descriptor = _DOLLAR_COMMAND_DESCRIPTOR
+        monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: descriptor.runtime_name)
+
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(tmp_path), "help"],
+            catch_exceptions=False,
+        )
+
+        payload = json_output_from_result(result)
+        assert payload["public_runtime_command_prefix"] == "$gpd-"
+        _assert_text_contains(
+            payload["quick_start"]["markdown"],
+            ("`$gpd-start`", "`$gpd-new-project --minimal`", "`$gpd-progress`"),
+        )
+        _assert_text_contains(payload["quick_start"]["canonical_markdown"], ("`gpd:start`",))
+        assert payload["recommended_commands"] == ["$gpd-help --all"]
+        assert payload["canonical_recommended_commands"] == ["gpd:help --all"]
+
+        result = runner.invoke(
+            app,
+            ["--raw", "--cwd", str(tmp_path), "help", "--all"],
+            catch_exceptions=False,
+        )
+
+        payload = json_output_from_result(result)
+        _assert_text_contains(
+            payload["command_index_markdown"],
+            ("`$gpd-help`", "`$gpd-new-project --minimal`", "`gpd --help`"),
+        )
+        _assert_text_contains(payload["canonical_command_index_markdown"], ("`gpd:help`",))
+        assert payload["detailed_help_follow_up"] == (
+            "Use `$gpd-help --command <name>` when you want detailed notes for one runtime command."
+        )
+        assert payload["canonical_detailed_help_follow_up"] == help_renderer.DETAILED_HELP_FOLLOW_UP
 
     @pytest.mark.parametrize(
         "descriptor",
@@ -5240,6 +5461,8 @@ class TestReviewValidationCommands:
         payload = json_output_from_result(result)
         assert payload["validated_surface"] == descriptor.validated_command_surface
         assert payload["public_runtime_command_prefix"] == descriptor.public_command_surface_prefix
+        _assert_text_contains(payload["detail_markdown"], (f"`{descriptor.public_command_surface_prefix}progress",))
+        _assert_text_contains(payload["canonical_detail_markdown"], ("`gpd:progress",))
         assert payload["command_context"]["validated_surface"] == descriptor.validated_command_surface
         assert payload["command_context"]["public_runtime_command_prefix"] == descriptor.public_command_surface_prefix
 

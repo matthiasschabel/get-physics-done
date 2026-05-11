@@ -7,6 +7,7 @@ from collections import Counter
 
 import pytest
 
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core import help_renderer
 from gpd.core.public_surface_contract import (
     beginner_startup_ladder,
@@ -37,9 +38,27 @@ def _assert_in_order(text: str, fragments: tuple[str, ...]) -> None:
     assert positions == sorted(positions)
 
 
+def _assert_contains_all(text: str, fragments: tuple[str, ...]) -> None:
+    for fragment in fragments:
+        assert fragment in text
+
+
+def _assert_contains_none(text: str, fragments: tuple[str, ...]) -> None:
+    for fragment in fragments:
+        assert fragment not in text
+
+
 def _runtime_ladder_commands() -> tuple[str, ...]:
     return tuple(
         f"gpd:{part.strip()}" for step in beginner_startup_ladder() for part in step.split("/") if part.strip()
+    )
+
+
+def _descriptor_with_public_prefix_kind(kind: str):
+    return next(
+        descriptor
+        for descriptor in iter_runtime_descriptors()
+        if descriptor.validated_command_surface == f"public_runtime_{kind}_command"
     )
 
 
@@ -76,6 +95,28 @@ def test_help_renderer_renders_quick_start_structure_without_freezing_marker_bod
     assert all(description.strip() for _command, description in rows)
 
 
+def test_help_renderer_quick_start_rewrites_runtime_commands_for_public_prefix() -> None:
+    public_prefix = _descriptor_with_public_prefix_kind("dollar").public_command_surface_prefix
+    quick_start = help_renderer.render_quick_start_markdown(public_prefix=public_prefix)
+
+    _assert_contains_all(
+        quick_start,
+        (
+            f"`{public_prefix}help`",
+            f"`{public_prefix}start`",
+            f"`{public_prefix}tour`",
+            f"`{public_prefix}new-project --minimal`",
+            f"`{public_prefix}progress`",
+            f"`{public_prefix}suggest-next`",
+            f"`{local_cli_resume_command()}`",
+            f"`{local_cli_resume_recent_command()}`",
+            f"`{local_cli_observe_execution_command()}`",
+            f"`{local_cli_cost_command()}`",
+        ),
+    )
+    _assert_contains_none(quick_start, ("`gpd:start`", "`gpd:progress`"))
+
+
 def test_help_renderer_renders_command_index_from_registry_backed_groups() -> None:
     command_index = help_renderer.render_command_index_markdown()
 
@@ -89,6 +130,18 @@ def test_help_renderer_renders_command_index_from_registry_backed_groups() -> No
         assert f"### {group.name}" in command_index
         fragments = (f"### {group.name}",) + tuple(f"`{entry.command}`" for entry in group.commands)
         _assert_in_order(command_index, fragments)
+
+
+def test_help_renderer_command_index_rewrites_runtime_commands_but_not_local_cli_help() -> None:
+    public_prefix = _descriptor_with_public_prefix_kind("slash").public_command_surface_prefix
+    command_index = help_renderer.render_command_index_markdown(public_prefix=public_prefix)
+    rows = _command_rows(command_index)
+
+    assert f"{public_prefix}help" in rows
+    assert f"{public_prefix}new-project --minimal" in rows
+    assert "gpd:help" not in rows
+    _assert_contains_all(command_index, ("`gpd --help`",))
+    _assert_contains_none(command_index, ("`/gpd --help`",))
 
 
 def test_help_command_groups_cover_registry_without_treating_minimal_variant_as_command() -> None:
@@ -160,6 +213,14 @@ def test_render_command_detail_markdown_uses_registry_and_renderer_metadata() ->
     assert "Argument hint:" not in detail
     assert "Context mode:" not in detail
     assert "`.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, and `.xlsx`" not in detail
+
+
+def test_render_command_detail_markdown_rewrites_runtime_signature_and_examples() -> None:
+    public_prefix = _descriptor_with_public_prefix_kind("dollar").public_command_surface_prefix
+    detail = help_renderer.render_command_detail_markdown("gpd:new-project", public_prefix=public_prefix)
+
+    _assert_contains_all(detail, (f"**`{public_prefix}new-project`**", f"`{public_prefix}new-project --minimal`"))
+    _assert_contains_none(detail, ("`gpd:new-project --minimal`",))
 
 
 def test_render_detailed_command_reference_covers_registry_once() -> None:

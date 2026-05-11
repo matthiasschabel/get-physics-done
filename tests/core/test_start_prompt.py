@@ -59,25 +59,6 @@ def _route_for_option(workflow: str, option_id: str) -> str:
     return route_step[start : start + 1 + next_route.start()]
 
 
-def _route_boundary_envelope(route: str) -> dict[str, str | bool]:
-    match = re.search(r"```text\nroute_boundary:(?P<body>.*?)\n```", route, flags=re.DOTALL)
-    assert match is not None, route
-    envelope: dict[str, str | bool] = {}
-    body = match.group("body").strip()
-    if "\n" in body:
-        pairs = [line.strip().split(": ", 1) for line in body.splitlines()]
-    else:
-        pairs = [part.strip().split("=", 1) for part in body.split(";")]
-    for key, value in pairs:
-        if value == "true":
-            envelope[key] = True
-        elif value == "false":
-            envelope[key] = False
-        else:
-            envelope[key] = value
-    return envelope
-
-
 def _numbered_choices(section: str) -> list[str]:
     return [line.strip() for line in section.splitlines() if re.match(r"\s*\d+\.\s+", line)]
 
@@ -170,7 +151,8 @@ def test_start_workflow_routes_to_existing_entrypoints() -> None:
     workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
 
     assert_start_workflow_router_contract(workflow)
-    assert "START_CONTEXT=$(gpd --raw init new-project)" in workflow
+    assert "START_CONTEXT=$(gpd --raw init start-context)" in workflow
+    assert "START_CONTEXT=$(gpd --raw init new-project)" not in workflow
     assert "gpd --raw init new-project --stage scope_intake" not in workflow
     detect_step = _extract_step(workflow, "detect_workspace_state")
     explain_step = _extract_step(workflow, "explain_current_state")
@@ -178,8 +160,18 @@ def test_start_workflow_routes_to_existing_entrypoints() -> None:
 
     _assert_anchor(
         detect_step,
-        "start classifier uses raw workspace-bound preflight",
-        ("non-staged raw CLI classifier", "workspace-bound", "read-only classifier", "invoked folder itself"),
+        "start classifier uses thin raw workspace-bound preflight",
+        ("thin raw CLI start-context classifier", "workspace-bound", "read-only classifier", "invoked folder"),
+    )
+    _assert_anchor(
+        detect_step,
+        "start classifier uses normalized folder state",
+        ("folder_state", "initialized_project", "partial_project", "research_map", "existing_research", "fresh"),
+    )
+    _assert_anchor(
+        detect_step,
+        "interrupted init progress routes away from fresh setup",
+        ("init_progress.exists=true", "setup was interrupted", "recovery/inspection", "fresh setup"),
     )
     _assert_anchor(
         detect_step + explain_step,
@@ -331,30 +323,36 @@ def test_start_workflow_same_message_choice_is_only_chooser_authority() -> None:
 
 def test_start_workflow_route_choice_has_general_downstream_write_gate_boundary() -> None:
     workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
-    route_step = _normalized(_extract_step(workflow, "route_choice"))
+    raw_route_step = _extract_step(workflow, "route_choice")
+    route_step = _normalized(raw_route_step)
 
     _assert_anchor(
         route_step,
         "start route choice has typed downstream write gate",
         (
-            "start-menu choice authorizes only the route into that command",
-            "state the route boundary visibly",
-            "first downstream write-capable gate",
-            "separate explicit approval",
-            "route_boundary",
-            "route_allowed=true",
-            "downstream_write_approved=false",
-            "next_user_decision",
+            "start-menu choice authorizes only routing into that command",
+            "write-capable routes",
+            "opened command",
+            "no downstream writes approved",
+            "next downstream approval/confirmation",
         ),
     )
+    for machine_fragment in (
+        "route_boundary:",
+        "route_allowed=true",
+        "downstream_write_approved",
+        "next_user_decision",
+        "```text",
+    ):
+        assert machine_fragment not in raw_route_step
 
 
-def test_start_workflow_write_capable_routes_render_route_boundary_envelopes() -> None:
+def test_start_workflow_write_capable_routes_render_plain_language_handoffs() -> None:
     workflow = (WORKFLOWS_DIR / "start.md").read_text(encoding="utf-8")
     expectations = {
         "new_project_minimal": {
             "selected_command": "gpd:new-project --minimal",
-            "next_user_decision": "new_project_minimal_scope_approval",
+            "next_required_decision": "downstream minimal-project scope approval",
             "boundary": (
                 "Route boundary for `new_project_minimal`",
                 "do not create `GPD/`",
@@ -366,7 +364,7 @@ def test_start_workflow_write_capable_routes_render_route_boundary_envelopes() -
         },
         "new_project_full": {
             "selected_command": "gpd:new-project",
-            "next_user_decision": "new_project_full_scope_approval",
+            "next_required_decision": "downstream full-project scope approval",
             "boundary": (
                 "Route boundary for `new_project_full`",
                 "do not create `GPD/`",
@@ -378,7 +376,7 @@ def test_start_workflow_write_capable_routes_render_route_boundary_envelopes() -
         },
         "map_research": {
             "selected_command": "gpd:map-research",
-            "next_user_decision": "map_research_durable_write_confirmation",
+            "next_required_decision": "explicit durable-write confirmation",
             "boundary": (
                 "Route boundary for `map_research`",
                 "creating, archiving, or updating `GPD/research-map/`",
@@ -389,7 +387,7 @@ def test_start_workflow_write_capable_routes_render_route_boundary_envelopes() -
         },
         "sync_state": {
             "selected_command": "gpd:sync-state",
-            "next_user_decision": "sync_repair_confirmation",
+            "next_required_decision": "explicit sync/repair confirmation",
             "boundary": (
                 "Route boundary for `sync_state`",
                 "do not run `gpd state repair-sync`",
@@ -401,7 +399,7 @@ def test_start_workflow_write_capable_routes_render_route_boundary_envelopes() -
         },
         "progress": {
             "selected_command": "gpd:progress",
-            "next_user_decision": "progress_reconcile_confirmation",
+            "next_required_decision": "explicit progress reconcile confirmation",
             "boundary": (
                 "Route boundary for `progress`",
                 "default/report mode only",
@@ -415,13 +413,18 @@ def test_start_workflow_write_capable_routes_render_route_boundary_envelopes() -
 
     for option_id, expectation in expectations.items():
         route = _route_for_option(workflow, option_id)
-        assert _route_boundary_envelope(route) == {
-            "option_id": option_id,
-            "selected_command": expectation["selected_command"],
-            "route_allowed": True,
-            "downstream_write_approved": False,
-            "next_user_decision": expectation["next_user_decision"],
-        }
+        _assert_anchor(
+            route,
+            f"{option_id} route renders compact plain-language handoff",
+            (
+                f"Opening `{expectation['selected_command']}`",
+                "`gpd:start` approves no",
+                "Next gate",
+                expectation["next_required_decision"],
+            ),
+        )
+        assert "route_boundary:" not in route
+        assert "downstream_write_approved" not in route
         _assert_anchor(
             route,
             f"{option_id} route denies downstream writes until named decision",

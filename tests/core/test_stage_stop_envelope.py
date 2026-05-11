@@ -3,32 +3,76 @@
 from __future__ import annotations
 
 import re
+import textwrap
 from pathlib import Path
 
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references"
 STAGE_STOP_PATH = REPO_ROOT / "src/gpd/specs/references/orchestration/stage-stop-envelope.md"
 CLOSEOUT_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/closeout.md"
-STAGE_STOP_OWNED_PATHS = (STAGE_STOP_PATH, CLOSEOUT_PATH)
+CHECKPOINT_RESUME_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/checkpoint-resume.md"
+VERIFICATION_HANDOFF_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/verification-handoff.md"
+GAP_REVERIFICATION_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/gap-reverification.md"
+WAVE_DISPATCH_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/wave-dispatch.md"
+EXECUTOR_DISPATCH_PATH = REPO_ROOT / "src/gpd/specs/workflows/execute-phase/executor-dispatch.md"
+BLOCKED_RECOVERY_PATH = REPO_ROOT / "src/gpd/specs/workflows/autonomous/blocked-recovery.md"
+PLAN_EXECUTE_CHILD_CYCLE_PATH = REPO_ROOT / "src/gpd/specs/workflows/autonomous/plan-execute-child-cycle.md"
+SESSION_ROUTER_PATH = REPO_ROOT / "src/gpd/specs/workflows/verify-work/session-router.md"
+STAGE_STOP_ROOTS = (WORKFLOWS_DIR, REFERENCES_DIR / "orchestration")
+STAGE_STOP_VISIBLE_NEXT_UP_PATHS = (
+    STAGE_STOP_PATH,
+    CHECKPOINT_RESUME_PATH,
+    VERIFICATION_HANDOFF_PATH,
+    GAP_REVERIFICATION_PATH,
+    WAVE_DISPATCH_PATH,
+    EXECUTOR_DISPATCH_PATH,
+    BLOCKED_RECOVERY_PATH,
+    PLAN_EXECUTE_CHILD_CYCLE_PATH,
+    SESSION_ROUTER_PATH,
+    CLOSEOUT_PATH,
+)
 
-PRIMARY_COMMAND_RE = re.compile(r"(?m)^Primary(?P<label> local transition)?: `(?P<command>[^`]+)`$")
+PRIMARY_COMMAND_RE = re.compile(r"(?m)^[ \t]*Primary(?P<label> local transition)?: `(?P<command>[^`]+)`$")
 PUBLIC_RUNTIME_COMMAND_RE = re.compile(r"^gpd:[^\s`]+(?:\s+.*)?$")
 LOCAL_TRANSITION_COMMAND_RE = re.compile(r"^gpd phase complete\b")
+FORBIDDEN_RUNTIME_FIELD_FRAGMENTS = (
+    "cat ",
+    "git ",
+    "gpd --raw",
+    "gpd phase complete",
+    "gpd verify phase",
+    "gpd:verify-phase",
+    "gpd-verify-work",
+)
 
 
 def _fenced_blocks(text: str, language: str) -> list[str]:
-    pattern = re.compile(rf"```{language}\n(?P<body>.*?)\n```", re.DOTALL)
-    return [match.group("body") for match in pattern.finditer(text)]
+    language_pattern = "ya?ml" if language == "yaml" else re.escape(language)
+    pattern = re.compile(rf"(?ms)^[ \t]*```{language_pattern}\n(?P<body>.*?)\n[ \t]*```")
+    return [textwrap.dedent(match.group("body")) for match in pattern.finditer(text)]
 
 
 def _stage_stop_blocks(path: Path) -> list[dict[str, object]]:
     blocks: list[dict[str, object]] = []
     for block in _fenced_blocks(path.read_text(encoding="utf-8"), "yaml"):
+        if "stage_stop:" not in block:
+            continue
         payload = yaml.safe_load(block)
         if isinstance(payload, dict) and isinstance(payload.get("stage_stop"), dict):
             blocks.append(payload["stage_stop"])
     return blocks
+
+
+def _stage_stop_owner_paths() -> list[Path]:
+    paths: list[Path] = []
+    for root in STAGE_STOP_ROOTS:
+        for path in sorted(root.rglob("*.md")):
+            if _stage_stop_blocks(path):
+                paths.append(path)
+    return paths
 
 
 def _next_up_blocks(path: Path) -> list[str]:
@@ -54,6 +98,7 @@ def _next_up_blocks(path: Path) -> list[str]:
 def _assert_public_runtime_command(command: object) -> None:
     assert isinstance(command, str)
     assert PUBLIC_RUNTIME_COMMAND_RE.match(command), command
+    assert not any(fragment in command for fragment in FORBIDDEN_RUNTIME_FIELD_FRAGMENTS), command
 
 
 def _assert_primary_line_shape(block: str) -> None:
@@ -120,13 +165,21 @@ def test_stage_stop_reference_next_up_blocks_have_one_owned_primary() -> None:
 
 
 def test_stage_stop_owned_yaml_blocks_use_public_runtime_secondaries() -> None:
-    blocks_by_path = {path: _stage_stop_blocks(path) for path in STAGE_STOP_OWNED_PATHS}
+    owner_paths = _stage_stop_owner_paths()
+    assert STAGE_STOP_PATH in owner_paths
+    assert CLOSEOUT_PATH in owner_paths
+    assert CHECKPOINT_RESUME_PATH in owner_paths
+    assert VERIFICATION_HANDOFF_PATH in owner_paths
+    assert GAP_REVERIFICATION_PATH in owner_paths
+    assert SESSION_ROUTER_PATH in owner_paths
+
+    blocks_by_path = {path: _stage_stop_blocks(path) for path in owner_paths}
     assert all(blocks_by_path.values())
 
     for path, blocks in blocks_by_path.items():
         for stage_stop in blocks:
-            assert stage_stop["status"] in {"checkpoint", "blocked", "completed", "failed"}
-            assert "checkpoint" in stage_stop
+            assert stage_stop["status"] in {"checkpoint", "blocked", "completed", "failed"}, path
+            assert "checkpoint" in stage_stop, path
             _assert_public_runtime_command(stage_stop["next_runtime_command"])
             also_available = stage_stop.get("also_available", [])
             assert isinstance(also_available, list), path
@@ -142,7 +195,7 @@ def test_stage_stop_owned_next_up_blocks_have_one_primary_without_raw_reload() -
         "--raw stage field-access",
     )
 
-    for path in STAGE_STOP_OWNED_PATHS:
+    for path in STAGE_STOP_VISIBLE_NEXT_UP_PATHS:
         blocks = _next_up_blocks(path)
         assert blocks, path
         for block in blocks:

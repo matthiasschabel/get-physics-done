@@ -33,6 +33,7 @@ stage_stop:
   stage: wave_failure_menu
   status: blocked
   reason: wave_failure_choice_required
+  checkpoint: none
   failed_plan_id: "{FAILED_PLAN_ID}"
   failed_wave: "{WAVE_NUM}"
   user_decision_needed: true

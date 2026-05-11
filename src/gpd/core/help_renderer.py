@@ -7,7 +7,7 @@ import textwrap
 from functools import lru_cache
 from typing import TypeAlias
 
-from gpd.command_labels import canonical_command_label, parse_command_label
+from gpd.command_labels import canonical_command_label, parse_command_label, rewrite_runtime_command_surfaces_to_public
 from gpd.core.public_surface_contract import (
     beginner_startup_ladder,
     beginner_startup_ladder_text,
@@ -431,15 +431,17 @@ def _required_ladder_command(commands: dict[str, str], slug: str) -> str:
         raise ValueError(f"beginner startup ladder must include {slug!r}") from exc
 
 
-def _format_ladder_step_as_runtime_commands(step: str) -> str:
+def _format_ladder_step_as_runtime_commands(step: str, *, public_prefix: str = "gpd:") -> str:
     commands = _runtime_command_for_ladder_step(step)
     if not commands:
         raise ValueError("beginner startup ladder steps must contain at least one command")
-    return " or ".join(f"`{command}`" for command in commands)
+    return " or ".join(f"`{_apply_public_prefix(command, public_prefix=public_prefix)}`" for command in commands)
 
 
-def _runtime_ladder_sentence(ladder: tuple[str, ...]) -> str:
-    command_fragments = tuple(_format_ladder_step_as_runtime_commands(step) for step in ladder)
+def _runtime_ladder_sentence(ladder: tuple[str, ...], *, public_prefix: str = "gpd:") -> str:
+    command_fragments = tuple(
+        _format_ladder_step_as_runtime_commands(step, public_prefix=public_prefix) for step in ladder
+    )
     if len(command_fragments) < 2:
         raise ValueError("beginner startup ladder must contain at least two steps")
     return (
@@ -763,7 +765,19 @@ def _render_command_detail_block(
 def _apply_public_prefix(text: str, *, public_prefix: str) -> str:
     if public_prefix == "gpd:":
         return text
-    return text.replace("gpd:", public_prefix)
+    return rewrite_runtime_command_surfaces_to_public(text, public_prefix=public_prefix)
+
+
+def format_help_all_command(*, public_prefix: str = "gpd:") -> str:
+    """Render the runtime-public command for the compact help index."""
+
+    return _apply_public_prefix("gpd:help --all", public_prefix=public_prefix)
+
+
+def format_detailed_help_follow_up(*, public_prefix: str = "gpd:") -> str:
+    """Render the runtime-public detailed-help follow-up sentence."""
+
+    return _apply_public_prefix(DETAILED_HELP_FOLLOW_UP, public_prefix=public_prefix)
 
 
 def render_command_detail_markdown(
@@ -788,15 +802,24 @@ def render_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -
     lines = [
         "## Detailed Command Reference",
         "",
-        "Use `gpd:help --command <name>` when you want the detailed notes for one runtime command at a time.",
+        _apply_public_prefix(
+            "Use `gpd:help --command <name>` when you want the detailed notes for one runtime command at a time.",
+            public_prefix=public_prefix,
+        ),
         "",
-        "Core workflow: `gpd:new-project` -> `gpd:discuss-phase` -> `gpd:plan-phase` -> `gpd:execute-phase` -> `gpd:verify-work` -> repeat.",
+        _apply_public_prefix(
+            "Core workflow: `gpd:new-project` -> `gpd:discuss-phase` -> `gpd:plan-phase` -> `gpd:execute-phase` -> `gpd:verify-work` -> repeat.",
+            public_prefix=public_prefix,
+        ),
         "",
-        (
-            "Project-aware technical-analysis lane: `gpd:derive-equation`, `gpd:dimensional-analysis`, "
-            "`gpd:limiting-cases`, `gpd:numerical-convergence`, `gpd:sensitivity-analysis`, `GPD/analysis/`. "
-            "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed "
-            "current-workspace lane."
+        _apply_public_prefix(
+            (
+                "Project-aware technical-analysis lane: `gpd:derive-equation`, `gpd:dimensional-analysis`, "
+                "`gpd:limiting-cases`, `gpd:numerical-convergence`, `gpd:sensitivity-analysis`, `GPD/analysis/`. "
+                "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed "
+                "current-workspace lane."
+            ),
+            public_prefix=public_prefix,
         ),
     ]
     emitted: set[str] = set()
@@ -819,7 +842,7 @@ def render_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -
     return "\n".join(lines).strip()
 
 
-def render_quick_start_markdown() -> str:
+def render_quick_start_markdown(*, public_prefix: str = "gpd:") -> str:
     """Render the default public quick-start help section."""
 
     for command in _quick_start_runtime_commands():
@@ -835,12 +858,17 @@ def render_quick_start_markdown() -> str:
     new_project_command = _required_ladder_command(ladder_commands, "new-project")
     map_research_command = _required_ladder_command(ladder_commands, "map-research")
     resume_work_command = _required_ladder_command(ladder_commands, "resume-work")
+    start_command = _apply_public_prefix(start_command, public_prefix=public_prefix)
+    tour_command = _apply_public_prefix(tour_command, public_prefix=public_prefix)
+    new_project_command = _apply_public_prefix(new_project_command, public_prefix=public_prefix)
+    map_research_command = _apply_public_prefix(map_research_command, public_prefix=public_prefix)
+    resume_work_command = _apply_public_prefix(resume_work_command, public_prefix=public_prefix)
     return textwrap.dedent(
         f"""\
         ## Quick Start
 
         If you only remember one order, use this: {beginner_startup_ladder_text()}.
-        {_runtime_ladder_sentence(startup_ladder)}
+        {_runtime_ladder_sentence(startup_ladder, public_prefix=public_prefix)}
 
         Use the path that matches your current situation:
 
@@ -848,7 +876,7 @@ def render_quick_start_markdown() -> str:
         1. `{start_command}` - Guided first-run router that chooses the safest first step for this folder
         2. `{tour_command}` - Get a read-only overview before choosing
         3. `{new_project_command}` - Create a full GPD project
-        4. `gpd:new-project --minimal` - Create a project through the shortest setup path
+        4. `{_apply_public_prefix("gpd:new-project --minimal", public_prefix=public_prefix)}` - Create a project through the shortest setup path
 
         **Existing work**
         1. `{map_research_command}` - Map an existing folder before turning it into a GPD project
@@ -858,21 +886,21 @@ def render_quick_start_markdown() -> str:
         1. `{local_resume}` - Reopen the current-workspace recovery snapshot from your normal terminal
         2. `{local_resume_recent}` - Find a different workspace first from your normal terminal
         3. `{resume_work_command}` - Continue inside the reopened project's canonical state
-        4. `gpd:progress` - See the broader project snapshot
-        5. `gpd:suggest-next` - Get the fastest next action
+        4. `{_apply_public_prefix("gpd:progress", public_prefix=public_prefix)}` - See the broader project snapshot
+        5. `{_apply_public_prefix("gpd:suggest-next", public_prefix=public_prefix)}` - Get the fastest next action
         6. `{local_observe_execution}` - Read-only progress / waiting state snapshot, conservative `possibly stalled` wording, and the next read-only checks from your normal terminal
         7. `{local_cost}` - Review recorded machine-local usage / cost from your normal terminal
 
         **Post-startup settings**
-        1. `gpd:settings` - Change autonomy, permissions, and broader runtime preferences after your first successful start or later
-        2. `gpd:set-tier-models` - Pin concrete `tier-1`, `tier-2`, and `tier-3` model ids only
+        1. `{_apply_public_prefix("gpd:settings", public_prefix=public_prefix)}` - Change autonomy, permissions, and broader runtime preferences after your first successful start or later
+        2. `{_apply_public_prefix("gpd:set-tier-models", public_prefix=public_prefix)}` - Pin concrete `tier-1`, `tier-2`, and `tier-3` model ids only
 
-        When a side investigation appears later, use `gpd:tangent` first. It is the chooser for stay / quick / defer / branch. Use `gpd:branch-hypothesis` only when that tangent needs its own git-backed branch.
+        When a side investigation appears later, use `{_apply_public_prefix("gpd:tangent", public_prefix=public_prefix)}` first. It is the chooser for stay / quick / defer / branch. Use `{_apply_public_prefix("gpd:branch-hypothesis", public_prefix=public_prefix)}` only when that tangent needs its own git-backed branch.
         """
     ).strip()
 
 
-def render_command_index_markdown() -> str:
+def render_command_index_markdown(*, public_prefix: str = "gpd:") -> str:
     """Render the compact grouped command index from renderer-owned help metadata."""
 
     lines = [
@@ -882,20 +910,23 @@ def render_command_index_markdown() -> str:
     ]
     for group in help_command_groups():
         lines.extend(("", f"### {group.name}", ""))
-        lines.extend(f"- `{entry.command}` - {entry.description}" for entry in group.commands)
+        lines.extend(
+            f"- `{_apply_public_prefix(entry.command, public_prefix=public_prefix)}` - {entry.description}"
+            for entry in group.commands
+        )
     return "\n".join(lines)
 
 
-def render_quick_start() -> str:
+def render_quick_start(*, public_prefix: str = "gpd:") -> str:
     """Render the default public quick-start help section."""
 
-    return render_quick_start_markdown()
+    return render_quick_start_markdown(public_prefix=public_prefix)
 
 
-def render_command_index() -> str:
+def render_command_index(*, public_prefix: str = "gpd:") -> str:
     """Render the compact grouped command index."""
 
-    return render_command_index_markdown()
+    return render_command_index_markdown(public_prefix=public_prefix)
 
 
 __all__ = [
@@ -907,6 +938,8 @@ __all__ = [
     "command_detail_payload",
     "command_groups_payload",
     "command_index_payload",
+    "format_detailed_help_follow_up",
+    "format_help_all_command",
     "help_command_groups",
     "render_command_index",
     "render_command_index_markdown",

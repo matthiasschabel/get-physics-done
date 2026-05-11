@@ -34,8 +34,10 @@ stage_stop:
 - `next_runtime_command`: exactly one public `gpd:` runtime command. Shell
   commands, `gpd --raw init`, and `gpd --raw stage field-access` stay out of
   this field.
-- `also_available`: optional secondary public commands. These are alternatives,
-  not competing primaries; keep raw staged reload mechanics out.
+- `also_available`: optional secondary public `gpd:` runtime commands. These
+  are alternatives, not competing primaries; keep shell commands, file-display
+  commands, local transitions, raw staged reload mechanics, and structural local
+  helpers out.
 
 If no domain-specific route is clear, set `next_runtime_command` to
 `gpd:suggest-next`.
@@ -67,9 +69,10 @@ Every user-facing stop renders from the envelope into this shape:
 ```markdown
 ## > Next Up
 
-Primary: `gpd:suggest-next`
+Primary: `gpd:resume-work`
 
 **Also available:**
+- `gpd:execute-phase {phase_number}` -- retry this phase workflow
 - `gpd:suggest-next` -- confirm the next action
 
 <sub>Start a fresh context window, then run the primary command above.</sub>
@@ -79,6 +82,10 @@ A rendered `## > Next Up` block contains exactly one `Primary:` line, and
 that line contains a public `gpd:` command. Put secondary commands only
 under `**Also available:**`, `**After this completes:**`, or another clearly
 secondary label.
+
+Report paths and other display-only entries are not commands. Render them under
+a label such as `**Report:**` or `**Display only:**`, never in
+`stage_stop.also_available`.
 
 For readiness-gated local transitions, the one primary line may use the owner
 label:

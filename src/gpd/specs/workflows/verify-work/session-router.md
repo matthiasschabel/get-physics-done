@@ -1,5 +1,5 @@
 <purpose>
-Thin session router for `gpd-verifier`. The verifier owns targets, proof policy, checks, comparison verdicts, and canonical status; this stage owns preflight and routing only.
+Thin `gpd-verifier` session router: preflight and routing only. The verifier owns targets, proof policy, verdicts, and status.
 </purpose>
 <stage_scope>
 Stage id: `session_router`. Owns argument normalization, active-session routing, review preflight, contract/lifecycle gates, and canonical phase artifact discovery. Do not load proof-redteam, verifier handoff, report schema, or gap-repair authorities here.
@@ -60,7 +60,16 @@ No-phase routing is choice-only:
 
 If active sessions exist, display a compact numbered list and ask for a number or phase.
 
-Wait for user response; load phase-only stages only after `PHASE_ARG` is set. If none exist, stop with: `No active verification sessions. Provide a phase number (e.g., gpd:verify-work <phase>)`.
+Wait for user response; load phase-only stages only after `PHASE_ARG` is set. If none exist, stop with the envelope below:
+
+```yaml
+stage_stop: {workflow: verify-work, stage: session_router, status: blocked, reason: verification_phase_needed, checkpoint: none, user_decision_needed: true, next_runtime_command: "gpd:verify-work <phase>", also_available: ["gpd:suggest-next"]}
+```
+
+## > Next Up
+Primary: `gpd:verify-work <phase>`
+
+## Phase Argument Errors
 
 **If non-empty `${PHASE_ARG}` is not found:**
 
@@ -93,7 +102,20 @@ If review preflight exits nonzero, stop and show its blocking issues before any 
 
 `contract_gate_stop:` workflow=verify-work; stage=session_router; status=blocked; checkpoint=contract_gate; trigger=blocked load | invalid validation | non-authoritative gate; primary=gpd:sync-state|gpd:new-project; rerun=gpd:verify-work ${PHASE_ARG}; secondary=gpd:suggest-next.
 
-If contract load is blocked, validation is invalid, or `project_contract_gate.authoritative` is not true, STOP before delegation, show the surfaced gate/load/validation errors, and use `contract_gate_stop`.
+If contract load is blocked, validation is invalid, or `project_contract_gate.authoritative` is not true, STOP before delegation, show the surfaced gate/load/validation errors, and use one concrete `contract_gate_stop` envelope:
+
+```yaml
+stage_stop: {workflow: verify-work, stage: session_router, status: blocked, reason: contract_gate_repair_required, checkpoint: contract_gate, user_decision_needed: true, next_runtime_command: "gpd:sync-state", also_available: ["gpd:verify-work ${PHASE_ARG}", "gpd:suggest-next"]}
+```
+
+Use `gpd:new-project` as `next_runtime_command` only when the surfaced gate says no project exists.
+
+## > Next Up
+Primary: `gpd:sync-state`
+
+**After this completes:** `gpd:verify-work ${PHASE_ARG}`
+
+## Continue Routing
 
 Run the executable lifecycle authority gate before proof repair, inventory building, contract checks, or verifier delegation:
 

@@ -3,7 +3,7 @@ Close the phase only after execution, verification, gap re-verification if neede
 </purpose>
 
 <stage_boundary>
-This stage owns readiness-gated phase completion, helper-owned checkpoint cleanup after successful closeout, and final runtime next-command rendering. It does not spawn verifiers, close gaps, run consistency checks, or decide scientific status.
+This stage owns readiness-gated completion, post-closeout helper checkpoint cleanup, and final next-command rendering. It does not spawn verifiers, close gaps, run consistency checks, or decide scientific status.
 </stage_boundary>
 
 <process>
@@ -21,7 +21,7 @@ fi
 
 Use `gpd --raw stage field-access execute-phase --stage closeout --style instruction` before reading `CLOSEOUT_INIT`.
 
-Before any roadmap/state transition, confirm:
+Before any roadmap/state transition, run the helper below and route from its JSON. The checks named here are prerequisites, not a second routing policy:
 
 - `verification_handoff` or `gap_reverification` produced a validated canonical verification report
 - canonical verification status is `passed`
@@ -39,12 +39,14 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-The readiness helper is read-only. If it reports missing summaries, missing/malformed/non-passing verification, active bounded segments, proof-redteam blockers, recovery preservation, or any other blocker, stop and surface its next action. Do not repair blockers, update roadmap/state, or clean checkpoints from this stage.
+The readiness helper is read-only. On any blocker, stop and surface its next action. Do not repair blockers, update roadmap/state, or clean checkpoints from this stage.
 
 Readiness next-action ownership:
 
 - Blocked closeout keeps a public runtime primary, such as `gpd:verify-work ${phase_number}`, `gpd:resume-work`, or `gpd:execute-phase ${phase_number}`.
 - Ready closeout labels `gpd phase complete "${phase_number}"` as `Primary local transition`, not a runtime workflow.
+- Prompt-visible ready closeout names the read-only readiness helper before the safe mutation: `gpd --raw phase closeout-readiness {PHASE_NUMBER} --require-verification`, then `gpd phase complete {PHASE_NUMBER}`.
+- Use `closeout_command_hint` for the local transition and `cleanup_command_hint` only as a secondary local helper.
 - Checkpoint cleanup is a secondary local helper. It never competes with the primary transition and never appears in `stage_stop.next_runtime_command` or `stage_stop.also_available`.
 </step>
 
@@ -55,24 +57,18 @@ Only after the gates above pass:
 gpd phase complete "${phase_number}"
 ```
 
-The completion helper owns the roadmap/state transition. Treat it as a local transition command, not a public runtime workflow. Load broader transition policy references only after readiness is green and only if the helper reports a transition ambiguity that needs policy interpretation.
+The completion helper owns the roadmap/state transition and rechecks lifecycle readiness before mutating. Treat it as a local transition command, not a public runtime workflow. Load broader transition policy references only after readiness is green and only if the helper reports a transition ambiguity that needs policy interpretation.
 Do not read `workflows/transition.md`, `templates/state-machine.md`, or `references/orchestration/state-portability.md` during normal closeout. If readiness is green and `gpd phase complete` reports an ambiguous transition/state-machine result, load the `transition_helper_ambiguity` conditional authority pack before interpreting or repairing that result.
 </step>
 
 <step name="cleanup_phase_checkpoints">
-After successful phase completion, ask the helper to remove only helper-owned checkpoint tags for this phase:
+After successful phase completion, remove only helper-owned checkpoint tags:
 
 ```bash
 gpd --raw phase checkpoint cleanup --phase "${phase_number}" --namespace phase --policy successful-closeout
 ```
 
-If cleanup exits nonzero, print the helper JSON and stop. Keep checkpoint tags when closeout readiness reported blockers, recovery artifacts, failed/skipped/rolled-back plans, verification gaps, or preservation policy. Cleanup is secondary local helper work after the transition; do not render it as the primary next action.
-
-| Condition | Action |
-| --- | --- |
-| All plans passed, verification passed, consistency gate passed, and no recovery preservation | Delete helper-owned successful-run checkpoint tags. |
-| Any failure, skip, rollback, verification gap, active bounded segment, or recovery artifact | Keep checkpoint tags. |
-| Phase completed after gap closure | Delete checkpoint tags only for the successful re-run segment; preserve earlier audit tags. |
+If cleanup exits nonzero, print the helper JSON and stop. Preserve tags for blockers, recovery artifacts, failed/skipped/rolled-back plans, verification gaps, or preservation policy. Cleanup is secondary local helper work after the transition; do not render it as the primary next action.
 </step>
 
 <step name="offer_next">

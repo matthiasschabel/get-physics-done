@@ -148,11 +148,24 @@ Present the summary of passed, issue, and skipped checks. Do not relax verifier 
 
 End with `## > Next Up`:
 
-- If verification passed and more phases remain: primary `gpd:discuss-phase ${next_phase}` when context is missing, otherwise `gpd:plan-phase ${next_phase}`
-- If verification passed and the milestone is complete: primary `gpd:complete-milestone`
+- If verification passed: run read-only closeout readiness first with `gpd --raw phase closeout-readiness "${phase_number}" --require-verification`.
+  - If readiness is blocked, render the readiness payload's runtime primary.
+  - If readiness is ready, render the local transition below and leave next-phase routing to `gpd:suggest-next` after it completes.
 - If gaps remain: primary `gpd:plan-phase ${phase_number} --gaps`; after gap plans exist, `gpd:execute-phase ${phase_number} --gaps-only`; confirm with `gpd:verify-work ${phase_number}`
 - Always include `gpd:suggest-next` as the recovery/confirmation command
 - Include `<sub>Start a fresh context window, then run the primary command above.</sub>`
+
+## > Next Up
+
+**Read-only readiness:**
+- `gpd --raw phase closeout-readiness {PHASE_NUMBER} --require-verification` -- confirm the local transition is allowed
+
+Primary local transition: `gpd phase complete {PHASE_NUMBER}`
+
+**After this completes:**
+- `gpd:suggest-next` -- route to the next runtime workflow
+
+<sub>Start a fresh context window, then run the primary command above.</sub>
 </step>
 
 </process>

@@ -307,6 +307,7 @@ def test_next_up_specificity_and_mutation_guard_classes() -> None:
     assert classify_next_up_specificity("ready_to_continue") == "vague"
     assert classify_next_up_specificity("runtime_verify_work") == "runtime_verify_work"
     assert classify_next_up_specificity("bounded_segment_resume") == "bounded_resume"
+    assert classify_next_up_specificity("local_phase_complete") == "concrete_command"
     assert classify_next_up_specificity("review_stop") == "concrete_command"
     assert classify_mutation_guard(False, False) == "no_write"
     assert classify_mutation_guard(True, True) == "expected_write_only"

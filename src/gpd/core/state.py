@@ -4985,6 +4985,7 @@ def state_record_verification(
     phase: str | None = None,
     status: str | None = None,
     verification_path: Path | None = None,
+    admin_override: bool = False,
 ) -> RecordVerificationResult:
     """Atomically update shared state after a VERIFICATION.md result.
 
@@ -4992,7 +4993,8 @@ def state_record_verification(
     ``Verifying`` without requiring a later manual ``gpd-sync-state``. If
     ``status`` is not provided, the function reads the canonical frontmatter
     status from the phase's VERIFICATION.md and fails closed if it is missing,
-    unparseable, or unknown.
+    unparseable, or unknown. Supplying ``status`` is an administrative repair
+    override and requires ``admin_override=True``.
     """
     if not phase:
         return RecordVerificationResult(recorded=False, error="phase required")
@@ -5000,6 +5002,14 @@ def state_record_verification(
     # Normalize user input: "passed" / "pass" / "failed" / "fail".
     normalized_status: str | None = None
     if status is not None:
+        if not admin_override:
+            return RecordVerificationResult(
+                recorded=False,
+                error=(
+                    "manual verification status override requires admin_override=True; "
+                    "omit status to read canonical VERIFICATION.md frontmatter"
+                ),
+            )
         normalized = status.strip().lower()
         if normalized in {"passed", "pass", "ok", "success"}:
             normalized_status = "passed"

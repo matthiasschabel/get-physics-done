@@ -72,6 +72,7 @@ __all__ = [
     "PhaseAmbiguityError",
     "PhaseValidationError",
     "PhaseIncompleteError",
+    "PhaseCloseoutBlockedError",
     "RoadmapNotFoundError",
     "MilestoneIncompleteError",
     # Models
@@ -162,6 +163,10 @@ class PhaseIncompleteError(PhaseError):
         )
 
 
+class PhaseCloseoutBlockedError(PhaseValidationError):
+    """Raised when phase closeout readiness disallows mutation."""
+
+
 class RoadmapNotFoundError(PhaseError):
     """Raised when ROADMAP.md is missing and required."""
 
@@ -216,6 +221,71 @@ def _update_state_markdown_locked(cwd: Path, update_state_content: Callable[[str
             return False
         _save_state_markdown_locked(cwd, update_state_content(state_content))
     return True
+
+
+def _phase_lifecycle_decision(cwd: Path, phase: str, *, require_verification: bool) -> object:
+    """Return the canonical phase lifecycle decision, falling back while Worker 1 lands."""
+
+    try:
+        from gpd.core.phase_lifecycle import phase_lifecycle_decision
+    except ModuleNotFoundError as exc:
+        if exc.name != "gpd.core.phase_lifecycle":
+            raise
+        from gpd.core.phase_closeout import phase_closeout_readiness
+
+        return phase_closeout_readiness(cwd, phase, require_verification=require_verification)
+
+    return phase_lifecycle_decision(cwd, phase, require_verification=require_verification)
+
+
+def _decision_value(decision: object, field: str, default: object = None) -> object:
+    if isinstance(decision, dict):
+        return decision.get(field, default)
+    if hasattr(decision, "model_dump"):
+        payload = decision.model_dump(mode="python")
+        if isinstance(payload, dict):
+            return payload.get(field, default)
+    return getattr(decision, field, default)
+
+
+def _ensure_phase_closeout_allows_mutation(cwd: Path, phase_num: str) -> None:
+    decision = _phase_lifecycle_decision(cwd, phase_num, require_verification=True)
+    closeout = _decision_value(decision, "closeout_readiness", None) or decision
+    ready = bool(_decision_value(closeout, "ready", _decision_value(decision, "closeout_ready", False)))
+    mutation_allowed = bool(_decision_value(closeout, "mutation_allowed", ready))
+    if ready and mutation_allowed:
+        return
+
+    raw_blockers = _decision_value(closeout, "blockers", _decision_value(decision, "closeout_blockers", [])) or []
+    blockers = [str(blocker) for blocker in raw_blockers if str(blocker).strip()]
+    if not blockers:
+        routing_status = _decision_value(
+            closeout,
+            "verification_routing_status",
+            _decision_value(decision, "verification_routing_status", None),
+        )
+        if routing_status and routing_status != "passed":
+            blockers.append(f"canonical verification report is {routing_status!r}; expected 'passed'")
+    reason = "; ".join(blockers) if blockers else "phase lifecycle decision disallowed mutation"
+    raise PhaseCloseoutBlockedError(f"Phase {phase_num} cannot be completed: {reason}")
+
+
+def _phase_complete_preflight(cwd: Path, phase_num: str) -> tuple[PhaseInfo, int, int]:
+    """Validate phase completeness and closeout readiness before any mutation."""
+    phase_info = find_phase(cwd, phase_num)
+    if not phase_info:
+        raise PhaseNotFoundError(phase_num)
+    if not phase_info.plans:
+        raise PhaseValidationError(f"Phase {phase_num} has no plans. Run plan-phase {phase_num} first.")
+
+    plan_count = len(phase_info.plans)
+    summary_count = matching_phase_artifact_count(phase_info.plans, phase_info.summaries)
+
+    if not is_phase_complete(plan_count, summary_count):
+        raise PhaseIncompleteError(phase_num, summary_count, plan_count)
+
+    _ensure_phase_closeout_allows_mutation(cwd, phase_num)
+    return phase_info, plan_count, summary_count
 
 
 def _restore_text_file(path: Path, previous_content: str | None) -> None:
@@ -2554,6 +2624,7 @@ def phase_complete(cwd: Path, phase_num: str) -> PhaseCompleteResult:
         PhaseValidationError: If phase number format is invalid.
         PhaseNotFoundError: If the phase doesn't exist.
         PhaseIncompleteError: If not all plans have summaries.
+        PhaseCloseoutBlockedError: If verification/closeout readiness disallows mutation.
     """
     phase_num = str(phase_num)
     _validate_phase_number(phase_num)
@@ -2570,18 +2641,10 @@ def phase_complete(cwd: Path, phase_num: str) -> PhaseCompleteResult:
     state_updated = False
 
     with gpd_span("phases.complete", phase=phase_num):
+        phase_info, plan_count, summary_count = _phase_complete_preflight(cwd, phase_num)
+
         with file_lock(roadmap_path) if roadmap_path.exists() else _null_context():
-            phase_info = find_phase(cwd, phase_num)
-            if not phase_info:
-                raise PhaseNotFoundError(phase_num)
-            if not phase_info.plans:
-                raise PhaseValidationError(f"Phase {phase_num} has no plans. Run plan-phase {phase_num} first.")
-
-            plan_count = len(phase_info.plans)
-            summary_count = matching_phase_artifact_count(phase_info.plans, phase_info.summaries)
-
-            if not is_phase_complete(plan_count, summary_count):
-                raise PhaseIncompleteError(phase_num, summary_count, plan_count)
+            phase_info, plan_count, summary_count = _phase_complete_preflight(cwd, phase_num)
 
             # Update ROADMAP.md
             roadmap_before = roadmap_path.read_text(encoding="utf-8") if roadmap_path.exists() else None

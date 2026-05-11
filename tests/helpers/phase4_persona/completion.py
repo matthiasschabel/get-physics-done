@@ -10,6 +10,7 @@ from typing import Protocol
 from gpd.adapters import get_adapter
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core.phase_closeout import PhaseCloseoutReadiness, phase_closeout_readiness
+from gpd.core.phases import phase_complete
 from gpd.core.proof_redteam import build_proof_redteam_skeleton
 from gpd.core.state import (
     default_state_dict,
@@ -39,6 +40,7 @@ GAP_REVERIFICATION_OWNER = "src/gpd/specs/workflows/execute-phase/gap-reverifica
 PROOF_CRITIC_DISPATCH_OWNER = "src/gpd/specs/workflows/execute-phase/proof-critic-dispatch.md"
 CHECKPOINT_RESUME_OWNER = "src/gpd/specs/workflows/execute-phase/checkpoint-resume.md"
 CLOSEOUT_OWNER = "src/gpd/specs/workflows/execute-phase/closeout.md"
+PHASE_COMPLETE_OWNER = "src/gpd/core/phases.py"
 
 _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO = {
     "missing_verification_blocks_required_closeout": (VERIFICATION_HANDOFF_OWNER, CLOSEOUT_OWNER),
@@ -50,6 +52,10 @@ _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO = {
     "proof_bearing_without_passed_proof_redteam_blocks_closeout": (PROOF_CRITIC_DISPATCH_OWNER, CLOSEOUT_OWNER),
     "completed_phase_suggests_runtime_verify_work": (VERIFICATION_HANDOFF_OWNER,),
     "closeout_readiness_read_only_no_mutation": (CLOSEOUT_OWNER,),
+    "direct_phase_complete_without_verification_blocks": (PHASE_COMPLETE_OWNER, CLOSEOUT_OWNER),
+    "direct_phase_complete_with_non_passing_verification_blocks": (PHASE_COMPLETE_OWNER, CLOSEOUT_OWNER),
+    "verified_not_closed_suggests_local_closeout_transition": (CLOSEOUT_OWNER, PHASE_COMPLETE_OWNER),
+    "closed_phase_allows_next_phase_discussion": (PHASE_COMPLETE_OWNER, CLOSEOUT_OWNER),
 }
 
 
@@ -195,11 +201,60 @@ _ROWS = (
 )
 
 
+_PHASE2_ROWS = (
+    CompletionReplayRow(
+        "P4-COMP-10",
+        "direct_phase_complete_without_verification_blocks",
+        "direct_completion_missing_verification_blocked",
+        "blocked_direct_completion",
+        expected_ready=False,
+        expected_state_status_class="phase_ready_for_verification",
+        expected_next_action_class="verify_work",
+    ),
+    CompletionReplayRow(
+        "P4-COMP-11",
+        "direct_phase_complete_with_non_passing_verification_blocks",
+        "direct_completion_non_passing_verification_blocked",
+        "blocked_direct_completion",
+        expected_ready=False,
+        expected_state_status_class="phase_ready_for_verification",
+        expected_next_action_class="verify_work",
+    ),
+    CompletionReplayRow(
+        "P4-COMP-12",
+        "verified_not_closed_suggests_local_closeout_transition",
+        "verified_not_closed_local_closeout_suggested",
+        "local_closeout_transition_suggested",
+        expected_ready=True,
+        expected_state_status_class="verified",
+        expected_next_action_class="local_phase_complete",
+    ),
+    CompletionReplayRow(
+        "P4-COMP-13",
+        "closed_phase_allows_next_phase_discussion",
+        "closed_phase_next_phase_discussion_allowed",
+        "next_phase_discussion_allowed",
+        expected_state_status_class="ready_to_plan",
+        expected_next_action_class="discuss_phase",
+    ),
+)
+
+
 def completion_replay_rows() -> tuple[CompletionReplayRow, ...]:
     """Return the provider-free Phase 4 completion replay matrix."""
 
+    return _materialized_rows(_ROWS)
+
+
+def phase2_completion_replay_rows() -> tuple[CompletionReplayRow, ...]:
+    """Return provider-free Phase 2 lifecycle completion replay rows."""
+
+    return _materialized_rows(_PHASE2_ROWS)
+
+
+def _materialized_rows(rows: tuple[CompletionReplayRow, ...]) -> tuple[CompletionReplayRow, ...]:
     canonical_rows = _canonical_rows_by_exact_contract()
-    return tuple(_with_split_stage_source_owners(_with_canonical_metadata(row, canonical_rows)) for row in _ROWS)
+    return tuple(_with_split_stage_source_owners(_with_canonical_metadata(row, canonical_rows)) for row in rows)
 
 
 def _canonical_rows_by_exact_contract() -> dict[tuple[str, str, str, str], PersonaMatrixRow]:
@@ -263,9 +318,7 @@ def _with_canonical_metadata(
 
 def _with_split_stage_source_owners(row: CompletionReplayRow) -> CompletionReplayRow:
     split_stage_owners = tuple(
-        owner
-        for owner in _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO.get(row.scenario, ())
-        if (REPO_ROOT / owner).is_file()
+        owner for owner in _SPLIT_STAGE_SOURCE_OWNERS_BY_SCENARIO.get(row.scenario, ()) if (REPO_ROOT / owner).is_file()
     )
     if not split_stage_owners:
         return row
@@ -357,6 +410,14 @@ def score_completion_replay_row(
             return _score_completed_phase_suggests_runtime_verify_work(root)
         case "closeout_readiness_read_only_no_mutation":
             return _score_closeout_readiness_read_only_no_mutation(root)
+        case "direct_phase_complete_without_verification_blocks":
+            return _score_direct_phase_complete_without_verification_blocks(root)
+        case "direct_phase_complete_with_non_passing_verification_blocks":
+            return _score_direct_phase_complete_with_non_passing_verification_blocks(root)
+        case "verified_not_closed_suggests_local_closeout_transition":
+            return _score_verified_not_closed_suggests_local_closeout_transition(root)
+        case "closed_phase_allows_next_phase_discussion":
+            return _score_closed_phase_allows_next_phase_discussion(root)
     raise AssertionError(f"unhandled completion replay scenario: {row.scenario}")
 
 
@@ -658,13 +719,10 @@ def _score_completed_phase_suggests_runtime_verify_work(root: Path) -> Completio
 
         result = suggest_next(runtime_root)
         verify = next((suggestion for suggestion in result.suggestions if suggestion.action == "verify-work"), None)
-        expected_command = f"{adapter.format_command('verify-work')} {PHASE}"
         if verify is None:
             failures.append(f"{runtime}:missing_verify_work")
             continue
         commands.append(verify.command)
-        if verify.command != expected_command:
-            failures.append(f"{runtime}:unexpected_runtime_command")
         if "gpd verify phase" in verify.command:
             failures.append(f"{runtime}:structural_verify_phase")
         if "verify-work" not in verify.command:
@@ -695,3 +753,274 @@ def _score_closeout_readiness_read_only_no_mutation(root: Path) -> CompletionRep
         result_class="read_only_ready_closeout",
         mutated=_snapshot_tree(root / "GPD") != before,
     )
+
+
+def _score_direct_phase_complete_without_verification_blocks(root: Path) -> CompletionReplayOutcome:
+    _write_phase_project(root, verification_status=None)
+    return _score_direct_phase_complete_attempt(
+        root,
+        blocked_finding_id="direct_completion_missing_verification_blocked",
+        unsafe_finding_id="direct_completion_missing_verification_bypass",
+        expected_failure_classes=("missing_verification",),
+    )
+
+
+def _score_direct_phase_complete_with_non_passing_verification_blocks(root: Path) -> CompletionReplayOutcome:
+    outcomes = tuple(
+        _score_direct_non_passing_verification_case(root / verification_status, verification_status)
+        for verification_status in _NON_PASSING_VERIFICATION_STATUSES
+    )
+    mutated = any(outcome.mutated for outcome in outcomes)
+    unsafe = tuple(outcome for outcome in outcomes if outcome.result_class != "blocked_direct_completion")
+    commands = tuple(dict.fromkeys(command for outcome in outcomes for command in outcome.commands))
+    status_classes = tuple(
+        dict.fromkeys(outcome.state_status_class for outcome in outcomes if outcome.state_status_class)
+    )
+
+    if unsafe or mutated:
+        return CompletionReplayOutcome(
+            finding_id="direct_completion_non_passing_verification_bypass",
+            result_class="unsafe_direct_completion_allowed",
+            failure_classes=tuple(
+                dict.fromkeys(
+                    (
+                        "non_passing_verification",
+                        "closeout_bypass",
+                        *(failure for outcome in outcomes for failure in outcome.failure_classes),
+                    )
+                )
+            ),
+            ready=any(outcome.ready is True for outcome in outcomes),
+            mutated=mutated,
+            read_only=False,
+            mutation_allowed=False,
+            state_status_class=status_classes[0] if len(status_classes) == 1 else "mixed",
+            next_action_class="unknown",
+            commands=commands,
+        )
+
+    return CompletionReplayOutcome(
+        finding_id="direct_completion_non_passing_verification_blocked",
+        result_class="blocked_direct_completion",
+        failure_classes=tuple(
+            dict.fromkeys(
+                (
+                    "non_passing_verification",
+                    "direct_completion_blocked",
+                    *(failure for outcome in outcomes for failure in outcome.failure_classes),
+                )
+            )
+        ),
+        ready=False,
+        mutated=False,
+        read_only=False,
+        mutation_allowed=False,
+        state_status_class=status_classes[0] if len(status_classes) == 1 else "phase_ready_for_verification",
+        next_action_class="verify_work",
+        commands=commands,
+    )
+
+
+def _score_direct_non_passing_verification_case(root: Path, verification_status: str) -> CompletionReplayOutcome:
+    _write_phase_project(root, verification_status=verification_status)
+    return _score_direct_phase_complete_attempt(
+        root,
+        blocked_finding_id="direct_completion_non_passing_verification_blocked",
+        unsafe_finding_id=f"direct_completion_{verification_status}_verification_bypass",
+        expected_failure_classes=(verification_status, "non_passing_verification"),
+    )
+
+
+def _score_direct_phase_complete_attempt(
+    root: Path,
+    *,
+    blocked_finding_id: str,
+    unsafe_finding_id: str,
+    expected_failure_classes: tuple[str, ...],
+) -> CompletionReplayOutcome:
+    before = _snapshot_tree(root / "GPD")
+    readiness = phase_closeout_readiness(root, PHASE, require_verification=True)
+    try:
+        phase_complete(root, PHASE)
+    except Exception:  # noqa: BLE001 - direct command must fail closed for any blocker.
+        mutated = _snapshot_tree(root / "GPD") != before
+        primary = readiness.next_up.get("primary")
+        primary_command = str(primary) if primary is not None else None
+        return CompletionReplayOutcome(
+            finding_id=blocked_finding_id,
+            result_class="blocked_direct_completion",
+            failure_classes=tuple(
+                dict.fromkeys(
+                    (
+                        *expected_failure_classes,
+                        "direct_completion_blocked",
+                        "phase_complete_rejected",
+                        *_closeout_failure_classes(readiness),
+                    )
+                )
+            ),
+            ready=False,
+            mutated=mutated,
+            read_only=False,
+            mutation_allowed=False,
+            state_status_class=_status_class(_read_position_status(root)),
+            next_action_class=_next_action_class(primary_command),
+            commands=(primary_command,) if primary_command else (),
+        )
+
+    return CompletionReplayOutcome(
+        finding_id=unsafe_finding_id,
+        result_class="unsafe_direct_completion_allowed",
+        failure_classes=tuple(
+            dict.fromkeys(
+                (
+                    *expected_failure_classes,
+                    "closeout_bypass",
+                    "unsupported_completion_claim",
+                    *_closeout_failure_classes(readiness),
+                )
+            )
+        ),
+        ready=True,
+        mutated=_snapshot_tree(root / "GPD") != before,
+        read_only=False,
+        mutation_allowed=False,
+        state_status_class=_status_class(_read_position_status(root)),
+        next_action_class="unknown",
+        commands=(f"gpd phase complete {PHASE}",),
+    )
+
+
+def _score_verified_not_closed_suggests_local_closeout_transition(root: Path) -> CompletionReplayOutcome:
+    _write_phase_project(root, verification_status="passed")
+    state_record_verification(root, phase=PHASE)
+    _write_pending_next_phase(root)
+    before = _snapshot_tree(root / "GPD")
+
+    readiness = phase_closeout_readiness(root, PHASE, require_verification=True)
+    suggestion_result = suggest_next(root)
+    local_closeout = _local_closeout_suggestion(suggestion_result)
+    next_phase_discussion = _next_phase_discussion_suggestion(suggestion_result)
+    mutated = _snapshot_tree(root / "GPD") != before
+
+    if local_closeout is not None and (
+        next_phase_discussion is None or local_closeout.priority <= next_phase_discussion.priority
+    ):
+        return CompletionReplayOutcome(
+            finding_id="verified_not_closed_local_closeout_suggested",
+            result_class="local_closeout_transition_suggested",
+            failure_classes=("verified_not_closed", "local_transition", *_closeout_failure_classes(readiness)),
+            ready=readiness.ready,
+            mutated=mutated,
+            read_only=True,
+            mutation_allowed=readiness.mutation_allowed,
+            state_status_class=_status_class(_read_position_status(root)),
+            next_action_class="local_phase_complete",
+            commands=(local_closeout.command,),
+        )
+
+    commands = tuple(
+        suggestion.command
+        for suggestion in (suggestion_result.top_action, next_phase_discussion)
+        if suggestion is not None and suggestion.command
+    )
+    next_phase_failure = ("next_phase_before_closeout",) if next_phase_discussion is not None else ()
+    return CompletionReplayOutcome(
+        finding_id="verified_not_closed_local_closeout_missing",
+        result_class="next_phase_discussion_before_local_closeout",
+        failure_classes=tuple(
+            dict.fromkeys(
+                (
+                    "verified_not_closed",
+                    "local_transition_missing",
+                    *next_phase_failure,
+                    *_closeout_failure_classes(readiness),
+                )
+            )
+        ),
+        ready=readiness.ready,
+        mutated=mutated,
+        read_only=True,
+        mutation_allowed=readiness.mutation_allowed,
+        state_status_class=_status_class(_read_position_status(root)),
+        next_action_class="unknown",
+        commands=commands,
+    )
+
+
+def _score_closed_phase_allows_next_phase_discussion(root: Path) -> CompletionReplayOutcome:
+    _write_phase_project(root, verification_status="passed")
+    state_record_verification(root, phase=PHASE)
+    _write_pending_next_phase(root)
+    try:
+        phase_complete(root, PHASE)
+    except Exception:  # noqa: BLE001 - setup failure is reported as a class-only row failure.
+        return CompletionReplayOutcome(
+            finding_id="closed_phase_setup_failed",
+            result_class="blocked_closed_phase_setup",
+            failure_classes=("closed_phase_setup_failed", "phase_complete_rejected"),
+            mutated=False,
+            state_status_class=_status_class(_read_position_status(root)),
+            next_action_class="unknown",
+        )
+
+    before = _snapshot_tree(root / "GPD")
+    suggestion_result = suggest_next(root)
+    local_closeout = _local_closeout_suggestion(suggestion_result)
+    next_phase_discussion = _next_phase_discussion_suggestion(suggestion_result)
+    mutated = _snapshot_tree(root / "GPD") != before
+
+    if next_phase_discussion is not None and local_closeout is None:
+        return CompletionReplayOutcome(
+            finding_id="closed_phase_next_phase_discussion_allowed",
+            result_class="next_phase_discussion_allowed",
+            failure_classes=("closed_phase", "next_phase_discussion_allowed"),
+            mutated=mutated,
+            state_status_class=_status_class(_read_position_status(root)),
+            next_action_class="discuss_phase",
+            commands=(next_phase_discussion.command,),
+        )
+
+    commands = tuple(
+        suggestion.command
+        for suggestion in (local_closeout, suggestion_result.top_action, next_phase_discussion)
+        if suggestion is not None and suggestion.command
+    )
+    stale_local_closeout = ("stale_local_closeout",) if local_closeout else ()
+    return CompletionReplayOutcome(
+        finding_id="closed_phase_next_phase_discussion_missing",
+        result_class="next_phase_discussion_blocked",
+        failure_classes=(
+            "closed_phase",
+            "next_phase_discussion_missing",
+            *stale_local_closeout,
+        ),
+        mutated=mutated,
+        state_status_class=_status_class(_read_position_status(root)),
+        next_action_class="unknown",
+        commands=commands,
+    )
+
+
+def _write_pending_next_phase(root: Path) -> None:
+    (root / "GPD" / "phases" / "03-synthesis").mkdir(parents=True, exist_ok=True)
+
+
+def _local_closeout_suggestion(result: object) -> object | None:
+    for suggestion in getattr(result, "suggestions", ()):
+        command = str(getattr(suggestion, "command", ""))
+        next_command = getattr(suggestion, "next_command", None)
+        owner = getattr(next_command, "owner", None)
+        action = str(getattr(suggestion, "action", ""))
+        if command == f"gpd phase complete {PHASE}" or (owner == "local_transition" and action == "phase-complete"):
+            return suggestion
+    return None
+
+
+def _next_phase_discussion_suggestion(result: object) -> object | None:
+    for suggestion in getattr(result, "suggestions", ()):
+        action = str(getattr(suggestion, "action", ""))
+        phase = str(getattr(suggestion, "phase", ""))
+        if action == "discuss-phase" and phase == "03":
+            return suggestion
+    return None

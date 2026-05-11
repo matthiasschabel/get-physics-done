@@ -139,6 +139,22 @@ def _write_passed_verification(report_path: Path) -> None:
     )
 
 
+def _snapshot_closeout_surfaces(root: Path) -> dict[Path, str | None]:
+    paths = [
+        root / "GPD" / "ROADMAP.md",
+        root / "GPD" / "STATE.md",
+        root / "GPD" / "state.json",
+        root / "GPD" / "CHECKPOINTS.md",
+    ]
+    return {path: path.read_text(encoding="utf-8") if path.exists() else None for path in paths}
+
+
+def _assert_closeout_surfaces_unchanged(snapshot: dict[Path, str | None]) -> None:
+    for path, before in snapshot.items():
+        after = path.read_text(encoding="utf-8") if path.exists() else None
+        assert after == before
+
+
 def test_apply_return_updates_completes_last_plan_from_ready_to_execute_state(tmp_path: Path) -> None:
     """A final-plan child return should not require manual Ready -> Executing repair."""
     phase_dir = _write_phase_project(tmp_path, status="Ready to execute")
@@ -163,6 +179,61 @@ def test_apply_return_updates_completes_last_plan_from_ready_to_execute_state(tm
     state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
     assert str(state["position"]["current_plan"]) == "2"
     assert state["position"]["status"] == "Phase complete \u2014 ready for verification"
+
+
+def test_phase_complete_without_canonical_verification_fails_closed_without_mutation(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Verified")
+    before = _snapshot_closeout_surfaces(tmp_path)
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "complete",
+            "02",
+        ],
+    )
+
+    assert result.exit_code == 1
+    failure_text = result.output + (str(result.exception) if result.exception else "")
+    assert "canonical verification report missing" in failure_text
+    assert not (tmp_path / "GPD" / "ROADMAP.md.lock").exists()
+    assert not (tmp_path / "GPD" / "CHECKPOINTS.md").exists()
+    assert not (tmp_path / "GPD" / "phase-checkpoints").exists()
+    assert not any(path.name.endswith("VERIFICATION.md") for path in phase_dir.iterdir())
+    _assert_closeout_surfaces_unchanged(before)
+
+
+def test_phase_complete_with_non_passing_verification_fails_closed_without_mutation(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Blocked")
+    verification_report = phase_dir / "02-VERIFICATION.md"
+    _write_gap_verification(verification_report, status="gaps_found")
+    before = _snapshot_closeout_surfaces(tmp_path)
+    before_report = verification_report.read_text(encoding="utf-8")
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "phase",
+            "complete",
+            "02",
+        ],
+    )
+
+    assert result.exit_code == 1
+    failure_text = result.output + (str(result.exception) if result.exception else "")
+    assert "canonical verification report must have top-level frontmatter status 'passed'" in failure_text
+    assert not (tmp_path / "GPD" / "ROADMAP.md.lock").exists()
+    assert verification_report.read_text(encoding="utf-8") == before_report
+    assert not (tmp_path / "GPD" / "CHECKPOINTS.md").exists()
+    assert not (tmp_path / "GPD" / "phase-checkpoints").exists()
+    _assert_closeout_surfaces_unchanged(before)
 
 
 def test_apply_return_updates_rejects_report_without_gpd_return_without_mutating_state(tmp_path: Path) -> None:
@@ -200,11 +271,7 @@ def test_apply_return_updates_rejects_malformed_required_fields_as_repairable_wi
     phase_dir = _write_phase_project(tmp_path, status="Ready to execute")
     report = phase_dir / "MALFORMED-RETURN.md"
     report.write_text(
-        "# Malformed Return\n\n"
-        "```yaml\n"
-        "gpd_return:\n"
-        "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
-        "```\n",
+        "# Malformed Return\n\n```yaml\ngpd_return:\n  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n```\n",
         encoding="utf-8",
     )
     state_path = tmp_path / "GPD" / "state.json"
@@ -463,6 +530,59 @@ def test_record_verification_maps_passing_report_to_verified_and_keeps_state_sur
     validation_payload = json.loads(validation.output)
     assert validation_payload["valid"] is True
     assert validation_payload["integrity_status"] == "healthy"
+
+
+def test_record_verification_manual_status_override_requires_admin_flag(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Verifying")
+    state_path = tmp_path / "GPD" / "state.json"
+    state_md_path = tmp_path / "GPD" / "STATE.md"
+    before_state = state_path.read_text(encoding="utf-8")
+    before_state_md = state_md_path.read_text(encoding="utf-8")
+
+    blocked_result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "state",
+            "record-verification",
+            "--phase",
+            "02",
+            "--status",
+            "passed",
+        ],
+    )
+
+    assert blocked_result.exit_code == 1
+    blocked_payload = json.loads(blocked_result.output)
+    assert blocked_payload["recorded"] is False
+    assert "admin_override=True" in blocked_payload["error"]
+    assert state_path.read_text(encoding="utf-8") == before_state
+    assert state_md_path.read_text(encoding="utf-8") == before_state_md
+    assert not any(path.name.endswith("VERIFICATION.md") for path in phase_dir.iterdir())
+
+    admin_result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "state",
+            "record-verification",
+            "--phase",
+            "02",
+            "--status",
+            "passed",
+            "--admin-status-override",
+        ],
+    )
+
+    assert admin_result.exit_code == 0, admin_result.output
+    admin_payload = json.loads(admin_result.output)
+    assert admin_payload["recorded"] is True
+    assert admin_payload["status"] == "Verified"
+    assert not any(path.name.endswith("VERIFICATION.md") for path in phase_dir.iterdir())
 
 
 def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tmp_path: Path) -> None:

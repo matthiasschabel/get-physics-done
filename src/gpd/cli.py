@@ -1590,15 +1590,26 @@ def state_record_verification(
         None,
         "--status",
         help=(
-            "Verification outcome (passed|failed). If omitted, read canonical VERIFICATION.md "
-            "frontmatter and fail closed on missing, malformed, or unknown status."
+            "Administrative override outcome (passed|failed). Requires --admin-status-override. "
+            "If omitted, read canonical VERIFICATION.md frontmatter and fail closed on missing, "
+            "malformed, or unknown status."
         ),
+    ),
+    admin_status_override: bool = typer.Option(
+        False,
+        "--admin-status-override",
+        help="Allow --status to bypass canonical VERIFICATION.md frontmatter for administrative repair.",
     ),
 ) -> None:
     """Atomically advance STATE.md past verification after a VERIFICATION.md result."""
     from gpd.core.state import state_record_verification
 
-    result = state_record_verification(_state_command_cwd(), phase=phase, status=status)
+    result = state_record_verification(
+        _state_command_cwd(),
+        phase=phase,
+        status=status,
+        admin_override=admin_status_override,
+    )
     payload = result.model_dump(mode="json") if hasattr(result, "model_dump") else result
     _output(payload)
     if isinstance(payload, dict) and payload.get("error"):

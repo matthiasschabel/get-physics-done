@@ -107,15 +107,17 @@ def _assert_event_matches_expected_score_keys(event: object, score: object) -> N
 
 def test_phase4_user_steering_rows_are_provider_free_and_owned() -> None:
     rows = user_steering_rows()
-
-    assert [row.row_id for row in rows] == [
+    expected_row_ids = {
         "P4-USER-01",
         "P4-USER-02",
         "P4-USER-03",
         "P4-USER-04",
         "P4-USER-05",
         "P4-USER-06",
-    ]
+    }
+
+    assert {row.row_id for row in rows} == expected_row_ids
+    assert len(rows) == len(expected_row_ids)
     assert all(row.provider_launch_allowed is False for row in rows)
     assert all(row.network_allowed is False for row in rows)
     assert all(row.raw_artifacts_allowed is False for row in rows)

@@ -225,11 +225,15 @@ def test_local_transition_command_has_distinct_owner() -> None:
     command = "gpd phase complete 02"
 
     next_command = classify_next_command(command=command, action="closeout", phase="02")
+    phase_complete_command = classify_next_command(command=command, action="phase-complete", phase="02")
     hint = build_command_run_hint(command=command, source="test", action="closeout", phase="02")
 
     assert next_command is not None
     assert next_command.owner == NEXT_COMMAND_OWNER_LOCAL_TRANSITION
     assert next_command.kind == KIND_LOCAL_CLI_TRANSITION_COMMAND
+    assert phase_complete_command is not None
+    assert phase_complete_command.action == "phase-complete"
+    assert phase_complete_command.owner == NEXT_COMMAND_OWNER_LOCAL_TRANSITION
     assert hint is not None
     assert hint["kind"] == KIND_LOCAL_CLI_TRANSITION_COMMAND
     assert hint["requires_user_initiated_runtime_command"] is False

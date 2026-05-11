@@ -288,6 +288,19 @@ def test_execute_phase_late_authorities_live_in_owning_stages() -> None:
     assert "gpd:complete-milestone" in closeout
 
 
+def test_execute_phase_closeout_names_readiness_before_safe_local_transition() -> None:
+    closeout = _stage_text("closeout.md")
+
+    readiness = "gpd --raw phase closeout-readiness"
+    transition = 'gpd phase complete "${phase_number}"'
+
+    assert readiness in closeout
+    assert transition in closeout
+    assert closeout.index(readiness) < closeout.index(transition)
+    assert "The completion helper owns the roadmap/state transition and rechecks lifecycle readiness" in closeout
+    assert "Primary local transition" in closeout
+
+
 def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> None:
     checkpoint = _stage_text("checkpoint-resume.md")
     verification_handoff = _stage_text("verification-handoff.md")

@@ -11,6 +11,7 @@ from tests.helpers.phase4_persona.completion import (
     SCHEMA_VERSION,
     CompletionReplayRow,
     completion_replay_rows,
+    phase2_completion_replay_rows,
     score_completion_replay_row,
 )
 from tests.helpers.phase4_persona.matrix import (
@@ -25,9 +26,7 @@ from tests.helpers.phase4_persona.matrix import (
 def test_phase4_completion_replay_rows_are_provider_free_and_owned() -> None:
     rows = completion_replay_rows()
     rows_by_scenario = {row.scenario: row for row in rows}
-
-    assert len(rows) == 9
-    assert {row.row_id for row in rows} == {
+    expected_row_ids = {
         "P4-COMP-01",
         "P4-COMP-02",
         "P4-COMP-03",
@@ -38,6 +37,9 @@ def test_phase4_completion_replay_rows_are_provider_free_and_owned() -> None:
         "P4-COMP-08",
         "P4-COMP-09",
     }
+
+    assert len(rows) == len(expected_row_ids)
+    assert {row.row_id for row in rows} == expected_row_ids
     assert all(row.schema_version == SCHEMA_VERSION for row in rows)
     assert SCHEMA_VERSION == PHASE4_PERSONA_SCHEMA_VERSION
     assert all(row.surface == "completion" for row in rows)
@@ -90,6 +92,30 @@ def test_phase4_completion_replay_rows_cover_required_completion_cases() -> None
     }
 
 
+def test_phase2_completion_replay_rows_are_provider_free_and_owned() -> None:
+    rows = phase2_completion_replay_rows()
+    expected_scenarios = {
+        "direct_phase_complete_without_verification_blocks",
+        "direct_phase_complete_with_non_passing_verification_blocks",
+        "verified_not_closed_suggests_local_closeout_transition",
+        "closed_phase_allows_next_phase_discussion",
+    }
+
+    assert {row.scenario for row in rows} == expected_scenarios
+    assert {row.row_id for row in rows} == {"P4-COMP-10", "P4-COMP-11", "P4-COMP-12", "P4-COMP-13"}
+    assert all(row.provider_launch_allowed is False for row in rows)
+    assert all(row.network_allowed is False for row in rows)
+    assert all(row.raw_artifacts_allowed is False for row in rows)
+    assert all(row.runtime_scope == ("provider_free",) for row in rows)
+    assert all(row.fixture_family.endswith("_class") for row in rows)
+    assert all(row.expected_mutation_guard_class == "no_write" for row in rows)
+
+    repo_root = Path(__file__).resolve().parents[2]
+    for row in rows:
+        for owner in (*row.source_owners, *row.test_owners):
+            assert (repo_root / owner).exists(), f"{row.row_id} owner missing: {owner}"
+
+
 @pytest.mark.parametrize("row", completion_replay_rows(), ids=lambda row: f"{row.row_id}-{row.scenario}")
 def test_phase4_persona_completion_replay(
     row: CompletionReplayRow,
@@ -113,6 +139,33 @@ def test_phase4_persona_completion_replay(
         assert outcome.next_action_class == row.expected_next_action_class
     if row.expect_no_mutation:
         assert outcome.mutated is False
+    assert_behavior_contract(row, outcome)
+
+
+@pytest.mark.parametrize("row", phase2_completion_replay_rows(), ids=lambda row: f"{row.row_id}-{row.scenario}")
+def test_phase2_persona_completion_replay(
+    row: CompletionReplayRow,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    outcome = score_completion_replay_row(row, tmp_path, monkeypatch)
+
+    assert outcome.provider_launch_allowed is False
+    assert outcome.network_allowed is False
+    assert outcome.raw_artifacts_allowed is False
+    assert outcome.finding_id == row.expected_finding
+    assert outcome.result_class == row.expected_result_class
+    if row.expected_ready is not None:
+        assert outcome.ready is row.expected_ready
+    if row.expected_state_status_class is not None:
+        assert outcome.state_status_class == row.expected_state_status_class
+    if row.expected_next_action_class is not None:
+        assert outcome.next_action_class == row.expected_next_action_class
+    if row.scenario.startswith("direct_phase_complete"):
+        assert outcome.read_only is False
+        assert outcome.mutated is False
+    else:
+        assert outcome.read_only is True
     assert_behavior_contract(row, outcome)
 
 

@@ -381,8 +381,18 @@ def _write_managed_publication_submission_lane(
     return entrypoint
 
 
-def _create_roadmap_with_phases(tmp_path: Path, phases: list[tuple[str, str]]) -> None:
+def _create_roadmap_with_phases(
+    tmp_path: Path,
+    phases: list[tuple[str, str]],
+    *,
+    completed: set[str] | None = None,
+) -> None:
+    completed = completed or set()
     lines = ["# Roadmap", ""]
+    for number, name in phases:
+        mark = "x" if number in completed else " "
+        lines.append(f"- [{mark}] Phase {number}: {name}")
+    lines.append("")
     for number, name in phases:
         lines.extend(
             [
@@ -842,6 +852,68 @@ def test_complete_unverified_runtime_install_exposes_next_command_decision(tmp_p
     assert verify.next_command.reason == verify.reason
 
 
+def test_complete_unverified_phase_blocks_next_phase_suggestions(tmp_path: Path) -> None:
+    """Summary-complete phases route to verification before next-phase work."""
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")])
+    _create_phase(root, "01-setup", plans=1, summaries=1)
+    _create_phase(root, "02-core", research=True)
+
+    result = suggest_next(root)
+
+    actions = [s.action for s in result.suggestions]
+    assert "verify-work" in actions
+    assert "plan-phase" not in actions
+    assert "discuss-phase" not in actions
+    assert "audit-milestone" not in actions
+    assert "write-paper" not in actions
+    verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert verify.command == "gpd:verify-work 01"
+    assert verify.next_command is not None
+    assert verify.next_command.owner == "runtime"
+
+
+def test_passed_verification_not_closed_suggests_local_phase_transition(tmp_path: Path) -> None:
+    """Passed verification must close locally before discussing the next phase."""
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")])
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+    _create_phase(root, "02-core", research=True)
+    before_roadmap = (root / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
+
+    result = suggest_next(root)
+
+    actions = [s.action for s in result.suggestions]
+    assert "phase-complete" in actions
+    assert "plan-phase" not in actions
+    assert "discuss-phase" not in actions
+    assert "audit-milestone" not in actions
+    assert "write-paper" not in actions
+    transition = next(s for s in result.suggestions if s.action == "phase-complete")
+    assert transition.command == "gpd phase complete 01"
+    assert transition.next_command is not None
+    assert transition.next_command.owner == "local_transition"
+    assert transition.next_command.requires_user_initiated_runtime_command is False
+    assert (root / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
+
+
+def test_after_phase_closeout_next_phase_suggestions_may_appear(tmp_path: Path) -> None:
+    """Once the completed phase is closed, suggest can move to the next phase."""
+    root = _setup_project(tmp_path)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")], completed={"1"})
+    _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
+    _create_phase(root, "02-core", research=True)
+
+    result = suggest_next(root)
+
+    actions = [s.action for s in result.suggestions]
+    assert "phase-complete" not in actions
+    assert "verify-work" not in actions
+    assert "plan-phase" in actions
+    plan = next(s for s in result.suggestions if s.action == "plan-phase")
+    assert plan.command == "gpd init plan-phase 02"
+
+
 def test_unknown_verification_status_blocks_audit_and_paper_suggestions(tmp_path: Path) -> None:
     """Unknown verification status is verification debt, not milestone/paper readiness."""
     root = _setup_project(tmp_path)
@@ -890,7 +962,7 @@ def test_verification_without_frontmatter_status_fails_closed(tmp_path: Path) ->
 def test_researched_phase_suggests_plan(tmp_path: Path) -> None:
     """Phase with research but no plans suggests planning."""
     root = _setup_project(tmp_path)
-    _create_roadmap(root)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")], completed={"1"})
     _create_phase(root, "01-setup", plans=2, summaries=2, verification=True)
     _create_phase(root, "02-core", research=True)
     result = suggest_next(root)
@@ -904,7 +976,7 @@ def test_researched_phase_suggests_plan(tmp_path: Path) -> None:
 def test_pending_phase_suggests_discuss(tmp_path: Path) -> None:
     """Pending phase with nothing suggests discussion."""
     root = _setup_project(tmp_path)
-    _create_roadmap(root)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")], completed={"1"})
     _create_phase(root, "01-setup", plans=2, summaries=2, verification=True)
     _create_phase(root, "02-core")  # empty phase
     result = suggest_next(root)
@@ -913,9 +985,9 @@ def test_pending_phase_suggests_discuss(tmp_path: Path) -> None:
 
 
 def test_all_complete_suggests_audit(tmp_path: Path) -> None:
-    """All phases complete suggests milestone audit."""
+    """All phases complete and closed suggests milestone audit."""
     root = _setup_project(tmp_path)
-    _create_roadmap(root)
+    _create_roadmap_with_phases(root, [("1", "Setup"), ("2", "Core")], completed={"1", "2"})
     _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
     _create_phase(root, "02-core", plans=2, summaries=2, verification=True)
     result = suggest_next(root)
@@ -1562,9 +1634,9 @@ def test_non_markdown_referee_report_does_not_trigger_response(tmp_path: Path) -
 
 
 def test_literature_review_suggested_when_all_complete(tmp_path: Path) -> None:
-    """All complete + no literature review suggests one."""
+    """All complete and closed + no literature review suggests one."""
     root = _setup_project(tmp_path)
-    _create_roadmap(root)
+    _create_roadmap_with_phases(root, [("1", "Setup")], completed={"1"})
     _create_phase(root, "01-setup", plans=1, summaries=1, verification=True)
     result = suggest_next(root)
     actions = [s.action for s in result.suggestions]
@@ -1660,7 +1732,11 @@ def test_yolo_mode_boosts_execution(tmp_path: Path) -> None:
 def test_decimal_phases_sorted_correctly(tmp_path: Path) -> None:
     """Decimal sub-phases should be sorted numerically (2.1 < 2.10)."""
     root = _setup_project(tmp_path)
-    _create_roadmap(root)
+    _create_roadmap_with_phases(
+        root,
+        [("1", "Base"), ("2.1", "Early"), ("2.10", "Late")],
+        completed={"1", "2.10"},
+    )
     _create_phase(root, "02.10-late", plans=1, summaries=1, verification=True)
     _create_phase(root, "02.1-early")
     _create_phase(root, "01-base", plans=1, summaries=1, verification=True)

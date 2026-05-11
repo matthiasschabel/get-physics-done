@@ -1345,6 +1345,26 @@ def test_execute_phase_closeout_always_surfaces_concrete_next_commands() -> None
     )
 
 
+def test_execute_phase_closeout_prompt_orders_readiness_before_safe_mutation() -> None:
+    workflow = workflow_authority_text(WORKFLOWS_DIR, "execute-phase")
+
+    _assert_ordered_fragments(
+        workflow,
+        (
+            "gpd --raw phase closeout-readiness",
+            'gpd phase complete "${phase_number}"',
+        ),
+    )
+    _assert_normalized_fragments(
+        workflow,
+        (
+            "read-only readiness helper before the safe mutation",
+            "rechecks lifecycle readiness before mutating",
+            "Primary local transition",
+        ),
+    )
+
+
 def test_command_requirements_force_concrete_next_up_for_stops() -> None:
     note = command_visibility_note()
 

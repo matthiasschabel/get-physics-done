@@ -32,6 +32,12 @@ def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _extract_between(content: str, start_marker: str, end_marker: str) -> str:
+    start = content.index(start_marker) + len(start_marker)
+    end = content.index(end_marker, start)
+    return content[start:end]
+
+
 def _child_gate(text: str, gate_id: str):
     return child_gate_from_text(text, gate_id)
 
@@ -341,10 +347,7 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
     planner_prompt = _read(TEMPLATES_DIR / "planner-subagent-prompt.md")
     gate = _child_gate(workflow, "verify_work_gap_planner")
 
-    assert (
-        "Use `templates/planner-subagent-prompt.md` for the gap_closure handoff"
-        in workflow
-    )
+    assert "Use `templates/planner-subagent-prompt.md` for the gap_closure handoff" in workflow
     assert [(artifact.path, artifact.kind) for artifact in gate.expected_artifacts] == [
         ("${PHASE_DIR_ABS}/*-PLAN.md", "glob")
     ]
@@ -539,4 +542,23 @@ def test_verify_work_record_verification_state_closeout_is_sequential() -> None:
         "never parallelize",
         "state mutation",
         "validation",
+    )
+
+
+def test_verify_work_passed_verification_routes_to_closeout_readiness_not_next_phase() -> None:
+    workflow = _read(WORKFLOWS_DIR / "verify-work.md")
+    complete_session = _extract_between(workflow, '<step name="complete_session">', "</step>")
+
+    readiness = 'gpd --raw phase closeout-readiness "${phase_number}" --require-verification'
+    local_transition = "gpd phase complete {PHASE_NUMBER}"
+
+    assert readiness in complete_session
+    assert local_transition in complete_session
+    assert complete_session.index(readiness) < complete_session.index(local_transition)
+    assert "Primary local transition" in complete_session
+    assert "readiness payload's runtime primary" in complete_session
+    assert "gpd:plan-phase ${next_phase}" not in complete_session
+    assert "gpd:discuss-phase ${next_phase}" not in complete_session
+    assert (
+        "If verification passed and the milestone is complete: primary `gpd:complete-milestone`" not in complete_session
     )

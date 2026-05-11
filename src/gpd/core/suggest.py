@@ -45,7 +45,7 @@ from gpd.core.manuscript_artifacts import (
     resolve_current_manuscript_resolution,
     resolve_current_publication_subject,
 )
-from gpd.core.phases import _milestone_completion_snapshot
+from gpd.core.phases import _milestone_completion_snapshot, roadmap_analyze
 from gpd.core.project_reentry import resolve_project_reentry
 from gpd.core.proof_review import (
     manuscript_requires_theorem_bearing_review,
@@ -61,10 +61,16 @@ from gpd.core.publication_runtime import (
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.runtime_command_surfaces import format_active_runtime_command
 from gpd.core.utils import (
+    compare_phase_numbers as _compare_phase_numbers,
+)
+from gpd.core.utils import (
     is_phase_complete as _is_phase_complete,
 )
 from gpd.core.utils import (
     matching_phase_artifact_count as _matching_phase_artifact_count,
+)
+from gpd.core.utils import (
+    phase_normalize as _phase_normalize,
 )
 from gpd.core.utils import (
     phase_sort_key as _phase_sort_key,
@@ -182,6 +188,17 @@ class _PhaseAnalysis:
     has_research: bool
     has_verification: bool
     verification_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class _PhaseLifecycleSuggestion:
+    """Blocking lifecycle recommendation for a summary-complete phase."""
+
+    action: str
+    priority: int
+    reason: str
+    command: str
+    phase: str
 
 
 # ─── Internal Helpers ─────────────────────────────────────────────────────────
@@ -358,6 +375,316 @@ def _build_next_command_decision(
         if active_runtime_public_prefix is not None
         else NEXT_COMMAND_SURFACE_CONTEXT_SHARED_NEXT_UP,
         active_runtime_public_prefix=active_runtime_public_prefix,
+    )
+
+
+_SHARED_LIFECYCLE_UNAVAILABLE = object()
+
+
+def _lifecycle_value(decision: object, *names: str) -> object | None:
+    for name in names:
+        if isinstance(decision, dict) and name in decision:
+            return decision[name]
+        value = getattr(decision, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def _command_label_from_value(value: object) -> str | None:
+    if isinstance(value, str):
+        label = value.strip()
+        return label or None
+    if isinstance(value, dict):
+        for key in ("command", "label", "primary"):
+            nested = value.get(key)
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+        return None
+    for attr in ("command", "label"):
+        nested = getattr(value, attr, None)
+        if isinstance(nested, str) and nested.strip():
+            return nested.strip()
+    return None
+
+
+def _normalize_lifecycle_action(action: object, status: object | None = None) -> str | None:
+    raw = str(action or "").strip().lower().replace("_", "-").replace(" ", "-")
+    aliases = {
+        "verify": "verify-work",
+        "verification": "verify-work",
+        "run-verification": "verify-work",
+        "run-verify-work": "verify-work",
+        "closeout": "phase-complete",
+        "complete-phase": "phase-complete",
+        "phase-complete": "phase-complete",
+        "phase-transition": "phase-complete",
+        "local-transition": "phase-complete",
+    }
+    if raw in aliases:
+        return aliases[raw]
+    if raw in {"", "none", "ready", "after-closeout", "next-phase", "next"}:
+        raw_status = str(status or "").strip().lower().replace("_", "-").replace(" ", "-")
+        if "verify" in raw_status or "verification" in raw_status:
+            return "verify-work"
+        if "closeout" in raw_status or "phase-complete" in raw_status or "transition" in raw_status:
+            return "phase-complete"
+        return None
+    return raw
+
+
+def _coerce_shared_phase_lifecycle_suggestion(
+    decision: object,
+    *,
+    phase: _PhaseAnalysis,
+    format_command,
+) -> _PhaseLifecycleSuggestion | None:
+    if decision is None:
+        return None
+
+    decision_kind = str(_lifecycle_value(decision, "decision", "lifecycle_state") or "").strip().lower()
+    if decision_kind in {"closed_ready_next_phase", "closed_milestone_complete"}:
+        return None
+
+    ready_for_next = _lifecycle_value(
+        decision,
+        "ready_for_next_phase",
+        "ready_for_downstream",
+        "closeout_complete",
+        "closed",
+        "after_closeout",
+        "phase_closed",
+    )
+    if ready_for_next is True:
+        return None
+
+    blocks_downstream = _lifecycle_value(
+        decision,
+        "blocks_downstream",
+        "block_downstream",
+        "blocks_next_phase",
+        "blocks_downstream_suggestions",
+    )
+    if blocks_downstream is False:
+        return None
+
+    status = _lifecycle_value(decision, "status", "state", "decision", "lifecycle_state")
+    action = _normalize_lifecycle_action(
+        _lifecycle_value(decision, "action", "next_action", "recommended_action", "primary_action"),
+        status,
+    )
+    if action is None:
+        return None
+
+    phase_number = str(_lifecycle_value(decision, "phase", "phase_number") or phase.number)
+    if action in {"verify-work", "execute-phase", "plan-phase", "discuss-phase"}:
+        command = f"{format_command(action)} {phase_number}"
+    elif action == "resume-work":
+        command = format_command("resume-work")
+    else:
+        command = _command_label_from_value(
+            _lifecycle_value(decision, "command", "primary_command", "next_command", "primary")
+        )
+        if command is None:
+            if action == "phase-complete":
+                command = f"gpd phase complete {phase_number}"
+            else:
+                return None
+
+    priority_value = _lifecycle_value(decision, "priority")
+    try:
+        priority = int(priority_value) if priority_value is not None else 2
+    except (TypeError, ValueError):
+        priority = 2
+
+    reason_value = _lifecycle_value(decision, "reason", "message", "summary")
+    reason = str(reason_value).strip() if reason_value is not None else ""
+    if not reason:
+        blockers = _lifecycle_value(decision, "closeout_blockers", "blockers")
+        if decision_kind == "blocked_closeout" and isinstance(blockers, list) and blockers:
+            blocker_preview = "; ".join(str(blocker) for blocker in blockers[:2])
+            reason = f"Phase {phase_number} closeout is blocked: {blocker_preview}"
+        elif action == "verify-work":
+            routing_status = str(_lifecycle_value(decision, "verification_routing_status") or "missing")
+            if routing_status == "missing":
+                reason = f"Phase {phase_number} is complete but unverified — run verification"
+            else:
+                reason = f"Phase {phase_number} verification is {routing_status} — refresh verification"
+        elif action == "phase-complete":
+            reason = f"Phase {phase_number} passed verification but is not closed — run the local transition"
+        else:
+            reason = f"Phase {phase_number} lifecycle gate blocks downstream suggestions"
+
+    return _PhaseLifecycleSuggestion(
+        action=action,
+        priority=priority,
+        reason=reason,
+        command=command,
+        phase=phase_number,
+    )
+
+
+def _shared_phase_lifecycle_suggestion(
+    cwd: Path,
+    phase: _PhaseAnalysis,
+    *,
+    format_command,
+) -> _PhaseLifecycleSuggestion | None | object:
+    try:
+        from gpd.core.phase_lifecycle import phase_lifecycle_decision
+    except (ImportError, ModuleNotFoundError):
+        return _SHARED_LIFECYCLE_UNAVAILABLE
+
+    try:
+        decision = phase_lifecycle_decision(cwd, phase.number, require_verification=True)
+    except TypeError:
+        decision = phase_lifecycle_decision(cwd, phase.number)
+    except Exception:
+        logger.debug("shared phase lifecycle decision failed", exc_info=True)
+        return _SHARED_LIFECYCLE_UNAVAILABLE
+
+    return _coerce_shared_phase_lifecycle_suggestion(
+        decision,
+        phase=phase,
+        format_command=format_command,
+    )
+
+
+def _roadmap_marks_phase_closed(cwd: Path, phase_number: str) -> bool:
+    try:
+        roadmap = roadmap_analyze(cwd)
+    except Exception:
+        logger.debug("suggest: roadmap lifecycle analysis failed", exc_info=True)
+        return False
+
+    normalized = _phase_normalize(phase_number)
+    return any(_phase_normalize(phase.number) == normalized and phase.roadmap_complete for phase in roadmap.phases)
+
+
+def _state_indicates_phase_closed(state: dict[str, object] | None, phase_number: str) -> bool:
+    if not isinstance(state, dict):
+        return False
+    position = state.get("position")
+    if not isinstance(position, dict):
+        return False
+
+    status = str(position.get("status") or "").strip().casefold()
+    current_phase = position.get("current_phase")
+    if status == "milestone complete" and str(current_phase or "").strip().casefold() in {"", "none", "null"}:
+        return True
+    if current_phase is None:
+        return False
+
+    current = str(current_phase).strip()
+    if not current or current.casefold() in {"none", "null", "n/a"}:
+        return status == "milestone complete"
+    if _phase_normalize(current) == _phase_normalize(phase_number):
+        return False
+    return _compare_phase_numbers(_phase_normalize(current), _phase_normalize(phase_number)) > 0
+
+
+def _phase_is_closed_after_verification(
+    cwd: Path,
+    phase_number: str,
+    *,
+    state: dict[str, object] | None,
+) -> bool:
+    return _roadmap_marks_phase_closed(cwd, phase_number) or _state_indicates_phase_closed(state, phase_number)
+
+
+def _closeout_readiness_safely(cwd: Path, phase_number: str):
+    try:
+        from gpd.core.phase_closeout import phase_closeout_readiness
+
+        return phase_closeout_readiness(cwd, phase_number, require_verification=True)
+    except Exception:
+        logger.debug("suggest: phase closeout readiness failed", exc_info=True)
+        return None
+
+
+def _blocked_closeout_lifecycle_suggestion(
+    readiness: object,
+    *,
+    phase_number: str,
+    format_command,
+) -> _PhaseLifecycleSuggestion:
+    next_up = getattr(readiness, "next_up", {})
+    command_entries = next_up.get("commands") if isinstance(next_up, dict) else None
+    primary_entry = command_entries[0] if isinstance(command_entries, list) and command_entries else {}
+    if not isinstance(primary_entry, dict):
+        primary_entry = {}
+    primary_action = primary_entry.get("action") if isinstance(primary_entry, dict) else None
+    action = str(primary_action or "phase-closeout-blocked")
+
+    if action == "verify-work":
+        command = f"{format_command('verify-work')} {phase_number}"
+    elif action == "resume-work":
+        command = format_command("resume-work")
+    elif action == "execute-phase":
+        command = f"{format_command('execute-phase')} {phase_number}"
+    else:
+        command = _command_label_from_value(primary_entry)
+        if command is None and isinstance(next_up, dict):
+            command = _command_label_from_value(next_up.get("primary"))
+        command = command or f"gpd phase complete {phase_number}"
+
+    blockers = getattr(readiness, "blockers", [])
+    blocker_preview = "; ".join(str(blocker) for blocker in blockers[:2]) if isinstance(blockers, list) else ""
+    reason = f"Phase {phase_number} closeout is blocked"
+    if blocker_preview:
+        reason += f": {blocker_preview}"
+
+    return _PhaseLifecycleSuggestion(
+        action=action,
+        priority=2,
+        reason=reason,
+        command=command,
+        phase=phase_number,
+    )
+
+
+def _pending_phase_lifecycle_suggestion(
+    cwd: Path,
+    phase: _PhaseAnalysis,
+    *,
+    state: dict[str, object] | None,
+    format_command,
+) -> _PhaseLifecycleSuggestion | None:
+    shared = _shared_phase_lifecycle_suggestion(cwd, phase, format_command=format_command)
+    if shared is not _SHARED_LIFECYCLE_UNAVAILABLE:
+        return shared
+
+    if phase.verification_status != "passed":
+        if phase.verification_status == "missing":
+            reason = f"Phase {phase.number} is complete but unverified — run verification"
+        else:
+            reason = f"Phase {phase.number} verification is {phase.verification_status} — refresh verification"
+        return _PhaseLifecycleSuggestion(
+            action="verify-work",
+            priority=2,
+            command=f"{format_command('verify-work')} {phase.number}",
+            reason=reason,
+            phase=phase.number,
+        )
+
+    if _phase_is_closed_after_verification(cwd, phase.number, state=state):
+        return None
+
+    readiness = _closeout_readiness_safely(cwd, phase.number)
+    if readiness is not None and getattr(readiness, "ready", False) is False:
+        return _blocked_closeout_lifecycle_suggestion(
+            readiness,
+            phase_number=phase.number,
+            format_command=format_command,
+        )
+
+    closeout_command = getattr(readiness, "closeout_command", None) if readiness is not None else None
+    return _PhaseLifecycleSuggestion(
+        action="phase-complete",
+        priority=2,
+        command=str(closeout_command or f"gpd phase complete {phase.number}"),
+        reason=f"Phase {phase.number} passed verification but is not closed — run the local transition",
+        phase=phase.number,
     )
 
 
@@ -979,31 +1306,33 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
             )
         )
 
-    # 5b. Verify completed phase that lacks fresh/passing verification
-    unverified_complete = next(
-        (p for p in phase_analysis if p.status == "complete" and p.verification_status != "passed"),
+    # 5b. Complete phases must pass lifecycle gates before downstream routing.
+    lifecycle_suggestion = next(
+        (
+            suggestion
+            for phase in phase_analysis
+            if phase.status == "complete"
+            for suggestion in (
+                _pending_phase_lifecycle_suggestion(cwd, phase, state=state, format_command=format_command),
+            )
+            if suggestion is not None
+        ),
         None,
     )
-    if unverified_complete:
-        if unverified_complete.verification_status == "missing":
-            reason = f"Phase {unverified_complete.number} is complete but unverified — run verification"
-        else:
-            reason = (
-                f"Phase {unverified_complete.number} verification is {unverified_complete.verification_status} "
-                "— refresh verification before closeout"
-            )
+    lifecycle_blocks_downstream = lifecycle_suggestion is not None
+    if lifecycle_suggestion is not None:
         suggestions.append(
             _MutableRecommendation(
-                action="verify-work",
-                priority=2,
-                command=f"{format_command('verify-work')} {unverified_complete.number}",
-                reason=reason,
-                phase=unverified_complete.number,
+                action=lifecycle_suggestion.action,
+                priority=lifecycle_suggestion.priority,
+                command=lifecycle_suggestion.command,
+                reason=lifecycle_suggestion.reason,
+                phase=lifecycle_suggestion.phase,
             )
         )
 
     # 5c. Plan a researched phase
-    if next_unplanned:
+    if next_unplanned and not lifecycle_blocks_downstream:
         suggestions.append(
             _MutableRecommendation(
                 action="plan-phase",
@@ -1015,7 +1344,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         )
 
     # 5d. Discover/research next pending phase
-    if next_pending:
+    if next_pending and not lifecycle_blocks_downstream:
         suggestions.append(
             _MutableRecommendation(
                 action="discuss-phase",
@@ -1107,7 +1436,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
             )
 
     # ── 11. No roadmap yet ──────────────────────────────────────────────
-    if not roadmap_exists:
+    if not roadmap_exists and not lifecycle_blocks_downstream:
         suggestions.append(
             _MutableRecommendation(
                 action="new-milestone",
@@ -1121,7 +1450,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
     all_complete_verified = (
         all_complete and phase_analysis and all(phase.verification_status == "passed" for phase in phase_analysis)
     )
-    if all_complete_verified:
+    if all_complete_verified and not lifecycle_blocks_downstream:
         suggestions.append(
             _MutableRecommendation(
                 action="audit-milestone",
@@ -1144,7 +1473,13 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
     ctx_kwargs["has_referee_report"] = has_referee
 
     # 13a. All phases complete + verified → suggest paper writing
-    if all_complete and phase_analysis and not has_paper_flag and not manuscript_state_is_blocked:
+    if (
+        all_complete
+        and phase_analysis
+        and not has_paper_flag
+        and not manuscript_state_is_blocked
+        and not lifecycle_blocks_downstream
+    ):
         if all_complete_verified:
             suggestions.append(
                 _MutableRecommendation(
@@ -1167,7 +1502,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
             )
 
     # 13b. Paper exists → suggest submission or referee response
-    if has_paper_flag:
+    if has_paper_flag and not lifecycle_blocks_downstream:
         if submission_ready_review and has_latex_manuscript:
             suggestions.append(
                 _MutableRecommendation(

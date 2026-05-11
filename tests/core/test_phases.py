@@ -56,6 +56,22 @@ def _create_phase_dir(tmp_path: Path, name: str) -> Path:
     return phase_dir
 
 
+def _write_passed_verification(phase_dir: Path) -> Path:
+    """Write the canonical passed verification report required for closeout."""
+    phase_number = phase_dir.name.split("-", 1)[0]
+    path = phase_dir / f"{phase_number}-VERIFICATION.md"
+    path.write_text(
+        "---\n"
+        f"phase: {phase_dir.name}\n"
+        "status: passed\n"
+        'score: "1/1 contract targets verified"\n'
+        "---\n\n"
+        "# Verification\n\nPASS: closeout evidence accepted.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _create_roadmap(tmp_path: Path, content: str) -> Path:
     """Write ROADMAP.md and return its path."""
     roadmap = tmp_path / "GPD" / "ROADMAP.md"
@@ -877,6 +893,7 @@ def test_phase_complete_uses_canonical_state_lock_and_locked_writer(
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     lock_calls = _assert_canonical_state_lock_and_locked_writer(tmp_path, monkeypatch)
@@ -907,6 +924,7 @@ def test_phase_complete_rolls_back_roadmap_when_atomic_state_save_fails(
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
@@ -942,6 +960,7 @@ def test_phase_complete_rolls_back_when_checkpoint_sync_fails(
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     before_roadmap = (tmp_path / "GPD" / "ROADMAP.md").read_text(encoding="utf-8")
@@ -1567,6 +1586,7 @@ def test_phase_complete_success(tmp_path: Path) -> None:
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     result = phase_complete(tmp_path, "1")
@@ -1607,6 +1627,7 @@ def test_phase_complete_uses_roadmap_for_unscaffolded_next_phase(tmp_path: Path)
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
 
     result = phase_complete(tmp_path, "1")
 
@@ -1658,6 +1679,7 @@ def test_phase_complete_handles_padded_em_dash_roadmap_heading(tmp_path: Path) -
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
 
     result = phase_complete(tmp_path, "1")
 
@@ -2218,6 +2240,7 @@ def test_phase_complete_sets_current_plan_to_inactive_sentinel(tmp_path: Path) -
     phase_dir = _create_phase_dir(tmp_path, "01-setup")
     (phase_dir / "a-PLAN.md").write_text("plan", encoding="utf-8")
     (phase_dir / "a-SUMMARY.md").write_text("done", encoding="utf-8")
+    _write_passed_verification(phase_dir)
     _create_phase_dir(tmp_path, "02-build")
 
     phase_complete(tmp_path, "1")

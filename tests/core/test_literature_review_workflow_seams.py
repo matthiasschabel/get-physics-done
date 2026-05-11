@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +14,13 @@ WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _assert_semantic(source: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(
+        source,
+        semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
+    )
 
 
 def test_literature_review_command_stays_thin_and_leaves_routing_to_the_workflow() -> None:
@@ -39,11 +47,16 @@ def test_literature_review_workflow_requires_reviewer_and_bibliographer_spawn_co
     assert "GPD/literature/{slug}-REVIEW.md" in workflow
     assert "GPD/literature/{slug}-CITATION-SOURCES.json" in workflow
     assert "GPD/literature/{slug}-CITATION-AUDIT.md" in workflow
-    assert "gpd_return.files_written" in workflow
-    assert "A completed return must list `GPD/literature/{slug}-CITATION-AUDIT.md` in `gpd_return.files_written`." in workflow
-    assert "fresh continuation handoff" in workflow
+    _assert_semantic(
+        workflow,
+        "literature review citation audit handoff names local artifact",
+        "typed handoff",
+        "completed",
+        "GPD/literature/{slug}-CITATION-AUDIT.md",
+        "files_written",
+    )
+    assert "references/orchestration/continuation-boundary.md" in workflow
     assert "checkpoint_response" in workflow
-    assert "Do not trust the runtime handoff status by itself." in workflow
     assert "Keep all durable review artifacts rooted under `GPD/literature/` in the current workspace." in workflow
     assert "If `topic` is empty, do not invent or auto-derive it from project state" in workflow
     assert "The review topic must already be explicit or newly clarified" in workflow
@@ -55,8 +68,22 @@ def test_literature_review_workflow_removes_legacy_commit_ownership_and_keeps_co
     workflow = workflow_authority_text(WORKFLOWS_DIR, "literature-review")
 
     assert "gpd commit" not in workflow
-    assert "Return to orchestrator through the typed child-return contract." in workflow
-    assert "Route on `gpd_return.status` and the artifact gate" in workflow
-    assert "Return `gpd_return.status: completed` only when the review, citation sidecar, and citation audit are named in `gpd_return.files_written`" in workflow
-    assert "If the review is incomplete or blocked, use `gpd_return.status: blocked` or `failed`" in workflow
-    assert "spawn a fresh continuation run after the response" in workflow
+    assert "references/orchestration/child-artifact-gate.md" in workflow
+    _assert_semantic(
+        workflow,
+        "literature review completion gate remains fail closed",
+        "Local completion gate",
+        "completed",
+        "REVIEW.md",
+        "CITATION-SOURCES.json",
+        "CITATION-AUDIT.md",
+        "files_written",
+        "blocked/failed",
+    )
+    _assert_semantic(
+        workflow,
+        "literature review checkpoint continuation",
+        "checkpoint",
+        "checkpoint_response",
+        "continuation",
+    )

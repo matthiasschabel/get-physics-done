@@ -16,17 +16,14 @@ def _read(path: Path) -> str:
 def test_literature_review_workflow_routes_on_typed_status_and_artifact_gate() -> None:
     workflow = workflow_authority_text(WORKFLOWS_DIR, "literature-review")
 
-    assert "Route on `gpd_return.status` and the artifact gate;" in workflow
-    assert "presentation only" in workflow
-    assert "Verify `GPD/literature/{slug}-REVIEW.md` exists on disk" in workflow
-    assert "Verify `GPD/literature/{slug}-CITATION-SOURCES.json` exists on disk and remains aligned with the review's Full Reference List" in workflow
-    assert (
-        "Return `gpd_return.status: completed` only when the review, citation sidecar, and citation audit "
-        "are named in `gpd_return.files_written` and present/readable on disk"
-    ) in workflow
-    assert "gpd_return.status: completed" in workflow
-    assert "gpd_return.status: checkpoint" in workflow
-    assert "fresh continuation run" in workflow
+    assert "references/orchestration/child-artifact-gate.md" in workflow
+    assert "references/orchestration/continuation-boundary.md" in workflow
+    assert "GPD/literature/{slug}-REVIEW.md" in workflow
+    assert "GPD/literature/{slug}-CITATION-SOURCES.json" in workflow
+    assert "GPD/literature/{slug}-CITATION-AUDIT.md" in workflow
+    assert "all three paths are named in `files_written` and present/readable on disk" in workflow
+    assert "checkpoint: include the decision question" in workflow
+    assert "blocked/failed: list the missing artifact" in workflow
 
 
 def test_literature_reviewer_shows_base_return_fields_and_one_shot_checkpointing() -> None:

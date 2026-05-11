@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from gpd.core.child_handoff import ChildGateTuple, parse_child_gate_markdown
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -30,15 +31,22 @@ def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -
     planner_gate = gates["quick_planner_plan"]
     executor_gate = gates["quick_executor_summary"]
 
-    assert "gpd_return.status" in workflow
-    assert "checkpoint" in workflow
-    assert "completed means the summary gate and applicator passed" in workflow
-    assert "gpd_return.files_written" in workflow
+    assert planner_gate.required_status == "completed"
+    assert executor_gate.required_status == "completed"
+    assert_prompt_contracts(
+        workflow,
+        semantic_anchor(
+            "quick executor completion uses tuple and applicator",
+            ("quick_executor_summary", "tuple", "applicator", "decide completion"),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            context="quick executor completion gate",
+        ),
+    )
     assert "loads staged quick init" in workflow
     assert "staged_loading" in workflow
     assert "reference_context" in workflow
     assert "default small-task path" in workflow
-    assert "gpd --raw init quick \"$DESCRIPTION\" --stage reference_context" in workflow
+    assert 'gpd --raw init quick "$DESCRIPTION" --stage reference_context' in workflow
     assert "workflows/quick/task-bootstrap.md" in workflow
     assert "workflows/quick/task-authoring.md" in workflow
     assert "tool_requirements" in workflow
@@ -50,9 +58,7 @@ def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -
     assert "references/orchestration/child-artifact-gate.md" in workflow
     assert "references/orchestration/continuation-boundary.md" in workflow
     assert planner_gate.role == "gpd-planner"
-    assert [artifact.path for artifact in planner_gate.expected_artifacts] == [
-        "${QUICK_DIR}/${next_num}-PLAN.md"
-    ]
+    assert [artifact.path for artifact in planner_gate.expected_artifacts] == ["${QUICK_DIR}/${next_num}-PLAN.md"]
     assert planner_gate.allowed_roots == ("${QUICK_DIR}",)
     assert planner_gate.freshness is not None
     assert planner_gate.freshness.marker == "$QUICK_PLANNER_HANDOFF_STARTED_AT"
@@ -62,9 +68,7 @@ def test_quick_workflow_routes_on_typed_gpd_return_and_applies_child_returns() -
         "failed": "retry planner, main-context planning, or abort",
     }
     assert executor_gate.role == "gpd-executor"
-    assert [artifact.path for artifact in executor_gate.expected_artifacts] == [
-        "${QUICK_DIR}/${next_num}-SUMMARY.md"
-    ]
+    assert [artifact.path for artifact in executor_gate.expected_artifacts] == ["${QUICK_DIR}/${next_num}-SUMMARY.md"]
     assert executor_gate.allowed_roots == ("${QUICK_DIR}",)
     assert executor_gate.freshness is not None
     assert executor_gate.freshness.marker == "$QUICK_EXECUTOR_HANDOFF_STARTED_AT"

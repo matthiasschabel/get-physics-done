@@ -66,8 +66,8 @@ Read the file at GPD/STATE.md
 - No literature review phase, no checker phase
 - Use the `staged_loading` fields from `TASK_AUTHORING_INIT` as the source of truth for the handoff instead of inventing a separate quick-only contract
 - Do not invent reference-runtime, protocol, literature/research-map, proof-review, or publication context that is not present in `TASK_AUTHORING_INIT.staged_loading.required_init_fields`.
-- If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` instead of drafting a plan from guessed scope.
-- If the task is theorem-style or proof-bearing, return `gpd_return.status: checkpoint` and tell the user quick mode is blocked pending the full proof-redteam workflow.
+- If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return checkpoint instead of drafting a plan from guessed scope.
+- If the task is theorem-style or proof-bearing, return checkpoint and tell the user quick mode is blocked pending the full proof-redteam workflow.
 - Proof-obligation command block: theorem-style, lemma/corollary/proposition, or explicit `proof_obligation` work must route to the full proof-redteam workflow.
 - ProjectContract `claim_kind: claim` is not proof-bearing by itself. A generic manuscript or task "claim" is not enough by itself. Require theorem/proof/formal metadata before routing generic manuscript claims through proof-redteam.
 - Target ~30% context usage (simple, focused)
@@ -75,7 +75,7 @@ Read the file at GPD/STATE.md
 
 <output>
 Write plan to: ${QUICK_DIR}/${next_num}-PLAN.md
-Return structured `gpd_return`; completed output is `${QUICK_DIR}/${next_num}-PLAN.md` and it must appear in `files_written`. Use checkpoint when user input or a contract block prevents drafting.
+Return the planner handoff; completed output is `${QUICK_DIR}/${next_num}-PLAN.md` and it must appear in `files_written`. Use checkpoint when user input or a contract block prevents drafting.
 </output>
 ",
   subagent_type="gpd-planner",
@@ -111,7 +111,7 @@ child_gate:
 
 Tuple summary: role=`gpd-planner`; expected=`${QUICK_DIR}/${next_num}-PLAN.md`.
 
-**If the planner agent fails to spawn or returns an error:** Keep the handoff incomplete under the gate above. A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only; require a valid planner `gpd_return` naming that plan, or run explicit main-context fallback with its own return. Offer: 1) Retry planner, 2) Create the plan in the main context, 3) Abort.
+**If the planner agent fails to spawn or returns an error:** Keep the handoff incomplete under the gate above. A plan file at `${QUICK_DIR}/${next_num}-PLAN.md` is recovery evidence only; require `quick_planner_plan` to pass, or run explicit main-context fallback with its own return. Offer: 1) Retry planner, 2) Create the plan in the main context, 3) Abort.
 
 After planner returns:
 
@@ -167,7 +167,7 @@ Reference runtime: not loaded for default `task_authoring`.
 - Do NOT update ROADMAP.md (quick tasks are separate from planned phases)
 - Do not invent reference artifacts or publication/proof-review context in the default `task_authoring` path.
 - If proof-bearing work slipped through planning, STOP and return the reroute instead of executing. Quick mode must not produce a proof result without the mandatory proof-redteam gate.
-- Return a structured `gpd_return` envelope with `gpd_return.status` and `gpd_return.files_written`; local completed output is `${QUICK_DIR}/${next_num}-SUMMARY.md`.
+- Return the executor handoff; local completed output is `${QUICK_DIR}/${next_num}-SUMMARY.md`.
 </constraints>
 ",
   subagent_type="gpd-executor",
@@ -232,7 +232,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Apply `quick_executor_summary`: completed means the summary gate and applicator passed; non-completed statuses route through `status_route`.
+Apply `quick_executor_summary`; the tuple and applicator decide completion, and non-completed statuses route through `status_route`.
 
 Only proceed to the quick-task completion record after `apply-return-updates` succeeds and the summary file still exists on disk.
 

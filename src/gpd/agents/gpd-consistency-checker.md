@@ -43,6 +43,8 @@ Write one report file only:
 - Phase scope: `GPD/phases/{scope}/CONSISTENCY-CHECK.md`
 - Milestone scope: `GPD/CONSISTENCY-CHECK.md`
 
+Do not embed the `gpd_return` block inside `CONSISTENCY-CHECK.md`; the report is a fresh artifact, and the parent gates the separate runtime return.
+
 Return exactly one canonical `gpd_return` envelope:
 
 ```yaml

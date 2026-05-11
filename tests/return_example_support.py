@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,3 +82,79 @@ def validate_gpd_return_examples(
                 continue
         envelopes.append(result.fields)
     return envelopes, failures
+
+
+def validated_gpd_return_examples(
+    path_or_text: Path | str,
+    *,
+    source_name: str | None = None,
+    require_required_fields: bool = True,
+    skip_child_gate_examples: bool = True,
+) -> list[dict[str, object]]:
+    """Extract visible examples and return validated envelopes, failing with source locations."""
+
+    examples = extract_gpd_return_examples(
+        path_or_text,
+        source_name=source_name,
+        skip_child_gate_examples=skip_child_gate_examples,
+    )
+    envelopes, failures = validate_gpd_return_examples(examples, require_required_fields=require_required_fields)
+    if failures:
+        raise AssertionError("Invalid gpd_return YAML examples:\n" + "\n".join(failures))
+    return envelopes
+
+
+def find_gpd_return_example(
+    path_or_text: Path | str,
+    *,
+    source_name: str | None = None,
+    field: str | None = None,
+    value: object | None = None,
+    status: str | None = None,
+    require_required_fields: bool = True,
+) -> tuple[GpdReturnExample, dict[str, object]]:
+    """Find one validated visible example matching a status or top-level field value."""
+
+    examples = extract_gpd_return_examples(path_or_text, source_name=source_name)
+    envelopes, failures = validate_gpd_return_examples(examples, require_required_fields=require_required_fields)
+    if failures:
+        raise AssertionError("Invalid gpd_return YAML examples:\n" + "\n".join(failures))
+
+    matches: list[tuple[GpdReturnExample, dict[str, object]]] = []
+    for example, envelope in zip(examples, envelopes, strict=True):
+        if status is not None and envelope.get("status") != status:
+            continue
+        if field is not None:
+            if field not in envelope:
+                continue
+            if value is not None and envelope[field] != value:
+                continue
+        matches.append((example, envelope))
+
+    if len(matches) != 1:
+        filters = []
+        if status is not None:
+            filters.append(f"status={status!r}")
+        if field is not None:
+            filters.append(f"field={field!r}")
+        if value is not None:
+            filters.append(f"value={value!r}")
+        detail = ", ".join(filters) or "no filters"
+        raise AssertionError(f"expected exactly one gpd_return example matching {detail}, found {len(matches)}")
+    return matches[0]
+
+
+def assert_fields_before(example_body: str, before_fields: Sequence[str], after_fields: Sequence[str]) -> None:
+    """Assert that selected top-level envelope fields keep base-before-extension order."""
+
+    positions: dict[str, int] = {}
+    for field_name in (*before_fields, *after_fields):
+        match = re.search(rf"(?m)^  {re.escape(field_name)}:", example_body)
+        if match is None:
+            raise AssertionError(f"missing gpd_return field {field_name!r}")
+        positions[field_name] = match.start()
+
+    for before_field in before_fields:
+        for after_field in after_fields:
+            if positions[before_field] >= positions[after_field]:
+                raise AssertionError(f"expected {before_field!r} before {after_field!r}")

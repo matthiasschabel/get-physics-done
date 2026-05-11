@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, machine_exact, semantic_anchor
+from tests.return_skeleton_support import render_gpd_return_block
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -63,16 +68,33 @@ def test_execute_phase_gap_reverification_has_debugger_and_circuit_breaker() -> 
 def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
 
-    assert "gpd-consistency-checker.md" in workflow
-    assert "<spawn_contract>" in workflow
-    assert "expected_artifacts:" in workflow
-    assert "{phase_dir}/CONSISTENCY-CHECK.md" in workflow
-    assert "Return exactly one typed gpd_return envelope, include files_written" in workflow
-    assert "Append the same typed YAML gpd_return block to the artifact before returning" in workflow
-    assert 'id: "rapid_consistency_check"' in workflow
-    assert "--require-files-written" in workflow
-    assert "--fresh-after" in workflow
-    assert "CONSISTENCY_HANDOFF_STARTED_AT" in workflow
+    assert_prompt_contracts(
+        workflow,
+        machine_exact(
+            "consistency check child gate machine anchors",
+            (
+                "gpd-consistency-checker.md",
+                "<spawn_contract>",
+                "expected_artifacts:",
+                "{phase_dir}/CONSISTENCY-CHECK.md",
+                "Return exactly one typed gpd_return envelope, include files_written",
+                'id: "rapid_consistency_check"',
+                "--require-files-written",
+                "--fresh-after",
+                "CONSISTENCY_HANDOFF_STARTED_AT",
+            ),
+        ),
+        semantic_anchor(
+            "runtime return canonical for consistency report",
+            (
+                "keep that envelope in the child response",
+                "runtime return is canonical",
+                "Do not embed or duplicate gpd_return inside the report artifact",
+            ),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+    )
+    assert "Append the same typed YAML gpd_return block to the artifact before returning" not in workflow
 
 
 def test_execute_phase_consistency_check_fails_closed_on_malformed_output() -> None:
@@ -84,6 +106,38 @@ def test_execute_phase_consistency_check_fails_closed_on_malformed_output() -> N
     assert "Do not infer success from prose headings or untyped routing." in workflow
     assert "Do not hand-author or paste a synthetic `gpd_return`" in workflow
     assert "gpd:validate-conventions" in workflow
+
+
+def test_execute_phase_consistency_report_without_embedded_return_validates_via_runtime_return(
+    tmp_path: Path,
+) -> None:
+    report_path = tmp_path / "GPD" / "phases" / "03-conventions" / "CONSISTENCY-CHECK.md"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text("# Consistency Check\n\nNo embedded return block.\n", encoding="utf-8")
+
+    runtime_return = render_gpd_return_block(
+        ["GPD/phases/03-conventions/CONSISTENCY-CHECK.md"],
+        extra_fields={"phase_checked": "03-conventions", "checks_performed": 3, "issues_found": 0},
+    )
+
+    result = validate_handoff_artifacts_markdown(
+        tmp_path,
+        runtime_return,
+        expected_artifacts=["GPD/phases/03-conventions/CONSISTENCY-CHECK.md"],
+        allowed_roots=["GPD/phases/03-conventions"],
+        required_suffixes=["CONSISTENCY-CHECK.md"],
+        require_files_written=True,
+        require_status="completed",
+        fresh_after=datetime.now(tz=UTC) - timedelta(minutes=1),
+    )
+
+    assert result.passed is True
+    assert result.mutated is False
+    assert result.mutates is False
+    assert result.status == "completed"
+    assert result.files_written == ["GPD/phases/03-conventions/CONSISTENCY-CHECK.md"]
+    assert result.checked_files == ["GPD/phases/03-conventions/CONSISTENCY-CHECK.md"]
+    assert "gpd_return:" not in report_path.read_text(encoding="utf-8")
 
 
 def test_execute_phase_consistency_stops_render_from_stage_stop_routes() -> None:

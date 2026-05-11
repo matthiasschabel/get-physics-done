@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
+from gpd.core.return_contract import RETURN_STATUS_ORDER
 from tests.return_example_support import extract_gpd_return_examples, validate_gpd_return_examples
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +16,7 @@ PROMPT_EXAMPLE_ROOTS = (
 REFERENCE_EXAMPLE_PATHS = (
     REPO_ROOT / "src" / "gpd" / "specs" / "references" / "execution" / "executor-completion.md",
     REPO_ROOT / "src" / "gpd" / "specs" / "references" / "orchestration" / "agent-infrastructure.md",
+    REPO_ROOT / "src" / "gpd" / "specs" / "references" / "verification" / "plan-checker" / "checker-return-protocol.md",
 )
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 
@@ -42,8 +44,10 @@ def test_visible_gpd_return_yaml_examples_match_return_contract() -> None:
 
 def test_agent_return_examples_use_canonical_status_profile_reference() -> None:
     infra = (REFERENCE_EXAMPLE_PATHS[1]).read_text(encoding="utf-8")
-    assert "Status vocabulary and base fields are canonical here." in infra
-    assert "return skeleton/profile source" in infra
+    assert "Status vocabulary is owned by `gpd.core.return_contract`" in infra
+    assert "`gpd --raw return profiles`" in infra
+    assert "`gpd return skeleton --role <role> --status <status>`" in infra
+    assert ", ".join(RETURN_STATUS_ORDER) not in infra
 
     offenders = []
     for path in sorted(AGENTS_DIR.glob("*.md")):

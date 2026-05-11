@@ -26,8 +26,8 @@ _ROLE_KIT_DEFINITIONS: tuple[AgentRoleKit, ...] = (
         label="Status Routing",
         authority_paths=("{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md",),
         rules=(
-            "Route lifecycle state from `gpd_return.status`; do not infer completion, checkpoint, or failure from headings or prose alone.",
-            "Use the shared status vocabulary from the authority path while preserving this prompt's role-specific return fields.",
+            "Route from `gpd_return.status`, not headings or prose.",
+            "Use shared status vocabulary; keep role-specific fields local.",
         ),
     ),
     AgentRoleKit(
@@ -35,8 +35,8 @@ _ROLE_KIT_DEFINITIONS: tuple[AgentRoleKit, ...] = (
         label="Fresh Continuation",
         authority_paths=("{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md",),
         rules=(
-            "A checkpoint is a one-shot handoff: return once, stop, and let the orchestrator decide presentation or continuation.",
-            "On resumed or fresh continuation, re-read current state and artifacts before acting; do not rely on stale prior-run assumptions.",
+            "Checkpoint once, stop, and let the orchestrator present or continue.",
+            "On fresh continuation, re-read current state and artifacts.",
         ),
     ),
     AgentRoleKit(
@@ -44,8 +44,8 @@ _ROLE_KIT_DEFINITIONS: tuple[AgentRoleKit, ...] = (
         label="Files-Written Freshness",
         authority_paths=("{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md",),
         rules=(
-            "`files_written` names only files created or updated in the current run.",
-            "Preexisting or stale files are evidence to inspect, not proof of current completion.",
+            "`files_written` is current-run writes only.",
+            "Preexisting or stale files are evidence, not completion proof.",
         ),
     ),
     AgentRoleKit(
@@ -80,8 +80,8 @@ _ROLE_KIT_DEFINITIONS: tuple[AgentRoleKit, ...] = (
             "{GPD_INSTALL_DIR}/references/orchestration/context-pressure-thresholds.md",
         ),
         rules=(
-            "When context pressure is high, finish the smallest coherent artifact or checkpoint rather than broadening scope.",
-            "Use local role thresholds for what counts as high pressure; report `context_pressure: high` only when the shared policy calls for it.",
+            "At high pressure, finish a coherent artifact or checkpoint; do not broaden scope.",
+            "Use local thresholds; set `context_pressure: high` only when shared policy says so.",
         ),
     ),
     AgentRoleKit(
@@ -178,7 +178,7 @@ def render_agent_role_kits_section(role_kit_ids: Sequence[str]) -> str:
     lines = [
         f"## {AGENT_ROLE_KITS_HEADING}",
         "",
-        "Generated from `role_kits` frontmatter. Apply these shared lifecycle rules; keep role-specific artifact paths, validators, and output fields from this prompt.",
+        "Shared rules from `role_kits`; local artifact paths, validators, and output fields stay in this prompt.",
     ]
     for kit in kits:
         lines.extend(("", f"### {kit.label} (`{kit.id}`)"))

@@ -474,7 +474,7 @@ def _filter_fields_for_status(fields: Iterable[str], status: str) -> tuple[str, 
 
 
 def _with_status_default_additions(fields: tuple[str, ...], status: str) -> tuple[str, ...]:
-    if status in {"checkpoint", "blocked", "failed"}:
+    if return_field_allowed_for_status("blockers", status):
         return _dedupe((*fields, "blockers"))
     return fields
 

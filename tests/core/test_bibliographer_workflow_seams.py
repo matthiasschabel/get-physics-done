@@ -38,8 +38,9 @@ def test_literature_review_bibliographer_step_routes_on_typed_return_contract() 
     workflow = _workflow("literature-review.md")
 
     assert "Return BIBLIOGRAPHY UPDATED or CITATION ISSUES FOUND." not in workflow
-    assert "Return a typed `gpd_return` envelope." in workflow
-    assert "Use `status: completed` when the bibliography task finished" in workflow
+    assert "Return through the typed handoff." in workflow
+    assert "completed must name it in files_written" in workflow
+    assert "Use checkpoint only when researcher input is required to continue." in workflow
     assert "**If the bibliographer completed with issues recorded in the audit report:**" in workflow
     assert "apply the citation-audit artifact" in workflow
     assert "before continuing" in workflow

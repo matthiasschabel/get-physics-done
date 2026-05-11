@@ -64,13 +64,13 @@ If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append 
 <constraints>
 - Create one plan with 1-3 focused tasks.
 - Use the selected reference payload only for the lookup or project-anchor dependency that justified `reference_context`.
-- If contract load or validation is blocked, return `gpd_return.status: checkpoint` instead of drafting from guessed scope.
+- If contract load or validation is blocked, return checkpoint instead of drafting from guessed scope.
 - If the task is theorem-style or proof-bearing, return `checkpoint` and route to the full proof-redteam workflow.
 - Target about 30% context usage.
 </constraints>
 
 <output>
-Write plan to `${QUICK_DIR}/${next_num}-PLAN.md`. Return structured `gpd_return`; completed output must list that path in `files_written`.
+Write plan to `${QUICK_DIR}/${next_num}-PLAN.md`. Return the planner handoff; completed output must list that path in `files_written`.
 </output>
 ",
   subagent_type="gpd-planner",
@@ -137,7 +137,7 @@ Reference artifacts: {reference_artifacts_content}
 - Execute all plan tasks and write `${QUICK_DIR}/${next_num}-SUMMARY.md`.
 - Do not update ROADMAP.md.
 - If proof-bearing work slipped through planning, STOP and return the reroute.
-- Return structured `gpd_return` with `status` and `files_written`.
+- Return the executor handoff with status and written files.
 </constraints>
 ",
   subagent_type="gpd-executor",
@@ -170,7 +170,7 @@ child_gate:
     failed: "retry executor, main-context execution, or abort"
 ```
 
-Apply `quick_executor_summary`; completed means the summary gate and applicator passed.
+Apply `quick_executor_summary`; the tuple and applicator decide completion.
 
 ```bash
 APPLY_RETURN=$(gpd apply-return-updates "${QUICK_DIR}/${next_num}-SUMMARY.md")

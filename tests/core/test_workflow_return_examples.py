@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.return_example_support import GpdReturnExample, extract_gpd_return_examples, validate_gpd_return_examples
+from tests.return_example_support import (
+    GpdReturnExample,
+    extract_gpd_return_examples,
+    validated_gpd_return_examples,
+)
 from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,9 +27,11 @@ def _validated_workflow_return_examples(path: Path, *, expected_count: int) -> l
     examples = _workflow_gpd_return_examples(path)
     assert len(examples) == expected_count
 
-    envelopes, failures = validate_gpd_return_examples(examples, require_required_fields=True)
-    assert failures == []
-    return envelopes
+    return validated_gpd_return_examples(
+        "\n\n".join(example.markdown for example in examples),
+        source_name=path.name,
+        require_required_fields=True,
+    )
 
 
 def test_execute_plan_visible_return_examples_are_complete_valid_envelopes() -> None:

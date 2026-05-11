@@ -66,19 +66,9 @@ gpd_return:
     - "gpd:show-phase XX"
 ```
 
-Status vocabulary and base fields are canonical here. Choose one status: `completed`, `checkpoint`, `blocked`, or `failed`. The four base fields above are required on every envelope.
+The four base fields above are required on every envelope. Status vocabulary is owned by `gpd.core.return_contract`; inspect the current list and role metadata with `gpd --raw return profiles`.
 
-Use this reference as the return skeleton/profile source instead of repeating the status list in each agent. Prompt-local examples may add only documented role fields:
-
-| Profile | Typical fields kept local to the role |
-|---|---|
-| executor | `phase`, `plan`, `tasks_completed`, `tasks_total`, `duration_seconds`, `state_updates`, `contract_updates`, `decisions`, `blockers`, `continuation_update` |
-| planner | `roadmap_updates`, `phase`, `plans_created`, `waves`, `conventions`, `approximations`, `plans`, `context_pressure` |
-| checker | `approved_plans`, `blocked_plans`, `dimensions_checked`, `revision_round`, `revision_guidance` |
-| verifier | `verification_status`, `score`, `confidence` |
-| referee | `recommendation`, `confidence`, `major_issues`, `minor_issues`, `dimensions_evaluated` |
-| researcher | `confidence` plus the specific research artifact paths named by the callsite |
-| support agents | their documented local fields, for example `design_file`, `conventions_file`, `entries_added`, `phase_checked`, `checks_performed`, `issues_found`, `section_name`, or `phases_created` |
+Use `gpd return skeleton --role <role> --status <status>` as the return skeleton/profile source instead of repeating status lists or full role tables in each agent. Prompt-local examples may add only documented role fields accepted by the return contract and named by the callsite.
 
 Recovery preserves authorship: recover literal child-authored file contents if writes were dropped, but do not synthesize, patch, or paste a child `gpd_return`. Missing/invalid envelopes require retry or explicit main-context fallback. Apply `references/orchestration/child-artifact-gate.md` at the callsite before accepting success.
 

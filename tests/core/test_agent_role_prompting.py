@@ -204,6 +204,11 @@ def test_consistency_checker_stays_one_shot_and_does_not_claim_resolution_work()
             ("one-shot handoff", "inspect once, write once, return once"),
             match=MatchMode.CASEFOLD_NORMALIZED,
         ),
+        semantic_anchor(
+            "consistency checker report is not return authority",
+            ("Do not embed", "gpd_return", "CONSISTENCY-CHECK.md", "separate runtime return"),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
         machine_exact(
             "consistency checker return fields",
             (

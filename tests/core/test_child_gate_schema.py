@@ -9,7 +9,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from gpd.core.child_gate_snippets import render_child_gate_inline_summary, render_child_gate_markdown
+from gpd.core.child_gate_snippets import (
+    AggregateChildGateTuple,
+    aggregate_child_gate_tuple_from_payload,
+    parse_aggregate_child_gate_markdown,
+    render_child_gate_inline_summary,
+    render_child_gate_markdown,
+)
 from gpd.core.child_handoff import (
     ChildGateApplicator,
     ChildGateArtifact,
@@ -30,6 +36,13 @@ class WorkflowChildGate:
     source: str
     line: int
     gate: ChildGateTuple
+
+
+@dataclass(frozen=True)
+class WorkflowAggregateChildGate:
+    source: str
+    line: int
+    gate: AggregateChildGateTuple
 
 
 def _planner_gate() -> ChildGateTuple:
@@ -116,6 +129,33 @@ def _workflow_child_gates() -> tuple[WorkflowChildGate, ...]:
     return tuple(gates)
 
 
+def _workflow_aggregate_child_gates() -> tuple[WorkflowAggregateChildGate, ...]:
+    gates: list[WorkflowAggregateChildGate] = []
+    errors: list[str] = []
+
+    for path in sorted(WORKFLOWS_DIR.rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        for match in _YAML_BLOCK_RE.finditer(text):
+            body = match.group("body")
+            if "aggregate_child_gate" not in body:
+                continue
+            line = text[: match.start()].count("\n") + 1
+            source = str(path.relative_to(WORKFLOWS_DIR))
+            try:
+                gates.append(
+                    WorkflowAggregateChildGate(
+                        source=source,
+                        line=line,
+                        gate=parse_aggregate_child_gate_markdown(f"```yaml\n{body}\n```"),
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - assertion reports exact prompt location
+                errors.append(f"{path.relative_to(REPO_ROOT)}:{line}: {exc}")
+
+    assert errors == []
+    return tuple(gates)
+
+
 def _renderer_gate() -> ChildGateTuple:
     return ChildGateTuple(
         id="renderer_gate",
@@ -192,6 +232,7 @@ def _expected_workflow_child_gate_keys() -> tuple[tuple[str, str], ...]:
         for gate_id in sorted(_EXPECTED_WORKFLOW_CHILD_GATE_SOURCES)
         for source in sorted(_expected_sources_for_gate(gate_id))
     )
+
 
 _EXPECTED_WORKFLOW_CHILD_GATE_ROLE_PROFILE = {
     "gap_closure_reverification": ("gpd-verifier", "verifier"),
@@ -434,6 +475,20 @@ _EXPECTED_WORKFLOW_CHILD_GATE_STATUS_ROUTE_KEYS = {
     "wave_executor_plan_result": ("checkpoint", "blocked", "failed"),
 }
 
+_EXPECTED_WORKFLOW_AGGREGATE_CHILD_GATE = {
+    "respond_to_referees_response_pair_current": {
+        "source": "respond-to-referees/response-authoring.md",
+        "required_child_gates": ("respond_to_referees_revision_section for every launched Group B section",),
+        "expected_artifacts": (
+            "every required revised section under ${PAPER_DIR}",
+            "${RESPONSE_AUTHOR_PATH}",
+            "${RESPONSE_REFEREE_PATH}",
+        ),
+        "validator_count": 3,
+        "failure_route": "retry failed sections | main-context targeted revision | leave response pair incomplete",
+    },
+}
+
 
 def test_child_gate_tuple_renders_compact_yaml_with_inferred_return_profile() -> None:
     rendered = _gate_markdown(_planner_gate())
@@ -556,6 +611,31 @@ def test_child_gate_tuple_accepts_compact_prompt_tuple_shape() -> None:
     assert set(gate.failure_route) == set(HandoffFailureClass)
 
 
+def test_aggregate_child_gate_tuple_accepts_wrapped_payload_and_round_trips_fields() -> None:
+    gate = aggregate_child_gate_tuple_from_payload(
+        {
+            "aggregate_child_gate": {
+                "id": "response_pair_current",
+                "required_child_gates": ["revision_section for every launched section"],
+                "expected_artifacts": ["${RESPONSE_AUTHOR_PATH}", "${RESPONSE_REFEREE_PATH}"],
+                "validators": ["mirrored artifacts exist on disk"],
+                "failure_route": "retry failed sections | leave response pair incomplete",
+            }
+        }
+    )
+
+    assert gate.required_child_gates == ("revision_section for every launched section",)
+    assert gate.expected_artifacts == ("${RESPONSE_AUTHOR_PATH}", "${RESPONSE_REFEREE_PATH}")
+    assert gate.validators == ("mirrored artifacts exist on disk",)
+    assert gate.to_payload() == {
+        "id": "response_pair_current",
+        "required_child_gates": ["revision_section for every launched section"],
+        "expected_artifacts": ["${RESPONSE_AUTHOR_PATH}", "${RESPONSE_REFEREE_PATH}"],
+        "validators": ["mirrored artifacts exist on disk"],
+        "failure_route": "retry failed sections | leave response pair incomplete",
+    }
+
+
 def test_execute_phase_split_child_gates_use_canonical_tuple_fields() -> None:
     proof_text = (WORKFLOWS_DIR / "execute-phase/proof-critic-dispatch.md").read_text(encoding="utf-8")
     return_text = (WORKFLOWS_DIR / "execute-phase/wave-return-checkpoint.md").read_text(encoding="utf-8")
@@ -595,6 +675,23 @@ required_status: completed
     assert parse_child_gate_markdown(fenced).return_profile == "planner"
 
 
+def test_parse_aggregate_child_gate_markdown_accepts_raw_and_fenced_payloads() -> None:
+    raw = """
+id: response_pair_current
+required_child_gates:
+  - revision_section
+expected_artifacts:
+  - ${RESPONSE_AUTHOR_PATH}
+validators:
+  - mirrored artifacts exist
+failure_route: retry failed sections
+"""
+    fenced = f"```yaml\naggregate_child_gate:\n  {raw.strip().replace(chr(10), chr(10) + '  ')}\n```\n"
+
+    assert parse_aggregate_child_gate_markdown(raw).id == "response_pair_current"
+    assert parse_aggregate_child_gate_markdown(fenced).required_child_gates == ("revision_section",)
+
+
 def test_child_gate_tuple_rejects_unknown_profile_status_route_and_invalid_freshness() -> None:
     with pytest.raises(ValueError, match="unknown gpd_return role profile"):
         ChildGateTuple(id="bad", role="gpd-unknown", required_status="completed")
@@ -614,6 +711,24 @@ def test_child_gate_tuple_rejects_unknown_profile_status_route_and_invalid_fresh
 
     with pytest.raises(ValueError, match="freshness marker is required"):
         ChildGateFreshness(require_mtime_at_or_after_marker=True)
+
+
+def test_aggregate_child_gate_tuple_rejects_empty_required_fields() -> None:
+    with pytest.raises(ValueError, match="required_child_gates must include at least one item"):
+        AggregateChildGateTuple(
+            id="bad",
+            required_child_gates=[],
+            expected_artifacts=["${RESPONSE_AUTHOR_PATH}"],
+            failure_route="retry",
+        )
+
+    with pytest.raises(ValueError, match="expected_artifacts must include at least one item"):
+        AggregateChildGateTuple(
+            id="bad",
+            required_child_gates=["revision_section"],
+            expected_artifacts=[],
+            failure_route="retry",
+        )
 
 
 def test_workflow_child_gate_yaml_blocks_parse_as_child_gate_tuples() -> None:
@@ -663,3 +778,25 @@ def test_workflow_child_gate_inventory_preserves_tuple_contract_fields() -> None
         assert set(gate.failure_route) == set(HandoffFailureClass)
         assert all(route.strip() for route in gate.failure_route.values())
         assert all(route.strip() for route in gate.status_route.values())
+
+
+def test_workflow_aggregate_child_gate_yaml_blocks_parse_as_separate_aggregate_tuples() -> None:
+    gates = _workflow_aggregate_child_gates()
+
+    assert len(gates) == len(_EXPECTED_WORKFLOW_AGGREGATE_CHILD_GATE)
+    assert sorted(item.gate.id for item in gates) == sorted(_EXPECTED_WORKFLOW_AGGREGATE_CHILD_GATE)
+
+
+def test_workflow_aggregate_child_gate_inventory_preserves_tuple_contract_fields() -> None:
+    gates = _workflow_aggregate_child_gates()
+
+    for item in gates:
+        gate = item.gate
+        expected = _EXPECTED_WORKFLOW_AGGREGATE_CHILD_GATE[gate.id]
+
+        assert item.source == expected["source"]
+        assert gate.required_child_gates == expected["required_child_gates"]
+        assert gate.expected_artifacts == expected["expected_artifacts"]
+        assert len(gate.validators) == expected["validator_count"]
+        assert all(validator.strip() for validator in gate.validators)
+        assert gate.failure_route == expected["failure_route"]

@@ -2327,7 +2327,14 @@ class TestValidateReturn:
             encoding="utf-8",
         )
 
-        checkpoint_result = _invoke("--raw", "return", "classify", str(return_file), "--require-status", "checkpoint")
+        checkpoint_result = _invoke(
+            "--raw",
+            "return",
+            "classify",
+            str(return_file),
+            "--require-status",
+            " CHECKPOINT ",
+        )
         checkpoint_payload = json.loads(checkpoint_result.output)
         assert checkpoint_payload["passed"] is True
         assert checkpoint_payload["accepted_for_success"] is True
@@ -3262,6 +3269,7 @@ class TestSummaryExtractCommand:
         parsed = json.loads(result.output)
         assert "one_liner" in parsed
         assert parsed["one_liner"] == "Set up project"
+
 
 class TestResolveModelCommand:
     def test_resolve_tier(self) -> None:

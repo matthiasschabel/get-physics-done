@@ -72,6 +72,10 @@ def test_return_profile_status_fields_obey_status_contract() -> None:
                 field_name for field_name in fields if not return_field_allowed_for_status(field_name, status)
             )
             assert disallowed == []
+            assert ("blockers" in profile.default_render_fields_by_status[status]) is return_field_allowed_for_status(
+                "blockers",
+                status,
+            )
 
     executor = GPD_RETURN_ROLE_PROFILES["executor"]
     assert "blockers" not in executor.role_fields_by_status["completed"]
@@ -85,6 +89,14 @@ def test_return_status_helper_normalizes_callsite_status_selectors() -> None:
 
     with pytest.raises(ValueError, match="unknown gpd_return status"):
         normalize_return_status("waiting")
+
+
+def test_prompt_diagnostics_status_vocab_term_uses_return_contract_order() -> None:
+    from gpd.core import prompt_diagnostics
+
+    status_pipe = " | ".join(RETURN_STATUS_ORDER)
+
+    assert prompt_diagnostics._status_handling_terms(status_pipe) == (status_pipe,)
 
 
 def test_list_gpd_return_profiles_matches_profile_registry_and_filters() -> None:

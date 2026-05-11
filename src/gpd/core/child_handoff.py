@@ -303,6 +303,42 @@ class ChildGateTuple(BaseModel):
         return payload
 
 
+class AggregateChildGateTuple(BaseModel):
+    """Callsite-owned aggregate gate that reconciles multiple child gate results."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str
+    required_child_gates: tuple[str, ...]
+    expected_artifacts: tuple[str, ...]
+    validators: tuple[str, ...] = ()
+    failure_route: str
+
+    @field_validator("id", "failure_route", mode="before")
+    @classmethod
+    def _normalize_required_text(cls, value: object, info) -> str:
+        return _normalize_text(value, field_name=info.field_name)
+
+    @field_validator("required_child_gates", "expected_artifacts", mode="before")
+    @classmethod
+    def _normalize_required_text_tuple(cls, value: object, info) -> tuple[str, ...]:
+        return _normalize_non_empty_text_sequence(value, field_name=info.field_name)
+
+    @field_validator("validators", mode="before")
+    @classmethod
+    def _normalize_validators(cls, value: object) -> tuple[str, ...]:
+        return _normalize_text_sequence(value, field_name="validators")
+
+    def to_payload(self) -> dict[str, object]:
+        return {
+            "id": self.id,
+            "required_child_gates": list(self.required_child_gates),
+            "expected_artifacts": list(self.expected_artifacts),
+            "validators": list(self.validators),
+            "failure_route": self.failure_route,
+        }
+
+
 _DEFAULT_FAILURE_ROUTE: dict[HandoffFailureClass, str] = {
     HandoffFailureClass.RETURN_MISSING: "retry_once",
     HandoffFailureClass.RETURN_MALFORMED_REPAIRABLE: "repair_prompt_once",
@@ -377,6 +413,7 @@ class ChildHandoffValidationResult(BaseModel):
 
 
 __all__ = [
+    "AggregateChildGateTuple",
     "SAFE_CHILD_HANDOFF_VALIDATORS",
     "ChildGateApplicator",
     "ChildGateArtifact",
@@ -385,7 +422,9 @@ __all__ = [
     "ChildHandoffValidationRequest",
     "ChildHandoffValidationResult",
     "ChildHandoffValidatorResult",
+    "aggregate_child_gate_tuple_from_payload",
     "child_gate_tuple_from_payload",
+    "parse_aggregate_child_gate_markdown",
     "parse_child_gate_markdown",
     "render_child_gate_inline_summary",
     "render_child_gate_markdown",
@@ -402,6 +441,15 @@ def child_gate_tuple_from_payload(payload: Mapping[str, object]) -> ChildGateTup
     return ChildGateTuple.model_validate(candidate)
 
 
+def aggregate_child_gate_tuple_from_payload(payload: Mapping[str, object]) -> AggregateChildGateTuple:
+    """Build an aggregate tuple from raw fields or ``{"aggregate_child_gate": ...}``."""
+
+    candidate = payload.get("aggregate_child_gate") if "aggregate_child_gate" in payload else payload
+    if not isinstance(candidate, Mapping):
+        raise ValueError("aggregate_child_gate payload must be a mapping")
+    return AggregateChildGateTuple.model_validate(candidate)
+
+
 def parse_child_gate_markdown(content: str) -> ChildGateTuple:
     """Parse a raw or fenced YAML ``child_gate`` tuple."""
 
@@ -415,6 +463,22 @@ def parse_child_gate_markdown(content: str) -> ChildGateTuple:
         if "child_gate" in payload or {"id", "role"} <= set(payload):
             return child_gate_tuple_from_payload(payload)
     raise ValueError("No child_gate YAML block found")
+
+
+def parse_aggregate_child_gate_markdown(content: str) -> AggregateChildGateTuple:
+    """Parse a raw or fenced YAML ``aggregate_child_gate`` tuple."""
+
+    required_raw_fields = {"id", "required_child_gates", "expected_artifacts"}
+    for yaml_text in _candidate_yaml_payloads(content):
+        try:
+            payload = yaml.safe_load(yaml_text)
+        except yaml.YAMLError:
+            continue
+        if not isinstance(payload, Mapping):
+            continue
+        if "aggregate_child_gate" in payload or required_raw_fields <= set(payload):
+            return aggregate_child_gate_tuple_from_payload(payload)
+    raise ValueError("No aggregate_child_gate YAML block found")
 
 
 def render_child_gate_markdown(gate: ChildGateTuple | Mapping[str, object] | str) -> str:
@@ -1077,3 +1141,10 @@ def _normalize_text_sequence(value: object, *, field_name: str) -> tuple[str, ..
     for index, item in enumerate(value):
         normalized.append(_normalize_text(item, field_name=f"{field_name}[{index}]"))
     return tuple(normalized)
+
+
+def _normalize_non_empty_text_sequence(value: object, *, field_name: str) -> tuple[str, ...]:
+    normalized = _normalize_text_sequence(value, field_name=field_name)
+    if not normalized:
+        raise ValueError(f"{field_name} must include at least one item")
+    return normalized

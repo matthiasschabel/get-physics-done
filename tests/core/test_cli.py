@@ -51,6 +51,7 @@ from gpd.core.public_surface_contract import (
 )
 from gpd.core.recent_projects import record_recent_project
 from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
+from gpd.core.return_contract import RETURN_STATUS_ORDER
 from gpd.core.state import default_state_dict, generate_state_markdown, save_state_json, save_state_markdown
 from tests.latex_test_support import latex_capability_payload as _latex_capability_payload
 from tests.latex_test_support import toolchain_capability as _toolchain_capability
@@ -10000,6 +10001,13 @@ def test_return_skeleton_raw_outputs_payload() -> None:
     assert payload["envelope"]["files_written"] == []
 
 
+def test_return_status_help_lists_come_from_return_contract() -> None:
+    expected_statuses = ", ".join(RETURN_STATUS_ORDER)
+
+    assert cli_module._return_status_help_list() == expected_statuses
+    assert cli_module._return_status_help_list(include_any=True) == f"{expected_statuses}, any"
+
+
 def test_return_skeleton_checkpoint_intent_flags_render_child_owned_intent() -> None:
     result = runner.invoke(
         app,
@@ -10081,7 +10089,7 @@ def test_return_classify_default_accepts_checkpoint_status_without_required_gate
 def test_return_classify_require_status_checkpoint_accepts_checkpoint_status() -> None:
     result = runner.invoke(
         app,
-        ["--raw", "return", "classify", "--require-status", "checkpoint", "-"],
+        ["--raw", "return", "classify", "--require-status", " CHECKPOINT ", "-"],
         input=_valid_checkpoint_return_markdown(),
     )
 

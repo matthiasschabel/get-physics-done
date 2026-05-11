@@ -12659,13 +12659,31 @@ def _mapping_payload(raw_payload: object, *, label: str) -> dict[str, object]:
     return dict(payload)
 
 
+def _return_status_help_list(*, include_any: bool = False) -> str:
+    from gpd.core.return_contract import RETURN_STATUS_ORDER
+
+    statuses = [*RETURN_STATUS_ORDER]
+    if include_any:
+        statuses.append("any")
+    return ", ".join(statuses)
+
+
+def _return_required_status_error() -> str:
+    return f"required status must be one of: {_return_status_help_list(include_any=True)}"
+
+
 def _normalize_return_classify_required_status(require_status: str) -> str | None:
+    if not isinstance(require_status, str):
+        raise GPDError("required status must be a string")
     normalized = require_status.strip().lower()
     if normalized == "any":
         return None
-    if normalized in {"completed", "checkpoint", "blocked", "failed"}:
-        return normalized
-    raise GPDError("required status must be one of: any, blocked, checkpoint, completed, failed")
+    from gpd.core.return_contract import normalize_return_status
+
+    try:
+        return normalize_return_status(require_status, field_name="required status")
+    except ValueError as exc:
+        raise GPDError(_return_required_status_error()) from exc
 
 
 def _classify_return_markdown(content: str, *, require_status: str | None = None) -> dict[str, object]:
@@ -12765,7 +12783,7 @@ def return_skeleton_cmd(
     status: str = typer.Option(
         "completed",
         "--status",
-        help="Canonical gpd_return status to render: completed, checkpoint, blocked, or failed.",
+        help=f"Canonical gpd_return status to render: {_return_status_help_list()}.",
     ),
     output_format: str = typer.Option(
         "markdown",
@@ -12861,7 +12879,7 @@ def return_classify_cmd(
     require_status: str = typer.Option(
         "any",
         "--require-status",
-        help="Require a return status: completed, checkpoint, blocked, failed, or any.",
+        help=f"Require a return status: {_return_status_help_list(include_any=True)}.",
     ),
 ) -> None:
     """Classify one child-return envelope without repairing or mutating it."""

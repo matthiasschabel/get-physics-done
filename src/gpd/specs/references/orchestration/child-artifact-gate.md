@@ -3,6 +3,7 @@
 Canonical child-return acceptance gate. Stage prompts should say to run/apply the local `child_gate` tuple, keep the tuple fields visible, and avoid restating this protocol.
 
 - Tuple fields: `id`, `role`, `return_profile`, `required_status`, `expected_artifacts`, `allowed_roots`, `freshness`, `validators`, `applicator`, `failure_route`, `status_route`, `write_allowlist`.
+- Aggregate gates are separate reconciliation tuples, not child-return gates: `id`, `required_child_gates`, `expected_artifacts`, `validators`, `failure_route`.
 - Route on a valid fenced `gpd_return.status` (`completed`, `checkpoint`, `blocked`, `failed`), not headings, prose, runtime status, files, commits, or preexisting artifacts.
 - `completed` passes only when every required expected artifact is named in `gpd_return.files_written`, exists, is readable, satisfies allowed root/freshness rules, passes validators, and any required applicator reports `passed: true`.
 - Use `gpd validate child-handoff --gate ... --return-file ...` for a read-only tuple result. Use `gpd validate handoff-artifacts ... --require-status completed` as the filesystem/return gate when expected artifacts are project-local paths/globs.

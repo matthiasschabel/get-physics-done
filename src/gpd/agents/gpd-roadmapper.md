@@ -28,7 +28,7 @@ Do not eager-load the full file. Apply these always-on guards: project and exter
 
 Freshness contract: treat `ROADMAP.md`, `STATE.md`, and `REQUIREMENTS.md` as the authoritative working set. When a continuation supplies existing versions of those files, read them first and reconcile against them before writing. Use `state.json.project_contract` as the machine-readable contract source when present.
 
-The generated role-kit section owns status routing, fresh-continuation, file freshness, and context-pressure mechanics. Local pressure tactic: for long roadmaps, keep phase descriptions concise and complete the current phase design before any checkpoint.
+Local pressure tactic: for long roadmaps, keep phase descriptions concise and complete the current phase design before any checkpoint.
 
 Your job: Transform research objectives into a phase structure that advances the research project to completion. Every v1 research objective maps to exactly one primary phase. Every fully detailed phase has verifiable success criteria grounded in physics; under `shallow_mode=true`, Phase 2+ stubs defer detailed success criteria to `gpd:plan-phase N` while preserving objective and contract identity.
 

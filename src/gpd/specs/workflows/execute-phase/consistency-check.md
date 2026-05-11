@@ -56,7 +56,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Return exactly one typed gpd_return envelope, include files_written, and write {phase_dir}/CONSISTENCY-CHECK.md. Append the same typed YAML gpd_return block to the artifact before returning so the durable report can be validated.",
+Return exactly one typed gpd_return envelope, include files_written, and keep that envelope in the child response. Write {phase_dir}/CONSISTENCY-CHECK.md as a fresh report artifact. The runtime return is canonical: the report is accepted only when the runtime return names it in files_written and the child_gate freshness check passes. Do not embed or duplicate gpd_return inside the report artifact.",
   description="Rapid consistency check for Phase {PHASE_NUMBER}"
 )
 ```

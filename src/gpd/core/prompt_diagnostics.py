@@ -62,6 +62,7 @@ from gpd.core.prompt_stage_diagnostics import (
 )
 from gpd.core.return_contract import (
     KNOWN_RETURN_FIELD_NAMES,
+    RETURN_STATUS_ORDER,
     return_field_allowed_source,
     validate_gpd_return_markdown,
 )
@@ -263,9 +264,11 @@ _FIELD_DECLARATION_STOP_WORDS = frozenset(
     }
 )
 _SEMANTIC_EXAMPLE_LIMIT = 10
+_SEMANTIC_STATUS_PIPE_DISPLAY = " | ".join(RETURN_STATUS_ORDER)
+_SEMANTIC_STATUS_SEQUENCE_RE = r".*".join(rf"\b{re.escape(status)}\b" for status in RETURN_STATUS_ORDER)
+_SEMANTIC_STATUS_PIPE_RE = r"\s*\|\s*".join(rf"\b{re.escape(status)}\b" for status in RETURN_STATUS_ORDER)
 _SEMANTIC_STATUS_VOCAB_RE = re.compile(
-    r"\bcompleted\b.*\bcheckpoint\b.*\bblocked\b.*\bfailed\b|"
-    r"\bcompleted\s*\|\s*checkpoint\s*\|\s*blocked\s*\|\s*failed\b",
+    rf"{_SEMANTIC_STATUS_SEQUENCE_RE}|{_SEMANTIC_STATUS_PIPE_RE}",
     re.IGNORECASE,
 )
 _SEMANTIC_ROUTE_STATUS_RE = re.compile(
@@ -2310,7 +2313,7 @@ def _status_handling_terms(clause: str) -> tuple[str, ...]:
     if has_gpd_status:
         terms.append("gpd_return.status")
     if has_runtime_vocab:
-        terms.append("completed | checkpoint | blocked | failed")
+        terms.append(_SEMANTIC_STATUS_PIPE_DISPLAY)
     if has_route_status:
         terms.append("route on status")
     return tuple(terms)

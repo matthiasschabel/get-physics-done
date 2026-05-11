@@ -25,7 +25,9 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
     assert "expected_artifacts:" in workflow
     assert "{phase_dir}/CONSISTENCY-CHECK.md" in workflow
     assert "Return exactly one typed gpd_return envelope, include files_written" in workflow
-    assert "Append the same typed YAML gpd_return block to the artifact before returning" in workflow
+    assert "runtime return is canonical" in workflow
+    assert "Do not embed or duplicate gpd_return inside the report artifact" in workflow
+    assert "Append the same typed YAML gpd_return block to the artifact before returning" not in workflow
     assert "Run the local child_gate before accepting the checker output." in workflow
     assert "`completed`: accept only if the child_gate passes" in workflow
     assert "`checkpoint`: stop, surface the checkpoint payload" in workflow

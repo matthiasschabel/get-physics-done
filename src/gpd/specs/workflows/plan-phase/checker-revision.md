@@ -163,7 +163,7 @@ Checker presentation headings are non-authority; route through the checker tuple
      ```
 
   5. Send ONLY the blocked plans from the fresh returned plan set to the revision loop (step 12). Pass the checker's blocker details as `{structured_issues_from_checker}`. Do NOT re-check already-approved plans unless their inputs change during revision, and do not treat preexisting blocked-plan files as revised unless `planner_revision` passes.
-  6. After revision + re-check cycle, if the re-check returns `gpd_return.status: completed` for the revised plans, merge approved sets and proceed to step 13. If it returns `gpd_return.status: checkpoint` again, repeat. If `gpd_return.status: failed`, enter standard revision loop for remaining plans.
+  6. After revision + re-check cycle, merge approved sets and proceed to step 13 when the revised plans pass; repeat on another checkpoint; enter the standard revision loop on failure.
   7. Approved plans from partial approval are final only after the plan-ID reconciliation checks pass.
 
 - **`gpd_return.status: blocked`:** The checker found a blocker that prevents accepting the current plan set as-is. If `approved_plans` is empty, treat this as a full rejection and send all plans to the revision loop. If `approved_plans` is non-empty, preserve the approved subset only after plan-ID reconciliation passes, then send the blocked subset to the revision loop with the structured issues.

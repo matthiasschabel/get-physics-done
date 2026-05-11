@@ -50,8 +50,8 @@ def test_planner_role_owns_schema_visibility_and_workflows_use_the_short_role_pr
         "and {GPD_INSTALL_DIR}/templates/plan-contract-schema.md for your role and instructions."
     )
     assert plan_phase.count(short_instruction) == 2
-    assert verify_work.count(short_instruction) == 2
-    assert quick.count(short_instruction) == 1
+    assert verify_work.count(short_instruction) == 1
+    assert quick.count(short_instruction) == 2
     assert long_instruction not in plan_phase
     assert long_instruction not in verify_work
     assert long_instruction not in quick

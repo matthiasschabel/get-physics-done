@@ -84,10 +84,11 @@ def test_execute_phase_figure_tracker_scans_durable_figure_roots() -> None:
 def test_write_paper_uses_durable_figure_and_literature_roots() -> None:
     workflow_text = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
-    assert "figure readiness from durable roots" in workflow_text
-    assert "`artifacts/phases`, `figures`" in workflow_text
-    assert "`${PAPER_DIR}/figures`" in workflow_text
-    assert "GPD/literature/*-REVIEW.md" in workflow_text
+    assert "figure roots include durable artifacts or `${PAPER_DIR}/FIGURE_TRACKER.md`" in workflow_text
+    assert "Generate or refresh a publication-styled script/output under\n   `${PAPER_DIR}/figures/`." in workflow_text
+    assert "mkdir -p \"${PAPER_DIR}/figures\"" in workflow_text
+    assert "literature review with concrete prior-work entries" in workflow_text
+    assert "GPD/literature/*-CITATION-SOURCES.json" in workflow_text
     assert "GPD/phases/*/figures/" not in workflow_text
     assert "GPD/phases/*/LITERATURE-REVIEW.md" not in workflow_text
 

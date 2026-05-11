@@ -9,18 +9,16 @@ This stage owns phase-wide wave planning. It classifies proof obligations, check
 <process>
 
 <stage_policy>
-Later staged refreshes surface `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, selected protocol bundles, and convention locks for anchor-aware routing. Stable knowledge docs may appear only through those shared reference surfaces as reviewed background; they do not become a separate authority tier.
+Later staged refreshes surface `effective_reference_intake`, active-reference handles, citation/source status, `reference_artifact_files`, selected protocol-bundle handles, and convention locks for anchor-aware routing. Stable knowledge docs may appear only through those shared handle surfaces as reviewed background; they do not become a separate authority tier.
 
-`execute-plan.md owns plan-local execution semantics; this workflow only owns phase-wide routing and wave risk.` This stage may name downstream child-readable paths, but it does not eagerly need full `workflows/execute-plan.md`, `references/orchestration/checkpoints.md`, or `references/verification/core/verification-core.md`.
+`execute-plan.md` owns plan-local execution. This stage owns only phase-wide routing and wave risk.
 
 **Mode-aware behavior:**
 - `autonomy` controls who gets interrupted at a wave boundary.
 - `research_mode` adjusts depth and optional tangents; it never relaxes required gates.
 - `review_cadence` controls bounded phase pauses.
-- `research_mode=balanced` keeps standard contract, anchor, and review coverage unless the wave needs a narrower or broader review.
-- `research_mode=adaptive` may narrow only after decisive prior `contract_results`, `comparison_verdicts`, or an explicit approach lock show that the method family is stable.
-- `research_mode=exploit` suppresses optional tangents by default.
-- `workflow.verifier=false`, sparse cadence, `autonomy=yolo`, or manual "skip verification" requests do not disable mandatory proof red-teaming for proof-bearing work.
+- `balanced` keeps standard contract/anchor/review coverage; `adaptive` narrows only after decisive prior evidence or an explicit approach lock; `exploit` suppresses optional tangents by default.
+- Disabled generic verifier, sparse cadence, `autonomy=yolo`, or "skip verification" never disables proof red-team for proof-bearing work.
 </stage_policy>
 
 <step name="detect_proof_obligation_work">
@@ -44,7 +42,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage wave_planning --style instruction` to confirm the manifest-selected wave-planning fields. Read only those keys from `WAVE_PLANNING_INIT`; `WAVE_PLANNING_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Use `gpd --raw stage field-access execute-phase --stage wave_planning --style instruction`; read only manifest-selected keys.
 </step>
 
 <step name="claim_deliverable_alignment_check">
@@ -75,16 +73,7 @@ fi
 
 **Suppression:** if `confirmed_at` is set AND the current `contract_fingerprint == confirmed_contract_hash` AND `context_guidance_fingerprint == confirmed_context_hash`, skip and log `claim_deliverable_alignment_check: skipped (already confirmed this session)`.
 
-**Render:** when fired and not suppressed, render a one-screen `Claim ↔ Deliverable Alignment` table. Left column: CONTEXT.md + `ContractContextIntake`; right column: `gpd contract alignment-summary`. Cap each cell at 5 bullets.
-
-```
-| User intent (CONTEXT)               | Machine contract                    |
-|-------------------------------------|-------------------------------------|
-| Observables: ...                    | Claims: ...                         |
-| Deliverables: ...                   | Deliverables: ...                   |
-| Must-have references: ...           | Acceptance tests: ...               |
-| Stop-or-rethink conditions: ...     |                                     |
-```
+**Render:** when fired and not suppressed, render one screen comparing CONTEXT/ContractContextIntake to `gpd contract alignment-summary`. Cover observables, deliverables, required references, stop/rethink conditions, claims, and acceptance tests; cap each side at 5 bullets.
 
 **ask_user:** present exactly one question with 4 options. Enter selects `Y`.
 
@@ -104,7 +93,7 @@ ask_user([
 ])
 ```
 
-Only an explicit `ask_user` answer of `Y: proceed` authorizes record-alignment. A command invocation, missing `ask_user` support, timeout, empty answer, or noninteractive run is not an alignment answer. Otherwise STOP before branch/checkpoint writes, scripts, numerical computations, dispatches, subagents, or artifacts.
+Only explicit `Y: proceed` authorizes record-alignment. Missing `ask_user`, timeout, empty answer, or noninteractive run is not confirmation; STOP before writes, scripts, computations, dispatches, subagents, or artifacts.
 
 On `Y: proceed` record alignment and continue:
 
@@ -112,13 +101,13 @@ On `Y: proceed` record alignment and continue:
 gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$CONTEXT_HASH"
 ```
 
-On `n: abort`, exit cleanly, do not spawn any executor, and emit `Next Up: gpd:execute-phase {N}`. On `e` or `p`, hand off to `gpd:discuss-phase {N}` or `gpd:plan-phase {N}`, then re-enter once; if the same key is chosen again, defer to that workflow and stop looping.
+On `n`, exit cleanly and emit `Next Up: gpd:execute-phase {N}`. On `e` or `p`, hand off to `gpd:discuss-phase {N}` or `gpd:plan-phase {N}`; if repeated, defer and stop looping.
 </step>
 
 <step name="discover_and_group_plans">
 Load plan inventory with wave grouping from `gpd phase index {phase_number}`.
 
-Parse JSON for: `phase`, `plans[]` (each with `id`, `wave`, `interactive`, `gap_closure`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves` (map of wave number -> plan IDs), `incomplete`, `has_checkpoints`.
+Parse JSON for `phase`, `plans[]` (`id`, `wave`, `interactive`, `gap_closure`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves`, `incomplete`, and `has_checkpoints`.
 
 **Filtering:** skip plans where `has_summary: true`. If `$GAPS_ONLY` is true, also skip non-gap_closure plans. If all filtered: "No matching incomplete plans" -> exit.
 
@@ -144,13 +133,11 @@ Report:
 </step>
 
 <step name="resolve_execution_cadence">
-Translate cadence config plus wave risk into concrete execution boundaries before any executor is spawned.
+Translate cadence config plus wave risk into execution boundaries before spawning executors.
 
 Read `review_cadence`, `research_mode`, the unattended-minute limits, checkpoint thresholds, `strict_wait`, `never_interrupt_running_workers`, and `never_auto_close_child_agents` from the current staged payload/config. `strict_wait` disables unattended-minute cutoffs entirely; `never_interrupt_running_workers` is the narrower form of the same guarantee. In either case, set plan and wave unattended-minute limits to zero so workers run to natural completion. `never_auto_close_child_agents` means a spawned child remains open until it returns, checkpoints, or fails; no parent stage may synthesize closure.
 
-**Core invariant:** `autonomy` decides who gets interrupted. `review_cadence` decides when the system must stop, inspect, or re-question. Even in `yolo`, required first-result and pre-fanout gates still run; the difference is that a clean pass can auto-continue.
-
-These gates are task-level safety rails, not line-by-line interruptions. Even in `supervised`, checkpoint after each plan task or required gate, not after every algebraic micro-step.
+`autonomy` decides who gets interrupted; `review_cadence` decides when to stop, inspect, or re-question. Even in `yolo`, first-result and pre-fanout gates still run; a clean pass may auto-continue. These are task-level gates, not line-by-line interruptions.
 
 For each wave, classify downstream fanout as risky when any of these holds:
 - multiple plans and any later wave depends on it
@@ -158,7 +145,7 @@ For each wave, classify downstream fanout as risky when any of these holds:
 - derivation, formalism, numerical, or validation phase classes
 - file conflicts, convention-lock requirements, or benchmark-critical anchors
 - new estimator, baseline, or branch point whose downstream value depends on a decisive comparison still to be earned
-- sparse evidence where the first material result only validates a proxy, internal consistency story, or supporting artifact while decisive anchors remain unresolved
+- sparse evidence where the first material result validates only a proxy or supporting artifact while decisive anchors remain unresolved
 
 When a wave is risky:
 - set `FIRST_RESULT_GATE_REQUIRED=true`
@@ -166,13 +153,13 @@ When a wave is risky:
 - set `SEGMENT_TASK_CAP=${CHECKPOINT_AFTER_N_TASKS}`
 - force bounded continuation segments even when the authored plan has no checkpoints
 
-**Dense cadence override:** when `review_cadence=dense`, treat every wave as risky regardless of the heuristic checks above, applying the risky-wave settings unconditionally: `FIRST_RESULT_GATE_REQUIRED=true` and `PRE_FANOUT_REVIEW_REQUIRED=true`. A clean pass may auto-continue once the gate fires, but the gate must fire.
+When `review_cadence=dense`, treat every wave as risky and require both first-result and pre-fanout gates.
 
 When a wave is not risky, keep bounded execution available for long plans, wall-clock budgets, and context pressure, but allow short low-fanout plans to run without checkpoint-free micro-pauses.
 
-**Skeptical re-questioning rule:** if the first material result is anchor-thin, stop before downstream fanout and record the weakest unchecked anchor, what still looks assumed, the quickest disconfirming observation, and which downstream plans would become wasted work if that evidence failed.
+If the first material result is anchor-thin, stop before downstream fanout and record the weakest unchecked anchor, remaining assumption, quickest disconfirming observation, and downstream plans at risk.
 
-**Proposal-first tangent control:** unexpected but non-blocking alternatives are tangent proposals, not permission for silent side work. Classify each proposal at the existing review stop using exactly one of: `ignore`, `defer`, `branch_later`, `pursue_now`. `pursue_now` requires explicit user request or approved contract scope.
+Unexpected but non-blocking alternatives are tangent proposals, not silent side work. Classify each proposal as `ignore`, `defer`, `branch_later`, or `pursue_now`; `pursue_now` requires explicit user request or approved contract scope.
 
 If a tangent should become an explicit side investigation, surface `gpd:tangent` as the follow-up command instead of silently branching inside execution.
 

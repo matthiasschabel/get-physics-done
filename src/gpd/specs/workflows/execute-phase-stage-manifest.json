@@ -25,6 +25,20 @@
       "phase_slug",
       "plans"
     ],
+    "phase_bootstrap_route": [
+      "phase_found",
+      "phase_dir",
+      "phase_number",
+      "plan_count",
+      "branching_strategy",
+      "branch_name",
+      "state_exists",
+      "roadmap_exists",
+      "project_contract_gate",
+      "project_contract_validation",
+      "project_contract_load_info",
+      "platform"
+    ],
     "plan_progress": [
       "incomplete_plans",
       "plan_count",
@@ -62,6 +76,12 @@
       "protocol_bundle_context",
       "protocol_bundle_verifier_extensions"
     ],
+    "protocol_bundle_handles": [
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_count",
+      "protocol_bundle_load_manifest",
+      "protocol_bundle_verifier_extensions"
+    ],
     "convention_lock_context": [
       "convention_lock",
       "convention_lock_count"
@@ -96,18 +116,9 @@
         "workflows/execute-phase/phase-bootstrap.md"
       ],
       "required_init_field_groups": [
-        "execution_phase_base",
-        "plan_progress"
+        "phase_bootstrap_route"
       ],
-      "required_init_fields": [
-        "state_exists",
-        "roadmap_exists",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_validation",
-        "project_contract_load_info",
-        "platform"
-      ],
+      "required_init_fields": [],
       "loaded_authorities": [
         "workflows/execute-phase/phase-bootstrap.md"
       ],
@@ -200,18 +211,26 @@
         "execution_phase_base",
         "plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
+        "reference_intake_context",
         "convention_lock_context",
         "derived_convention_lock_context",
         "state_integrity_context"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase/phase-classification.md",
-        "references/orchestration/meta-orchestration.md",
-        "references/orchestration/model-profile-resolution.md"
+        "workflows/execute-phase/phase-classification.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "classification_policy_debug",
+          "authorities": [
+            "references/orchestration/meta-orchestration.md",
+            "references/orchestration/model-profile-resolution.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
+        "references/orchestration/meta-orchestration.md",
+        "references/orchestration/model-profile-resolution.md",
         "workflows/execute-phase/wave-planning.md",
         "workflows/execute-phase/wave-dispatch.md",
         "workflows/execute-phase/aggregate-and-verify.md",
@@ -257,23 +276,14 @@
         "execution_phase_base",
         "plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
-        "reference_artifact_context",
-        "protocol_bundle_context"
+        "reference_intake_context",
+        "reference_artifact_handles",
+        "protocol_bundle_handles"
       ],
       "required_init_fields": [
-        "derived_active_references",
-        "derived_active_reference_count",
         "citation_source_files",
-        "citation_source_count",
         "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
         "active_references",
-        "active_reference_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
         "convention_lock",
         "convention_lock_count",
         "derived_convention_lock",
@@ -294,10 +304,15 @@
       ],
       "loaded_authorities": [
         "workflows/execute-phase/wave-planning.md",
-        "references/orchestration/context-budget.md",
         "references/verification/core/proof-redteam-workflow-gate.md"
       ],
       "conditional_authorities": [
+        {
+          "when": "context_pressure",
+          "authorities": [
+            "references/orchestration/context-budget.md"
+          ]
+        },
         {
           "when": "full_checkpoint_policy",
           "authorities": [
@@ -312,6 +327,7 @@
         }
       ],
       "must_not_eager_load": [
+        "references/orchestration/context-budget.md",
         "references/orchestration/checkpoints.md",
         "references/orchestration/agent-infrastructure.md",
         "references/verification/core/verification-core.md",
@@ -772,8 +788,8 @@
         "execution_phase_base",
         "plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
-        "protocol_bundle_context",
+        "reference_intake_context",
+        "protocol_bundle_handles",
         "execution_resume_context",
         "state_integrity_context"
       ],
@@ -942,14 +958,16 @@
       ],
       "required_init_field_groups": [
         "execution_phase_base",
-        "summary_plan_progress",
+        "plan_progress",
         "contract_gate_status",
-        "reference_runtime_context",
-        "reference_artifact_context",
-        "protocol_bundle_context",
-        "execution_resume_context"
+        "reference_intake_context",
+        "reference_artifact_handles",
+        "protocol_bundle_handles"
       ],
       "required_init_fields": [
+        "citation_source_files",
+        "citation_source_warnings",
+        "active_references",
         "convention_lock",
         "convention_lock_count",
         "intermediate_results",

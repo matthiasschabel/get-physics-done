@@ -97,7 +97,7 @@ VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS = (
     "Stage id: `session_router`.",
     "SESSION_ROUTER_INIT=$(gpd --raw init verify-work",
     "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`.",
-    "Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here.",
+    "replaces shell loops over `GPD/phases`",
     "Do not assume reference ledgers, protocol bundles, or report schemas are loaded here.",
     'gpd validate review-preflight verify-work "${PHASE_ARG}" --strict',
     "LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate verify-work",
@@ -717,6 +717,53 @@ def test_runtime_projected_help_uses_native_include_or_compact_help_bridge_shim(
         assert has_help_bridge_shim_sentinel(projected)
 
 
+def _manifest_asset_paths(manifest: dict[str, object]) -> set[str]:
+    paths: set[str] = set()
+    for bundle in manifest["bundles"]:
+        assets = bundle["assets"]
+        for role_assets in assets.values():
+            paths.update(asset["path"] for asset in role_assets)
+    return paths
+
+
+def _assert_staged_protocol_bundle_payload(payload: dict[str, object], *, selected: bool) -> None:
+    assert "selected_protocol_bundles" not in payload
+    assert "protocol_bundle_asset_paths" not in payload
+
+    manifest = payload["protocol_bundle_load_manifest"]
+    assert manifest["selected_bundle_ids"] == payload["selected_protocol_bundle_ids"]
+    assert manifest["bundle_count"] == payload["protocol_bundle_count"]
+
+    if selected:
+        assert payload["selected_protocol_bundle_ids"] == ["stat-mech-simulation"]
+        assert payload["protocol_bundle_count"] == 1
+        assert manifest["bundles"][0]["title"] == "Statistical Mechanics Simulation"
+        assert "references/protocols/monte-carlo.md" in _manifest_asset_paths(manifest)
+        assert "references/protocols/numerical-relativity.md" not in _manifest_asset_paths(manifest)
+        assert manifest["bundles"][0]["estimator_policies"]
+        assert manifest["bundles"][0]["decisive_artifact_guidance"]
+        assert any(
+            extension["bundle_id"] == "stat-mech-simulation"
+            for extension in payload["protocol_bundle_verifier_extensions"]
+        )
+    else:
+        assert payload["selected_protocol_bundle_ids"] == []
+        assert payload["protocol_bundle_count"] == 0
+        assert manifest["bundles"] == []
+        assert payload["protocol_bundle_verifier_extensions"] == []
+
+    rendered_context = payload.get("protocol_bundle_context")
+    if rendered_context:
+        if selected:
+            assert "Statistical Mechanics Simulation" in rendered_context
+            assert "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md" in rendered_context
+            assert "Numerical Relativity" not in rendered_context
+        else:
+            assert "None selected from project metadata" in rendered_context
+            for marker in PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS:
+                assert marker not in rendered_context
+
+
 @pytest.mark.parametrize("selected", (True, False), ids=("selected", "absent"))
 def test_staged_protocol_bundle_payloads_preserve_selected_vs_absent_context(
     tmp_path: Path,
@@ -731,32 +778,7 @@ def test_staged_protocol_bundle_payloads_preserve_selected_vs_absent_context(
     )
 
     for payload in payloads:
-        assert "selected_protocol_bundles" not in payload
-        assert "protocol_bundle_asset_paths" not in payload
-        if selected:
-            assert payload["selected_protocol_bundle_ids"] == ["stat-mech-simulation"]
-            assert payload["protocol_bundle_count"] == 1
-            assert "Statistical Mechanics Simulation" in payload["protocol_bundle_context"]
-            assert "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md" in payload["protocol_bundle_context"]
-            assert "Estimator policies:" in payload["protocol_bundle_context"]
-            assert "Decisive artifacts:" in payload["protocol_bundle_context"]
-            assert "Numerical Relativity" not in payload["protocol_bundle_context"]
-            assert (
-                "{GPD_INSTALL_DIR}/references/protocols/numerical-relativity.md"
-                not in payload["protocol_bundle_context"]
-            )
-            assert any(
-                extension["bundle_id"] == "stat-mech-simulation"
-                for extension in payload["protocol_bundle_verifier_extensions"]
-            )
-        else:
-            assert payload["selected_protocol_bundle_ids"] == []
-            assert payload["protocol_bundle_count"] == 0
-            assert payload["protocol_bundle_verifier_extensions"] == []
-            assert "None selected from project metadata" in payload["protocol_bundle_context"]
-            assert "Fall back to shared protocols and on-demand routing." in payload["protocol_bundle_context"]
-            for marker in PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS:
-                assert marker not in payload["protocol_bundle_context"]
+        _assert_staged_protocol_bundle_payload(payload, selected=selected)
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)

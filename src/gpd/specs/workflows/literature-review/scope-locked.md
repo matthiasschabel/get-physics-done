@@ -236,7 +236,7 @@ Write `GPD/literature/{slug}-REVIEW.md` and `GPD/literature/{slug}-CITATION-SOUR
 </output>
 
 <citation_sidecar_contract>
-`GPD/literature/{slug}-CITATION-SOURCES.json` is a JSON array of strict `CitationSource` objects with stable `reference_id`; `year` is a string; Extra keys are rejected by the downstream parser; audit-only fields stay in `GPD/literature/{slug}-CITATION-AUDIT.md`. Compact shape: `[{"source_type":"paper","reference_id":"ref-main","bibtex_key":"Ref2026","title":"Fixture Reference","authors":["Ada Example"],"year": "2026","journal":"Journal of Fixture Physics"}]`.
+`GPD/literature/{slug}-CITATION-SOURCES.json` is a JSON array of strict `CitationSource` objects with stable `reference_id`; `year` is a string; Extra keys are rejected by the downstream parser; audit-only fields such as `verification_status`, `canonical_identifiers`, and `verification_sources` stay in `GPD/literature/{slug}-CITATION-AUDIT.md`. Compact shape: `[{"source_type":"paper","reference_id":"ref-main","bibtex_key":"Ref2026","title":"Fixture Reference","authors":["Ada Example"],"year": "2026","journal":"Journal of Fixture Physics"}]`.
 </citation_sidecar_contract>
 
 <spawn_contract>

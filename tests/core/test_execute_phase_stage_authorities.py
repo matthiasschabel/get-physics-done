@@ -172,17 +172,42 @@ def test_execute_phase_split_stage_write_scopes_are_narrow() -> None:
 
 def test_execute_phase_early_reference_content_boundaries_are_explicit() -> None:
     manifest = load_workflow_stage_manifest("execute-phase")
+    bootstrap = manifest.stage("phase_bootstrap")
     phase_classification = manifest.stage("phase_classification")
     wave_planning = manifest.stage("wave_planning")
+    verification_handoff = manifest.stage("verification_handoff")
     closeout = manifest.stage("closeout")
+
+    assert "phase_dir" in bootstrap.required_init_fields
+    assert "phase_number" in bootstrap.required_init_fields
+    assert "plan_count" in bootstrap.required_init_fields
+    assert "branch_name" in bootstrap.required_init_fields
+    assert "executor_model" not in bootstrap.required_init_fields
+    assert "verifier_model" not in bootstrap.required_init_fields
+    assert "autonomy" not in bootstrap.required_init_fields
+    assert "plans" not in bootstrap.required_init_fields
+    assert "project_contract" not in bootstrap.required_init_fields
 
     assert "reference_artifacts_content" not in phase_classification.required_init_fields
     assert "protocol_bundle_context" not in phase_classification.required_init_fields
-    assert "active_reference_context" in phase_classification.required_init_fields
+    assert "active_reference_context" not in phase_classification.required_init_fields
+    assert "effective_reference_intake" in phase_classification.required_init_fields
 
     assert "reference_artifact_files" in wave_planning.required_init_fields
-    assert "reference_artifacts_content" in wave_planning.required_init_fields
-    assert "protocol_bundle_context" in wave_planning.required_init_fields
+    assert "reference_artifacts_content" not in wave_planning.required_init_fields
+    assert "active_reference_context" not in wave_planning.required_init_fields
+    assert "active_references" in wave_planning.required_init_fields
+    assert "protocol_bundle_load_manifest" in wave_planning.required_init_fields
+    assert "protocol_bundle_context" not in wave_planning.required_init_fields
+    assert "protocol_bundle_verifier_extensions" in wave_planning.required_init_fields
+
+    assert "active_references" in verification_handoff.required_init_fields
+    assert "citation_source_files" in verification_handoff.required_init_fields
+    assert "citation_source_warnings" in verification_handoff.required_init_fields
+    assert "current_execution" not in verification_handoff.required_init_fields
+    assert "summaries" not in verification_handoff.required_init_fields
+    assert "derived_active_references" not in verification_handoff.required_init_fields
+    assert "active_reference_count" not in verification_handoff.required_init_fields
 
     assert "active_reference_context" not in closeout.required_init_fields
     assert "reference_artifact_files" not in closeout.required_init_fields

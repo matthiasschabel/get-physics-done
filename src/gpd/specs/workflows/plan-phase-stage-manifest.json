@@ -34,21 +34,22 @@
       "project_contract_load_info",
       "project_contract_validation"
     ],
-    "reference_runtime_context": [
+    "reference_handle_context": [
       "contract_intake",
       "effective_reference_intake",
       "selected_protocol_bundle_ids",
       "protocol_bundle_count",
-      "protocol_bundle_context",
+      "protocol_bundle_load_manifest",
       "protocol_bundle_verifier_extensions",
-      "active_reference_context",
       "reference_artifact_files",
-      "reference_artifacts_content",
       "literature_review_files",
       "literature_review_count",
       "research_map_reference_files",
       "research_map_reference_count",
       "derived_manuscript_proof_review_status"
+    ],
+    "reference_rendered_context": [
+      "active_reference_context"
     ]
   },
   "stages": [
@@ -165,7 +166,8 @@
         "planning_controls",
         "phase_target_context",
         "contract_gate_status",
-        "reference_runtime_context"
+        "reference_handle_context",
+        "reference_rendered_context"
       ],
       "required_init_fields": [
         "state_content",
@@ -228,15 +230,9 @@
         "planning_controls",
         "phase_target_context",
         "contract_gate_status",
-        "reference_runtime_context"
+        "reference_handle_context"
       ],
       "required_init_fields": [
-        "requirements_content",
-        "context_content",
-        "research_content",
-        "experiment_design_content",
-        "verification_content",
-        "validation_content",
         "platform"
       ],
       "loaded_authorities": [

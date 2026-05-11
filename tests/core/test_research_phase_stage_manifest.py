@@ -44,7 +44,18 @@ def test_research_phase_stage_manifest_tracks_visible_runtime_delegation_authori
         "references/orchestration/model-profile-resolution.md",
         "references/orchestration/runtime-delegation-note.md",
     )
-    assert "reference_artifacts_content" in handoff.required_init_fields
+    assert "effective_reference_intake" in handoff.required_init_fields
+    assert "reference_artifact_files" in handoff.required_init_fields
+    assert "active_references" in handoff.required_init_fields
+    assert "selected_protocol_bundle_ids" in handoff.required_init_fields
+    assert "protocol_bundle_load_manifest" in handoff.required_init_fields
+    assert "protocol_bundle_verifier_extensions" in handoff.required_init_fields
+    assert "active_reference_context" not in handoff.required_init_fields
+    assert "reference_artifacts_content" not in handoff.required_init_fields
+    assert "protocol_bundle_context" not in handoff.required_init_fields
+    assert "state_content" not in handoff.required_init_fields
+    assert "config_content" not in handoff.required_init_fields
+    assert "roadmap_content" not in handoff.required_init_fields
     assert handoff.writes_allowed == ("GPD/phases/XX-name/XX-RESEARCH.md",)
 
 

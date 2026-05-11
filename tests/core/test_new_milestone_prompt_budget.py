@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import yaml
 
 from gpd.core.child_handoff import ChildGateTuple, child_gate_tuple_from_payload
+from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
 from tests.prompt_metrics_support import measure_prompt_surface
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,6 +18,13 @@ SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 SURVEY_AUTHORITY = WORKFLOWS_DIR / "new-milestone" / "survey-objectives.md"
 ROADMAP_AUTHORITY = WORKFLOWS_DIR / "new-milestone" / "roadmap-authoring.md"
+
+
+def _new_milestone_manifest():
+    return validate_workflow_stage_manifest_payload(
+        json.loads((WORKFLOWS_DIR / "new-milestone-stage-manifest.json").read_text(encoding="utf-8")),
+        expected_workflow_id="new-milestone",
+    )
 
 
 def _child_gate(source: str, gate_id: str) -> ChildGateTuple:
@@ -104,3 +113,39 @@ def test_new_milestone_child_gates_preserve_artifact_contracts() -> None:
     assert roadmapper.allowed_roots == ("GPD",)
     assert roadmapper.applicator.command.startswith("main workflow applies accepted state changes")
     assert roadmapper.applicator.require_passed_true is False
+
+
+def test_new_milestone_planning_stages_use_handles_instead_of_embedded_bodies() -> None:
+    manifest = _new_milestone_manifest()
+    survey = manifest.stage("survey_objectives")
+    roadmap = manifest.stage("roadmap_authoring")
+
+    required_handle_fields = {
+        "contract_intake",
+        "effective_reference_intake",
+        "reference_artifact_files",
+        "literature_review_files",
+        "research_map_reference_files",
+    }
+    removed_body_fields = {
+        "active_reference_context",
+        "project_content",
+        "state_content",
+        "milestones_content",
+        "requirements_content",
+        "roadmap_content",
+    }
+
+    assert required_handle_fields <= set(survey.required_init_fields)
+    assert required_handle_fields <= set(roadmap.required_init_fields)
+    assert removed_body_fields.isdisjoint(survey.required_init_fields)
+    assert removed_body_fields.isdisjoint(roadmap.required_init_fields)
+
+    survey_source = SURVEY_AUTHORITY.read_text(encoding="utf-8")
+    roadmap_source = ROADMAP_AUTHORITY.read_text(encoding="utf-8")
+    assert "<files_to_read>" in survey_source
+    assert "<files_to_read>" in roadmap_source
+    assert "Project content: {project_content}" not in survey_source
+    assert "Project content: {project_content}" not in roadmap_source
+    assert "Active references: {active_reference_context}" not in survey_source
+    assert "Active references: {active_reference_context}" not in roadmap_source

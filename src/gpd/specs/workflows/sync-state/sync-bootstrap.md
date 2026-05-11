@@ -1,13 +1,17 @@
 <purpose>
-Reconcile diverged `STATE.md` and `state.json` with a deterministic, fail-closed rule set. `state.json` is the authoritative store for structured state; `STATE.md` is the human-readable projection. When both files exist, structured fields follow `state.json` and the markdown view is regenerated from it. Markdown is only used as a recovery source when `state.json` is missing or unreadable.
+Bootstrap `gpd:sync-state` with deterministic, fail-closed routing for
+`STATE.md`, `state.json`, and `state.json.bak`. `state.json` is authoritative
+for structured fields; `STATE.md` is the projection and only becomes a recovery
+source when JSON is missing or unreadable.
 </purpose>
 
 <required_reading>
 Read all files referenced by the invoking prompt's execution_context before starting.
 
 Canonical reconciliation contract: later stages keep
-`{GPD_INSTALL_DIR}/templates/state-json-schema.md` conditional; load it only for
-manual schema-drift diagnosis or backend validation failure context.
+`{GPD_INSTALL_DIR}/templates/state-json-schema.md`
+conditional; load it only for manual schema-drift diagnosis or backend
+validation failure context.
 </required_reading>
 
 <process>

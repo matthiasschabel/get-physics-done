@@ -147,7 +147,7 @@ def test_verify_work_session_router_no_phase_routes_are_runtime_only() -> None:
     assert "No-phase routing is choice-only:" in router
     assert "active sessions present: ask the user to choose one numbered session" in router
     assert "no active sessions present: ask for a phase and show the runtime route `gpd:verify-work <phase>`" in router
-    assert "Never shell-loop over `GPD/phases`" in router
+    assert "replaces shell loops over `GPD/phases`" in router
     assert "never render `gpd verify phase` or bare `gpd-verify-work`" in router
     assert 'PHASE_INFO=$(gpd --raw roadmap get-phase "${PHASE_ARG}")' in router
     assert '"${phase_number}"' not in router

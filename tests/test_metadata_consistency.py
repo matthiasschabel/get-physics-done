@@ -485,7 +485,7 @@ def test_branching_strategy_docs_use_canonical_config_literals() -> None:
     assert 'Git branching approach: `"none"`, `"per-phase"`, or `"per-milestone"`' in planning
     assert '| `per-phase`     | At `execute-phase` start' in planning
     assert '| `per-milestone` | At first `execute-phase` of milestone' in planning
-    assert '**"per-phase" or "per-milestone":** Use pre-computed `branch_name` from init:' in execute_phase
+    assert "`per-phase` or `per-milestone`: use precomputed `branch_name`" in execute_phase
     assert '**For "per-phase" strategy:**' in complete_milestone
     assert '**For "per-milestone" strategy:**' in complete_milestone
     assert 'if [ "$BRANCHING_STRATEGY" = "per-phase" ]; then' in complete_milestone
@@ -584,13 +584,19 @@ def test_referee_response_round_suffix_convention_is_consistent() -> None:
     respond = _workflow_authority("respond-to-referees")
     arxiv = _workflow_authority("arxiv-submission")
     reliability = _read("src/gpd/specs/references/publication/peer-review-reliability.md")
+    response_artifacts = _read("src/gpd/specs/references/publication/publication-response-artifacts.md")
+    response_handoff = _read("src/gpd/specs/references/publication/publication-response-writer-handoff.md")
     author_response = _read("src/gpd/specs/templates/paper/author-response.md")
     template = _read("src/gpd/specs/templates/paper/referee-response.md")
 
     assert "round_suffix" in peer_review
     assert "${REVIEW_ROOT}/REFEREE_RESPONSE{round_suffix}.md" in peer_review
-    assert '`GPD/review/REFEREE_RESPONSE{round_suffix}.md`' in respond
-    assert '`GPD/AUTHOR-RESPONSE{round_suffix}.md`' in respond
+    assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in response_artifacts
+    assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in response_artifacts
+    assert "`GPD/review/REFEREE_RESPONSE{round_suffix}.md`" in response_handoff
+    assert "`GPD/AUTHOR-RESPONSE{round_suffix}.md`" in response_handoff
+    assert 'RESPONSE_REFEREE_PATH="${RESPONSE_REVIEW_ROOT}/REFEREE_RESPONSE{round_suffix}.md"' in respond
+    assert 'RESPONSE_AUTHOR_PATH="${RESPONSE_PUBLICATION_ROOT}/AUTHOR-RESPONSE{round_suffix}.md"' in respond
     assert "context_mode: project-aware" in respond_command
     assert "command-policy:" in respond_command
     assert "explicit_input_kinds:" in respond_command
@@ -604,7 +610,10 @@ def test_referee_response_round_suffix_convention_is_consistent() -> None:
     assert "REFEREE_RESPONSE_R2.md" not in respond
     assert "REFEREE_RESPONSE_R2.md" not in template
     assert "paper/referee-reports" not in respond
-    assert "Do not write `AUTHOR-RESPONSE*` or `REFEREE_RESPONSE*` beside `${PAPER_DIR}` or beside the imported report source." in respond
+    assert re.search(
+        r"Do not write\s+`AUTHOR-RESPONSE\*` or `REFEREE_RESPONSE\*` beside `\$\{PAPER_DIR\}` or an imported\s+report source",
+        respond,
+    )
     for content in (peer_review, referee):
         assert "ls GPD/REFEREE-REPORT*.md 2>/dev/null" not in content
         assert "ls GPD/AUTHOR-RESPONSE*.md 2>/dev/null" not in content

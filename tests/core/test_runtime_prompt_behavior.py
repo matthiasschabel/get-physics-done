@@ -109,7 +109,10 @@ def test_map_research_partial_outputs_block_complete_claims() -> None:
     workflow = _workflow("map-research")
     verify_output = _extract_step(workflow, "verify_output")
     offer_next = _extract_step(workflow, "offer_next")
-    partial_output, complete_output = offer_next.split("**If `MAP_STATUS=complete`, use this output format:**", 1)
+    partial_output, complete_output = offer_next.split(
+        "**If `MAP_STATUS=complete`, summarize the created files and next step:**",
+        1,
+    )
 
     assert "stop before secret scan and commit unless the user explicitly chooses partial mode" in verify_output
     assert "Research project mapping is partial, not complete." in verify_output

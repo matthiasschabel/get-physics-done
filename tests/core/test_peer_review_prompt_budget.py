@@ -129,6 +129,17 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
     assert {"protocol_bundle_context", "active_reference_context"}.isdisjoint(bootstrap.required_init_fields)
     assert "reference_artifacts_content" not in artifact_discovery.required_init_fields
     assert "reference_artifacts_content" not in final_adjudication.required_init_fields
+    assert {
+        "project_contract",
+        "reference_artifacts_content",
+        "active_reference_context",
+        "protocol_bundle_context",
+    }.isdisjoint(panel_execution.required_init_fields)
+    assert {
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+        "reference_artifact_files",
+    } <= set(panel_execution.required_init_fields)
     assert artifact_discovery.loaded_authorities == (
         "workflows/peer-review/artifact-discovery.md",
         "references/publication/publication-review-round-artifacts.md",

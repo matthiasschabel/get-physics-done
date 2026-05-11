@@ -129,6 +129,8 @@ def _assert_phase7_score_hard_budgets(wrapped_score: object) -> None:
         assert counts[metric_key] == 0
 
     if wrapped_score.row.row_id == "LP-JIT-04":
+        assert counts["conversation_turn_count"] == 2
+        assert wrapped_score.behavior_score.metric_counts["raw_reload_leakage_count"] == 0
         assert wrapped_score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 0
         assert wrapped_score.behavior_score.metric_classes["artifact_handle_first_class"] == "handle_before_content"
         assert classes["artifact_handle_first_class"] == "handle_first"

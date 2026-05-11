@@ -65,17 +65,18 @@ Render the template's `## Standard Planning Template` into `filled_prompt` with 
 - `{requirements_content}` -> {requirements_content}
 - `{selected_protocol_bundle_ids}` -> {selected_protocol_bundle_ids}
 - `{protocol_bundle_load_manifest}` -> {protocol_bundle_load_manifest}
-- `{protocol_bundle_context}` -> {protocol_bundle_context}
 - `{protocol_bundle_verifier_extensions}` -> {protocol_bundle_verifier_extensions}
 - `{active_reference_context}` -> {active_reference_context}
-- `{reference_artifacts_content}` -> {reference_artifacts_content}
+- `{reference_artifact_files}` -> {reference_artifact_files}
+- `{literature_review_files}` -> {literature_review_files}
+- `{research_map_reference_files}` -> {research_map_reference_files}
 - `{context_content}` -> {context_content}
 - `{research_content}` -> {research_content}
 - `{experiment_design_content}` -> {experiment_design_content}
 - `{verification_content}` -> {verification_content}
 - `{validation_content}` -> {validation_content}
 Keep `{contract_intake}` and `{effective_reference_intake}` visible in the rendered prompt.
-Stable knowledge docs in `{active_reference_context}` or `{reference_artifacts_content}` are advisory: they may refine assumptions but never override `convention_lock`, `project_contract`, PLAN `contract`, or direct evidence.
+Render body/prose template placeholders that are not selected in this staged init as `deferred; read selected handles only if needed`. Stable knowledge docs surfaced through `{active_reference_context}` are advisory: they may refine assumptions but never override `convention_lock`, `project_contract`, PLAN `contract`, or direct evidence.
 If a plan relies on a knowledge doc in a downstream-gateable way, express that as explicit `knowledge_deps`.
 
 Do not restate template-owned contract gates, tangent control, tool-requirement policy, proof-bearing plan policy, context-budget guidance, downstream-consumer rules, or the quality gate here.

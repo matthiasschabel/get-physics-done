@@ -1,5 +1,5 @@
 <purpose>
-Route post-execution verification through a fresh verifier child, the verification report bridge helpers, and canonical verification status.
+Route post-execution verification through a fresh verifier child, report bridges, and canonical verification status.
 </purpose>
 
 <stage_boundary>
@@ -31,27 +31,27 @@ if [ $? -ne 0 ] || [ -z "$VERIFICATION_HANDOFF_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage verification_handoff --style instruction` before reading `VERIFICATION_HANDOFF_INIT`. Required bridge and context fields are manifest-owned by this stage.
+Use `gpd --raw stage field-access execute-phase --stage verification_handoff --style instruction`; read only manifest-owned bridge and handle fields.
 
 `VERIFICATION_HANDOFF_INIT` must carry:
 
 - `verification_report_skeleton_bridge`
 - `verification_report_finalizer_bridge`
-- `reference_artifact_files` and any reference/protocol context passed to the verifier
-- `protocol_bundle_verifier_extensions`
-- proof-review status when available
+- `effective_reference_intake`, `active_references`, citation/source status, and `reference_artifact_files`
+- `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, and `protocol_bundle_verifier_extensions`
+- proof-review status from child `phase-op` init when available
 
-Keep `{GPD_INSTALL_DIR}/workflows/verify-phase.md` as a child-readable path in the verifier prompt. The parent stage must not eagerly load or restate the full verifier workflow, `verification-core.md`, or schema templates unless a helper or validator error specifically requires them.
+Keep `{GPD_INSTALL_DIR}/workflows/verify-phase.md` child-readable. Do not eagerly load or restate the full verifier workflow, `verification-core.md`, or schemas unless a helper/validator error requires them.
 </step>
 
 <step name="verifier_eligibility">
-If `verifier_enabled` is false, skip only the generic post-execution verifier for non-proof phases. Proof-bearing work still requires fresh proof-redteam artifacts with `status: passed`; missing, stale, malformed, or non-passing proof-redteam artifacts keep verification fail-closed.
+If `verifier_enabled` is false, skip only the generic post-execution verifier for non-proof phases. Proof-bearing work still needs fresh passing proof-redteam artifacts; missing, stale, malformed, or non-passing artifacts fail closed.
 
 Do not treat a disabled generic verifier as permission to close the phase. Closeout still requires the structured readiness gate and any proof/consistency gates that apply.
 </step>
 
 <step name="spawn_verifier">
-Verify phase goal achievement, not task completion. Pass phase classification, protocol bundle context, active reference context, and proof-review status as context, but let the child verifier own target construction and physics checks.
+Verify phase goal achievement, not task completion. Pass phase class, reference/protocol handles, and proof-review status; the child owns target construction and physics checks.
 
 Set the freshness marker immediately before spawning:
 
@@ -70,19 +70,16 @@ task(
 
 Verify Phase {PHASE_NUMBER} against its phase goal and plan contracts.
 
-Load before verdict:
-- {GPD_INSTALL_DIR}/workflows/verify-phase.md
-- verification_report_skeleton_bridge from VERIFICATION_HANDOFF_INIT
-- verification_report_finalizer_bridge from VERIFICATION_HANDOFF_INIT
-- {GPD_INSTALL_DIR}/templates/verification-report.md only if a helper or validator reports a schema issue
-- {GPD_INSTALL_DIR}/templates/contract-results-schema.md only if a helper or validator reports a schema issue
-
-Use the skeleton bridge writer only for conservative gap reports. Use the finalizer bridge writer command template with PATCH.json plus body-only BODY.md for passed, human_needed, expert_needed, and typed non-gap outcomes. Do not hand-author or reflow VERIFICATION.md frontmatter YAML.
+Load before verdict: verify-phase.md, both report bridges from `VERIFICATION_HANDOFF_INIT`, and schema templates only after helper/validator schema errors. Use the skeleton bridge only for conservative gaps and the finalizer bridge for passed, human_needed, expert_needed, or typed non-gap outcomes. Do not hand-author frontmatter.
 
 <phase_class>{PHASE_CLASSES}</phase_class>
+<effective_reference_intake>{effective_reference_intake}</effective_reference_intake>
+<active_references>{active_references}</active_references>
+<citation_source_files>{citation_source_files}</citation_source_files>
+<citation_source_warnings>{citation_source_warnings}</citation_source_warnings>
+<reference_artifact_files>{reference_artifact_files}</reference_artifact_files>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 
 <files_to_read>
@@ -101,7 +98,7 @@ expected_artifacts:
 shared_state_policy: return_only
 </spawn_contract>
 
-Run `gpd --raw init phase-op {PHASE_NUMBER}` and keep project contract, reference/protocol context, protocol bundle verifier extensions, and phase_proof_review_status visible. Stable knowledge docs surfaced there are background only.
+Run `gpd --raw init phase-op {PHASE_NUMBER}` and keep project contract, reference handles, protocol verifier extensions, and phase_proof_review_status visible. Stable knowledge docs are background only.
 
 Write to {phase_dir}/{phase_number}-VERIFICATION.md through the verification-report skeleton/finalizer bridge. Return one typed `gpd_return` envelope with status, files_written, the report path, and canonical verification_status: passed | gaps_found | expert_needed | human_needed.",
   description="Verify Phase {PHASE_NUMBER} goal"
@@ -110,7 +107,7 @@ Write to {phase_dir}/{phase_number}-VERIFICATION.md through the verification-rep
 </step>
 
 <step name="verifier_child_gate">
-Run the local child_gate before accepting the verifier result. Shared gate, status, and continuation rules live in `references/orchestration/child-artifact-gate.md`, `references/verification/verification-status-authority.md`, and `references/orchestration/continuation-boundary.md`.
+Run the local child_gate before accepting the verifier result. Shared gate/status/continuation rules live in the loaded child-artifact, status-authority, and continuation-boundary references.
 
 ```yaml
 child_gate:
@@ -134,11 +131,11 @@ child_gate:
   failure_route: "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_gpd_verify_work"
 ```
 
-Spawn errors, tuple failures, validator failures, malformed returns, and proof-redteam blockers all fail closed. Verifier return authorship and report frontmatter stay child/helper-owned; this parent stage may not mark the phase complete.
+Spawn errors, tuple failures, validator failures, malformed returns, and proof-redteam blockers fail closed. Verifier returns and frontmatter stay child/helper-owned; this stage cannot mark the phase complete.
 </step>
 
 <step name="canonical_status_route">
-Read status only after the child_gate passes. Use the typed return plus validated top-level report frontmatter `status` / `verification_status`. Do not route on headings, marker strings, conversational `session_status`, or prose like "all checks passed".
+Read status only after child_gate passes. Route from typed return plus validated top-level `status` / `verification_status`, not headings, marker strings, `session_status`, or prose.
 
 `session_status: validating|completed|diagnosed` is conversational progress only. If the prior report carries `session_status: diagnosed`, use it as context but continue to route from canonical verification status.
 

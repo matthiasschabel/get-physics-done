@@ -253,13 +253,14 @@ def test_execute_phase_routes_convention_repair_to_validate_conventions_not_inli
 
 def test_response_writer_handoff_is_included_once_in_respond_to_referees() -> None:
     workflow = _read(WORKFLOWS_DIR / "respond-to-referees.md")
+    staged_workflow = workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
     raw_include = "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
     literal_reference = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 
     assert raw_include not in workflow
     assert literal_reference in workflow
-    assert "Use the publication response-writer handoff already loaded during initialization" in workflow
-    assert "The already-loaded shared\npublication response-writer handoff owns pair freshness and binding." in workflow
+    assert "Apply `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` from this stage exactly." in staged_workflow
+    assert "The loaded publication response-writer\nhandoff owns pair freshness and binding." in staged_workflow
 
 
 def test_write_paper_response_writer_handoff_stays_deferred_to_stage_authority() -> None:

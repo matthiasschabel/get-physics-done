@@ -26,6 +26,15 @@ Use `gpd --raw stage field-access write-paper --stage outline_and_scaffold --sty
 to confirm the manifest-selected outline/scaffold fields before reading
 `OUTLINE_INIT`.
 
+This stage receives handle/status/count fields for reference artifacts,
+literature reviews, research-map references, derived inventory, and protocol
+bundles. It does not receive `state_content`, `roadmap_content`,
+`requirements_content`, `reference_artifacts_content`, rendered
+`protocol_bundle_context`, or rendered `active_reference_context`. When outline
+decisions require planning prose or an evidence quote, read the specific
+`GPD/STATE.md`, `GPD/ROADMAP.md`, `GPD/REQUIREMENTS.md`, manuscript, or reference
+path by handle.
+
 Apply `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`
 from this staged payload before outline-level mode decisions, including
 bibliographer search breadth, referee strictness, and paper-writer style by mode.

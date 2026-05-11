@@ -27,6 +27,12 @@ INIT="$AUTHORING_INIT"
 Use `gpd --raw stage field-access write-paper --stage figure_and_section_authoring --style instruction`
 to confirm the manifest-selected authoring fields before reading
 `AUTHORING_INIT`.
+
+This is a body-hydration stage: section drafting may use planning bodies and
+reference artifact content. It still does not need rendered
+`protocol_bundle_context` or rendered `active_reference_context`; use bundle
+IDs/load manifests, reference handles, and specific files for any quoted or
+section-local evidence.
 </init>
 
 <writing_principle>
@@ -130,7 +136,8 @@ callsite tuple.
 Each writer receives the paper context, section brief, narrative continuity,
 evidence paths, active decisive-comparison artifacts, relevant
 `${PAPER_DIR}/FIGURE_TRACKER.md` entries, passed proof-redteam artifacts for
-theorem-style claims, and protocol bundle context as additive guidance only.
+theorem-style claims, and selected protocol-bundle handles as additive guidance
+only.
 
 Writer agents must not strengthen, generalize, or rhetorically smooth
 theorem-style claims beyond passed proof-redteam scope. If a brief implies a

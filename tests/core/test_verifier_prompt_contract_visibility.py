@@ -617,11 +617,11 @@ def test_verify_work_template_keeps_session_overlay_after_verifier_output() -> N
             "`project_contract`",
             "`project_contract_gate.authoritative`",
             "protocol_bundle_verifier_extensions",
-            "Do not mark the parent claim or acceptance test as passed until",
-                "headings, marker strings",
+            "Keep decisive comparison gaps legible",
+            "headings, marker strings",
             "canonical verification frontmatter",
             "`gpd_return.status`",
-            "one-shot handoff",
+            "Spawn `gpd-verifier` once",
             "fresh verifier continuation",
         ),
     )
@@ -629,34 +629,34 @@ def test_verify_work_template_keeps_session_overlay_after_verifier_output() -> N
         fallback,
         (
             "verification_report_skeleton_bridge",
-            "writer_command",
-            "skeleton_command",
-            "do not hand-author or reflow frontmatter",
-            "command transcripts",
+            "skeleton bridge only for conservative gap reports",
+            "gpd verification-report finalize",
+            "Do not hand-author frontmatter",
+            "transcripts",
             "hashes",
             "oracle details",
             "prose-only evidence",
             "`gpd_return`",
-            "out of YAML",
-            "Do not wrapper-repair the canonical report",
+            "in YAML",
+            "do not wrapper-repair the canonical report",
         ),
     )
     _assert_contains_all(
         completion,
         (
             "record-verification",
-            "uses the canonical verification-status reader",
+            "uses the canonical status reader",
             "`passed` -> `Verified`",
             "non-passed -> `Blocked`",
             "Do not relax verifier fail-closed results",
         ),
     )
     assert (
-        "Stable knowledge docs that appear there are reviewed background synthesis: use them to clarify definitions, "
+        "Stable knowledge docs that appear through handle/status fields are reviewed background synthesis: use them to clarify definitions, "
         "assumptions, and caveats only when they agree with stronger sources, and never as decisive evidence on their own."
         in verify_work
     )
-    assert "The verification overlay is written only after authoritative verifier output is available" in verify_work
+    assert "Update the session overlay only. The canonical verifier verdict remains verifier-owned." in verify_work
     assert "canonical verifier report content remains owned by `gpd-verifier`" in verify_work
-    assert "Every spawned agent is a one-shot delegation" in verify_work
+    assert "Every child handoff is one-shot" in verify_work
     assert "research_mode=balanced" not in verify_work

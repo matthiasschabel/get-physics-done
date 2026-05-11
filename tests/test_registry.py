@@ -2156,21 +2156,15 @@ class TestRegistryPromptIncludeInlining:
         ).read_text(encoding="utf-8")
 
         durable_fragments = (
-            "fallback verifier execution is still `gpd-verifier` execution",
+            "fallback execution is still `gpd-verifier` work",
             "verification_report_skeleton_bridge",
-            "write body-only evidence",
-            "satisfies bridge `body_contract`",
-            "one fenced executed `python`/`bash` block",
-            "adjacent `**Output:**` plus fenced `output`",
-            "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-            "replace `BODY.md` in the skeleton bridge `writer_command`",
-            "write the finalizer bridge patch JSON",
-            "The helper serializes YAML and validates before canonical acceptance.",
-            "Use `skeleton_command` only as read-only preview context",
-            "do not hand-author or reflow frontmatter",
-            "keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML",
-            "Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy",
-            "not for wrapper-side schema recreation",
+            "verification_report_finalizer_bridge",
+            "bridge-valid body-only evidence",
+            "skeleton bridge only for conservative gap reports",
+            "gpd verification-report finalize",
+            "Do not hand-author frontmatter",
+            "transcripts, hashes, oracle details, prose-only evidence, or `gpd_return` in YAML",
+            "do not wrapper-repair the canonical report",
             "do not route to gaps unless a schema-valid gap report exists",
         )
 
@@ -3336,7 +3330,9 @@ class TestPublicAPI:
             "references/orchestration/runtime-delegation-note.md",
         )
         assert cmd.staged_loading.stages[1].writes_allowed == ("GPD/phases/XX-name/XX-RESEARCH.md",)
-        assert "reference_artifacts_content" in cmd.staged_loading.stages[1].required_init_fields
+        assert "reference_artifact_files" in cmd.staged_loading.stages[1].required_init_fields
+        assert "active_references" in cmd.staged_loading.stages[1].required_init_fields
+        assert "reference_artifacts_content" not in cmd.staged_loading.stages[1].required_init_fields
 
     def test_get_agent_phase_researcher_surfaces_one_shot_handoff_contract(self) -> None:
         agent = registry.get_agent("gpd-phase-researcher")

@@ -28,7 +28,7 @@ COMMAND_NAMES = tuple(registry.list_commands())
 COMMAND_BASELINES = {
     "add-phase": (170, 4_340, 1),
     "add-todo": (227, 6_977, 1),
-    "arxiv-submission": (288, 14_691, 1),
+    "arxiv-submission": (316, 14_199, 1),
     "audit-milestone": (518, 20_292, 1),
     "autonomous": (62, 2_003, 1),
     "branch-hypothesis": (383, 11_072, 1),
@@ -58,7 +58,7 @@ COMMAND_BASELINES = {
     "limiting-cases": (554, 23_484, 1),
     "list-phase-assumptions": (393, 14_092, 1),
     "literature-review": (175, 9_868, 1),
-    "map-research": (216, 9_899, 1),
+    "map-research": (196, 8_131, 1),
     "merge-phases": (387, 12_144, 1),
     "new-milestone": (152, 6_940, 1),
     "new-project": (256, 11_152, 1),
@@ -76,8 +76,8 @@ COMMAND_BASELINES = {
     "regression-check": (180, 6_665, 1),
     "remove-phase": (231, 6_029, 1),
     "research-phase": (211, 8_215, 1),
-    "respond-to-referees": (317, 20_094, 1),
-    "resume-work": (116, 8_216, 1),
+    "respond-to-referees": (319, 15_056, 1),
+    "resume-work": (111, 6_194, 1),
     "review-knowledge": (332, 12_822, 1),
     "revise-phase": (475, 14_484, 1),
     "route": (185, 7_305, 1),
@@ -96,7 +96,7 @@ COMMAND_BASELINES = {
     "update": (269, 7_655, 1),
     "validate-conventions": (269, 10_508, 1),
     "verify-work": (208, 7_483, 1),
-    "write-paper": (433, 20_231, 1),
+    "write-paper": (417, 18_251, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
     "autonomous": (90, 4_000),

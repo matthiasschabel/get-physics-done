@@ -57,8 +57,8 @@ def test_plan_and_execute_phase_require_proof_redteam_gates() -> None:
 
     assert '<step name="detect_proof_obligation_work">' in execute_phase
     assert PROOF_GATE_REF in execute_phase
-    assert "workflow.verifier=false" in execute_phase
-    assert "sibling `{plan_id}-PROOF-REDTEAM.md` artifact" in execute_phase
+    assert "Disabled generic verifier, sparse cadence, `autonomy=yolo`, or \"skip verification\"" in execute_phase
+    assert "sibling `{plan_id}-PROOF-REDTEAM.md` artifact before wave success can be claimed" in execute_phase
     assert "`gpd-check-proof` is the canonical owner" in execute_phase
     assert 'subagent_type="gpd-check-proof"' in execute_phase
     _assert_semantic(
@@ -110,9 +110,9 @@ def test_verification_workflows_fail_closed_on_missing_proof_coverage() -> None:
     _assert_semantic(
         verify_work,
         "verify-work proof flags cannot waive canonical artifact",
-        "Targeted flags narrow",
-        "optional check mix only",
+        "For proof-bearing work",
         "canonical `*-PROOF-REDTEAM.md` artifact",
+        "missing/stale/malformed/not `passed`",
     )
     assert "CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)" in verify_work
     assert 'task(\n  subagent_type="gpd-check-proof"' in verify_work
@@ -164,8 +164,8 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
         "blocked pending the full proof-redteam workflow",
     )
 
-    assert "proof-obligation coverage" in write_paper
-    assert "GPD/review/PROOF-REDTEAM{round_suffix}.md" in write_paper
+    assert "proof obligations are covered by passed proof-redteam artifacts" in write_paper
+    assert "claim/proof scope does not exceed passed proof-redteam artifacts" in write_paper
     _assert_semantic(
         write_paper,
         "write-paper cannot smooth beyond proof-redteam scope",
@@ -183,11 +183,11 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
     ).read_text(encoding="utf-8")
     assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in peer_review
     assert "gpd-check-proof" in peer_review
-    assert "may be running in parallel" in peer_review
-    assert "do not wait on that" in peer_review
-    assert "artifact to begin the math review" in peer_review
+    assert "Run Stage 2, Stage 3, and proof critique in parallel" in peer_review
+    assert "Treat them as one barriered wave" in peer_review
+    assert "Before Stage 4, every launched\nchild must have a typed return" in peer_review
     assert "expect a sibling `GPD/review/PROOF-REDTEAM{round_suffix}.md` artifact" not in peer_review
-    assert "Recommendation floor: `major_revision` or `reject`." in peer_review
+    assert "Recommendation floor: `major_revision` or\n`reject`." in peer_review
 
     assert "this does NOT disable mandatory proof red-teaming" in settings
     assert "Sparse cadence does not waive proof red-teaming" in settings
@@ -198,20 +198,17 @@ def test_peer_review_final_decision_guardrail_requires_same_round_proof_redteam(
     reliability = (SPECS_DIR / "references/publication/peer-review-reliability.md").read_text(encoding="utf-8")
 
     assert (
-        "wrong-round, wrong-root, or non-passing same-round `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` "
-        "artifact prevents any favorable recommendation" in peer_review
+        "wrong-round, wrong-root, or\nnon-passing same-round `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` artifact\n"
+        "blocks any favorable recommendation" in peer_review
     )
-    assert "Stage-review validation alone is not proof-redteam clearance" in peer_review
-    assert "aligned `proof_audits[]` entries in `${REVIEW_ROOT}/STAGE-math{round_suffix}.json`" in peer_review
-    assert (
-        "do not by themselves clear a favorable final decision without the same-round proof-redteam artifact"
-        in peer_review
-    )
+    assert "not a substitute for same-round proof-redteam clearance" in peer_review
+    assert "aligned `proof_audits[]`" in peer_review
+    assert "necessary review\nevidence but not a substitute for same-round proof-redteam clearance" in peer_review
     assert (
         "gpd validate referee-decision ${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json --strict "
         "--ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json" in peer_review
     )
-    assert "this strict final-decision validator is the favorable-decision guardrail" in peer_review
+    assert "this strict final-decision validator is the favorable\ndecision guardrail" in peer_review
 
     assert "same selected review root as the round artifacts" in reliability
     assert "stage-review validation alone does not clear same-round proof-redteam policy" in reliability

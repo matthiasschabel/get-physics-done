@@ -19,18 +19,13 @@ if [ $? -ne 0 ] || [ -z "$PHASE_CLASSIFICATION_INIT" ]; then
 fi
 ```
 
-Classify from the stage payload, the phase goal, and selected plan objectives.
-
 Use `gpd --raw stage field-access execute-phase --stage phase_classification --style instruction` before reading `PHASE_CLASSIFICATION_INIT`; fields outside that helper-selected set are unavailable at this stage.
 
 Classify semantically. A phase may have multiple classes: `derivation`, `numerical`, `literature`, `paper-writing`, `formalism`, `analysis`, and `validation`; use `mixed` only when none of those apply.
 
 Log the classification: `"Phase ${phase_number} classified as: ${PHASE_CLASSES[*]}"`
 
-**Use classification for:**
-- Agent selection (see `agent-infrastructure.md` Meta-Orchestration Intelligence > Agent Selection by Phase Type)
-- Context budget targets (see `agent-infrastructure.md` Meta-Orchestration Intelligence > Context Budget Allocation)
-- Computation-type-aware execution adaptation (see `adapt_to_computation_type` below)
+Use the classification for the local execution parameters below, specialist routing labels, and executor context hints.
 </step>
 
 <step name="adapt_to_computation_type">
@@ -38,7 +33,7 @@ Translate the phase classification into concrete execution parameters that drive
 
 Start from this default routing state: `CONVENTION_LOCK_REQUIRED=false`, no pre-execution specialists, `INTER_WAVE_CHECKS=[convention, dimensional]`, `EXECUTOR_CONTEXT_HINT=standard`, `WAVE_TIMEOUT_FACTOR=1.0`, `FORCE_SEQUENTIAL=false`, and no yolo restrictions.
 
-**Per-class overrides:** Apply these cumulatively for multi-class phases. This table is the source of truth for convention locks, specialist routing, inter-wave checks, executor context hints, timeout factors, sequential forcing, and yolo restrictions.
+Apply per-class overrides cumulatively:
 
 | Class | Overrides |
 |---|---|
@@ -58,9 +53,7 @@ Run the convention lock gate and require a `locked` or `complete` result before 
 
 **Hard gate:** when `CONVENTION_LOCK_REQUIRED=true` and conventions are not locked, execution MUST NOT proceed in any autonomy mode. Convention errors invalidate downstream results.
 
-**Pre-execution specialist routing:**
-
-The `pre_execution_specialists` stage consumes `PRE_EXECUTION_SPECIALISTS` and loads delegation guidance for real one-shot handoffs. This workflow chooses specialist types; it does not inline placeholder `task(...)` calls or wait for child confirmation in the same run.
+`pre_execution_specialists` consumes `PRE_EXECUTION_SPECIALISTS` and loads delegation guidance; this stage only chooses specialist types.
 
 **Force-sequential override:**
 
@@ -72,15 +65,13 @@ If `autonomy=yolo` and `YOLO_RESTRICTIONS` is non-empty, restrict yolo behavior:
 
 Log any restrictions: `"YOLO mode restricted for phase class (${PHASE_CLASSES[*]}): ${YOLO_RESTRICTIONS[*]}"`
 
-**Context hint propagation:**
-
-Include `EXECUTOR_CONTEXT_HINT` in the executor spawn prompt so subagents can self-regulate:
+Include `EXECUTOR_CONTEXT_HINT` in executor prompts:
 
 ```
 <context_hint>{EXECUTOR_CONTEXT_HINT}</context_hint>
 ```
 
-Hint meanings: `standard` balances derivation/code/prose; `derivation-heavy`, `code-heavy`, `reading-heavy`, and `prose-heavy` reserve context for their named work type without changing required gates.
+Hint meanings: `standard` balances derivation/code/prose; the `*-heavy` hints reserve context for their named work type without changing required gates.
 </step>
 
 <step name="validate_phase">

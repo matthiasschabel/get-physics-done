@@ -23,7 +23,7 @@ def test_wave_planning_keeps_phase_wide_gates_without_full_checkpoint_or_verific
         '<step name="publish_wave_plan_for_dispatch">',
         "Intra-wave dependency validation",
         "Parallel file conflict detection",
-        "Dense cadence override:",
+        "When `review_cadence=dense`, treat every wave as risky",
         "FIRST_RESULT_GATE_REQUIRED=true",
         "PRE_FANOUT_REVIEW_REQUIRED=true",
     ):

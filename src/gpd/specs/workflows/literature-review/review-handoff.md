@@ -17,7 +17,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access literature-review --stage review_handoff --style instruction` to confirm the manifest-selected handoff fields. Read only those keys from `REVIEW_HANDOFF_INIT`; `REVIEW_HANDOFF_INIT.staged_loading.required_init_fields` is the runtime confirmation before spawning the bibliographer or accepting a completed review handoff.
+Use `gpd --raw stage field-access literature-review --stage review_handoff --style instruction` to confirm manifest-selected handoff fields. Read only keys in `REVIEW_HANDOFF_INIT.staged_loading.required_init_fields`; reference artifacts may be hydrated here, while active reference and protocol prose remain handle-first through `active_references`, `reference_artifact_files`, and `protocol_bundle_load_manifest`.
 
 Resolve bibliographer model:
 

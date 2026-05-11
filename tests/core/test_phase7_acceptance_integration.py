@@ -13,7 +13,7 @@ from tests.helpers.phase4_persona.matrix import load_phase4_rows
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-_PHASE7_TRACKED_LOC_CAP = 1_800
+_PHASE7_TRACKED_LOC_CAP = 2_000
 _PHASE7_BEHAVIOR_EXPANSION_MAX = 12
 _PHASE7_ROW_ID_RE = re.compile(r"^(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*$")
 _PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")

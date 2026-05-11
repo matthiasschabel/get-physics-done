@@ -67,9 +67,19 @@
       "derived_manuscript_reference_status_count",
       "derived_manuscript_proof_review_status"
     ],
+    "protocol_reference_handles": [
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest",
+      "derived_manuscript_reference_status",
+      "derived_manuscript_reference_status_count",
+      "derived_manuscript_proof_review_status"
+    ],
     "reference_artifact_context": [
       "reference_artifact_files",
       "reference_artifacts_content"
+    ],
+    "reference_artifact_handles": [
+      "reference_artifact_files"
     ],
     "literature_review_context": [
       "literature_review_files",
@@ -117,7 +127,7 @@
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "managed_publication_context",
-        "protocol_reference_context"
+        "protocol_reference_handles"
       ],
       "required_init_fields": [
         "platform"
@@ -190,24 +200,12 @@
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "managed_publication_context",
-        "protocol_reference_context"
+        "protocol_reference_handles",
+        "reference_artifact_handles",
+        "literature_review_context",
+        "derived_research_inventory"
       ],
       "required_init_fields": [
-        "roadmap_content",
-        "requirements_content",
-        "state_content",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
         "platform"
       ],
       "loaded_authorities": [
@@ -285,7 +283,7 @@
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "managed_publication_context",
-        "protocol_reference_context",
+        "protocol_reference_handles",
         "reference_artifact_context",
         "literature_review_context",
         "derived_research_inventory",
@@ -365,11 +363,10 @@
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "managed_publication_context",
-        "protocol_reference_context",
+        "protocol_reference_handles",
         "reference_artifact_context",
         "citation_source_context",
-        "derived_research_inventory",
-        "planning_state_content"
+        "derived_research_inventory"
       ],
       "required_init_fields": [
         "platform"

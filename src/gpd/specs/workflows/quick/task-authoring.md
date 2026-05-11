@@ -1,5 +1,5 @@
 <purpose>
-Own the quick-task authoring, executor handoff, child-return application, state update, and final commit stages after quick bootstrap has selected the default `task_authoring` stage or the reference-aware `reference_context` stage.
+Own the default quick-task authoring, executor handoff, child-return application, state update, and final commit after quick bootstrap selects `task_authoring`.
 </purpose>
 
 <stage_boundary>
@@ -15,19 +15,10 @@ This authority starts only after `task_bootstrap` has created the quick-task dir
 <process>
 **Step 4: Spawn planner (quick mode)**
 
-Choose the staged authoring payload before assembling the quick planner prompt:
-
-- Default to `task_authoring` for local calculations, dimensional checks, unit conversions, one-file numerical spot-checks, formatting, and other self-contained small tasks.
-- Use `reference_context` only for targeted source lookup or tasks whose answer depends on active project anchors, existing reference artifacts, literature/research-map files, or protocol/reference context.
-
-Set `NEEDS_REFERENCE_CONTEXT` to `true` only for the second case; otherwise set it to `false`.
+This authority is for self-contained small tasks: local calculations, dimensional checks, unit conversions, one-file numerical spot-checks, formatting, and similar work. If the task needs targeted source lookup, active project anchors, reference artifacts, literature/research-map files, or protocol/reference context, leave this authority and reload `reference_context`.
 
 ```bash
-if [ "$NEEDS_REFERENCE_CONTEXT" = "true" ]; then
-  TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage reference_context)
-else
-  TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_authoring)
-fi
+TASK_AUTHORING_INIT=$(gpd --raw init quick "$DESCRIPTION" --stage task_authoring)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd quick task-authoring init failed: $TASK_AUTHORING_INIT"
   # STOP; surface the error.
@@ -35,9 +26,7 @@ fi
 INIT="$TASK_AUTHORING_INIT"
 ```
 
-`NEEDS_REFERENCE_CONTEXT` must be false by default. Do not set it just because `project_contract_gate` exists; contract-gate fields are already present in the default small-task payload.
-
-Use `gpd --raw stage field-access quick --stage task_authoring --style instruction`, or `gpd --raw stage field-access quick --stage reference_context --style instruction` when `NEEDS_REFERENCE_CONTEXT=true`. Read only staged-loading fields.
+Do not choose `reference_context` just because `project_contract_gate` exists; contract-gate fields are already present in the default payload. Use `gpd --raw stage field-access quick --stage task_authoring --style instruction` and read only staged-loading fields.
 
 Spawn gpd-planner with the quick-mode context:
 
@@ -69,18 +58,6 @@ Read the file at GPD/STATE.md
 
 **Default Reference Runtime:** not loaded for `task_authoring`.
 
-If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append this selected reference payload:
-**Contract Intake:** {contract_intake}
-**Effective Reference Intake:** {effective_reference_intake}
-**Active References:** {active_reference_context}
-**Reference Artifacts:** {reference_artifacts_content}
-<protocol_bundle_handoff>
-<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
-<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
-<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
-</protocol_bundle_handoff>
-
 </planning_context>
 
 <constraints>
@@ -88,7 +65,7 @@ If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append 
 - Quick tasks should be atomic and self-contained
 - No literature review phase, no checker phase
 - Use the `staged_loading` fields from `TASK_AUTHORING_INIT` as the source of truth for the handoff instead of inventing a separate quick-only contract
-- If `staged_loading.stage_id` is `task_authoring`, do not invent reference-runtime, protocol, literature/research-map, proof-review, or publication context that is not present in `TASK_AUTHORING_INIT.staged_loading.required_init_fields`.
+- Do not invent reference-runtime, protocol, literature/research-map, proof-review, or publication context that is not present in `TASK_AUTHORING_INIT.staged_loading.required_init_fields`.
 - If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` instead of drafting a plan from guessed scope.
 - If the task is theorem-style or proof-bearing, return `gpd_return.status: checkpoint` and tell the user quick mode is blocked pending the full proof-redteam workflow.
 - Proof-obligation command block: theorem-style, lemma/corollary/proposition, or explicit `proof_obligation` work must route to the full proof-redteam workflow.
@@ -183,24 +160,12 @@ Project contract validation: {project_contract_validation}
 
 Reference runtime: not loaded for default `task_authoring`.
 
-If the selected planner stage was `reference_context`, pass through the selected reference payload:
-Contract intake: {contract_intake}
-Effective reference intake: {effective_reference_intake}
-Active references: {active_reference_context}
-Reference artifacts: {reference_artifacts_content}
-<protocol_bundle_handoff>
-<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
-<protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
-<protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
-</protocol_bundle_handoff>
-
 <constraints>
 - Execute all tasks in the plan
 - Commit each task atomically
 - Create summary at: ${QUICK_DIR}/${next_num}-SUMMARY.md
 - Do NOT update ROADMAP.md (quick tasks are separate from planned phases)
-- Do not invent reference artifacts or publication/proof-review context when the selected planner stage was the default `task_authoring`.
+- Do not invent reference artifacts or publication/proof-review context in the default `task_authoring` path.
 - If proof-bearing work slipped through planning, STOP and return the reroute instead of executing. Quick mode must not produce a proof result without the mandatory proof-redteam gate.
 - Return a structured `gpd_return` envelope with `gpd_return.status` and `gpd_return.files_written`; local completed output is `${QUICK_DIR}/${next_num}-SUMMARY.md`.
 </constraints>

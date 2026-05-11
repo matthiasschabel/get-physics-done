@@ -164,8 +164,8 @@ _EXPECTED_WORKFLOW_CHILD_GATE_SOURCES = {
     "post_execution_verifier": "execute-phase/verification-handoff.md",
     "project_roadmapper": "new-project/roadmap-authoring.md",
     "proof_critic_wave_audit": "execute-phase/proof-critic-dispatch.md",
-    "quick_executor_summary": "quick/task-authoring.md",
-    "quick_planner_plan": "quick/task-authoring.md",
+    "quick_executor_summary": ("quick/task-authoring.md", "quick/reference-context.md"),
+    "quick_planner_plan": ("quick/task-authoring.md", "quick/reference-context.md"),
     "rapid_consistency_check": "execute-phase/consistency-check.md",
     "respond_to_referees_revision_section": "respond-to-referees/response-authoring.md",
     "verify_work_gap_plan_checker": "verify-work/gap-repair.md",
@@ -177,6 +177,21 @@ _EXPECTED_WORKFLOW_CHILD_GATE_SOURCES = {
     "write_paper_response_pair": "write-paper/publication-review-finalization.md",
     "write_paper_section_writer": "write-paper/authoring.md",
 }
+
+
+def _expected_sources_for_gate(gate_id: str) -> tuple[str, ...]:
+    sources = _EXPECTED_WORKFLOW_CHILD_GATE_SOURCES[gate_id]
+    if isinstance(sources, str):
+        return (sources,)
+    return sources
+
+
+def _expected_workflow_child_gate_keys() -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (source, gate_id)
+        for gate_id in sorted(_EXPECTED_WORKFLOW_CHILD_GATE_SOURCES)
+        for source in sorted(_expected_sources_for_gate(gate_id))
+    )
 
 _EXPECTED_WORKFLOW_CHILD_GATE_ROLE_PROFILE = {
     "gap_closure_reverification": ("gpd-verifier", "verifier"),
@@ -604,22 +619,24 @@ def test_child_gate_tuple_rejects_unknown_profile_status_route_and_invalid_fresh
 def test_workflow_child_gate_yaml_blocks_parse_as_child_gate_tuples() -> None:
     gates = _workflow_child_gates()
 
-    assert len(gates) == len(_EXPECTED_WORKFLOW_CHILD_GATE_SOURCES)
-    assert sorted(item.gate.id for item in gates) == sorted(_EXPECTED_WORKFLOW_CHILD_GATE_SOURCES)
+    assert len(gates) == len(_expected_workflow_child_gate_keys())
+    assert sorted((item.source, item.gate.id) for item in gates) == sorted(_expected_workflow_child_gate_keys())
 
 
 def test_workflow_child_gate_inventory_preserves_tuple_contract_fields() -> None:
     gates = _workflow_child_gates()
-    by_id = {item.gate.id: item for item in gates}
+    by_key = {(item.source, item.gate.id): item for item in gates}
 
-    assert len(by_id) == len(gates)
-    for gate_id, item in by_id.items():
+    assert len(by_key) == len(gates)
+    assert sorted(by_key) == sorted(_expected_workflow_child_gate_keys())
+    for item in gates:
         gate = item.gate
+        gate_id = gate.id
         expected_role, expected_profile = _EXPECTED_WORKFLOW_CHILD_GATE_ROLE_PROFILE[gate_id]
         expected_marker = _EXPECTED_WORKFLOW_CHILD_GATE_FRESHNESS_MARKERS[gate_id]
         expected_applicator = _EXPECTED_WORKFLOW_CHILD_GATE_APPLICATORS[gate_id]
 
-        assert item.source == _EXPECTED_WORKFLOW_CHILD_GATE_SOURCES[gate_id]
+        assert item.source in _expected_sources_for_gate(gate_id)
         assert gate.role == expected_role
         assert gate.return_profile == expected_profile
         assert gate.required_status == "completed"

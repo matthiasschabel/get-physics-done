@@ -97,8 +97,8 @@ def test_respond_to_referees_group_b_completion_requires_fresh_child_files_writt
     _assert_semantic(
         source,
         "respond-to-referees mirrored section response failure",
-        "section file changed",
-        "response trackers",
+        "section edits and tracker updates",
+        "both fresh and consistent",
         "failed",
     )
 
@@ -122,7 +122,7 @@ def test_respond_to_referees_response_letter_generation_stays_file_backed_and_fr
         in source
     )
     assert (
-        "Those two GPD-owned response artifacts stay canonical even when the manuscript subject is explicit or external."
+        "Those two Markdown artifacts under selected GPD publication/review roots are the\nrequired outputs."
         in source
     )
     assert (

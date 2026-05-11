@@ -1,5 +1,6 @@
 <purpose>
-Own the phase-research handoff, child artifact gate, typed return routing, and continuation handoff for `gpd:research-phase` after phase bootstrap has validated the selected phase.
+Own the phase-research child handoff, artifact gate, typed return routing, and
+fresh continuation handoff after `phase_bootstrap` validates the selected phase.
 </purpose>
 
 <stage_boundary>
@@ -7,24 +8,8 @@ This authority starts only after `phase_bootstrap` has validated the phase, hand
 </stage_boundary>
 
 <stage_prerequisites>
-If this authority is entered fresh, define the staged reload helper before loading `research_handoff`:
-
-```bash
-load_research_phase_stage() {
-  local stage_name="$1"
-  local phase_arg="$2"
-  local init_payload=""
-
-  init_payload=$(gpd --raw init research-phase "${phase_arg}" --stage "${stage_name}" 2>/dev/null)
-  if [ $? -ne 0 ] || [ -z "$init_payload" ]; then
-    echo "ERROR: staged gpd initialization failed for stage '${stage_name}': ${init_payload}"
-    return 1
-  fi
-
-  printf '%s' "$init_payload"
-  return 0
-}
-```
+If this authority is entered fresh, reuse the `load_research_phase_stage` helper
+from `phase_bootstrap` before loading `research_handoff`.
 </stage_prerequisites>
 
 <process>
@@ -42,7 +27,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use the staged refresh for `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, `protocol_bundle_verifier_extensions`, `state_content`, `config_content`, and `roadmap_content` before assembling the child handoff.
+Use the staged refresh for `contract_intake`, `effective_reference_intake`, `reference_artifact_files`, `active_references`, `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, and `protocol_bundle_verifier_extensions` before assembling the child handoff. Read planning files by path only when needed; this stage does not receive embedded reference, protocol, state, config, or roadmap bodies.
 
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 
@@ -63,23 +48,34 @@ Prior decisions: {decisions}
 Phase context: {context_md}
 </context>
 
+<files_to_read>
+Use file_read for any listed path before relying on its body:
+- GPD/REQUIREMENTS.md when phase objectives or acceptance criteria matter
+- GPD/ROADMAP.md when the phase sequence or milestone context matters
+- GPD/STATE.md / GPD/state.json when current project position or decisions matter
+- Files named in `effective_reference_intake.must_include_prior_outputs`
+- Files named in `reference_artifact_files` when relevant to the phase question
+</files_to_read>
+
+<reference_handoff>
+<contract_intake>{contract_intake}</contract_intake>
+<effective_reference_intake>{effective_reference_intake}</effective_reference_intake>
+<active_references>{active_references}</active_references>
+<reference_artifact_files>{reference_artifact_files}</reference_artifact_files>
+</reference_handoff>
+
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 </protocol_bundle_handoff>
 
-When `selected_protocol_bundle_ids` is non-empty, use the bundle context, load manifest, anchor prompts, reference prompts, assets, decisive-artifact guidance, and verifier extensions as the primary specialized research surface. Use the broad physics research directives below only for uncovered areas or when no bundle is selected.
+When `selected_protocol_bundle_ids` is non-empty, use `protocol_bundle_load_manifest` to read the listed bundle assets and use `protocol_bundle_verifier_extensions` as the primary specialized research checklist surface. Use the broad physics research directives below only for uncovered areas or when no bundle is selected.
 
 <physics_research_directives>
 Cover only what is needed for this phase:
-- mathematical framework: governing equations, symmetries, function spaces, boundary/initial data
-- standard results: exact solutions, approximations, validity regimes, key references
-- limiting cases: classical/non-relativistic/thermodynamic, weak/strong coupling, asymptotics
-- computational methods: algorithms, packages, convergence/error scaling, performance constraints
-- dimensional scales: physical scales, dimensionless parameters, regime placement
-- pitfalls: instabilities, gauge/regularization/renormalization, notation conflicts, known errors
+framework, standard results, limiting cases, computational methods,
+dimensional scales, and pitfalls relevant to this phase.
 </physics_research_directives>
 
 <output>
@@ -128,15 +124,25 @@ Research file path: {phase_dir}/{phase_number}-RESEARCH.md
 Read that file before continuing so you inherit the prior research state instead of relying on inline prompt state.
 </prior_state>
 
+<files_to_read>
+Use file_read for GPD/REQUIREMENTS.md, GPD/ROADMAP.md, GPD/STATE.md / GPD/state.json, files named in `effective_reference_intake.must_include_prior_outputs`, and files named in `reference_artifact_files` when they are relevant to the continuation.
+</files_to_read>
+
 <checkpoint_response>
 **Type:** {checkpoint_type}
 **Response:** {user_response}
 </checkpoint_response>
 
+<reference_handoff>
+<contract_intake>{contract_intake}</contract_intake>
+<effective_reference_intake>{effective_reference_intake}</effective_reference_intake>
+<active_references>{active_references}</active_references>
+<reference_artifact_files>{reference_artifact_files}</reference_artifact_files>
+</reference_handoff>
+
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 </protocol_bundle_handoff>
 
@@ -169,8 +175,5 @@ task(
 - [ ] Phase context gathered (roadmap section, requirements, prior decisions)
 - [ ] gpd-phase-researcher spawned with physics research directives
 - [ ] RESEARCH.md written to phase directory and named in `gpd_return.files_written`
-- [ ] Research return handled via typed `gpd_return.status` and artifact gating
-- [ ] Research covers: mathematical framework, known solutions, limiting cases, computational methods, dimensional analysis, potential pitfalls
-- [ ] Return handled (complete/checkpoint/inconclusive)
 - [ ] Next action offered (plan phase, dig deeper, review)
 </success_criteria>

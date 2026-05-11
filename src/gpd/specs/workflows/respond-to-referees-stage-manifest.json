@@ -41,6 +41,7 @@
     ],
     "response_protocol_reference_handles": [
       "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest",
       "derived_manuscript_reference_status",
       "derived_manuscript_reference_status_count",
       "derived_manuscript_proof_review_status"

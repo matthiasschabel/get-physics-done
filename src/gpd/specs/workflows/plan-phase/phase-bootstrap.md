@@ -20,20 +20,20 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. The staged field-access helper is the source of truth for which fields are available; use `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction` after later reloads. Parse only the fields named by `BOOTSTRAP_INIT.staged_loading.required_init_fields`; this stage-selected payload includes `project_contract_gate` before any authoritative contract use.
+Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm manifest-selected bootstrap fields. The staged field-access helper is authoritative; use `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction` after later reloads. Parse only fields in `BOOTSTRAP_INIT.staged_loading.required_init_fields`; bootstrap includes `project_contract_gate` before authoritative contract use.
 
 **Mode-aware behavior:**
 - `autonomy=supervised` (default): Present draft plans for user review before approval or execution; do not weaken the contract gate.
 - `autonomy=balanced`: Pause only if the checker raises issues or planning choices need user judgment.
 - `autonomy=yolo`: Write the plan and proceed.
-- `research_mode=explore`: Always run research step even if research exists. Expand research and comparison coverage, but do not auto-create git-backed branches or branch-like plans just because alternatives appear.
-- `research_mode=exploit`: Reuse existing research only when it already covers the exact method family, anchors, and decisive evidence path for this phase. Otherwise run targeted research and suppress optional tangents entirely unless the user explicitly requests them. Do not volunteer `gpd:branch-hypothesis` as the default response in exploit mode.
+- `research_mode=explore`: Always run research. Expand comparison coverage, but do not auto-create git-backed branches or branch-like plans just because alternatives appear.
+- `research_mode=exploit`: Reuse existing research only when it already covers the exact method family, anchors, and decisive evidence path. Otherwise run targeted research and suppress optional tangents unless the user explicitly requests them. Do not volunteer `gpd:branch-hypothesis` by default in exploit mode.
 - `research_mode=balanced` (default): Use the standard research depth for the phase and keep the default contract-checking and comparison coverage unless the phase needs broader or narrower review.
-- `research_mode=adaptive`: Start broad until prior decisive evidence or an explicit approach lock justifies narrowing. Do not infer “safe to narrow” from phase number alone.
-- Tangent policy: when multiple viable approaches or optional side questions appear, do NOT silently branch or widen the plan. Use the canonical tangent decision model below instead of assuming extra plans or branches. `git.branching_strategy` does not override this rule.
+- `research_mode=adaptive`: Start broad until decisive evidence or an explicit approach lock justifies narrowing.
+- Tangent policy: when multiple viable approaches or optional side questions appear, do NOT silently branch or widen the plan. Use the canonical tangent decision model below; `git.branching_strategy` does not override this rule.
 - All modes still require contract completeness, decisive outputs, required anchors, forbidden-proxy handling, and disconfirming paths before execution starts.
 
-**Staged init access rule:** after every `gpd --raw init plan-phase ... --stage <stage_id>` reload, follow `references/orchestration/agent-module-loading.md`: read only the current `INIT.staged_loading.required_init_fields`, derive stage-local values from that payload, and request explicit `--alias ALIAS=field` bindings for shell snippets that need aliases. Do not reuse shell variables parsed from an older stage.
+**Staged init access rule:** after every `gpd --raw init plan-phase ... --stage <stage_id>` reload, read only `INIT.staged_loading.required_init_fields`, derive stage-local values from that payload, and request explicit `--alias ALIAS=field` bindings for shell snippets that need aliases. Do not reuse shell variables parsed from an older stage.
 
 ```bash
 REQUESTED_PHASE="${PHASE}"
@@ -43,9 +43,7 @@ INIT="${BOOTSTRAP_INIT}"
 PHASE=$(echo "$INIT" | gpd json get .phase_number --default "${REQUESTED_PHASE}")
 ```
 
-**Dirty worktree safety gate:** before phase directory creation, handoffs, fingerprints, alignment, or write-capable reloads, inspect only the project worktree:
-
-If the project worktree is dirty, halt before planning. Show the dirty paths and offer `git status --short`, `gpd commit`, or an explicitly approved project-local cleanup path. `plan-phase` never stashes, resets, cleans, overwrites, or hides user work.
+**Dirty worktree safety gate:** before phase directory creation, handoffs, fingerprints, alignment, or write-capable reloads, inspect only the project worktree. If it is dirty, halt before planning, show dirty paths, and offer `git status --short`, `gpd commit`, or an explicitly approved project-local cleanup path. `plan-phase` never stashes, resets, cleans, overwrites, or hides user work.
 
 **If `planning_exists` is false:** Error -- run `gpd:new-project` first.
 
@@ -69,7 +67,7 @@ fi
 ```
 
 <step name="fail_closed_on_state_conflict" priority="first">
-Before resolving a missing phase, creating `PHASE_DIR`, spawning agents, or writing plans, compare `state_content`, `roadmap_content`, `requirements_content`, phase directories, and conventions. If they disagree about phase/scope, STOP: no new plan, roadmap rewrite, execution, or generic health check. Repair route:
+Before resolving a missing phase, creating `PHASE_DIR`, spawning agents, or writing plans, compare state, roadmap, requirements, phase directories, and conventions. If they disagree about phase/scope, STOP: no new plan, roadmap rewrite, execution, or generic health check. Repair route:
 
 - state/roadmap phase mismatch or missing active phase directory -> `gpd:sync-state`
 - convention-lock or `GPD/CONVENTIONS.md` mismatch -> `gpd:validate-conventions`
@@ -98,7 +96,7 @@ When `--inline-discuss` is present, combine discuss-phase and plan-phase for str
 2. If those questions reveal viable alternatives or side questions, use the canonical tangent decision model below instead of assuming extra plans or branches.
 3. Record the answers and any explicit tangent decision in lightweight CONTEXT.md, then proceed to step 5.
 
-This is not the full discuss-phase flow; use `gpd:discuss-phase` separately for complex phases.
+This is not the full discuss-phase flow; use `gpd:discuss-phase` for complex phases.
 
 **If no phase number:** Use the `phase_number` returned by bootstrap; `gpd --raw init plan-phase --stage phase_bootstrap` auto-detects the first roadmap phase whose disk status is `empty`, `no_directory`, `discussed`, or `researched`. If bootstrap cannot infer one, stop and ask for an explicit phase.
 
@@ -108,15 +106,11 @@ Use these resolved values for all later references to `PHASE_DIR`, `PHASE_SLUG`,
 
 **Existing artifacts from init:** `has_research`, `has_plans`, `plan_count`.
 
-## 3. Validate Phase
-
-Use the roadmap phase helper to refresh phase metadata. **If `found` is false:** Error with available phases. **If `found` is true:** Extract `phase_number`, `phase_name`, `goal` from the structured result.
-
 ## 4. Load CONTEXT.md and Hypothesis Context
 
 Use `context_content` from init JSON (already loaded via `--include context`).
 
-**CRITICAL:** Use `context_content` from INIT -- pass to researcher, planner, checker, and revision agents.
+**CRITICAL:** Use `context_content` from the later stage-local init -- pass it to researcher, planner, checker, and revision agents when that field is selected.
 
 If `context_content` is not null, display: `Using phase context from: ${PHASE_DIR}/*-CONTEXT.md`
 
@@ -124,10 +118,7 @@ If `context_content` is not null, display: `Using phase context from: ${PHASE_DI
 
 Check the structured active-hypothesis state. If one exists, bind `HYPOTHESIS_SLUG`, read `GPD/hypotheses/{HYPOTHESIS_SLUG}/HYPOTHESIS.md`, and store its contents as `HYPOTHESIS_CONTENT`.
 
-**If an active hypothesis exists:**
-
-1. Extract the branch slug, read HYPOTHESIS.md using the shell snippet above, and display `Active hypothesis detected: hypothesis/${HYPOTHESIS_SLUG}`.
-2. Treat the hypothesis description, motivation, expected outcome, and success criteria as a **primary constraint** for researcher, planner, checker, and revision prompts:
+**If an active hypothesis exists:** extract the branch slug, read HYPOTHESIS.md, display `Active hypothesis detected: hypothesis/${HYPOTHESIS_SLUG}`, and treat the hypothesis description, motivation, expected outcome, and success criteria as a **primary constraint** for researcher, planner, checker, and revision prompts:
 
 ```markdown
 <hypothesis_constraint>
@@ -145,15 +136,13 @@ already explores that path.
 </hypothesis_constraint>
 ```
 
-3. Append this `<hypothesis_constraint>` block to the prompts for the researcher, planner, checker, and revision agents.
+Append this `<hypothesis_constraint>` block to researcher, planner, checker, and revision prompts.
 
 ## 4.5. Convention Verification
 
 **Verify conventions before planning** — plans that depend on conventions from prior phases must use the correct ones:
 
-Run the convention check before planning. If it fails, stop with the check output and route to convention validation; convention mismatches compound into every planned task.
-
-If the check fails, stop before spawning the researcher or planner. Convention mismatches in the plan propagate into every task during execution.
+Run the convention check before planning. If it fails, stop before spawning the researcher or planner, show the check output, and route to convention validation; convention mismatches compound into every planned and executed task.
 
 ## 4.6. Tangent Control During Planning
 

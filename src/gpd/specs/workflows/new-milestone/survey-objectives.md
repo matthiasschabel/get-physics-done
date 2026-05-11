@@ -16,39 +16,22 @@ fi
 
 Use `gpd --raw stage field-access new-milestone --stage survey_objectives --style instruction` to confirm the manifest-selected survey/objectives fields. Read only those keys from `SURVEY_INIT`; `SURVEY_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
-Treat `active_reference_context` and `effective_reference_intake` from this survey/objectives init as binding carry-forward context even when `project_contract` is empty or blocked.
+Treat `effective_reference_intake`, `contract_intake`, and `reference_artifact_files` from this survey/objectives init as binding carry-forward handles even when `project_contract` is empty or blocked.
 
-Before defining scope, inspect these carry-forward inputs and keep them visible through milestone planning:
-- `effective_reference_intake.must_read_refs`
-- `effective_reference_intake.must_include_prior_outputs`
-- `effective_reference_intake.user_asserted_anchors`
-- `effective_reference_intake.known_good_baselines`
-- `effective_reference_intake.context_gaps`
-- `effective_reference_intake.crucial_inputs`
-- `contract_intake`
+Before defining scope, inspect and preserve the carry-forward keys in
+`effective_reference_intake` (`must_read_refs`, prior outputs, user anchors,
+baselines, context gaps, crucial inputs) plus `contract_intake`.
 
 If `reference_artifact_files` is non-empty, read the listed reference artifact handles when they are relevant. This handle-first stage does not receive embedded artifact bodies.
+Read planning documents by path when their text is needed: `GPD/PROJECT.md`, `GPD/STATE.md`, `GPD/state.json`, and `GPD/MILESTONES.md`.
 
 ## 2. Gather Milestone Goals
 
-**If MILESTONE-CONTEXT.md exists:**
-
-- Use research directions and scope from milestone discussion
-- Present summary for confirmation
-
-**If no context file:**
-
-- Present what was accomplished in the last milestone
-- Ask: "What do you want to investigate next?"
-- Use ask_user to explore: new phenomena, extended parameter regimes, additional observables, paper targets, peer review responses
-
-**Research milestones typically focus on one of:**
-
-- **Analytical extension:** Push derivations to new regimes, higher orders, or related systems
-- **Numerical validation:** Implement and benchmark against analytical predictions
-- **Phenomenological exploration:** Map out parameter space, identify new phases or transitions
-- **Paper preparation:** Draft manuscript, prepare figures, write supplementary material
-- **Peer review response:** Address referee comments, perform additional calculations
+If `MILESTONE-CONTEXT.md` exists, summarize its directions and confirm. If not,
+summarize the previous milestone and ask: "What do you want to investigate
+next?" Probe only enough to classify the milestone as analytical extension,
+numerical validation, phenomenology, paper preparation, peer-review response, or
+another explicit user direction.
 
 ## 3. Determine Milestone Version
 
@@ -58,7 +41,7 @@ If `reference_artifact_files` is non-empty, read the listed reference artifact h
 
 ## 4. Update PROJECT.md
 
-Add/update:
+Add/update the current milestone block in `GPD/PROJECT.md`:
 
 ```markdown
 ## Current Milestone: v[X.Y] [Name]
@@ -72,7 +55,7 @@ Add/update:
 - [Result 3]
 ```
 
-Update Active research questions section and "Last updated" footer.
+Update active research questions and the "Last updated" footer.
 
 ## 5. Update project state
 
@@ -89,7 +72,7 @@ gpd state add-decision \
   --rationale "New milestone cycle"
 ```
 
-Keep Accumulated Context section from previous milestone.
+Keep accumulated context from previous milestones.
 
 ## 6. Cleanup and Commit
 
@@ -122,16 +105,8 @@ gpd config set workflow.research true
 gpd config set workflow.research false
 ```
 
-**If "Survey first":**
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD >>> SURVEYING RESEARCH LANDSCAPE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
->>> Spawning 4 literature scouts in parallel...
-  -> Known Results, Methods, Framework, Pitfalls
-```
+**If "Survey first":** create `GPD/literature` and spawn 4 literature scouts
+in parallel: Prior Work, Methods, Computational, Pitfalls.
 
 ```bash
 mkdir -p GPD/literature
@@ -188,15 +163,11 @@ shared_state_policy: return_only
 
 Each scout contract is task-local. Do not widen the write scope or reuse a shared survey contract across dimensions.
 
-**Dimension-specific fields:**
-
-| Field            | Prior Work                                                             | Methods                                                                     | Computational                                                                       | Pitfalls                                                                             |
-| ---------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| EXISTING_CONTEXT | Existing validated results (DO NOT re-research): [from PROJECT.md]     | Existing methods (already used): [from PROJECT.md]                          | Existing computational framework: [from PROJECT.md or research map]                 | Focus on pitfalls specific to EXTENDING these results                                |
-| QUESTION         | What new results have appeared for [new direction]? What is now known? | What methods are appropriate for [new calculations]?                        | What computational extensions are needed for [new regime]?                          | Common mistakes when extending [existing results] to [new regime]?                   |
-| CONSUMER         | Specific results with references, conditions, assumptions              | Methods with computational cost, scaling, known limitations                 | Algorithms, software, integration with existing code, resource estimates            | Warning signs, prevention strategy, which phase should address it                    |
-| GATES            | References specific, conditions stated, relevance explained            | Methods specific to this physics domain, cost noted, limitations identified | Algorithms defined with convergence criteria, versions current, dependencies mapped | Pitfalls specific to this extension, numerical issues covered, prevention actionable |
-| FILE             | PRIOR-WORK.md                                                          | METHODS.md                                                                  | COMPUTATIONAL.md                                                                    | PITFALLS.md                                                                          |
+Dimension mapping:
+- Prior Work -> `PRIOR-WORK.md`: new results, conditions, assumptions, references.
+- Methods -> `METHODS.md`: viable methods, costs, limitations.
+- Computational -> `COMPUTATIONAL.md`: algorithms, dependencies, resource estimates.
+- Pitfalls -> `PITFALLS.md`: extension-specific mistakes, warnings, prevention.
 
 **Scout child gate:**
 
@@ -252,13 +223,10 @@ Read these files using the file_read tool:
 </files_to_read>
 
 <survey_context>
-Project content: {project_content}
-State content: {state_content}
-Milestones content: {milestones_content}
 Contract intake: {contract_intake}
-Active references: {active_reference_context}
 Effective reference intake: {effective_reference_intake}
 Reference artifact file handles: {reference_artifact_files}
+Planning file paths: GPD/PROJECT.md, GPD/STATE.md, GPD/state.json, GPD/MILESTONES.md
 </survey_context>
 
 <output>
@@ -315,13 +283,9 @@ Route `checkpoint`, `blocked`, or final `failed` through the gate to
 main context, or use a stale summary unless the fresh return names it and the
 tuple passes.
 
-Display key findings from SUMMARY.md:
+Display key findings from fresh SUMMARY.md:
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD >>> LITERATURE SURVEY COMPLETE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
 **New results:** [from SUMMARY.md]
 **Recommended methods:** [from SUMMARY.md]
 **Watch Out For:** [from SUMMARY.md]
@@ -340,14 +304,10 @@ gpd commit "docs: complete literature survey" --files GPD/literature/PRIOR-WORK.
 
 ## 8. Define Research Objectives
 
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD >>> DEFINING RESEARCH REQUIREMENTS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
+Define research requirements after survey choice is resolved.
 
-Read PROJECT.md: core research question, current milestone goals, answered questions (what is established).
-Read `active_reference_context` and `effective_reference_intake` before drafting objectives so contract-critical anchors, prior outputs, baselines, and unresolved gaps carry forward explicitly.
+Read `GPD/PROJECT.md`: core research question, current milestone goals, answered questions (what is established).
+Read `effective_reference_intake`, `contract_intake`, and relevant files from `reference_artifact_files` before drafting objectives so contract-critical anchors, prior outputs, baselines, and unresolved gaps carry forward explicitly.
 
 **If literature survey exists:** Read METHODS.md and PRIOR-WORK.md, extract available approaches and known results.
 
@@ -384,14 +344,8 @@ Track: Selected -> this milestone. Unselected essential -> future. Unselected ex
 
 **REQ-ID format:** `[CATEGORY]-[NUMBER]` (ANAL-01, NUMR-02). Continue numbering from existing.
 
-**Objective quality criteria:**
-
-Good research objectives are:
-
-- **Specific and testable:** "Compute the spectral gap as a function of coupling g in the range g in [0.1, 10]" (not "Study the spectrum")
-- **Result-oriented:** "Derive expression for X" (not "Think about Z")
-- **Atomic:** One calculation or result per objective (not "Derive and validate the phase diagram")
-- **Independent:** Minimal dependencies on other objectives
+Objective criteria: specific, testable, result-oriented, atomic, and as
+independent as the physics permits.
 
 Present FULL objectives list for confirmation:
 

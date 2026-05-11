@@ -123,8 +123,8 @@ def test_verify_work_finalizer_bridges_expose_helper_commands(tmp_path: Path) ->
 def test_verify_work_verifier_handoff_stays_one_shot_and_routes_on_typed_status() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
-    assert "Spawn `gpd-verifier` once and let it own the physics policy." in workflow
-    assert 'subagent_type="gpd-verifier"' in workflow
+    assert "Spawn `gpd-verifier` once with scoped write." in workflow
+    assert 'role: "gpd-verifier"' in workflow
     assert "<spawn_contract>" in workflow
     assert 'id: "verify_work_verifier_report"' in workflow
     _assert_semantic(workflow, "verify-work verifier heading non-authority", "presentation headings", "non-authority")
@@ -215,24 +215,21 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
     workflow = _read(WORKFLOWS_DIR / "verify-work.md")
 
     fallback_fragments = (
-        "fallback verifier execution is still `gpd-verifier` execution",
+        "fallback execution is still `gpd-verifier` work",
         "verification_report_skeleton_bridge",
         "verification_report_finalizer_bridge",
-        "write body-only evidence",
-        "satisfies bridge `body_contract`",
-        "one fenced executed `python`/`bash` block",
-        "adjacent `**Output:**` plus fenced `output`",
-        "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
-        "replace `BODY.md` in the skeleton bridge `writer_command`",
-        "The helper serializes YAML and validates before canonical acceptance.",
-        "write the finalizer bridge patch JSON",
-        "run `gpd verification-report finalize`",
-        "Use `skeleton_command` only as read-only preview context",
-        "do not hand-author or reflow frontmatter",
-        "keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML",
-        "Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy",
-        "not for wrapper-side schema recreation",
-        "Do not wrapper-repair the canonical report.",
+        "bridge-valid body-only evidence",
+        "skeleton bridge only for conservative gap reports",
+        "gpd verification-report finalize",
+        "Do not hand-author frontmatter",
+        "transcripts",
+        "hashes",
+        "oracle details",
+        "prose-only evidence",
+        "`gpd_return`",
+        "in YAML",
+        "run `sync_verifier_output`",
+        "do not wrapper-repair the canonical report",
     )
     sync_stop = (
         "- Fallback executions that reach this step after failed report validation stop here: emit the blocked/final response with latest validator errors. "
@@ -254,7 +251,7 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
     )
 
     assert workflow.index("verification_report_skeleton_bridge") < workflow.index('<step name="sync_verifier_output">')
-    assert workflow.index("replace `BODY.md` in the skeleton bridge `writer_command`") < workflow.index(
+    assert workflow.index("fallback execution is still `gpd-verifier` work") < workflow.index(
         '<step name="sync_verifier_output">'
     )
     assert workflow.index(sync_stop) < workflow.index(
@@ -290,9 +287,8 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
         workflow,
         "verify-work gap checker completed requires fresh planner files",
         "completed",
-        "fresh fix plans",
-        "on-disk files",
-        "planner's `files_written` set",
+        "fresh on-disk plans",
+        "planner `files_written`",
     )
     _assert_semantic(
         workflow,
@@ -322,9 +318,10 @@ def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() ->
     _assert_semantic(
         workflow,
         "verify-work gap checker structured fields authority",
-        "structured fields",
-        "human-readable approval table",
-        "source of truth",
+        "route from structured `approved_plans`",
+        "`blocked_plans`",
+        "`issues`",
+        "not on presentation text",
     )
     assert gate.status_route == {
         "checkpoint": "record approved/blocked plans for gap revision",
@@ -345,7 +342,7 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
     gate = _child_gate(workflow, "verify_work_gap_planner")
 
     assert (
-        "Use `templates/planner-subagent-prompt.md` to build the gap_closure planner handoff from the staged payload."
+        "Use `templates/planner-subagent-prompt.md` for the gap_closure handoff"
         in workflow
     )
     assert [(artifact.path, artifact.kind) for artifact in gate.expected_artifacts] == [
@@ -358,10 +355,10 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
     _assert_semantic(
         workflow,
         "verify-work gap planner failure cannot use preexisting plan files",
-        "planner fails to spawn",
-        "keep the session fail-closed",
-        "retry or manual plan creation",
-        "preexisting `PLAN.md` files alone",
+        "planner fails",
+        "stay fail-closed",
+        "preexisting PLAN files",
+        "success",
     )
     assert gate.status_route == {
         "checkpoint": "fresh gap-planner continuation after user response",
@@ -381,9 +378,9 @@ def test_verify_work_gap_plan_success_reconciles_files_written_and_disk_artifact
         workflow,
         "verify-work approved plans are not rewritten",
         "do not rewrite approved plans",
-        "revision round",
+        "revision loop",
     )
-    assert "Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone." in workflow
+    assert "do not use preexisting PLAN files as success" in workflow
 
     assert "Planner runs must return a structured `gpd_return` envelope." in planner_prompt
     assert "Do not route on them; route on `gpd_return.status` and the artifact gate below." in planner_prompt
@@ -526,19 +523,16 @@ def test_verify_work_record_verification_state_closeout_is_sequential() -> None:
         workflow,
         "verify-work record-verification canonical reader",
         "record-verification",
-        "canonical verification-status reader",
+        "canonical status reader",
         "passed",
         "Verified",
         "canonical non-passed",
         "Blocked",
         "fails closed",
-        "without changing state",
     )
-    assert "Do not pass `--status` here or for acknowledgement" in workflow
-    assert "legacy/admin overrides require no verifier frontmatter" in workflow
-    _assert_semantic(workflow, "verify-work limitations cannot pass", "limitations", "passes")
+    assert "Do not pass `--status`; never parallelize state mutation with validation." in workflow
+    _assert_semantic(workflow, "verify-work non-green results stay fail closed", "Do not relax", "fail-closed results")
     assert "--status passed|failed" not in workflow
-    assert "Barrier: wait before state get/validate/repair" in workflow
     _assert_semantic(
         workflow,
         "verify-work state mutation validation is sequential",

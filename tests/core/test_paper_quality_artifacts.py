@@ -2210,12 +2210,12 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
     assert "Missing generic `verification_status` / `confidence` tags alone are not blockers." in write_paper
     assert "Treat paper-support artifacts as scaffolding, not as proof that a claim is established." in write_paper
 
-    assert "protocol_bundle_context" in peer_review
+    assert "protocol_bundle_load_manifest" in peer_review
     assert "${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md" in peer_review
     assert "GPD/comparisons/*-COMPARISON.md" in peer_review
     assert "Bundle guidance" in peer_review
     assert "additive only" in peer_review
-    assert "review-support artifacts are scaffolding" in peer_review
+    assert "review-support artifacts are first-class" in peer_review
 
     assert "protocol_bundle_context" in respond
     assert "missing decisive evidence we already owed" in respond

@@ -83,7 +83,8 @@ def test_execute_phase_explicitly_defers_plan_local_semantics_to_execute_plan() 
     executor_dispatch = _execute_phase_stage("executor-dispatch.md")
     execute_plan_text = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
 
-    assert "execute-plan.md owns plan-local execution semantics" in workflow_text
+    assert "`execute-plan.md` owns plan-local execution." in workflow_text
+    assert "This stage owns only phase-wide routing and wave risk." in workflow_text
     assert "`workflows/execute-plan.md` is a child-readable workflow path" in executor_dispatch
     assert "autonomy` changes who is asked and when" in execute_plan_text
     assert "first-result" in execute_plan_text

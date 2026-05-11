@@ -49,25 +49,19 @@ Checker prompt:
 **Project Contract Validation:** {project_contract_validation}
 **Contract Intake:** {contract_intake}
 **Effective Reference Intake:** {effective_reference_intake}
-**Active References:** {active_reference_context}
-**Reference Artifacts:** {reference_artifacts_content}
+**Reference Artifact Files:** {reference_artifact_files}
+**Literature Review Files:** {literature_review_files}
+**Research Map Reference Files:** {research_map_reference_files}
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 </protocol_bundle_handoff>
-Treat stable knowledge docs in `active_reference_context` and `reference_artifacts_content` as reviewed background synthesis. They may influence assumptions or method choice when consistent with stronger sources, but they do not override `convention_lock`, `project_contract`, the PLAN `contract`, or decisive evidence.
+Treat reference paths as handles, not preloaded bodies. Read a selected path only when a checker finding depends on quoting or decisive comparison evidence; reviewed knowledge docs never override `convention_lock`, `project_contract`, the PLAN `contract`, or decisive evidence.
 Check that any downstream-gateable reliance on a reviewed knowledge doc is written as explicit `knowledge_deps`, not only implied by background context.
 
 **Phase Context:**
-IMPORTANT: Plans MUST honor user decisions. Flag as issue if plans contradict.
-
-- **Decisions** = LOCKED -- plans must implement exactly
-- **Agent's Discretion** = Freedom areas -- plans can choose approach
-- **Deferred Ideas** = Out of scope -- plans must NOT include
-
-{context_content}
+IMPORTANT: Plans MUST honor user decisions. If context is needed, read `${PHASE_DIR}/*-CONTEXT.md`; locked decisions must be implemented exactly, discretion areas may be chosen by the plan, and deferred ideas remain out of scope.
 </verification_context>
 
 <physics_verification_criteria>
@@ -216,13 +210,12 @@ Render the template's `## Revision Template` into `revision_prompt` with these b
 - `{effective_reference_intake}` -> {effective_reference_intake}
 - `{selected_protocol_bundle_ids}` -> {selected_protocol_bundle_ids}
 - `{protocol_bundle_load_manifest}` -> {protocol_bundle_load_manifest}
-- `{protocol_bundle_context}` -> {protocol_bundle_context}
 - `{protocol_bundle_verifier_extensions}` -> {protocol_bundle_verifier_extensions}
-- `{active_reference_context}` -> {active_reference_context}
-- `{reference_artifacts_content}` -> {reference_artifacts_content}
-- `{context_content}` -> {context_content}
+- `{reference_artifact_files}` -> {reference_artifact_files}
+- `{literature_review_files}` -> {literature_review_files}
+- `{research_map_reference_files}` -> {research_map_reference_files}
 If the revised fix plan still needs specialized tooling or other machine-checkable hard requirements, keep them in PLAN frontmatter `tool_requirements`.
-Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_reference_context` is the readable projection, not the source of truth.
+Treat `effective_reference_intake` as the structured source of carry-forward anchors; read reference paths by handle only for targeted checker fixes.
 
 Keep the revision prompt scoped to targeted checker fixes. Do not restate template-owned revision policy here.
 ```

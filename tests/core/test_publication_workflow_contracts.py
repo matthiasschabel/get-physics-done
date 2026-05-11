@@ -130,23 +130,19 @@ def test_peer_review_stage_six_requires_report_artifacts_and_threads_mode_contex
             'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)',
             "<autonomy_mode>{AUTONOMY}</autonomy_mode>",
             "<research_mode>{RESEARCH_MODE}</research_mode>",
-            "Treat the referee report files as required final-stage artifacts.",
+            "Stage 6 writes:",
         ),
-    )
-    assert re.search(
-        r"confirm `\$\{PUBLICATION_ROOT\}/REFEREE-REPORT\{round_suffix\}\.md` and\s+`\$\{PUBLICATION_ROOT\}/REFEREE-REPORT\{round_suffix\}\.tex` exist before treating the final\s+recommendation as complete",
-        workflow,
     )
     _assert_all_present(
         workflow,
         (
             "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md",
             "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex",
-            "Stage-review validation alone is not proof-redteam clearance",
+            "not a substitute for same-round proof-redteam clearance plus strict\nreferee-decision validation",
         ),
     )
     assert re.search(
-        r"same-round\s+`\$\{REVIEW_ROOT\}/PROOF-REDTEAM\{round_suffix\}\.md` clearance plus strict\s+referee-decision validation",
+        r"without same-round\s+`\$\{REVIEW_ROOT\}/PROOF-REDTEAM\{round_suffix\}\.md` plus strict decision validation",
         workflow,
     )
 
@@ -164,8 +160,8 @@ def test_peer_review_panel_child_gates_are_tuple_shaped_and_stage_owned() -> Non
         "peer_review_stage6_referee",
     ):
         assert f"{gate_id}" in workflow
-    assert re.search(r"Stage identity is\s+callsite-owned", workflow)
-    assert re.search(r"never trust a stage label inside\s+`gpd_return`", workflow)
+    assert re.search(r"Stage identity comes from tuple role", workflow)
+    assert re.search(r"never trust a stage\s+label inside `gpd_return`", workflow)
     _assert_all_present(
         workflow,
         (
@@ -197,34 +193,29 @@ def test_peer_review_workflow_retires_finished_handoffs_and_clears_transient_sta
     _assert_all_present(workflow, ("{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md",))
     assert re.search(r"spawned\s+reviewer/proof-auditor/referee lifecycle", workflow)
     assert re.search(r"checkpoint continuation,[\s\S]{0,80}sequential fallback cleanup", workflow)
-    assert (
-        re.search(r"Each\s+downstream stage begins from persisted artifacts plus the declared\s+carry-forward inputs for that stage", workflow)
-    )
+    assert re.search(r"downstream work restarts only from persisted artifacts plus declared\s+carry-forward inputs", workflow)
 
 
 def test_peer_review_workflow_requires_barriers_and_cleanup_before_downstream_stage_spawns() -> None:
     workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
     assert re.search(
-        r"Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered\s+review wave under the publication stage-recovery gate",
+        r"Run Stage 2, Stage 3, and proof critique in parallel when the runtime supports\s+it; otherwise run literature, math, proof\. Treat them as one barriered wave",
         workflow,
     )
     assert (
         re.search(
-            r"Before Stage 4 can spawn, the branch barrier must pass: every launched child has a\s+typed return, every persisted artifact above exists and validates, and downstream work\s+restarts only from those artifacts plus the declared carry-forward inputs",
+            r"Before Stage 4, every launched\s+child must have a typed return, every promised artifact must exist and validate,\s+and downstream work restarts only from persisted artifacts plus declared\s+carry-forward inputs",
             workflow,
         )
     )
+    assert "Retry once from the same persisted inputs; if still\ninvalid, STOP before Stage 5." in workflow
     assert re.search(
-        r"After `\$\{REVIEW_ROOT\}/STAGE-physics\{round_suffix\}\.json` validates, Stage 5\s+(?:must )?starts?\s+from persisted stage artifacts and declared carry-forward inputs only",
+        r"After validation, Stage 6 must begin from persisted stage artifacts and declared\s+carry-forward inputs only",
         workflow,
     )
     assert re.search(
-        r"After `\$\{REVIEW_ROOT\}/STAGE-interestingness\{round_suffix\}\.json` validates, Stage 6\s+must begin from the persisted stage artifacts and declared carry-forward inputs only",
-        workflow,
-    )
-    assert re.search(
-        r"Apply the `peer_review_stage6_referee` tuple and publication stage-recovery gate\s+before classifying the outcome as recovery-eligible, upstream-blocked, or\s+complete",
+        r"Apply the `peer_review_stage6_referee` tuple and publication stage-recovery gate\s+before classifying outcome as recovery-eligible, upstream-blocked, or complete",
         workflow,
     )
 
@@ -235,15 +226,15 @@ def test_peer_review_stage_six_limits_writes_to_stage_six_owned_artifacts() -> N
     _assert_all_present(
         workflow,
         (
-            "Your writable scope is limited to Stage 6-owned adjudication artifacts for this round:",
+            "Stage 6 writes:",
+            "Writable scope is limited to Stage 6-owned report `.md`/`.tex`, ledger,\ndecision, and optional consistency report.",
             "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
             "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json",
             "${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md",
-            "Do not modify `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, any `${REVIEW_ROOT}/STAGE-*.json`, or `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`.",
-            "any upstream path is a failed handoff",
+            "Do not modify\n`${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, any `${REVIEW_ROOT}/STAGE-*.json`,\nor `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`.",
+            "any upstream\npath is a failed handoff",
             "peer_review_stage6_referee",
-            "gpd_return.files_written stays within Stage 6 write_allowlist",
-            "The Stage 6 tuple write allowlist is report `.md`/`.tex`, ledger, decision, and optional consistency report.",
+            "`gpd_return.files_written` stays within the Stage 6 write allowlist",
         ),
     )
 
@@ -252,17 +243,17 @@ def test_peer_review_stage_six_fails_back_to_earliest_upstream_stage_on_inconsis
     workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
     assert re.search(
-        r"return `gpd_return.status: blocked` and hand the failure back to the earliest failing\s+upstream stage",
+        r"return `gpd_return.status:\s+blocked` and hand failure back instead of repairing it inside Stage 6",
         workflow,
     )
     _assert_all_present(
         workflow,
         (
-            "Do not retry Stage 6 as an upstream repair step.",
+            "STOP fail-closed and rerun the earliest failing\nupstream stage.",
             "Upstream fail-back table:",
             "`CLAIMS{round_suffix}.json` or `STAGE-reader{round_suffix}.json` -> rerun Stage 1",
             "`STAGE-math{round_suffix}.json` or `PROOF-REDTEAM{round_suffix}.md` -> rerun Stage 3",
             "`STAGE-interestingness{round_suffix}.json` -> rerun Stage 5",
-            "earliest failing upstream stage",
+            "earliest failing\nupstream stage",
         ),
     )

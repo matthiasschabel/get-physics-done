@@ -3,16 +3,22 @@ Prepare a completed paper for arXiv submission.
 
 Stages: `bootstrap` -> `manuscript_preflight` -> `review_gate` -> `package` -> `finalize`.
 
-The `arxiv-submission-stage-manifest.json` sidecar is executable through `gpd --raw init arxiv-submission --stage <stage_id>`. Executable stages: `gpd --raw init arxiv-submission --stage bootstrap`, `manuscript_preflight`, `review_gate`, `package`, `finalize`. Load the active stage payload before stage-specific authority; keep centralized command-context and strict review-preflight validators as the manuscript gate.
+The `arxiv-submission-stage-manifest.json` sidecar is executable through
+`gpd --raw init arxiv-submission --stage <stage_id>`. Executable stages:
+`gpd --raw init arxiv-submission --stage bootstrap`, `manuscript_preflight`,
+`review_gate`, `package`, `finalize`. Load the active stage payload before
+stage-specific authority; keep centralized command-context and strict
+review-preflight validators as the manuscript gate.
 
 Keep arXiv-only rules inline; shared bootstrap owns manuscript and review gates.
-
-Output: a submission-ready `arxiv-submission.tar.gz` under `GPD/publication/<subject_slug>/arxiv/` and a manual submission checklist.
+Output is `arxiv-submission.tar.gz` under
+`GPD/publication/<subject_slug>/arxiv/` plus a manual submission checklist.
 </purpose>
 
 <required_reading>
-Read all files referenced by the invoking prompt's `execution_context` before starting.
-Also read the shared publication bootstrap reference before resolving the manuscript target:
+Read all files referenced by the invoking prompt's `execution_context` before
+starting. Also read the shared publication bootstrap reference before resolving
+the manuscript target:
 
 @{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md
 </required_reading>
@@ -20,9 +26,7 @@ Also read the shared publication bootstrap reference before resolving the manusc
 <process>
 
 <step name="bootstrap" priority="first">
-**Resolve the manuscript target and publication bootstrap context.**
-
-Load the staged bootstrap payload before resolving the manuscript target:
+Load bootstrap, then enter the resolved project root:
 
 ```bash
 if [ -n "${ARGUMENTS:-}" ]; then
@@ -44,7 +48,7 @@ if [ -n "$PROJECT_ROOT" ]; then
 fi
 ```
 
-Run centralized context preflight before continuing:
+Run centralized command context and strict review preflight:
 
 ```bash
 if [ -n "${ARGUMENTS:-}" ]; then
@@ -58,8 +62,6 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Run the centralized review preflight before continuing and keep its raw routing fields:
-
 ```bash
 if [ -n "${ARGUMENTS:-}" ]; then
   REVIEW_PREFLIGHT=$(gpd --raw validate review-preflight arxiv-submission --strict -- "${ARGUMENTS}")
@@ -72,29 +74,50 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse `REVIEW_PREFLIGHT` for `publication_subject_slug`, `publication_lane_kind`, `managed_publication_root`, `selected_publication_root`, `selected_review_root`, `manuscript_root`, and `manuscript_entrypoint`. Use the shared publication bootstrap reference as the source of truth for manuscript-root resolution, latest-review/latest-response discovery, and paired response gating.
-Strict preflight reads `ARTIFACT-MANIFEST.json`, `BIBLIOGRAPHY-AUDIT.json`, and `reproducibility-manifest.json` from the resolved manuscript directory itself. The same resolved manuscript root is also the strict preflight source of truth for packaging. It is also the proof-review source; use `derived_manuscript_proof_review_status` as first-pass theorem-proof freshness for the resolved manuscript and must not persist `PROOF-REVIEW-MANIFEST.json` beside the manuscript root while validating.
-Current executable policy is conservative: any same-round or newer `gpd:respond-to-referees` author/referee response artifact for the active manuscript requires newer staged `gpd:peer-review` before packaging. Without durable manuscript-change scope metadata, response-only rounds are not arXiv clearance.
+Parse `REVIEW_PREFLIGHT` for `publication_subject_slug`,
+`publication_lane_kind`, `managed_publication_root`,
+`selected_publication_root`, `selected_review_root`, `manuscript_root`, and
+`manuscript_entrypoint`. Use the shared publication bootstrap reference as the source of truth for manuscript-root resolution, latest-review/latest-response discovery, and paired response gating.
 
-Response-freshness mapping:
-failed `response_freshness` check or `latest_response_requires_fresh_review=true` checkpoint as `response_gate`, not `review_gate`;
-existing target-bound staged review pair is older than response artifacts -> `review_state: stale`, `response_state: requires_fresh_review`; no typed target-bound staged review pair -> `review_state: missing`;
-response gate before package/materialization -> `command_execution_state: blocked_before_write`, not `stopped_at_checkpoint`; `claim_state: not_applicable`, not `human_needed`; same-round/newer responses require fresh staged `gpd:peer-review` before packaging.
+Strict preflight reads `ARTIFACT-MANIFEST.json`, `BIBLIOGRAPHY-AUDIT.json`, and
+`reproducibility-manifest.json` from the resolved manuscript directory. The same resolved manuscript root is also the strict preflight source of truth for packaging and proof review. Use `derived_manuscript_proof_review_status` as
+first-pass theorem-proof freshness; must not persist `PROOF-REVIEW-MANIFEST.json` beside the manuscript root while validating.
 
-For nested-cwd launches, use `project_root`, `manuscript_root`, `selected_publication_root`, and `selected_review_root` from init/preflight as authority; never infer package roots from launch cwd.
+Current executable policy is conservative: any same-round or newer
+`gpd:respond-to-referees` author/referee response artifact for the active
+manuscript requires newer staged `gpd:peer-review` before packaging. Without
+durable manuscript-change scope metadata, response-only rounds are not arXiv
+clearance.
 
-Resolve the manuscript target from raw preflight plus `$ARGUMENTS`:
+Response-freshness mapping: failed `response_freshness` check or
+`latest_response_requires_fresh_review=true` checkpoint as `response_gate`, not
+`review_gate`; an older target-bound staged review pair gives
+`review_state: stale`, `response_state: requires_fresh_review`; no typed pair
+gives `review_state: missing`; response gate before materialization gives
+`command_execution_state: blocked_before_write` and `claim_state: not_applicable`, not `human_needed`; same-round/newer responses require fresh
+staged `gpd:peer-review` before packaging.
+
+For nested-cwd launches, trust `project_root`, `manuscript_root`,
+`selected_publication_root`, and `selected_review_root` from init/preflight.
+Never infer package roots from launch cwd.
+
+Resolve manuscript target from raw preflight plus `$ARGUMENTS`:
 
 1. Set `resolved_main_tex` from `manuscript_entrypoint` and `resolved_dir` from `manuscript_root` in `REVIEW_PREFLIGHT`.
 2. If `$ARGUMENTS` specifies a `.tex` file, it must match that resolved entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`.
 3. If `$ARGUMENTS` specifies a directory, the centralized preflight-resolved entrypoint under that directory is authoritative.
-4. Otherwise inspect only the documented GPD-owned manuscript roots: `paper/`, `manuscript/`, `draft/`, and a unique `GPD/publication/<subject_slug>/manuscript/` lane when centralized preflight resolves one.
-5. If the manuscript root is ambiguous or missing, STOP and require an explicit manuscript path or a repaired manuscript-root state.
+4. Otherwise inspect only `paper/`, `manuscript/`, `draft/`, and a unique
+   `GPD/publication/<subject_slug>/manuscript/` lane when preflight resolves it.
+5. If manuscript root is ambiguous or missing, STOP and require an explicit manuscript path or a repaired manuscript-root state.
 6. Do not accept arbitrary external directories or standalone `.tex` entrypoints outside those supported roots.
 7. Do not fall back to `find` or arbitrary wildcard matching outside the documented default roots.
 
-Then run the centralized publication preflight and review preflight checks. If the latest review artifacts are missing, incomplete, stale, or blocked, or if the manuscript-root gates fail, stop before any packaging work starts.
-Set `subject_slug` from `publication_subject_slug`. If it is missing, STOP and repair preflight routing instead of deriving a new slug. Package outputs are always rooted at `GPD/publication/${subject_slug}/arxiv/`; treat `selected_publication_root` as validation context only. Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself.
+Then run the centralized publication preflight and review preflight checks. If
+latest review artifacts are missing, incomplete, stale, or blocked, or if
+manuscript-root gates fail, stop before packaging. Set `subject_slug` from
+`publication_subject_slug`; if missing, STOP and repair preflight routing.
+Package outputs are always rooted at `GPD/publication/${subject_slug}/arxiv/`.
+Treat `selected_publication_root` as validation context only. Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself.
 
 Set:
 
@@ -110,8 +133,11 @@ SUBMISSION_DIR="${PACKAGE_ROOT}/submission"
 PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"
 ```
 </step>
+
 <step name="handoff_to_manuscript_preflight">
-After the bootstrap context, centralized command-context preflight, strict review preflight, and manuscript target resolution all pass, reload `manuscript_preflight` before refreshing the manuscript-root build contract:
+After bootstrap context, command-context preflight, strict review preflight, and
+manuscript target resolution all pass, reload `manuscript_preflight` before
+refreshing the build contract:
 
 ```bash
 if [ -n "${ARGUMENTS:-}" ]; then
@@ -125,7 +151,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Read only the active stage's `staged_loading.eager_authorities`, primarily `workflows/arxiv-submission/manuscript-preflight.md`. Do not continue from bootstrap memory into packaging or finalization.
+Read only the active stage's `staged_loading.eager_authorities`, primarily
+`workflows/arxiv-submission/manuscript-preflight.md`. Do not continue from
+bootstrap memory into packaging or finalization.
 </step>
 
 </process>

@@ -3,7 +3,7 @@ Bootstrap phase lookup, contract gates, plan preflight, and branch setup.
 </purpose>
 
 <stage_boundary>
-First-stage authority only: arguments, bootstrap init, lifecycle gates, plan preflight, and branch setup. Do not load downstream authorities here.
+First-stage authority only: arguments, bootstrap init, lifecycle gates, plan preflight, and branch setup. Do not load downstream authorities.
 </stage_boundary>
 
 <process>
@@ -49,13 +49,13 @@ fi
 rm -f "$INIT_STDERR"
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage phase_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `BOOTSTRAP_INIT`; `BOOTSTRAP_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Use `gpd --raw stage field-access execute-phase --stage phase_bootstrap --style instruction`; read only those manifest-selected keys from `BOOTSTRAP_INIT`.
 
 **If `phase_found` is false:** Error -- phase directory not found.
 **If `plan_count` is 0:** Error -- no plans found in phase.
 **If `state_exists` is false but `GPD/` exists:** Offer reconstruct or continue.
 
-`contract_gate_stop:` ref=contract-authority-gate#blocked-lifecycle-stop-phrase; workflow=execute-phase; stage=phase_bootstrap; status=blocked; checkpoint=contract_gate; triggers=project_contract_load_info.status starts with blocked | project_contract_validation.valid is false | project_contract_gate.authoritative is not true; primary=gpd:sync-state|gpd:new-project; rerun=gpd:execute-phase ${PHASE_ARG}; secondary=gpd:suggest-next.
+`contract_gate_stop:` workflow=execute-phase; stage=phase_bootstrap; status=blocked; checkpoint=contract_gate; trigger=blocked load | invalid validation | non-authoritative gate; primary=gpd:sync-state|gpd:new-project; rerun=gpd:execute-phase ${PHASE_ARG}; secondary=gpd:suggest-next.
 
 For blocked contract load, invalid contract validation, or non-authoritative `project_contract_gate`, STOP, show the gate/load/validation errors, and use `contract_gate_stop`.
 
@@ -69,11 +69,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Later staged refreshes surface `effective_reference_intake`, `active_reference_context`, and `reference_artifacts_content` for anchor-aware routing and wave planning. Stable knowledge docs may appear only through those shared reference surfaces as reviewed background; they do not become a separate authority tier. Before branch handling, scripts, computations, dispatches, subagents, writes, or claims, require that the selected `PLAN.md` passes `gpd validate plan-preflight <PLAN.md>`.
+Later stages surface reference/protocol handles for anchor-aware routing. Stable knowledge docs remain reviewed background and never become a separate authority tier. Before branch handling, scripts, computations, dispatches, subagents, writes, or claims, require selected `PLAN.md` files to pass preflight.
 </step>
 
 <step name="validate_selected_plans_before_execution" priority="first">
-Validate the selected plans before any execution-side work. If this gate fails, do not run workspace scripts, numerical computations, task dispatches, subagents, artifact writes, branch creation, or result claims.
+Validate selected plans before execution-side work. On failure, do not run scripts, computations, dispatches, subagents, writes, branch creation, or result claims.
 ```bash
 SELECTED_PLAN_FILES=()
 for plan in "$phase_dir"/*-PLAN.md; do
@@ -108,21 +108,19 @@ if [ "$PLAN_GATE_FAILED" = true ]; then
   exit 1
 fi
 ```
-`gpd:plan-phase {N}` is the supported public plan repair route. Invoke it with explicit instructions to revise or recreate the invalid `PLAN.md`, then rerun `gpd:execute-phase {N}`.
+Repair invalid plans with `gpd:plan-phase {N}`, then rerun `gpd:execute-phase {N}`.
 </step>
 
 <step name="handle_branching">
 Check `branching_strategy` from init:
 
-**"none":** Skip, continue on current branch.
-
-**"per-phase" or "per-milestone":** Use pre-computed `branch_name` from init:
+`none`: continue on current branch. `per-phase` or `per-milestone`: use precomputed `branch_name`:
 
 ```bash
 git checkout -b "$BRANCH_NAME" 2>/dev/null || git checkout "$BRANCH_NAME"
 ```
 
-All subsequent commits go to this branch. User handles merging.
+Subsequent commits go to this branch; the user handles merging.
 </step>
 
 </process>

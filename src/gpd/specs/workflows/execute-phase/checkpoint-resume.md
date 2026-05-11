@@ -71,8 +71,7 @@ Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --styl
    - `{execution_segment}`: The returned bounded-segment state, including checkpoint cause, current cursor, resume preconditions, downstream-lock status, and any skeptical re-questioning fields that must survive into the continuation
    - `{selected_protocol_bundle_ids}`: From checkpoint_resume init JSON
    - `{protocol_bundle_load_manifest}`: From checkpoint_resume init JSON when present
-   - `{protocol_bundle_context}`: From checkpoint_resume init JSON
-   - `{protocol_bundle_verifier_extensions}`: From checkpoint_resume init JSON
+   - `{protocol_bundle_verifier_extensions}`: From checkpoint_resume init JSON as the verifier-extension checklist surface
 7. Continuation agent verifies previous commits, continues from resume point
 8. Repeat until plan completes or user stops
 

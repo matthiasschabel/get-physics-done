@@ -5,7 +5,21 @@ from __future__ import annotations
 import inspect
 import json
 from dataclasses import fields
+from pathlib import Path
 
+from gpd.core.context import init_literature_review
+from gpd.core.staged_init_assembly import (
+    StagedInitAssemblyContext,
+    StagedInitProvider,
+    assemble_staged_init_payload,
+)
+from gpd.core.workflow_staging import (
+    WORKFLOW_STAGE_MANIFEST_DIR,
+    WORKFLOW_STAGE_MANIFEST_SUFFIX,
+    WorkflowStage,
+    WorkflowStageManifest,
+    load_workflow_stage_manifest,
+)
 from tests.helpers import phase7_live_like
 from tests.helpers.phase4_persona.interaction_events import FakePersonaTrace, FakePersonaTurn
 from tests.helpers.phase7_live_like import (
@@ -16,6 +30,9 @@ from tests.helpers.phase7_live_like import (
     score_phase7_live_like_row,
     score_phase7_live_like_rows,
 )
+
+REFERENCE_FILE_FIELD = "reference_artifact_files"
+REFERENCE_CONTENT_FIELD = "reference_artifacts_content"
 
 
 def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
@@ -73,12 +90,158 @@ def test_phase7_live_like_scores_lp_jit_rows_with_hard_budgets() -> None:
     assert scores_by_prefix["LP-JIT-08"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
 
 
+def test_lp_jit_04_matrix_targets_real_literature_review_stage_pair() -> None:
+    row = _raw_row_by_id("LP-JIT-04")
+    bounds = row["behavior_metric_bounds"]
+
+    assert row["fixture_family"] == "jit_reference_handle_first_class"
+    assert row["workflow_class"] == "literature_review_handle_then_hydrate"
+    assert {
+        "src/gpd/core/context.py",
+        "src/gpd/core/staged_init_assembly.py",
+        "src/gpd/specs/workflows/literature-review-stage-manifest.json",
+        "src/gpd/specs/workflows/literature-review/scope-locked.md",
+        "src/gpd/specs/workflows/literature-review/review-handoff.md",
+    } <= set(row["source_owners"])
+    assert "tests/core/test_phase7_live_like.py" in row["test_owners"]
+
+    for metric_key in (
+        "invalid_command_suggestion_count",
+        "schema_repair_loop_count",
+        "duplicate_question_bucket_count",
+        "post_stop_activity_count",
+        "unexpected_write_count",
+        "unsupported_completion_claim_count",
+        "raw_reload_leakage_count",
+        "content_hydration_before_selection_count",
+    ):
+        assert bounds[metric_key] == 0
+    assert bounds["structured_authority_coverage"] == 1
+    assert row["expected_artifact_handle_first_class"] == "handle_first"
+    assert row["expected_first_useful_action_class"] == "handle_selection"
+    assert row["expected_mutation_guard_class"] == "no_write"
+
+
+def test_lp_jit_04_literature_review_stage_pair_defers_reference_content() -> None:
+    manifest = load_workflow_stage_manifest("literature-review")
+    scope_locked = manifest.stage("scope_locked")
+    review_handoff = manifest.stage("review_handoff")
+
+    assert REFERENCE_FILE_FIELD in scope_locked.required_init_fields
+    assert REFERENCE_CONTENT_FIELD not in scope_locked.required_init_fields
+    _assert_handles_before_content(review_handoff.required_init_fields)
+
+
+def test_reference_content_stages_select_handles_before_content() -> None:
+    for manifest_path in sorted(WORKFLOW_STAGE_MANIFEST_DIR.glob(f"*{WORKFLOW_STAGE_MANIFEST_SUFFIX}")):
+        workflow_id = manifest_path.name.removesuffix(WORKFLOW_STAGE_MANIFEST_SUFFIX)
+        manifest = _load_reference_order_manifest(workflow_id)
+        for stage in manifest.stages:
+            if REFERENCE_CONTENT_FIELD in stage.required_init_fields:
+                _assert_handles_before_content(stage.required_init_fields, label=f"{workflow_id}.{stage.id}")
+
+
+def test_handle_only_reference_stage_inventory_keeps_content_deferred() -> None:
+    handle_only_stages = (
+        ("literature-review", "scope_locked"),
+        ("peer-review", "artifact_discovery"),
+        ("peer-review", "panel_stages"),
+        ("peer-review", "final_adjudication"),
+        ("respond-to-referees", "revision_planning"),
+        ("verify-work", "interactive_validation"),
+    )
+    content_stages = (
+        ("literature-review", "review_handoff"),
+        ("respond-to-referees", "response_authoring"),
+        ("verify-work", "gap_repair"),
+    )
+
+    for workflow_id, stage_id in handle_only_stages:
+        stage = _load_reference_order_manifest(workflow_id).stage(stage_id)
+
+        assert REFERENCE_FILE_FIELD in stage.required_init_fields, f"{workflow_id}.{stage_id}"
+        assert REFERENCE_CONTENT_FIELD not in stage.required_init_fields, f"{workflow_id}.{stage_id}"
+
+    for workflow_id, stage_id in content_stages:
+        stage = _load_reference_order_manifest(workflow_id).stage(stage_id)
+
+        _assert_handles_before_content(stage.required_init_fields, label=f"{workflow_id}.{stage_id}")
+
+
+def test_staged_init_payload_dispatch_is_lazy_for_handle_only_reference_stage(tmp_path: Path) -> None:
+    manifest = _manifest(
+        _stage("handle_only", (REFERENCE_FILE_FIELD,)),
+        _stage("hydrate", (REFERENCE_FILE_FIELD, REFERENCE_CONTENT_FIELD), order=2),
+    )
+    calls: list[str] = []
+
+    def build_handles(context: StagedInitAssemblyContext) -> dict[str, object]:
+        calls.append(f"handles:{context.stage.id}")
+        return {REFERENCE_FILE_FIELD: ["GPD/research-map/REFERENCES.md"]}
+
+    def build_content(context: StagedInitAssemblyContext) -> dict[str, object]:
+        if context.stage.id == "handle_only":
+            raise AssertionError("reference content provider must not run for handle-only stages")
+        calls.append(f"content:{context.stage.id}")
+        return {REFERENCE_CONTENT_FIELD: "hydrated reference body"}
+
+    providers = (
+        StagedInitProvider("handles", frozenset({REFERENCE_FILE_FIELD}), build_handles),
+        StagedInitProvider("content", frozenset({REFERENCE_CONTENT_FIELD}), build_content),
+    )
+
+    handle_payload = assemble_staged_init_payload(
+        workflow_id="phase7-handle-first",
+        stage_id="handle_only",
+        cwd=tmp_path,
+        base_payload={},
+        manifest=manifest,
+        providers=providers,
+    )
+    hydrate_payload = assemble_staged_init_payload(
+        workflow_id="phase7-handle-first",
+        stage_id="hydrate",
+        cwd=tmp_path,
+        base_payload={},
+        manifest=manifest,
+        providers=providers,
+    )
+
+    assert calls == ["handles:handle_only", "handles:hydrate", "content:hydrate"]
+    assert tuple(handle_payload) == (REFERENCE_FILE_FIELD, "staged_loading")
+    assert REFERENCE_CONTENT_FIELD not in handle_payload
+    assert tuple(hydrate_payload) == (REFERENCE_FILE_FIELD, REFERENCE_CONTENT_FIELD, "staged_loading")
+    assert hydrate_payload[REFERENCE_CONTENT_FIELD] == "hydrated reference body"
+
+
+def test_literature_review_staged_payload_hydrates_only_after_scope_locked(tmp_path: Path) -> None:
+    _setup_literature_review_reference_project(tmp_path)
+
+    scope_locked = init_literature_review(tmp_path, "Curvature flow bounds", stage="scope_locked")
+    review_handoff = init_literature_review(tmp_path, "Curvature flow bounds", stage="review_handoff")
+
+    assert REFERENCE_FILE_FIELD in scope_locked
+    assert scope_locked[REFERENCE_FILE_FIELD] == ["GPD/research-map/REFERENCES.md"]
+    assert REFERENCE_CONTENT_FIELD not in scope_locked
+    assert _active_payload_fields(scope_locked) == tuple(scope_locked["staged_loading"]["required_init_fields"])
+
+    assert review_handoff[REFERENCE_FILE_FIELD] == ["GPD/research-map/REFERENCES.md"]
+    assert isinstance(review_handoff[REFERENCE_CONTENT_FIELD], str)
+    assert review_handoff[REFERENCE_CONTENT_FIELD]
+    assert _active_payload_fields(review_handoff) == tuple(review_handoff["staged_loading"]["required_init_fields"])
+    _assert_handles_before_content(tuple(review_handoff))
+
+
 def test_lp_jit_04_uses_shared_handle_before_content_detector() -> None:
     row = _row_by_id("LP-JIT-04")
     score = score_phase7_live_like_row(row)
 
     assert score.passed
     assert score.hard_budget_failures == ()
+    assert score.phase7_metric_counts["raw_reload_leakage_count"] == 0
+    assert score.phase7_metric_counts["content_hydration_before_selection_count"] == 0
+    assert score.phase7_metric_counts["conversation_turn_count"] == 2
+    assert score.behavior_score.metric_counts["raw_reload_leakage_count"] == 0
     assert score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 0
     assert score.behavior_score.metric_classes["artifact_handle_first_class"] == "handle_before_content"
     assert score.phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
@@ -126,3 +289,57 @@ def test_phase7_live_like_helper_has_no_execution_or_network_surface() -> None:
 def _row_by_id(row_id: str) -> Phase7LiveLikeRow:
     rows = load_phase7_live_like_rows()
     return next(row for row in rows if row.row_id == row_id)
+
+
+def _raw_row_by_id(row_id: str) -> dict[str, object]:
+    payload = json.loads(PHASE7_LIVE_PERSONA_MATRIX_PATH.read_text(encoding="utf-8"))
+    return next(row for row in payload["rows"] if row["row_id"] == row_id)
+
+
+def _load_reference_order_manifest(workflow_id: str) -> WorkflowStageManifest:
+    return load_workflow_stage_manifest(workflow_id)
+
+
+def _assert_handles_before_content(required_fields: tuple[str, ...], *, label: str = "") -> None:
+    assert REFERENCE_FILE_FIELD in required_fields, label
+    assert REFERENCE_CONTENT_FIELD in required_fields, label
+    assert required_fields.index(REFERENCE_FILE_FIELD) < required_fields.index(REFERENCE_CONTENT_FIELD), label
+
+
+def _stage(stage_id: str, required_fields: tuple[str, ...], *, order: int = 1) -> WorkflowStage:
+    return WorkflowStage(
+        id=stage_id,
+        order=order,
+        purpose=f"{stage_id} purpose",
+        mode_paths=(),
+        required_init_fields=required_fields,
+        loaded_authorities=(),
+        conditional_authorities=(),
+        must_not_eager_load=(),
+        allowed_tools=(),
+        writes_allowed=(),
+        produced_state=(),
+        next_stages=(),
+        checkpoints=(),
+        init_spec_id=None,
+    )
+
+
+def _manifest(*stages: WorkflowStage) -> WorkflowStageManifest:
+    return WorkflowStageManifest(schema_version=1, workflow_id="phase7-handle-first", stages=stages)
+
+
+def _setup_literature_review_reference_project(cwd: Path) -> None:
+    gpd_dir = cwd / "GPD"
+    research_map_dir = gpd_dir / "research-map"
+    research_map_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "config.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "STATE.md").write_text("# State\n", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text("# Project\n\nCurvature flow bounds.\n", encoding="utf-8")
+    (gpd_dir / "ROADMAP.md").write_text("## Milestone\n\n### Phase 1: Test\n", encoding="utf-8")
+    (research_map_dir / "REFERENCES.md").write_text("# References\n\n- Hamilton 1982.\n", encoding="utf-8")
+
+
+def _active_payload_fields(payload: dict[str, object]) -> tuple[str, ...]:
+    return tuple(key for key in payload if key != "staged_loading")

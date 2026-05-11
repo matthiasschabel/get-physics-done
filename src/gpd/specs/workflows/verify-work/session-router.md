@@ -1,16 +1,12 @@
 <purpose>
-Orchestrate conversational verification through a thin session wrapper around `gpd-verifier`.
-
-The verifier owns target construction, proof policy, checks, comparison verdicts, and canonical status. Scientific status ownership and routing vocabulary live in `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md`. This workflow owns preflight, routing, interaction, sync, diagnosis, and gap repair.
+Thin session router for `gpd-verifier`. The verifier owns targets, proof policy, checks, comparison verdicts, and canonical status; this stage owns preflight and routing only.
 </purpose>
 <stage_scope>
-Stage id: `session_router`. Owns argument normalization, active-session routing, review preflight, contract-gate checks, lifecycle gate checks, and canonical phase artifact discovery. Do not load proof-redteam, verifier handoff, report schema, or gap-repair authorities here.
+Stage id: `session_router`. Owns argument normalization, active-session routing, review preflight, contract/lifecycle gates, and canonical phase artifact discovery. Do not load proof-redteam, verifier handoff, report schema, or gap-repair authorities here.
 </stage_scope>
 <process>
 
 <step name="check_type_selection">
-## Check Type Selection
-
 Normalize args before init: the first non-flag token is the optional phase; flags may appear anywhere.
 
 ```bash
@@ -26,11 +22,11 @@ VERIFY_FLAG_TEXT="${VERIFY_FLAGS[*]}"
 [ -n "$VERIFY_FLAG_TEXT" ] || VERIFY_FLAG_TEXT="--all"
 ```
 
-Targeted flags narrow the optional check mix only. `--all` or no flags delegates the full package; proof gates, ownership, and fail-closed routing do not change.
+Flags narrow optional checks only; proof gates, verifier ownership, and fail-closed routing do not change.
 </step>
 
 <step name="initialize" priority="first">
-Load session-router first; load later stages where used.
+Load session-router first; load later stages only where used.
 
 ```bash
 SESSION_ROUTER_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage session_router)
@@ -40,7 +36,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse only `session_router.required_init_fields`.
+Read only `session_router.required_init_fields`.
 
 ```bash
 export PROJECT_ROOT PHASE_DIR_ABS
@@ -52,7 +48,7 @@ Do not assume reference ledgers, protocol bundles, or report schemas are loaded 
 
 **If no phase was provided:**
 
-Read `active_verification_sessions` from `SESSION_ROUTER_INIT`. This payload is produced by the canonical verification-status reader from structured frontmatter and is capped to the first five active sessions. Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here.
+Read `active_verification_sessions` from `SESSION_ROUTER_INIT`. It comes from the canonical verification-status reader, is capped to five sessions, and replaces shell loops over `GPD/phases`.
 
 Active sessions are payload entries with `session_status` of `validating` or `diagnosed`. Route on each entry's canonical `status` / `routing_status` and keep `session_status` conversational only; never let `session_status` overwrite `status`.
 
@@ -62,15 +58,7 @@ No-phase routing is choice-only:
 - no active sessions present: ask for a phase and show the runtime route `gpd:verify-work <phase>`;
 - never render `gpd verify phase` or bare `gpd-verify-work` as the visible verification workflow action.
 
-If active sessions exist, display:
-
-```
-## Active Verification Sessions
-
-1. Phase N: validating; verification gaps_found; score 2/6
-
-Reply with a number to resume, or provide a phase number.
-```
+If active sessions exist, display a compact numbered list and ask for a number or phase.
 
 Wait for user response; load phase-only stages only after `PHASE_ARG` is set. If none exist, stop with: `No active verification sessions. Provide a phase number (e.g., gpd:verify-work <phase>)`.
 
@@ -103,13 +91,9 @@ fi
 
 If review preflight exits nonzero, stop and show its blocking issues before any delegation.
 
-`contract_gate_stop:` ref=contract-authority-gate#blocked-lifecycle-stop-phrase; workflow=verify-work; stage=session_router; status=blocked; checkpoint=contract_gate; triggers=project_contract_load_info.status starts with blocked | project_contract_validation.valid is false | project_contract_gate.authoritative is not true; primary=gpd:sync-state|gpd:new-project; rerun=gpd:verify-work ${PHASE_ARG}; secondary=gpd:suggest-next.
+`contract_gate_stop:` workflow=verify-work; stage=session_router; status=blocked; checkpoint=contract_gate; trigger=blocked load | invalid validation | non-authoritative gate; primary=gpd:sync-state|gpd:new-project; rerun=gpd:verify-work ${PHASE_ARG}; secondary=gpd:suggest-next.
 
-If `project_contract_load_info.status` starts with `blocked`, stop and show the surfaced `project_contract_load_info.errors` / `warnings` before delegation. Use `contract_gate_stop`.
-
-If `project_contract_validation.valid` is false, stop and show `project_contract_validation.errors` before delegation. Use `contract_gate_stop`.
-
-**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint. Show gate/load/validation errors. Use `contract_gate_stop`.
+If contract load is blocked, validation is invalid, or `project_contract_gate.authoritative` is not true, STOP before delegation, show the surfaced gate/load/validation errors, and use `contract_gate_stop`.
 
 Run the executable lifecycle authority gate before proof repair, inventory building, contract checks, or verifier delegation:
 
@@ -121,13 +105,13 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use canonical artifact discovery helpers during bootstrap. `verification_report_status_payload` is the fail-closed status surface for the current phase; if it reports `missing`, `missing_status`, `unparseable`, or `unknown_status`, treat that as pending verification rather than a pass.
+Use canonical artifact discovery helpers during bootstrap. `verification_report_status_payload` is fail-closed; `missing`, `missing_status`, `unparseable`, or `unknown_status` means pending verification, never pass.
 
 ```bash
 PHASE_INFO=$(gpd --raw roadmap get-phase "${PHASE_ARG}")
 ```
 
-Use `phase_dir_abs` for shell/file IO; `phase_dir` stays the project-relative label. Read all PLAN.md files in `${PHASE_DIR_ABS}/` using the file_read tool.
+Use `phase_dir_abs` for shell/file IO. Read PLAN.md files in `${PHASE_DIR_ABS}/` with `file_read`.
 </step>
 
 <stage_transition>

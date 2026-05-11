@@ -1,16 +1,8 @@
 <purpose>
-Orchestrate conversational verification through a thin session wrapper around `gpd-verifier`.
-
-The verifier owns target construction, proof policy, checks, comparison verdicts, and canonical status. Scientific status ownership and routing vocabulary live in `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md`. This workflow owns preflight, routing, interaction, sync, diagnosis, and gap repair.
+Delegate phase verification to one fresh `gpd-verifier` and gate the produced report.
 </purpose>
 <philosophy>
-**Do not duplicate verifier policy here.**
-
-- Fail closed before delegation if the project, roadmap, contract, or proof readiness are not usable.
-- Use `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` for status ownership and vocabulary; this wrapper gates artifacts and routes, but does not decide the scientific verdict.
-- Present verifier-produced evidence one check at a time and record only the session overlay in this workflow.
-- Every spawned agent is a one-shot delegation: if it needs user input or new evidence arrives after return, start a fresh continuation; never send more input to closed child.
-- File-producing handoffs must prove the expected artifact exists before success is accepted.
+Do not duplicate verifier policy. Fail closed before delegation if project, roadmap, contract, or proof readiness is unusable. The wrapper gates artifacts and routes; the verifier owns scientific status. Every child handoff is one-shot and file-producing success requires fresh expected artifacts.
 </philosophy>
 <shared_contract_floor>
 **Project Contract Gate:** {project_contract_gate}
@@ -20,10 +12,9 @@ The verifier owns target construction, proof policy, checks, comparison verdicts
 **Effective Reference Intake:** {effective_reference_intake}
 
 Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. A visible-but-blocked contract must be repaired before it is used as authoritative verification scope; keep the same contract-critical floor at all times.
-Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_reference_context` is the readable projection, not the source of truth.
+Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_references`, `citation_source_files`, and `citation_source_warnings` are compact routing handles.
 Do NOT skip contract-critical anchors.
 </shared_contract_floor>
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 
 <process>
 
@@ -38,34 +29,29 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Treat `inventory_build.required_init_fields` as source of truth for contract, reference, and protocol-bundle fields.
+Treat `inventory_build.required_init_fields` as source of truth for contract, reference, and protocol fields.
 
-Use `active_reference_context` from init JSON as a mandatory input to verification.
-Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_reference_context` is the readable projection, not the source of truth.
+Use `effective_reference_intake`, `active_references`, `citation_source_files`, and `citation_source_warnings` as mandatory handle inputs to verification.
+Treat `effective_reference_intake` as the structured source of carry-forward anchors; handle lists route the verifier to the relevant sources without inlining rendered reference prose.
 
 - If it names a benchmark, prior artifact, or must-read reference, verification must explicitly check it or report why it could not.
-- Treat `reference_artifacts_content` as supporting evidence for what comparisons remain decisive. Stable knowledge docs that appear there are reviewed background synthesis: use them to clarify definitions, assumptions, and caveats only when they agree with stronger sources, and never as decisive evidence on their own.
+- Stable knowledge docs that appear through handle/status fields are reviewed background synthesis: use them to clarify definitions, assumptions, and caveats only when they agree with stronger sources, and never as decisive evidence on their own.
 - Background literature may be reduced by mode; anchor checks may not.
 </step>
 
-<step name="load_protocol_bundle_context">
-Use `protocol_bundle_load_manifest` and `protocol_bundle_context` from init JSON as additive specialized guidance. If `selected_protocol_bundle_ids` is non-empty, use `protocol_bundle_verifier_extensions` from init JSON as the primary source for bundle checklist extensions; call `get_bundle_checklist(selected_protocol_bundle_ids)` only when extensions are missing or need consistency checking. Bundle guidance may add estimator checks, decisive artifact expectations, or domain-specific audits, but it does NOT replace the plan contract or reduce anchor obligations.
-- If the phase has a PLAN `contract` and project-local anchors or prior-output paths matter, use this contract-check loop before finalizing the inventory:
-  1. Call `suggest_contract_checks(contract, project_dir=...)`.
-  2. Treat the returned items as the default contract-aware seed unless they are clearly inapplicable.
-  3. For each returned check, start from `request_template`, satisfy `required_request_fields` and `schema_required_request_fields`, satisfy one full alternative from `schema_required_request_anyof_fields`, stay within `supported_binding_fields` for `request.binding`, and keep `project_dir` as the top-level absolute project root argument.
-  4. Call `run_contract_check(request=..., project_dir=...)` so contract-aware checks are executed rather than only discovered.
+<step name="load_protocol_bundle_handles">
+Use `protocol_bundle_load_manifest` as specialized-loading guidance. If bundles are selected, use `protocol_bundle_verifier_extensions` as the primary checklist surface; call `get_bundle_checklist(selected_protocol_bundle_ids)` only when extensions are missing or inconsistent. Bundle guidance may add checks, but it never replaces the plan contract or reduces anchor obligations.
+
+For PLAN contracts with project-local anchors or prior-output paths, call `suggest_contract_checks(contract, project_dir=...)`, fill the returned `request_template` completely, and run each applicable check with `run_contract_check(request=..., project_dir=...)`.
 </step>
 
 <step name="delegate_verification">
 ## Delegate Verification
 
-Spawn `gpd-verifier` once and let it own the physics policy. Use `subagent_type="gpd-verifier"`, model `{verifier_model}`, and scoped write. It owns contract-backed target extraction, evidence mapping, proof policy, computational checks, decisive comparisons, canonical status, suggested contract checks, and the gap ledger.
+Spawn `gpd-verifier` once with scoped write. It owns target extraction, evidence mapping, proof policy, checks, decisive comparisons, canonical status, suggested contract checks, and the gap ledger.
 
-Pass the project contract, proof freshness summary, active reference context, and protocol bundle handoff fields into the handoff so the verifier can build its own authoritative ledger.
-Point the verifier at `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` for scientific status ownership, target status vocabulary, top-level verification status, and runtime return-status distinction.
-Use `protocol_bundle_verifier_extensions` as primary bundle checklist surface; `protocol_bundle_context` is readable projection. Use `suggest_contract_checks(contract)` for ambiguous decisive anchors or prior-output paths. Required decisive comparisons should stay legible enough that the researcher can recognize in the phase promise which `claim`, acceptance test, or reference is still unresolved. Do not mark the parent claim or acceptance test as passed until that decisive comparison is resolved.
-Verifier presentation headings are non-authority; route through the verifier tuple plus `verification-status-authority.md`.
+Pass the project contract, proof freshness summary, reference handles, and protocol bundle handoff fields into the handoff so the verifier can build its own authoritative ledger.
+Point it at `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md`. Presentation headings are non-authority; route through the verifier tuple plus canonical report status.
 
 > Verifier checkpoints use `references/orchestration/continuation-boundary.md`; the wrapper starts a fresh continuation after the user responds.
 
@@ -77,7 +63,7 @@ Prompt: "First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instruct
 
 Read with `file_read`: `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`, all PLAN/SUMMARY/`*-PROOF-REDTEAM.md` files in `${PHASE_DIR_ABS}/`, `${PROJECT_ROOT}/GPD/STATE.md`, and `${PROJECT_ROOT}/GPD/ROADMAP.md`.
 
-Pass this context: Project contract: {project_contract}; Project contract gate: {project_contract_gate}; Project contract load info: {project_contract_load_info}; Project contract validation: {project_contract_validation}; Contract intake: {contract_intake}; Effective reference intake: {effective_reference_intake}; Active reference context: {active_reference_context}; Proof freshness summary: {phase_proof_review_status}.
+Pass this context: Project contract: {project_contract}; gate: {project_contract_gate}; load info: {project_contract_load_info}; validation: {project_contract_validation}; contract intake: {contract_intake}; effective reference intake: {effective_reference_intake}; active references: {active_references}; citation source files: {citation_source_files}; citation warnings: {citation_source_warnings}; proof freshness: {phase_proof_review_status}.
 
 <selected_protocol_bundle_ids>
 {selected_protocol_bundle_ids}
@@ -86,10 +72,6 @@ Pass this context: Project contract: {project_contract}; Project contract gate: 
 <protocol_bundle_load_manifest>
 {protocol_bundle_load_manifest}
 </protocol_bundle_load_manifest>
-
-<protocol_bundle_context>
-{protocol_bundle_context}
-</protocol_bundle_context>
 
 <protocol_bundle_verifier_extensions>
 {protocol_bundle_verifier_extensions}
@@ -136,7 +118,7 @@ child_gate:
     failed: "non-green stop with validator errors"
 ```
 
-If runtime delegation is unavailable, fallback verifier execution is still `gpd-verifier` execution. Before writing contract-backed `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`: read `verification_report_skeleton_bridge` and `verification_report_finalizer_bridge`; write body-only evidence to a Markdown file that satisfies bridge `body_contract` (body-only Markdown with one fenced executed `python`/`bash` block, adjacent `**Output:**` plus fenced `output`, and a following `PASS`/`FAIL`/`INCONCLUSIVE` verdict). For conservative gap reports, replace `BODY.md` in the skeleton bridge `writer_command` with that file and run it. For passed, `human_needed`, `expert_needed`, or typed non-gap outcomes, write the finalizer bridge patch JSON, replace `PATCH.json` and `BODY.md` in its `writer_command_template`, and run `gpd verification-report finalize`. The helper serializes YAML and validates before canonical acceptance. Use `skeleton_command` only as read-only preview context; do not hand-author or reflow frontmatter, and keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML. Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and helper/schema authority references for verifier policy, not for wrapper-side schema recreation. Then apply `sync_verifier_output`; on validation failure, emit the blocked/final response and stop. Do not wrapper-repair the canonical report.
+If runtime delegation is unavailable, fallback execution is still `gpd-verifier` work: read both report bridges, create bridge-valid body-only evidence, use the skeleton bridge only for conservative gap reports, and use `gpd verification-report finalize` for passed, `human_needed`, `expert_needed`, or typed non-gap outcomes. Do not hand-author frontmatter or put transcripts, hashes, oracle details, prose-only evidence, or `gpd_return` in YAML. Then run `sync_verifier_output`; on validation failure, stop non-green and do not wrapper-repair the canonical report.
 </step>
 
 <step name="sync_verifier_output">

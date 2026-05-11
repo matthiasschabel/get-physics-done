@@ -12,7 +12,7 @@ def test_verify_work_routes_on_structured_checker_statuses() -> None:
     workflow = workflow_authority_text(VERIFY_WORK.parent, "verify-work")
 
     assert "route on `gpd_return.status` and the structured plan lists" in workflow
-    assert "- `completed`: treat the fresh fix plans as verified only after the on-disk files still match the planner's `files_written` set." in workflow
+    assert "- `completed`: accept only after fresh on-disk plans still match planner `files_written`." in workflow
     assert (
         "- `checkpoint`: some plans are approved and others need revision; record `approved_plans` and `blocked_plans`"
         in workflow
@@ -25,6 +25,6 @@ def test_verify_work_references_one_shot_checker_contract_in_the_gap_closure_loo
     workflow = workflow_authority_text(VERIFY_WORK.parent, "verify-work")
 
     assert 'id: "verify_work_gap_plan_checker"' in workflow
-    assert "Generic acceptance and checkpoint semantics are owned by `references/orchestration/child-artifact-gate.md`" in workflow
-    assert "use the structured `approved_plans`, `blocked_plans`, and `issues` fields" in workflow
-    assert "Use the structured fields, not the human-readable approval table, as the source of truth." in workflow
+    assert "shared gate and continuation rules live in `references/orchestration/child-artifact-gate.md`" in workflow
+    assert "route from structured `approved_plans`, `blocked_plans`, and `issues`" in workflow
+    assert "not on presentation text" in workflow

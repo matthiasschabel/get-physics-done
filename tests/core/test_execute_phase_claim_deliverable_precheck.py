@@ -127,21 +127,18 @@ def test_precheck_fails_closed_when_fingerprints_are_missing() -> None:
     assert "fail closed if either fingerprint command fails or resolves to an empty value" in _PRECHECK_BODY
     assert 'if [ -z "$CONTRACT_HASH" ] || [ -z "$CONTEXT_HASH" ]; then' in _PRECHECK_BODY
     assert "call `gpd contract record-alignment` on this path" in _PRECHECK_BODY
-    assert "branch/checkpoint writes, scripts, numerical computations, dispatches, subagents, or artifacts" in _PRECHECK_BODY
+    assert "STOP before writes, scripts, computations, dispatches, subagents, or artifacts" in _PRECHECK_BODY
 
 
 def test_precheck_requires_explicit_interactive_answer_before_recording_alignment() -> None:
     assert _PRECHECK_BODY, "precheck step body could not be extracted"
 
-    assert "Only an explicit `ask_user` answer of `Y: proceed`" in _PRECHECK_BODY
-    assert "A command invocation" in _PRECHECK_BODY
-    assert "missing `ask_user` support" in _PRECHECK_BODY
-    assert "noninteractive run is not an alignment answer" in _PRECHECK_BODY
-    assert "STOP before branch/checkpoint writes" in _PRECHECK_BODY
-    assert "scripts, numerical computations" in _PRECHECK_BODY
+    assert "Only explicit `Y: proceed` authorizes record-alignment." in _PRECHECK_BODY
+    assert "Missing `ask_user`, timeout, empty answer, or noninteractive run is not confirmation" in _PRECHECK_BODY
+    assert "STOP before writes, scripts, computations, dispatches, subagents, or artifacts" in _PRECHECK_BODY
     assert "On `Y: proceed` record alignment and continue" in _PRECHECK_BODY
 
-    block_idx = _PRECHECK_BODY.index("Only an explicit `ask_user` answer")
+    block_idx = _PRECHECK_BODY.index("Only explicit `Y: proceed`")
     record_idx = _PRECHECK_BODY.index(
         'gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$CONTEXT_HASH"'
     )

@@ -1,16 +1,8 @@
 <purpose>
-Orchestrate conversational verification through a thin session wrapper around `gpd-verifier`.
-
-The verifier owns target construction, proof policy, checks, comparison verdicts, and canonical status. Scientific status ownership and routing vocabulary live in `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md`. This workflow owns preflight, routing, interaction, sync, diagnosis, and gap repair.
+Plan, check, and close verifier-diagnosed gaps without changing verifier-owned canonical status.
 </purpose>
 <philosophy>
-**Do not duplicate verifier policy here.**
-
-- Fail closed before delegation if the project, roadmap, contract, or proof readiness are not usable.
-- Use `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` for status ownership and vocabulary; this wrapper gates artifacts and routes, but does not decide the scientific verdict.
-- Present verifier-produced evidence one check at a time and record only the session overlay in this workflow.
-- Every spawned agent is a one-shot delegation: if it needs user input or new evidence arrives after return, start a fresh continuation; never send more input to closed child.
-- File-producing handoffs must prove the expected artifact exists before success is accepted.
+The verifier decides scientific status. This stage only turns diagnosed gaps into fresh plans, checks those plans, and records session closeout after canonical validation. All agents are one-shot; file-producing success requires fresh expected artifacts.
 </philosophy>
 <shared_contract_floor>
 **Project Contract Gate:** {project_contract_gate}
@@ -23,30 +15,17 @@ Treat `project_contract` as authoritative only when `project_contract_gate.autho
 Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_reference_context` is the readable projection, not the source of truth.
 Do NOT skip contract-critical anchors.
 </shared_contract_floor>
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 
 <process>
 
 <step name="plan_gap_closure">
 **Auto-plan fixes from diagnosed gaps**
 
-Display:
+Display a compact "Planning fixes" status before spawning.
 
-```
-====================================================
- GPD > PLANNING FIXES
-====================================================
-
-* Spawning planner for gap closure...
-```
-
-Spawn `gpd-planner` in `--gaps` mode as a fresh one-shot delegation from the staged gap-repair payload.
-First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
-Use `templates/planner-subagent-prompt.md` to build the gap_closure planner handoff from the staged payload. Keep `tool_requirements`, the checker feedback, and other machine-checkable hard requirements explicit.
+Spawn `gpd-planner` in `--gaps` mode as a fresh one-shot delegation from the staged gap-repair payload. First read {GPD_AGENTS_DIR}/gpd-planner.md. Use `templates/planner-subagent-prompt.md` for the gap_closure handoff, keeping `tool_requirements`, checker feedback, and hard requirements explicit.
 Bind the template's protocol fields from the gap-repair payload: `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}`. Do not collapse verifier extensions into the rendered context block.
 If a diagnosed gap is specifically an uncertainty or error-propagation gap, load the `error_propagation_gap` conditional authority pack before using error-propagation protocol requirements in the planner handoff.
-
-> Apply the canonical runtime delegation convention above; planner status, freshness, continuation, and failure routing use the tuple below.
 
 Set `GAP_PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
@@ -76,25 +55,13 @@ child_gate:
     failed: "retry gap planner or gpd:plan-phase ${phase_number} --gaps"
 ```
 
-If the planner fails to spawn or returns an error, keep the session fail-closed and offer retry or manual plan creation. Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone. Use the gap-repair blocked stop route: primary `gpd:plan-phase ${phase_number} --gaps`.
+If the planner fails or returns an error, stay fail-closed; do not use preexisting PLAN files as success. Primary route: `gpd:plan-phase ${phase_number} --gaps`.
 </step>
 
 <step name="verify_gap_plans">
 **Verify fix plans with checker**
 
-Display:
-
-```
-====================================================
- GPD > VERIFYING FIX PLANS
-====================================================
-
-* Spawning plan checker...
-```
-
-Spawn `gpd-plan-checker` as a fresh one-shot delegation.
-
-> Apply the canonical runtime delegation convention above; checker status and continuation routing use the tuple below.
+Display a compact "Verifying fix plans" status, then spawn `gpd-plan-checker` as a fresh one-shot delegation.
 
 Set `GAP_CHECKER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
 
@@ -120,15 +87,13 @@ child_gate:
     failed: "retry or manual revision"
 ```
 
-Non-completed: use `status_route`.
-
 Gap-checker stops render through `references/orchestration/stage-stop-envelope.md`: checkpoint stops use primary `gpd:resume-work`; blocked or failed stops use primary `gpd:plan-phase ${phase_number} --gaps`; keep `gpd:suggest-next` secondary.
 
 If the checker fails to spawn or returns an error, proceed without plan verification but note that the plans were not verified.
 
 If the checker returns a structured `gpd_return`, route on `gpd_return.status` and the structured plan lists, not on presentation text:
 
-- `completed`: treat the fresh fix plans as verified only after the on-disk files still match the planner's `files_written` set.
+- `completed`: accept only after fresh on-disk plans still match planner `files_written`.
 - `checkpoint`: some plans are approved and others need revision; record `approved_plans` and `blocked_plans`, then send only the blocked plans back through the revision loop. If stopping for user input, use the gap-checker checkpoint stop route.
 - `blocked`: nothing is approved; feed the checker issues and blocked plan IDs back into the revision loop without rewriting approved plans. If stopping, use the gap-checker blocked stop route.
 - `failed`: present the issues and offer retry or manual revision. If stopping, use the gap-checker failed stop route.
@@ -137,8 +102,7 @@ If the checker returns a structured `gpd_return`, route on `gpd_return.status` a
 <step name="revision_loop">
 **Iterate planner <-> checker until plans pass, up to 3 rounds**
 
-If the checker reports issues, send a fresh planner continuation from the staged gap-repair payload with the checker feedback. After the planner returns, run the checker again. Each agent turn is one-shot; do not keep either agent alive across user interaction.
-When the checker returns `checkpoint` or `blocked`, use the structured `approved_plans`, `blocked_plans`, and `issues` fields to decide which plans to revise. Use the structured fields, not the human-readable approval table, as the source of truth. Do not rewrite approved plans during the revision round.
+If the checker reports issues, send a fresh planner handoff with checker feedback, then rerun the checker. Each agent turn is one-shot. For `checkpoint` or `blocked`, route from structured `approved_plans`, `blocked_plans`, and `issues`; do not rewrite approved plans.
 First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
 Use `templates/planner-subagent-prompt.md` again for checker-driven gap_closure revisions.
 Again bind `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}` from the staged gap-repair payload so revision planners keep verifier-extension obligations visible.
@@ -155,7 +119,7 @@ Render that stop through `references/orchestration/stage-stop-envelope.md`: prim
 <step name="complete_session">
 **Complete validation and commit**
 
-Before updating `XX-VERIFICATION.md`, repairing its schema, or serializing the final gap ledger, load the `gap_report_write_or_schema_repair` conditional authority pack. That pack contains the research-verification template, verification-report template, contract-results schema, and canonical schema discipline needed for report writes.
+Before updating `XX-VERIFICATION.md`, repairing schema, or serializing the gap ledger, load `gap_report_write_or_schema_repair`.
 
 Update the verification file overlay:
 
@@ -178,8 +142,7 @@ gpd commit "verify(${phase_number}): complete research validation - {passed} pas
 gpd --raw state record-verification --phase "${phase_number}"
 ```
 
-`record-verification` uses the canonical verification-status reader (`passed` -> `Verified`; canonical non-passed -> `Blocked`; missing, unparseable, or unknown status fails closed without changing state).
-Do not pass `--status` here or for acknowledgement; legacy/admin overrides require no verifier frontmatter and cannot turn limitations into passes. Barrier: wait before state get/validate/repair; never parallelize state mutation with validation.
+`record-verification` uses the canonical status reader (`passed` -> `Verified`; canonical non-passed -> `Blocked`; missing/unparseable/unknown fails closed). Do not pass `--status`; never parallelize state mutation with validation.
 
 Present the summary of passed, issue, and skipped checks. Do not relax verifier fail-closed results.
 
@@ -203,16 +166,3 @@ Write only when needed:
 
 Keep the current check display, summary, and session overlay in sync with the verifier output. The canonical verifier report content remains owned by `gpd-verifier`.
 </update_rules>
-
-<success_criteria>
-
-- [ ] `verify-work` stays thin and does not duplicate verifier policy
-- [ ] Preflight, review gating, session routing, diagnosis, and gap repair remain in the workflow
-- [ ] `gpd-verifier` owns canonical target extraction, evidence mapping, proof policy, checks, and status
-- [ ] Spawned agents use one-shot delegation with checkpoint-and-restart semantics after user input
-- [ ] File-producing handoffs verify expected artifacts on disk before success is accepted
-- [ ] The verification overlay is written only after authoritative verifier output is available
-- [ ] Researcher responses are processed as pass / issue / skip
-- [ ] Final session closeout validates and commits the verification file without recomputing verifier policy
-
-</success_criteria>

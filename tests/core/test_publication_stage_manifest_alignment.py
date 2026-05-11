@@ -200,10 +200,45 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "managed_manuscript_root",
     } <= set(bootstrap.required_init_fields)
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
-    assert {"active_reference_context", "protocol_bundle_context"} <= set(bootstrap.required_init_fields)
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(bootstrap.required_init_fields)
+    assert {
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+    } <= set(bootstrap.required_init_fields)
     assert bootstrap.writes_allowed == ()
     for stage in (bootstrap, outline, authoring, consistency, publication_review):
         assert "write_paper_argument_input" in stage.required_init_fields
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(outline.required_init_fields)
+    assert {
+        "reference_artifacts_content",
+        "state_content",
+        "roadmap_content",
+        "requirements_content",
+    }.isdisjoint(outline.required_init_fields)
+    assert "reference_artifact_files" in outline.required_init_fields
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(authoring.required_init_fields)
+    assert {
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+    } <= set(authoring.required_init_fields)
+    assert {
+        "reference_artifacts_content",
+        "state_content",
+        "roadmap_content",
+        "requirements_content",
+    } <= set(authoring.required_init_fields)
+    assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(consistency.required_init_fields)
+    assert {
+        "state_content",
+        "roadmap_content",
+        "requirements_content",
+    }.isdisjoint(consistency.required_init_fields)
+    assert {
+        "reference_artifacts_content",
+        "citation_source_files",
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+    } <= set(consistency.required_init_fields)
     assert outline.writes_allowed[0] == WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT
     assert WRITE_PAPER_MANAGED_INTAKE_ROOT in outline.writes_allowed
     assert authoring.writes_allowed[0] == WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT
@@ -301,6 +336,17 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
         assert field in final_adjudication.required_init_fields
     assert "GPD/publication/{subject_slug}/review/CLAIMS{round_suffix}.json" in panel_stages.writes_allowed
     assert "GPD/publication/{subject_slug}/review/PROOF-REDTEAM{round_suffix}.md" in panel_stages.writes_allowed
+    assert {
+        "project_contract",
+        "reference_artifacts_content",
+        "active_reference_context",
+        "protocol_bundle_context",
+    }.isdisjoint(panel_stages.required_init_fields)
+    assert {
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+        "reference_artifact_files",
+    } <= set(panel_stages.required_init_fields)
     panel_loaded = set(panel_stages.loaded_authorities)
     final_loaded = set(final_adjudication.loaded_authorities)
     assert PEER_REVIEW_PANEL_REQUIRED_EAGER <= panel_loaded
@@ -370,7 +416,10 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
     assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(bootstrap.required_init_fields)
     assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(report_triage.required_init_fields)
     assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(revision_planning.required_init_fields)
-    assert "selected_protocol_bundle_ids" in revision_planning.required_init_fields
+    assert {
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+    } <= set(revision_planning.required_init_fields)
     assert {"active_reference_context", "protocol_bundle_context"} <= set(response_authoring.required_init_fields)
 
     assert bootstrap.mode_paths == ("workflows/respond-to-referees/bootstrap.md",)

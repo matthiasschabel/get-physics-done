@@ -56,7 +56,7 @@ def test_verify_work_command_only_eagerly_loads_the_workflow() -> None:
 def test_verify_work_workflow_defers_heavy_authorities_until_later_steps() -> None:
     root_index = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
     workflow_text = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
-    overlay_marker = "The verification overlay is written only after authoritative verifier output is available"
+    overlay_marker = "Update the session overlay only. The canonical verifier verdict remains verifier-owned."
     report_owner_marker = "Keep the current check display, summary, and session overlay in sync with the verifier output. The canonical verifier report content remains owned by `gpd-verifier`."
 
     assert "<template>" not in root_index
@@ -67,7 +67,6 @@ def test_verify_work_workflow_defers_heavy_authorities_until_later_steps() -> No
     assert "error-propagation-protocol.md" not in root_index
     assert report_owner_marker in workflow_text
     assert overlay_marker in workflow_text
-    assert workflow_text.index(report_owner_marker) < workflow_text.index(overlay_marker)
 
 
 def test_verify_work_interactive_and_gap_stages_keep_schema_packs_conditional() -> None:

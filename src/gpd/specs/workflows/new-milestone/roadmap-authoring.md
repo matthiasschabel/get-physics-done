@@ -14,7 +14,8 @@ Create the milestone roadmap through the roadmapper handoff and final artifact g
 >>> Spawning roadmapper...
 ```
 
-**Starting phase number:** Read MILESTONES.md for last phase number. Continue from there (v1.0 ended at phase 5 -> v1.1 starts at phase 6).
+**Starting phase number:** Read `GPD/MILESTONES.md` for the last phase number
+and continue from there.
 
 **Roadmap handoff staging:** run a fresh late-stage init immediately before the roadmapper handoff and treat it as the source of truth for roadmap assembly.
 
@@ -28,7 +29,9 @@ fi
 
 Use `gpd --raw stage field-access new-milestone --stage roadmap_authoring --style instruction` to confirm the manifest-selected roadmapping fields. Read only those keys from `ROADMAPPER_INIT`; `ROADMAPPER_INIT.staged_loading.required_init_fields` is the runtime confirmation.
 
-Use the bootstrap init for milestone identity and contract gating. Use this late-stage init for the final handoff and do not reuse earlier roadmapping inputs from the survey/objective loop.
+Use bootstrap init for milestone identity and contract gating. Use this
+late-stage init for the final handoff; do not reuse earlier survey/objective
+inputs.
 
 Apply the canonical runtime delegation convention already loaded above.
 
@@ -50,11 +53,7 @@ Read these files using the file_read tool before proceeding:
 <milestone_context>
 Current milestone: {current_milestone}
 Milestone name: {current_milestone_name}
-Project content: {project_content}
-State content: {state_content}
-Milestones content: {milestones_content}
-Requirements content: {requirements_content}
-Roadmap content: {roadmap_content}
+Planning file paths: GPD/PROJECT.md, GPD/state.json, GPD/config.json, GPD/MILESTONES.md, GPD/REQUIREMENTS.md, GPD/ROADMAP.md
 Reference artifact file handles: {reference_artifact_files}
 </milestone_context>
 
@@ -64,7 +63,6 @@ Project contract gate: {project_contract_gate}
 Project contract validation: {project_contract_validation}
 Project contract load info: {project_contract_load_info}
 Contract intake: {contract_intake}
-Active references: {active_reference_context}
 Effective reference intake: {effective_reference_intake}
 Reference artifact file handles: {reference_artifact_files}
 </contract_context>
@@ -142,7 +140,8 @@ artifact gate passes, apply accepted state changes in the main workflow with
 `gpd state patch` / `gpd state add-decision`; a direct roadmapper edit to
 `GPD/STATE.md` is not success proof.
 
-**If `gpd_return.status: completed`:** Read ROADMAP.md only after the fresh file proof is satisfied, then present the roadmap inline:
+**If `gpd_return.status: completed`:** Read ROADMAP.md only after fresh file
+proof passes, then present a compact roadmap summary:
 
 ```
 ## Proposed Research Roadmap
@@ -152,16 +151,6 @@ artifact gate passes, apply accepted state changes in the main workflow with
 | # | Phase | Goal | Objectives | Contract Coverage | Success Criteria |
 |---|-------|------|------------|-------------------|------------------|
 | [N] | [Name] | [Goal] | [REQ-IDs] | [claims / anchors] | [count] |
-
-### Phase Details
-
-**Phase [N]: [Name]**
-Goal: [goal]
-Objectives: [REQ-IDs]
-Contract coverage: [decisive outputs, anchors, forbidden proxies]
-Success criteria:
-1. [criterion]
-2. [criterion]
 ```
 
 **Ask for approval** via ask_user:
@@ -178,19 +167,11 @@ Apply the canonical runtime delegation convention already loaded above.
   task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and instructions.
 
   <continuation>
-  This is a continuation of the current roadmap handoff, not a fresh brainstorm.
-
-  User feedback on roadmap:
-  [user's notes]
-
-  Current artifact snapshot:
-  - GPD/ROADMAP.md
-  - GPD/STATE.md
-  - GPD/REQUIREMENTS.md
-
-  Read the existing roadmap and requirements before editing.
-  Edit files in place.
-  Return a typed `gpd_return` envelope with status and updated roadmap artifacts.
+  Continuation of the current roadmap handoff, not a fresh brainstorm.
+  User feedback: [user's notes]
+  Current artifacts: GPD/ROADMAP.md, GPD/STATE.md, GPD/REQUIREMENTS.md.
+  Read the existing roadmap and requirements before editing in place.
+  Return typed `gpd_return` status and updated roadmap artifacts.
   </continuation>
 
   <shallow_mode>false</shallow_mode>
@@ -217,20 +198,9 @@ gpd commit "docs: create milestone v[X.Y] roadmap ([N] phases)" --files GPD/ROAD
 ## 10. Done
 
 ```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD >>> MILESTONE INITIALIZED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Milestone v[X.Y]: [Name]**
-
-| Artifact       | Location                    |
-|----------------|-----------------------------|
-| Project        | `GPD/PROJECT.md`      |
-| Literature     | `GPD/literature/`     |
-| Objectives     | `GPD/REQUIREMENTS.md`   |
-| Roadmap        | `GPD/ROADMAP.md`      |
-
-**[N] phases** | **[X] objectives** | Ready to investigate
+Milestone initialized: v[X.Y] [Name]
+Artifacts: GPD/PROJECT.md, GPD/literature/, GPD/REQUIREMENTS.md, GPD/ROADMAP.md
+[N] phases | [X] objectives | Ready to investigate
 
 ## > Next Up
 
@@ -242,25 +212,19 @@ gpd commit "docs: create milestone v[X.Y] roadmap ([N] phases)" --files GPD/ROAD
 
 ---
 
-**Also available:**
-- `gpd:plan-phase [N]` — skip discussion and plan directly
-- `gpd:suggest-next` — confirm the next action
+Also available: `gpd:plan-phase [N]`, `gpd:suggest-next`
 ```
 </process>
 
 <success_criteria>
 
 - [ ] PROJECT.md updated with Current Milestone section
-- [ ] STATE.md reset for new milestone
-- [ ] MILESTONE-CONTEXT.md consumed and deleted (if existed)
-- [ ] Literature survey completed (if selected) — 4 parallel agents, milestone-aware
 - [ ] Objectives gathered and scoped per category
 - [ ] REQUIREMENTS.md created with REQ-IDs
 - [ ] gpd-roadmapper spawned with staged continuation context
 - [ ] Roadmap files written immediately (not draft)
 - [ ] User feedback incorporated (if any)
 - [ ] ROADMAP.md phases continue from previous milestone
-- [ ] All commits made (if planning docs committed)
 - [ ] User knows next step: `gpd:discuss-phase [N]`
 
 **Atomic commits:** Each phase commits its artifacts immediately.

@@ -111,7 +111,9 @@ def test_peer_review_init_fields_are_manifest_owned_and_interestingness_stage_bu
     assert "Parse bootstrap JSON for: `project_exists`" not in peer_review
     assert "Parse target-aware init JSON for: `project_exists`" not in peer_review
 
-    stage_5 = peer_review[peer_review.index("Stage 5 judges") : peer_review.index("Validate before Stage 6:")]
+    stage_5_start = peer_review.index("Stage 5 judges")
+    stage_5_end = peer_review.index("Stage 6", stage_5_start)
+    stage_5 = peer_review[stage_5_start:stage_5_end]
     assert "\t-" not in stage_5
 
 

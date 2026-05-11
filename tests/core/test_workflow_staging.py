@@ -444,7 +444,10 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
     assert "templates/verification-report.md" not in manifest.stages[2].eager_authorities()
     assert "workflows/verify-work/gap-repair.md" in manifest.stages[2].must_not_eager_load
     assert "protocol_bundle_verifier_extensions" in manifest.stages[2].required_init_fields
-    assert "active_reference_context" in manifest.stages[2].required_init_fields
+    assert "protocol_bundle_load_manifest" in manifest.stages[2].required_init_fields
+    assert "protocol_bundle_context" not in manifest.stages[2].required_init_fields
+    assert "active_reference_context" not in manifest.stages[2].required_init_fields
+    assert "active_references" in manifest.stages[2].required_init_fields
     assert "verification_report_finalizer_bridge" in manifest.stages[2].required_init_fields
     assert "verification_report_skeleton_bridge" in manifest.stages[2].required_init_fields
     assert "reference_artifacts_content" not in manifest.stages[2].required_init_fields
@@ -468,6 +471,7 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
         "check results remain contract-backed",
     )
     assert "reference_artifact_files" in manifest.stages[3].required_init_fields
+    assert "active_reference_context" not in manifest.stages[3].required_init_fields
     assert "reference_artifacts_content" not in manifest.stages[3].required_init_fields
     assert "protocol_bundle_context" not in manifest.stages[3].required_init_fields
     assert "protocol_bundle_verifier_extensions" not in manifest.stages[3].required_init_fields
@@ -956,10 +960,20 @@ def test_validate_workflow_stage_manifest_payload_loads_plan_phase_manifest() ->
         "workflows/plan-phase/checker-revision.md",
         "templates/planner-subagent-prompt.md",
     )
-    assert "reference_artifacts_content" in manifest.stages[2].required_init_fields
-    assert "reference_artifacts_content" in manifest.stages[3].required_init_fields
+    assert "reference_artifacts_content" not in manifest.stages[2].required_init_fields
+    assert "reference_artifacts_content" not in manifest.stages[3].required_init_fields
+    assert "reference_artifact_files" in manifest.stages[2].required_init_fields
+    assert "reference_artifact_files" in manifest.stages[3].required_init_fields
+    assert "protocol_bundle_load_manifest" in manifest.stages[2].required_init_fields
+    assert "protocol_bundle_load_manifest" in manifest.stages[3].required_init_fields
+    assert "protocol_bundle_context" not in manifest.stages[2].required_init_fields
+    assert "protocol_bundle_context" not in manifest.stages[3].required_init_fields
+    assert "active_reference_context" in manifest.stages[2].required_init_fields
+    assert "active_reference_context" not in manifest.stages[3].required_init_fields
     assert "experiment_design_content" in manifest.stages[2].required_init_fields
-    assert "experiment_design_content" in manifest.stages[3].required_init_fields
+    assert "experiment_design_content" not in manifest.stages[3].required_init_fields
+    assert "requirements_content" not in manifest.stages[3].required_init_fields
+    assert "context_content" not in manifest.stages[3].required_init_fields
     assert "state_content" not in manifest.stages[3].required_init_fields
     assert "GPD/phases" in manifest.stages[2].writes_allowed
 
@@ -1021,6 +1035,8 @@ def test_validate_workflow_stage_manifest_payload_loads_quick_manifest() -> None
     assert authoring.writes_allowed == ("GPD/quick/NNN-slug/NNN-PLAN.md",)
 
     assert "contract_intake" in reference_context.required_init_fields
+    assert reference_context.loaded_authorities[0] == "workflows/quick/reference-context.md"
+    assert reference_context.mode_paths == ("workflows/quick/reference-context.md",)
     assert "effective_reference_intake" in reference_context.required_init_fields
     assert "active_reference_context" in reference_context.required_init_fields
     assert "reference_artifacts_content" in reference_context.required_init_fields
@@ -1233,6 +1249,7 @@ def test_known_init_fields_for_quick_cover_task_bootstrap_and_reference_context(
     assert "reference_artifacts_content" not in manifest.stage("task_authoring").required_init_fields
     assert "contract_intake" in manifest.stage("reference_context").required_init_fields
     assert "reference_artifacts_content" in manifest.stage("reference_context").required_init_fields
+    assert manifest.stage("reference_context").loaded_authorities[0] == "workflows/quick/reference-context.md"
 
 
 def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
@@ -1242,6 +1259,7 @@ def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
             (WORKFLOW_STAGE_MANIFEST_DIR / "quick.md").read_text(encoding="utf-8"),
             (WORKFLOW_STAGE_MANIFEST_DIR / "quick" / "task-bootstrap.md").read_text(encoding="utf-8"),
             (WORKFLOW_STAGE_MANIFEST_DIR / "quick" / "task-authoring.md").read_text(encoding="utf-8"),
+            (WORKFLOW_STAGE_MANIFEST_DIR / "quick" / "reference-context.md").read_text(encoding="utf-8"),
         ]
     )
 
@@ -1276,6 +1294,7 @@ def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
                 "effective_reference_intake",
                 "active_reference_context",
                 "reference_artifacts_content",
+                "protocol_bundle_load_manifest",
                 "derived_manuscript_proof_review_status",
             },
         ),
@@ -1411,20 +1430,22 @@ def test_validate_workflow_stage_manifest_payload_loads_research_phase_manifest(
     )
     assert "contract_intake" in manifest.stage("research_handoff").required_init_fields
     assert "effective_reference_intake" in manifest.stage("research_handoff").required_init_fields
+    assert "active_references" in manifest.stage("research_handoff").required_init_fields
     assert "reference_artifact_files" in manifest.stage("research_handoff").required_init_fields
-    assert "reference_artifacts_content" in manifest.stage("research_handoff").required_init_fields
+    assert "reference_artifacts_content" not in manifest.stage("research_handoff").required_init_fields
     assert "selected_protocol_bundle_ids" in manifest.stage("research_handoff").required_init_fields
+    assert "protocol_bundle_count" in manifest.stage("research_handoff").required_init_fields
     assert "protocol_bundle_load_manifest" in manifest.stage("research_handoff").required_init_fields
-    assert "protocol_bundle_context" in manifest.stage("research_handoff").required_init_fields
+    assert "protocol_bundle_context" not in manifest.stage("research_handoff").required_init_fields
     assert "protocol_bundle_verifier_extensions" in manifest.stage("research_handoff").required_init_fields
     assert "current_execution" in manifest.stage("research_handoff").required_init_fields
     assert "derived_manuscript_proof_review_status" in manifest.stage("research_handoff").required_init_fields
-    assert "config_content" in manifest.stage("research_handoff").required_init_fields
-    assert "state_content" in manifest.stage("research_handoff").required_init_fields
-    assert "roadmap_content" in manifest.stage("research_handoff").required_init_fields
+    assert "config_content" not in manifest.stage("research_handoff").required_init_fields
+    assert "state_content" not in manifest.stage("research_handoff").required_init_fields
+    assert "roadmap_content" not in manifest.stage("research_handoff").required_init_fields
     assert manifest.stage("research_handoff").writes_allowed == ("GPD/phases/XX-name/XX-RESEARCH.md",)
     assert manifest.stage("research_handoff").checkpoints == (
-        "reference and contract context are visible to the handoff",
+        "reference, contract, and protocol handles are visible to the handoff",
         "runtime delegation note is loaded only for the child handoff",
         "fresh RESEARCH artifact is required before completion",
     )
@@ -1472,8 +1493,10 @@ def test_validate_workflow_stage_manifest_payload_loads_new_milestone_manifest()
         "templates/project.md",
         "templates/requirements.md",
     )
-    assert "requirements_content" in manifest.stage("roadmap_authoring").required_init_fields
-    assert "roadmap_content" in manifest.stage("roadmap_authoring").required_init_fields
+    assert "requirements_content" not in manifest.stage("roadmap_authoring").required_init_fields
+    assert "roadmap_content" not in manifest.stage("roadmap_authoring").required_init_fields
+    assert "project_content" not in manifest.stage("roadmap_authoring").required_init_fields
+    assert "state_content" not in manifest.stage("roadmap_authoring").required_init_fields
     assert "reference_artifact_files" in manifest.stage("roadmap_authoring").required_init_fields
     assert "reference_artifacts_content" not in manifest.stage("roadmap_authoring").required_init_fields
     assert manifest.stage("roadmap_authoring").writes_allowed == (

@@ -25,6 +25,11 @@ INIT="$CONSISTENCY_INIT"
 Use `gpd --raw stage field-access write-paper --stage consistency_and_references --style instruction`
 to confirm the manifest-selected consistency/reference fields before reading
 `CONSISTENCY_INIT`.
+
+This stage receives manuscript paths, citation-source context, selected
+reference bodies, and protocol/reference handles. It does not receive planning
+document bodies or rendered protocol/reference context; read a specific planning
+or bundle file only when a consistency finding depends on it.
 </init>
 
 <consistency_check>

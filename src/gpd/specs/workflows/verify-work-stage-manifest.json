@@ -31,6 +31,18 @@
       "project_contract_load_info",
       "project_contract_validation",
       "project_contract_gate"
+    ],
+    "reference_handle_context": [
+      "effective_reference_intake",
+      "citation_source_files",
+      "citation_source_warnings",
+      "active_references"
+    ],
+    "protocol_bundle_handles": [
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_count",
+      "protocol_bundle_load_manifest",
+      "protocol_bundle_verifier_extensions"
     ]
   },
   "stages": [
@@ -42,10 +54,15 @@
         "workflows/verify-work/session-router.md"
       ],
       "required_init_field_groups": [
-        "phase_target_base",
         "contract_gate_status"
       ],
       "required_init_fields": [
+        "project_root",
+        "phase_found",
+        "phase_dir_abs",
+        "active_verification_sessions",
+        "verification_report_status_payload",
+        "phase_proof_review_status",
         "platform"
       ],
       "loaded_authorities": [
@@ -158,29 +175,16 @@
       "required_init_field_groups": [
         "phase_target_base",
         "project_contract_core",
-        "contract_gate_status"
+        "contract_gate_status",
+        "reference_handle_context",
+        "protocol_bundle_handles"
       ],
       "required_init_fields": [
         "contract_intake",
-        "effective_reference_intake",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "active_references",
-        "active_reference_count",
         "convention_lock",
         "convention_lock_count",
         "derived_convention_lock",
         "derived_convention_lock_count",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "active_reference_context",
         "verification_report_finalizer_bridge",
         "verification_report_skeleton_bridge"
       ],
@@ -241,9 +245,6 @@
       ],
       "required_init_fields": [
         "contract_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "active_reference_context",
         "reference_artifact_files"
       ],
       "loaded_authorities": [

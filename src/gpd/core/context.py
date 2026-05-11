@@ -804,6 +804,7 @@ _STAGED_REFERENCE_SUMMARY_FIELDS = frozenset(
         "active_reference_count",
     }
 )
+_STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS = frozenset({"protocol_bundle_context", "active_reference_context"})
 _STAGED_FULL_REFERENCE_RUNTIME_FIELDS = _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS - _STAGED_REFERENCE_SUMMARY_FIELDS
 _STAGED_REFERENCE_ARTIFACT_CONTENT_FIELDS = frozenset({"reference_artifacts_content"})
 _RESEARCH_PHASE_FILE_CONTENT_FIELDS = frozenset(
@@ -1941,6 +1942,7 @@ def _build_reference_runtime_context(
     *,
     include_artifact_content: bool = True,
     include_protocol_context: bool = True,
+    include_active_reference_context: bool = True,
     persist_manuscript_proof_review_manifest: bool = False,
 ) -> dict[str, object]:
     """Build shared reference/anchor context for workflow init payloads."""
@@ -2056,7 +2058,9 @@ def _build_reference_runtime_context(
             artifact_payload["research_map_reference_files"],
             project_contract_validation,
             project_contract_load_info,
-        ),
+        )
+        if include_active_reference_context
+        else "",
         **artifact_payload,
     }
 
@@ -2078,7 +2082,12 @@ def _build_new_project_contract_runtime_context(cwd: Path) -> dict[str, object]:
     }
 
 
-def _build_contract_reference_runtime_context(cwd: Path) -> dict[str, object]:
+def _build_contract_reference_runtime_context(
+    cwd: Path,
+    *,
+    include_protocol_context: bool = True,
+    include_active_reference_context: bool = True,
+) -> dict[str, object]:
     """Build contract-derived reference context without scanning durable reference artifacts."""
     contract, project_contract_load_info = _load_project_contract(cwd)
     contract_references = _serialize_active_references(contract)
@@ -2141,7 +2150,9 @@ def _build_contract_reference_runtime_context(cwd: Path) -> dict[str, object]:
         "protocol_bundle_count": len(selected_protocol_bundles),
         "protocol_bundle_load_manifest": protocol_bundle_load_manifest,
         "protocol_bundle_verifier_extensions": bundle_verifier_extensions,
-        "protocol_bundle_context": render_protocol_bundle_context(selected_protocol_bundles),
+        "protocol_bundle_context": render_protocol_bundle_context(selected_protocol_bundles)
+        if include_protocol_context
+        else None,
         "active_reference_context": _render_active_reference_context(
             surfaced_active_references,
             surfaced_effective_reference_intake,
@@ -2151,7 +2162,9 @@ def _build_contract_reference_runtime_context(cwd: Path) -> dict[str, object]:
             [],
             project_contract_validation,
             project_contract_load_info,
-        ),
+        )
+        if include_active_reference_context
+        else "",
     }
 
 
@@ -2164,11 +2177,20 @@ def _build_staged_reference_runtime_context(
     """Build the smallest reference context tier needed by a staged init payload."""
     if not reference_fields:
         return {}
+    rendered_context_fields = reference_fields & _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS
+    include_protocol_context = "protocol_bundle_context" in rendered_context_fields
+    include_active_reference_context = "active_reference_context" in rendered_context_fields
     if reference_fields <= _STAGED_REFERENCE_SUMMARY_FIELDS:
-        return _build_contract_reference_runtime_context(cwd)
+        return _build_contract_reference_runtime_context(
+            cwd,
+            include_protocol_context=include_protocol_context,
+            include_active_reference_context=include_active_reference_context,
+        )
     return _build_reference_runtime_context(
         cwd,
         include_artifact_content=bool(reference_fields & _STAGED_REFERENCE_ARTIFACT_CONTENT_FIELDS),
+        include_protocol_context=include_protocol_context,
+        include_active_reference_context=include_active_reference_context,
         persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest,
     )
 
@@ -2255,6 +2277,8 @@ def _build_publication_bootstrap_runtime_context(
     cwd: Path,
     *,
     external_authoring_intake: WritePaperExternalAuthoringIntakeResolution | None = None,
+    include_protocol_context: bool = True,
+    include_active_reference_context: bool = True,
     persist_manuscript_proof_review_manifest: bool = False,
 ) -> dict[str, object]:
     """Build the lightweight contract/bundle/manuscript-status payload for publication bootstrap."""
@@ -2361,7 +2385,9 @@ def _build_publication_bootstrap_runtime_context(
         "publication_bootstrap_detail": publication_bootstrap_payload["detail"],
         "selected_protocol_bundle_ids": [bundle.bundle_id for bundle in selected_protocol_bundles],
         "protocol_bundle_load_manifest": protocol_bundle_load_manifest,
-        "protocol_bundle_context": render_protocol_bundle_context(selected_protocol_bundles),
+        "protocol_bundle_context": render_protocol_bundle_context(selected_protocol_bundles)
+        if include_protocol_context
+        else None,
         "active_reference_context": _render_active_reference_context(
             surfaced_active_references,
             surfaced_effective_reference_intake,
@@ -2371,7 +2397,9 @@ def _build_publication_bootstrap_runtime_context(
             [],
             project_contract_validation,
             project_contract_load_info,
-        ),
+        )
+        if include_active_reference_context
+        else "",
         "derived_manuscript_reference_status": derived_manuscript_reference_status,
         "derived_manuscript_reference_status_count": len(derived_manuscript_reference_status),
         "derived_manuscript_proof_review_status": manuscript_proof_review_status.to_context_dict(cwd),
@@ -2777,17 +2805,25 @@ def _build_peer_review_runtime_context(
                 cwd, persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest
             )
         )
+        include_protocol_context = True
+        include_active_reference_context = True
     else:
+        selected_reference_fields = frozenset(reference_fields)
         result = dict(
             _build_staged_reference_runtime_context(
                 cwd,
-                frozenset(reference_fields),
+                selected_reference_fields,
                 persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest,
             )
         )
+        include_protocol_context = "protocol_bundle_context" in selected_reference_fields
+        include_active_reference_context = "active_reference_context" in selected_reference_fields
     result.update(
         _build_publication_bootstrap_runtime_context(
-            cwd, persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest
+            cwd,
+            persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest,
+            include_protocol_context=include_protocol_context,
+            include_active_reference_context=include_active_reference_context,
         )
     )
     result.update(
@@ -5197,6 +5233,8 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
                 _build_publication_bootstrap_runtime_context(
                     effective_cwd,
                     external_authoring_intake=external_authoring_intake,
+                    include_protocol_context="protocol_bundle_context" in required_fields,
+                    include_active_reference_context="active_reference_context" in required_fields,
                 )
             )
         if needs_full_reference_context and needs_publication_bootstrap_context:
@@ -5204,6 +5242,8 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
                 _build_publication_bootstrap_runtime_context(
                     effective_cwd,
                     external_authoring_intake=external_authoring_intake,
+                    include_protocol_context="protocol_bundle_context" in required_fields,
+                    include_active_reference_context="active_reference_context" in required_fields,
                 )
             )
         return payload

@@ -339,8 +339,8 @@ def test_new_milestone_roadmapper_spawn_contract_keeps_return_only_shared_state_
     assert "Project contract load info: {project_contract_load_info}" in task.text
     assert "Project contract validation: {project_contract_validation}" in task.text
     assert "Contract intake: {contract_intake}" in task.text
-    assert "Active references: {active_reference_context}" in task.text
     assert "Effective reference intake: {effective_reference_intake}" in task.text
+    assert "Reference artifact file handles: {reference_artifact_files}" in task.text
     assert "expected_artifacts:" in content
     assert 'freshness_marker: "after $MILESTONE_ROADMAPPER_HANDOFF_STARTED_AT"' in content
     assert "Do not write STATE.md directly" in task.text

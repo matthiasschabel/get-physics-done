@@ -1,7 +1,7 @@
 <purpose>
-Research mathematical methods, physical principles, and computational tools needed to approach a phase. Spawns gpd-phase-researcher with phase context.
-
-Standalone, one-shot research command. For most workflows, use `gpd:plan-phase` which integrates research automatically.
+Bootstrap `gpd:research-phase`: validate the requested phase, gather only
+phase-level context, resolve model/depth, and reload `research_handoff` before
+spawning the researcher.
 </purpose>
 
 <process>
@@ -33,7 +33,8 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Extract from init JSON: `phase_dir`, `phase_number`, `phase_name`, `phase_found`, `autonomy`, `research_mode`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+Extract from init JSON: `phase_dir`, `phase_number`, `phase_name`,
+`phase_found`, `autonomy`, `research_mode`, and the contract gate fields.
 
 ```bash
 RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)
@@ -43,14 +44,10 @@ The init-derived `RESEARCH_MODE` is the single source of truth for depth; do not
 
 **If `phase_found` is false:** Error and exit.
 
-**Mode-aware behavior:**
-- `research_mode=explore`: Comprehensive research — survey all viable methods, include failed approaches from literature, 10+ papers.
-- `research_mode=exploit`: Focused research — direct methods only, 3-5 key papers, skip speculative approaches.
-- `research_mode=balanced` (default): Use the standard research depth for this workflow and keep the default contract and anchor coverage unless the topic calls for broader or narrower review.
-- `research_mode=adaptive`: Start broad enough to compare viable method families, then narrow only after prior decisive evidence or an explicit approach lock shows the method family is stable.
-- `autonomy=supervised`: Present the `RESEARCH.md` draft for user review before treating the handoff as complete.
-- `autonomy=balanced`: Accept the researcher handoff automatically once `RESEARCH.md` exists and passes the artifact check, then present the research summary before returning control.
-- `autonomy=yolo`: Accept the researcher handoff automatically once `RESEARCH.md` exists and passes the artifact check without any extra summary-review pause.
+**Mode-aware behavior:** explore broadens methods and literature; exploit uses
+direct methods only; balanced uses standard depth; adaptive narrows only after
+decisive prior evidence or an explicit approach lock. Supervised reviews
+`RESEARCH.md`; balanced/yolo accept only after the artifact gate passes.
 
 @{GPD_INSTALL_DIR}/references/orchestration/model-profile-resolution.md
 

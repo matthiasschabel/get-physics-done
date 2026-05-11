@@ -30,7 +30,7 @@ def test_verification_scaffolds_surface_closed_comparison_kind_enum_without_blan
     assert research_verification.count(omit_instruction) == 1
     assert research_verification.count(paired_id_instruction) == 1
     assert "Update the session overlay only." in verify_workflow
-    assert "The wrapper should present verifier-produced evidence exactly once per check." in verify_workflow
+    assert "Present verifier-produced evidence exactly once per check." in verify_workflow
 
 
 def test_verification_report_strict_pass_guidance_includes_reference_coverage_rules() -> None:
@@ -57,7 +57,7 @@ def test_verify_work_current_check_overlay_stays_separate_from_verifier_scaffold
     verify_workflow = _read("src/gpd/specs/workflows/verify-work.md")
 
     assert "Read the verifier-supplied current check from the verification file or report state." in verify_workflow
-    assert "The wrapper should present verifier-produced evidence exactly once per check." in verify_workflow
+    assert "Present verifier-produced evidence exactly once per check." in verify_workflow
     assert "Update the session overlay only. The canonical verifier verdict remains verifier-owned." in verify_workflow
     assert "one-shot delegation" in verify_workflow
     assert "summary: \"verification not started yet\"" not in verify_workflow
@@ -67,7 +67,7 @@ def test_verify_work_gap_repair_uses_explicit_stage_route_and_stays_fail_closed(
     verify_workflow = _read("src/gpd/specs/workflows/verify-work.md")
 
     assert 'gpd --raw init verify-work "${PHASE_ARG}" --stage gap_repair' in verify_workflow
-    assert "Do not fall through to gap verification on the basis of preexisting `PLAN.md` files alone." in verify_workflow
+    assert "do not use preexisting PLAN files as success" in verify_workflow
     assert "skipping gap closure" not in verify_workflow
 
 

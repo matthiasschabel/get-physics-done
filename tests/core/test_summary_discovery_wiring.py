@@ -148,14 +148,14 @@ def test_command_surfaces_list_standalone_and_numbered_phase_artifacts() -> None
 def test_respond_to_referees_prefers_canonical_markdown_report_path() -> None:
     workflow_text = workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
 
-    assert "`${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` remains the canonical issue-ID source" in workflow_text
+    assert "${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md`\nis the canonical issue-ID source" in workflow_text
     assert "import or normalize it into `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` before parsing comments" in workflow_text
     assert "Use that shared handoff for `round_suffix`, sibling-artifact discovery, and the canonical response-artifact pair for the active round." in workflow_text
     assert "`${RESPONSE_REFEREE_PATH}`" in workflow_text
     assert "`${RESPONSE_AUTHOR_PATH}`" in workflow_text
-    assert "Before response-pair completion, read `${RESPONSE_AUTHOR_PATH}` and" in workflow_text
+    assert "Before completion, read both canonical response files" in workflow_text
     assert "`${RESPONSE_REFEREE_PATH}`" in workflow_text
-    assert "run the aggregate below" in workflow_text
-    assert "Do not write `AUTHOR-RESPONSE*` or `REFEREE_RESPONSE*` beside `${PAPER_DIR}` or beside the imported report source." in workflow_text
+    assert "aggregate_child_gate:" in workflow_text
+    assert "Do not write\n`AUTHOR-RESPONSE*` or `REFEREE_RESPONSE*` beside `${PAPER_DIR}` or an imported\nreport source." in workflow_text
     assert "keep auxiliary response outputs under the selected GPD roots" in workflow_text
     assert "`GPD/paper/referee-report-*.md` or `paper/referee-reports/*.md`" not in workflow_text

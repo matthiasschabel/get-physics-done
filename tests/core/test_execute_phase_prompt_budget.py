@@ -168,11 +168,12 @@ def test_execute_phase_workflow_refreshes_stage_context_in_order() -> None:
     assert 'gpd --raw init execute-phase "${PHASE_ARG}" --stage "${stage_name}" 2>/dev/null' not in workflow_text
     assert 'echo "stderr: $(cat "$INIT_STDERR")"' in workflow_text
     assert "`gap_closure`" in next(
-        line for line in workflow_text.splitlines() if line.startswith("Parse JSON for: `phase`, `plans[]`")
+        line for line in workflow_text.splitlines() if line.startswith("Parse JSON for `phase`, `plans[]`")
     )
     assert "If `$GAPS_ONLY` is true, also skip non-gap_closure plans." in workflow_text
     assert "Gap-only execution uses `gpd:execute-phase {PHASE_NUMBER} --gaps-only` after gap plans exist." in workflow_text
-    assert "execute-plan.md owns plan-local execution semantics" in workflow_text
+    assert "`execute-plan.md` owns plan-local execution." in workflow_text
+    assert "This stage owns only phase-wide routing and wave risk." in workflow_text
     assert "# task(subagent_type=\"gpd-notation-coordinator\"" not in workflow_text
     assert "# task(subagent_type=\"gpd-experiment-designer\"" not in workflow_text
 

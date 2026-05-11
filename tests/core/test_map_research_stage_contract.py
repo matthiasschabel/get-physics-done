@@ -45,7 +45,15 @@ def test_map_research_stage_manifest_defers_heavy_context_and_tracks_visible_del
         "workflows/map-research/mapper-authoring.md",
         "references/orchestration/runtime-delegation-note.md",
     )
-    assert "reference_artifacts_content" in authoring.required_init_fields
+    assert "effective_reference_intake" in authoring.required_init_fields
+    assert "reference_artifact_files" in authoring.required_init_fields
+    assert "active_references" in authoring.required_init_fields
+    assert "selected_protocol_bundle_ids" in authoring.required_init_fields
+    assert "protocol_bundle_load_manifest" in authoring.required_init_fields
+    assert "protocol_bundle_verifier_extensions" in authoring.required_init_fields
+    assert "active_reference_context" not in authoring.required_init_fields
+    assert "reference_artifacts_content" not in authoring.required_init_fields
+    assert "protocol_bundle_context" not in authoring.required_init_fields
     assert "GPD/research-map/FORMALISM.md" in authoring.writes_allowed
     assert "GPD/research-map/CONCERNS.md" in authoring.writes_allowed
 

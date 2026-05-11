@@ -109,7 +109,7 @@ def test_peer_review_surfaces_describe_dual_mode_project_and_external_artifact_r
     assert "do not infer a full publication-tree relocation from that one continuation path" in command
     assert "standalone skeptical peer review" not in workflow
     assert "current GPD project manuscript" in workflow
-    assert "explicit manuscript artifact" in workflow
+    assert "explicit\nexternal artifact path" in workflow
     assert "reviewing the current GPD project manuscript" in reliability
     assert "explicit external artifact review" in reliability
 
@@ -206,7 +206,7 @@ def test_peer_review_stage_six_boundary_aligns_reliability_workflow_panel_and_re
         workflow,
         "peer-review workflow Stage 6 files-written write allowlist",
         "gpd_return.files_written",
-        "Stage 6 write_allowlist",
+        "Stage 6 write allowlist",
     )
     for label, source in (
         ("reliability", reliability),

@@ -1520,7 +1520,7 @@ class TestInitExecutePhaseStagedWiring:
         ctx = init_execute_phase(tmp_path, "1", stage="phase_classification")
 
         assert ctx["staged_loading"]["stage_id"] == "phase_classification"
-        assert "active_reference_context" in ctx
+        assert "reference_artifacts_content" not in ctx
         assert calls == []
 
     def test_stage_rejects_unknown_execute_phase_stage(self, tmp_path: Path) -> None:
@@ -2984,10 +2984,11 @@ class TestInitNewProject:
             workflow_id="write-paper",
             stage_id="outline_and_scaffold",
         )
-        assert "Reference and Anchor Map" in ctx["reference_artifacts_content"]
-        assert "Universal crossing window" in ctx["reference_artifacts_content"]
-        assert "Milestone v1.0" in ctx["roadmap_content"]
-        assert "Verified evidence" in ctx["requirements_content"]
+        assert "reference_artifacts_content" not in ctx
+        assert "roadmap_content" not in ctx
+        assert "requirements_content" not in ctx
+        assert "GPD/research-map/REFERENCES.md" in ctx["reference_artifact_files"]
+        assert ctx["literature_review_files"] == ["GPD/literature/benchmark-REVIEW.md"]
         assert ctx["derived_convention_lock_count"] == 2
         assert ctx["derived_intermediate_result_count"] == 1
         assert ctx["publication_bootstrap_mode"] == "fresh_project_bootstrap"
@@ -3679,8 +3680,10 @@ class TestInitNewMilestone:
             "objectives finalized",
             "roadmap authored",
         ]
-        assert "requirements_content" in ctx
-        assert "roadmap_content" in ctx
+        assert "project_content" not in ctx
+        assert "state_content" not in ctx
+        assert "requirements_content" not in ctx
+        assert "roadmap_content" not in ctx
         assert "reference_artifact_files" in ctx
         assert "reference_artifacts_content" not in ctx
 
@@ -3862,6 +3865,98 @@ class TestInitQuick:
 
         assert ctx["staged_loading"]["stage_id"] == "handle_only_reference"
         assert ctx["reference_artifact_files"] == ["GPD/research-map/REFERENCES.md"]
+        assert "reference_artifacts_content" not in ctx
+        assert calls == [False]
+
+    def test_stage_summary_handles_skip_rendered_reference_context(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _setup_project(tmp_path)
+        (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        _write_project_contract_state(tmp_path)
+        install_fake_stage_manifest(
+            monkeypatch,
+            workflow_id="quick",
+            stages={
+                "summary_handles": [
+                    "description",
+                    "project_exists",
+                    "selected_protocol_bundle_ids",
+                    "protocol_bundle_load_manifest",
+                ]
+            },
+        )
+        monkeypatch.setattr(
+            context_module,
+            "_reference_artifact_payload",
+            _fail_if_context_builder_runs("_reference_artifact_payload"),
+        )
+        monkeypatch.setattr(
+            context_module,
+            "_render_active_reference_context",
+            _fail_if_context_builder_runs("_render_active_reference_context"),
+        )
+        monkeypatch.setattr(
+            context_module,
+            "render_protocol_bundle_context",
+            _fail_if_context_builder_runs("render_protocol_bundle_context"),
+        )
+
+        ctx = init_quick(tmp_path, "Check handles", stage="summary_handles")
+
+        assert ctx["staged_loading"]["stage_id"] == "summary_handles"
+        assert ctx["selected_protocol_bundle_ids"] == []
+        assert ctx["protocol_bundle_load_manifest"]["selected_bundle_ids"] == []
+        assert "active_reference_context" not in ctx
+        assert "protocol_bundle_context" not in ctx
+        assert "reference_artifacts_content" not in ctx
+
+    def test_stage_artifact_handles_skip_rendered_reference_context(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        _setup_project(tmp_path)
+        (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+        _write_project_contract_state(tmp_path)
+        install_fake_stage_manifest(
+            monkeypatch,
+            workflow_id="quick",
+            stages={
+                "artifact_handles": [
+                    "description",
+                    "project_exists",
+                    "reference_artifact_files",
+                    "selected_protocol_bundle_ids",
+                    "protocol_bundle_load_manifest",
+                ]
+            },
+        )
+        calls: list[bool] = []
+        monkeypatch.setattr(
+            context_module, "_reference_artifact_payload", _record_reference_artifact_payload_calls(calls)
+        )
+        monkeypatch.setattr(
+            context_module,
+            "_render_active_reference_context",
+            _fail_if_context_builder_runs("_render_active_reference_context"),
+        )
+        monkeypatch.setattr(
+            context_module,
+            "render_protocol_bundle_context",
+            _fail_if_context_builder_runs("render_protocol_bundle_context"),
+        )
+
+        ctx = init_quick(tmp_path, "Check artifact handles", stage="artifact_handles")
+
+        assert ctx["staged_loading"]["stage_id"] == "artifact_handles"
+        assert ctx["reference_artifact_files"] == ["GPD/research-map/REFERENCES.md"]
+        assert ctx["selected_protocol_bundle_ids"] == []
+        assert ctx["protocol_bundle_load_manifest"]["selected_bundle_ids"] == []
+        assert "active_reference_context" not in ctx
+        assert "protocol_bundle_context" not in ctx
         assert "reference_artifacts_content" not in ctx
         assert calls == [False]
 
@@ -4469,7 +4564,7 @@ class TestInitVerifyWork:
         assert ctx["phase_proof_review_status"]["scope"] == "phase"
         assert ctx["phase_proof_review_status"]["state"] == "not_reviewed"
         assert ctx["active_verification_sessions"] == []
-        assert ctx["verification_report_status"] == "missing"
+        assert "verification_report_status" not in ctx
         assert ctx["verification_report_status_payload"]["routing_status"] == "missing"
         assert ctx["staged_loading"]["stage_id"] == "session_router"
         assert ctx["staged_loading"]["checkpoints"] == [
@@ -4489,9 +4584,9 @@ class TestInitVerifyWork:
         ctx = init_verify_work(tmp_path, "", stage="session_router")
 
         assert ctx["phase_found"] is False
-        assert ctx["phase_dir"] is None
+        assert "phase_dir" not in ctx
         assert ctx["phase_dir_abs"] is None
-        assert ctx["phase_number"] is None
+        assert "phase_number" not in ctx
         assert ctx["project_root"] == tmp_path.resolve(strict=False).as_posix()
         assert ctx["project_contract_gate"]["visible"] is True
         assert ctx["active_verification_sessions"] == []
@@ -4567,8 +4662,11 @@ class TestInitVerifyWork:
 
         assert ctx["staged_loading"]["stage_id"] == "inventory_build"
         assert ctx["project_contract"]["references"][0]["role"] == "benchmark"
-        assert "## Active Reference Registry" in ctx["active_reference_context"]
+        assert "active_reference_context" not in ctx
+        assert "active_reference_count" not in ctx
+        assert ctx["active_references"][0]["id"] == "ref-benchmark"
         assert "stat-mech-simulation" in ctx["selected_protocol_bundle_ids"]
+        assert ctx["protocol_bundle_count"] == 1
         assert ctx["convention_lock"]["metric_signature"] == "(-,+,+,+)"
         assert ctx["derived_convention_lock"]["metric_signature"] == "(-,+,+,+)"
         assert "reference_artifacts_content" not in ctx
@@ -6311,10 +6409,14 @@ class TestInitPhaseOp:
             cwd: Path,
             *,
             include_artifact_content: bool = True,
+            include_active_reference_context: bool = True,
+            include_protocol_context: bool = True,
             **_kwargs: object,
         ) -> dict[str, object]:
             calls.append("reference")
-            assert include_artifact_content is True
+            assert include_artifact_content is False
+            assert include_active_reference_context is False
+            assert include_protocol_context is False
             return {
                 **{
                     field: f"reference::{field}"
@@ -6354,10 +6456,13 @@ class TestInitPhaseOp:
 
         result = init_phase_op(tmp_path, phase="1", stage="research_handoff")
 
-        assert calls == ["reference", "structured_state", "state_memory", "execution"]
-        assert result["active_reference_context"] == "reference context"
-        assert result["reference_artifacts_content"] == "reference artifacts"
-        assert result["derived_convention_lock"] == {"metric_signature": "mostly-plus"}
+        assert calls == ["reference", "execution"]
+        assert "active_reference_context" not in result
+        assert "reference_artifacts_content" not in result
+        assert "protocol_bundle_context" not in result
+        assert result["active_references"] == "reference::active_references"
+        assert result["protocol_bundle_load_manifest"] == "reference::protocol_bundle_load_manifest"
+        assert "derived_convention_lock" not in result
         assert result["current_execution"] == {"phase": "01", "segment_status": "running"}
 
     def test_init_research_phase_alias_uses_the_same_stage_manifest_contract(

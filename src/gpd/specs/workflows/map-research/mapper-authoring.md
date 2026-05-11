@@ -1,5 +1,7 @@
 <purpose>
-Own mapper prompt assembly, parallel research-map fanout, artifact verification, secret scanning, commit, and completion reporting for `gpd:map-research` after bootstrap has resolved project-rooted output paths.
+Own mapper prompt assembly, parallel fanout, artifact verification, secret scan,
+commit, and completion reporting after bootstrap resolves project-rooted output
+paths.
 </purpose>
 
 <stage_boundary>
@@ -7,42 +9,16 @@ This authority starts only after `map_bootstrap` has routed existing maps and cr
 </stage_boundary>
 
 <philosophy>
-**Why dedicated mapper agents:** Fresh context per domain, direct writes, minimal orchestrator context, parallel execution.
-
-**Document quality:** Include enough detail to be useful reference material; prefer practical examples (key equations, code patterns, data formats) over arbitrary brevity.
-
-**Document templates:** Mapper agents load `{GPD_INSTALL_DIR}/references/templates/research-mapper/`. Missing templates mean broken install; fall back to the agent's built-in structure, not runtime-specific path searches.
-
-**Always include file paths:**
-Always include actual paths in backticks: `src/hamiltonian.py`, `notebooks/convergence_test.ipynb`, `latex/topic_stem.tex`.
-
-**Map all project artifacts:**
-A physics project may contain derivations, code, data, notebooks, figures, configs/job scripts, and references.
+Use dedicated mapper agents for fresh per-domain context and direct writes.
+Documents should be practical reference material with concrete paths, equations,
+code/data formats, conventions, validation status, and open concerns. Agents
+load `{GPD_INSTALL_DIR}/references/templates/research-mapper/`; missing
+templates indicate a broken install.
 </philosophy>
 
 <stage_prerequisites>
-If this authority is entered fresh, define the staged reload helper before running `mapper_authoring` init:
-
-```bash
-load_map_research_stage() {
-  local stage_name="$1"
-  local init_payload=""
-  local target_cwd="${PROJECT_ROOT:-$PWD}"
-
-  if [ -n "${ARGUMENTS:-}" ]; then
-    init_payload=$(gpd --raw --cwd "$target_cwd" init map-research --stage "${stage_name}" -- "${ARGUMENTS:-}" 2>/dev/null)
-  else
-    init_payload=$(gpd --raw --cwd "$target_cwd" init map-research --stage "${stage_name}" 2>/dev/null)
-  fi
-  if [ $? -ne 0 ] || [ -z "$init_payload" ]; then
-    echo "ERROR: staged gpd initialization failed for stage '${stage_name}': ${init_payload}"
-    return 1
-  fi
-
-  printf '%s' "$init_payload"
-  return 0
-}
-```
+If this authority is entered fresh, reuse the `load_map_research_stage` helper
+from `map_bootstrap` before running `mapper_authoring` init.
 </stage_prerequisites>
 
 <process>
@@ -68,7 +44,7 @@ Use task tool with `subagent_type="gpd-research-mapper"`, `model="{mapper_model}
 
 **CRITICAL:** Use the dedicated `gpd-research-mapper` agent, NOT `Explore`. The mapper agent writes documents directly.
 
-Each mapper prompt must carry the staged intake, active reference context, excerpts, contract load/validation status, and project contract. Keep compact inline authority instructions in the task prompt; prefer contract IDs only when `project_contract_gate.authoritative` is true.
+Each mapper prompt must carry the staged intake, reference file handles, active reference IDs, protocol load manifest/verifier extensions, contract load/validation status, and project contract. Keep compact inline authority instructions in the task prompt; prefer contract IDs only when `project_contract_gate.authoritative` is true. Mapper agents should read selected paths with file_read when the mapping task needs source text; this stage does not embed broad reference excerpts or rendered protocol prose.
 
 Mapper write paths are project-rooted. Resolve every relative `GPD/research-map/...` path against `{project_root}` and write to the corresponding absolute target under `{research_map_dir_absolute}`. Never write under the runtime shell cwd unless it is the same directory as `{project_root}`.
 
@@ -85,7 +61,7 @@ task(
 Focus: theory. Bias toward {map_focus} when provided without dropping contract-critical anchors.
 Analyze theoretical content and literature foundations.
 
-Context: staged={effective_reference_intake}; refs={active_reference_context}; excerpts={reference_artifacts_content}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Use IDs only when authoritative.
+Context: staged={effective_reference_intake}; refs={active_references}; reference_files={reference_artifact_files}; protocol={selected_protocol_bundle_ids}/{protocol_bundle_load_manifest}/{protocol_bundle_verifier_extensions}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Read relevant listed files before quoting or classifying their contents. Use IDs only when authoritative.
 
 - FORMALISM.md - equations, symmetries, approximations, boundary conditions, conservation laws
 - REFERENCES.md - papers, benchmarks, prior artifacts, carry-forward actions, open questions. Every row needs `Anchor ID` and `Source / Locator`; record exact contract IDs separately when known.
@@ -120,7 +96,7 @@ task(
 Focus: computation. Bias toward {map_focus} when provided without dropping contract-critical anchors.
 Analyze computational methods, solvers, and project structure.
 
-Context: staged={effective_reference_intake}; refs={active_reference_context}; excerpts={reference_artifacts_content}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Use IDs only when authoritative.
+Context: staged={effective_reference_intake}; refs={active_references}; reference_files={reference_artifact_files}; protocol={selected_protocol_bundle_ids}/{protocol_bundle_load_manifest}/{protocol_bundle_verifier_extensions}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Read relevant listed files before quoting or classifying their contents. Use IDs only when authoritative.
 
 - ARCHITECTURE.md - computational pipeline, solver choices, libraries, data flow, performance bottlenecks
 - STRUCTURE.md - directory layout, file roles, naming conventions, formats, dependencies, build/job scripts
@@ -155,7 +131,7 @@ task(
 Focus: methodology. Bias toward {map_focus} when provided without dropping contract-critical anchors.
 Analyze notation conventions, unit systems, and validation practices.
 
-Context: staged={effective_reference_intake}; refs={active_reference_context}; excerpts={reference_artifacts_content}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Use IDs only when authoritative.
+Context: staged={effective_reference_intake}; refs={active_references}; reference_files={reference_artifact_files}; protocol={selected_protocol_bundle_ids}/{protocol_bundle_load_manifest}/{protocol_bundle_verifier_extensions}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Read relevant listed files before quoting or classifying their contents. Use IDs only when authoritative.
 
 - CONVENTIONS.md - notation, signs, units, indices, coordinates, variable naming, coupling definitions
 - VALIDATION.md - known limits, convergence, consistency checks, comparisons, tests, error analysis
@@ -190,7 +166,7 @@ task(
 Focus: status. Bias toward {map_focus} when provided without dropping contract-critical anchors.
 Analyze open questions, known issues, and concerns.
 
-Context: staged={effective_reference_intake}; refs={active_reference_context}; excerpts={reference_artifacts_content}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Use IDs only when authoritative.
+Context: staged={effective_reference_intake}; refs={active_references}; reference_files={reference_artifact_files}; protocol={selected_protocol_bundle_ids}/{protocol_bundle_load_manifest}/{protocol_bundle_verifier_extensions}; contract={project_contract}; gate/load/validation={project_contract_gate}/{project_contract_load_info}/{project_contract_validation}. Read relevant listed files before quoting or classifying their contents. Use IDs only when authoritative.
 
 - CONCERNS.md - known issues, theoretical gaps, TODOs, fragile code/calculations, missing validation, bottlenecks, stale branches
 Write to: GPD/research-map/CONCERNS.md
@@ -218,23 +194,23 @@ Wait for all 4 agents to complete.
 
 Read each agent's output file for confirmation, then reconcile the typed return with on-disk artifacts.
 
-**Expected confirmation format from each agent:**
+Each agent returns typed status plus file paths/line counts, not document
+contents. Accept `gpd_return.status: completed` only through the focus-specific
+artifact gate.
+
+Compact completed return anchor:
 
 ```yaml
 gpd_return:
   status: completed
   files_written:
-    - "GPD/research-map/FORMALISM.md"
-    - "GPD/research-map/REFERENCES.md"
+    - GPD/research-map/FORMALISM.md
+    - GPD/research-map/REFERENCES.md
   issues: []
   next_actions:
-    - "Verify GPD/research-map/FORMALISM.md and GPD/research-map/REFERENCES.md exist on disk before accepting the handoff."
-  focus: "theory"
+    - Verify the focus-specific artifact gate before accepting completion.
+  focus: theory
 ```
-
-**What you receive:** Typed return + file paths and line counts. NOT document contents.
-
-If an agent reports `gpd_return.status: completed`, accept it only through the focus-specific artifact gate.
 
 Continue to verify_output.
 </step>
@@ -317,22 +293,14 @@ wc -l "$RESEARCH_MAP_DIR_ABS"/*.md
 
 **If `MAP_STATUS=partial`, output `Research project mapping partial.`, list missing documents, and end with `## > Next Up` primary `gpd:map-research [missing focus]`. Do not print `Research project mapping complete.` or make `gpd:new-project` primary. End workflow after the partial summary.
 
-**If `MAP_STATUS=complete`, use this output format:**
+**If `MAP_STATUS=complete`, summarize the created files and next step:**
 
 ```
 Research project mapping complete.
 
 Created GPD/research-map/:
-- FORMALISM.md ([N] lines) - Theoretical framework, key equations, symmetries
-- REFERENCES.md ([N] lines) - Literature foundations, cited papers, experimental data
-- ARCHITECTURE.md ([N] lines) - Computational pipeline, solvers, algorithms
-- STRUCTURE.md ([N] lines) - Directory layout, file organization, data formats
-- CONVENTIONS.md ([N] lines) - Notation, units, sign conventions
-- VALIDATION.md ([N] lines) - Benchmarks, consistency checks, test coverage
-- CONCERNS.md ([N] lines) - Known issues, theoretical gaps, open questions
-
-
----
+- FORMALISM.md, REFERENCES.md, ARCHITECTURE.md, STRUCTURE.md
+- CONVENTIONS.md, VALIDATION.md, CONCERNS.md
 
 ## > Next Up
 
@@ -344,12 +312,7 @@ Created GPD/research-map/:
 
 ---
 
-**Also available:**
-- Re-run mapping: `gpd:map-research`
-- Review specific file: `cat GPD/research-map/FORMALISM.md`
-- Edit any document before proceeding
-
----
+Also available: `gpd:map-research` to rerun, or review/edit any map document.
 ```
 
 End workflow.
@@ -358,12 +321,8 @@ End workflow.
 </process>
 
 <success_criteria>
-
-- Project-rooted `GPD/research-map/` directory created
-- 4 parallel gpd-research-mapper agents spawned with run_in_background=true
-- Agents write documents directly (orchestrator doesn't receive document contents)
-- Read agent output files to collect confirmations
-- All 7 research map documents exist covering theory, computation, methodology, and status
-- Clear completion summary with line counts
-- User offered clear next steps in GPD style
+- Project-rooted `GPD/research-map/` directory exists.
+- 4 background `gpd-research-mapper` agents wrote directly.
+- All accepted files pass typed return, disk, line-count, and secret checks.
+- Complete or partial status is reported with the correct next command.
   </success_criteria>

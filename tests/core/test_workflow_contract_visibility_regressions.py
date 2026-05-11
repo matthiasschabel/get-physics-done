@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -61,17 +62,19 @@ def _assert_contract_gate_stop_tuple(
     after_repair: str,
     triggers: tuple[str, ...],
 ) -> None:
-    assert "contract_gate_stop:" in workflow
-    assert "ref=contract-authority-gate#blocked-lifecycle-stop-phrase" in workflow
-    assert f"workflow={workflow_id}" in workflow
-    assert f"stage={stage_id}" in workflow
-    assert "status=blocked" in workflow
-    assert "checkpoint=contract_gate" in workflow
-    assert "primary=gpd:sync-state|gpd:new-project" in workflow
-    assert f"rerun={after_repair}" in workflow
-    assert "secondary=gpd:suggest-next" in workflow
+    stop_tuple = next(
+        line
+        for line in workflow.splitlines()
+        if "contract_gate_stop:" in line and f"workflow={workflow_id}" in line
+    )
+    assert f"stage={stage_id}" in stop_tuple
+    assert "status=blocked" in stop_tuple
+    assert "checkpoint=contract_gate" in stop_tuple
+    assert "primary=gpd:sync-state|gpd:new-project" in stop_tuple
+    assert f"rerun={after_repair}" in stop_tuple
+    assert "secondary=gpd:suggest-next" in stop_tuple
     for trigger in triggers:
-        assert trigger in workflow
+        assert trigger in stop_tuple or trigger in workflow
 
 
 def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -> None:
@@ -88,32 +91,74 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
 
 
 @pytest.mark.parametrize(
-    ("workflow_name", "surface_marker", "expected_token"),
+    ("workflow_name", "surface_marker", "expected_token", "authoritative_marker", "stage_id"),
     [
-        ("plan-phase.md", "Parse only the fields named by", "project_contract_gate"),
-        ("execute-phase.md", "project_contract_gate.authoritative is not true", "project_contract_gate"),
-        ("execute-plan.md", "Extract from init JSON:", "project_contract_gate"),
-        ("compare-experiment.md", "Parse JSON for:", "project_contract_gate"),
-        ("compare-results.md", "Parse JSON for:", "project_contract_gate"),
-        ("new-project.md", "If `project_contract_gate.authoritative` is false", "project_contract_gate"),
-        ("progress.md", "Extract from init JSON:", "project_contract_gate"),
-        ("audit-milestone.md", "Extract from init JSON:", "project_contract_gate"),
-        ("resume-work.md", "- **Availability and contract authority:**", "project_contract_gate"),
-        ("write-paper.md", "Parse bootstrap JSON using", "project_contract_gate"),
-        ("respond-to-referees.md", "Parse JSON for:", "project_contract_gate"),
-        ("peer-review.md", "Parse only `staged_loading.required_init_fields`", "project_contract_gate"),
+        (
+            "plan-phase.md",
+            "gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction",
+            "project_contract_gate",
+            "project_contract_gate.authoritative",
+            "phase_bootstrap",
+        ),
+        (
+            "execute-phase.md",
+            "gpd --raw stage field-access execute-phase --stage phase_bootstrap --style instruction",
+            "project_contract_gate",
+            "non-authoritative `project_contract_gate`",
+            "phase_bootstrap",
+        ),
+        ("execute-plan.md", "Extract from init JSON:", "project_contract_gate", "project_contract_gate.authoritative", None),
+        ("compare-experiment.md", "Parse JSON for:", "project_contract_gate", "project_contract_gate.authoritative", None),
+        ("compare-results.md", "Parse JSON for:", "project_contract_gate", "project_contract_gate.authoritative", None),
+        (
+            "new-project.md",
+            "Parse only fields named by `staged_loading.required_init_fields`",
+            "project_contract_gate",
+            "project_contract_gate.authoritative",
+            "scope_intake",
+        ),
+        ("progress.md", "Extract from init JSON:", "project_contract_gate", "project_contract_gate.authoritative", None),
+        ("audit-milestone.md", "Extract from init JSON:", "project_contract_gate", "project_contract_gate.authoritative", None),
+        (
+            "resume-work.md",
+            "- **Availability and contract authority:**",
+            "project_contract_gate",
+            "project_contract_gate.authoritative",
+            None,
+        ),
+        ("write-paper.md", "Parse bootstrap JSON using", "project_contract_gate", "project_contract_gate.authoritative", None),
+        (
+            "respond-to-referees.md",
+            "Use `INIT.staged_loading.required_init_fields` as the bootstrap contract",
+            "project_contract_gate",
+            "project_contract_gate.authoritative",
+            "bootstrap",
+        ),
+        (
+            "peer-review.md",
+            "Parse only fields named by `staged_loading.required_init_fields`",
+            "project_contract_gate",
+            "project_contract_gate.authoritative",
+            "bootstrap",
+        ),
     ],
 )
 def test_contract_gate_is_visible_before_authoritative_use(
     workflow_name: str,
     surface_marker: str,
     expected_token: str,
+    authoritative_marker: str,
+    stage_id: str | None,
 ) -> None:
     workflow = _workflow_text(workflow_name)
     surface_line = next(line for line in workflow.splitlines() if surface_marker in line)
 
-    assert expected_token in surface_line
-    assert workflow.index(surface_line) < workflow.index("project_contract_gate.authoritative")
+    if stage_id is None:
+        assert expected_token in surface_line
+    else:
+        workflow_id = workflow_name.removesuffix(".md")
+        assert expected_token in load_workflow_stage_manifest(workflow_id).stage(stage_id).required_init_fields
+    assert workflow.index(surface_line) < workflow.index(authoritative_marker)
 
 
 @pytest.mark.parametrize(
@@ -166,6 +211,7 @@ def test_literature_review_workflow_surfaces_contract_gate_before_deferred_refer
         "triggers",
         "gate_command",
         "first_forbidden_marker",
+        "stop_line",
     ),
     [
         (
@@ -181,6 +227,7 @@ def test_literature_review_workflow_surfaces_contract_gate_before_deferred_refer
             ),
             "gpd --raw validate lifecycle-contract-gate plan-phase",
             "### Spawn gpd-phase-researcher",
+            "project_contract_gate.authoritative is not true",
         ),
         (
             "execute-phase.md",
@@ -188,12 +235,13 @@ def test_literature_review_workflow_surfaces_contract_gate_before_deferred_refer
             "phase_bootstrap",
             "gpd:execute-phase ${PHASE_ARG}",
             (
-                "project_contract_load_info.status starts with blocked",
-                "project_contract_validation.valid is false",
-                "project_contract_gate.authoritative is not true",
+                "blocked contract load",
+                "invalid contract validation",
+                "non-authoritative `project_contract_gate`",
             ),
             "gpd --raw validate lifecycle-contract-gate execute-phase",
             '<step name="handle_branching">',
+            "non-authoritative `project_contract_gate`",
         ),
         (
             "verify-work.md",
@@ -201,12 +249,13 @@ def test_literature_review_workflow_surfaces_contract_gate_before_deferred_refer
             "session_router",
             "gpd:verify-work ${PHASE_ARG}",
             (
-                "project_contract_load_info.status starts with blocked",
-                "project_contract_validation.valid is false",
-                "project_contract_gate.authoritative is not true",
+                "contract load is blocked",
+                "validation is invalid",
+                "`project_contract_gate.authoritative` is not true",
             ),
             "gpd --raw validate lifecycle-contract-gate verify-work",
             "gpd-check-proof",
+            "`project_contract_gate.authoritative` is not true",
         ),
     ],
 )
@@ -218,9 +267,9 @@ def test_lifecycle_workflows_stop_on_non_authoritative_project_contract_gate(
     triggers: tuple[str, ...],
     gate_command: str,
     first_forbidden_marker: str,
+    stop_line: str,
 ) -> None:
     workflow = _workflow_text(workflow_name)
-    stop_line = "project_contract_gate.authoritative is not true"
 
     assert stop_line in workflow
     assert BLOCKED_LIFECYCLE_STOP_PROHIBITION not in workflow
@@ -240,12 +289,12 @@ def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() ->
     workflow = _workflow_text("plan-phase.md")
 
     assert "**Dirty worktree safety gate:**" in workflow
-    assert "If the project worktree is dirty, halt before planning." in workflow
+    assert "If it is dirty, halt before planning" in workflow
     assert "**If `project_contract_load_info.status` starts with `blocked`" in workflow
     assert 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)' in workflow
 
     dirty_gate = workflow.index("**Dirty worktree safety gate:**")
-    dirty_stop = workflow.index("If the project worktree is dirty, halt before planning.")
+    dirty_stop = workflow.index("If it is dirty, halt before planning")
     contract_stop = workflow.index("**If `project_contract_load_info.status` starts with `blocked`")
     first_authoring_reload = workflow.index('INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)')
 
@@ -253,7 +302,7 @@ def test_plan_phase_dirty_gate_stops_before_contract_and_authoring_surfaces() ->
         workflow,
         "plan-phase dirty gate stops before hiding user work",
         "inspect only the project worktree",
-        "Show the dirty paths",
+        "show dirty paths",
         "git status --short",
         "gpd commit",
         "project-local cleanup path",
@@ -307,13 +356,13 @@ def test_plan_phase_missing_contract_gate_blocks_scope_substitution_and_authorin
 def test_write_paper_surfaces_manuscript_reference_status_before_using_it() -> None:
     workflow = _workflow_text("write-paper.md")
     surface_line = next(line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using"))
-    use_line = next(line for line in workflow.splitlines() if "When later steps need publication routing" in line)
+    status_line = next(line for line in workflow.splitlines() if "Use derived manuscript review statuses from init" in line)
 
     assert "do not duplicate the manifest's required-field list in prose" in surface_line
     assert "selected_publication_root" not in surface_line
-    assert "derived manuscript review statuses" in use_line
-    assert workflow.index(surface_line) < workflow.index("derived_manuscript_reference_status")
-    assert "If `derived_manuscript_reference_status` is present" in workflow
+    assert workflow.index(surface_line) < workflow.index(status_line)
+    assert workflow.index(status_line) < workflow.index("source ordering or prose")
+    assert "`derived_manuscript_reference_status` for the resolved" in workflow
 
 
 def test_execute_phase_latex_compile_guidance_uses_resolved_manuscript_root() -> None:
@@ -363,9 +412,9 @@ def test_new_milestone_roadmapper_prompt_surfaces_contract_gate_inputs() -> None
     assert "Project contract validation: {project_contract_validation}" in contract_context
     assert "Project contract load info: {project_contract_load_info}" in contract_context
     assert "Contract intake: {contract_intake}" in contract_context
-    assert "Active references: {active_reference_context}" in contract_context
     assert "Effective reference intake: {effective_reference_intake}" in contract_context
     assert "Reference artifact file handles: {reference_artifact_files}" in contract_context
+    assert "Files named in `effective_reference_intake.must_include_prior_outputs`" in workflow
     assert workflow.index("Project contract gate: {project_contract_gate}") < workflow.index(
         "approved project contract"
     )
@@ -426,13 +475,16 @@ def test_sync_state_keeps_state_json_authority_before_markdown_repair() -> None:
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw_sync_state_command
     assert "{GPD_INSTALL_DIR}/templates/state-json-schema.md" in raw_sync_state_workflow
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in raw_sync_state_workflow
-    assert "`state.json` is the authoritative store for structured state" in raw_sync_state_workflow
-    assert "`STATE.md` is the human-readable projection" in raw_sync_state_workflow
+    assert "`state.json` is authoritative" in raw_sync_state_workflow
+    assert "`STATE.md` is the projection" in raw_sync_state_workflow
 
     for content in (sync_state_command, sync_state_workflow):
         assert "state-json-schema.md" in content
         assert "# state.json Schema" not in content
-        assert "Markdown is only used as a recovery source when `state.json` is missing or unreadable." in content
+
+    assert re.search(r"`STATE\.md` is the projection and only becomes a recovery\s+source", sync_state_command)
+    assert "backend repair command owns" in sync_state_workflow
+    assert "Use `state.json` for structured fields and regenerate `STATE.md` from it unless `state.json` is unreadable." in sync_state_workflow
 
     assert "do not invent a field-by-field merge" not in sync_state_command
     assert "do not invent a field-by-field merge" in sync_state_workflow
@@ -475,10 +527,16 @@ def test_arxiv_submission_does_not_instruct_unsupported_explicit_submission_root
     workflow = _workflow_text("arxiv-submission.md")
 
     assert "submission/topic_stem.tex" not in workflow
-    assert (
-        "inspect only the documented GPD-owned manuscript roots: `paper/`, `manuscript/`, `draft/`, "
-        "and a unique `GPD/publication/<subject_slug>/manuscript/` lane" in workflow
-    )
+    root_policy = workflow[workflow.index("Resolve manuscript target from raw preflight") :]
+    for supported_root in (
+        "`paper/`",
+        "`manuscript/`",
+        "`draft/`",
+        "`GPD/publication/<subject_slug>/manuscript/`",
+    ):
+        assert supported_root in root_policy
+    assert "Do not accept arbitrary external directories" in root_policy
+    assert "Do not fall back to `find` or arbitrary wildcard matching" in root_policy
 
 
 def test_paper_quality_scoring_reference_tracks_per_journal_gate_and_generic_fallback() -> None:

@@ -62,7 +62,7 @@ def test_execute_phase_workflow_routes_report_construction_through_finalizer_bri
 
     assert "verification_report_finalizer_bridge" in workflow
     assert "verification_report_skeleton_bridge" in workflow
-    assert "Do not hand-author or reflow VERIFICATION.md frontmatter YAML." in workflow
+    assert "Do not hand-author frontmatter." in workflow
     assert "verification-report skeleton/finalizer bridge" in workflow
     assert "gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md" in workflow
     assert workflow.index("verification_report_finalizer_bridge") < workflow.index("<step name=\"verifier_child_gate\">")
@@ -72,8 +72,8 @@ def test_execute_phase_verification_handoff_keeps_verify_phase_child_readable() 
     workflow = _read_execute_phase_stage("verification-handoff.md")
 
     assert "{GPD_INSTALL_DIR}/workflows/verify-phase.md" in workflow
-    assert "child-readable path" in workflow
-    assert "parent stage must not eagerly load or restate the full verifier workflow" in workflow
+    assert "child-readable" in workflow
+    assert "Do not eagerly load or restate the full verifier workflow" in workflow
     assert "workflows/verify-phase.md\"]," not in workflow
 
 
@@ -85,4 +85,4 @@ def test_execute_phase_verification_handoff_routes_on_canonical_status() -> None
     assert "canonical verification_status: passed | gaps_found | expert_needed | human_needed" in workflow
     assert "| `passed` | Continue to `consistency_check`; do not close the phase yet. |" in workflow
     assert "| `gaps_found` | Continue to `gap_reverification` or stop with the gap route below. |" in workflow
-    assert "Do not route on headings, marker strings, conversational `session_status`" in workflow
+    assert "not headings, marker strings, `session_status`, or prose" in workflow

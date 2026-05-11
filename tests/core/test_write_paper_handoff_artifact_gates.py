@@ -173,7 +173,8 @@ def test_write_paper_bootstrap_contract_is_explicit_about_project_and_bounded_ex
         "strict preflight",
     )
     _assert_semantic(source, "write-paper bootstrap resolved manuscript root", "resolved manuscript root")
-    assert "the managed project lane `GPD/publication/{subject_slug}/manuscript`" in source
+    assert "project_backed`: current GPD project, including managed manuscripts at" in source
+    assert "`GPD/publication/{subject_slug}/manuscript`" in source
     _assert_semantic(
         source,
         "write-paper external intake uses managed subject handoff",
@@ -182,15 +183,15 @@ def test_write_paper_bootstrap_contract_is_explicit_about_project_and_bounded_ex
         "managed subject handoff",
     )
     assert (
-        "`GPD/publication/{subject_slug}/intake/` is intake/provenance state only; it must not participate in manuscript-root discovery"
+        "`GPD/publication/{subject_slug}/intake/` holds intake/provenance state only"
         in source
     )
     assert (
-        "a resolved `${PAPER_DIR}` under `GPD/publication/{subject_slug}/manuscript` may be either the managed project lane or the bounded external-authoring lane"
+        "bind `PAPER_DIR` to the only\nmanuscript/build root at `GPD/publication/{subject_slug}/manuscript`"
         in source
     )
     assert (
-        "do not mine generic folders or widen into arbitrary external-manuscript discovery; the only non-project lane is explicit `--intake`"
+        "no generic folder mining or arbitrary external-manuscript discovery"
         in source
     )
     _assert_absent(

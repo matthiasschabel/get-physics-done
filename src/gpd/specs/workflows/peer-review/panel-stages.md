@@ -1,26 +1,24 @@
 <purpose>
-Own Stage 1 claim extraction, Stages 2-5 specialist review, conditional same-round
-proof-redteam review, and stage-artifact validation.
+Own Stage 1 claim extraction, Stages 2-5 specialist review, conditional
+same-round proof-redteam review, and stage-artifact validation.
 </purpose>
 
 <stage_boundary>
 Panel stages start only after bootstrap, preflight, and artifact discovery have
-resolved the target and round state. Each stage runs in a fresh subagent context
-and writes a compact artifact. Apply
+resolved target and round state. Each stage runs in a fresh subagent context and
+writes a compact artifact. Apply
 `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for spawned
-reviewer/proof-auditor/referee lifecycle, checkpoint continuation,
-stale-output rejection, retry freshness, and sequential fallback cleanup. Each
-downstream stage begins from persisted artifacts plus the declared
-carry-forward inputs for that stage.
+reviewer/proof-auditor/referee lifecycle, checkpoint continuation, stale-output
+rejection, retry freshness, and sequential fallback cleanup.
 
-The stage manifest loads `references/publication/peer-review-panel.md` for the
-machine contract and `references/publication/peer-review-panel-playbook.md` for
-Stage 1-5 reviewer guidance.
-
-Bundle guidance from `protocol_bundle_context` is additive only. Reader-visible
-claims, surfaced evidence, `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`,
-`GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are scaffolding
-and remain first-class; do not let bundle guidance invent new claims.
+The manifest loads `references/publication/peer-review-panel.md` for the machine
+contract and `references/publication/peer-review-panel-playbook.md` for Stage 1-5
+reviewer guidance. Bundle guidance enters as handles only:
+`selected_protocol_bundle_ids` and `protocol_bundle_load_manifest`.
+Reader-visible claims, surfaced evidence, `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`,
+`GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are first-class.
+Read reference files by handle only when targeted evidence is needed; do not
+hydrate broad rendered reference or protocol bodies into panel init.
 </stage_boundary>
 
 <announce_panel>
@@ -41,11 +39,9 @@ Before spawning any reviewer, announce the review with this concise stage map:
 </announce_panel>
 
 <child_return_contract>
-Use these local stage tuples for the panel callsites. Stage identity is
-callsite-owned: derive it from the tuple `role`, expected artifact paths, write
-allowlist, canonical filenames, and validators; never trust a stage label inside
-`gpd_return`. Fresh `gpd_return.files_written` evidence is accepted only through
-the matching tuple gate.
+Use these callsite-owned tuples. Stage identity comes from tuple role, expected
+paths, write allowlist, canonical filenames, and validators; never trust a stage
+label inside `gpd_return`.
 
 ```yaml
 peer_review_stage1_reader:
@@ -90,51 +86,42 @@ peer_review_stage5_significance:
 </child_return_contract>
 
 <stage_1_claim_extraction>
-Stage 1 reads the whole manuscript once and writes:
-
-- `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`
-- `${REVIEW_ROOT}/STAGE-reader{round_suffix}.json`
-
-Spawn `gpd-review-reader` with the selected manuscript path, manuscript hash,
-target journal when known, round number, round suffix, `PUBLICATION_ROOT`, and
-`REVIEW_ROOT`. The reader must preserve exact `manuscript_path`,
-`manuscript_sha256`, claim ids, theorem-like claim kind, theorem assumptions, and
-theorem parameters.
-
-Validate before proceeding:
+Stage 1 reads the whole manuscript once and writes
+`${REVIEW_ROOT}/CLAIMS{round_suffix}.json` and
+`${REVIEW_ROOT}/STAGE-reader{round_suffix}.json`. Spawn
+`gpd-review-reader` with selected manuscript path/hash, journal when known,
+round number/suffix, `PUBLICATION_ROOT`, and `REVIEW_ROOT`. The reader must
+preserve exact `manuscript_path`, `manuscript_sha256`, claim ids,
+theorem-like claim kind, theorem assumptions, and theorem parameters.
 
 ```bash
 gpd validate review-claim-index ${REVIEW_ROOT}/CLAIMS{round_suffix}.json
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-reader{round_suffix}.json
 ```
 
-If Stage 1 fails, apply the publication stage-recovery gate and retry once from
-the same persisted inputs with a `StageReviewReport` / `ClaimIndex` schema
-reminder. If validation still fails, STOP; do not proceed to Stages 2-6.
+If Stage 1 fails, apply stage-recovery gate and retry once with the
+`StageReviewReport` / `ClaimIndex` schema reminder. If validation still fails,
+STOP before Stages 2-6.
 </stage_1_claim_extraction>
 
 <stage_2_3_and_proof_redteam>
-Stage 2 literature reads the manuscript, claims, reader stage, bibliography audit,
-bib files, comparisons, figure tracker, and targeted web search when
+Stage 2 literature reads manuscript, claims, reader stage, bibliography audit,
+bib files, comparisons, figure tracker, and targeted web search only when
 novelty/positioning is uncertain. It writes
 `${REVIEW_ROOT}/STAGE-literature{round_suffix}.json`.
 
-Stage 3 math reads the manuscript, claims, reader stage, summaries, verification,
-artifact manifest, reproducibility manifest, and proof artifact when present. It
-writes `${REVIEW_ROOT}/STAGE-math{round_suffix}.json`.
-Stage 3 math artifact must contain exactly one `proof_audits[]` entry for each
-reviewed theorem-bearing claim.
-every `proof_audits[].claim_id` must also appear in `claims_reviewed`.
+Stage 3 math reads manuscript, claims, reader stage, summaries, verification,
+artifact/reproducibility manifests, and proof artifacts when present. It writes
+`${REVIEW_ROOT}/STAGE-math{round_suffix}.json`. Require exactly one
+`proof_audits[]` entry per reviewed theorem-bearing claim, with each
+`proof_audits[].claim_id` also in `claims_reviewed`.
 
-If theorem-bearing claims are present, `gpd-check-proof` may be running in parallel
-and will produce `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`; do not wait on that
-artifact to begin the math review, and do not duplicate the proof audit yourself.
+When theorem-bearing claims are present, run `gpd-check-proof` as the auxiliary
+proof critique, writing `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`. The
+manifest-loaded proof-redteam workflow gate, protocol, and schema authorities
+own same-round theorem binding, frontmatter, status handling, and validation.
 
-The stage manifest loads the proof-redteam workflow gate, protocol, and schema
-authorities. Use those loaded authorities for same-round theorem binding,
-frontmatter requirements, status handling, and artifact validation.
-
-Conditional proof-critique prompt when theorem-bearing claims are present:
+Conditional proof prompt:
 
 ```text
 First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions.
@@ -145,85 +132,53 @@ Follow the proof-redteam protocol's one-shot return semantics.
 Write to: `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`
 ```
 
-The proof-redteam artifact must bind to:
+The proof-redteam task and artifact must copy active `manuscript_path`,
+`manuscript_sha256`, round, theorem-bearing `claim_ids`, and
+`proof_artifact_paths` from `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`; include
+the manuscript entrypoint when it is not already listed. Missing, malformed,
+wrong-round/root, `status: gaps_found`, or `status: human_needed` proof artifacts
+block favorable recommendation. Retry proof-redteam once, then STOP if invalid.
 
-- `manuscript_path`: copy exactly from `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`
-- `manuscript_sha256`: copy exactly from `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`
-- `round`: the active review round
-- `claim_ids`: copy exactly the theorem-bearing Stage 1 `claim_id` values under review
-- `proof_artifact_paths`: copy exactly the theorem-bearing proof artifact paths under review, plus the manuscript entrypoint if it is not already listed
-
-The `gpd-check-proof` task must carry the active `manuscript_path`,
-`manuscript_sha256`, `round`, theorem-bearing `claim_ids`, and
-`proof_artifact_paths` copied from `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`.
-Require theorem-binding frontmatter (`claim_ids` and non-empty
-`proof_artifact_paths`) before accepting the proof-redteam artifact.
-
-Use the proof-redteam references for adversarial proof critique. Locally require
-full theorem/proof inventory coverage; narrower special-case proofs report
-`status: gaps_found`.
-
-If the runtime supports parallel subagent execution, run Stage 2, Stage 3, and the
-conditional proof-critique pass in parallel when theorem-bearing claims are present.
-Otherwise run Stage 2 first, then Stage 3, then the conditional proof-critique pass.
-Treat Stage 2, Stage 3, and the conditional proof-critique pass as one barriered
-review wave under the publication stage-recovery gate.
-
-Validate after the wave:
+Run Stage 2, Stage 3, and proof critique in parallel when the runtime supports
+it; otherwise run literature, math, proof. Treat them as one barriered wave:
 
 ```bash
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-literature{round_suffix}.json
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-math{round_suffix}.json
 ```
 
-If proof-bearing review is active, also require
-`${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` with reviewer `gpd-check-proof`,
-same-round theorem binding, non-empty `claim_ids`, non-empty
-`proof_artifact_paths`, and the canonical proof-redteam sections. Missing,
-malformed, wrong-round, wrong-root, `status: gaps_found`, or
-`status: human_needed` artifacts block favorable recommendation; retry
-`gpd-check-proof` once, then STOP if still invalid.
-If the proof-redteam artifact is missing, malformed, or stale, retry `gpd-check-proof` once with the same inputs.
-If the retry also fails, STOP the pipeline and report that proof review could not be completed.
-
-Before Stage 4 can spawn, the branch barrier must pass: every launched child has a
-typed return, every persisted artifact above exists and validates, and downstream work
-restarts only from those artifacts plus the declared carry-forward inputs.
-If literature, math, or the conditional proof-critique stage fails, STOP before
-Stage 4; retry only the failed tuple once under the stage-recovery gate.
+If proof-bearing review is active, also validate same-round
+`${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`. Before Stage 4, every launched
+child must have a typed return, every promised artifact must exist and validate,
+and downstream work restarts only from persisted artifacts plus declared
+carry-forward inputs.
 </stage_2_3_and_proof_redteam>
 
 <stage_4_physics>
-Stage 4 checks physical soundness after the mathematical pass. It reads the manuscript,
-reader, math, literature, proof-redteam artifact if active, summaries, verifications,
+Stage 4 checks physical soundness after math. It reads manuscript, reader, math,
+literature, proof-redteam artifact if active, summaries, verifications,
 comparisons, and figure tracker. It writes
 `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json`.
-
-Validate before proceeding:
 
 ```bash
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-physics{round_suffix}.json
 ```
 
-Apply the publication stage-recovery gate. Retry Stage 4 once from the same
-persisted inputs; if validation still fails, STOP and do not proceed to Stage 5.
-After `${REVIEW_ROOT}/STAGE-physics{round_suffix}.json` validates, Stage 5 starts
-from persisted stage artifacts and declared carry-forward inputs only.
+Apply stage-recovery gate. Retry once from the same persisted inputs; if still
+invalid, STOP before Stage 5.
 </stage_4_physics>
 
 <stage_5_significance>
-Stage 5 judges interestingness and venue fit after the technical stages. It reads the
-manuscript, reader, literature, physics, proof-redteam artifact if active, and target
-journal. It writes `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json`.
-
-Validate before Stage 6:
+Stage 5 judges interestingness and venue fit after technical stages. It reads
+manuscript, reader, literature, physics, proof-redteam artifact if active, and
+target journal. It writes `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json`.
 
 ```bash
 gpd validate review-stage-report ${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json
 ```
 
-After `${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json` validates, Stage 6
-must begin from the persisted stage artifacts and declared carry-forward inputs only.
+After validation, Stage 6 must begin from persisted stage artifacts and declared
+carry-forward inputs only.
 </stage_5_significance>
 
 <handoff>

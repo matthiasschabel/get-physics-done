@@ -1,15 +1,14 @@
 <purpose>
-Own the first staged `new-project` boundary: read-only startup checks, recovery routing,
-existing-work routing, and narrow physics scope intake.
+Own the first staged `new-project` boundary: read-only startup checks, recovery
+and existing-work routing, and one narrow physics scope question.
 </purpose>
 
 <stage_boundary>
 This is the only first-stage authority. Do not read `workflows/new-project.md`
 or any downstream authoring/template/setup authority while this stage is active.
 
-Stage 1 does not delegate to researchers, synthesizers, roadmap authors, or convention
-writers. It only decides whether the workspace is safe to scope and gathers the user's
-initial scope/anchor input.
+Stage 1 does not delegate. It decides whether the workspace is safe to scope and
+captures the user's initial scope/anchor input.
 </stage_boundary>
 
 <bootstrap>
@@ -23,8 +22,8 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse only the fields named by `staged_loading.required_init_fields`. In this
-stage, no model fields are available or needed.
+Parse only fields named by `staged_loading.required_init_fields`; no model
+fields are available or needed.
 
 Setup is read-only. Do not initialize git, create `GPD/`, write state, or
 write/delete `GPD/init-progress.json`.
@@ -76,12 +75,9 @@ rethink the approach?"
 
 Wait for the response. Extract only:
 
-- core research target
-- expected first deliverable or decisive success signal
-- named anchor, reference, prior output, baseline, or explicit unknown-anchor gap
-- existing work that must be carried forward
-- first known investigation chunk, if the user named one
-- rethink, stop, or review triggers
+core target; first deliverable or decisive success signal; named anchor,
+reference, prior output, baseline, or unknown-anchor gap; existing work to carry
+forward; first investigation chunk if named; rethink, stop, or review triggers.
 
 If one of those fields is missing and blocks a coherent scoping contract, ask one
 narrow repair question for the missing item. Do not ask broad post-scope setup

@@ -40,6 +40,10 @@
       "derived_manuscript_reference_status_count",
       "derived_manuscript_proof_review_status"
     ],
+    "protocol_reference_handle_context": [
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest"
+    ],
     "reference_evidence_context": [
       "reference_artifact_files",
       "reference_artifacts_content",
@@ -347,8 +351,10 @@
       ],
       "required_init_field_groups": [
         "review_target_context",
-        "contract_reference_context",
-        "reference_evidence_context",
+        "preflight_contract_gate_context",
+        "preflight_reference_status_context",
+        "protocol_reference_handle_context",
+        "reference_handle_context",
         "publication_lane_context",
         "manuscript_package_paths"
       ],

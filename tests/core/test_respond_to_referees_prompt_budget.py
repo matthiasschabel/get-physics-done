@@ -158,7 +158,10 @@ def test_respond_to_referees_workflow_defers_stage_authorities_until_the_manifes
         "checkpoint_or_child_recovery_needed": ("references/publication/stage-recovery-gate.md",),
     }
     assert "reference_artifacts_content" not in revision_planning.required_init_fields
-    assert "selected_protocol_bundle_ids" in revision_planning.required_init_fields
+    assert {
+        "selected_protocol_bundle_ids",
+        "protocol_bundle_load_manifest",
+    } <= set(revision_planning.required_init_fields)
     assert "protocol_bundle_context" not in revision_planning.required_init_fields
     assert "active_reference_context" not in revision_planning.required_init_fields
     assert "references/publication/publication-response-writer-handoff.md" in revision_planning.must_not_eager_load
@@ -174,6 +177,7 @@ def test_respond_to_referees_workflow_defers_stage_authorities_until_the_manifes
         "templates/paper/author-response.md",
     )
     assert "reference_artifacts_content" in response_authoring.required_init_fields
+    assert {"protocol_bundle_context", "active_reference_context"} <= set(response_authoring.required_init_fields)
     assert finalize.loaded_authorities == (
         "workflows/respond-to-referees/finalize.md",
         "references/publication/publication-response-writer-handoff.md",

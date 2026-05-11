@@ -7,16 +7,18 @@ context_mode: global
 
 
 <objective>
-Display GPD help by delegating to the renderer-backed local CLI help bridge, with the workflow-owned help surface as the marker fallback.
+Display GPD help by delegating to the renderer-backed local CLI help bridge, with the workflow-owned help surface and generated detail reference as marker fallbacks.
 
 Return only reference content. Do not add project analysis, git status, next steps, or commentary.
 </objective>
 
 Shared wrapper rule: use the bridge first; fallback extracts preserve workflow marker text without rewriting or invented wording.
+Use the workflow-owned help surface as the marker fallback when the bridge is unavailable.
 
 Bridge command rule: run local CLI raw help for the requested mode, parse JSON, and return renderer-backed markdown/fields.
 
 - `@{GPD_INSTALL_DIR}/workflows/help.md` - Fallback marker source path; do not inline it here.
+- `@{GPD_INSTALL_DIR}/references/help/detailed-command-reference.md` - Fallback full detail source path for `--command <name>`; do not inline it here.
 
 Use the workflow-owned stable markers as the extraction boundaries for fallback mode:
 
@@ -100,7 +102,8 @@ gpd --raw help --command <name>
 
 Workflow-owned reference fallback:
 
-- Normalize to the matching canonical command inside the detailed-command marker range (`<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`), whose visible heading is `## Detailed Command Reference`.
+- Prefer the generated detail reference file. Normalize to the matching canonical command inside its detailed-command marker range (`<!-- gpd-help:detailed-command-reference:start -->` / `<!-- gpd-help:detailed-command-reference:end -->`), whose visible heading is `## Detailed Command Reference`.
+- If the generated detail reference file is unavailable, use the root workflow help marker with the same detailed-command marker range as a compact fallback slice.
 - Output ONLY the smallest matching detailed command block.
 - Include the nearest containing section heading (for example `### Phase Planning`) plus the matching command block.
 - Include matching `Flags:`, `Usage:`, and `Result:` lines that belong to that command when present.

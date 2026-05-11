@@ -33,7 +33,7 @@ allowed-tools:
 
 
 <objective>
-Perform systematic convergence tests on numerical computations in the active physics project or on an explicit current-workspace target.
+Route a numerical-convergence request into the workflow-owned validation flow.
 
 Keep standalone/current-workspace durable outputs under `GPD/analysis/` rooted at the invoking workspace. Only authoritative phase-backed runs may write phase-local reports. Standalone/current-workspace runs stop after writing the analysis artifact, do not mutate `STATE.md` or `state.json`, and do not assume a standalone commit step.
 </objective>
@@ -47,7 +47,7 @@ Target: $ARGUMENTS
 
 Interpretation:
 
-- If a number (e.g., "3"): test convergence for all numerical results in that current-workspace phase
+- If a number: test convergence for that current-workspace phase only when authoritative phase context exists
 - If a file path: test convergence for computations in that file
 - If empty in current-workspace project mode: ask one focused question to identify the phase or file target
 - If empty outside a project: command-context validation rejects the request; require an explicit phase number or file path
@@ -67,10 +67,8 @@ fi
 ```
 
 Execute the included numerical-convergence workflow end-to-end.
-Keep its workspace-locked bootstrap, explicit target/output resolution, and the phase-backed vs standalone/current-workspace persistence split intact.
-
-If authoritative phase-backed project context exists, the workflow may write `${phase_dir}/NUMERICAL-VALIDATION.md`.
-If no authoritative phase-backed context exists, the durable output must stay under `GPD/analysis/numerical-{slug}.md` in the invoking workspace, with no `STATE.md` or `state.json` mutation and no standalone commit step.
+The workflow owns target resolution, decisive checks, report content, and the
+phase-backed vs standalone/current-workspace persistence split.
 </process>
 
 <success_criteria>

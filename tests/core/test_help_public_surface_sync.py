@@ -27,6 +27,14 @@ def _read_workflow_help() -> str:
     return (_repo_root() / "src/gpd/specs/workflows/help.md").read_text(encoding="utf-8")
 
 
+def _help_detail_reference_path() -> Path:
+    return _repo_root() / "src/gpd/specs/references/help/detailed-command-reference.md"
+
+
+def _read_help_detail_reference() -> str:
+    return _help_detail_reference_path().read_text(encoding="utf-8")
+
+
 def _read_command_help() -> str:
     return (_repo_root() / "src/gpd/commands/help.md").read_text(encoding="utf-8")
 
@@ -108,6 +116,13 @@ def _render_detailed_command_reference(renderer: object) -> str:
     return _rendered_markdown(_call_with_supported_kwargs(render_detailed, public_prefix="gpd:"))
 
 
+def _render_root_detailed_command_reference(renderer: object) -> str:
+    render_detailed = getattr(renderer, "render_root_detailed_command_reference_markdown", None)
+    if render_detailed is None:
+        pytest.fail("gpd.core.help_renderer must expose render_root_detailed_command_reference_markdown()")
+    return _rendered_markdown(_call_with_supported_kwargs(render_detailed, public_prefix="gpd:"))
+
+
 def test_help_marker_comments_are_unique_ordered_extraction_anchors() -> None:
     workflow_help = _read_workflow_help()
     positions: list[int] = []
@@ -180,14 +195,26 @@ def test_help_detailed_reference_marker_matches_renderer_output() -> None:
     renderer = _help_renderer()
     workflow_help = _read_workflow_help()
 
-    checked_in_detailed_reference = _normalized_block(
+    checked_in_root_reference = _normalized_block(
         extract_help_surface_region(workflow_help, "detailed-command-reference")
+    )
+    assert checked_in_root_reference == _render_root_detailed_command_reference(renderer)
+
+
+def test_help_detail_reference_file_marker_matches_renderer_output() -> None:
+    renderer = _help_renderer()
+    detail_reference = _read_help_detail_reference()
+
+    checked_in_detailed_reference = _normalized_block(
+        extract_help_surface_region(detail_reference, "detailed-command-reference")
     )
     assert checked_in_detailed_reference == _render_detailed_command_reference(renderer)
 
 
 def test_help_surface_marker_script_is_idempotent() -> None:
     workflow_help = _read_workflow_help()
+    detail_reference = _read_help_detail_reference()
 
     assert check_help_surface_text(workflow_help) == ()
+    assert check_help_surface_text(detail_reference, path=_help_detail_reference_path()) == ()
     assert replace_help_surface_text(workflow_help) == workflow_help

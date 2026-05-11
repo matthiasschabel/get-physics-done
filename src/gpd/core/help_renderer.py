@@ -256,6 +256,7 @@ _ADDITIONAL_QUICK_START_RUNTIME_COMMANDS = (
 
 _COMMAND_DETAIL_SIGNATURE_OVERRIDES: dict[str, str] = {
     "gpd:compare-results": "gpd:compare-results [phase, artifact, or comparison target]",
+    "gpd:discover": "gpd:discover [phase or topic] [--depth quick|medium|deep]",
     "gpd:digest-knowledge": "gpd:digest-knowledge [topic|arXiv id|source file|knowledge path]",
     "gpd:map-research": "gpd:map-research",
     "gpd:new-project": "gpd:new-project",
@@ -266,6 +267,8 @@ _COMMAND_DETAIL_SIGNATURE_OVERRIDES: dict[str, str] = {
 
 _COMMAND_DETAIL_USAGE_EXAMPLES: dict[str, tuple[str, ...]] = {
     "gpd:arxiv-submission": ("gpd:arxiv-submission paper/",),
+    "gpd:compare-experiment": ("gpd:compare-experiment data/results.csv",),
+    "gpd:compare-results": ("gpd:compare-results GPD/comparisons/baseline.md",),
     "gpd:derive-equation": ('gpd:derive-equation "effective mass from self-energy"',),
     "gpd:digest-knowledge": (
         'gpd:digest-knowledge "renormalization group fixed points"',
@@ -290,6 +293,7 @@ _COMMAND_DETAIL_USAGE_EXAMPLES: dict[str, tuple[str, ...]] = {
         "gpd:new-project --auto",
     ),
     "gpd:numerical-convergence": ("gpd:numerical-convergence results/mesh-study.csv",),
+    "gpd:parameter-sweep": ("gpd:parameter-sweep --param beta --range 0.1:1.0",),
     "gpd:peer-review": (
         "gpd:peer-review draft.docx",
         "gpd:peer-review data/observables.csv",
@@ -305,6 +309,7 @@ _COMMAND_DETAIL_USAGE_EXAMPLES: dict[str, tuple[str, ...]] = {
         "gpd:respond-to-referees paste",
     ),
     "gpd:review-knowledge": ("gpd:review-knowledge GPD/knowledge/K-example.md",),
+    "gpd:sensitivity-analysis": ("gpd:sensitivity-analysis --target observable --params alpha,beta --method sobol",),
     "gpd:write-paper": (
         "gpd:write-paper",
         "gpd:write-paper --intake intake/write-paper-authoring-input.json",
@@ -410,6 +415,43 @@ _COMMAND_DETAIL_NOTES: dict[str, tuple[str, ...]] = {
         "Project-backed review/response/package outputs remain in the resolved GPD manuscript lane.",
     ),
 }
+
+_ROOT_DETAILED_REFERENCE_COMMANDS: tuple[str, ...] = (
+    "gpd:new-project",
+    "gpd:map-research",
+    "gpd:resume-work",
+    "gpd:pause-work",
+    "gpd:progress",
+    "gpd:suggest-next",
+    "gpd:explain",
+    "gpd:discover",
+    "gpd:show-phase",
+    "gpd:plan-phase",
+    "gpd:execute-phase",
+    "gpd:verify-work",
+    "gpd:derive-equation",
+    "gpd:dimensional-analysis",
+    "gpd:limiting-cases",
+    "gpd:numerical-convergence",
+    "gpd:parameter-sweep",
+    "gpd:compare-experiment",
+    "gpd:compare-results",
+    "gpd:sensitivity-analysis",
+    "gpd:graph",
+    "gpd:error-propagation",
+    "gpd:digest-knowledge",
+    "gpd:review-knowledge",
+    "gpd:literature-review",
+    "gpd:write-paper",
+    "gpd:peer-review",
+    "gpd:respond-to-referees",
+    "gpd:arxiv-submission",
+    "gpd:settings",
+    "gpd:route",
+    "gpd:record-backtrack",
+    "gpd:compact-state",
+    "gpd:update",
+)
 
 
 def _runtime_command_for_ladder_step(step: str) -> tuple[str, ...]:
@@ -717,6 +759,7 @@ def _render_command_detail_block(
     *,
     include_group_heading: bool,
     public_prefix: str,
+    include_metadata: bool = True,
 ) -> str:
     command = get_command(registry_command)
     group_name, _entry = _base_command_entries_by_label()[command.name]
@@ -748,17 +791,18 @@ def _render_command_detail_block(
         lines.extend(("", "Notes:"))
         lines.extend(f"- {note}" for note in notes)
 
-    metadata_lines: list[str] = []
-    for require_line in _requires_summary(command.requires):
-        metadata_lines.append(f"- Requires {require_line}")
-    for policy_line in _command_policy_summary(command.name):
-        metadata_lines.append(f"- {policy_line}")
-    for review_line in _review_contract_summary(command.name):
-        metadata_lines.append(f"- {review_line}")
-    for staged_line in _staged_workflow_summary(command.name):
-        metadata_lines.append(f"- {staged_line}")
-    if metadata_lines:
-        lines.extend(("", *metadata_lines))
+    if include_metadata:
+        metadata_lines: list[str] = []
+        for require_line in _requires_summary(command.requires):
+            metadata_lines.append(f"- Requires {require_line}")
+        for policy_line in _command_policy_summary(command.name):
+            metadata_lines.append(f"- {policy_line}")
+        for review_line in _review_contract_summary(command.name):
+            metadata_lines.append(f"- {review_line}")
+        for staged_line in _staged_workflow_summary(command.name):
+            metadata_lines.append(f"- {staged_line}")
+        if metadata_lines:
+            lines.extend(("", *metadata_lines))
     return "\n".join(lines).strip()
 
 
@@ -796,10 +840,8 @@ def render_command_detail_markdown(
     )
 
 
-def render_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -> str:
-    """Render the detailed command reference from registry and renderer help metadata."""
-
-    lines = [
+def _detailed_reference_intro_lines(*, public_prefix: str) -> list[str]:
+    return [
         "## Detailed Command Reference",
         "",
         _apply_public_prefix(
@@ -822,6 +864,51 @@ def render_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -
             public_prefix=public_prefix,
         ),
     ]
+
+
+def render_root_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -> str:
+    """Render the compact root fallback for detailed help."""
+
+    lines = _detailed_reference_intro_lines(public_prefix=public_prefix)
+    lines.extend(
+        (
+            "",
+            (
+                "The full generated command detail reference is installed at "
+                "`{GPD_INSTALL_DIR}/references/help/detailed-command-reference.md`; the runtime bridge serves "
+                "that detail one command at a time."
+            ),
+            "",
+            _apply_public_prefix(
+                (
+                    "Current-workspace durable outputs can be created from a project context or outside a project "
+                    "only when the user supplies an explicit derivation target or explicit file path. Parameter "
+                    "and sensitivity helpers keep their explicit flags visible: `--param`, `--range`, `--target`, "
+                    "and `--params`."
+                ),
+                public_prefix=public_prefix,
+            ),
+        )
+    )
+    for command_name in _ROOT_DETAILED_REFERENCE_COMMANDS:
+        lines.extend(
+            (
+                "",
+                _render_command_detail_block(
+                    command_name,
+                    include_group_heading=False,
+                    public_prefix=public_prefix,
+                    include_metadata=False,
+                ),
+            )
+        )
+    return "\n".join(lines).strip()
+
+
+def render_detailed_command_reference_markdown(*, public_prefix: str = "gpd:") -> str:
+    """Render the detailed command reference from registry and renderer help metadata."""
+
+    lines = _detailed_reference_intro_lines(public_prefix=public_prefix)
     emitted: set[str] = set()
     for group in help_command_groups():
         lines.extend(("", f"### {group.name}"))
@@ -945,6 +1032,7 @@ __all__ = [
     "render_command_index_markdown",
     "render_command_detail_markdown",
     "render_detailed_command_reference_markdown",
+    "render_root_detailed_command_reference_markdown",
     "render_quick_start",
     "render_quick_start_markdown",
 ]

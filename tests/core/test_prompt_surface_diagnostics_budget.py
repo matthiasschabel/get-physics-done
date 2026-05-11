@@ -12,11 +12,11 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 51_350, "chars": 2_185_000}
+PROMPT_TOTAL_BUDGET = {"lines": 51_350, "chars": 2_130_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 22_520, "chars": 884_000},
+    "command": {"lines": 22_520, "chars": 865_000},
     "agent": {"lines": 9_280, "chars": 488_800},
-    "workflow": {"lines": 19_595, "chars": 812_900},
+    "workflow": {"lines": 19_595, "chars": 780_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 155_000}
 # Phase 4 scaffolding guard. Keep first-turn active content flat while Phase 6
@@ -77,7 +77,7 @@ ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
         "write-paper",
     }
 )
-SHELL_PARSING_LINE_BUDGET = 460
+SHELL_PARSING_LINE_BUDGET = 400
 SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
     {
         ("workflow", "execute-phase"),

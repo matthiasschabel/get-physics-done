@@ -86,13 +86,6 @@ def _source_for_install_scope(install_scope: str | None, *, fallback: str) -> st
     return fallback
 
 
-def _adapter(runtime: str):
-    try:
-        return adapters_module.get_adapter(runtime)
-    except KeyError:
-        return None
-
-
 def normalize_runtime_name(value: str | None) -> str | None:
     """Resolve a runtime id, display name, or alias to a canonical runtime name."""
     return _normalize_runtime_name(value)
@@ -644,7 +637,9 @@ def get_cache_dirs(*, cwd: Path | None = None, home: Path | None = None) -> list
 def home_update_cache_file(*, home: Path | None = None) -> Path:
     """Return the canonical home-scoped update-cache file path."""
     data_dir = os.environ.get(ENV_DATA_DIR, "").strip()
-    if data_dir and (home is None or Path(home).expanduser().resolve(strict=False) == Path.home().resolve(strict=False)):
+    if data_dir and (
+        home is None or Path(home).expanduser().resolve(strict=False) == Path.home().resolve(strict=False)
+    ):
         data_root = Path(data_dir).expanduser()
     elif home is not None:
         data_root = Path(home).expanduser().resolve(strict=False) / HOME_DATA_DIR_NAME

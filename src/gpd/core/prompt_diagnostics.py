@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import difflib
 import re
 from collections import defaultdict
@@ -32,6 +31,24 @@ from gpd.core.frontmatter import (
     FrontmatterParseError,
     extract_frontmatter,
     validate_frontmatter,
+)
+from gpd.core.prompt_exactness_diagnostics import (
+    EXACT_ASSERTION_THRESHOLDS as _EXACT_ASSERTION_THRESHOLDS,
+)
+from gpd.core.prompt_exactness_diagnostics import (
+    bounded_exact_assertion_diagnostics as _bounded_exact_assertion_diagnostics,
+)
+from gpd.core.prompt_exactness_diagnostics import (
+    empty_exact_assertion_diagnostics as _empty_exact_assertion_diagnostics,
+)
+from gpd.core.prompt_exactness_diagnostics import (
+    exact_assertion_file_rows as _exact_assertion_file_rows,
+)
+from gpd.core.prompt_exactness_diagnostics import (
+    exact_prose_assertion_files_from_diagnostics as _exact_prose_assertion_files_from_diagnostics,
+)
+from gpd.core.prompt_exactness_diagnostics import (
+    scan_exact_assertion_diagnostics as _scan_exact_assertion_diagnostics,
 )
 from gpd.core.prompt_stage_diagnostics import (
     AuthorityPromptMetric,
@@ -135,92 +152,6 @@ _RUNTIME_NOTE_RE = re.compile(
     r"When shell steps call the GPD CLI)",
     re.IGNORECASE,
 )
-_MACHINE_CONTRACT_RE = re.compile(
-    r"(?:"
-    r"\b[A-Za-z0-9_.{}$-]+/[A-Za-z0-9_./{}$-]+|"
-    r"\b[A-Za-z0-9_.-]+\.(?:md|json|ya?ml|toml|tex|pdf|py)\b|"
-    r"--[a-z0-9][a-z0-9-]*\b|"
-    r"\$gpd-[a-z0-9-]+|"
-    r"\bgpd(?:[: -][a-z0-9-]+|_return| --raw)\b|"
-    r"\b(?:schema_version|frontmatter|gpd_return|contract_results|files_written|next_actions|project_contract)\b|"
-    r"\b[A-Za-z_][A-Za-z0-9_]*(?:\[\])?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\])?)+\b|"
-    r"@\{GPD_INSTALL_DIR\}|"
-    r"<!--\s*@\s*include\b|"
-    r"<[A-Za-z][A-Za-z0-9_-]*(?:\s+[^>\n]*)?>"
-    r")",
-    re.IGNORECASE,
-)
-_SCHEMA_KEY_LITERAL_RE = re.compile(
-    r"^\s*(?:schema_version|gpd_return|status|summary|files_written|issues|next_actions|contract_results|"
-    r"project_contract|claims|references|artifacts|path|kind|id|name|description|stage|round|source|target|"
-    r"verified_at):(?:\s|$)",
-    re.IGNORECASE,
-)
-_FIELD_PATH_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*(?:\[\])?(?:\.[A-Za-z_][A-Za-z0-9_]*(?:\[\])?)+\b")
-_STRUCTURED_PROMPT_MARKER_RE = re.compile(
-    r"^\s*(?:"
-    r"<[A-Za-z][A-Za-z0-9_-]*(?:\s+[^>\n]*)?>|"
-    r"</[A-Za-z][A-Za-z0-9_-]*>|"
-    r"<!--\s*@\s*include\b.*-->"
-    r")\s*$"
-)
-_PUBLIC_UX_LITERAL_RE = re.compile(
-    r"(?:"
-    r"^\s*#+\s*(?:Command Index|Choose this runtime if|Quick Start|Install|Uninstall|Warnings)\b|"
-    r"^\s*(?:Command Index|Quick Start|Choose this runtime if|Available commands|Usage|Examples?)\s*$|"
-    r"\[Y/n/e\]|"
-    r"Start a fresh context window, then run|"
-    r"Runtime readiness preflight|"
-    r"No GPD project found|"
-    r"Choose one:"
-    r")",
-    re.IGNORECASE,
-)
-_PUBLIC_UX_TEST_PATH_RE = re.compile(
-    r"(?:^|/)tests/(?:core/)?(?:"
-    r"test_cli(?:_commands)?|"
-    r"test_.*(?:help|start|tour|onboarding|install|uninstall|diagnostics|checkpoint)"
-    r")\.py$"
-)
-_SHORT_MACHINE_CONTRACT_LITERALS = frozenset(
-    {
-        "must_haves",
-        "verification_inputs",
-        "peer_review_stage",
-        "execution_segment",
-        "schema_version",
-        "frontmatter",
-        "gpd_return",
-    }
-)
-_SHORT_PUBLIC_UX_LITERALS = frozenset({"Quick Start", "[Y/n/e]"})
-_EXACT_ASSERTION_EXAMPLES_PER_CATEGORY = 5
-_EXACT_ASSERTION_THRESHOLDS: dict[str, dict[str, int]] = {
-    "brittle_prose_assertions": {"warn": 1100, "fail": 1150},
-    "max_brittle_prose_assertions_per_file": {"warn": 50, "fail": 75},
-    "max_brittle_prose_assertions_in_test_prompt_wiring": {"warn": 240, "fail": 260},
-    "public_ux_exact_assertions": {"warn": 700, "fail": 750},
-    "machine_contract_exact_assertions": {"warn": 6000, "fail": 6200},
-    "exact_assertion_count": {"warn": 7700, "fail": 7900},
-}
-_TAXONOMY_HELPER_USAGE_SCHEMA_VERSION = "taxonomy_helper_usage.v1"
-_TAXONOMY_HELPER_NAMES: tuple[str, ...] = (
-    "assert_fragments",
-    "assert_prompt_contracts",
-    "forbidden_duplicate",
-    "fragment_count",
-    "machine_exact",
-    "public_exact",
-    "semantic_anchor",
-)
-_TAXONOMY_HELPER_ALIASES = {
-    "_assert_prompt_contracts": "assert_prompt_contracts",
-}
-
-ExactAssertionCategory = Literal["machine_contract", "public_ux", "brittle_prose"]
-ExactAssertionPolarity = Literal["required", "forbidden", "counted", "indexed"]
-ExactAssertionShape = Literal["assert_contains", "assert_not_contains", "count", "index"]
-ExactAssertionSeverity = Literal["info", "warn", "high"]
 _GPD_RETURN_FIELD_REFERENCE_RE = re.compile(r"(?<![A-Za-z0-9_])\.?gpd_return\.([A-Za-z_][A-Za-z0-9_]*)")
 _RETURN_FIELD_DECLARATION_RE = re.compile(
     r"\b(?:extended fields?|role-specific field|agent-specific extended field|role fields such as)\b",
@@ -427,14 +358,6 @@ _SEMANTIC_DUPLICATE_CATEGORIES: tuple[_SemanticDuplicateCategory, ...] = (
     ),
 )
 _SEMANTIC_DUPLICATE_CATEGORY_BY_ID = {category.category: category for category in _SEMANTIC_DUPLICATE_CATEGORIES}
-
-
-@dataclass(frozen=True, slots=True)
-class ExactPromptAssertion:
-    literal: str
-    line: int
-    assertion_shape: ExactAssertionShape
-    polarity: ExactAssertionPolarity
 
 
 @dataclass(frozen=True, slots=True)
@@ -898,13 +821,10 @@ def _row_text(row: Mapping[str, object], *keys: str) -> str:
     return ""
 
 
-def _fixed_table_section_lines(
-    title: str,
+def _fixed_table_lines(
     headers: Sequence[str],
     rows: Sequence[Sequence[str]],
 ) -> list[str]:
-    if not rows:
-        return []
     widths = [len(header) for header in headers]
     for row in rows:
         widths = [max(width, len(cell)) for width, cell in zip(widths, row, strict=True)]
@@ -912,13 +832,17 @@ def _fixed_table_section_lines(
     def render_row(row: Sequence[str]) -> str:
         return "  ".join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)).rstrip()
 
-    return [
-        "",
-        title,
-        render_row(headers),
-        render_row(tuple("-" * width for width in widths)),
-        *(render_row(row) for row in rows),
-    ]
+    return [render_row(headers), render_row(tuple("-" * width for width in widths)), *(render_row(row) for row in rows)]
+
+
+def _fixed_table_section_lines(
+    title: str,
+    headers: Sequence[str],
+    rows: Sequence[Sequence[str]],
+) -> list[str]:
+    if not rows:
+        return []
+    return ["", title, *_fixed_table_lines(headers, rows)]
 
 
 def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None = None) -> str:
@@ -1230,15 +1154,7 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         "shell_parse",
         "rigidity",
     )
-    widths = [len(header) for header in headers]
-    for row in rows:
-        widths = [max(width, len(cell)) for width, cell in zip(widths, row, strict=True)]
-
-    def render_row(row: Sequence[str]) -> str:
-        return "  ".join(cell.ljust(width) for cell, width in zip(row, widths, strict=True)).rstrip()
-
-    lines = [render_row(headers), render_row(tuple("-" * width for width in widths))]
-    lines.extend(render_row(row) for row in rows)
+    lines = _fixed_table_lines(headers, rows)
     runtime_rows = [
         (
             str(row["runtime"]),
@@ -1256,37 +1172,21 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         )
         for row in _runtime_top_prompt_rows(report.items, top)
     ]
-    if runtime_rows:
-        runtime_headers = (
-            "runtime",
-            "kind",
-            "name",
-            "projected_chars",
-            "expanded_chars",
-            "char_delta",
-            "line_delta",
-            "includes",
-            "runtime_notes",
-            "shell_fences",
-            "shell_rewrites",
-            "bridge_calls",
-        )
-        runtime_widths = [len(header) for header in runtime_headers]
-        for row in runtime_rows:
-            runtime_widths = [max(width, len(cell)) for width, cell in zip(runtime_widths, row, strict=True)]
-
-        def render_runtime_row(row: Sequence[str]) -> str:
-            return "  ".join(cell.ljust(width) for cell, width in zip(row, runtime_widths, strict=True)).rstrip()
-
-        lines.extend(
-            (
-                "",
-                "runtime top prompts",
-                render_runtime_row(runtime_headers),
-                render_runtime_row(tuple("-" * width for width in runtime_widths)),
-            )
-        )
-        lines.extend(render_runtime_row(row) for row in runtime_rows)
+    runtime_headers = (
+        "runtime",
+        "kind",
+        "name",
+        "projected_chars",
+        "expanded_chars",
+        "char_delta",
+        "line_delta",
+        "includes",
+        "runtime_notes",
+        "shell_fences",
+        "shell_rewrites",
+        "bridge_calls",
+    )
+    lines.extend(_fixed_table_section_lines("runtime top prompts", runtime_headers, runtime_rows))
     stage_rows = [
         (
             str(row["workflow_id"]),
@@ -1298,31 +1198,15 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         )
         for row in _stage_top_prompt_rows(report.stage_diagnostics, top)
     ]
-    if stage_rows:
-        stage_headers = (
-            "workflow",
-            "stage",
-            "first_turn_chars",
-            "eager_chars",
-            "lazy_chars",
-            "violations",
-        )
-        stage_widths = [len(header) for header in stage_headers]
-        for row in stage_rows:
-            stage_widths = [max(width, len(cell)) for width, cell in zip(stage_widths, row, strict=True)]
-
-        def render_stage_row(row: Sequence[str]) -> str:
-            return "  ".join(cell.ljust(width) for cell, width in zip(row, stage_widths, strict=True)).rstrip()
-
-        lines.extend(
-            (
-                "",
-                "stage top prompts",
-                render_stage_row(stage_headers),
-                render_stage_row(tuple("-" * width for width in stage_widths)),
-            )
-        )
-        lines.extend(render_stage_row(row) for row in stage_rows)
+    stage_headers = (
+        "workflow",
+        "stage",
+        "first_turn_chars",
+        "eager_chars",
+        "lazy_chars",
+        "violations",
+    )
+    lines.extend(_fixed_table_section_lines("stage top prompts", stage_headers, stage_rows))
     authority_rows = [
         (
             _row_text(row, "workflow_id"),
@@ -1383,24 +1267,8 @@ def render_prompt_surface_table(report: PromptSurfaceReport, top: int | None = N
         )
         for row in _exact_assertion_file_rows(report.exact_assertion_diagnostics, top)
     ]
-    if exact_rows:
-        exact_headers = ("file", "exact", "machine", "public_ux", "brittle", "brittle_pct", "severity")
-        exact_widths = [len(header) for header in exact_headers]
-        for row in exact_rows:
-            exact_widths = [max(width, len(cell)) for width, cell in zip(exact_widths, row, strict=True)]
-
-        def render_exact_row(row: Sequence[str]) -> str:
-            return "  ".join(cell.ljust(width) for cell, width in zip(row, exact_widths, strict=True)).rstrip()
-
-        lines.extend(
-            (
-                "",
-                "prompt-test exactness",
-                render_exact_row(exact_headers),
-                render_exact_row(tuple("-" * width for width in exact_widths)),
-            )
-        )
-        lines.extend(render_exact_row(row) for row in exact_rows)
+    exact_headers = ("file", "exact", "machine", "public_ux", "brittle", "brittle_pct", "severity")
+    lines.extend(_fixed_table_section_lines("prompt-test exactness", exact_headers, exact_rows))
     outside_top_disallowed = _disallowed_return_field_mentions_outside_top_rows(report, top)
     if outside_top_disallowed:
         lines.extend(("", f"disallowed return field mentions outside top prompt rows: {outside_top_disallowed}"))
@@ -2460,377 +2328,6 @@ def _semantic_example_limit(top: int | None) -> int:
     return min(top, _SEMANTIC_EXAMPLE_LIMIT)
 
 
-def _scan_exact_assertion_diagnostics(repo_root: Path) -> dict[str, object]:
-    tests_root = repo_root / "tests"
-    if not tests_root.is_dir():
-        return _empty_exact_assertion_diagnostics()
-
-    file_rows: list[dict[str, object]] = []
-    taxonomy_usage_rows: list[dict[str, object]] = []
-    files_scanned = 0
-    for path in sorted(tests_root.rglob("*.py")):
-        if path.is_symlink() or not path.is_file():
-            continue
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except (SyntaxError, OSError, UnicodeDecodeError):
-            continue
-        files_scanned += 1
-        relative_path = _relative_path(path, repo_root)
-        taxonomy_usage = _taxonomy_helper_usage_for_tree(tree, path=relative_path)
-        if taxonomy_usage:
-            taxonomy_usage_rows.append(taxonomy_usage)
-        assertions = _prompt_exact_assertions(tree)
-        if not assertions:
-            continue
-        classified = [_exact_assertion_to_dict(assertion, path=relative_path) for assertion in assertions]
-        machine = [entry for entry in classified if entry["category"] == "machine_contract"]
-        public_ux = [entry for entry in classified if entry["category"] == "public_ux"]
-        brittle = [entry for entry in classified if entry["category"] == "brittle_prose"]
-        exact_count = len(classified)
-        brittle_density = len(brittle) / exact_count if exact_count else 0.0
-        file_rows.append(
-            {
-                "path": relative_path,
-                "exact_assertion_count": exact_count,
-                "machine_contract_exact_assertions": len(machine),
-                "public_ux_exact_assertions": len(public_ux),
-                "brittle_prose_assertions": len(brittle),
-                "brittle_prose_density": round(brittle_density, 6),
-                "severity": _exact_assertion_file_severity(len(brittle), brittle_density),
-                "examples": {
-                    "machine_contract": machine[:_EXACT_ASSERTION_EXAMPLES_PER_CATEGORY],
-                    "public_ux": public_ux[:_EXACT_ASSERTION_EXAMPLES_PER_CATEGORY],
-                    "brittle_prose": brittle[:_EXACT_ASSERTION_EXAMPLES_PER_CATEGORY],
-                },
-            }
-        )
-
-    file_rows = sorted(
-        file_rows,
-        key=lambda entry: (
-            -cast(int, entry["brittle_prose_assertions"]),
-            -cast(float, entry["brittle_prose_density"]),
-            -cast(int, entry["exact_assertion_count"]),
-            cast(str, entry["path"]),
-        ),
-    )
-    totals = _exact_assertion_totals(files_scanned, file_rows)
-    return {
-        "schema_version": "exact_assertions.v1",
-        "totals": totals,
-        "thresholds": _EXACT_ASSERTION_THRESHOLDS,
-        "files": file_rows,
-        "taxonomy_helper_usage": _taxonomy_helper_usage_diagnostics(files_scanned, taxonomy_usage_rows),
-    }
-
-
-def _empty_exact_assertion_diagnostics() -> dict[str, object]:
-    return {
-        "schema_version": "exact_assertions.v1",
-        "totals": {
-            "files_scanned": 0,
-            "exact_assertion_file_count": 0,
-            "exact_assertion_count": 0,
-            "machine_contract_exact_assertions": 0,
-            "public_ux_exact_assertions": 0,
-            "brittle_prose_assertions": 0,
-            "brittle_prose_file_count": 0,
-        },
-        "thresholds": _EXACT_ASSERTION_THRESHOLDS,
-        "files": [],
-        "taxonomy_helper_usage": _taxonomy_helper_usage_diagnostics(0, ()),
-    }
-
-
-def _exact_assertion_totals(files_scanned: int, file_rows: Sequence[Mapping[str, object]]) -> dict[str, int]:
-    return {
-        "files_scanned": files_scanned,
-        "exact_assertion_file_count": len(file_rows),
-        "exact_assertion_count": sum(cast(int, row["exact_assertion_count"]) for row in file_rows),
-        "machine_contract_exact_assertions": sum(
-            cast(int, row["machine_contract_exact_assertions"]) for row in file_rows
-        ),
-        "public_ux_exact_assertions": sum(cast(int, row["public_ux_exact_assertions"]) for row in file_rows),
-        "brittle_prose_assertions": sum(cast(int, row["brittle_prose_assertions"]) for row in file_rows),
-        "brittle_prose_file_count": sum(1 for row in file_rows if cast(int, row["brittle_prose_assertions"]) > 0),
-    }
-
-
-def _taxonomy_helper_usage_for_tree(tree: ast.AST, *, path: str) -> dict[str, object] | None:
-    helper_counts: dict[str, int] = dict.fromkeys(_TAXONOMY_HELPER_NAMES, 0)
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        helper_name = _taxonomy_helper_name(node.func)
-        if helper_name is None:
-            continue
-        helper_counts[helper_name] += 1
-
-    used_helpers = {helper_name: count for helper_name, count in helper_counts.items() if count}
-    if not used_helpers:
-        return None
-    return {
-        "path": path,
-        "helper_call_count": sum(used_helpers.values()),
-        "helpers": used_helpers,
-    }
-
-
-def _taxonomy_helper_name(node: ast.AST) -> str | None:
-    raw_name: str | None = None
-    if isinstance(node, ast.Name):
-        raw_name = node.id
-    elif isinstance(node, ast.Attribute):
-        raw_name = node.attr
-    if raw_name is None:
-        return None
-    helper_name = _TAXONOMY_HELPER_ALIASES.get(raw_name, raw_name)
-    if helper_name not in _TAXONOMY_HELPER_NAMES:
-        return None
-    return helper_name
-
-
-def _taxonomy_helper_usage_diagnostics(
-    files_scanned: int,
-    file_rows: Sequence[Mapping[str, object]],
-) -> dict[str, object]:
-    sorted_rows = tuple(
-        sorted(
-            file_rows,
-            key=lambda row: (
-                -cast(int, row["helper_call_count"]),
-                cast(str, row["path"]),
-            ),
-        )
-    )
-    totals: dict[str, int] = {
-        "files_scanned": files_scanned,
-        "taxonomy_helper_file_count": len(sorted_rows),
-        "taxonomy_helper_call_count": sum(cast(int, row["helper_call_count"]) for row in sorted_rows),
-    }
-    for helper_name in _TAXONOMY_HELPER_NAMES:
-        totals[helper_name] = sum(
-            cast(int, cast(Mapping[str, object], row.get("helpers", {})).get(helper_name, 0)) for row in sorted_rows
-        )
-    return {
-        "schema_version": _TAXONOMY_HELPER_USAGE_SCHEMA_VERSION,
-        "totals": totals,
-        "files": [dict(row) for row in sorted_rows],
-    }
-
-
-def _exact_prose_assertion_files_from_diagnostics(
-    diagnostics: Mapping[str, object],
-) -> tuple[Mapping[str, object], ...]:
-    entries: list[Mapping[str, object]] = []
-    for row in _exact_assertion_file_rows(diagnostics, None):
-        examples = cast(Mapping[str, object], row.get("examples", {}))
-        sample_literals: list[str] = []
-        for category in ("brittle_prose", "public_ux", "machine_contract"):
-            category_examples = cast(Sequence[Mapping[str, object]], examples.get(category, ()))
-            sample_literals.extend(str(example.get("literal", "")) for example in category_examples)
-        entries.append(
-            {
-                "path": row.get("path", ""),
-                "exact_assertion_count": row.get("exact_assertion_count", 0),
-                "prose_contract_assertions": cast(int, row.get("public_ux_exact_assertions", 0))
-                + cast(int, row.get("brittle_prose_assertions", 0)),
-                "machine_contract_assertions": row.get("machine_contract_exact_assertions", 0),
-                "public_ux_exact_assertions": row.get("public_ux_exact_assertions", 0),
-                "brittle_prose_assertions": row.get("brittle_prose_assertions", 0),
-                "examples": tuple(sample_literals[:5]),
-            }
-        )
-    return tuple(
-        sorted(
-            entries,
-            key=lambda entry: (
-                -cast(int, entry["prose_contract_assertions"]),
-                -cast(int, entry["exact_assertion_count"]),
-                cast(str, entry["path"]),
-            ),
-        )
-    )
-
-
-def _exact_assertion_file_rows(
-    diagnostics: Mapping[str, object],
-    top: int | None,
-) -> tuple[Mapping[str, object], ...]:
-    files = tuple(cast(Sequence[Mapping[str, object]], diagnostics.get("files", ())))
-    if top is None or top <= 0:
-        return files
-    return files[:top]
-
-
-def _exact_assertion_to_dict(assertion: ExactPromptAssertion, *, path: str) -> dict[str, object]:
-    category, reason = _classify_exact_assertion(
-        assertion.literal,
-        path=path,
-        polarity=assertion.polarity,
-    )
-    return {
-        "path": path,
-        "line": assertion.line,
-        "literal": assertion.literal,
-        "assertion_shape": assertion.assertion_shape,
-        "polarity": assertion.polarity,
-        "category": category,
-        "reason": reason,
-    }
-
-
-def _exact_assertion_file_severity(
-    brittle_prose_assertions: int,
-    brittle_prose_density: float,
-) -> ExactAssertionSeverity:
-    if brittle_prose_assertions >= 50 or (brittle_prose_assertions >= 20 and brittle_prose_density >= 0.45):
-        return "high"
-    if brittle_prose_assertions >= 20 or (brittle_prose_assertions >= 10 and brittle_prose_density >= 0.30):
-        return "warn"
-    return "info"
-
-
-def _prompt_exact_assertions(tree: ast.AST) -> tuple[ExactPromptAssertion, ...]:
-    assertions: list[ExactPromptAssertion] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assert):
-            assertions.extend(_assert_exact_assertions(node.test))
-        elif isinstance(node, ast.Call):
-            assertions.extend(_method_exact_assertions(node))
-    return tuple(assertion for assertion in assertions if _is_prompt_literal(assertion.literal))
-
-
-def _assert_exact_assertions(node: ast.AST) -> tuple[ExactPromptAssertion, ...]:
-    if not isinstance(node, ast.Compare):
-        return ()
-    assertions: list[ExactPromptAssertion] = []
-    for op in node.ops:
-        if isinstance(op, (ast.In, ast.NotIn)):
-            shape: ExactAssertionShape = "assert_not_contains" if isinstance(op, ast.NotIn) else "assert_contains"
-            polarity: ExactAssertionPolarity = "forbidden" if isinstance(op, ast.NotIn) else "required"
-            literal = _string_constant(node.left)
-            if literal is not None:
-                assertions.append(
-                    ExactPromptAssertion(
-                        literal=literal,
-                        line=getattr(node, "lineno", 0),
-                        assertion_shape=shape,
-                        polarity=polarity,
-                    )
-                )
-            for comparator in node.comparators:
-                literal = _string_constant(comparator)
-                if literal is not None:
-                    assertions.append(
-                        ExactPromptAssertion(
-                            literal=literal,
-                            line=getattr(node, "lineno", 0),
-                            assertion_shape=shape,
-                            polarity=polarity,
-                        )
-                    )
-    return tuple(assertions)
-
-
-def _method_exact_assertions(node: ast.Call) -> tuple[ExactPromptAssertion, ...]:
-    if not isinstance(node.func, ast.Attribute) or node.func.attr not in {"count", "index"}:
-        return ()
-    shape = cast(ExactAssertionShape, node.func.attr)
-    polarity: ExactAssertionPolarity = "counted" if node.func.attr == "count" else "indexed"
-    assertions: list[ExactPromptAssertion] = []
-    for arg in node.args[:1]:
-        literal = _string_constant(arg)
-        if literal is not None:
-            assertions.append(
-                ExactPromptAssertion(
-                    literal=literal,
-                    line=getattr(node, "lineno", 0),
-                    assertion_shape=shape,
-                    polarity=polarity,
-                )
-            )
-    return tuple(assertions)
-
-
-def _string_constant(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return node.value
-    return None
-
-
-def _is_prompt_literal(literal: str) -> bool:
-    stripped = literal.strip()
-    if len(stripped) < 12:
-        return stripped in _SHORT_MACHINE_CONTRACT_LITERALS or stripped in _SHORT_PUBLIC_UX_LITERALS
-    if "\n" in stripped:
-        return True
-    return bool(
-        re.search(r"[A-Za-z]{3,}\s+[A-Za-z]{3,}", stripped)
-        or _MACHINE_CONTRACT_RE.search(stripped)
-        or _SCHEMA_KEY_LITERAL_RE.search(stripped)
-        or _PUBLIC_UX_LITERAL_RE.search(stripped)
-    )
-
-
-def _classify_exact_assertion(
-    literal: str,
-    *,
-    path: str,
-    polarity: ExactAssertionPolarity,
-) -> tuple[ExactAssertionCategory, str]:
-    machine_reason = _machine_contract_exact_reason(literal, polarity=polarity)
-    if machine_reason:
-        return "machine_contract", machine_reason
-
-    public_reason = _public_ux_exact_reason(literal, path=path)
-    if public_reason:
-        return "public_ux", public_reason
-
-    if _english_word_count(literal) >= 5:
-        return "brittle_prose", "long_internal_prompt_prose"
-    return "machine_contract", "short_prompt_literal"
-
-
-def _machine_contract_exact_reason(literal: str, *, polarity: ExactAssertionPolarity) -> str | None:
-    stripped = literal.strip()
-    if stripped in _SHORT_PUBLIC_UX_LITERALS:
-        return None
-    if stripped in _SHORT_MACHINE_CONTRACT_LITERALS:
-        return "machine_regression_token"
-    if _STRUCTURED_PROMPT_MARKER_RE.search(stripped):
-        return "structured_prompt_marker"
-    if re.search(r"\bgpd\s+--raw\b|\bgpd:[a-z0-9-]+\b|\$gpd-[a-z0-9-]+\b|--[a-z0-9][a-z0-9-]*\b", stripped):
-        return "gpd_command_or_flag"
-    if re.search(r"\b[A-Za-z0-9_.{}$-]+/[A-Za-z0-9_./{}$-]+", stripped) or re.search(
-        r"\b[A-Za-z0-9_.-]+\.(?:md|json|ya?ml|toml|tex|pdf|py)\b",
-        stripped,
-        re.IGNORECASE,
-    ):
-        return "path_or_artifact"
-    if _FIELD_PATH_RE.search(stripped) or _SCHEMA_KEY_LITERAL_RE.search(stripped):
-        return "schema_or_field_path"
-    if _MACHINE_CONTRACT_RE.search(stripped):
-        return "machine_token"
-    if polarity == "forbidden" and any(token in stripped for token in _SHORT_MACHINE_CONTRACT_LITERALS):
-        return "forbidden_stale_alias"
-    return None
-
-
-def _public_ux_exact_reason(literal: str, *, path: str) -> str | None:
-    stripped = literal.strip()
-    if stripped in _SHORT_PUBLIC_UX_LITERALS or _PUBLIC_UX_LITERAL_RE.search(stripped):
-        return "public_ux_copy"
-    if _PUBLIC_UX_TEST_PATH_RE.search(path) and _english_word_count(stripped) >= 2:
-        return "public_ux_surface"
-    return None
-
-
-def _english_word_count(text: str) -> int:
-    return len(re.findall(r"[A-Za-z][A-Za-z'-]*", text))
-
-
 def _top_items(items: Sequence[PromptSurfaceItem], top: int | None) -> tuple[PromptSurfaceItem, ...]:
     sorted_items = sorted(
         items,
@@ -2839,36 +2336,6 @@ def _top_items(items: Sequence[PromptSurfaceItem], top: int | None) -> tuple[Pro
     if top is None or top <= 0:
         return tuple(sorted_items)
     return tuple(sorted_items[:top])
-
-
-def _bounded_exact_assertion_diagnostics(
-    diagnostics: Mapping[str, object],
-    top: int | None,
-) -> Mapping[str, object]:
-    limit = _top_limit(top)
-    if limit is None:
-        return diagnostics
-
-    payload = dict(diagnostics)
-    payload["files"] = [dict(row) for row in _exact_assertion_file_rows(diagnostics, top)]
-    taxonomy_helper_usage = diagnostics.get("taxonomy_helper_usage")
-    if isinstance(taxonomy_helper_usage, Mapping):
-        payload["taxonomy_helper_usage"] = _bounded_taxonomy_helper_usage(taxonomy_helper_usage, top)
-    return payload
-
-
-def _bounded_taxonomy_helper_usage(
-    diagnostics: Mapping[str, object],
-    top: int | None,
-) -> Mapping[str, object]:
-    limit = _top_limit(top)
-    if limit is None:
-        return diagnostics
-
-    files = tuple(cast(Sequence[Mapping[str, object]], diagnostics.get("files", ())))
-    payload = dict(diagnostics)
-    payload["files"] = [dict(row) for row in files[:limit]]
-    return payload
 
 
 def _disallowed_return_field_mentions_outside_top_rows(report: PromptSurfaceReport, top: int | None) -> int:

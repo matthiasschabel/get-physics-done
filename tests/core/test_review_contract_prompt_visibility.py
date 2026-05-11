@@ -1316,11 +1316,14 @@ def test_review_contract_renderer_renders_scope_variants() -> None:
     assert "required_outputs_override:" in section
 
 
-def test_publication_scope_variant_relaxed_and_optional_checks_have_cli_detail_keys() -> None:
-    from gpd import cli
+def test_publication_scope_variant_relaxed_and_optional_checks_have_preflight_detail_keys() -> None:
+    from gpd.core.command_preflight import (
+        _EXTERNAL_ARTIFACT_OPTIONAL_DETAILS,
+        _WRITE_PAPER_EXTERNAL_AUTHORING_OPTIONAL_DETAILS,
+    )
 
-    cli_detail_keys = set(cli._EXTERNAL_ARTIFACT_OPTIONAL_DETAILS) | set(
-        cli._WRITE_PAPER_EXTERNAL_AUTHORING_OPTIONAL_DETAILS
+    preflight_detail_keys = set(_EXTERNAL_ARTIFACT_OPTIONAL_DETAILS) | set(
+        _WRITE_PAPER_EXTERNAL_AUTHORING_OPTIONAL_DETAILS
     )
     missing_detail_keys: dict[str, list[str]] = {}
     for command_name in registry.list_review_commands():
@@ -1329,7 +1332,7 @@ def test_publication_scope_variant_relaxed_and_optional_checks_have_cli_detail_k
             continue
         for variant in contract.scope_variants:
             variant_checks = set(variant.relaxed_preflight_checks) | set(variant.optional_preflight_checks)
-            missing = sorted(variant_checks - cli_detail_keys)
+            missing = sorted(variant_checks - preflight_detail_keys)
             if missing:
                 missing_detail_keys[f"{command_name}:{variant.scope}"] = missing
 

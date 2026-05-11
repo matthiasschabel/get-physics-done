@@ -16,16 +16,13 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-import glob
-import hashlib
-import inspect
 import json
 import logging
 import os
 import re
 import shlex
 import sys
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Collection, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
@@ -39,14 +36,39 @@ from rich.text import Text
 from gpd.adapters.base import INSTALL_ROLLBACK_RESULT_KEY as _INSTALL_RESULT_ROLLBACK_KEY
 from gpd.adapters.runtime_catalog import list_runtime_names, normalize_runtime_name
 from gpd.command_labels import canonical_command_label, parse_command_label, validated_public_command_prefix
+from gpd.core.artifact_command_payloads import (
+    call_proof_redteam_finalizer as _call_proof_redteam_finalizer,
+)
+from gpd.core.artifact_command_payloads import (
+    call_proof_redteam_skeleton_builder as _call_proof_redteam_skeleton_builder,
+)
+from gpd.core.artifact_command_payloads import (
+    call_verification_report_finalizer as _call_verification_report_finalizer,
+)
+from gpd.core.artifact_command_payloads import (
+    call_verification_report_skeleton_builder as _call_verification_report_skeleton_builder,
+)
+from gpd.core.artifact_command_payloads import (
+    callable_accepts_kwarg as _callable_accepts_kwarg,
+)
+from gpd.core.artifact_command_payloads import (
+    jsonable_value as _jsonable_value,
+)
+from gpd.core.artifact_command_payloads import (
+    mapping_payload as _mapping_payload,
+)
+from gpd.core.artifact_command_payloads import (
+    markdown_payload_value as _markdown_payload_value,
+)
+from gpd.core.artifact_command_payloads import (
+    validation_result_is_valid as _validation_result_is_valid,
+)
 from gpd.core.artifact_text import (
-    DIGEST_KNOWLEDGE_SOURCE_SUFFIXES,
     ArtifactTextError,
     load_artifact_text_surface,
     materialize_artifact_text_surface,
     probe_artifact_text_surface,
 )
-from gpd.core.arxiv_source_download import normalize_arxiv_id
 from gpd.core.cli_args import (
     normalize_root_global_cli_options as _normalize_root_global_cli_options,
 )
@@ -55,6 +77,46 @@ from gpd.core.cli_args import (
 )
 from gpd.core.cli_args import (
     split_root_global_cli_options as _split_root_global_cli_options,
+)
+from gpd.core.command_arguments import (
+    _PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES,
+    _has_simple_positional_inputs,
+    _has_write_paper_external_authoring_intake,
+    _split_command_arguments,
+)
+from gpd.core.command_preflight import (
+    _command_context_publication_roots,
+    _command_managed_output_context_root,
+    _command_managed_output_root,
+    _publication_subject_preflight_policy,
+    _review_preflight_publication_routing,
+)
+from gpd.core.command_subjects import (
+    ResolvedCommandSubject,
+    _build_resolved_command_subject,
+    _command_allows_external_manuscript_targets,
+    _command_allows_interactive_subject_intake,
+    _command_allows_manuscript_bootstrap,
+    _command_context_manuscript_check,
+    _command_effective_context_mode,
+    _command_effective_project_reentry_mode,
+    _command_explicit_input_labels_from_policy,
+    _command_explicit_manuscript_argument,
+    _command_explicit_manuscript_subject_uses_supported_roots,
+    _command_explicit_manuscript_suffixes,
+    _command_has_typed_subject_policy,
+    _command_interactive_subject_detail,
+    _command_referee_report_arguments,
+    _command_required_file_patterns,
+    _command_required_files_override_detail,
+    _command_required_files_present,
+    _command_requires_compiled_manuscript,
+    _command_requires_manuscript_context,
+    _command_supports_explicit_manuscript_subject,
+    _resolve_review_knowledge_target,
+    _resolve_review_preflight_manuscript,
+    _resolve_subject_path,
+    _supported_manuscript_root_for_target,
 )
 from gpd.core.constants import (
     CONFIG_FILENAME,
@@ -66,12 +128,6 @@ from gpd.core.constants import (
     PUBLICATION_MANUSCRIPT_DIR_NAME,
 )
 from gpd.core.errors import ConfigError, GPDError
-from gpd.core.manuscript_artifacts import (
-    _resolve_manuscript_entrypoint_from_root_resolution as resolve_manuscript_entrypoint_from_root_resolution,
-)
-from gpd.core.manuscript_artifacts import (
-    _supported_manuscript_root_for_target as resolve_supported_manuscript_root_for_target,
-)
 from gpd.core.manuscript_artifacts import (
     locate_publication_artifact,
     resolve_current_manuscript_resolution,
@@ -165,19 +221,6 @@ from gpd.core.workflow_presets import (
     get_workflow_preset,
     list_workflow_presets,
     preview_workflow_preset_application,
-)
-from gpd.core.write_paper_intake import (
-    WritePaperExternalAuthoringIntakeResolution,
-    reject_write_paper_intake_inside_project_detail,
-)
-from gpd.core.write_paper_intake import (
-    has_write_paper_external_authoring_intake as _shared_has_write_paper_external_authoring_intake,
-)
-from gpd.core.write_paper_intake import (
-    resolve_write_paper_external_authoring_intake as _shared_resolve_write_paper_external_authoring_intake,
-)
-from gpd.core.write_paper_intake import (
-    write_paper_external_authoring_intake_argument as _shared_write_paper_external_authoring_intake_argument,
 )
 from gpd.mcp.managed_integrations import WOLFRAM_MANAGED_INTEGRATION
 
@@ -595,28 +638,6 @@ def _format_display_path_from_cwd(target: str | Path | None, *, cwd: Path) -> st
 
 
 @dataclasses.dataclass(frozen=True)
-class ResolvedCommandSubject:
-    """Shared command-subject resolution envelope for CLI preflight consumers."""
-
-    command: str
-    workspace_root: Path
-    resolved_project_root: Path | None
-    context_root: Path
-    target_path: Path | None
-    target_root: Path | None
-    subject_kind: str
-    ownership_mode: str
-    status: str
-    exists: bool
-    explicit_input: bool = False
-    project_root_source: str | None = None
-    project_root_auto_selected: bool = False
-    reentry_mode: str | None = None
-    ancestor_walked_up: bool = False
-    detail: str = ""
-
-
-@dataclasses.dataclass(frozen=True)
 class ReviewPreflightCheck:
     """One executable preflight check for a review command."""
 
@@ -688,140 +709,6 @@ class CommandContextPreflightResult:
     resolved_subject: ResolvedCommandSubject | None = None
     selected_publication_root: str | None = None
     selected_review_root: str | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class ResolvedManuscriptTarget:
-    """Structured manuscript-target resolution details for publication commands."""
-
-    status: str
-    manuscript: Path | None
-    manuscript_root: Path | None
-    requested_target: Path | None
-    detail: str
-
-
-@dataclasses.dataclass(frozen=True)
-class ManuscriptIntakePolicy:
-    """Static manuscript-subject intake rules for one command."""
-
-    allowed_suffixes: frozenset[str]
-    allow_external_targets: bool = False
-    allow_interactive_standalone_intake: bool = False
-    interactive_standalone_detail: str = ""
-
-
-@dataclasses.dataclass(frozen=True)
-class PublicationSubjectPreflightPolicy:
-    """Publication preflight relaxations and scope overrides derived from the active subject."""
-
-    active_scopes: frozenset[str] = frozenset()
-    relaxed_checks: frozenset[str] = frozenset()
-    optional_checks: frozenset[str] = frozenset()
-    detail_overrides: Mapping[str, str] = dataclasses.field(default_factory=dict)
-    required_outputs: tuple[str, ...] = ()
-    required_evidence: tuple[str, ...] = ()
-    blocking_conditions: tuple[str, ...] = ()
-
-    def relaxes(self, check_name: str) -> bool:
-        return check_name in self.relaxed_checks
-
-    def makes_missing_optional(self, check_name: str) -> bool:
-        return check_name in self.optional_checks
-
-    def passes_when_missing(self, check_name: str) -> bool:
-        return self.relaxes(check_name) or self.makes_missing_optional(check_name)
-
-    def detail(self, check_name: str) -> str | None:
-        return self.detail_overrides.get(check_name)
-
-    def blocking(self, check_name: str, *, missing: bool = False, default: bool = True) -> bool:
-        if self.relaxes(check_name):
-            return False
-        if missing and self.makes_missing_optional(check_name):
-            return False
-        return default
-
-    def missing_detail(self, check_name: str, *, default: str) -> str:
-        detail = self.detail(check_name)
-        return detail if detail is not None else default
-
-
-_SUPPORTED_MANUSCRIPT_ROOT_NAMES = frozenset({"paper", "manuscript", "draft"})
-_DEFAULT_PUBLICATION_EXTERNAL_SUFFIXES = frozenset({".txt", ".pdf"})
-_PUBLICATION_INTERACTIVE_STANDALONE_DETAIL = (
-    "no explicit review target supplied; interactive intake can prompt for a specific artifact path "
-    "or use the current GPD project when available"
-)
-_EXTERNAL_ARTIFACT_RELAXED_CHECKS = frozenset(
-    {
-        "project_state",
-        "roadmap",
-        "conventions",
-        "research_artifacts",
-        "verification_reports",
-        "manuscript_proof_review",
-    }
-)
-_EXTERNAL_ARTIFACT_OPTIONAL_CHECKS = frozenset(
-    {
-        "artifact_manifest",
-        "bibliography_audit",
-        "bibliography_audit_clean",
-        "reproducibility_manifest",
-        "reproducibility_ready",
-    }
-)
-_EXTERNAL_ARTIFACT_OPTIONAL_DETAILS = {
-    "project_state": "external artifact review: project state is optional and is not required to start review",
-    "roadmap": "external artifact review: roadmap is optional",
-    "conventions": "external artifact review: project conventions are optional",
-    "research_artifacts": "external artifact review: phase summaries or milestone digests are optional",
-    "verification_reports": "external artifact review: verification reports are optional",
-    "artifact_manifest": "no ARTIFACT-MANIFEST.json found near the manuscript; external artifact review can proceed without it",
-    "bibliography_audit": "no BIBLIOGRAPHY-AUDIT.json found near the manuscript; external artifact review can proceed without it",
-    "bibliography_audit_clean": "bibliography audit cleanliness is optional for external artifact review",
-    "reproducibility_manifest": (
-        "no reproducibility manifest found near the manuscript; external artifact review can proceed without it"
-    ),
-    "reproducibility_ready": "reproducibility readiness is optional for external artifact review",
-    "manuscript_proof_review": (
-        "prior staged manuscript proof review is optional in external artifact mode; "
-        "theorem-bearing claims will be audited in this review round if detected"
-    ),
-}
-_WRITE_PAPER_EXTERNAL_AUTHORING_EXPLICIT_INPUTS = ["--intake path/to/write-paper-authoring-input.json"]
-_WRITE_PAPER_EXTERNAL_AUTHORING_DETAIL = (
-    "external authoring outside a project requires `--intake path/to/write-paper-authoring-input.json`"
-)
-_WRITE_PAPER_EXTERNAL_AUTHORING_OPTIONAL_DETAILS = {
-    "project_state": "external authoring intake: project state is optional because the intake manifest is authoritative",
-    "roadmap": "external authoring intake: roadmap is optional because the intake manifest supplies the draft scope",
-    "conventions": "external authoring intake: project conventions are optional before the manuscript exists",
-    "research_artifacts": (
-        "external authoring intake: milestone digests and phase summaries are optional because claims and evidence "
-        "come from the intake manifest"
-    ),
-    "verification_reports": (
-        "external authoring intake: project verification reports are optional because claim-to-evidence bindings come "
-        "from the intake manifest"
-    ),
-    "artifact_manifest": (
-        "no ARTIFACT-MANIFEST.json found yet; the external authoring lane emits it after manuscript scaffolding"
-    ),
-    "bibliography_audit": (
-        "no BIBLIOGRAPHY-AUDIT.json found yet; the external authoring lane emits it after bibliography scaffolding"
-    ),
-    "bibliography_audit_clean": "bibliography audit cleanliness is optional before the first external-authoring draft",
-    "reproducibility_manifest": (
-        "no reproducibility manifest found yet; the external authoring lane emits it after manuscript scaffolding"
-    ),
-    "reproducibility_ready": "reproducibility readiness is optional before the first external-authoring draft",
-    "manuscript_proof_review": (
-        "prior staged manuscript proof review is optional before the first external-authoring draft; "
-        "proof review begins after the manuscript is authored"
-    ),
-}
 
 
 def _format_runtime_list(runtime_names: list[str]) -> str:
@@ -6897,16 +6784,6 @@ return_app = typer.Typer(help="gpd_return envelope helpers")
 app.add_typer(return_app, name="return")
 
 
-def _resolve_subject_path(subject: str | None, *, base: Path) -> Path | None:
-    """Resolve one raw subject string relative to *base* when possible."""
-    if not isinstance(subject, str) or not subject.strip():
-        return None
-    target = Path(subject)
-    if not target.is_absolute():
-        target = base / target
-    return target.resolve(strict=False)
-
-
 def _resolve_launch_or_project_relative_path(
     subject: str | None, *, launch_cwd: Path, project_cwd: Path
 ) -> Path | None:
@@ -6918,324 +6795,6 @@ def _resolve_launch_or_project_relative_path(
     if project_candidate is not None and project_candidate.exists():
         return project_candidate
     return launch_candidate
-
-
-def _subject_is_relative_to(target: Path, base: Path) -> bool:
-    """Return whether *target* stays under *base* after normalization."""
-    try:
-        target.resolve(strict=False).relative_to(base.resolve(strict=False))
-    except ValueError:
-        return False
-    return True
-
-
-def _normalized_allowed_manuscript_suffixes(
-    *,
-    allow_markdown: bool,
-    allowed_suffixes: Collection[str] | None = None,
-) -> set[str]:
-    """Return normalized explicit manuscript suffixes for one command."""
-    normalized_allowed_suffixes = {
-        suffix.lower()
-        for suffix in (
-            allowed_suffixes if allowed_suffixes is not None else ({".tex", ".md"} if allow_markdown else {".tex"})
-        )
-    }
-    return normalized_allowed_suffixes or {".tex"}
-
-
-def _allowed_manuscript_suffix_message(allowed_suffixes: Collection[str]) -> str:
-    """Return a user-facing suffix description for manuscript target errors."""
-    ordered_suffixes = [suffix for suffix in (".tex", ".md", ".txt", ".pdf") if suffix in allowed_suffixes]
-    extras = sorted(suffix for suffix in allowed_suffixes if suffix not in {".tex", ".md", ".txt", ".pdf"})
-    ordered_suffixes.extend(extras)
-    if ordered_suffixes == [".tex"]:
-        return ".tex file"
-    if len(ordered_suffixes) == 2:
-        return f"{ordered_suffixes[0]} or {ordered_suffixes[1]} file"
-    return ", ".join(ordered_suffixes[:-1]) + f", or {ordered_suffixes[-1]} file"
-
-
-def _supported_manuscript_root_for_target(project_root: Path, target: Path) -> Path | None:
-    """Return the canonical manuscript root that owns *target*, when supported."""
-
-    return resolve_supported_manuscript_root_for_target(project_root, target)
-
-
-def _supported_explicit_manuscript_target(project_root: Path, target: Path) -> bool:
-    """Return whether *target* stays under a supported manuscript root."""
-    return _supported_manuscript_root_for_target(project_root, target) is not None
-
-
-def _supported_root_resolution_for_target(
-    project_root: Path,
-    target: Path,
-    *,
-    allow_markdown: bool,
-) -> tuple[Path, object] | tuple[None, None]:
-    """Resolve the owning manuscript root for *target* when it stays under supported roots."""
-    manuscript_root = _supported_manuscript_root_for_target(project_root, target)
-    if manuscript_root is None:
-        return None, None
-    return manuscript_root, resolve_manuscript_entrypoint_from_root_resolution(
-        manuscript_root,
-        allow_markdown=allow_markdown,
-    )
-
-
-def _manuscript_root_needs_supported_metadata(
-    project_root: Path,
-    manuscript_root: Path,
-    *,
-    restrict_to_supported_roots: bool,
-) -> bool:
-    """Return whether an explicit target must obey managed manuscript-root metadata."""
-
-    if restrict_to_supported_roots:
-        return True
-
-    from gpd.core.constants import ProjectLayout
-
-    if ProjectLayout(project_root).project_md.exists():
-        return True
-
-    publication_dir = (project_root / PLANNING_DIR_NAME / PUBLICATION_DIR_NAME).resolve(strict=False)
-    try:
-        relative_root = manuscript_root.resolve(strict=False).relative_to(publication_dir)
-    except ValueError:
-        return False
-    return len(relative_root.parts) >= 2 and relative_root.parts[1] == PUBLICATION_MANUSCRIPT_DIR_NAME
-
-
-def _resolve_review_preflight_manuscript_target(
-    cwd: Path,
-    subject: str | None,
-    *,
-    allow_markdown: bool = True,
-    restrict_to_supported_roots: bool = False,
-    workspace_cwd: Path | None = None,
-    allowed_suffixes: Collection[str] | None = None,
-) -> ResolvedManuscriptTarget:
-    """Resolve a review-preflight manuscript target with structured status details."""
-
-    project_root = cwd.resolve(strict=False)
-    subject_base = (workspace_cwd or cwd).resolve(strict=False)
-    normalized_allowed_suffixes = _normalized_allowed_manuscript_suffixes(
-        allow_markdown=allow_markdown,
-        allowed_suffixes=allowed_suffixes,
-    )
-    requested_target = _resolve_subject_path(subject, base=subject_base)
-
-    if requested_target is not None:
-        target_is_supported_root = _supported_explicit_manuscript_target(project_root, requested_target)
-        if restrict_to_supported_roots and not target_is_supported_root:
-            return ResolvedManuscriptTarget(
-                status="invalid",
-                manuscript=None,
-                manuscript_root=requested_target if requested_target.is_dir() else requested_target.parent,
-                requested_target=requested_target,
-                detail=(
-                    "explicit manuscript target must stay under `paper/`, `manuscript/`, `draft/`, "
-                    "or `GPD/publication/<subject_slug>[/manuscript/]` inside the current project"
-                ),
-            )
-        if not requested_target.exists():
-            return ResolvedManuscriptTarget(
-                status="missing",
-                manuscript=None,
-                manuscript_root=requested_target if requested_target.suffix == "" else requested_target.parent,
-                requested_target=requested_target,
-                detail=f"missing explicit manuscript target {_format_display_path(requested_target)}",
-            )
-        if requested_target.is_file():
-            target_suffix = requested_target.suffix.lower()
-            if target_suffix in normalized_allowed_suffixes:
-                owning_manuscript_root = _supported_manuscript_root_for_target(project_root, requested_target)
-                if target_suffix in {".tex", ".md"}:
-                    manuscript_root, root_resolution = _supported_root_resolution_for_target(
-                        project_root,
-                        requested_target,
-                        allow_markdown=allow_markdown,
-                    )
-                    if (
-                        manuscript_root is not None
-                        and root_resolution is not None
-                        and _manuscript_root_needs_supported_metadata(
-                            project_root,
-                            manuscript_root,
-                            restrict_to_supported_roots=restrict_to_supported_roots,
-                        )
-                    ):
-                        if root_resolution.status != "resolved" or root_resolution.manuscript_entrypoint is None:
-                            return ResolvedManuscriptTarget(
-                                status=root_resolution.status,
-                                manuscript=None,
-                                manuscript_root=manuscript_root,
-                                requested_target=requested_target,
-                                detail=(
-                                    f"{_format_display_path(manuscript_root)} is ambiguous or inconsistent: "
-                                    f"{root_resolution.detail}"
-                                ),
-                            )
-                        if root_resolution.manuscript_entrypoint.resolve(strict=False) != requested_target.resolve(
-                            strict=False
-                        ):
-                            return ResolvedManuscriptTarget(
-                                status="invalid",
-                                manuscript=None,
-                                manuscript_root=manuscript_root,
-                                requested_target=requested_target,
-                                detail=(
-                                    f"{_format_display_path(requested_target)} does not match the resolved manuscript "
-                                    f"entrypoint {_format_display_path(root_resolution.manuscript_entrypoint)} under "
-                                    f"{_format_display_path(manuscript_root)}"
-                                ),
-                            )
-                return ResolvedManuscriptTarget(
-                    status="resolved",
-                    manuscript=requested_target,
-                    manuscript_root=owning_manuscript_root or requested_target.parent,
-                    requested_target=requested_target,
-                    detail=f"{_format_display_path(requested_target)} present",
-                )
-            if target_suffix == ".md" and normalized_allowed_suffixes == {".tex"}:
-                return ResolvedManuscriptTarget(
-                    status="invalid",
-                    manuscript=None,
-                    manuscript_root=requested_target.parent,
-                    requested_target=requested_target,
-                    detail=f"explicit manuscript target must be a .tex file: {_format_display_path(requested_target)}",
-                )
-            return ResolvedManuscriptTarget(
-                status="invalid",
-                manuscript=None,
-                manuscript_root=requested_target.parent,
-                requested_target=requested_target,
-                detail=(
-                    "explicit manuscript target must be a "
-                    f"{_allowed_manuscript_suffix_message(normalized_allowed_suffixes)}: "
-                    f"{_format_display_path(requested_target)}"
-                ),
-            )
-
-        if requested_target.is_dir():
-            manuscript_root, root_resolution = _supported_root_resolution_for_target(
-                project_root,
-                requested_target,
-                allow_markdown=allow_markdown,
-            )
-            resolution = (
-                root_resolution
-                if manuscript_root is not None and root_resolution is not None
-                else resolve_manuscript_entrypoint_from_root_resolution(requested_target, allow_markdown=allow_markdown)
-            )
-            if resolution.status == "resolved" and resolution.manuscript_entrypoint is not None:
-                if manuscript_root is not None and manuscript_root != requested_target:
-                    resolved_entrypoint = resolution.manuscript_entrypoint.resolve(strict=False)
-                    if not _subject_is_relative_to(resolved_entrypoint, requested_target):
-                        return ResolvedManuscriptTarget(
-                            status="invalid",
-                            manuscript=None,
-                            manuscript_root=manuscript_root,
-                            requested_target=requested_target,
-                            detail=(
-                                f"{_format_display_path(requested_target)} does not contain the resolved manuscript "
-                                f"entrypoint {_format_display_path(resolution.manuscript_entrypoint)} under "
-                                f"{_format_display_path(manuscript_root)}"
-                            ),
-                        )
-                return ResolvedManuscriptTarget(
-                    status="resolved",
-                    manuscript=resolution.manuscript_entrypoint,
-                    manuscript_root=resolution.manuscript_root,
-                    requested_target=requested_target,
-                    detail=(
-                        f"{_format_display_path(requested_target)} resolved to "
-                        f"{_format_display_path(resolution.manuscript_entrypoint)}"
-                    ),
-                )
-            if resolution.status == "missing":
-                return ResolvedManuscriptTarget(
-                    status="missing",
-                    manuscript=None,
-                    manuscript_root=resolution.manuscript_root,
-                    requested_target=requested_target,
-                    detail=f"no manuscript entry point found under {_format_display_path(requested_target)}",
-                )
-            return ResolvedManuscriptTarget(
-                status=resolution.status,
-                manuscript=None,
-                manuscript_root=resolution.manuscript_root,
-                requested_target=requested_target,
-                detail=f"{_format_display_path(requested_target)} is ambiguous or inconsistent: {resolution.detail}",
-            )
-
-    resolution = resolve_current_manuscript_resolution(project_root, allow_markdown=allow_markdown)
-    manuscript = resolution.manuscript_entrypoint
-    if manuscript is not None and resolution.status == "resolved":
-        return ResolvedManuscriptTarget(
-            status="resolved",
-            manuscript=manuscript,
-            manuscript_root=resolution.manuscript_root,
-            requested_target=None,
-            detail=f"{_format_display_path(manuscript)} present",
-        )
-    if allow_markdown:
-        if resolution.status == "missing":
-            return ResolvedManuscriptTarget(
-                status="missing",
-                manuscript=None,
-                manuscript_root=resolution.manuscript_root,
-                requested_target=None,
-                detail=(
-                    "no manuscript entrypoint found under paper/, manuscript/, or draft/ "
-                    "(expected ARTIFACT-MANIFEST.json or PAPER-CONFIG.json-derived output)"
-                ),
-            )
-        return ResolvedManuscriptTarget(
-            status=resolution.status,
-            manuscript=None,
-            manuscript_root=resolution.manuscript_root,
-            requested_target=None,
-            detail=f"ambiguous or inconsistent manuscript roots: {resolution.detail}",
-        )
-    if resolution.status == "missing":
-        return ResolvedManuscriptTarget(
-            status="missing",
-            manuscript=None,
-            manuscript_root=resolution.manuscript_root,
-            requested_target=None,
-            detail="no LaTeX manuscript entrypoint found under paper/, manuscript/, or draft/",
-        )
-    return ResolvedManuscriptTarget(
-        status=resolution.status,
-        manuscript=None,
-        manuscript_root=resolution.manuscript_root,
-        requested_target=None,
-        detail=f"ambiguous or inconsistent manuscript roots: {resolution.detail}",
-    )
-
-
-def _resolve_review_preflight_manuscript(
-    cwd: Path,
-    subject: str | None,
-    *,
-    allow_markdown: bool = True,
-    restrict_to_supported_roots: bool = False,
-    workspace_cwd: Path | None = None,
-    allowed_suffixes: Collection[str] | None = None,
-) -> tuple[Path | None, str]:
-    """Resolve a review-preflight manuscript target from an explicit subject or defaults."""
-
-    resolution = _resolve_review_preflight_manuscript_target(
-        cwd,
-        subject,
-        allow_markdown=allow_markdown,
-        restrict_to_supported_roots=restrict_to_supported_roots,
-        workspace_cwd=workspace_cwd,
-        allowed_suffixes=allowed_suffixes,
-    )
-    return resolution.manuscript, resolution.detail
 
 
 def _resolve_review_preflight_publication_artifact(manuscript: Path, *filenames: str) -> Path | None:
@@ -8048,47 +7607,6 @@ def _reject_internal_paper_config_location(config_file: Path, *, project_root: P
     )
 
 
-def _split_command_arguments(arguments: str | None) -> list[str]:
-    """Split a raw command argument string into shell-like tokens."""
-    if not arguments:
-        return []
-    try:
-        return shlex.split(arguments)
-    except ValueError:
-        return arguments.split()
-
-
-def _flag_values(arguments: str | None, *flags: str) -> list[str]:
-    """Return non-empty values supplied to one or more long flags."""
-    tokens = _split_command_arguments(arguments)
-    values: list[str] = []
-    skip_next = False
-    flag_set = set(flags)
-
-    for index, token in enumerate(tokens):
-        if skip_next:
-            skip_next = False
-            continue
-        if token == "--":
-            break
-        if token in flag_set:
-            skip_next = True
-            if index + 1 >= len(tokens):
-                continue
-            next_token = tokens[index + 1].strip()
-            if next_token and not next_token.startswith("-"):
-                values.append(next_token)
-            continue
-        matched_flag = next((flag for flag in flags if token.startswith(f"{flag}=")), None)
-        if matched_flag is None:
-            continue
-        value = token.partition("=")[2].strip()
-        if value:
-            values.append(value)
-
-    return values
-
-
 def _progress_reconcile_requested(command: object, arguments: str | None) -> bool:
     """Return whether this invocation is the runtime progress reconciliation mode."""
     return str(getattr(command, "name", "") or "") == "gpd:progress" and "--reconcile" in _split_command_arguments(
@@ -8122,216 +7640,6 @@ def _runtime_command_argument_check(command: object, arguments: str | None) -> t
         False,
         f"{supplied} is local CLI only for runtime progress; use `gpd progress json --watch` from a terminal.",
     )
-
-
-def _write_paper_external_authoring_intake_argument(arguments: str | None) -> str | None:
-    """Return the explicit ``--intake`` manifest path supplied to ``gpd:write-paper``."""
-
-    return _shared_write_paper_external_authoring_intake_argument(arguments)
-
-
-def _resolve_write_paper_external_authoring_intake(
-    project_root: Path,
-    arguments: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-) -> WritePaperExternalAuthoringIntakeResolution | None:
-    """Validate the bounded external-authoring intake manifest for ``gpd:write-paper``."""
-
-    return _shared_resolve_write_paper_external_authoring_intake(
-        project_root,
-        arguments,
-        workspace_cwd=workspace_cwd,
-    )
-
-
-def _has_write_paper_external_authoring_intake(arguments: str | None) -> bool:
-    """Return whether ``gpd:write-paper`` received an explicit ``--intake`` flag."""
-
-    return _shared_has_write_paper_external_authoring_intake(arguments)
-
-
-def _has_flag_value(tokens: list[str], flag: str) -> bool:
-    """Return True when ``flag`` is present with a non-empty value."""
-    for index, token in enumerate(tokens):
-        if token == flag:
-            if index + 1 < len(tokens):
-                next_token = tokens[index + 1]
-                if next_token and (not next_token.startswith("-") or _looks_like_negative_cli_value(next_token)):
-                    return True
-        elif token.startswith(f"{flag}="):
-            return bool(token.partition("=")[2].strip())
-    return False
-
-
-def _looks_like_negative_cli_value(token: str) -> bool:
-    """Return True for numeric CLI values that start with '-' but are not options."""
-    return len(token) > 1 and token[0] == "-" and (token[1].isdigit() or token[1] == ".")
-
-
-def _positional_tokens(arguments: str | None, *, flags_with_values: tuple[str, ...] = ()) -> list[str]:
-    """Extract positional tokens after removing known long-option/value pairs."""
-    tokens = _split_command_arguments(arguments)
-    positionals: list[str] = []
-    skip_next = False
-    value_flags = set(flags_with_values)
-
-    for index, token in enumerate(tokens):
-        if skip_next:
-            skip_next = False
-            continue
-        if token == "--":
-            return positionals + tokens[index + 1 :]
-        if token in value_flags:
-            skip_next = True
-            continue
-        if any(token.startswith(f"{flag}=") for flag in value_flags):
-            continue
-        if token.startswith("--"):
-            continue
-        positionals.append(token)
-
-    return positionals
-
-
-def _has_discover_explicit_inputs(arguments: str | None) -> bool:
-    """Discover standalone mode needs either a phase number or a topic."""
-    return bool(_positional_tokens(arguments, flags_with_values=("--depth", "-d")))
-
-
-def _has_simple_positional_inputs(arguments: str | None) -> bool:
-    """Generic detector for commands satisfied by any positional topic/target."""
-    return bool(_positional_tokens(arguments))
-
-
-def _has_sensitivity_explicit_inputs(arguments: str | None) -> bool:
-    """Sensitivity analysis standalone mode requires both target and parameter list."""
-    tokens = _split_command_arguments(arguments)
-    return _has_flag_value(tokens, "--target") and _has_flag_value(tokens, "--params")
-
-
-def _looks_like_parameter_sweep_anchor_token(token: str) -> bool:
-    """Return True for a standalone/current-workspace parameter-sweep compute anchor."""
-    if not token or token.startswith("-"):
-        return False
-    if token.isdigit():
-        return False
-    if token.startswith(("./", "../", "~/", "/", "@")):
-        return True
-    if os.sep in token or (os.altsep is not None and os.altsep in token):
-        return True
-    if Path(token).suffix:
-        return True
-    return any(character.isalpha() for character in token)
-
-
-def _has_parameter_sweep_explicit_inputs(arguments: str | None) -> bool:
-    """Parameter-sweep standalone mode needs param/range flags plus a non-phase compute anchor."""
-    tokens = _split_command_arguments(arguments)
-    if not (_has_flag_value(tokens, "--param") and _has_flag_value(tokens, "--range")):
-        return False
-    positionals = _positional_tokens(arguments, flags_with_values=("--param", "--range"))
-    return any(_looks_like_parameter_sweep_anchor_token(token) for token in positionals)
-
-
-_DIGEST_KNOWLEDGE_PATH_SUFFIXES = DIGEST_KNOWLEDGE_SOURCE_SUFFIXES
-
-
-def _looks_like_digest_knowledge_topic_token(token: str) -> bool:
-    """Return True for a non-empty topic-like token."""
-    if not token or token.startswith("-"):
-        return False
-    if _looks_like_digest_knowledge_path_token(token) or _looks_like_digest_knowledge_arxiv_token(token):
-        return False
-    return any(character.isalpha() for character in token)
-
-
-def _looks_like_digest_knowledge_path_token(token: str) -> bool:
-    """Return True for a token that looks like an explicit path input."""
-    if not token or token.startswith("-"):
-        return False
-    if token.startswith(("./", "../", "~/", "/", "@")):
-        return True
-    if os.sep in token or (os.altsep is not None and os.altsep in token):
-        return True
-    return Path(token).suffix.lower() in _DIGEST_KNOWLEDGE_PATH_SUFFIXES
-
-
-def _looks_like_digest_knowledge_arxiv_token(token: str) -> bool:
-    """Return True for a token that normalizes as an arXiv identifier."""
-    if not token or token.startswith("-"):
-        return False
-    try:
-        normalize_arxiv_id(token)
-    except ValueError:
-        return False
-    return True
-
-
-def _looks_like_review_knowledge_id_token(token: str) -> bool:
-    """Return True for a canonical knowledge identifier token."""
-    if not token or token.startswith("-") or not token.startswith("K-"):
-        return False
-    slug = token[2:]
-    return bool(slug) and normalize_ascii_slug(slug) == slug
-
-
-def _looks_like_review_knowledge_path_token(token: str) -> bool:
-    """Return True for an explicit knowledge-document path token."""
-    if not token or token.startswith("-"):
-        return False
-    if not _looks_like_digest_knowledge_path_token(token):
-        return False
-    path = Path(token)
-    if not (
-        path.suffix.lower() == ".md"
-        and path.stem.startswith("K-")
-        and normalize_ascii_slug(path.stem[2:]) == path.stem[2:]
-    ):
-        return False
-
-    normalized_parts = [part for part in path.as_posix().split("/") if part not in {"", "."}]
-    if path.is_absolute():
-        return len(normalized_parts) >= 3 and normalized_parts[-3:-1] == ["GPD", "knowledge"]
-    return len(normalized_parts) >= 3 and normalized_parts[:2] == ["GPD", "knowledge"]
-
-
-def _has_digest_knowledge_explicit_inputs(arguments: str | None) -> bool:
-    """Digest-knowledge standalone mode needs an explicit topic, path, or arXiv input."""
-    tokens = _split_command_arguments(arguments)
-    return any(
-        _looks_like_digest_knowledge_topic_token(token)
-        or _looks_like_digest_knowledge_path_token(token)
-        or _looks_like_digest_knowledge_arxiv_token(token)
-        for token in tokens
-    )
-
-
-def _has_review_knowledge_explicit_inputs(arguments: str | None) -> bool:
-    """Review-knowledge standalone mode needs an explicit knowledge path or canonical knowledge id."""
-    tokens = _split_command_arguments(arguments)
-    return any(
-        _looks_like_review_knowledge_path_token(token) or _looks_like_review_knowledge_id_token(token)
-        for token in tokens
-    )
-
-
-_PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES: dict[str, Callable[[str | None], bool]] = {
-    "gpd:compare-experiment": _has_simple_positional_inputs,
-    "gpd:compare-results": _has_simple_positional_inputs,
-    "gpd:derive-equation": _has_simple_positional_inputs,
-    "gpd:dimensional-analysis": _has_simple_positional_inputs,
-    "gpd:discover": _has_discover_explicit_inputs,
-    "gpd:explain": _has_simple_positional_inputs,
-    "gpd:digest-knowledge": _has_digest_knowledge_explicit_inputs,
-    "gpd:review-knowledge": _has_review_knowledge_explicit_inputs,
-    "gpd:limiting-cases": _has_simple_positional_inputs,
-    "gpd:literature-review": _has_simple_positional_inputs,
-    "gpd:numerical-convergence": _has_simple_positional_inputs,
-    "gpd:parameter-sweep": _has_parameter_sweep_explicit_inputs,
-    "gpd:sensitivity-analysis": _has_sensitivity_explicit_inputs,
-    "gpd:write-paper": _has_write_paper_external_authoring_intake,
-}
 
 
 def _build_project_aware_guidance(explicit_inputs: list[str], *, init_command: str) -> str:
@@ -8396,1235 +7704,6 @@ def _active_runtime_settings_command(*, cwd: Path | None = None) -> str:
         detect_runtime=detect_runtime_for_gpd_use,
         fallback="the active runtime's `settings` command",
     )
-
-
-def _command_review_contract(command: object) -> object | None:
-    return getattr(command, "review_contract", None)
-
-
-def _command_review_mode(command: object) -> str:
-    return str(getattr(_command_review_contract(command), "review_mode", "") or "").strip()
-
-
-def _command_subject_policy(command: object) -> object | None:
-    command_policy = getattr(command, "command_policy", None)
-    return getattr(command_policy, "subject_policy", None)
-
-
-def _command_supporting_context_policy(command: object) -> object | None:
-    command_policy = getattr(command, "command_policy", None)
-    return getattr(command_policy, "supporting_context_policy", None)
-
-
-def _command_policy_string_list(policy: object | None, field_name: str) -> list[str]:
-    if policy is None:
-        return []
-    raw_value = getattr(policy, field_name, None)
-    if not isinstance(raw_value, tuple | list):
-        return []
-    seen: set[str] = set()
-    normalized: list[str] = []
-    for item in raw_value:
-        value = str(item or "").strip()
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        normalized.append(value)
-    return normalized
-
-
-def _command_policy_bool(policy: object | None, field_name: str) -> bool | None:
-    if policy is None:
-        return None
-    value = getattr(policy, field_name, None)
-    return value if isinstance(value, bool) else None
-
-
-def _command_output_policy(command: object) -> object | None:
-    command_policy = getattr(command, "command_policy", None)
-    return getattr(command_policy, "output_policy", None)
-
-
-def _command_subject_policy_string(command: object, field_name: str) -> str:
-    subject_policy = _command_subject_policy(command)
-    value = getattr(subject_policy, field_name, None) if subject_policy is not None else None
-    return str(value or "").strip()
-
-
-def _command_subject_resolution_mode(command: object) -> str:
-    return _command_subject_policy_string(command, "resolution_mode")
-
-
-def _command_subject_kind(command: object) -> str:
-    return _command_subject_policy_string(command, "subject_kind")
-
-
-def _command_has_typed_subject_policy(command: object) -> bool:
-    return bool(_command_subject_resolution_mode(command))
-
-
-def _command_effective_context_mode(command: object) -> str:
-    """Return the runtime-authoritative context mode for one command."""
-    if _command_review_mode(command) == "publication":
-        supporting_context_policy = _command_supporting_context_policy(command)
-        project_context_mode = str(getattr(supporting_context_policy, "project_context_mode", "") or "").strip()
-        if project_context_mode:
-            return project_context_mode
-    return str(getattr(command, "context_mode", "project-required") or "project-required")
-
-
-def _command_effective_project_reentry_mode(command: object) -> str:
-    """Return the runtime-authoritative project re-entry mode for one command."""
-    supporting_context_policy = _command_supporting_context_policy(command)
-    project_reentry_mode = str(getattr(supporting_context_policy, "project_reentry_mode", "") or "").strip()
-    if project_reentry_mode:
-        return project_reentry_mode
-    return "allowed" if bool(getattr(command, "project_reentry_capable", False)) else "disallowed"
-
-
-_PUBLICATION_INPUT_KIND_LABELS = {
-    "artifact_path": ["external artifact path"],
-    "authoring_intake_manifest": _WRITE_PAPER_EXTERNAL_AUTHORING_EXPLICIT_INPUTS,
-    "manuscript_path": ["manuscript path"],
-    "manuscript_root": ["paper directory or managed manuscript root"],
-    "paste": ["`paste`"],
-    "paste_referee_report": ["`paste`"],
-    "publication_artifact_path": ["external artifact path"],
-    "referee_report_path": ["path to referee report"],
-    "referee_report_source": ["path to referee report"],
-}
-
-
-def _publication_input_kind_labels(input_kind: str) -> list[str]:
-    canonical = re.sub(r"[^a-z0-9]+", "_", input_kind.casefold()).strip("_")
-    labels = _PUBLICATION_INPUT_KIND_LABELS.get(canonical)
-    if labels is not None:
-        return labels
-    return [input_kind.replace("_", " ")]
-
-
-def _command_explicit_input_labels_from_policy(command: object) -> list[str]:
-    subject_policy = _command_subject_policy(command)
-    labels: list[str] = []
-    seen: set[str] = set()
-    for input_kind in _command_policy_string_list(subject_policy, "explicit_input_kinds"):
-        for label in _publication_input_kind_labels(input_kind):
-            if label in seen:
-                continue
-            seen.add(label)
-            labels.append(label)
-    return labels
-
-
-def _command_required_file_patterns(command: object) -> list[str]:
-    """Return runtime-authoritative required file patterns for one command."""
-    if _command_review_mode(command) == "publication":
-        supporting_context_policy = _command_supporting_context_policy(command)
-        if supporting_context_policy is not None:
-            return _command_policy_string_list(supporting_context_policy, "required_file_patterns")
-    requires = getattr(command, "requires", None)
-    if not isinstance(requires, Mapping):
-        return []
-    raw_patterns = requires.get("files")
-    if isinstance(raw_patterns, str):
-        candidates = [raw_patterns]
-    elif isinstance(raw_patterns, list):
-        candidates = [item for item in raw_patterns if isinstance(item, str)]
-    else:
-        return []
-    return [pattern.strip() for pattern in candidates if pattern.strip()]
-
-
-def _command_required_files_present(
-    project_root: Path,
-    command: object,
-) -> tuple[bool, list[str], list[str]]:
-    """Return whether command-required files exist under *project_root*.
-
-    Literal file requirements are conjunctive: every declared path must exist.
-    Globbed requirements are alternative surfaces: if one or more glob patterns
-    are declared, at least one of them must match.
-    """
-    patterns = _command_required_file_patterns(command)
-    if not patterns:
-        return True, [], []
-
-    matched_literals: list[str] = []
-    matched_globs: list[str] = []
-    missing_literals: list[str] = []
-    missing_globs: list[str] = []
-    for pattern in patterns:
-        if glob.has_magic(pattern):
-            try:
-                if any(project_root.glob(pattern)):
-                    matched_globs.append(pattern)
-                else:
-                    missing_globs.append(pattern)
-            except ValueError:
-                missing_globs.append(pattern)
-            continue
-
-        candidate = Path(pattern)
-        resolved = candidate if candidate.is_absolute() else project_root / candidate
-        if resolved.exists():
-            matched_literals.append(pattern)
-        else:
-            missing_literals.append(pattern)
-
-    glob_passed = not missing_globs or bool(matched_globs)
-    passed = not missing_literals and glob_passed
-    matched = [*matched_literals, *matched_globs]
-    missing = [*missing_literals, *missing_globs]
-    return passed, matched, missing
-
-
-def _command_explicit_manuscript_subject_kinds(command: object) -> set[str]:
-    """Return explicit input kinds that can carry a manuscript subject."""
-    subject_policy = _command_subject_policy(command)
-    return set(_command_policy_string_list(subject_policy, "explicit_input_kinds")).intersection(
-        {"artifact_path", "manuscript_path", "manuscript_root", "publication_artifact_path"}
-    )
-
-
-def _command_supports_positional_manuscript_subject(command: object) -> bool:
-    """Return whether one command reads a positional argument as manuscript input."""
-    contract = getattr(command, "review_contract", None)
-    if not _command_requires_manuscript_context(command):
-        return False
-    if _review_contract_requests_check(contract, "referee_report_source"):
-        return False
-    return bool(_command_explicit_manuscript_subject_kinds(command) or _command_required_file_patterns(command))
-
-
-def _command_supports_explicit_manuscript_subject(command: object) -> bool:
-    """Return whether one command accepts manuscript-subject intake in any form."""
-    if not _command_requires_manuscript_context(command):
-        return False
-    return bool(_command_explicit_manuscript_subject_kinds(command) or _command_required_file_patterns(command))
-
-
-def _command_explicit_manuscript_argument(command: object, arguments: str | None) -> str | None:
-    """Extract an explicit manuscript target from command arguments when present."""
-    if not isinstance(arguments, str) or not arguments.strip():
-        return None
-
-    flagged = _flag_values(arguments, "--manuscript")
-    if flagged:
-        return flagged[-1]
-
-    if not _command_supports_positional_manuscript_subject(command):
-        return None
-
-    positionals = _positional_tokens(arguments, flags_with_values=("--manuscript", "--report"))
-    return positionals[0] if positionals else None
-
-
-def _command_referee_report_arguments(command: object, arguments: str | None) -> tuple[str, ...]:
-    """Extract explicit referee-report sources from command arguments when present."""
-    contract = getattr(command, "review_contract", None)
-    if not _review_contract_requests_check(contract, "referee_report_source"):
-        return ()
-    if not isinstance(arguments, str) or not arguments.strip():
-        return ()
-
-    flagged = tuple(value for value in _flag_values(arguments, "--report") if value and value != "paste")
-    if flagged:
-        return flagged
-
-    positionals = _positional_tokens(arguments, flags_with_values=("--manuscript", "--report"))
-    return tuple(token for token in positionals if token and token != "paste")
-
-
-def _command_required_files_override_detail(
-    project_root: Path,
-    command: object,
-    arguments: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-    resolved_subject: ResolvedCommandSubject | None = None,
-) -> str | None:
-    """Return a detail string when explicit review inputs satisfy required-file gating."""
-    if not _command_supports_explicit_manuscript_subject(command):
-        return None
-    if resolved_subject is not None:
-        if (
-            not resolved_subject.explicit_input
-            or resolved_subject.subject_kind != "manuscript"
-            or resolved_subject.status != "resolved"
-            or resolved_subject.ownership_mode not in {"project_backed", "project_reentry_selected"}
-            or resolved_subject.target_path is None
-            or resolved_subject.target_path.is_dir()
-        ):
-            return None
-        return (
-            "explicit manuscript target satisfies command context: "
-            f"{_format_display_path(resolved_subject.target_path)}"
-        )
-    if not isinstance(arguments, str) or not arguments.strip():
-        return None
-
-    manuscript_argument = _command_explicit_manuscript_argument(command, arguments)
-    if manuscript_argument is None:
-        return None
-
-    manuscript, _ = _resolve_review_preflight_manuscript(
-        project_root,
-        manuscript_argument,
-        allow_markdown=not _command_requires_compiled_manuscript(command),
-        restrict_to_supported_roots=_command_explicit_manuscript_subject_uses_supported_roots(command),
-        workspace_cwd=workspace_cwd,
-        allowed_suffixes=_command_explicit_manuscript_suffixes(command),
-    )
-    if manuscript is None:
-        return None
-    return f"explicit manuscript target satisfies command context: {_format_display_path(manuscript)}"
-
-
-def _command_requires_manuscript_context(command: object) -> bool:
-    """Return whether command context should use canonical manuscript resolution."""
-    contract = getattr(command, "review_contract", None)
-    preflight_checks = getattr(contract, "preflight_checks", ())
-    return isinstance(preflight_checks, tuple | list) and "manuscript" in preflight_checks
-
-
-def _command_requires_compiled_manuscript(command: object) -> bool:
-    """Return whether manuscript checks must resolve to a compiled-submission surface."""
-    contract = getattr(command, "review_contract", None)
-    return _review_contract_requests_check(contract, "compiled_manuscript")
-
-
-def _command_manuscript_intake_policy(command: object) -> ManuscriptIntakePolicy:
-    """Return manuscript-target intake rules derived from command metadata."""
-    subject_policy = _command_subject_policy(command)
-    allowed_suffixes = set(_command_policy_string_list(subject_policy, "allowed_suffixes"))
-    if not allowed_suffixes:
-        allowed_suffixes = {".tex"}
-        if not _command_requires_compiled_manuscript(command):
-            allowed_suffixes.add(".md")
-    allow_external_targets = _command_policy_bool(subject_policy, "allow_external_subjects")
-    allow_interactive_without_subject = _command_policy_bool(
-        subject_policy,
-        "allow_interactive_without_subject",
-    )
-    return ManuscriptIntakePolicy(
-        allowed_suffixes=frozenset(allowed_suffixes),
-        allow_external_targets=bool(allow_external_targets),
-        allow_interactive_standalone_intake=bool(allow_interactive_without_subject),
-        interactive_standalone_detail=(
-            _PUBLICATION_INTERACTIVE_STANDALONE_DETAIL if allow_interactive_without_subject else ""
-        ),
-    )
-
-
-def _command_explicit_manuscript_suffixes(command: object) -> frozenset[str]:
-    """Return the allowed explicit manuscript suffixes for one command."""
-    return _command_manuscript_intake_policy(command).allowed_suffixes
-
-
-def _command_allows_external_manuscript_targets(command: object) -> bool:
-    """Return whether a command may accept explicit manuscript targets outside supported roots."""
-    return _command_manuscript_intake_policy(command).allow_external_targets
-
-
-def _command_allows_interactive_standalone_intake(command: object) -> bool:
-    """Return whether a project-aware command may prompt for standalone inputs after launch."""
-    return _command_manuscript_intake_policy(command).allow_interactive_standalone_intake
-
-
-def _command_explicit_manuscript_subject_uses_supported_roots(command: object) -> bool:
-    """Return whether explicit manuscript arguments must stay under supported manuscript roots."""
-    if not _command_supports_explicit_manuscript_subject(command):
-        return False
-    if _command_allows_external_manuscript_targets(command):
-        return False
-    subject_policy = _command_subject_policy(command)
-    supported_roots = {root for root in _command_policy_string_list(subject_policy, "supported_roots") if root}
-    if not supported_roots:
-        supported_roots = {
-            Path(pattern).parts[0] for pattern in _command_required_file_patterns(command) if Path(pattern).parts
-        }
-    return bool(supported_roots) and supported_roots <= _SUPPORTED_MANUSCRIPT_ROOT_NAMES
-
-
-def _command_allows_manuscript_bootstrap(command: object) -> bool:
-    """Return whether missing manuscript roots are expected to be bootstrapped."""
-    subject_policy = _command_subject_policy(command)
-    bootstrap_allowed = _command_policy_bool(subject_policy, "bootstrap_allowed")
-    if bootstrap_allowed is not None:
-        return bootstrap_allowed
-    contract = getattr(command, "review_contract", None)
-    if getattr(command, "name", "") == "gpd:peer-review":
-        return False
-    return (
-        _command_requires_manuscript_context(command)
-        and not _command_required_file_patterns(command)
-        and not _review_contract_requests_check(contract, "compiled_manuscript")
-        and not _review_contract_requests_check(contract, "referee_report_source")
-    )
-
-
-def _command_allows_interactive_subject_intake(command: object) -> bool:
-    """Return whether a command may launch without a concrete subject and ask interactively."""
-    if _command_requires_manuscript_context(command):
-        return _command_allows_interactive_standalone_intake(command)
-    subject_policy = _command_subject_policy(command)
-    return bool(_command_policy_bool(subject_policy, "allow_interactive_without_subject"))
-
-
-_PROJECT_BACKED_ONLY_INTERACTIVE_SUBJECT_COMMANDS = frozenset({"gpd:literature-review"})
-
-
-def _command_allows_standalone_interactive_subject_intake(command: object) -> bool:
-    """Return whether empty standalone command-context may defer subject selection to interaction."""
-    if not _command_allows_interactive_subject_intake(command):
-        return False
-    return str(getattr(command, "name", "") or "") not in _PROJECT_BACKED_ONLY_INTERACTIVE_SUBJECT_COMMANDS
-
-
-def _command_interactive_subject_detail(command: object, explicit_inputs: list[str]) -> str:
-    """Return the standardized detail string for interactive subject intake."""
-    if _command_requires_manuscript_context(command):
-        return _command_manuscript_intake_policy(command).interactive_standalone_detail
-    if not explicit_inputs:
-        explicit_inputs = ["a concrete subject"]
-    if len(explicit_inputs) == 1:
-        subject_text = explicit_inputs[0]
-    elif len(explicit_inputs) == 2:
-        subject_text = f"{explicit_inputs[0]} or {explicit_inputs[1]}"
-    else:
-        subject_text = ", ".join(explicit_inputs[:-1]) + f", or {explicit_inputs[-1]}"
-    return f"no explicit subject supplied; interactive intake can prompt for {subject_text}"
-
-
-def _resolved_subject_manuscript_entrypoint(
-    resolved_subject: ResolvedCommandSubject | None,
-) -> Path | None:
-    """Return the resolved manuscript file for subject-scoped commands."""
-    if (
-        resolved_subject is None
-        or resolved_subject.subject_kind != "manuscript"
-        or resolved_subject.status != "resolved"
-        or resolved_subject.target_path is None
-        or resolved_subject.target_path.is_dir()
-    ):
-        return None
-    return resolved_subject.target_path
-
-
-def _publication_subject_slug_for_manuscript_entrypoint(
-    project_root: Path,
-    manuscript_entrypoint: Path,
-) -> str:
-    """Return the managed publication slug for one manuscript entrypoint."""
-    manuscript_root = _supported_manuscript_root_for_target(project_root, manuscript_entrypoint)
-    if manuscript_root is not None:
-        try:
-            relative_root = manuscript_root.resolve(strict=False).relative_to(project_root.resolve(strict=False))
-        except ValueError:
-            relative_root = None
-        if (
-            relative_root is not None
-            and len(relative_root.parts) == 4
-            and relative_root.parts[0] == PLANNING_DIR_NAME
-            and relative_root.parts[1] == PUBLICATION_DIR_NAME
-            and relative_root.parts[3] == PUBLICATION_MANUSCRIPT_DIR_NAME
-        ):
-            return relative_root.parts[2]
-
-    resolved_root = project_root.resolve(strict=False)
-    resolved_entrypoint = manuscript_entrypoint.resolve(strict=False)
-    try:
-        label = resolved_entrypoint.relative_to(resolved_root).as_posix()
-    except ValueError:
-        label = resolved_entrypoint.as_posix()
-    slug_source = label[: -len(resolved_entrypoint.suffix)] if resolved_entrypoint.suffix else label
-    slug = normalize_ascii_slug(slug_source.replace("/", "-")) or "manuscript"
-    slug = slug[:48].rstrip("-") or "manuscript"
-    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()[:12]
-    return f"{slug}-{digest}"
-
-
-def _managed_publication_slug_for_target(project_root: Path, target: Path | None) -> str | None:
-    """Return the existing managed publication slug for a target under GPD/publication."""
-    if target is None:
-        return None
-    try:
-        relative = target.resolve(strict=False).relative_to(project_root.resolve(strict=False))
-    except ValueError:
-        return None
-    parts = relative.parts
-    if (
-        len(parts) >= 4
-        and parts[0] == PLANNING_DIR_NAME
-        and parts[1] == PUBLICATION_DIR_NAME
-        and parts[3] == PUBLICATION_MANUSCRIPT_DIR_NAME
-    ):
-        return parts[2]
-    return None
-
-
-def _command_context_publication_roots(
-    project_root: Path,
-    command: object,
-    resolved_subject: ResolvedCommandSubject | None,
-) -> tuple[str | None, str | None]:
-    """Return selected response roots exposed by command-context preflight."""
-    if _command_review_mode(command) != "publication":
-        return None, None
-    if resolved_subject is not None and resolved_subject.ownership_mode == "external_authoring_intake":
-        managed_slug = _managed_publication_slug_for_target(
-            project_root,
-            resolved_subject.target_root or resolved_subject.target_path,
-        )
-        if managed_slug is None:
-            return None, None
-        publication_root = f"{PLANNING_DIR_NAME}/{PUBLICATION_DIR_NAME}/{managed_slug}"
-        return publication_root, f"{publication_root}/review"
-    if resolved_subject is None or resolved_subject.subject_kind != "manuscript":
-        return PLANNING_DIR_NAME, f"{PLANNING_DIR_NAME}/review"
-
-    managed_slug = _managed_publication_slug_for_target(project_root, resolved_subject.target_path)
-    if managed_slug is not None:
-        publication_root = f"{PLANNING_DIR_NAME}/{PUBLICATION_DIR_NAME}/{managed_slug}"
-    elif resolved_subject.ownership_mode == "external_artifact" and resolved_subject.target_path is not None:
-        publication_root = (
-            f"{PLANNING_DIR_NAME}/{PUBLICATION_DIR_NAME}/"
-            f"{_publication_subject_slug_for_manuscript_entrypoint(project_root, resolved_subject.target_path)}"
-        )
-    else:
-        publication_root = PLANNING_DIR_NAME
-    return publication_root, f"{publication_root}/review"
-
-
-def _project_relative_path(project_root: Path, target: Path | None) -> str | None:
-    """Return *target* relative to *project_root* when possible."""
-    if target is None:
-        return None
-    try:
-        return target.resolve(strict=False).relative_to(project_root.resolve(strict=False)).as_posix()
-    except ValueError:
-        return target.resolve(strict=False).as_posix()
-
-
-def _review_preflight_publication_routing(
-    *,
-    project_root: Path,
-    command: object,
-    resolved_subject: ResolvedCommandSubject | None,
-    manuscript: Path | None,
-    context_preflight: CommandContextPreflightResult,
-) -> dict[str, str | None]:
-    """Return publication routing fields emitted by raw review-preflight."""
-    selected_publication_root = context_preflight.selected_publication_root
-    selected_review_root = context_preflight.selected_review_root
-    manuscript_root = (
-        _supported_manuscript_root_for_target(project_root, manuscript) if manuscript is not None else None
-    )
-    if manuscript is not None and manuscript_root is None:
-        manuscript_root = manuscript.parent
-
-    publication_subject_slug = None
-    publication_lane_kind = None
-    managed_publication_root = None
-    if (
-        resolved_subject is not None
-        and resolved_subject.ownership_mode == "external_authoring_intake"
-        and _command_review_mode(command) == "publication"
-    ):
-        managed_slug = _managed_publication_slug_for_target(
-            project_root,
-            resolved_subject.target_root or resolved_subject.target_path,
-        )
-        if managed_slug is not None:
-            publication_subject_slug = managed_slug
-            publication_lane_kind = "managed_publication_manuscript"
-            managed_publication_root = f"{PLANNING_DIR_NAME}/{PUBLICATION_DIR_NAME}/{publication_subject_slug}"
-            manuscript_root = resolved_subject.target_root
-    if manuscript is not None and _command_review_mode(command) == "publication":
-        managed_slug = _managed_publication_slug_for_target(project_root, manuscript)
-        publication_subject_slug = managed_slug or _publication_subject_slug_for_manuscript_entrypoint(
-            project_root,
-            manuscript,
-        )
-        managed_publication_root = f"{PLANNING_DIR_NAME}/{PUBLICATION_DIR_NAME}/{publication_subject_slug}"
-        if managed_slug is not None:
-            publication_lane_kind = "managed_publication_manuscript"
-        elif (
-            resolved_subject is not None
-            and resolved_subject.ownership_mode == "external_artifact"
-            and resolved_subject.explicit_input
-        ):
-            publication_lane_kind = "external_artifact"
-        else:
-            publication_lane_kind = "canonical_project_manuscript"
-
-    return {
-        "publication_subject_slug": publication_subject_slug,
-        "publication_lane_kind": publication_lane_kind,
-        "managed_publication_root": managed_publication_root,
-        "selected_publication_root": selected_publication_root,
-        "selected_review_root": selected_review_root,
-        "manuscript_root": _project_relative_path(project_root, manuscript_root),
-        "manuscript_entrypoint": _project_relative_path(project_root, manuscript),
-    }
-
-
-def _resolved_subject_uses_managed_publication_root(resolved_subject: ResolvedCommandSubject | None) -> bool:
-    return (
-        resolved_subject is not None
-        and resolved_subject.subject_kind == "manuscript"
-        and _managed_publication_slug_for_target(resolved_subject.context_root, resolved_subject.target_path)
-        is not None
-    )
-
-
-def _command_managed_output_bindings(
-    *,
-    project_root: Path,
-    resolved_subject: ResolvedCommandSubject | None,
-) -> dict[str, str]:
-    """Return dynamic managed-output subtree bindings for the active subject."""
-    if resolved_subject is not None and resolved_subject.ownership_mode == "external_authoring_intake":
-        managed_slug = _managed_publication_slug_for_target(
-            project_root,
-            resolved_subject.target_root or resolved_subject.target_path,
-        )
-        return {"subject_slug": managed_slug} if managed_slug is not None else {}
-    manuscript_entrypoint = _resolved_subject_manuscript_entrypoint(resolved_subject)
-    if manuscript_entrypoint is None:
-        return {}
-    return {"subject_slug": _publication_subject_slug_for_manuscript_entrypoint(project_root, manuscript_entrypoint)}
-
-
-def _command_managed_output_policy(
-    command: object,
-    *,
-    project_root: Path | None = None,
-    resolved_subject: ResolvedCommandSubject | None = None,
-):
-    """Return a storage-path managed-output policy derived from command metadata, when available."""
-    from gpd.core.storage_paths import (
-        ManagedOutputClass,
-        ManagedOutputMatchMode,
-        ManagedOutputPolicy,
-        ManagedOutputRootKind,
-        StageArtifactPolicy,
-    )
-
-    output_policy = _command_output_policy(command)
-    if output_policy is None:
-        return None
-
-    managed_root_raw = str(getattr(output_policy, "managed_root_kind", "") or "").strip().casefold()
-    if not managed_root_raw:
-        return None
-    if managed_root_raw in {"gpd", "gpd_managed_durable", "gpd_internal_other"}:
-        managed_root_kind = ManagedOutputRootKind.GPD
-        output_class = ManagedOutputClass.GPD_MANAGED_DURABLE
-    elif managed_root_raw in {"project", "user_export_durable", "project_local_other"}:
-        managed_root_kind = ManagedOutputRootKind.PROJECT
-        output_class = ManagedOutputClass.USER_EXPORT_DURABLE
-    else:
-        return None
-
-    subtree = str(getattr(output_policy, "default_output_subtree", "") or "").strip()
-    if not subtree:
-        return None
-    subtree = subtree.replace("\\", "/")
-    if managed_root_kind == ManagedOutputRootKind.GPD:
-        if subtree == PLANNING_DIR_NAME:
-            subtree = ""
-        elif subtree.startswith(f"{PLANNING_DIR_NAME}/"):
-            subtree = subtree[len(PLANNING_DIR_NAME) + 1 :]
-    elif managed_root_kind == ManagedOutputRootKind.PROJECT and subtree.startswith("./"):
-        subtree = subtree[2:]
-    subtree_components = tuple(component for component in subtree.split("/") if component and component != ".")
-
-    stage_policy_raw = str(getattr(output_policy, "stage_artifact_policy", "") or "").strip().casefold()
-    stage_artifact_policy = (
-        StageArtifactPolicy.ALLOWED
-        if stage_policy_raw in {"allowed", "gpd_owned_outputs_only"}
-        else StageArtifactPolicy.DISALLOWED
-    )
-
-    output_mode = str(getattr(output_policy, "output_mode", "") or "").strip().casefold()
-    match_mode = ManagedOutputMatchMode.EXACT if output_mode == "exact" else ManagedOutputMatchMode.SUBTREE
-
-    try:
-        policy = ManagedOutputPolicy(
-            output_class=output_class,
-            managed_root_kind=managed_root_kind,
-            default_output_subtree=subtree_components,
-            match_mode=match_mode,
-            stage_artifact_policy=stage_artifact_policy,
-        )
-    except ValueError:
-        return None
-
-    if not any(re.search(r"\{[A-Za-z_][A-Za-z0-9_]*\}", component) for component in policy.default_output_subtree):
-        return policy
-    if project_root is None:
-        return None
-    try:
-        return policy.bind_output_subtree_placeholders(
-            _command_managed_output_bindings(project_root=project_root, resolved_subject=resolved_subject)
-        )
-    except ValueError:
-        return None
-
-
-def _command_managed_output_root(
-    command: object,
-    *,
-    project_root: Path,
-    resolved_subject: ResolvedCommandSubject | None = None,
-) -> Path | None:
-    """Return the effective managed output root for one command, when typed policy declares it."""
-    from gpd.core.storage_paths import ProjectStorageLayout
-
-    policy = _command_managed_output_policy(
-        command,
-        project_root=project_root,
-        resolved_subject=resolved_subject,
-    )
-    if policy is None:
-        return None
-    return ProjectStorageLayout(project_root).managed_output_path(policy)
-
-
-def _command_managed_output_context_root(
-    *,
-    workspace_root: Path,
-    context_root: Path,
-    project_exists: bool,
-) -> Path:
-    """Choose the root that owns managed outputs for one command-context preflight."""
-    return context_root if project_exists else workspace_root
-
-
-def _command_manuscript_bootstrap_detail() -> str:
-    """Return the canonical bootstrap detail for manuscript-scaffolding commands."""
-    return (
-        "no manuscript entrypoint found under paper/, manuscript/, or draft/; "
-        "fresh bootstrap is allowed and will scaffold a topic-specific manuscript stem under ./paper/"
-    )
-
-
-def _resolved_project_root_for_subject(context_root: Path) -> Path | None:
-    """Return the project root bound to one subject-resolution context, if any."""
-    from gpd.core.constants import ProjectLayout
-
-    candidate = context_root.resolve(strict=False)
-    return candidate if ProjectLayout(candidate).project_md.exists() else None
-
-
-def _command_subject_base_ownership_mode(
-    *,
-    resolved_project_root: Path | None,
-    project_root_source: str | None,
-    project_root_auto_selected: bool,
-) -> str:
-    """Return the default subject ownership mode before explicit-target overrides."""
-    if (
-        resolved_project_root is not None
-        and project_root_auto_selected
-        and str(project_root_source or "").strip() == "recent_project"
-    ):
-        return "project_reentry_selected"
-    if resolved_project_root is not None:
-        return "project_backed"
-    return "workspace_locked"
-
-
-def _resolve_review_knowledge_target(
-    context_root: Path,
-    subject: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-) -> tuple[str, Path | None, str]:
-    """Resolve one canonical review-knowledge target under ``GPD/knowledge``."""
-    workspace_root = (workspace_cwd or context_root).resolve(strict=False)
-    if not isinstance(subject, str) or not subject.strip():
-        return "missing", None, "missing explicit knowledge target"
-
-    tokens = _split_command_arguments(subject)
-    candidate = next((token for token in tokens if token and not token.startswith("-")), "")
-    if not candidate:
-        return "missing", None, "missing explicit knowledge target"
-
-    knowledge_dir = context_root / "GPD" / "knowledge"
-    if _looks_like_review_knowledge_id_token(candidate):
-        target_path = (knowledge_dir / f"{candidate}.md").resolve(strict=False)
-        return "resolved", target_path, f"canonical knowledge id resolves to {_format_display_path(target_path)}"
-
-    if not _looks_like_digest_knowledge_path_token(candidate):
-        return "invalid", None, "review target must be a canonical K-* id or GPD/knowledge/{knowledge_id}.md path"
-
-    target_path = (_resolve_subject_path(candidate, base=workspace_root) or (workspace_root / candidate)).resolve(
-        strict=False
-    )
-    try:
-        relative = target_path.relative_to(context_root.resolve(strict=False))
-    except ValueError:
-        return "invalid", target_path, "review target must resolve under the current workspace's GPD/knowledge/"
-
-    if not (
-        len(relative.parts) == 3
-        and relative.parts[0] == "GPD"
-        and relative.parts[1] == "knowledge"
-        and target_path.suffix.lower() == ".md"
-        and target_path.stem.startswith("K-")
-        and normalize_ascii_slug(target_path.stem[2:]) == target_path.stem[2:]
-    ):
-        return "invalid", target_path, "review target must resolve to canonical GPD/knowledge/{knowledge_id}.md"
-    return "resolved", target_path, f"canonical knowledge target {_format_display_path(target_path)}"
-
-
-def _nonpublication_subject_ownership_mode(
-    *,
-    target_path: Path | None,
-    resolved_project_root: Path | None,
-    base_ownership_mode: str,
-) -> str:
-    """Return ownership mode for a non-publication resolved subject."""
-    if target_path is None:
-        return base_ownership_mode
-    if resolved_project_root is None:
-        return "workspace_locked"
-    try:
-        target_path.resolve(strict=False).relative_to(resolved_project_root.resolve(strict=False))
-    except ValueError:
-        return "external_subject"
-    return base_ownership_mode
-
-
-def _build_nonpublication_resolved_command_subject(
-    project_root: Path,
-    command: object,
-    subject: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-    project_root_source: str | None = None,
-    project_root_auto_selected: bool = False,
-    reentry_mode: str | None = None,
-) -> ResolvedCommandSubject | None:
-    """Resolve the shared subject envelope for typed non-publication commands."""
-    if _command_requires_manuscript_context(command):
-        return None
-    resolution_mode = _command_subject_resolution_mode(command)
-    if not resolution_mode:
-        return None
-
-    workspace_root = (workspace_cwd or project_root).resolve(strict=False)
-    context_root = project_root.resolve(strict=False)
-    resolved_project_root = _resolved_project_root_for_subject(context_root)
-    resolved_project_root_source = project_root_source or ("workspace" if resolved_project_root is not None else None)
-    ancestor_walked_up = (
-        resolved_project_root is not None
-        and resolved_project_root != workspace_root
-        and _subject_is_relative_to(workspace_root, resolved_project_root)
-    )
-    base_ownership_mode = _command_subject_base_ownership_mode(
-        resolved_project_root=resolved_project_root,
-        project_root_source=resolved_project_root_source,
-        project_root_auto_selected=project_root_auto_selected,
-    )
-    explicit_inputs = _command_explicit_input_labels_from_policy(command)
-    subject_kind = _command_subject_kind(command) or "subject"
-
-    allow_interactive_without_subject = _command_allows_interactive_subject_intake(command) and (
-        resolved_project_root is not None or _command_allows_standalone_interactive_subject_intake(command)
-    )
-
-    if not (isinstance(subject, str) and subject.strip()) and allow_interactive_without_subject:
-        return ResolvedCommandSubject(
-            command=str(getattr(command, "name", "") or ""),
-            workspace_root=workspace_root,
-            resolved_project_root=resolved_project_root,
-            context_root=context_root,
-            target_path=None,
-            target_root=None,
-            subject_kind=subject_kind,
-            ownership_mode=base_ownership_mode,
-            status="interactive",
-            exists=False,
-            explicit_input=False,
-            project_root_source=resolved_project_root_source,
-            project_root_auto_selected=project_root_auto_selected,
-            reentry_mode=reentry_mode,
-            ancestor_walked_up=ancestor_walked_up,
-            detail=_command_interactive_subject_detail(command, explicit_inputs),
-        )
-
-    tokens: list[str]
-    if resolution_mode in {"phase_number", "phase_or_topic"}:
-        tokens = _positional_tokens(subject, flags_with_values=("--depth", "-d"))
-    else:
-        tokens = _positional_tokens(subject)
-    if not tokens:
-        if allow_interactive_without_subject:
-            return ResolvedCommandSubject(
-                command=str(getattr(command, "name", "") or ""),
-                workspace_root=workspace_root,
-                resolved_project_root=resolved_project_root,
-                context_root=context_root,
-                target_path=None,
-                target_root=None,
-                subject_kind=subject_kind,
-                ownership_mode=base_ownership_mode,
-                status="interactive",
-                exists=False,
-                explicit_input=False,
-                project_root_source=resolved_project_root_source,
-                project_root_auto_selected=project_root_auto_selected,
-                reentry_mode=reentry_mode,
-                ancestor_walked_up=ancestor_walked_up,
-                detail=_command_interactive_subject_detail(command, explicit_inputs),
-            )
-        return ResolvedCommandSubject(
-            command=str(getattr(command, "name", "") or ""),
-            workspace_root=workspace_root,
-            resolved_project_root=resolved_project_root,
-            context_root=context_root,
-            target_path=None,
-            target_root=None,
-            subject_kind=subject_kind,
-            ownership_mode=base_ownership_mode,
-            status="missing",
-            exists=False,
-            explicit_input=False,
-            project_root_source=resolved_project_root_source,
-            project_root_auto_selected=project_root_auto_selected,
-            reentry_mode=reentry_mode,
-            ancestor_walked_up=ancestor_walked_up,
-            detail=f"missing explicit subject ({', '.join(explicit_inputs or ['subject'])})",
-        )
-
-    target_path: Path | None = None
-    target_root: Path | None = None
-    detail = "explicit subject supplied"
-    status = "resolved"
-
-    if resolution_mode in {"knowledge_review_target", "explicit_current_workspace_canonical_target"}:
-        status, target_path, detail = _resolve_review_knowledge_target(
-            context_root,
-            subject,
-            workspace_cwd=workspace_root,
-        )
-        if target_path is not None:
-            target_root = target_path.parent
-    elif resolution_mode == "knowledge_input":
-        first = tokens[0]
-        if _looks_like_digest_knowledge_path_token(first):
-            target_path = (_resolve_subject_path(first, base=workspace_root) or (workspace_root / first)).resolve(
-                strict=False
-            )
-            target_root = target_path if target_path.is_dir() else target_path.parent
-            detail = f"explicit knowledge input path {_format_display_path(target_path)}"
-        elif _looks_like_digest_knowledge_arxiv_token(first):
-            detail = f"explicit arXiv knowledge input {first}"
-        else:
-            detail = "explicit knowledge topic supplied"
-    elif resolution_mode in {"compare_subject", "compare_experiment_subject"}:
-        first = tokens[0]
-        if _looks_like_digest_knowledge_path_token(first):
-            target_path = (_resolve_subject_path(first, base=workspace_root) or (workspace_root / first)).resolve(
-                strict=False
-            )
-            target_root = target_path if target_path.is_dir() else target_path.parent
-            detail = f"explicit comparison target {_format_display_path(target_path)}"
-        else:
-            detail = "explicit comparison target supplied"
-    elif resolution_mode == "explanation_input":
-        first = tokens[0]
-        if _looks_like_digest_knowledge_path_token(first):
-            target_path = (_resolve_subject_path(first, base=workspace_root) or (workspace_root / first)).resolve(
-                strict=False
-            )
-            target_root = target_path if target_path.is_dir() else target_path.parent
-            detail = f"explicit explanation anchor {_format_display_path(target_path)}"
-        else:
-            detail = "explicit explanation subject supplied"
-    elif resolution_mode == "phase_number":
-        first = tokens[0]
-        subject_kind = "phase"
-        if re.fullmatch(r"\d+(?:\.\d+)*", first):
-            detail = f"explicit phase subject {first}"
-        else:
-            status = "invalid"
-            detail = f"invalid phase-number subject {first!r}"
-    elif resolution_mode == "phase_or_topic":
-        first = tokens[0]
-        if re.fullmatch(r"\d+(?:\.\d+)*", first):
-            subject_kind = "phase"
-            detail = f"explicit phase subject {first}"
-        else:
-            detail = "explicit discovery topic supplied"
-    elif resolution_mode == "literature_topic":
-        detail = "explicit literature-review topic supplied"
-
-    ownership_mode = _nonpublication_subject_ownership_mode(
-        target_path=target_path,
-        resolved_project_root=resolved_project_root,
-        base_ownership_mode=base_ownership_mode,
-    )
-
-    return ResolvedCommandSubject(
-        command=str(getattr(command, "name", "") or ""),
-        workspace_root=workspace_root,
-        resolved_project_root=resolved_project_root,
-        context_root=context_root,
-        target_path=target_path,
-        target_root=target_root,
-        subject_kind=subject_kind,
-        ownership_mode=ownership_mode,
-        status=status,
-        exists=target_path.exists() if target_path is not None else False,
-        explicit_input=True,
-        project_root_source=resolved_project_root_source,
-        project_root_auto_selected=project_root_auto_selected,
-        reentry_mode=reentry_mode,
-        ancestor_walked_up=ancestor_walked_up,
-        detail=detail,
-    )
-
-
-def _build_resolved_command_subject(
-    project_root: Path,
-    command: object,
-    subject: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-    project_root_source: str | None = None,
-    project_root_auto_selected: bool = False,
-    reentry_mode: str | None = None,
-) -> ResolvedCommandSubject | None:
-    """Resolve the shared subject envelope for publication/manuscript-aware commands."""
-    from gpd.core.constants import ProjectLayout
-
-    generic_resolution = _build_nonpublication_resolved_command_subject(
-        project_root,
-        command,
-        subject,
-        workspace_cwd=workspace_cwd,
-        project_root_source=project_root_source,
-        project_root_auto_selected=project_root_auto_selected,
-        reentry_mode=reentry_mode,
-    )
-    if generic_resolution is not None:
-        return generic_resolution
-
-    if not _command_requires_manuscript_context(command):
-        return None
-
-    workspace_root = (workspace_cwd or project_root).resolve(strict=False)
-    context_root = project_root.resolve(strict=False)
-    resolved_project_root = _resolved_project_root_for_subject(context_root)
-    resolved_project_root_source = project_root_source or ("workspace" if resolved_project_root is not None else None)
-    ancestor_walked_up = (
-        resolved_project_root is not None
-        and resolved_project_root != workspace_root
-        and _subject_is_relative_to(workspace_root, resolved_project_root)
-    )
-    base_ownership_mode = _command_subject_base_ownership_mode(
-        resolved_project_root=resolved_project_root,
-        project_root_source=resolved_project_root_source,
-        project_root_auto_selected=project_root_auto_selected,
-    )
-    if (
-        str(getattr(command, "name", "") or "") == "gpd:write-paper"
-        and resolved_project_root is not None
-        and _has_write_paper_external_authoring_intake(subject)
-    ):
-        intake_argument = _write_paper_external_authoring_intake_argument(subject)
-        intake_path = _resolve_subject_path(intake_argument, base=workspace_root) if intake_argument else None
-        return ResolvedCommandSubject(
-            command=str(getattr(command, "name", "") or ""),
-            workspace_root=workspace_root,
-            resolved_project_root=resolved_project_root,
-            context_root=context_root,
-            target_path=intake_path,
-            target_root=None,
-            subject_kind="publication",
-            ownership_mode="external_authoring_intake",
-            status="invalid",
-            exists=intake_path.exists() if intake_path is not None else False,
-            explicit_input=True,
-            project_root_source=resolved_project_root_source,
-            project_root_auto_selected=project_root_auto_selected,
-            reentry_mode=reentry_mode,
-            ancestor_walked_up=ancestor_walked_up,
-            detail=reject_write_paper_intake_inside_project_detail(),
-        )
-
-    if str(getattr(command, "name", "") or "") == "gpd:write-paper" and resolved_project_root is None:
-        intake_resolution = _resolve_write_paper_external_authoring_intake(
-            context_root,
-            subject,
-            workspace_cwd=workspace_root,
-        )
-        if intake_resolution is None:
-            return ResolvedCommandSubject(
-                command=str(getattr(command, "name", "") or ""),
-                workspace_root=workspace_root,
-                resolved_project_root=resolved_project_root,
-                context_root=context_root,
-                target_path=None,
-                target_root=None,
-                subject_kind="publication",
-                ownership_mode=base_ownership_mode,
-                status="missing",
-                exists=False,
-                explicit_input=False,
-                project_root_source=resolved_project_root_source,
-                project_root_auto_selected=project_root_auto_selected,
-                reentry_mode=reentry_mode,
-                ancestor_walked_up=ancestor_walked_up,
-                detail=_WRITE_PAPER_EXTERNAL_AUTHORING_DETAIL,
-            )
-
-        intake_target_root = (
-            intake_resolution.manuscript_root
-            or intake_resolution.intake_root
-            or (intake_resolution.intake_path.parent if intake_resolution.intake_path is not None else None)
-        )
-        if intake_resolution.status == "resolved":
-            return ResolvedCommandSubject(
-                command=str(getattr(command, "name", "") or ""),
-                workspace_root=workspace_root,
-                resolved_project_root=resolved_project_root,
-                context_root=context_root,
-                target_path=intake_resolution.intake_path,
-                target_root=intake_resolution.manuscript_root,
-                subject_kind="publication",
-                ownership_mode="external_authoring_intake",
-                status="bootstrap",
-                exists=intake_resolution.intake_path is not None and intake_resolution.intake_path.exists(),
-                explicit_input=True,
-                project_root_source=resolved_project_root_source,
-                project_root_auto_selected=project_root_auto_selected,
-                reentry_mode=reentry_mode,
-                ancestor_walked_up=ancestor_walked_up,
-                detail=intake_resolution.detail,
-            )
-
-        return ResolvedCommandSubject(
-            command=str(getattr(command, "name", "") or ""),
-            workspace_root=workspace_root,
-            resolved_project_root=resolved_project_root,
-            context_root=context_root,
-            target_path=intake_resolution.intake_path,
-            target_root=intake_target_root,
-            subject_kind="publication",
-            ownership_mode="external_authoring_intake",
-            status=intake_resolution.status,
-            exists=intake_resolution.intake_path is not None and intake_resolution.intake_path.exists(),
-            explicit_input=True,
-            project_root_source=resolved_project_root_source,
-            project_root_auto_selected=project_root_auto_selected,
-            reentry_mode=reentry_mode,
-            ancestor_walked_up=ancestor_walked_up,
-            detail=intake_resolution.detail,
-        )
-    manuscript_subject = _command_explicit_manuscript_argument(command, subject)
-
-    if (
-        _command_supports_explicit_manuscript_subject(command)
-        and not (isinstance(subject, str) and subject.strip())
-        and _command_allows_interactive_standalone_intake(command)
-        and not ProjectLayout(context_root).project_md.exists()
-    ):
-        return ResolvedCommandSubject(
-            command=str(getattr(command, "name", "") or ""),
-            workspace_root=workspace_root,
-            resolved_project_root=resolved_project_root,
-            context_root=context_root,
-            target_path=None,
-            target_root=None,
-            subject_kind="manuscript",
-            ownership_mode=base_ownership_mode,
-            status="interactive",
-            exists=False,
-            explicit_input=False,
-            project_root_source=resolved_project_root_source,
-            project_root_auto_selected=project_root_auto_selected,
-            reentry_mode=reentry_mode,
-            ancestor_walked_up=ancestor_walked_up,
-            detail=_command_manuscript_intake_policy(command).interactive_standalone_detail,
-        )
-
-    target_resolution = _resolve_review_preflight_manuscript_target(
-        context_root,
-        manuscript_subject if _command_supports_explicit_manuscript_subject(command) else None,
-        allow_markdown=not _command_requires_compiled_manuscript(command),
-        restrict_to_supported_roots=_command_explicit_manuscript_subject_uses_supported_roots(command),
-        workspace_cwd=workspace_root,
-        allowed_suffixes=_command_explicit_manuscript_suffixes(command),
-    )
-    target_path = target_resolution.manuscript or target_resolution.requested_target
-    target_root = target_resolution.manuscript_root
-    if target_root is None and target_path is not None:
-        target_root = target_path if target_path.is_dir() else target_path.parent
-
-    status = target_resolution.status
-    detail = target_resolution.detail
-    if (
-        _command_allows_manuscript_bootstrap(command)
-        and target_resolution.requested_target is None
-        and status == "missing"
-    ):
-        status = "bootstrap"
-        detail = _command_manuscript_bootstrap_detail()
-        target_root = context_root / "paper"
-
-    ownership_mode = base_ownership_mode
-    ownership_target = target_resolution.manuscript or target_resolution.requested_target
-    if ownership_target is not None and (
-        resolved_project_root is None
-        or not _path_is_within_supported_manuscript_root(resolved_project_root, ownership_target)
-    ):
-        ownership_mode = "external_artifact"
-
-    return ResolvedCommandSubject(
-        command=str(getattr(command, "name", "") or ""),
-        workspace_root=workspace_root,
-        resolved_project_root=resolved_project_root,
-        context_root=context_root,
-        target_path=target_path,
-        target_root=target_root,
-        subject_kind="manuscript",
-        ownership_mode=ownership_mode,
-        status=status,
-        exists=target_path.exists() if target_path is not None else False,
-        explicit_input=target_resolution.requested_target is not None,
-        project_root_source=resolved_project_root_source,
-        project_root_auto_selected=project_root_auto_selected,
-        reentry_mode=reentry_mode,
-        ancestor_walked_up=ancestor_walked_up,
-        detail=detail,
-    )
-
-
-def _command_context_manuscript_check(
-    project_root: Path,
-    command: object,
-    arguments: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-    resolved_subject: ResolvedCommandSubject | None = None,
-) -> tuple[bool, str] | None:
-    """Return a canonical manuscript-context check for publication commands."""
-    if not _command_requires_manuscript_context(command):
-        return None
-    subject_resolution = resolved_subject or _build_resolved_command_subject(
-        project_root,
-        command,
-        arguments,
-        workspace_cwd=workspace_cwd,
-    )
-    if subject_resolution is None:
-        return None
-    return subject_resolution.status in {"resolved", "bootstrap"}, subject_resolution.detail
 
 
 def _validated_runtime_surface(*, cwd: Path | None = None) -> str:
@@ -9721,135 +7800,6 @@ def _peer_review_resolved_mode(
     """Return the resolved peer-review intake mode and the reason it was selected."""
     resolution = _peer_review_mode_resolution(project_root, subject, workspace_cwd=workspace_cwd)
     return resolution.resolved_mode, resolution.mode_reason
-
-
-def _normalize_review_scope_selector(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", value.casefold()).strip("_")
-
-
-def _resolved_subject_scope_selectors(resolved_subject: ResolvedCommandSubject | None) -> frozenset[str]:
-    if resolved_subject is None:
-        return frozenset()
-
-    selectors: set[str] = set()
-    ownership_mode = _normalize_review_scope_selector(resolved_subject.ownership_mode)
-    if ownership_mode:
-        selectors.add(ownership_mode)
-    status = _normalize_review_scope_selector(resolved_subject.status)
-    if status:
-        selectors.add(status)
-    if resolved_subject.explicit_input:
-        selectors.add("explicit_input")
-        if resolved_subject.subject_kind == "manuscript":
-            selectors.add("explicit_manuscript")
-    if resolved_subject.ancestor_walked_up:
-        selectors.add("ancestor_project")
-    if resolved_subject.ownership_mode in {"project_backed", "project_reentry_selected"}:
-        selectors.add("project_backed")
-    if _resolved_subject_uses_managed_publication_root(resolved_subject):
-        selectors.add("managed_publication_subject")
-    if resolved_subject.ownership_mode == "external_artifact":
-        selectors.update(
-            {
-                "explicit_artifact",
-                "explicit_external_manuscript",
-                "explicit_external_subject",
-                "external_artifact",
-            }
-        )
-    if resolved_subject.ownership_mode == "external_authoring_intake":
-        selectors.update(
-            {
-                "external_authoring_intake",
-                "explicit_intake_manifest",
-                "authoring_intake",
-            }
-        )
-    if resolved_subject.status == "interactive":
-        selectors.update({"interactive", "interactive_standalone"})
-    return frozenset(selectors)
-
-
-def _active_review_contract_scope_variants(
-    contract: object,
-    *,
-    resolved_subject: ResolvedCommandSubject | None,
-) -> list[object]:
-    active_selectors = _resolved_subject_scope_selectors(resolved_subject)
-    active_variants: list[object] = []
-    for variant in list(getattr(contract, "scope_variants", []) or []):
-        scope = _normalize_review_scope_selector(str(getattr(variant, "scope", "") or ""))
-        if scope and scope in active_selectors:
-            active_variants.append(variant)
-    return active_variants
-
-
-def _effective_review_contract_scope_overrides(
-    contract: object,
-    *,
-    active_scope_variants: list[object],
-) -> tuple[list[str], list[str], list[str]]:
-    required_outputs = list(getattr(contract, "required_outputs", []) or [])
-    required_evidence = list(getattr(contract, "required_evidence", []) or [])
-    blocking_conditions = list(getattr(contract, "blocking_conditions", []) or [])
-    for variant in active_scope_variants:
-        outputs_override = list(getattr(variant, "required_outputs_override", []) or [])
-        if outputs_override:
-            required_outputs = outputs_override
-        evidence_override = list(getattr(variant, "required_evidence_override", []) or [])
-        if evidence_override:
-            required_evidence = evidence_override
-        blocking_override = list(getattr(variant, "blocking_conditions_override", []) or [])
-        if blocking_override:
-            blocking_conditions = blocking_override
-    return required_outputs, required_evidence, blocking_conditions
-
-
-def _publication_subject_preflight_policy(
-    command: object,
-    *,
-    resolved_subject: ResolvedCommandSubject | None,
-) -> PublicationSubjectPreflightPolicy:
-    """Return publication preflight relaxations derived from the shared subject envelope."""
-    contract = _command_review_contract(command)
-    if _command_review_mode(command) != "publication":
-        return PublicationSubjectPreflightPolicy()
-
-    active_scopes = _resolved_subject_scope_selectors(resolved_subject)
-    active_scope_variants = _active_review_contract_scope_variants(
-        contract,
-        resolved_subject=resolved_subject,
-    )
-    relaxed_checks: set[str] = set()
-    optional_checks: set[str] = set()
-    detail_overrides: dict[str, str] = {}
-    for variant in active_scope_variants:
-        relaxed_checks.update(list(getattr(variant, "relaxed_preflight_checks", []) or []))
-        optional_checks.update(list(getattr(variant, "optional_preflight_checks", []) or []))
-
-    if active_scopes.intersection({"external_authoring_intake", "explicit_intake_manifest", "authoring_intake"}):
-        for check_name, detail in _WRITE_PAPER_EXTERNAL_AUTHORING_OPTIONAL_DETAILS.items():
-            if check_name in relaxed_checks or check_name in optional_checks:
-                detail_overrides.setdefault(check_name, detail)
-
-    if active_scopes.intersection({"explicit_artifact", "external_artifact"}):
-        for check_name, detail in _EXTERNAL_ARTIFACT_OPTIONAL_DETAILS.items():
-            if check_name in relaxed_checks or check_name in optional_checks:
-                detail_overrides.setdefault(check_name, detail)
-
-    required_outputs, required_evidence, blocking_conditions = _effective_review_contract_scope_overrides(
-        contract,
-        active_scope_variants=active_scope_variants,
-    )
-    return PublicationSubjectPreflightPolicy(
-        active_scopes=active_scopes,
-        relaxed_checks=frozenset(relaxed_checks),
-        optional_checks=frozenset(optional_checks),
-        detail_overrides=detail_overrides,
-        required_outputs=tuple(required_outputs),
-        required_evidence=tuple(required_evidence),
-        blocking_conditions=tuple(blocking_conditions),
-    )
 
 
 def _peer_review_artifact_text_surface_ready(
@@ -11811,87 +9761,6 @@ def _normalize_verification_report_skeleton_status(status: str) -> str:
     return normalized
 
 
-def _load_verification_report_skeleton_builder() -> Callable[..., Mapping[str, object]]:
-    """Load the source-of-truth verification-report skeleton builder."""
-
-    try:
-        from gpd.core.verification_report import build_verification_report_skeleton
-    except ImportError as exc:
-        raise GPDError(
-            "verification-report skeleton builder is not available; expected "
-            "gpd.core.verification_report.build_verification_report_skeleton"
-        ) from exc
-    return build_verification_report_skeleton
-
-
-def _load_verification_report_finalizer() -> Callable[..., object]:
-    """Load the source-of-truth verification-report finalizer."""
-
-    try:
-        from gpd.core.verification_report import finalize_verification_report
-    except ImportError as exc:
-        raise GPDError(
-            "verification-report finalizer is not available; expected "
-            "gpd.core.verification_report.finalize_verification_report"
-        ) from exc
-    return finalize_verification_report
-
-
-def _callable_accepts_kwarg(callable_obj: Callable[..., object], name: str) -> bool:
-    try:
-        signature = inspect.signature(callable_obj)
-    except (TypeError, ValueError):
-        return False
-    for parameter in signature.parameters.values():
-        if parameter.kind == inspect.Parameter.VAR_KEYWORD:
-            return True
-        if parameter.name == name and parameter.kind in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }:
-            return True
-    return False
-
-
-def _callable_has_explicit_kwarg(callable_obj: Callable[..., object], name: str) -> bool:
-    try:
-        signature = inspect.signature(callable_obj)
-    except (TypeError, ValueError):
-        return False
-    return any(
-        parameter.name == name
-        and parameter.kind
-        in {
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            inspect.Parameter.KEYWORD_ONLY,
-        }
-        for parameter in signature.parameters.values()
-    )
-
-
-def _call_verification_report_skeleton_builder(
-    builder: Callable[..., object],
-    *,
-    contract: object,
-    plan_path: Path,
-    plan_contract_ref: str,
-    status: str,
-    verified: str | None,
-    score: str | None,
-) -> object:
-    kwargs: dict[str, object] = {
-        "contract": contract,
-        "plan_path": plan_path,
-        "plan_contract_ref": plan_contract_ref,
-        "status": status,
-    }
-    if verified is not None and _callable_accepts_kwarg(builder, "verified"):
-        kwargs["verified"] = verified
-    if score is not None and _callable_accepts_kwarg(builder, "score"):
-        kwargs["score"] = score
-    return builder(**kwargs)
-
-
 def _normalize_verification_report_skeleton_output(
     raw_payload: object,
     *,
@@ -11899,16 +9768,7 @@ def _normalize_verification_report_skeleton_output(
     plan_contract_ref: str,
     target_status: str,
 ) -> dict[str, object]:
-    if hasattr(raw_payload, "model_dump"):
-        payload = raw_payload.model_dump(mode="json", by_alias=True)
-    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
-        payload = dataclasses.asdict(raw_payload)
-    else:
-        payload = raw_payload
-    if not isinstance(payload, Mapping):
-        raise GPDError("verification-report skeleton builder must return a mapping")
-
-    normalized = dict(payload)
+    normalized = _mapping_payload(raw_payload, label="verification-report skeleton builder")
     normalized.setdefault("plan_path", str(plan_path))
     normalized.setdefault("plan_contract_ref", plan_contract_ref)
     normalized.setdefault("target_status", target_status)
@@ -12180,6 +10040,76 @@ def _verification_report_validation_not_run(mode: str, error: str) -> dict[str, 
     }
 
 
+def _artifact_target_ref(target_path: Path) -> str:
+    return _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+
+
+def _artifact_write_blocker(
+    target_path: Path,
+    *,
+    force: bool,
+    target_exists: bool | None = None,
+    existing_requires_force: bool = True,
+) -> str | None:
+    exists = target_path.exists() if target_exists is None else target_exists
+    if exists and existing_requires_force and not force:
+        return f"target exists; pass --force to overwrite: {_format_display_path(target_path)}"
+    if not target_path.parent.exists():
+        return f"target parent directory does not exist: {_format_display_path(target_path.parent)}"
+    if not target_path.parent.is_dir():
+        return f"target parent is not a directory: {_format_display_path(target_path.parent)}"
+    return None
+
+
+def _atomic_write_artifact_error(target_path: Path, content: str) -> str | None:
+    try:
+        atomic_write(target_path, content)
+    except OSError as exc:
+        return f"failed to write target atomically: {exc}"
+    return None
+
+
+def _emit_raw_json_and_exit(payload: Mapping[str, object]) -> NoReturn:
+    _emit_raw_json(dict(payload))
+    raise typer.Exit(code=1)
+
+
+def _verification_report_write_payload(
+    *,
+    target_path: Path,
+    target_ref: str,
+    force: bool,
+    body_path: Path | None,
+    warnings: list[str],
+    validation_commands: list[str],
+    patch_file_path: Path | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "written": False,
+        "target_report_path": str(target_path),
+        "target_report_ref": target_ref,
+        "replaced": False,
+        "force": force,
+        "body_file": str(body_path) if body_path is not None else None,
+        "validation": {},
+        "warnings": warnings,
+        "validation_commands": validation_commands,
+    }
+    if patch_file_path is not None:
+        payload["patch_file"] = str(patch_file_path)
+    return payload
+
+
+def _emit_verification_report_not_run(
+    write_payload: dict[str, object],
+    *,
+    mode: str,
+    error: str,
+) -> NoReturn:
+    write_payload["validation"] = _verification_report_validation_not_run(mode, error)
+    _emit_raw_json_and_exit(write_payload)
+
+
 def _verification_report_write_recovery(
     *,
     plan_path: Path,
@@ -12328,119 +10258,15 @@ def _validate_verification_report_candidate(
     }
 
 
-def _jsonable_value(value: object) -> object:
-    if hasattr(value, "model_dump"):
-        return value.model_dump(mode="json", by_alias=True)
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return dataclasses.asdict(value)
-    return value
-
-
-def _coerce_verification_report_outcome_patch(outcome_patch: Mapping[str, object]) -> object:
-    try:
-        from gpd.core.verification_report import VerificationReportOutcomePatch
-    except ImportError:
-        return outcome_patch
-    return VerificationReportOutcomePatch.model_validate(outcome_patch)
-
-
-def _call_verification_report_finalizer(
-    finalizer: Callable[..., object],
-    *,
-    contract: object,
-    outcome_patch: Mapping[str, object],
-    body_markdown: str,
-    plan_path: Path,
-    plan_contract_ref: str,
-    target_report_ref: str,
-    source_path: Path,
-    validation_mode: str,
-) -> object:
-    kwargs: dict[str, object] = {
-        "contract": contract,
-        "body_markdown": body_markdown,
-    }
-    if _callable_has_explicit_kwarg(finalizer, "outcome"):
-        kwargs["outcome"] = _coerce_verification_report_outcome_patch(outcome_patch)
-    elif _callable_has_explicit_kwarg(finalizer, "outcome_patch"):
-        kwargs["outcome_patch"] = _coerce_verification_report_outcome_patch(outcome_patch)
-    elif _callable_has_explicit_kwarg(finalizer, "patch"):
-        kwargs["patch"] = _coerce_verification_report_outcome_patch(outcome_patch)
-    else:
-        kwargs["outcome_patch"] = outcome_patch
-    if _callable_accepts_kwarg(finalizer, "plan_path"):
-        kwargs["plan_path"] = plan_path
-    if _callable_accepts_kwarg(finalizer, "plan_contract_ref"):
-        kwargs["plan_contract_ref"] = plan_contract_ref
-    if _callable_accepts_kwarg(finalizer, "target_report_ref"):
-        kwargs["target_report_ref"] = target_report_ref
-    if _callable_accepts_kwarg(finalizer, "source_path"):
-        kwargs["source_path"] = source_path
-    if _callable_accepts_kwarg(finalizer, "validation_mode"):
-        kwargs["validation_mode"] = validation_mode
-    return finalizer(**kwargs)
-
-
 def _verification_report_finalized_markdown(payload: Mapping[str, object]) -> str:
-    for key in ("markdown", "markdown_draft", "content", "report_markdown"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.rstrip() + "\n"
-    raise GPDError("verification-report finalizer payload is missing markdown")
-
-
-def _load_proof_redteam_validator() -> Callable[..., object]:
-    """Load the public proof-redteam artifact validator."""
-
-    try:
-        from gpd.core.proof_redteam import validate_proof_redteam_artifact
-    except ImportError as exc:
-        raise GPDError(
-            "proof-redteam validator is not available; expected gpd.core.proof_redteam.validate_proof_redteam_artifact"
-        ) from exc
-    return validate_proof_redteam_artifact
-
-
-def _load_proof_redteam_skeleton_builder() -> Callable[..., object]:
-    """Load the source-of-truth proof-redteam skeleton builder."""
-
-    try:
-        from gpd.core.proof_redteam import build_proof_redteam_skeleton
-    except ImportError as exc:
-        raise GPDError(
-            "proof-redteam skeleton builder is not available; expected "
-            "gpd.core.proof_redteam.build_proof_redteam_skeleton"
-        ) from exc
-    return build_proof_redteam_skeleton
-
-
-def _load_proof_redteam_finalizer() -> Callable[..., object]:
-    """Load the source-of-truth proof-redteam finalizer."""
-
-    try:
-        from gpd.core.proof_redteam import finalize_proof_redteam_artifact
-    except ImportError as exc:
-        raise GPDError(
-            "proof-redteam finalizer is not available; expected gpd.core.proof_redteam.finalize_proof_redteam_artifact"
-        ) from exc
-    return finalize_proof_redteam_artifact
-
-
-def _validation_result_is_valid(result: object) -> bool:
-    """Return the conventional validation boolean from a result object."""
-
-    for field_name in ("valid", "passed"):
-        if isinstance(result, Mapping) and isinstance(result.get(field_name), bool):
-            return bool(result[field_name])
-        value = getattr(result, field_name, None)
-        if isinstance(value, bool):
-            return value
-    if isinstance(result, Mapping) and isinstance(result.get("errors"), list):
-        return len(result["errors"]) == 0
-    errors = getattr(result, "errors", None)
-    if isinstance(errors, list | tuple):
-        return len(errors) == 0
-    return True
+    markdown = _markdown_payload_value(
+        payload,
+        keys=("markdown", "markdown_draft", "content", "report_markdown"),
+        label="verification-report finalizer",
+        required=True,
+    )
+    assert markdown is not None
+    return markdown
 
 
 def _normalize_proof_redteam_skeleton_status(status: str) -> str:
@@ -12520,25 +10346,6 @@ def _resolve_proof_redteam_proof_artifact_path(
     return next((candidate for candidate in candidates if candidate.exists() and candidate.is_file()), None)
 
 
-def _call_proof_redteam_skeleton_builder(
-    builder: Callable[..., object],
-    *,
-    claim_id: str,
-    claim_text: str | None,
-    status: str,
-    proof_artifact_paths: list[str],
-) -> object:
-    kwargs: dict[str, object] = {
-        "claim_id": claim_id,
-        "status": status,
-    }
-    if claim_text is not None or _callable_accepts_kwarg(builder, "claim_text"):
-        kwargs["claim_text"] = claim_text
-    if proof_artifact_paths or _callable_accepts_kwarg(builder, "proof_artifact_paths"):
-        kwargs["proof_artifact_paths"] = proof_artifact_paths
-    return builder(**kwargs)
-
-
 def _proof_redteam_validation_commands_for_ref(artifact_ref: str) -> list[str]:
     return [f"gpd validate proof-redteam {shlex.quote(artifact_ref)}"]
 
@@ -12566,17 +10373,10 @@ def _normalize_proof_redteam_skeleton_output(
     target_status: str,
 ) -> dict[str, object]:
     if isinstance(raw_payload, str):
-        payload: object = {"markdown_draft": raw_payload}
-    elif hasattr(raw_payload, "model_dump"):
-        payload = raw_payload.model_dump(mode="json", by_alias=True)
-    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
-        payload = dataclasses.asdict(raw_payload)
+        normalized = {"markdown_draft": raw_payload}
     else:
-        payload = raw_payload
-    if not isinstance(payload, Mapping):
-        raise GPDError("proof-redteam skeleton builder must return a mapping or Markdown string")
+        normalized = _mapping_payload(raw_payload, label="proof-redteam skeleton builder")
 
-    normalized = dict(payload)
     normalized.setdefault("claim_id", claim_id)
     if claim_text is not None:
         normalized.setdefault("claim_text", claim_text)
@@ -12620,7 +10420,7 @@ def _proof_redteam_finalize_not_run(
     target_path: Path,
     force: bool,
 ) -> dict[str, object]:
-    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    target_ref = _artifact_target_ref(target_path)
     return {
         "written": False,
         "input_path": str(input_path),
@@ -12634,56 +10434,13 @@ def _proof_redteam_finalize_not_run(
     }
 
 
-def _call_proof_redteam_finalizer(
-    finalizer: Callable[..., object],
-    *,
-    path: Path,
-    project_root: Path,
-    claim_id: str,
-    claim_text: str,
-    proof_artifact_path: str,
-    reviewed_at: str | None,
-    output_path: Path,
-) -> object:
-    kwargs: dict[str, object] = {
-        "path": path,
-        "project_root": project_root,
-        "claim_id": claim_id,
-        "proof_artifact_path": proof_artifact_path,
-    }
-    if _callable_accepts_kwarg(finalizer, "claim_statement"):
-        kwargs["claim_statement"] = claim_text
-    elif _callable_accepts_kwarg(finalizer, "claim_text"):
-        kwargs["claim_text"] = claim_text
-    else:
-        kwargs["claim_statement"] = claim_text
-    if reviewed_at is not None or _callable_accepts_kwarg(finalizer, "reviewed_at"):
-        kwargs["reviewed_at"] = reviewed_at
-    if _callable_accepts_kwarg(finalizer, "output_path"):
-        kwargs["output_path"] = output_path
-    if _callable_accepts_kwarg(finalizer, "write"):
-        kwargs["write"] = False
-    return finalizer(**kwargs)
-
-
 def _proof_redteam_finalized_markdown(payload: Mapping[str, object]) -> str | None:
-    for key in ("markdown", "markdown_draft", "content", "artifact_markdown"):
-        value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.rstrip() + "\n"
-    return None
-
-
-def _mapping_payload(raw_payload: object, *, label: str) -> dict[str, object]:
-    if hasattr(raw_payload, "model_dump"):
-        payload = raw_payload.model_dump(mode="json", by_alias=True)
-    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
-        payload = dataclasses.asdict(raw_payload)
-    else:
-        payload = raw_payload
-    if not isinstance(payload, Mapping):
-        raise GPDError(f"{label} must return a mapping")
-    return dict(payload)
+    return _markdown_payload_value(
+        payload,
+        keys=("markdown", "markdown_draft", "content", "artifact_markdown"),
+        label="proof-redteam finalizer",
+        required=False,
+    )
 
 
 def _return_status_help_list(*, include_any: bool = False) -> str:
@@ -12749,16 +10506,7 @@ def _normalize_return_skeleton_format(output_format: str) -> str:
 
 
 def _normalize_return_skeleton_output(raw_payload: object) -> dict[str, object]:
-    if hasattr(raw_payload, "model_dump"):
-        payload = raw_payload.model_dump(mode="json", by_alias=True)
-    elif dataclasses.is_dataclass(raw_payload) and not isinstance(raw_payload, type):
-        payload = dataclasses.asdict(raw_payload)
-    else:
-        payload = raw_payload
-    if not isinstance(payload, Mapping):
-        raise GPDError("return skeleton builder must return a mapping")
-
-    normalized = dict(payload)
+    normalized = _mapping_payload(raw_payload, label="return skeleton builder")
     envelope = normalized.get("envelope")
     if not isinstance(envelope, Mapping):
         raise GPDError("return skeleton payload is missing envelope")
@@ -12961,7 +10709,7 @@ def _proof_redteam_output_target(output_path: str | None) -> Path:
 
 
 def _proof_redteam_write_not_run(error: str, *, target_path: Path, force: bool) -> dict[str, object]:
-    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    target_ref = _artifact_target_ref(target_path)
     return {
         "written": False,
         "target_path": str(target_path),
@@ -13007,13 +10755,11 @@ def proof_redteam_skeleton_cmd(
     if output_path is not None and not write:
         _error("proof-redteam skeleton --output requires --write")
 
-    try:
-        builder = _load_proof_redteam_skeleton_builder()
-    except GPDError as exc:
-        _error(str(exc))
+    from gpd.core.proof_redteam import build_proof_redteam_skeleton
+
     try:
         raw_payload = _call_proof_redteam_skeleton_builder(
-            builder,
+            build_proof_redteam_skeleton,
             claim_id=normalized_claim_id,
             claim_text=normalized_claim_text,
             status=normalized_status,
@@ -13041,50 +10787,30 @@ def proof_redteam_skeleton_cmd(
         target_path = _proof_redteam_output_target(output_path)
     except GPDError as exc:
         _error(str(exc))
-    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    target_ref = _artifact_target_ref(target_path)
     validation_commands = _proof_redteam_validation_commands_for_ref(target_ref)
     markdown_draft = payload["markdown_draft"]
     assert isinstance(markdown_draft, str)
     target_exists = target_path.exists()
-    if target_exists and not force:
-        _emit_raw_json(
+    blocker = _artifact_write_blocker(target_path, force=force, target_exists=target_exists)
+    if blocker is not None:
+        _emit_raw_json_and_exit(
             _proof_redteam_write_not_run(
-                f"target exists; pass --force to overwrite: {_format_display_path(target_path)}",
+                blocker,
                 target_path=target_path,
                 force=force,
             )
         )
-        raise typer.Exit(code=1)
-    if not target_path.parent.exists():
-        _emit_raw_json(
-            _proof_redteam_write_not_run(
-                f"target parent directory does not exist: {_format_display_path(target_path.parent)}",
-                target_path=target_path,
-                force=force,
-            )
-        )
-        raise typer.Exit(code=1)
-    if not target_path.parent.is_dir():
-        _emit_raw_json(
-            _proof_redteam_write_not_run(
-                f"target parent is not a directory: {_format_display_path(target_path.parent)}",
-                target_path=target_path,
-                force=force,
-            )
-        )
-        raise typer.Exit(code=1)
 
-    try:
-        atomic_write(target_path, markdown_draft.rstrip() + "\n")
-    except OSError as exc:
-        _emit_raw_json(
+    write_error = _atomic_write_artifact_error(target_path, markdown_draft.rstrip() + "\n")
+    if write_error is not None:
+        _emit_raw_json_and_exit(
             _proof_redteam_write_not_run(
-                f"failed to write target atomically: {exc}",
+                write_error,
                 target_path=target_path,
                 force=force,
             )
         )
-        raise typer.Exit(code=1) from exc
     _emit_raw_json(
         {
             "written": True,
@@ -13136,7 +10862,7 @@ def proof_redteam_finalize_cmd(
         target_path = _proof_redteam_finalize_output_target(file_path, output_path)
     except GPDError as exc:
         _error(str(exc))
-    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    target_ref = _artifact_target_ref(target_path)
     validation_commands = _proof_redteam_finalize_validation_commands_for_ref(target_ref)
     input_resolved = file_path.resolve(strict=False)
     target_is_input = target_path == input_resolved
@@ -13153,44 +10879,27 @@ def proof_redteam_finalize_cmd(
             f"{normalized_proof_artifact_path}"
         )
 
-    if target_exists and not target_is_input and not force:
-        _emit_raw_json(
+    blocker = _artifact_write_blocker(
+        target_path,
+        force=force,
+        target_exists=target_exists,
+        existing_requires_force=not target_is_input,
+    )
+    if blocker is not None:
+        _emit_raw_json_and_exit(
             _proof_redteam_finalize_not_run(
-                f"target exists; pass --force to overwrite: {_format_display_path(target_path)}",
+                blocker,
                 input_path=file_path,
                 target_path=target_path,
                 force=force,
             )
         )
-        raise typer.Exit(code=1)
-    if not target_path.parent.exists():
-        _emit_raw_json(
-            _proof_redteam_finalize_not_run(
-                f"target parent directory does not exist: {_format_display_path(target_path.parent)}",
-                input_path=file_path,
-                target_path=target_path,
-                force=force,
-            )
-        )
-        raise typer.Exit(code=1)
-    if not target_path.parent.is_dir():
-        _emit_raw_json(
-            _proof_redteam_finalize_not_run(
-                f"target parent is not a directory: {_format_display_path(target_path.parent)}",
-                input_path=file_path,
-                target_path=target_path,
-                force=force,
-            )
-        )
-        raise typer.Exit(code=1)
+
+    from gpd.core.proof_redteam import finalize_proof_redteam_artifact
 
     try:
-        finalizer = _load_proof_redteam_finalizer()
-    except GPDError as exc:
-        _error(str(exc))
-    try:
         raw_payload = _call_proof_redteam_finalizer(
-            finalizer,
+            finalize_proof_redteam_artifact,
             path=file_path,
             project_root=project_root,
             claim_id=normalized_claim_id,
@@ -13216,23 +10925,20 @@ def proof_redteam_finalize_cmd(
     if not _validation_result_is_valid(payload):
         payload["written"] = False
         payload.setdefault("replaced", False)
-        _emit_raw_json(payload)
-        raise typer.Exit(code=1)
+        _emit_raw_json_and_exit(payload)
 
     markdown = _proof_redteam_finalized_markdown(payload)
     if markdown is not None:
-        try:
-            atomic_write(target_path, markdown)
-        except OSError as exc:
+        write_error = _atomic_write_artifact_error(target_path, markdown)
+        if write_error is not None:
             failure = _proof_redteam_finalize_not_run(
-                f"failed to write target atomically: {exc}",
+                write_error,
                 input_path=file_path,
                 target_path=target_path,
                 force=force,
             )
             failure.update({key: value for key, value in payload.items() if key not in failure})
-            _emit_raw_json(failure)
-            raise typer.Exit(code=1) from exc
+            _emit_raw_json_and_exit(failure)
         payload["written"] = True
         payload["replaced"] = target_exists
     else:
@@ -13316,13 +11022,11 @@ def verification_report_skeleton_cmd(
         _error("PLAN frontmatter does not contain a contract block")
 
     plan_contract_ref = _verification_report_plan_contract_ref(file_path)
-    try:
-        builder = _load_verification_report_skeleton_builder()
-    except GPDError as exc:
-        _error(str(exc))
+    from gpd.core.verification_report import build_verification_report_skeleton
+
     try:
         raw_payload = _call_verification_report_skeleton_builder(
-            builder,
+            build_verification_report_skeleton,
             contract=contract,
             plan_path=file_path,
             plan_contract_ref=plan_contract_ref,
@@ -13350,7 +11054,7 @@ def verification_report_skeleton_cmd(
         or normalized_score is not None
     ):
         target_path = _verification_report_output_target(output_path, payload=payload, plan_path=file_path)
-        target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+        target_ref = _artifact_target_ref(target_path)
         validation_commands = _verification_report_validation_commands_for_ref(target_ref)
         try:
             candidate, rendered_payload = _render_verification_report_candidate(
@@ -13372,38 +11076,17 @@ def verification_report_skeleton_cmd(
 
         warnings = _verification_report_warning_list(rendered_payload, validate_mode=normalized_validate_mode)
         target_exists = target_path.exists()
-        write_payload: dict[str, object] = {
-            "written": False,
-            "target_report_path": str(target_path),
-            "target_report_ref": target_ref,
-            "replaced": False,
-            "force": force,
-            "body_file": str(body_path) if body_path is not None else None,
-            "validation": {},
-            "warnings": warnings,
-            "validation_commands": validation_commands,
-        }
-        if target_exists and not force:
-            write_payload["validation"] = _verification_report_validation_not_run(
-                normalized_validate_mode,
-                f"target exists; pass --force to overwrite: {_format_display_path(target_path)}",
-            )
-            _emit_raw_json(write_payload)
-            raise typer.Exit(code=1)
-        if not target_path.parent.exists():
-            write_payload["validation"] = _verification_report_validation_not_run(
-                normalized_validate_mode,
-                f"target parent directory does not exist: {_format_display_path(target_path.parent)}",
-            )
-            _emit_raw_json(write_payload)
-            raise typer.Exit(code=1)
-        if not target_path.parent.is_dir():
-            write_payload["validation"] = _verification_report_validation_not_run(
-                normalized_validate_mode,
-                f"target parent is not a directory: {_format_display_path(target_path.parent)}",
-            )
-            _emit_raw_json(write_payload)
-            raise typer.Exit(code=1)
+        write_payload = _verification_report_write_payload(
+            target_path=target_path,
+            target_ref=target_ref,
+            force=force,
+            body_path=body_path,
+            warnings=warnings,
+            validation_commands=validation_commands,
+        )
+        blocker = _artifact_write_blocker(target_path, force=force, target_exists=target_exists)
+        if blocker is not None:
+            _emit_verification_report_not_run(write_payload, mode=normalized_validate_mode, error=blocker)
 
         validation = _validate_verification_report_candidate(
             candidate,
@@ -13423,18 +11106,15 @@ def verification_report_skeleton_cmd(
                     verified=normalized_verified,
                     score=normalized_score,
                 )
-            _emit_raw_json(write_payload)
-            raise typer.Exit(code=1)
+            _emit_raw_json_and_exit(write_payload)
 
-        try:
-            atomic_write(target_path, candidate)
-        except OSError as exc:
-            write_payload["validation"] = _verification_report_validation_not_run(
-                normalized_validate_mode,
-                f"failed to write target atomically: {exc}",
+        write_error = _atomic_write_artifact_error(target_path, candidate)
+        if write_error is not None:
+            _emit_verification_report_not_run(
+                write_payload,
+                mode=normalized_validate_mode,
+                error=write_error,
             )
-            _emit_raw_json(write_payload)
-            raise typer.Exit(code=1) from exc
         write_payload["written"] = True
         write_payload["replaced"] = target_exists
         _emit_raw_json(write_payload)
@@ -13495,52 +11175,29 @@ def verification_report_finalize_cmd(
         _error("PLAN frontmatter does not contain a contract block")
 
     target_path = _verification_report_output_target(output_path, payload={}, plan_path=file_path)
-    target_ref = _project_local_gpd_ref(str(target_path)) or target_path.as_posix()
+    target_ref = _artifact_target_ref(target_path)
     validation_commands = _verification_report_validation_commands_for_ref(target_ref)
     warnings: list[str] = []
     target_exists = target_path.exists()
-    write_payload: dict[str, object] = {
-        "written": False,
-        "target_report_path": str(target_path),
-        "target_report_ref": target_ref,
-        "replaced": False,
-        "force": force,
-        "body_file": str(body_path),
-        "patch_file": str(patch_file_path),
-        "validation": {},
-        "warnings": warnings,
-        "validation_commands": validation_commands,
-    }
-    if target_exists and not force:
-        write_payload["validation"] = _verification_report_validation_not_run(
-            normalized_validate_mode,
-            f"target exists; pass --force to overwrite: {_format_display_path(target_path)}",
-        )
-        _emit_raw_json(write_payload)
-        raise typer.Exit(code=1)
-    if not target_path.parent.exists():
-        write_payload["validation"] = _verification_report_validation_not_run(
-            normalized_validate_mode,
-            f"target parent directory does not exist: {_format_display_path(target_path.parent)}",
-        )
-        _emit_raw_json(write_payload)
-        raise typer.Exit(code=1)
-    if not target_path.parent.is_dir():
-        write_payload["validation"] = _verification_report_validation_not_run(
-            normalized_validate_mode,
-            f"target parent is not a directory: {_format_display_path(target_path.parent)}",
-        )
-        _emit_raw_json(write_payload)
-        raise typer.Exit(code=1)
+    write_payload = _verification_report_write_payload(
+        target_path=target_path,
+        target_ref=target_ref,
+        force=force,
+        body_path=body_path,
+        warnings=warnings,
+        validation_commands=validation_commands,
+        patch_file_path=patch_file_path,
+    )
+    blocker = _artifact_write_blocker(target_path, force=force, target_exists=target_exists)
+    if blocker is not None:
+        _emit_verification_report_not_run(write_payload, mode=normalized_validate_mode, error=blocker)
 
     plan_contract_ref = _verification_report_plan_contract_ref(file_path)
-    try:
-        finalizer = _load_verification_report_finalizer()
-    except GPDError as exc:
-        _error(str(exc))
+    from gpd.core.verification_report import finalize_verification_report
+
     try:
         raw_payload = _call_verification_report_finalizer(
-            finalizer,
+            finalize_verification_report,
             contract=contract,
             outcome_patch=patch_document,
             body_markdown=body_markdown,
@@ -13583,18 +11240,15 @@ def verification_report_finalize_cmd(
             validate_mode=normalized_validate_mode,
             force=force,
         )
-        _emit_raw_json(write_payload)
-        raise typer.Exit(code=1)
+        _emit_raw_json_and_exit(write_payload)
 
-    try:
-        atomic_write(target_path, candidate)
-    except OSError as exc:
-        write_payload["validation"] = _verification_report_validation_not_run(
-            normalized_validate_mode,
-            f"failed to write target atomically: {exc}",
+    write_error = _atomic_write_artifact_error(target_path, candidate)
+    if write_error is not None:
+        _emit_verification_report_not_run(
+            write_payload,
+            mode=normalized_validate_mode,
+            error=write_error,
         )
-        _emit_raw_json(write_payload)
-        raise typer.Exit(code=1) from exc
     write_payload["written"] = True
     write_payload["replaced"] = target_exists
     _emit_raw_json(write_payload)
@@ -13987,11 +11641,9 @@ def validate_proof_redteam_cmd(
         _get_cwd(),
         command_label="gpd validate proof-redteam",
     )
-    try:
-        validator = _load_proof_redteam_validator()
-    except GPDError as exc:
-        _error(str(exc))
-    result = validator(file_path, project_root=project_root)
+    from gpd.core.proof_redteam import validate_proof_redteam_artifact
+
+    result = validate_proof_redteam_artifact(file_path, project_root=project_root)
     _output(result)
     if not _validation_result_is_valid(result):
         raise typer.Exit(code=1)

@@ -2535,7 +2535,7 @@ def test_validate_proof_redteam_calls_public_validator(
             "artifact_path": str(path),
         }
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_validator", lambda: fake_validator)
+    monkeypatch.setattr("gpd.core.proof_redteam.validate_proof_redteam_artifact", fake_validator)
 
     result = runner.invoke(
         app,
@@ -2570,7 +2570,7 @@ def test_validate_proof_redteam_exits_nonzero_when_validator_reports_invalid(
             "errors": [f"{path.name} is missing required proof inventory"],
         }
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_validator", lambda: fake_validator)
+    monkeypatch.setattr("gpd.core.proof_redteam.validate_proof_redteam_artifact", fake_validator)
 
     result = runner.invoke(
         app,
@@ -2608,7 +2608,7 @@ def test_proof_redteam_skeleton_raw_uses_builder_payload(
             "warnings": ["Skeleton is non-passing until the audit is completed."],
         }
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", fake_builder)
 
     result = runner.invoke(
         app,
@@ -2648,7 +2648,7 @@ def test_proof_redteam_skeleton_rejects_passed_status_before_builder(
     def unexpected_builder(**kwargs):
         raise AssertionError(f"proof-redteam skeleton builder should not run for invalid status: {kwargs}")
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: unexpected_builder)
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", unexpected_builder)
 
     result = runner.invoke(
         app,
@@ -2678,7 +2678,7 @@ def test_proof_redteam_skeleton_write_refuses_existing_without_force(
             )
         }
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", fake_builder)
 
     result = runner.invoke(
         app,
@@ -2718,7 +2718,7 @@ def test_proof_redteam_skeleton_write_force_overwrites_target(
             )
         }
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.proof_redteam.build_proof_redteam_skeleton", fake_builder)
 
     result = runner.invoke(
         app,
@@ -2828,7 +2828,7 @@ def test_proof_redteam_finalize_writes_and_prints_raw_payload(
             },
         }
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_finalizer", lambda: fake_finalizer)
+    monkeypatch.setattr("gpd.core.proof_redteam.finalize_proof_redteam_artifact", fake_finalizer)
 
     result = runner.invoke(
         app,
@@ -2878,7 +2878,7 @@ def test_proof_redteam_finalize_rejects_missing_proof_artifact(
     def unexpected_finalizer(**kwargs):
         raise AssertionError(f"proof finalizer should not run for missing proof artifact: {kwargs}")
 
-    monkeypatch.setattr(cli_module, "_load_proof_redteam_finalizer", lambda: unexpected_finalizer)
+    monkeypatch.setattr("gpd.core.proof_redteam.finalize_proof_redteam_artifact", unexpected_finalizer)
 
     result = runner.invoke(
         app,
@@ -3033,7 +3033,7 @@ def test_verification_report_skeleton_raw_uses_plan_contract_and_builder_payload
             "authoring_rules": ["Use the generated frontmatter as the starting YAML."],
         }
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
     result = runner.invoke(
         app,
@@ -3096,7 +3096,7 @@ def test_verification_report_skeleton_uses_project_local_ref_when_outer_director
             "target_report_path": str(phase_dir / "01-VERIFICATION.md"),
         }
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
     result = runner.invoke(
         app,
@@ -3220,7 +3220,7 @@ def test_verification_report_skeleton_default_prints_markdown_draft_not_rich_tab
             "authoring_rules": ["Do not hand-convert raw JSON."],
         }
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
     result = runner.invoke(app, ["verification-report", "skeleton", str(plan_path)], catch_exceptions=False)
 
@@ -3258,7 +3258,7 @@ def test_verification_report_skeleton_fallback_validation_commands_quote_report_
             "target_report_ref": "GPD/phases/01 with space/01-VERIFICATION.md",
         }
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: fake_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", fake_builder)
 
     result = runner.invoke(
         app,
@@ -3295,7 +3295,7 @@ def test_verification_report_skeleton_rejects_non_plan_frontmatter_before_builde
     def unexpected_builder(**kwargs):
         raise AssertionError(f"verification skeleton builder should not run for invalid PLAN input: {kwargs}")
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_skeleton_builder", lambda: unexpected_builder)
+    monkeypatch.setattr("gpd.core.verification_report.build_verification_report_skeleton", unexpected_builder)
 
     result = runner.invoke(
         app,
@@ -3656,7 +3656,7 @@ def test_verification_report_finalize_writes_only_after_validation_passes(
             "oracle_evidence_count": 1,
         }
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: fake_finalizer)
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
     monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
 
     result = runner.invoke(
@@ -3702,7 +3702,7 @@ def test_verification_report_finalize_refuses_existing_without_force(
     def unexpected_finalizer(**kwargs):
         raise AssertionError(f"verification finalizer should not run for existing output: {kwargs}")
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: unexpected_finalizer)
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", unexpected_finalizer)
 
     result = runner.invoke(
         app,
@@ -3746,7 +3746,7 @@ def test_verification_report_finalize_rejects_body_file_frontmatter(
     def unexpected_finalizer(**kwargs):
         raise AssertionError(f"verification finalizer should not run for body frontmatter: {kwargs}")
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: unexpected_finalizer)
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", unexpected_finalizer)
 
     result = runner.invoke(
         app,
@@ -3804,7 +3804,7 @@ def test_verification_report_finalize_validation_failure_preserves_existing_outp
             "oracle_evidence_count": 0,
         }
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: fake_finalizer)
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
     monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
 
     result = runner.invoke(
@@ -3870,7 +3870,7 @@ def test_verification_report_finalize_raw_output_includes_validation_and_command
             "oracle_evidence_count": 1,
         }
 
-    monkeypatch.setattr(cli_module, "_load_verification_report_finalizer", lambda: fake_finalizer)
+    monkeypatch.setattr("gpd.core.verification_report.finalize_verification_report", fake_finalizer)
     monkeypatch.setattr(cli_module, "_validate_verification_report_candidate", fake_validate)
 
     result = runner.invoke(

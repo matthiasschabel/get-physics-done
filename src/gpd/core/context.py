@@ -58,6 +58,30 @@ from gpd.core.constants import (
     VERIFICATION_SUFFIX,
     ProjectLayout,
 )
+from gpd.core.context_staged_providers import (
+    assembly_context_provider as _staged_assembly_context_provider,
+)
+from gpd.core.context_staged_providers import (
+    build_selected_file_context as _build_selected_file_context,
+)
+from gpd.core.context_staged_providers import (
+    context_provider as _staged_context_provider,
+)
+from gpd.core.context_staged_providers import (
+    file_context_provider as _staged_file_context_provider,
+)
+from gpd.core.context_staged_providers import (
+    reference_or_contract_provider as _staged_reference_or_contract_provider,
+)
+from gpd.core.context_staged_providers import (
+    scalar_field_provider as _staged_scalar_field_provider,
+)
+from gpd.core.context_staged_providers import (
+    schema_bridge_provider as _staged_schema_bridge_provider,
+)
+from gpd.core.context_staged_providers import (
+    selected_fields_provider as _staged_selected_fields_provider,
+)
 from gpd.core.continuation import (
     RESUMABLE_SEGMENT_STATUSES,
     ContinuationResumeSource,
@@ -124,9 +148,6 @@ from gpd.core.root_resolution import (
     resolve_state_json_root,
 )
 from gpd.core.staged_init_assembly import (
-    StagedInitProvider as _StagedInitProvider,
-)
-from gpd.core.staged_init_assembly import (
     assemble_staged_init_payload as _assemble_staged_init_payload,
 )
 from gpd.core.state import _current_machine_identity, _finalize_project_contract_gate, backup_only_state_guidance
@@ -162,6 +183,9 @@ from gpd.core.workflow_staging import (
 )
 from gpd.core.workflow_staging import (
     MAP_RESEARCH_INIT_FIELDS as _MAP_RESEARCH_INIT_FIELDS,
+)
+from gpd.core.workflow_staging import (
+    NEW_MILESTONE_INIT_FIELDS as _NEW_MILESTONE_INIT_FIELDS,
 )
 from gpd.core.workflow_staging import (
     PLAN_PHASE_CONTRACT_GATE_FIELDS as _PLAN_PHASE_CONTRACT_GATE_FIELDS,
@@ -213,6 +237,9 @@ from gpd.core.workflow_staging import (
 )
 from gpd.core.workflow_staging import (
     VERIFY_WORK_STRUCTURED_STATE_FIELDS as _VERIFY_WORK_STRUCTURED_STATE_FIELDS,
+)
+from gpd.core.workflow_staging import (
+    WRITE_PAPER_INIT_FIELDS as _WRITE_PAPER_INIT_FIELDS,
 )
 from gpd.core.write_paper_intake import (
     WritePaperExternalAuthoringIntakeResolution,
@@ -337,101 +364,9 @@ _QUICK_STAGE_ALLOWED_TOOLS = frozenset(
         "task",
     }
 )
-_RESUME_BASE_INIT_FIELDS = frozenset(
-    {
-        "workspace_root",
-        "project_root",
-        "project_root_source",
-        "project_root_auto_selected",
-        "project_reentry_mode",
-        "project_reentry_requires_selection",
-        "project_reentry_selected_candidate",
-        "project_reentry_candidates",
-        "workspace_state_exists",
-        "workspace_roadmap_exists",
-        "workspace_project_exists",
-        "workspace_planning_exists",
-        "state_json_backup_exists",
-        "state_exists",
-        "roadmap_exists",
-        "project_exists",
-        "planning_exists",
-        "has_interrupted_agent",
-        "interrupted_agent_id",
-        "commit_docs",
-        "autonomy",
-        "review_cadence",
-        "research_mode",
-        "resume_surface_schema_version",
-        "active_bounded_segment",
-        "derived_execution_head",
-        "derived_execution_head_resume_file",
-        "continuity_handoff_file",
-        "recorded_continuity_handoff_file",
-        "missing_continuity_handoff_file",
-        "has_continuity_handoff",
-        "active_resume_kind",
-        "active_resume_origin",
-        "active_resume_pointer",
-        "active_resume_result",
-        "resume_candidates",
-        "current_hostname",
-        "current_platform",
-        "session_hostname",
-        "session_platform",
-        "session_last_date",
-        "session_stopped_at",
-        "machine_change_detected",
-        "machine_change_notice",
-        "execution_review_pending",
-        "execution_pre_fanout_review_pending",
-        "execution_skeptical_requestioning_required",
-        "execution_downstream_locked",
-        "execution_blocked",
-        "execution_resumable",
-        "execution_paused_at",
-        "current_execution_resume_file",
-        "handoff_resume_file",
-        "recorded_handoff_resume_file",
-        "missing_handoff_resume_file",
-        "execution_resume_file",
-        "execution_resume_file_source",
-        "platform",
-    }
-)
-_PROJECT_CONTRACT_GATE_FIELDS = frozenset(
-    {
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-    }
-)
-_STRUCTURED_STATE_FIELDS = frozenset(
-    {
-        "state_load_source",
-        "state_integrity_issues",
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-    }
-)
-_STATE_MEMORY_FIELDS = frozenset(
-    {
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-    }
-)
-_RESUME_CONTRACT_GATE_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS
+_PROJECT_CONTRACT_GATE_FIELDS = _PLAN_PHASE_CONTRACT_GATE_FIELDS
+_STRUCTURED_STATE_FIELDS = _PLAN_PHASE_STRUCTURED_STATE_FIELDS
+_STATE_MEMORY_FIELDS = _PLAN_PHASE_STATE_MEMORY_FIELDS
 _RESUME_REFERENCE_RUNTIME_FIELDS = frozenset(
     {
         "contract_intake",
@@ -441,35 +376,11 @@ _RESUME_REFERENCE_RUNTIME_FIELDS = frozenset(
         "reference_artifacts_content",
     }
 )
-_RESUME_STRUCTURED_STATE_FIELDS = _STRUCTURED_STATE_FIELDS
-_RESUME_STATE_MEMORY_FIELDS = _STATE_MEMORY_FIELDS
 _RESUME_FILE_CONTENT_FIELDS = frozenset(
-    {
-        "state_content",
-        "project_content",
-        "roadmap_content",
-        "derivation_state_content",
-        "continuity_handoff_content",
-    }
+    {"state_content", "project_content", "roadmap_content", "derivation_state_content", "continuity_handoff_content"}
 )
-_SYNC_STATE_BASE_INIT_FIELDS = frozenset(
-    {
-        "project_root",
-        "state_md_exists",
-        "state_json_exists",
-        "state_json_backup_exists",
-        "platform",
-    }
-)
-_SYNC_STATE_FILE_CONTENT_FIELDS = frozenset(
-    {
-        "state_md_content",
-        "state_json_content",
-        "state_json_backup_content",
-    }
-)
+_SYNC_STATE_FILE_CONTENT_FIELDS = frozenset({"state_md_content", "state_json_content", "state_json_backup_content"})
 _SYNC_STATE_STRUCTURED_STATE_FIELDS = frozenset({"state_load_source", "state_integrity_issues"})
-_SYNC_STATE_CONTRACT_GATE_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS
 _WRITE_PAPER_STAGE_ALLOWED_TOOLS = frozenset(
     {
         "ask_user",
@@ -483,30 +394,17 @@ _WRITE_PAPER_STAGE_ALLOWED_TOOLS = frozenset(
         "web_search",
     }
 )
-_WRITE_PAPER_BASE_INIT_FIELDS = frozenset(
-    {
-        "commit_docs",
-        "project_root",
-        "state_exists",
-        "project_exists",
-        "autonomy",
-        "research_mode",
-        "platform",
-        "write_paper_argument_input",
-    }
-)
-_WRITE_PAPER_CONTRACT_GATE_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS
 _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS = frozenset(
     {
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_load_manifest",
-        "protocol_bundle_context",
         "active_reference_context",
+        "contract_intake",
+        "derived_manuscript_proof_review_status",
         "derived_manuscript_reference_status",
         "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
+        "effective_reference_intake",
+        "protocol_bundle_context",
+        "protocol_bundle_load_manifest",
+        "selected_protocol_bundle_ids",
     }
 )
 _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS = frozenset(
@@ -553,24 +451,7 @@ _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS = frozenset(
         "derived_citation_source_count",
     }
 )
-_WRITE_PAPER_STATE_MEMORY_FIELDS = _STATE_MEMORY_FIELDS
-_WRITE_PAPER_FILE_CONTENT_FIELDS = frozenset(
-    {
-        "state_content",
-        "roadmap_content",
-        "requirements_content",
-    }
-)
-_WRITE_PAPER_INIT_FIELDS = frozenset(
-    {
-        *_WRITE_PAPER_BASE_INIT_FIELDS,
-        *_WRITE_PAPER_CONTRACT_GATE_FIELDS,
-        *_WRITE_PAPER_REFERENCE_RUNTIME_FIELDS,
-        *_WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS,
-        *_WRITE_PAPER_STATE_MEMORY_FIELDS,
-        *_WRITE_PAPER_FILE_CONTENT_FIELDS,
-    }
-)
+_WRITE_PAPER_FILE_CONTENT_FIELDS = frozenset({"state_content", "roadmap_content", "requirements_content"})
 _PEER_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
     {
         "ask_user",
@@ -583,71 +464,7 @@ _PEER_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
         "web_search",
     }
 )
-_PEER_REVIEW_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_load_manifest",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "derived_manuscript_proof_review_status",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-    }
-)
-_PEER_REVIEW_PUBLICATION_RUNTIME_FIELDS = frozenset(
-    {
-        "publication_subject_slug",
-        "publication_lane_kind",
-        "publication_lane_owner",
-        "managed_publication_root",
-        "selected_publication_root",
-        "selected_review_root",
-        "review_target_input",
-        "review_target_mode",
-        "review_target_mode_reason",
-        "resolved_review_target",
-        "resolved_review_root",
-        "manuscript_resolution_status",
-        "manuscript_resolution_detail",
-        "manuscript_root",
-        "manuscript_entrypoint",
-        "artifact_manifest_path",
-        "bibliography_audit_path",
-        "reproducibility_manifest_path",
-        "publication_blockers",
-        "publication_blocker_count",
-        "latest_review_round",
-        "latest_review_round_suffix",
-        "latest_review_ledger",
-        "latest_referee_decision",
-        "latest_referee_report_md",
-        "latest_referee_report_tex",
-        "latest_proof_redteam",
-        "latest_review_artifacts",
-        "latest_response_round",
-        "latest_response_round_suffix",
-        "latest_author_response",
-        "latest_referee_response",
-        "latest_response_artifacts",
-    }
-)
+_PEER_REVIEW_REFERENCE_RUNTIME_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS | _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS
 _NEW_MILESTONE_STAGE_ALLOWED_TOOLS = frozenset(
     {
         "ask_user",
@@ -657,68 +474,21 @@ _NEW_MILESTONE_STAGE_ALLOWED_TOOLS = frozenset(
         "task",
     }
 )
-_NEW_MILESTONE_BASE_INIT_FIELDS = frozenset(
-    {
-        "researcher_model",
-        "synthesizer_model",
-        "roadmapper_model",
-        "init_root_policy",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "research_enabled",
-        "current_milestone",
-        "current_milestone_name",
-        "project_exists",
-        "roadmap_exists",
-        "state_exists",
-        "platform",
-    }
-)
-_NEW_MILESTONE_CONTRACT_GATE_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS
 _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS = frozenset(
     {
+        "active_reference_context",
         "contract_intake",
         "effective_reference_intake",
-        "active_reference_context",
+        "literature_review_count",
+        "literature_review_files",
         "reference_artifact_files",
         "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
         "research_map_reference_count",
+        "research_map_reference_files",
     }
 )
-_NEW_MILESTONE_STATE_MEMORY_FIELDS = _STATE_MEMORY_FIELDS
 _NEW_MILESTONE_FILE_CONTENT_FIELDS = frozenset(
-    {
-        "project_content",
-        "state_content",
-        "milestones_content",
-        "requirements_content",
-        "roadmap_content",
-    }
-)
-_NEW_MILESTONE_INIT_FIELDS = frozenset(
-    {
-        *_NEW_MILESTONE_BASE_INIT_FIELDS,
-        *_NEW_MILESTONE_CONTRACT_GATE_FIELDS,
-        *_NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS,
-        *_NEW_MILESTONE_STATE_MEMORY_FIELDS,
-        *_NEW_MILESTONE_FILE_CONTENT_FIELDS,
-    }
-)
-_EXECUTE_PHASE_STAGE_ALLOWED_TOOLS = frozenset(
-    {
-        "ask_user",
-        "file_edit",
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell",
-        "task",
-    }
+    {"project_content", "state_content", "milestones_content", "requirements_content", "roadmap_content"}
 )
 _EXECUTE_PHASE_CONTRACT_GATE_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS
 _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS = frozenset(
@@ -817,13 +587,56 @@ _STAGED_REFERENCE_SUMMARY_FIELDS = frozenset(
 _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS = frozenset({"protocol_bundle_context", "active_reference_context"})
 _STAGED_FULL_REFERENCE_RUNTIME_FIELDS = _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS - _STAGED_REFERENCE_SUMMARY_FIELDS
 _STAGED_REFERENCE_ARTIFACT_CONTENT_FIELDS = frozenset({"reference_artifacts_content"})
-_RESEARCH_PHASE_FILE_CONTENT_FIELDS = frozenset(
-    {
-        "state_content",
-        "config_content",
-        "roadmap_content",
-    }
-)
+_RESEARCH_PHASE_FILE_CONTENT_FIELDS = frozenset({"state_content", "config_content", "roadmap_content"})
+_PLAN_PHASE_PLANNING_FILE_CONTEXT_PATHS = {
+    "state_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
+    "roadmap_content": f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}",
+    "requirements_content": f"{PLANNING_DIR_NAME}/{REQUIREMENTS_FILENAME}",
+}
+_PLAN_PHASE_ARTIFACT_FIELD_SPECS = {
+    "context_content": (CONTEXT_SUFFIX, STANDALONE_CONTEXT),
+    "research_content": (RESEARCH_SUFFIX, STANDALONE_RESEARCH),
+    "experiment_design_content": (_EXPERIMENT_DESIGN_SUFFIX, None),
+    "verification_content": (VERIFICATION_SUFFIX, None),
+    "validation_content": (VALIDATION_SUFFIX, STANDALONE_VALIDATION),
+}
+_PLAN_PHASE_INCLUDE_FILE_FIELDS = {
+    "state": "state_content",
+    "roadmap": "roadmap_content",
+    "requirements": "requirements_content",
+    "context": "context_content",
+    "research": "research_content",
+    "verification": "verification_content",
+    "validation": "validation_content",
+}
+_NEW_MILESTONE_FILE_CONTEXT_PATHS = {
+    "project_content": f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}",
+    "state_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
+    "milestones_content": f"{PLANNING_DIR_NAME}/{MILESTONES_FILENAME}",
+    "requirements_content": f"{PLANNING_DIR_NAME}/{REQUIREMENTS_FILENAME}",
+    "roadmap_content": f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}",
+}
+_RESUME_FILE_CONTEXT_PATHS = {
+    "state_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
+    "project_content": f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}",
+    "roadmap_content": f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}",
+    "derivation_state_content": f"{PLANNING_DIR_NAME}/DERIVATION-STATE.md",
+}
+_SYNC_STATE_FILE_CONTEXT_PATHS = {
+    "state_md_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
+    "state_json_content": f"{PLANNING_DIR_NAME}/state.json",
+    "state_json_backup_content": f"{PLANNING_DIR_NAME}/{STATE_JSON_BACKUP_FILENAME}",
+}
+_RESEARCH_PHASE_FILE_CONTEXT_PATHS = {
+    "state_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
+    "config_content": f"{PLANNING_DIR_NAME}/{CONFIG_FILENAME}",
+    "roadmap_content": f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}",
+}
+_RESEARCH_PHASE_INCLUDE_FILE_FIELDS = {
+    "state": "state_content",
+    "config": "config_content",
+    "roadmap": "roadmap_content",
+}
 # Directories to skip when scanning for research files.
 _LEADING_BLANK_LINES_BEFORE_FRONTMATTER_RE = re.compile(r"^(?:[ \t]*\r?\n)+(?=---[ \t]*\r?\n)")
 
@@ -891,9 +704,6 @@ __all__ = [
     "init_verify_work",
     "load_config",
 ]
-
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
 def _path_exists(cwd: Path, target: str) -> bool:
@@ -3683,9 +3493,6 @@ def _promote_auto_selected_recent_bounded_segment(
     return promoted, True
 
 
-# ─── Config Loader ────────────────────────────────────────────────────────────
-
-
 def _config_to_dict(cfg: GPDProjectConfig) -> dict:
     """Convert a :class:`GPDProjectConfig` to the plain-dict format used by context callers.
 
@@ -3731,13 +3538,6 @@ def load_config(cwd: Path) -> dict:
     return _config_to_dict(cfg)
 
 
-# ─── Resolve Model ────────────────────────────────────────────────────────────
-
-# Concrete model selection is runtime-scoped. When no override is configured
-# for the active runtime, callers should omit the runtime model parameter and
-# allow the platform to use its default model.
-
-
 def _resolve_model(
     cwd: Path,
     agent_type: str,
@@ -3777,9 +3577,6 @@ def _resolve_model(
         active_runtime = None
 
     return _resolve_model_canonical(cwd, agent_type, runtime=active_runtime)
-
-
-# ─── Phase Info Helper ────────────────────────────────────────────────────────
 
 
 def _try_find_phase(cwd: Path, phase: str) -> dict | None:
@@ -3926,9 +3723,6 @@ def _try_get_milestone_info(cwd: Path) -> dict:
     return result.model_dump()
 
 
-# ─── Platform Detection ──────────────────────────────────────────────────────
-
-
 def _detect_platform(cwd: Path | None = None) -> str:
     """Detect the active AI runtime, if any."""
     resolved_cwd = cwd or Path.cwd()
@@ -3951,9 +3745,6 @@ def _detect_platform(cwd: Path | None = None) -> str:
         pass
 
     return runtime_unknown
-
-
-# ─── Context Assemblers ──────────────────────────────────────────────────────
 
 
 def init_execute_phase(
@@ -4057,29 +3848,6 @@ def init_execute_phase(
 
     manifest = load_execute_phase_stage_contract()
 
-    def build_execute_reference(assembly_context: object) -> Mapping[str, object]:
-        reference_fields = assembly_context.required_fields & _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS
-        return _build_staged_reference_runtime_context(cwd, reference_fields)
-
-    def build_execute_schema_bridges(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        if phase_info is None:
-            raise ValueError(
-                f"execute-phase stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
-            )
-        bridges: dict[str, object] = {}
-        if "verification_report_skeleton_bridge" in required_fields:
-            bridges["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
-                cwd,
-                phase_info,
-            )
-        if "verification_report_finalizer_bridge" in required_fields:
-            bridges["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
-                cwd,
-                phase_info,
-            )
-        return bridges
-
     return _assemble_staged_init_payload(
         workflow_id="execute-phase",
         stage_id=stage,
@@ -4087,33 +3855,38 @@ def init_execute_phase(
         base_payload=result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "contract_gate",
-                _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
-                lambda _assembly_context: _build_new_project_contract_runtime_context(cwd),
+            _staged_contract_provider(cwd, _EXECUTE_PHASE_CONTRACT_GATE_FIELDS),
+            _staged_selected_fields_provider(
+                "reference_runtime",
+                _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS,
+                _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS,
+                lambda selected_fields: _build_staged_reference_runtime_context(cwd, selected_fields),
             ),
-            _StagedInitProvider("reference_runtime", _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS, build_execute_reference),
-            _StagedInitProvider(
-                "structured_state",
-                _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS,
-                lambda _assembly_context: _build_structured_state_runtime_context(cwd),
-            ),
-            _StagedInitProvider(
-                "state_memory",
-                _EXECUTE_PHASE_STATE_MEMORY_FIELDS,
-                lambda _assembly_context: _build_state_memory_runtime_context(cwd),
-            ),
-            _StagedInitProvider(
-                "execution_runtime",
-                _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
-                lambda _assembly_context: _build_execution_runtime_context(cwd),
-            ),
-            _StagedInitProvider(
+            _staged_structured_state_provider(cwd, _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS),
+            _staged_state_memory_provider(cwd, _EXECUTE_PHASE_STATE_MEMORY_FIELDS),
+            _staged_execution_provider(cwd),
+            _staged_context_provider(
                 "task_overlays",
                 _EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
-                lambda _assembly_context: _build_execute_phase_task_overlay_context(),
+                _build_execute_phase_task_overlay_context,
             ),
-            _StagedInitProvider("schema_bridges", _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS, build_execute_schema_bridges),
+            _staged_schema_bridge_provider(
+                _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
+                phase_info=phase_info,
+                missing_phase_message=(
+                    f"execute-phase stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
+                ),
+                bridge_builders={
+                    "verification_report_skeleton_bridge": lambda: _build_verification_report_skeleton_bridge(
+                        cwd,
+                        phase_info,
+                    ),
+                    "verification_report_finalizer_bridge": lambda: _build_verification_report_finalizer_bridge(
+                        cwd,
+                        phase_info,
+                    ),
+                },
+            ),
         ),
     )
 
@@ -4121,113 +3894,95 @@ def init_execute_phase(
 def _build_plan_phase_file_context(
     cwd: Path,
     phase_info: dict[str, object] | None,
-    *,
-    include_state: bool = False,
-    include_roadmap: bool = False,
-    include_requirements: bool = False,
-    include_context: bool = False,
-    include_research: bool = False,
-    include_experiment_design: bool = False,
-    include_verification: bool = False,
-    include_validation: bool = False,
+    selected_fields: frozenset[str],
 ) -> dict[str, object]:
     """Build file-content payloads for plan-phase init surfaces."""
-    result: dict[str, object] = {}
-    planning = cwd / PLANNING_DIR_NAME
-
-    if include_state:
-        result["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
-    if include_roadmap:
-        result["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
-    if include_requirements:
-        result["requirements_content"] = _safe_read_file_truncated(planning / REQUIREMENTS_FILENAME)
+    result = _build_selected_file_context(
+        cwd,
+        selected_fields,
+        _PLAN_PHASE_PLANNING_FILE_CONTEXT_PATHS,
+        _safe_read_file_truncated,
+    )
 
     if not phase_info or not phase_info.get("directory"):
         return result
 
     phase_dir = cwd / str(phase_info["directory"])
-    if include_context:
-        result["context_content"] = _find_phase_artifact(phase_dir, CONTEXT_SUFFIX, STANDALONE_CONTEXT)
-    if include_research:
-        result["research_content"] = _find_phase_artifact(phase_dir, RESEARCH_SUFFIX, STANDALONE_RESEARCH)
-    if include_experiment_design:
-        result["experiment_design_content"] = _find_phase_artifact(phase_dir, _EXPERIMENT_DESIGN_SUFFIX)
-    if include_verification:
-        result["verification_content"] = _find_phase_artifact(phase_dir, VERIFICATION_SUFFIX)
-    if include_validation:
-        result["validation_content"] = _find_phase_artifact(phase_dir, VALIDATION_SUFFIX, STANDALONE_VALIDATION)
+    for field, (suffix, standalone) in _PLAN_PHASE_ARTIFACT_FIELD_SPECS.items():
+        if field in selected_fields:
+            result[field] = _find_phase_artifact(phase_dir, suffix, standalone)
     return result
 
 
-def _build_publication_file_context(
+def _selected_file_fields_from_includes(
+    includes: set[str],
+    include_to_field: Mapping[str, str],
+) -> frozenset[str]:
+    """Map legacy include flags onto staged file-content field names."""
+
+    return frozenset(field for include, field in include_to_field.items() if include in includes)
+
+
+def _staged_reference_provider(
     cwd: Path,
-    *,
-    include_state: bool = False,
-    include_roadmap: bool = False,
-    include_requirements: bool = False,
-) -> dict[str, object]:
-    """Build planning-file content payloads for publication workflows."""
-    result: dict[str, object] = {}
-    planning = cwd / PLANNING_DIR_NAME
-    if include_state:
-        result["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
-    if include_roadmap:
-        result["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
-    if include_requirements:
-        result["requirements_content"] = _safe_read_file_truncated(planning / REQUIREMENTS_FILENAME)
-    return result
+    reference_fields: frozenset[str],
+    contract_fields: frozenset[str],
+):
+    return _staged_reference_or_contract_provider(
+        reference_fields=reference_fields,
+        contract_fields=contract_fields,
+        build_reference=lambda selected_fields: _build_staged_reference_runtime_context(cwd, selected_fields),
+        build_contract=lambda: _build_new_project_contract_runtime_context(cwd),
+    )
 
 
-def _build_new_milestone_file_context(
-    cwd: Path,
-    *,
-    include_project: bool = False,
-    include_state: bool = False,
-    include_milestones: bool = False,
-    include_requirements: bool = False,
-    include_roadmap: bool = False,
-) -> dict[str, object]:
-    """Build planning-file content payloads for new-milestone init surfaces."""
-    result: dict[str, object] = {}
-    planning = cwd / PLANNING_DIR_NAME
+def _staged_contract_provider(cwd: Path, trigger_fields: frozenset[str]):
+    return _staged_context_provider(
+        "contract_gate",
+        trigger_fields,
+        lambda: _build_new_project_contract_runtime_context(cwd),
+    )
 
-    if include_project:
-        result["project_content"] = _safe_read_file_truncated(planning / PROJECT_FILENAME)
-    if include_state:
-        result["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
-    if include_milestones:
-        result["milestones_content"] = _safe_read_file_truncated(planning / MILESTONES_FILENAME)
-    if include_requirements:
-        result["requirements_content"] = _safe_read_file_truncated(planning / REQUIREMENTS_FILENAME)
-    if include_roadmap:
-        result["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
-    return result
+
+def _staged_structured_state_provider(cwd: Path, trigger_fields: frozenset[str]):
+    return _staged_context_provider(
+        "structured_state",
+        trigger_fields,
+        lambda: _build_structured_state_runtime_context(cwd),
+    )
+
+
+def _staged_state_memory_provider(cwd: Path, trigger_fields: frozenset[str]):
+    return _staged_context_provider(
+        "state_memory",
+        trigger_fields,
+        lambda: _build_state_memory_runtime_context(cwd),
+    )
+
+
+def _staged_execution_provider(cwd: Path):
+    return _staged_context_provider(
+        "execution_runtime",
+        _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
+        lambda: _build_execution_runtime_context(cwd),
+    )
 
 
 def _build_resume_file_context(
     cwd: Path,
     *,
     continuity_handoff_file: str | None = None,
-    include_state: bool = False,
-    include_project: bool = False,
-    include_roadmap: bool = False,
-    include_derivation_state: bool = False,
-    include_continuity_handoff: bool = False,
+    selected_fields: frozenset[str],
 ) -> dict[str, object]:
     """Build file-content payloads for resume-work init surfaces."""
-    result: dict[str, object] = {}
-    planning = cwd / PLANNING_DIR_NAME
+    result = _build_selected_file_context(
+        cwd,
+        selected_fields,
+        _RESUME_FILE_CONTEXT_PATHS,
+        _safe_read_file_truncated,
+    )
 
-    if include_state:
-        result["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
-    if include_project:
-        result["project_content"] = _safe_read_file_truncated(planning / PROJECT_FILENAME)
-    if include_roadmap:
-        result["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
-    if include_derivation_state:
-        result["derivation_state_content"] = _safe_read_file_truncated(planning / "DERIVATION-STATE.md")
-
-    if include_continuity_handoff:
+    if "continuity_handoff_content" in selected_fields:
         handoff_path: Path | None = None
         if isinstance(continuity_handoff_file, str) and continuity_handoff_file.strip():
             candidate = Path(continuity_handoff_file).expanduser()
@@ -4242,27 +3997,6 @@ def _build_resume_file_context(
         result["continuity_handoff_content"] = (
             _safe_read_file_truncated(handoff_path) if handoff_path is not None else None
         )
-
-    return result
-
-
-def _build_sync_state_file_context(
-    cwd: Path,
-    *,
-    include_state_md: bool = False,
-    include_state_json: bool = False,
-    include_state_json_backup: bool = False,
-) -> dict[str, object]:
-    """Build file-content payloads for sync-state init surfaces."""
-    result: dict[str, object] = {}
-    planning = cwd / PLANNING_DIR_NAME
-
-    if include_state_md:
-        result["state_md_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
-    if include_state_json:
-        result["state_json_content"] = _safe_read_file_truncated(planning / "state.json")
-    if include_state_json_backup:
-        result["state_json_backup_content"] = _safe_read_file_truncated(planning / STATE_JSON_BACKUP_FILENAME)
 
     return result
 
@@ -4466,14 +4200,7 @@ def init_plan_phase(
             _build_plan_phase_file_context(
                 effective_cwd,
                 phase_info,
-                include_state="state" in includes,
-                include_roadmap="roadmap" in includes,
-                include_requirements="requirements" in includes,
-                include_context="context" in includes,
-                include_research="research" in includes,
-                include_experiment_design=False,
-                include_verification="verification" in includes,
-                include_validation="validation" in includes,
+                selected_fields=_selected_file_fields_from_includes(includes, _PLAN_PHASE_INCLUDE_FILE_FIELDS),
             )
         )
         if "state" in includes:
@@ -4488,28 +4215,6 @@ def init_plan_phase(
         known_init_fields=_PLAN_PHASE_INIT_FIELDS,
     )
 
-    def build_plan_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS
-        if reference_fields:
-            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(effective_cwd)
-
-    def build_plan_file_content(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        return _build_plan_phase_file_context(
-            effective_cwd,
-            phase_info,
-            include_state="state_content" in required_fields,
-            include_roadmap="roadmap_content" in required_fields,
-            include_requirements="requirements_content" in required_fields,
-            include_context="context_content" in required_fields,
-            include_research="research_content" in required_fields,
-            include_experiment_design="experiment_design_content" in required_fields,
-            include_verification="verification_content" in required_fields,
-            include_validation="validation_content" in required_fields,
-        )
-
     return _assemble_staged_init_payload(
         workflow_id="plan-phase",
         stage_id=stage,
@@ -4517,22 +4222,19 @@ def init_plan_phase(
         base_payload=result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "reference_or_contract",
-                _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS | _PLAN_PHASE_CONTRACT_GATE_FIELDS,
-                build_plan_reference_or_contract,
+            _staged_reference_provider(
+                effective_cwd,
+                _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS,
+                _PLAN_PHASE_CONTRACT_GATE_FIELDS,
             ),
-            _StagedInitProvider(
-                "state_memory",
-                _PLAN_PHASE_STATE_MEMORY_FIELDS,
-                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
+            _staged_state_memory_provider(effective_cwd, _PLAN_PHASE_STATE_MEMORY_FIELDS),
+            _staged_structured_state_provider(effective_cwd, _PLAN_PHASE_STRUCTURED_STATE_FIELDS),
+            _staged_selected_fields_provider(
+                "file_content",
+                _PLAN_PHASE_FILE_CONTENT_FIELDS,
+                _PLAN_PHASE_FILE_CONTENT_FIELDS,
+                lambda selected_fields: _build_plan_phase_file_context(effective_cwd, phase_info, selected_fields),
             ),
-            _StagedInitProvider(
-                "structured_state",
-                _PLAN_PHASE_STRUCTURED_STATE_FIELDS,
-                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
-            ),
-            _StagedInitProvider("file_content", _PLAN_PHASE_FILE_CONTENT_FIELDS, build_plan_file_content),
         ),
     )
 
@@ -4575,30 +4277,19 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
+            _staged_scalar_field_provider(
                 "researcher_model",
-                {"researcher_model"},
-                lambda _assembly_context: {
-                    "researcher_model": _resolve_model(project_cwd, "gpd-project-researcher", config)
-                },
+                lambda: _resolve_model(project_cwd, "gpd-project-researcher", config),
             ),
-            _StagedInitProvider(
+            _staged_scalar_field_provider(
                 "synthesizer_model",
-                {"synthesizer_model"},
-                lambda _assembly_context: {
-                    "synthesizer_model": _resolve_model(project_cwd, "gpd-research-synthesizer", config)
-                },
+                lambda: _resolve_model(project_cwd, "gpd-research-synthesizer", config),
             ),
-            _StagedInitProvider(
+            _staged_scalar_field_provider(
                 "roadmapper_model",
-                {"roadmapper_model"},
-                lambda _assembly_context: {"roadmapper_model": _resolve_model(project_cwd, "gpd-roadmapper", config)},
+                lambda: _resolve_model(project_cwd, "gpd-roadmapper", config),
             ),
-            _StagedInitProvider(
-                "contract_gate",
-                _PROJECT_CONTRACT_GATE_FIELDS,
-                lambda _assembly_context: _build_new_project_contract_runtime_context(project_cwd),
-            ),
+            _staged_contract_provider(project_cwd, _PROJECT_CONTRACT_GATE_FIELDS),
         ),
     )
 
@@ -4674,24 +4365,6 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
         known_init_fields=_NEW_MILESTONE_INIT_FIELDS,
     )
 
-    def build_new_milestone_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS
-        if reference_fields:
-            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(effective_cwd)
-
-    def build_new_milestone_file_content(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        return _build_new_milestone_file_context(
-            effective_cwd,
-            include_project="project_content" in required_fields,
-            include_state="state_content" in required_fields,
-            include_milestones="milestones_content" in required_fields,
-            include_requirements="requirements_content" in required_fields,
-            include_roadmap="roadmap_content" in required_fields,
-        )
-
     return _assemble_staged_init_payload(
         workflow_id="new-milestone",
         stage_id=stage,
@@ -4699,39 +4372,29 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
+            _staged_scalar_field_provider(
                 "researcher_model",
-                {"researcher_model"},
-                lambda _assembly_context: {
-                    "researcher_model": _resolve_model(effective_cwd, "gpd-project-researcher", config)
-                },
+                lambda: _resolve_model(effective_cwd, "gpd-project-researcher", config),
             ),
-            _StagedInitProvider(
+            _staged_scalar_field_provider(
                 "synthesizer_model",
-                {"synthesizer_model"},
-                lambda _assembly_context: {
-                    "synthesizer_model": _resolve_model(effective_cwd, "gpd-research-synthesizer", config)
-                },
+                lambda: _resolve_model(effective_cwd, "gpd-research-synthesizer", config),
             ),
-            _StagedInitProvider(
+            _staged_scalar_field_provider(
                 "roadmapper_model",
-                {"roadmapper_model"},
-                lambda _assembly_context: {"roadmapper_model": _resolve_model(effective_cwd, "gpd-roadmapper", config)},
+                lambda: _resolve_model(effective_cwd, "gpd-roadmapper", config),
             ),
-            _StagedInitProvider(
-                "reference_or_contract",
-                _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS | _NEW_MILESTONE_CONTRACT_GATE_FIELDS,
-                build_new_milestone_reference_or_contract,
+            _staged_reference_provider(
+                effective_cwd,
+                _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS,
+                _PROJECT_CONTRACT_GATE_FIELDS,
             ),
-            _StagedInitProvider(
-                "state_memory",
-                _NEW_MILESTONE_STATE_MEMORY_FIELDS,
-                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
-            ),
-            _StagedInitProvider(
-                "file_content",
+            _staged_state_memory_provider(effective_cwd, _STATE_MEMORY_FIELDS),
+            _staged_file_context_provider(
                 _NEW_MILESTONE_FILE_CONTENT_FIELDS,
-                build_new_milestone_file_content,
+                cwd=effective_cwd,
+                field_paths=_NEW_MILESTONE_FILE_CONTEXT_PATHS,
+                read_file=_safe_read_file_truncated,
             ),
         ),
     )
@@ -4807,26 +4470,13 @@ def init_quick(cwd: Path, description: str | None = None, stage: str | None = No
         known_init_fields=_QUICK_INIT_FIELDS,
     )
 
-    def build_quick_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & _QUICK_REFERENCE_RUNTIME_FIELDS
-        if reference_fields:
-            return _build_staged_reference_runtime_context(cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(cwd)
-
     return _assemble_staged_init_payload(
         workflow_id="quick",
         stage_id=stage,
         cwd=cwd,
         base_payload=result,
         manifest=manifest,
-        providers=(
-            _StagedInitProvider(
-                "reference_or_contract",
-                _QUICK_REFERENCE_RUNTIME_FIELDS | _QUICK_CONTRACT_GATE_FIELDS,
-                build_quick_reference_or_contract,
-            ),
-        ),
+        providers=(_staged_reference_provider(cwd, _QUICK_REFERENCE_RUNTIME_FIELDS, _QUICK_CONTRACT_GATE_FIELDS),),
     )
 
 
@@ -4979,25 +4629,6 @@ def init_resume(cwd: Path, *, data_root: Path | None = None, stage: str | None =
         allowed_tools={"ask_user", "file_read", "file_write", "shell"},
     )
 
-    def build_resume_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & _RESUME_REFERENCE_RUNTIME_FIELDS
-        if reference_fields:
-            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(effective_cwd)
-
-    def build_resume_file_content(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        return _build_resume_file_context(
-            effective_cwd,
-            continuity_handoff_file=continuity_handoff_file,
-            include_state="state_content" in required_fields,
-            include_project="project_content" in required_fields,
-            include_roadmap="roadmap_content" in required_fields,
-            include_derivation_state="derivation_state_content" in required_fields,
-            include_continuity_handoff="continuity_handoff_content" in required_fields,
-        )
-
     def canonicalize_resume_staged_payload(_assembly_context: object, staged_source: dict[str, object]) -> None:
         canonical = canonicalize_resume_public_payload(staged_source)
         staged_source.clear()
@@ -5010,22 +4641,19 @@ def init_resume(cwd: Path, *, data_root: Path | None = None, stage: str | None =
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "reference_or_contract",
-                _RESUME_REFERENCE_RUNTIME_FIELDS | _RESUME_CONTRACT_GATE_FIELDS,
-                build_resume_reference_or_contract,
+            _staged_reference_provider(effective_cwd, _RESUME_REFERENCE_RUNTIME_FIELDS, _PROJECT_CONTRACT_GATE_FIELDS),
+            _staged_structured_state_provider(effective_cwd, _STRUCTURED_STATE_FIELDS),
+            _staged_state_memory_provider(effective_cwd, _STATE_MEMORY_FIELDS),
+            _staged_selected_fields_provider(
+                "file_content",
+                _RESUME_FILE_CONTENT_FIELDS,
+                _RESUME_FILE_CONTENT_FIELDS,
+                lambda selected_fields: _build_resume_file_context(
+                    effective_cwd,
+                    continuity_handoff_file=continuity_handoff_file,
+                    selected_fields=selected_fields,
+                ),
             ),
-            _StagedInitProvider(
-                "structured_state",
-                _RESUME_STRUCTURED_STATE_FIELDS,
-                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
-            ),
-            _StagedInitProvider(
-                "state_memory",
-                _RESUME_STATE_MEMORY_FIELDS,
-                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
-            ),
-            _StagedInitProvider("file_content", _RESUME_FILE_CONTENT_FIELDS, build_resume_file_content),
         ),
         postprocessors=(canonicalize_resume_staged_payload,),
     )
@@ -5061,11 +4689,11 @@ def init_sync_state(cwd: Path, *, stage: str | None = None) -> dict:
         result.update(_build_structured_state_runtime_context(effective_cwd))
         result.update(_build_new_project_contract_runtime_context(effective_cwd))
         result.update(
-            _build_sync_state_file_context(
+            _build_selected_file_context(
                 effective_cwd,
-                include_state_md=True,
-                include_state_json=True,
-                include_state_json_backup=True,
+                _SYNC_STATE_FILE_CONTENT_FIELDS,
+                _SYNC_STATE_FILE_CONTEXT_PATHS,
+                _safe_read_file_truncated,
             )
         )
         return result
@@ -5077,15 +4705,6 @@ def init_sync_state(cwd: Path, *, stage: str | None = None) -> dict:
         allowed_tools={"ask_user", "file_read", "file_write", "shell", "find_files", "search_files"},
     )
 
-    def build_sync_state_file_content(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        return _build_sync_state_file_context(
-            effective_cwd,
-            include_state_md="state_md_content" in required_fields,
-            include_state_json="state_json_content" in required_fields,
-            include_state_json_backup="state_json_backup_content" in required_fields,
-        )
-
     return _assemble_staged_init_payload(
         workflow_id="sync-state",
         stage_id=stage,
@@ -5093,17 +4712,14 @@ def init_sync_state(cwd: Path, *, stage: str | None = None) -> dict:
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "structured_state",
-                _SYNC_STATE_STRUCTURED_STATE_FIELDS,
-                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
+            _staged_structured_state_provider(effective_cwd, _SYNC_STATE_STRUCTURED_STATE_FIELDS),
+            _staged_contract_provider(effective_cwd, _PROJECT_CONTRACT_GATE_FIELDS),
+            _staged_file_context_provider(
+                _SYNC_STATE_FILE_CONTENT_FIELDS,
+                cwd=effective_cwd,
+                field_paths=_SYNC_STATE_FILE_CONTEXT_PATHS,
+                read_file=_safe_read_file_truncated,
             ),
-            _StagedInitProvider(
-                "contract_gate",
-                _SYNC_STATE_CONTRACT_GATE_FIELDS,
-                lambda _assembly_context: _build_new_project_contract_runtime_context(effective_cwd),
-            ),
-            _StagedInitProvider("file_content", _SYNC_STATE_FILE_CONTENT_FIELDS, build_sync_state_file_content),
         ),
     )
 
@@ -5170,37 +4786,6 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
         known_init_fields=_VERIFY_WORK_INIT_FIELDS,
     )
 
-    def build_verify_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS
-        if reference_fields:
-            return _build_staged_reference_runtime_context(cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(cwd)
-
-    def build_verify_schema_bridges(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        if phase_info is None:
-            raise ValueError(
-                f"verify-work stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
-            )
-        bridges: dict[str, object] = {}
-        if "verification_report_skeleton_bridge" in required_fields:
-            bridges["verification_report_skeleton_bridge"] = _build_verification_report_skeleton_bridge(
-                cwd,
-                phase_info,
-            )
-        if "verification_report_finalizer_bridge" in required_fields:
-            bridges["verification_report_finalizer_bridge"] = _build_verification_report_finalizer_bridge(
-                cwd,
-                phase_info,
-            )
-        if "proof_redteam_finalizer_bridge" in required_fields:
-            bridges["proof_redteam_finalizer_bridge"] = _build_proof_redteam_finalizer_bridge(
-                cwd,
-                phase_info,
-            )
-        return bridges
-
     return _assemble_staged_init_payload(
         workflow_id="verify-work",
         stage_id=stage,
@@ -5208,22 +4793,30 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "reference_or_contract",
-                _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS | _VERIFY_WORK_CONTRACT_GATE_FIELDS,
-                build_verify_reference_or_contract,
+            _staged_reference_provider(cwd, _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS, _VERIFY_WORK_CONTRACT_GATE_FIELDS),
+            _staged_structured_state_provider(cwd, _VERIFY_WORK_STRUCTURED_STATE_FIELDS),
+            _staged_state_memory_provider(cwd, _VERIFY_WORK_STATE_MEMORY_FIELDS),
+            _staged_schema_bridge_provider(
+                _VERIFY_WORK_SCHEMA_BRIDGE_FIELDS,
+                phase_info=phase_info,
+                missing_phase_message=(
+                    f"verify-work stage {stage!r} requires a resolved phase so verification-report bridge commands can be built."
+                ),
+                bridge_builders={
+                    "verification_report_skeleton_bridge": lambda: _build_verification_report_skeleton_bridge(
+                        cwd,
+                        phase_info,
+                    ),
+                    "verification_report_finalizer_bridge": lambda: _build_verification_report_finalizer_bridge(
+                        cwd,
+                        phase_info,
+                    ),
+                    "proof_redteam_finalizer_bridge": lambda: _build_proof_redteam_finalizer_bridge(
+                        cwd,
+                        phase_info,
+                    ),
+                },
             ),
-            _StagedInitProvider(
-                "structured_state",
-                _VERIFY_WORK_STRUCTURED_STATE_FIELDS,
-                lambda _assembly_context: _build_structured_state_runtime_context(cwd),
-            ),
-            _StagedInitProvider(
-                "state_memory",
-                _VERIFY_WORK_STATE_MEMORY_FIELDS,
-                lambda _assembly_context: _build_state_memory_runtime_context(cwd),
-            ),
-            _StagedInitProvider("schema_bridges", _VERIFY_WORK_SCHEMA_BRIDGE_FIELDS, build_verify_schema_bridges),
         ),
     )
 
@@ -5302,7 +4895,7 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
         reference_fields = required_fields & _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS
         needs_full_reference_context = bool(reference_fields)
         needs_bootstrap_reference_context = bool(required_fields & _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS)
-        needs_contract_gate_context = bool(required_fields & _WRITE_PAPER_CONTRACT_GATE_FIELDS)
+        needs_contract_gate_context = bool(required_fields & _PROJECT_CONTRACT_GATE_FIELDS)
         needs_publication_bootstrap_context = bool(required_fields & _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS)
         payload: dict[str, object] = {}
         if needs_full_reference_context:
@@ -5327,15 +4920,6 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
             )
         return payload
 
-    def build_write_paper_file_content(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        return _build_publication_file_context(
-            effective_cwd,
-            include_state="state_content" in required_fields,
-            include_roadmap="roadmap_content" in required_fields,
-            include_requirements="requirements_content" in required_fields,
-        )
-
     return _assemble_staged_init_payload(
         workflow_id="write-paper",
         stage_id=stage,
@@ -5343,20 +4927,21 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
+            _staged_assembly_context_provider(
                 "reference_or_publication_bootstrap",
                 _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS
                 | _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS
-                | _WRITE_PAPER_CONTRACT_GATE_FIELDS
+                | _PROJECT_CONTRACT_GATE_FIELDS
                 | _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS,
                 build_write_paper_reference_or_bootstrap,
             ),
-            _StagedInitProvider(
-                "state_memory",
-                _WRITE_PAPER_STATE_MEMORY_FIELDS,
-                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
+            _staged_state_memory_provider(effective_cwd, _STATE_MEMORY_FIELDS),
+            _staged_file_context_provider(
+                _WRITE_PAPER_FILE_CONTENT_FIELDS,
+                cwd=effective_cwd,
+                field_paths=_PLAN_PHASE_PLANNING_FILE_CONTEXT_PATHS,
+                read_file=_safe_read_file_truncated,
             ),
-            _StagedInitProvider("file_content", _WRITE_PAPER_FILE_CONTENT_FIELDS, build_write_paper_file_content),
         ),
     )
 
@@ -5394,14 +4979,15 @@ def init_peer_review(cwd: Path, subject: str | None = None, stage: str | None = 
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
+            _staged_selected_fields_provider(
                 "peer_review_runtime",
                 PEER_REVIEW_INIT_FIELDS - frozenset(base_result),
-                lambda assembly_context: _build_peer_review_runtime_context(
+                _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS,
+                lambda reference_fields: _build_peer_review_runtime_context(
                     effective_cwd,
                     subject,
                     launch_cwd=launch_cwd,
-                    reference_fields=assembly_context.required_fields & _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS,
+                    reference_fields=reference_fields,
                 ),
             ),
         ),
@@ -5449,15 +5035,16 @@ def init_respond_to_referees(cwd: Path, subject: str | None = None, stage: str |
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
+            _staged_selected_fields_provider(
                 "peer_review_runtime",
                 PEER_REVIEW_INIT_FIELDS - frozenset(base_result),
-                lambda assembly_context: _build_peer_review_runtime_context(
+                _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS,
+                lambda reference_fields: _build_peer_review_runtime_context(
                     effective_cwd,
                     manuscript_subject,
                     launch_cwd=launch_cwd,
                     preserve_standalone_publication_roots=True,
-                    reference_fields=assembly_context.required_fields & _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS,
+                    reference_fields=reference_fields,
                 ),
             ),
         ),
@@ -5523,12 +5110,16 @@ def init_arxiv_submission(cwd: Path, subject: str | None = None, stage: str | No
         base_payload=base_result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
+            _staged_context_provider(
                 "publication_bootstrap",
                 ARXIV_SUBMISSION_BOOTSTRAP_FIELDS,
-                lambda _assembly_context: _build_publication_bootstrap_runtime_context(effective_cwd),
+                lambda: _build_publication_bootstrap_runtime_context(effective_cwd),
             ),
-            _StagedInitProvider("publication_snapshot", ARXIV_SUBMISSION_SNAPSHOT_FIELDS, build_arxiv_snapshot),
+            _staged_context_provider(
+                "publication_snapshot",
+                ARXIV_SUBMISSION_SNAPSHOT_FIELDS,
+                lambda: build_arxiv_snapshot(None),
+            ),
         ),
     )
 
@@ -5591,40 +5182,22 @@ def init_phase_op(
         result.update(_build_reference_runtime_context(effective_cwd))
         result.update(_build_state_memory_runtime_context(effective_cwd))
         result.update(_build_execution_runtime_context(effective_cwd))
-
-        planning = effective_cwd / PLANNING_DIR_NAME
-        if "state" in includes:
-            result["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
+        selected_file_fields = _selected_file_fields_from_includes(includes, _RESEARCH_PHASE_INCLUDE_FILE_FIELDS)
+        result.update(
+            _build_selected_file_context(
+                effective_cwd,
+                selected_file_fields,
+                _RESEARCH_PHASE_FILE_CONTEXT_PATHS,
+                _safe_read_file_truncated,
+            )
+        )
+        if "state_content" in selected_file_fields:
             result.update(_build_structured_state_runtime_context(effective_cwd))
-        if "config" in includes:
-            result["config_content"] = _safe_read_file_truncated(planning / CONFIG_FILENAME)
-        if "roadmap" in includes:
-            result["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
-
         return result
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
     manifest = load_workflow_stage_manifest("research-phase", known_init_fields=_RESEARCH_PHASE_INIT_FIELDS)
-
-    def build_research_phase_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & (_STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS)
-        if reference_fields:
-            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(effective_cwd)
-
-    def build_research_phase_file_content(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        planning = effective_cwd / PLANNING_DIR_NAME
-        payload: dict[str, object] = {}
-        if "state_content" in required_fields:
-            payload["state_content"] = _safe_read_file_truncated(planning / STATE_MD_FILENAME)
-        if "config_content" in required_fields:
-            payload["config_content"] = _safe_read_file_truncated(planning / CONFIG_FILENAME)
-        if "roadmap_content" in required_fields:
-            payload["roadmap_content"] = _safe_read_file_truncated(planning / ROADMAP_FILENAME)
-        return payload
 
     return _assemble_staged_init_payload(
         workflow_id="research-phase",
@@ -5633,29 +5206,20 @@ def init_phase_op(
         base_payload=result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "reference_or_contract",
-                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS
-                | _STAGED_REFERENCE_SUMMARY_FIELDS
-                | _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
-                build_research_phase_reference_or_contract,
+            _staged_reference_provider(
+                effective_cwd,
+                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS,
+                _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
             ),
-            _StagedInitProvider(
-                "structured_state",
-                _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS,
-                lambda _assembly_context: _build_structured_state_runtime_context(effective_cwd),
+            _staged_structured_state_provider(effective_cwd, _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS),
+            _staged_state_memory_provider(effective_cwd, _EXECUTE_PHASE_STATE_MEMORY_FIELDS),
+            _staged_execution_provider(effective_cwd),
+            _staged_file_context_provider(
+                _RESEARCH_PHASE_FILE_CONTENT_FIELDS,
+                cwd=effective_cwd,
+                field_paths=_RESEARCH_PHASE_FILE_CONTEXT_PATHS,
+                read_file=_safe_read_file_truncated,
             ),
-            _StagedInitProvider(
-                "state_memory",
-                _EXECUTE_PHASE_STATE_MEMORY_FIELDS,
-                lambda _assembly_context: _build_state_memory_runtime_context(effective_cwd),
-            ),
-            _StagedInitProvider(
-                "execution_runtime",
-                _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
-                lambda _assembly_context: _build_execution_runtime_context(effective_cwd),
-            ),
-            _StagedInitProvider("file_content", _RESEARCH_PHASE_FILE_CONTENT_FIELDS, build_research_phase_file_content),
         ),
     )
 
@@ -5704,13 +5268,6 @@ def init_literature_review(cwd: Path, topic: str | None = None, stage: str | Non
 
     manifest = load_workflow_stage_manifest("literature-review", known_init_fields=_LITERATURE_REVIEW_INIT_FIELDS)
 
-    def build_literature_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & (_STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS)
-        if reference_fields:
-            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(effective_cwd)
-
     return _assemble_staged_init_payload(
         workflow_id="literature-review",
         stage_id=stage,
@@ -5718,12 +5275,10 @@ def init_literature_review(cwd: Path, topic: str | None = None, stage: str | Non
         base_payload=result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "reference_or_contract",
-                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS
-                | _STAGED_REFERENCE_SUMMARY_FIELDS
-                | _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
-                build_literature_reference_or_contract,
+            _staged_reference_provider(
+                effective_cwd,
+                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS,
+                _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
             ),
         ),
     )
@@ -6080,13 +5635,6 @@ def init_map_research(cwd: Path, focus: str | None = None, stage: str | None = N
 
     manifest = load_workflow_stage_manifest("map-research", known_init_fields=_MAP_RESEARCH_INIT_FIELDS)
 
-    def build_map_reference_or_contract(assembly_context: object) -> Mapping[str, object]:
-        required_fields = assembly_context.required_fields
-        reference_fields = required_fields & (_STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS)
-        if reference_fields:
-            return _build_staged_reference_runtime_context(effective_cwd, reference_fields)
-        return _build_new_project_contract_runtime_context(effective_cwd)
-
     return _assemble_staged_init_payload(
         workflow_id="map-research",
         stage_id=stage,
@@ -6094,12 +5642,10 @@ def init_map_research(cwd: Path, focus: str | None = None, stage: str | None = N
         base_payload=result,
         manifest=manifest,
         providers=(
-            _StagedInitProvider(
-                "reference_or_contract",
-                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS
-                | _STAGED_REFERENCE_SUMMARY_FIELDS
-                | _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
-                build_map_reference_or_contract,
+            _staged_reference_provider(
+                effective_cwd,
+                _STAGED_FULL_REFERENCE_RUNTIME_FIELDS | _STAGED_REFERENCE_SUMMARY_FIELDS,
+                _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
             ),
         ),
     )

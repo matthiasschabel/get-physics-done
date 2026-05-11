@@ -27,6 +27,17 @@ _SUPPORTED_MANUSCRIPT_ROOTS_DETAIL = (
 )
 
 
+@dataclasses.dataclass(frozen=True)
+class ResolvedReviewManuscriptTarget:
+    """Structured manuscript-target resolution details for review preflights."""
+
+    status: str
+    manuscript: Path | None
+    manuscript_root: Path | None
+    requested_target: Path | None
+    detail: str
+
+
 def _format_display_path_from_cwd(target: str | Path | None, *, cwd: Path) -> str:
     """Format one path relative to *cwd* when possible."""
 
@@ -66,6 +77,17 @@ def path_is_within_supported_manuscript_root(project_root: Path, target: Path) -
     """Return whether *target* lives under a supported project manuscript root."""
 
     return _supported_manuscript_root_for_target(project_root, target) is not None
+
+
+def _resolve_subject_path(subject: str | None, *, base: Path) -> Path | None:
+    """Resolve one raw subject string relative to *base* when possible."""
+
+    if not isinstance(subject, str) or not subject.strip():
+        return None
+    target = Path(subject.strip()).expanduser()
+    if not target.is_absolute():
+        target = base / target
+    return target.resolve(strict=False)
 
 
 def _manuscript_root_needs_supported_metadata(
@@ -251,6 +273,75 @@ def resolve_review_manuscript_target(
     if resolution.status == "missing":
         return None, "no LaTeX manuscript entrypoint found under paper/, manuscript/, or draft/"
     return None, f"ambiguous or inconsistent manuscript roots: {resolution.detail}"
+
+
+def _review_manuscript_target_status(*, manuscript: Path | None, detail: str) -> str:
+    """Infer the structured status corresponding to resolver detail text."""
+
+    if manuscript is not None:
+        return "resolved"
+    normalized_detail = detail.casefold()
+    if (
+        normalized_detail.startswith("missing ")
+        or normalized_detail.startswith("no manuscript")
+        or normalized_detail.startswith("no latex")
+    ):
+        return "missing"
+    if "ambiguous or inconsistent manuscript roots" in normalized_detail:
+        return "ambiguous"
+    if " is ambiguous or inconsistent:" in normalized_detail:
+        if (
+            "missing" in normalized_detail
+            or "no readable" in normalized_detail
+            or "does not resolve" in normalized_detail
+            or "does not contain manuscript metadata" in normalized_detail
+        ):
+            return "missing"
+        return "ambiguous"
+    return "invalid"
+
+
+def resolve_review_manuscript_target_details(
+    project_root: Path,
+    subject: str | None,
+    *,
+    allow_markdown: bool = True,
+    restrict_to_supported_roots: bool = False,
+    workspace_cwd: Path | None = None,
+    allowed_suffixes: Collection[str] | None = None,
+    display_cwd: Path | None = None,
+) -> ResolvedReviewManuscriptTarget:
+    """Resolve one explicit or implicit manuscript/artifact target with metadata."""
+
+    project_root = project_root.resolve(strict=False)
+    subject_base = (workspace_cwd or project_root).resolve(strict=False)
+    detail_cwd = (display_cwd or subject_base).resolve(strict=False)
+    requested_target = _resolve_subject_path(subject, base=subject_base)
+    manuscript, detail = resolve_review_manuscript_target(
+        project_root,
+        subject,
+        allow_markdown=allow_markdown,
+        restrict_to_supported_roots=restrict_to_supported_roots,
+        workspace_cwd=subject_base,
+        allowed_suffixes=allowed_suffixes,
+        display_cwd=detail_cwd,
+    )
+
+    if manuscript is not None:
+        manuscript_root = _supported_manuscript_root_for_target(project_root, manuscript) or manuscript.parent
+    elif requested_target is not None:
+        manuscript_root = (
+            requested_target if requested_target.is_dir() or requested_target.suffix == "" else requested_target.parent
+        )
+    else:
+        manuscript_root = None
+    return ResolvedReviewManuscriptTarget(
+        status=_review_manuscript_target_status(manuscript=manuscript, detail=detail),
+        manuscript=manuscript,
+        manuscript_root=manuscript_root,
+        requested_target=requested_target,
+        detail=detail,
+    )
 
 
 @dataclasses.dataclass(frozen=True)

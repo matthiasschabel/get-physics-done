@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from importlib import import_module
 from pathlib import Path
 
 from gpd.adapters.runtime_catalog import (
@@ -29,7 +28,9 @@ _MANIFEST_RUNTIME_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 def get_adapter(runtime: str):
     """Lazily resolve the runtime adapter to keep manifest parsing lightweight."""
-    return import_module("gpd.adapters").get_adapter(runtime)
+    from gpd.adapters import get_adapter as resolve_adapter
+
+    return resolve_adapter(runtime)
 
 
 def build_runtime_install_repair_command(
@@ -40,7 +41,8 @@ def build_runtime_install_repair_command(
     explicit_target: bool = False,
 ) -> str:
     """Lazily resolve the public repair-command helper."""
-    install_utils = import_module("gpd.adapters.install_utils")
+    from gpd.adapters import install_utils
+
     return install_utils.build_runtime_install_repair_command(
         runtime,
         install_scope=install_scope,

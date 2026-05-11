@@ -34,13 +34,11 @@ It covers:
 
 - `src/gpd/commands/*.md`: `71`
 - `src/gpd/agents/*.md`: `24`
-- `src/gpd/specs/workflows/*.md`: `72`
-- `src/gpd/specs/templates/**/*.md`: `81`
-- `src/gpd/specs/references/**/*.md`: `183`
-- `src/gpd/adapters/*.py`: `9`
+- `src/gpd/specs/workflows/*.md`: `67`
+- `src/gpd/specs/templates/**/*.md`: `76`
+- `src/gpd/specs/references/**/*.md`: `168`
+- `src/gpd/adapters/*.py`: `10`
 - `src/gpd/hooks/*.py`: `11`
-- `src/gpd/mcp/*.py`: `5`
-- `src/gpd/mcp/integrations/*.py`: `2`
 - `src/gpd/mcp/servers/*.py`: `9`
 - `infra/gpd-*.json`: `8`
 
@@ -60,6 +58,7 @@ Excluded as noise from node counting, but still modeled where contractually rele
 - `.gemini/**`
 - `.codex/**`
 - `.opencode/**`
+- `.copilot/**`
 - `dist/**`
 <!-- repo-graph-scope:end -->
 

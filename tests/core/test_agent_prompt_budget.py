@@ -29,33 +29,35 @@ PATH_PREFIX = "/runtime/"
 
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
-PHASE6_MAX_AGENT_EXPANDED_CHARS = 49_999
+PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 460_000
+PHASE5_MAX_AGENT_EXPANDED_CHARS = 46_000
+PHASE5_MIN_ROLE_KIT_AGENT_COUNT = 12
 
 AGENT_BASELINES = {
-    "gpd-bibliographer": (132, 6_015),
+    "gpd-bibliographer": (136, 5_800),
     "gpd-check-proof": (81, 6_231),
-    "gpd-consistency-checker": (64, 3_993),
-    "gpd-debugger": (246, 9_494),
-    "gpd-executor": (763, 48_258),
-    "gpd-experiment-designer": (631, 35_483),
+    "gpd-consistency-checker": (69, 4_112),
+    "gpd-debugger": (245, 9_482),
+    "gpd-executor": (676, 42_243),
+    "gpd-experiment-designer": (631, 35_363),
     "gpd-explainer": (241, 9_508),
-    "gpd-literature-reviewer": (394, 14_734),
-    "gpd-notation-coordinator": (629, 36_452),
+    "gpd-literature-reviewer": (395, 14_820),
+    "gpd-notation-coordinator": (637, 36_159),
     "gpd-paper-writer": (598, 34_030),
-    "gpd-phase-researcher": (366, 15_409),
-    "gpd-plan-checker": (399, 22_456),
-    "gpd-planner": (594, 33_278),
-    "gpd-project-researcher": (274, 12_725),
+    "gpd-phase-researcher": (370, 15_315),
+    "gpd-plan-checker": (401, 21_540),
+    "gpd-planner": (570, 32_479),
+    "gpd-project-researcher": (274, 12_605),
     "gpd-referee": (547, 35_781),
-    "gpd-research-mapper": (743, 37_100),
-    "gpd-research-synthesizer": (978, 48_673),
+    "gpd-research-mapper": (706, 35_904),
+    "gpd-research-synthesizer": (617, 31_977),
     "gpd-review-literature": (53, 2_591),
     "gpd-review-math": (54, 3_343),
     "gpd-review-physics": (53, 2_604),
     "gpd-review-reader": (52, 3_166),
     "gpd-review-significance": (54, 2_790),
-    "gpd-roadmapper": (903, 38_674),
-    "gpd-verifier": (384, 26_135),
+    "gpd-roadmapper": (689, 33_451),
+    "gpd-verifier": (374, 25_864),
 }
 
 PEER_REVIEW_SPECIALIST_AGENTS = (
@@ -79,22 +81,23 @@ MODE_TABLE_ALLOWLIST = {
     "gpd-project-researcher",
 }
 WORST_AGENT_HARD_CAPS = {
-    "gpd-planner": (614, 34_278),
-    "gpd-executor": (783, 49_500),
-    "gpd-research-mapper": (800, 39_000),
-    "gpd-roadmapper": (988, 42_619),
-    "gpd-project-researcher": (300, 50_000),
-    "gpd-experiment-designer": (650, 37_000),
-    "gpd-research-synthesizer": (1_008, 50_313),
-    "gpd-notation-coordinator": (650, 38_000),
-    "gpd-referee": (570, 37_000),
-    "gpd-plan-checker": (419, 23_456),
-    "gpd-verifier": (430, 30_000),
+    "gpd-executor": (697, 43_600),
+    "gpd-experiment-designer": (651, 36_450),
+    "gpd-notation-coordinator": (657, 37_250),
+    "gpd-paper-writer": (618, 35_100),
+    "gpd-plan-checker": (421, 22_200),
+    "gpd-planner": (590, 33_500),
+    "gpd-project-researcher": (294, 13_700),
+    "gpd-referee": (567, 36_900),
+    "gpd-research-mapper": (728, 37_000),
+    "gpd-research-synthesizer": (637, 33_000),
+    "gpd-roadmapper": (710, 34_500),
+    "gpd-verifier": (394, 26_700),
 }
-PHASE6_RAW_AGENT_LINE_CAPS = {
-    "gpd-planner": 625,
-    "gpd-executor": 780,
-    "gpd-plan-checker": 899,
+PHASE5_RAW_AGENT_LINE_CAPS = {
+    "gpd-executor": 700,
+    "gpd-plan-checker": 421,
+    "gpd-planner": 590,
 }
 TOP_AGENT_HARD_CAP_COUNT = 6
 BULKY_REFERENCE_INCLUDE_FILES = (
@@ -162,9 +165,9 @@ def test_expanded_agent_prompt_stays_under_budget(agent_name: str) -> None:
     )
 
 
-@pytest.mark.parametrize("agent_name", sorted(PHASE6_RAW_AGENT_LINE_CAPS))
-def test_phase6_selected_agent_raw_source_prompt_caps(agent_name: str) -> None:
-    max_lines = PHASE6_RAW_AGENT_LINE_CAPS[agent_name]
+@pytest.mark.parametrize("agent_name", sorted(PHASE5_RAW_AGENT_LINE_CAPS))
+def test_phase5_selected_agent_raw_source_prompt_caps(agent_name: str) -> None:
+    max_lines = PHASE5_RAW_AGENT_LINE_CAPS[agent_name]
     observed_lines = _raw_line_count(AGENTS_DIR / f"{agent_name}.md")
 
     assert observed_lines <= max_lines
@@ -209,7 +212,7 @@ def test_largest_agent_prompts_have_hard_caps() -> None:
     assert largest_agents <= set(WORST_AGENT_HARD_CAPS)
 
 
-def test_phase6_all_expanded_agent_prompts_stay_below_50k_chars() -> None:
+def test_phase5_all_expanded_agent_prompts_stay_below_46k_chars() -> None:
     offenders: list[str] = []
     for agent_name in sorted(registry.list_agents()):
         metrics = measure_prompt_surface(
@@ -217,10 +220,31 @@ def test_phase6_all_expanded_agent_prompts_stay_below_50k_chars() -> None:
             src_root=SOURCE_ROOT,
             path_prefix=PATH_PREFIX,
         )
-        if metrics.expanded_char_count > PHASE6_MAX_AGENT_EXPANDED_CHARS:
+        if metrics.expanded_char_count > PHASE5_MAX_AGENT_EXPANDED_CHARS:
             offenders.append(f"{agent_name}: {metrics.expanded_char_count}")
 
     assert offenders == []
+
+
+def test_phase5_total_expanded_agent_prompt_chars_stays_under_target() -> None:
+    total_chars = 0
+    for agent_name in sorted(registry.list_agents()):
+        metrics = measure_prompt_surface(
+            AGENTS_DIR / f"{agent_name}.md",
+            src_root=SOURCE_ROOT,
+            path_prefix=PATH_PREFIX,
+        )
+        total_chars += metrics.expanded_char_count
+
+    assert total_chars <= PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS
+
+
+def test_phase5_role_kit_adoption_reaches_target() -> None:
+    agents_with_role_kits = [
+        agent_name for agent_name in sorted(registry.list_agents()) if registry.get_agent(agent_name).role_kits
+    ]
+
+    assert len(agents_with_role_kits) >= PHASE5_MIN_ROLE_KIT_AGENT_COUNT, agents_with_role_kits
 
 
 @pytest.mark.parametrize("agent_name", sorted(WORST_AGENT_HARD_CAPS))

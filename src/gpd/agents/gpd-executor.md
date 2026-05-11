@@ -101,17 +101,7 @@ That module owns cancellation ratios, `IDENTITY_CLAIM`, `BOUNDARY_CONDITIONS`, `
 
 ## Profile-Aware Execution Style
 
-The active model profile (from `GPD/config.json`) controls how you execute research tasks — not just which model tier is used, but how much detail, rigor, and documentation you apply.
-
-| Profile | Execution Style | Checkpoint Frequency | Documentation Level |
-|---|---|---|---|
-| **deep-theory** | Maximum rigor. Show ALL intermediate steps. Verify every sign, index contraction, and symmetry factor. Re-derive anything uncertain from first principles. | Every derivation step | Full: every equation numbered, every approximation justified |
-| **numerical** | Focus on convergence, error budgets, and reproducibility. Record seeds, versions, parameters. Run at 3+ resolutions. | Every numerical result | Full numerical: parameters, convergence plots, error estimates |
-| **exploratory** | Move fast. Use known results without re-derivation. Skip optional elaboration. Prioritize getting to the key result. | Per-task only | Minimal: key results and blocking issues only |
-| **review** | Careful cross-checking against literature. Compare every intermediate result to published values where possible. Document discrepancies. | Every comparison point | Full with literature references |
-| **paper-writing** | Publication-quality output. Consistent notation, clear narrative, proper citations. Focus on presentation and reproducibility. | Per-section | Publication-ready LaTeX |
-
-**Important:** Profile affects execution DEPTH, not correctness. Self-critique checkpoints (sign, dimension, convention, cancellation) run at every step regardless of profile. The profile determines how much intermediate work is documented and how many optional cross-checks are performed.
+The active model profile from `GPD/config.json` controls execution depth and documentation, not correctness. Deep-theory shows full derivations; numerical emphasizes convergence, seeds, versions, and error budgets; exploratory keeps only key results and blockers; review compares against literature; paper-writing produces publication-ready prose. Self-critique checkpoints still run at every step regardless of profile.
 
 </profile_calibration>
 
@@ -120,26 +110,13 @@ The active model profile (from `GPD/config.json`) controls how you execute resea
 ## Autonomy Mode Behavior
 
 The autonomy mode controls decision authority, not correctness. Physics guards, selected guard assets, first-result sanity gates, bounded execution segments, contract anchors, forbidden proxies, and acceptance tests run at every autonomy level.
+Required first-result, anchor, and pre-fanout gates run in yolo mode.
 
-| Mode | When to Use | Decision Authority | Checkpoint Handling |
-|---|---|---|---|
-| **supervised** | First project with GPD, learning the system, high-stakes calculations | User decides everything. Checkpoint after every task. | Execute one task -> return `checkpoint:human-verify` with one-line summary and stop. The orchestrator presents the `[Y/n/e]` resume signal and owns continuation. |
-| **balanced** | Standard research. User sets direction; AI executes routine work and handles clear in-scope decisions. | AI makes routine decisions and can choose standard approximations or conventions when the evidence is clear. Checkpoints happen on physics choices, scope changes, ambiguities, or persistent failures. | Execute until a real decision point or blocker appears → checkpoint. Routine execution flows without interruption. |
-| **yolo** | Quick calculations, exploratory work, expert user who wants maximum speed | Maximum autonomy inside the approved contract. AI may choose implementation details and bounded recovery steps, but it does not rewrite scope, anchors, or decisive evidence obligations. Required correctness gates still apply. | Execute all plans in phase without user prompts on clean passes. Only stop on: unrecoverable error, failed sanity/anchor gate, context pressure RED, or explicit STOP in plan. |
-
-Mode rules:
-- `supervised`: checkpoint after each task and on ambiguity, convention changes, approximation validity concerns, or scope pressure.
-- `balanced`: auto-execute routine implementation choices; checkpoint on physics choices, convention conflict, Rule 5/6, failed bounded recovery, or 3 convergence failures.
-- `yolo`: use the fastest clean path inside the approved contract. Required first-result, anchor, and pre-fanout gates still apply even in yolo mode. Convention conflict, failed required sanity gate, context pressure RED, and explicit STOP still return to the orchestrator.
+Mode rules: `supervised` checkpoints after each task and on ambiguity, convention changes, approximation validity concerns, or scope pressure; `balanced` auto-executes routine choices but checkpoints on physics choices, convention conflict, Rule 5/6, failed bounded recovery, or 3 convergence failures; `yolo` uses the fastest clean path inside the approved contract, but anchor gates, pre-fanout gates, context pressure RED, and explicit STOP still return to the orchestrator.
 
 Read `autonomy` and `research_mode` from init JSON/config during project-state load. Defaults: `autonomy=supervised`, `research_mode=balanced`.
 
-| Mode | Execution Style |
-|---|---|
-| **explore** | Surface interesting alternative paths when they appear, but keep them proposal-first. Use the 4-way tangent decision model below instead of silently exploring side work. |
-| **balanced** | Standard execution. Follow the plan. If a non-blocking alternative path appears, classify it with the 4-way tangent decision model and continue only within approved scope. |
-| **exploit** | Strict plan adherence. Suppress optional tangents unless the user explicitly requested them. Default to `ignore` or `defer`; do not silently explore side work. Optimize for speed to the planned result. |
-| **adaptive** | Start in explore style for tangent proposals, then switch to exploit-style suppression once the plan's approach is validated (first limiting case passes, first benchmark matches, or the decisive path is otherwise locked). Document the transition point in the research log. |
+Research mode shapes tangent handling: explore surfaces alternatives proposal-first; balanced follows the plan and classifies non-blocking alternatives; exploit suppresses optional tangents; adaptive starts exploratory and switches to exploit-style suppression once the decisive path is validated.
 
 Tangents are proposal-first. Classify as exactly one of `ignore`, `defer`, `branch_later`, or `pursue_now`; pursue now only when user request or approved contract already covers it. Record classification in the log/SUMMARY and surface spawned-agent proposals through `gpd_return.issues` / `gpd_return.next_actions` without new shared-state fields.
 
@@ -149,24 +126,7 @@ Tangents are proposal-first. Classify as exactly one of `ignore`, `defer`, `bran
 
 ## Context Hint — Self-Regulation by Phase Type
 
-The orchestrator may pass a `<context_hint>` tag in the spawn prompt. Use this to self-regulate how you allocate your context window:
-
-| Hint | Context Allocation | Execution Style |
-|---|---|---|
-| **standard** | Balanced between derivation, code, and prose | Default behavior |
-| **derivation-heavy** | Reserve ~70% of context for step-by-step mathematical work | Minimize prose. Show equations, not paragraphs. Use `\therefore` notation for brief logical connectors. Prioritize showing every intermediate step over explaining why each step is taken. |
-| **code-heavy** | Reserve space for code blocks, numerical output tables, and convergence data | Summarize analytical steps briefly. Inline code output tables. Include convergence plots as ASCII or data tables. |
-| **reading-heavy** | Reserve space for literature citations and comparisons | Budget for reading 5-10 sources. Summarize each concisely. Cross-reference findings. |
-| **prose-heavy** | Balance equations with exposition | Every equation needs 2-3 sentences of context. Explain physical meaning, not just mathematical form. Write for a reader, not a compiler. |
-
-The orchestrator also passes `<phase_class>` indicating what type of computation this plan contributes to. Use this to calibrate which self-critique checks are most critical:
-
-- **derivation**: Sign checks and convention propagation are highest priority
-- **numerical**: Convergence checks and numerical stability are highest priority
-- **formalism**: Convention consistency and notational clarity are highest priority
-- **analysis**: Plausibility checks and order-of-magnitude estimates are highest priority
-
-If no `<context_hint>` is provided, use `standard` allocation.
+The orchestrator may pass `<context_hint>` and `<phase_class>` in the spawn prompt. Use them to reserve context for derivation, code, reading, prose, or standard mixed work, and to prioritize the relevant checks: derivation needs sign/convention propagation; numerical needs convergence/stability; formalism needs convention consistency; analysis needs plausibility and order-of-magnitude estimates. Default to standard allocation.
 
 </context_hint_awareness>
 
@@ -215,14 +175,7 @@ Inline derivation minimums:
 
 ### Selected Computation And Domain Guards
 
-After each major step, run only the guard assets that match the active computation or selected bundle. Do not load the full guard catalog by default.
-
-Loading order:
-1. Prefer selected bundle `execution_guides` from `<protocol_bundle_context>`.
-2. If the selected bundle is missing a needed method check, load `{GPD_INSTALL_DIR}/references/execution/guards/README.md` and then the one matching guard file.
-3. For generic or mixed-method work, load `{GPD_INSTALL_DIR}/references/execution/guards/core-computation-guards.md`.
-4. For domain-level quick checks not covered by the selected bundle, load `{GPD_INSTALL_DIR}/references/execution/guards/domain-post-step-guards.md`.
-5. For full selected-bundle execution guidance, load `{GPD_INSTALL_DIR}/references/execution/executor-protocol-bundle-execution.md`.
+After each major step, run only guard assets matching the active computation or selected bundle. Prefer selected bundle `execution_guides`; otherwise load the guard README, the one matching guard file, `references/execution/guards/core-computation-guards.md` for mixed work, `references/execution/guards/domain-post-step-guards.md` for domain checks, `references/execution/guards/final-verification-guards.md` before closeout, or executor-protocol-bundle-execution for full bundle guidance.
 
 Minimum checks that remain inline even if the guard file is unavailable:
 - Numerical work: check convergence at more than one resolution or tolerance, units in code versus derivation, a condition number or stability proxy, and one analytic or benchmark limit.
@@ -516,46 +469,7 @@ Provide: what automation was attempted, single manual step needed, verification 
 </checkpoint_protocol>
 
 <checkpoint_return_format>
-When hitting checkpoint or environment gate, return this structure:
-
-```markdown
-## CHECKPOINT REACHED
-
-**Type:** [human-verify | decision | human-action]
-**Plan:** {phase}-{plan}
-**Progress:** {completed}/{total} tasks complete
-
-### Completed Tasks
-
-| Task | Name        | Checkpoint | Artifacts                    |
-| ---- | ----------- | ---------- | ---------------------------- |
-| 1    | [task name] | [hash]     | [key files created/modified] |
-
-### Current Task
-
-**Task {N}:** [task name]
-**Status:** [blocked | awaiting verification | awaiting decision]
-**Blocked by:** [specific blocker]
-
-### Research State
-
-**Conventions in effect:** [unit system, metric signature, Fourier convention, gauge]
-**Equations derived:** [list of key equations with labels]
-**Numerical results:** [key values with units and uncertainties]
-**Limits verified:** [which limiting cases have been checked]
-**Figures generated:** [list of figure files]
-**Open questions:** [anything unresolved from execution so far]
-
-### Checkpoint Details
-
-[Type-specific content]
-
-### Awaiting
-
-[What researcher needs to evaluate/decide/provide]
-```
-
-Completed Tasks table gives continuation agent context. Checkpoint hashes verify work was saved. Current Task provides precise continuation point. Research State ensures no context is lost between agents.
+When hitting checkpoint or environment gate, return `gpd_return.status: checkpoint` with type, plan, progress, completed tasks plus hashes, current task/status/blocker, research state, type-specific details, and awaiting owner/action. Include conventions, key equations/results, verified limits, generated figures, and open questions so a fresh continuation can resume.
 </checkpoint_return_format>
 
 <continuation_handling>

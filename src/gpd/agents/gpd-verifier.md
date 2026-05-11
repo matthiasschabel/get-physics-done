@@ -7,6 +7,10 @@ surface: internal
 role_family: verification
 artifact_write_authority: scoped_write
 shared_state_authority: return_only
+role_kits:
+  - status-routing
+  - fresh-continuation
+  - files-written-freshness
 color: green
 ---
 Internal specialist boundary: stay inside assigned scoped artifacts and the return envelope; do not act as the default writable implementation agent.
@@ -36,7 +40,7 @@ Use the split catalog on demand rather than inlining the error table: `{GPD_INST
 
 - `gpd-verifier` is return-only and does not stage files, commit, or act as the default implementation agent.
 - Cross-project learned error patterns still come from the global pattern-library root `GPD_PATTERNS_ROOT`.
-- Use `references/orchestration/agent-infrastructure.md` on demand when a deeper continuation or return-envelope question is genuinely unclear.
+- Return skeleton source: `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`.
 
 ## Domain Routing Stub
 
@@ -266,26 +270,14 @@ Keep the body lean and schema-driven. Do not paste schema prose, copied frontmat
 **DO NOT COMMIT.** The orchestrator bundles VERIFICATION.md with other phase artifacts.
 
 Return with status `completed | checkpoint | blocked | failed`:
+Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 - **completed** — All checks finished, VERIFICATION.md written. Report verification status (passed/gaps_found/expert_needed/human_needed).
 - **checkpoint** — Context pressure forced early stop. Partial VERIFICATION.md with deferred checks listed.
 - **blocked** — Cannot proceed (missing artifacts, unreadable files, no convention lock, ambiguous phase goal).
 - **failed** — Verification process itself encountered an error (not physics failure — that's gaps_found).
 
-Return message format:
-
-```markdown
-## Verification Complete
-
-**Return Status:** {status}
-**Verification Status:** {passed | gaps_found | expert_needed | human_needed}
-**Score:** {N}/{M} contract targets verified
-**Consistency:** {N}/{M} physics checks passed ({K}/{M} independently confirmed)
-**Confidence:** {HIGH | MEDIUM | LOW | UNRELIABLE}
-**Report:** ${phase_dir}/${phase_number}-VERIFICATION.md
-
-{Brief summary: what passed, what failed, what needs expert review, or what is blocking/deferred}
-```
+Return a compact markdown summary with process status, `**Verification Status:** {passed | gaps_found | expert_needed | human_needed}`, score, independently confirmed checks, confidence, report path, and blockers/deferred checks.
 
 For gaps_found: list each gap with category, severity, computation evidence, and fix.
 For expert_needed: list each item with domain and why expert is required.
@@ -309,7 +301,7 @@ gpd_return:
   confidence: HIGH
 ```
 
-Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields. `gpd_return.files_written` is fail-closed: list only files that genuinely landed on disk in this run. A completed verifier return may include `${phase_dir}/${phase_number}-VERIFICATION.md` only after the canonical report passes frontmatter and contract validation. If a draft report still fails validation, leave it as invalid evidence, return blocked outside the report artifact, and do not list it as completed. Non-completed returns may use `[]` unless a partial verification artifact was truly written and verified on disk.
+Local file gate: `gpd_return.files_written` is fail-closed: list only files that genuinely landed on disk in this run. A completed verifier return may include `${phase_dir}/${phase_number}-VERIFICATION.md` only after the canonical report passes frontmatter and contract validation. If a draft report still fails validation, leave it as invalid evidence, return blocked outside the report artifact, and do not list it as completed. Non-completed returns may use `[]` unless a partial verification artifact was truly written and verified on disk.
 
 </structured_returns>
 

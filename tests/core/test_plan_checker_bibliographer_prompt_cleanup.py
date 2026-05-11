@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import FragmentMode, assert_prompt_contracts, machine_exact
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PLAN_CHECKER = REPO_ROOT / "src/gpd/agents/gpd-plan-checker.md"
 BIBLIOGRAPHER = REPO_ROOT / "src/gpd/agents/gpd-bibliographer.md"
@@ -23,22 +25,37 @@ def test_plan_checker_prompt_uses_typed_status_and_concise_presentation_language
     return_protocol = _read(CHECKER_RETURN_PROTOCOL)
     envelope = _gpd_return_block(source)
 
-    assert (
-        "Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics."
-        in source
+    assert_prompt_contracts(
+        source,
+        machine_exact(
+            "plan checker concise typed status routing",
+            (
+                "Apply `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for one-shot handoff semantics.",
+                "If user input is needed, return the typed checkpoint and stop.",
+                "Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`",
+                "For UI label handling, follow `checker-return-protocol.md`",
+                "the machine decision comes from `gpd_return.status`, approved/blocked plan lists, and `issues`.",
+            ),
+        ),
     )
-    assert "If user input is needed, return the typed checkpoint and stop." in source
     assert "artifact_write_authority: read_only" in source
     assert "file_write" not in source
     assert "\n{GPD_INSTALL_DIR}/references/shared/shared-protocols.md\n" not in source
-    assert "Shared protocols live at `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`" in source
-    assert "For UI label handling, follow `checker-return-protocol.md`" in source
-    assert "the machine decision comes from `gpd_return.status`, approved/blocked plan lists, and `issues`." in source
-    assert (
-        "Headings above are presentation only. Route on `gpd_return.status`, the approved/blocked plan lists, and `issues`."
-        in return_protocol
+    assert_prompt_contracts(
+        return_protocol,
+        machine_exact(
+            "plan checker protocol headings route on typed status",
+            "Headings above are presentation only. Route on `gpd_return.status`, the approved/blocked plan lists, and `issues`.",
+        ),
     )
-    assert "Headings above are presentation only; route on gpd_return.status." not in source
+    assert_prompt_contracts(
+        source,
+        machine_exact(
+            "plan checker stale prose route absent",
+            "Headings above are presentation only; route on gpd_return.status.",
+            mode=FragmentMode.ABSENT,
+        ),
+    )
     assert "  status: completed" in envelope
     assert "  files_written: []" in envelope
     assert "  issues: []" in envelope

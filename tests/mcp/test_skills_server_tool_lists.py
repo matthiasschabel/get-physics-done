@@ -11,6 +11,18 @@ import gpd.registry as registry_module
 from gpd.core.workflow_staging import WorkflowStage, WorkflowStageConditionalAuthority, WorkflowStageManifest
 from gpd.registry import AgentDef, CommandDef, SkillDef
 
+_TASK_OVERLAY_BODY_KEYS = frozenset(
+    {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_markdown", "overlay_text"}
+)
+
+
+def _assert_body_free_task_overlay_metadata(payload: dict[str, object]) -> None:
+    assert payload["body_policy"] == "metadata_only"
+    for entry in payload["overlays"]:
+        assert _TASK_OVERLAY_BODY_KEYS.isdisjoint(entry)
+        assert entry["body_loaded"] is False
+        assert entry["portable_path"] == "@{GPD_INSTALL_DIR}/references/orchestration/task-overlays.md"
+
 
 def test_get_skill_tool_schema_publishes_transitive_reference_body_opt_in() -> None:
     import anyio
@@ -897,7 +909,13 @@ def test_get_skill_executor_agent_does_not_expose_staged_loading_sidecar() -> No
         "content": "canonical",
         "allowed_tools": "mirrored",
         "agent_policy": "mirrored",
+        "compatible_task_overlays": "mirrored",
     }
+    assert result["compatible_task_overlays"]["compatible_task_overlay_ids"] == [
+        "executor.proof_bearing",
+        "executor.bounded_segment",
+    ]
+    _assert_body_free_task_overlay_metadata(result["compatible_task_overlays"])
     assert "staged_loading" not in result
     assert "staged_loading" not in result["structured_metadata_authority"]
 

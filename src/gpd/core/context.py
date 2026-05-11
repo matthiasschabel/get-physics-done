@@ -131,6 +131,7 @@ from gpd.core.staged_init_assembly import (
 )
 from gpd.core.state import _current_machine_identity, _finalize_project_contract_gate, backup_only_state_guidance
 from gpd.core.state import peek_state_json as _peek_state_json
+from gpd.core.task_overlays import build_task_overlay_load_manifest
 from gpd.core.utils import (
     generate_slug as _generate_slug_impl,
 )
@@ -152,6 +153,9 @@ from gpd.core.workflow_staging import (
 )
 from gpd.core.workflow_staging import (
     EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS as _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
+)
+from gpd.core.workflow_staging import (
+    EXECUTE_PHASE_TASK_OVERLAY_FIELDS as _EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
 )
 from gpd.core.workflow_staging import (
     LITERATURE_REVIEW_INIT_FIELDS as _LITERATURE_REVIEW_INIT_FIELDS,
@@ -789,6 +793,12 @@ _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS = frozenset(
         "missing_continuity_handoff_file",
         "has_continuity_handoff",
     }
+)
+_EXECUTE_PHASE_EXECUTOR_TASK_OVERLAY_IDS = ("executor.bounded_segment",)
+_EXECUTE_PHASE_TASK_OVERLAY_SELECTION_SOURCE = "execute-phase.executor_dispatch"
+_EXECUTE_PHASE_TASK_OVERLAY_POLICY_SUMMARY = (
+    "Selected executor.bounded_segment for execute-phase executor_dispatch bounded fanout; "
+    "selected entries stay metadata-only."
 )
 _STAGED_REFERENCE_SUMMARY_FIELDS = frozenset(
     {
@@ -2000,6 +2010,20 @@ def _protocol_bundle_verifier_extensions(
                 }
             )
     return bundle_verifier_extensions
+
+
+def _build_execute_phase_task_overlay_context() -> dict[str, object]:
+    """Build the metadata-only executor overlay handles for execute-phase fanout."""
+    selected_ids = list(_EXECUTE_PHASE_EXECUTOR_TASK_OVERLAY_IDS)
+    return {
+        "selected_task_overlay_ids": selected_ids,
+        "task_overlay_load_manifest": build_task_overlay_load_manifest(
+            selected_ids,
+            role="gpd-executor",
+            selection_source=_EXECUTE_PHASE_TASK_OVERLAY_SELECTION_SOURCE,
+        ),
+        "task_overlay_policy_summary": _EXECUTE_PHASE_TASK_OVERLAY_POLICY_SUMMARY,
+    }
 
 
 def _build_reference_runtime_context(
@@ -4083,6 +4107,11 @@ def init_execute_phase(
                 "execution_runtime",
                 _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
                 lambda _assembly_context: _build_execution_runtime_context(cwd),
+            ),
+            _StagedInitProvider(
+                "task_overlays",
+                _EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
+                lambda _assembly_context: _build_execute_phase_task_overlay_context(),
             ),
             _StagedInitProvider("schema_bridges", _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS, build_execute_schema_bridges),
         ),

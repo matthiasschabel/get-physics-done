@@ -14,6 +14,7 @@ __all__ = [
     "TASK_OVERLAY_REFERENCE_PATH",
     "TaskOverlay",
     "TaskOverlaySelectionError",
+    "build_task_overlay_compatibility_manifest",
     "build_task_overlay_load_manifest",
     "get_task_overlay",
     "list_task_overlays",
@@ -197,6 +198,22 @@ def build_task_overlay_load_manifest(
         "selected_task_overlay_ids": [overlay.overlay_id for overlay in selected],
         "overlay_count": len(selected),
         "overlays": [overlay.as_manifest_entry() for overlay in selected],
+    }
+
+
+def build_task_overlay_compatibility_manifest(*, role: str) -> dict[str, object]:
+    """Build metadata-only compatibility entries for overlays available to an agent role."""
+    normalized_role = _normalize_role(role)
+    overlays = list_task_overlays(role=normalized_role)
+    for overlay in overlays:
+        _validate_overlay_metadata(overlay)
+    return {
+        "schema_version": 1,
+        "role": normalized_role,
+        "compatible_task_overlay_ids": [overlay.overlay_id for overlay in overlays],
+        "overlay_count": len(overlays),
+        "overlays": [overlay.as_manifest_entry() for overlay in overlays],
+        "body_policy": "metadata_only",
     }
 
 

@@ -127,6 +127,19 @@ None yet.
 
 None yet.
 """
+_TASK_OVERLAY_BODY_KEYS = frozenset(
+    {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_markdown", "overlay_text"}
+)
+
+
+def _assert_body_free_task_overlay_metadata(payload: dict[str, object], *, role: str) -> None:
+    assert payload["role"] == role
+    assert payload["body_policy"] == "metadata_only"
+    for entry in payload["overlays"]:
+        assert _TASK_OVERLAY_BODY_KEYS.isdisjoint(entry)
+        assert entry["role"] == role
+        assert entry["body_loaded"] is False
+        assert entry["portable_path"] == "@{GPD_INSTALL_DIR}/references/orchestration/task-overlays.md"
 
 
 def _write_state_with_project_contract(
@@ -709,6 +722,30 @@ class TestSkillsServerIntegration:
         assert "wait for confirmation" not in result["content"]
         assert "pause here for approval" not in result["content"]
         assert "ask the user then continue" not in result["content"]
+
+    def test_get_skill_surfaces_body_free_overlay_compatibility_for_overlay_capable_agents(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        planner = get_skill("gpd-planner")
+        plan_checker = get_skill("gpd-plan-checker")
+        paper_writer = get_skill("gpd-paper-writer")
+
+        assert planner["compatible_task_overlays"]["compatible_task_overlay_ids"] == ["planner.proof_bearing"]
+        assert plan_checker["compatible_task_overlays"]["compatible_task_overlay_ids"] == ["checker.proof_obligation"]
+        assert paper_writer["compatible_task_overlays"]["compatible_task_overlay_ids"] == [
+            "paper_writer.section_results",
+            "paper_writer.section_methods",
+            "paper_writer.section_intro_discussion",
+            "paper_writer.section_abstract_conclusion",
+            "paper_writer.figure_sensitive",
+            "paper_writer.response_pair",
+        ]
+        assert planner["structured_metadata_authority"]["compatible_task_overlays"] == "mirrored"
+        assert plan_checker["structured_metadata_authority"]["compatible_task_overlays"] == "mirrored"
+        assert paper_writer["structured_metadata_authority"]["compatible_task_overlays"] == "mirrored"
+        _assert_body_free_task_overlay_metadata(planner["compatible_task_overlays"], role="gpd-planner")
+        _assert_body_free_task_overlay_metadata(plan_checker["compatible_task_overlays"], role="gpd-plan-checker")
+        _assert_body_free_task_overlay_metadata(paper_writer["compatible_task_overlays"], role="gpd-paper-writer")
 
     def test_get_skill_research_synthesizer_and_literature_bootstrap_surfaces_remain_projected(self):
         from gpd import registry

@@ -38,6 +38,7 @@ from gpd.core.reference_graph import (
     build_reference_lists,
 )
 from gpd.core.review_contract_prompt import review_contract_payload
+from gpd.core.task_overlays import build_task_overlay_compatibility_manifest
 from gpd.mcp.descriptor_text import SKILL_BEHAVIORAL_GUARDRAIL_HINT
 from gpd.mcp.servers import (
     configure_mcp_logging,
@@ -270,6 +271,13 @@ def _agent_policy_payload(agent: content_registry.AgentDef) -> dict[str, object]
         "role_kit_authorities": list(role_kit_authority_paths(agent.role_kits)),
         "tools": list(agent.tools),
     }
+
+
+def _agent_task_overlay_compatibility_payload(agent: content_registry.AgentDef) -> dict[str, object] | None:
+    payload = build_task_overlay_compatibility_manifest(role=agent.name)
+    if payload["overlay_count"] == 0:
+        return None
+    return payload
 
 
 def _canonical_skill_content(skill: content_registry.SkillDef) -> tuple[str, Path]:
@@ -738,6 +746,7 @@ def get_skill(
             elif skill.source_kind == "agent":
                 agent = content_registry.get_agent(skill.registry_name)
                 agent_policy = _agent_policy_payload(agent)
+                task_overlay_compatibility = _agent_task_overlay_compatibility_payload(agent)
                 payload["allowed_tools"] = _normalize_allowed_tools(agent.tools)
                 payload["allowed_tools_surface"] = "agent.tools"
                 payload["agent_policy"] = agent_policy
@@ -747,6 +756,13 @@ def get_skill(
                     "allowed_tools": "mirrored",
                     "agent_policy": "mirrored",
                 }
+                if task_overlay_compatibility is not None:
+                    payload["compatible_task_overlays"] = task_overlay_compatibility
+                    payload["structured_metadata_authority"]["compatible_task_overlays"] = "mirrored"
+                    loading_hint = (
+                        f"{loading_hint} `compatible_task_overlays` is metadata-only; load overlay bodies only when "
+                        "a runtime spawn manifest selects their portable paths."
+                    )
                 payload["loading_hint"] = loading_hint
             return stable_mcp_response(payload)
         except (GPDError, OSError, ValueError, TimeoutError) as e:

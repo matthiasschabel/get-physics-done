@@ -7,6 +7,11 @@ surface: internal
 role_family: verification
 artifact_write_authority: read_only
 shared_state_authority: return_only
+role_kits:
+  - status-routing
+  - fresh-continuation
+  - read-only-return
+  - context-pressure
 color: green
 ---
 Internal specialist boundary: stay read-only inside assigned scoped artifacts and the return envelope; do not act as the default writable implementation agent.
@@ -292,9 +297,9 @@ Use `gpd verify plan` output for structural facts, then apply D0-D16 for physics
 
 ## Step 5: Decide Machine Status
 
-The label examples in `checker-return-protocol.md` are UI only; use `gpd_return.status` for the machine decision.
+For UI label handling, follow `checker-return-protocol.md`. The label examples in `checker-return-protocol.md` are UI only; use `gpd_return.status` for the machine decision. the machine decision comes from `gpd_return.status`, approved/blocked plan lists, and `issues`. Typed statuses: `gpd_return.status: completed`, `gpd_return.status: checkpoint`, `gpd_return.status: failed`, `gpd_return.status: blocked`.
 
-Status map: `gpd_return.status: completed` approves all fresh plans; `gpd_return.status: checkpoint` returns explicit approved/blocked sets for partial progress; `gpd_return.status: failed` requires planner revision; `gpd_return.status: blocked` escalates blocker-level issues after 3 revision rounds.
+Local status map: `completed` approves all fresh plans, `checkpoint` returns explicit approved/blocked sets for partial progress, `failed` requires planner revision, and `blocked` escalates blocker-level issues after 3 revision rounds.
 
 Severities: `blocker` (must fix), `warning` (should fix), `info` (suggestions). Maximum revision loop is 3 rounds. Load `{GPD_INSTALL_DIR}/references/verification/plan-checker/checker-return-protocol.md` for persistent blocker escalation, detailed issue formatting, partial approval protocol, and long return examples.
 
@@ -320,7 +325,7 @@ Use `blocker` for missing contract requirements, invalid approximations, infeasi
 
 <structured_returns>
 
-For UI label handling, follow `checker-return-protocol.md`; the machine decision comes from `gpd_return.status`, approved/blocked plan lists, and `issues`.
+Return the standard envelope plus checker-specific approval fields:
 
 ```yaml
 gpd_return:
@@ -334,14 +339,14 @@ gpd_return:
     - "04-02"
   blocked_plans: []
   dimensions_checked:
-    - "D0-D16 compact matrix plus loaded JIT dimension catalog when needed"
+    - "D0-D16"
   revision_round: 1
   revision_guidance: "Plans are approved; execute the approved set."
 ```
 
-When a phase has multiple plans, some may pass while others have blockers. Rather than blocking the entire phase, use partial approval to let passing plans proceed, but only when every approved plan's full dependency chain is also approved. Any D0 contract-gate failure is not approvable and blocks dependents.
+Partial approval is allowed only when every approved plan's full dependency chain is also approved. Any D0 contract-gate failure is not approvable and blocks dependents.
 
-Use `agent-infrastructure.md` as the base return skeleton/profile reference and `checker-return-protocol.md` for partial approval tables, persistent blocker escalation, and long examples. `files_written` must always be `[]`.
+Use `checker-return-protocol.md` for partial approval tables, persistent blocker escalation, and long examples. `files_written` must always be `[]`.
 
 </structured_returns>
 
@@ -349,7 +354,7 @@ Use `agent-infrastructure.md` as the base return skeleton/profile reference and 
 
 ## Context Pressure Management
 
-Use agent-infrastructure.md for the base context-pressure policy and `references/orchestration/context-pressure-thresholds.md` for plan-checker thresholds. This agent reads plans plus research artifacts; prioritize D0 and contract-critical dimensions first, complete the current plan check before checkpointing, and include `context_pressure: high` only when the shared policy calls for it.
+This agent reads plans plus research artifacts. Prioritize D0 and contract-critical dimensions first and complete the current plan check before checkpointing.
 
 </context_pressure>
 
@@ -381,16 +386,6 @@ Use agent-infrastructure.md for the base context-pressure policy and `references
 
 <success_criteria>
 
-Plan verification complete when:
-
-- [ ] ROADMAP.md research question, phase context, and every fresh PLAN.md loaded
-- [ ] `gpd verify plan` results parsed for every plan
-- [ ] Plan contracts parsed from frontmatter and treated as the only machine-readable target set
-- [ ] Dimensions 0-16 evaluated using the dimension sections and Step 4 matrix
-- [ ] Context compliance included when CONTEXT.md is provided
-- [ ] Overall return status determined
-- [ ] Structured issues returned (if any found)
-- [ ] `files_written: []` returned
-- [ ] Result returned to orchestrator
+Plan verification is complete when ROADMAP/phase context and every fresh PLAN are loaded, `gpd verify plan` output is parsed, frontmatter contracts are treated as the machine-readable target set, Dimensions 0-16 evaluated using the dimension sections and Step 4 matrix, CONTEXT compliance is evaluated, status/issues are returned, `files_written: []` is preserved, and the result is handed back to the orchestrator.
 
 </success_criteria>

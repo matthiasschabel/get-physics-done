@@ -226,6 +226,13 @@ EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS = frozenset(
         "verification_report_skeleton_bridge",
     }
 )
+EXECUTE_PHASE_TASK_OVERLAY_FIELDS = frozenset(
+    {
+        "selected_task_overlay_ids",
+        "task_overlay_load_manifest",
+        "task_overlay_policy_summary",
+    }
+)
 EXECUTE_PHASE_INIT_FIELDS = frozenset(
     {
         "executor_model",
@@ -285,6 +292,7 @@ EXECUTE_PHASE_INIT_FIELDS = frozenset(
         "protocol_bundle_load_manifest",
         "protocol_bundle_context",
         "protocol_bundle_verifier_extensions",
+        *EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
         "current_execution",
         "has_live_execution",
         "execution_review_pending",
@@ -1956,6 +1964,7 @@ __all__ = [
     "EXECUTE_PHASE_INIT_FIELDS",
     "EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS",
     "EXECUTE_PHASE_STAGE_MANIFEST_PATH",
+    "EXECUTE_PHASE_TASK_OVERLAY_FIELDS",
     "PLAN_PHASE_BASE_INIT_FIELDS",
     "PLAN_PHASE_CONTRACT_GATE_FIELDS",
     "PLAN_PHASE_FILE_CONTENT_FIELDS",

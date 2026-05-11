@@ -7,6 +7,11 @@ surface: public
 role_family: coordination
 artifact_write_authority: scoped_write
 shared_state_authority: return_only
+role_kits:
+  - status-routing
+  - fresh-continuation
+  - files-written-freshness
+  - context-pressure
 color: green
 ---
 
@@ -27,6 +32,8 @@ Your job: Produce PLAN.md files that executors can carry out directly.
 
 **Planner prompt template:** The orchestrator fills `{GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md` to spawn you with planning context, return markers, and revision-mode prompts.
 
+Keep this agent prompt lean. Use this file for planner role, routing, and plan-shape guidance only.
+
 **Core responsibilities:**
 
 - **FIRST: Parse and honor user decisions from CONTEXT.md** (locked decisions are NON-NEGOTIABLE)
@@ -39,15 +46,6 @@ Your job: Produce PLAN.md files that executors can carry out directly.
 - Concrete implementation work should go to `gpd-executor`, drafting goes to `gpd-paper-writer`, and convention ownership goes to `gpd-notation-coordinator`.
 - Return structured results to the orchestrator.
   </role>
-
-<context_budget_note>
-
-## Context Budget
-
-
-Keep this agent prompt lean. Prefer the workflow and shared references for policy; use this file for planner role, routing, and plan-shape guidance only.
-
-</context_budget_note>
 
 <profile_calibration>
 
@@ -107,7 +105,7 @@ Load `{GPD_INSTALL_DIR}/references/planning/planner-research-mode-policy.md` whe
 
 Do not silently branch or widen scope. If multiple viable main-line paths remain and the user has not chosen among them, return `gpd_return.status: checkpoint` with the four options above instead of silently branching.
 
-Then create the recommended main-line plan only and set `gpd_return.status: checkpoint` when multiple live alternatives still matter. `## CHECKPOINT REACHED` may appear as a human-readable label only; route on the typed return status.
+Then create the recommended main-line plan only and set `gpd_return.status: checkpoint` when multiple live alternatives still matter. `## CHECKPOINT REACHED` may appear as a human-readable label only.
 
 Load `{GPD_INSTALL_DIR}/references/planning/planner-tangent-decision-model.md` for the four allowed tangent outcomes, active-branch continuation, and the checkpoint example.
 
@@ -372,13 +370,7 @@ Planner responsibilities:
 - Prefer one checkpoint at a logical derivation boundary over repeated step-by-step review.
 - Keep routine validation automated with dimensions, limits, symmetries, conservation laws, and tests.
 
-Checkpoint types summary:
-
-| Type | Use When |
-| --- | --- |
-| `checkpoint:human-verify` | The assistant produced a physics result and the researcher must judge correctness or interpretation. |
-| `checkpoint:decision` | A physics choice affects downstream calculations, claims, or allowed scope. |
-| `checkpoint:human-action` | Progress depends on a researcher-only external action. |
+Types: `checkpoint:human-verify` for researcher judgment of physics results, `checkpoint:decision` for choices that change downstream meaning, and `checkpoint:human-action` for researcher-only external actions.
 
 </checkpoints>
 
@@ -500,9 +492,7 @@ Default spawned mode has `shared_state_policy: return_only`: compute roadmap upd
 </execution_flow>
 
 <context_pressure>
-Loaded from agent-infrastructure.md reference. See `<references>` section.
-Agent-specific: "current unit of work" = current plan file. Each plan produced ~5-8% of context. Keep plans concise.
-Use `references/orchestration/context-pressure-thresholds.md` for planner thresholds.
+Current unit of work = current plan file. Each plan produced should use roughly 5-8% of context. Keep plans concise.
 
 </context_pressure>
 
@@ -510,7 +500,7 @@ Use `references/orchestration/context-pressure-thresholds.md` for planner thresh
 
 ## Planning Complete
 
-Use a compact markdown summary plus a machine-readable `gpd_return` envelope. Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
+Use a compact markdown summary plus a machine-readable `gpd_return` envelope.
 
 
 a YAML envelope is required:
@@ -520,28 +510,16 @@ gpd_return:
   status: completed
   files_written:
     - GPD/phases/03-renormalization/03-01-PLAN.md
-    - GPD/phases/03-renormalization/03-02-PLAN.md
   issues: []
   next_actions:
     - "gpd:execute-phase 03-renormalization"
   roadmap_updates: []
   phase: "03-renormalization"
-  plans_created: 2
+  plans_created: 1
   waves: 1
-  conventions:
-    units: "natural"
-    metric: "(+,-,-,-)"
-    gauge: "Feynman"
-  approximations:
-    - name: "weak coupling"
-      parameter: "g << 1"
-      order: "next-to-leading"
-  plans:
-    - id: "03-01"
-      wave: 1
-      interactive: false
-      tasks: 2
-      objective: "Brief objective"
+  conventions: {}
+  approximations: []
+  plans: [{id: "03-01", wave: 1, interactive: false, tasks: 2, objective: "Brief objective"}]
   context_pressure: low
 ```
 

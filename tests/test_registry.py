@@ -16,6 +16,7 @@ from gpd.core.model_visible_text import (
     review_contract_visibility_note,
     skeptical_rigor_guardrails_section,
 )
+from gpd.core.task_overlays import build_task_overlay_compatibility_manifest
 from gpd.core.workflow_staging import WorkflowStageManifest
 from gpd.registry import (
     AgentDef,
@@ -306,6 +307,26 @@ class TestParseAgentFile:
         assert agent.system_prompt.startswith("## Agent Requirements\n")
         assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.endswith("Prompt.")
+
+    def test_task_overlay_compatibility_manifest_is_metadata_only(self) -> None:
+        payload = build_task_overlay_compatibility_manifest(role="gpd-executor")
+
+        assert payload["schema_version"] == 1
+        assert payload["role"] == "gpd-executor"
+        assert payload["compatible_task_overlay_ids"] == [
+            "executor.proof_bearing",
+            "executor.bounded_segment",
+        ]
+        assert payload["overlay_count"] == 2
+        assert payload["body_policy"] == "metadata_only"
+
+        forbidden_keys = {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_text"}
+        for entry in payload["overlays"]:
+            assert set(entry).isdisjoint(forbidden_keys)
+            assert entry["role"] == "gpd-executor"
+            assert entry["path"] == "references/orchestration/task-overlays.md"
+            assert entry["portable_path"] == "@{GPD_INSTALL_DIR}/references/orchestration/task-overlays.md"
+            assert entry["body_loaded"] is False
 
     def test_agent_file_parses_explicit_commit_authority(self, tmp_path: Path) -> None:
         f = tmp_path / "direct.md"

@@ -40,7 +40,7 @@ def test_planner_role_owns_schema_visibility_and_workflows_use_the_short_role_pr
     assert "If the template cannot be loaded" in bootstrap
     assert "do not reconstruct the schema from memory" in bootstrap
     assert "Keep this agent prompt lean." in planner_role
-    assert "use this file for planner role, routing, and plan-shape guidance only." in planner_role
+    assert "use this file for planner role, routing, and plan-shape guidance only." in planner_role.lower()
     assert "@{GPD_INSTALL_DIR}/workflows/execute-plan.md" not in bootstrap
     assert "@{GPD_INSTALL_DIR}/templates/summary.md" not in bootstrap
     assert "@{GPD_INSTALL_DIR}/references/protocols/order-of-limits.md" not in bootstrap

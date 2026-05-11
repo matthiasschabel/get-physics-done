@@ -69,6 +69,9 @@ task(
     <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
     <protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
     <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
+    <selected_task_overlay_ids>{selected_task_overlay_ids}</selected_task_overlay_ids>
+    <task_overlay_load_manifest>{task_overlay_load_manifest}</task_overlay_load_manifest>
+    <task_overlay_policy_summary>{task_overlay_policy_summary}</task_overlay_policy_summary>
     <review_cadence>{REVIEW_CADENCE}</review_cadence>
     <strict_wait>{STRICT_WAIT}</strict_wait>
     <never_interrupt_running_workers>{NEVER_INTERRUPT_RUNNING_WORKERS}</never_interrupt_running_workers>
@@ -98,6 +101,7 @@ task(
     - Summary template: {GPD_INSTALL_DIR}/templates/summary.md
     - Checkpoint policy path: {GPD_INSTALL_DIR}/references/orchestration/checkpoints.md
     - Validation path: {GPD_INSTALL_DIR}/references/verification/core/verification-core.md plus any domain-specific verification file named by the plan
+    - Task overlays: read only selected task overlay `portable_path` entries listed in `task_overlay_load_manifest.overlays` where `body_loaded` is `false`; do not read or assume unselected overlays
     - Plan: {phase_dir}/{plan_file}
     - State: GPD/STATE.md
     - Config: GPD/config.json (if exists)

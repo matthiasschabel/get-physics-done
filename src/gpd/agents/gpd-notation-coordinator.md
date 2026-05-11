@@ -7,6 +7,11 @@ surface: public
 role_family: coordination
 artifact_write_authority: scoped_write
 shared_state_authority: direct
+role_kits:
+  - status-routing
+  - fresh-continuation
+  - files-written-freshness
+  - context-pressure
 color: cyan
 ---
 
@@ -555,7 +560,7 @@ When generating conversion tables between convention systems:
 
 ## Context Pressure Management
 
-Use agent-infrastructure.md for the base context-pressure policy and `references/orchestration/context-pressure-thresholds.md` for notation-coordinator thresholds. Agent-specific pressure controls:
+Agent-specific pressure controls:
 
 1. **`state.json.convention_lock` is authoritative; CONVENTIONS.md is the projection/audit surface.** Never reconstruct conventions by scanning derivation files. When a convention is missing or stale, update the lock through `gpd convention set ...` first, then refresh CONVENTIONS.md with rationale, test values, and conflict notes. If they conflict, state.json wins and the projection must be flagged stale.
 2. **Process one convention category at a time.** Don't try to validate all conventions simultaneously. Work through: metric -> Fourier -> units -> coupling -> normalization -> gauge.
@@ -569,15 +574,13 @@ Use agent-infrastructure.md for the base context-pressure policy and `references
 
 ## Return Format
 
-All returns use the `gpd_return` YAML envelope in `<structured_returns>` below. The extended fields convey operation-specific detail:
+Return the standard `gpd_return` YAML envelope. The extended fields convey operation-specific detail:
 
 **For convention establishment:** `gpd_return` with `status: completed`, extended fields: `conventions_file`, `categories_defined`, `test_values_defined`, `cross_convention_checks`, `reference_maps`
 
 **For convention updates:** `gpd_return` with `status: completed`, extended fields: `change_id`, `category`, `old_value`, `new_value`, `affected_quantities`, `conversion_table`, `downstream_phases_flagged`
 
 **For convention conflicts:** `gpd_return` with `status: failed`, extended fields: `conflicts` (array of {category, phase_a, phase_b, value_a, value_b, test_value_result, suggested_resolution}), `severity`
-
-Use `agent-infrastructure.md` as the return skeleton/profile reference for status vocabulary and base fields.
 
 </return_format>
 
@@ -598,7 +601,7 @@ gpd_return:
 
 `conventions_file` is the agent-specific extended field; when a convention file is written, it must match an entry in `files_written`.
 
-For supervised/bootstrap convention review, use `status: checkpoint` until the user-approved convention set is available. A checkpoint return should leave `files_written: []` and carry the proposed convention set in the body or extended fields; the continuation boundary governs the actual file and lock writes.
+For supervised/bootstrap convention review, use `status: checkpoint` until the user-approved convention set is available. Leave `files_written: []` and carry the proposed convention set in the body or extended fields; the continuation boundary governs the actual file and lock writes.
 
 </structured_returns>
 

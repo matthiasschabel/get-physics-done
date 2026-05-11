@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from gpd.core.context import init_execute_phase
 from gpd.core.task_overlays import (
     TASK_OVERLAY_REFERENCE_PATH,
     TaskOverlaySelectionError,
@@ -50,6 +51,18 @@ BASE_AGENT_OVERLAY_ROLES = {
     "gpd-plan-checker",
     "gpd-paper-writer",
 }
+
+
+def _setup_execute_phase_project(cwd: Path) -> None:
+    gpd_dir = cwd / "GPD"
+    phase_dir = gpd_dir / "phases" / "01-test"
+    phase_dir.mkdir(parents=True, exist_ok=True)
+    (gpd_dir / "config.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "state.json").write_text("{}", encoding="utf-8")
+    (gpd_dir / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+    (gpd_dir / "ROADMAP.md").write_text("## Milestone\n\n### Phase 1: Test\n", encoding="utf-8")
+    (gpd_dir / "STATE.md").write_text("# State\n", encoding="utf-8")
+    (phase_dir / "a-PLAN.md").write_text("# Plan\n", encoding="utf-8")
 
 
 def _assert_task_overlay_metadata_is_body_free(value: object, *, path: str) -> None:
@@ -164,6 +177,64 @@ def test_stage_manifests_do_not_request_task_overlay_body_init_fields() -> None:
                 offenders[f"{workflow_id}:{stage.id}"] = unexpected_fields
 
     assert offenders == {}
+
+
+def test_execute_phase_executor_dispatch_is_only_stage_requesting_task_overlay_handles() -> None:
+    overlay_stages: dict[str, list[str]] = {}
+
+    for manifest_path in sorted(WORKFLOW_STAGE_MANIFEST_DIR.glob(f"*{WORKFLOW_STAGE_MANIFEST_SUFFIX}")):
+        workflow_id = manifest_path.name.removesuffix(WORKFLOW_STAGE_MANIFEST_SUFFIX)
+        manifest = load_workflow_stage_manifest(workflow_id)
+        for stage in manifest.stages:
+            overlay_fields = [
+                field for field in stage.required_init_fields if field in ALLOWED_TASK_OVERLAY_INIT_FIELDS
+            ]
+            if overlay_fields:
+                overlay_stages[f"{workflow_id}:{stage.id}"] = overlay_fields
+
+    assert overlay_stages == {
+        "execute-phase:executor_dispatch": [
+            "selected_task_overlay_ids",
+            "task_overlay_load_manifest",
+            "task_overlay_policy_summary",
+        ]
+    }
+
+
+def test_execute_phase_executor_dispatch_task_overlay_payload_is_body_free(tmp_path: Path) -> None:
+    _setup_execute_phase_project(tmp_path)
+
+    payload = init_execute_phase(tmp_path, "1", stage="executor_dispatch")
+    load_manifest = payload["task_overlay_load_manifest"]
+
+    assert payload["selected_task_overlay_ids"] == ["executor.bounded_segment"]
+    assert isinstance(load_manifest, dict)
+    assert load_manifest["selection_source"] == "execute-phase.executor_dispatch"
+    assert load_manifest["role"] == "gpd-executor"
+    assert load_manifest["selected_task_overlay_ids"] == ["executor.bounded_segment"]
+    assert load_manifest["overlay_count"] == 1
+    assert payload["task_overlay_policy_summary"] == (
+        "Selected executor.bounded_segment for execute-phase executor_dispatch bounded fanout; "
+        "selected entries stay metadata-only."
+    )
+    assert "executor.proof_bearing" not in payload["selected_task_overlay_ids"]
+
+    overlays = load_manifest["overlays"]
+    assert isinstance(overlays, list)
+    assert len(overlays) == 1
+    assert set(overlays[0]) == {"overlay_id", "role", "path", "summary", "portable_path", "body_loaded"}
+    assert overlays[0]["overlay_id"] == "executor.bounded_segment"
+    assert overlays[0]["path"] == TASK_OVERLAY_REFERENCE_PATH
+    assert overlays[0]["portable_path"] == f"@{{GPD_INSTALL_DIR}}/{TASK_OVERLAY_REFERENCE_PATH}"
+    assert overlays[0]["body_loaded"] is False
+    _assert_task_overlay_metadata_is_body_free(
+        {
+            "selected_task_overlay_ids": payload["selected_task_overlay_ids"],
+            "task_overlay_load_manifest": load_manifest,
+            "task_overlay_policy_summary": payload["task_overlay_policy_summary"],
+        },
+        path="execute-phase:executor_dispatch.task_overlay_handles",
+    )
 
 
 def test_staged_loading_payloads_remain_task_overlay_body_free() -> None:

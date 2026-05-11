@@ -6,10 +6,12 @@ import re
 from pathlib import Path
 
 from gpd import registry
+from gpd.core.agent_role_kits import get_agent_role_kit
 from gpd.core.model_visible_text import (
     INTERNAL_AGENT_BOUNDARY_POINTER,
     READ_ONLY_INTERNAL_AGENT_BOUNDARY_POINTER,
 )
+from tests.agent_policy_test_support import assert_agent_role_kit_policy, assert_agent_role_kit_section
 from tests.assertion_taxonomy_support import (
     FragmentMode,
     MatchMode,
@@ -23,9 +25,48 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references"
 
+PHASE5_TARGET_AGENT_ROLE_KITS = {
+    "gpd-research-mapper": (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    ),
+    "gpd-notation-coordinator": (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    ),
+    "gpd-planner": (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    ),
+    "gpd-verifier": (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+    ),
+    "gpd-plan-checker": (
+        "status-routing",
+        "fresh-continuation",
+        "read-only-return",
+        "context-pressure",
+    ),
+}
+
 
 def _read_agent(name: str) -> str:
     return (AGENTS_DIR / f"{name}.md").read_text(encoding="utf-8")
+
+
+def _agent_body(name: str) -> str:
+    source = _read_agent(name)
+    if source.startswith("---"):
+        return source.split("---", 2)[2]
+    return source
 
 
 def _tag_blocks(text: str, tag: str) -> list[str]:
@@ -34,6 +75,28 @@ def _tag_blocks(text: str, tag: str) -> list[str]:
 
 def _fenced_yaml_blocks(text: str) -> list[str]:
     return re.findall(r"```(?:yaml|yml)\n(.*?)```", text, flags=re.DOTALL)
+
+
+def test_phase5_target_agents_declare_expected_role_kits() -> None:
+    for agent_name, expected_role_kits in PHASE5_TARGET_AGENT_ROLE_KITS.items():
+        agent = registry.get_agent(agent_name)
+
+        assert_agent_role_kit_policy(agent, expected_role_kits)
+        assert_agent_role_kit_section(agent, before="## Scientific Rigor Guardrails")
+
+
+def test_phase5_target_agents_delegate_generic_lifecycle_rules_to_role_kits() -> None:
+    for agent_name, expected_role_kits in PHASE5_TARGET_AGENT_ROLE_KITS.items():
+        body = _agent_body(agent_name)
+        duplicated_rules = [
+            f"{role_kit_id}: {rule}"
+            for role_kit_id in expected_role_kits
+            for rule in get_agent_role_kit(role_kit_id).rules
+            if rule in body
+        ]
+
+        assert "## Agent Role Kits" not in body, agent_name
+        assert duplicated_rules == [], agent_name
 
 
 def test_executor_prompt_describes_default_writable_scoped_task_role() -> None:

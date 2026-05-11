@@ -19,6 +19,18 @@ import pytest
 from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
+_TASK_OVERLAY_BODY_KEYS = frozenset(
+    {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_markdown", "overlay_text"}
+)
+
+
+def _assert_body_free_task_overlay_metadata(payload: dict[str, object]) -> None:
+    assert payload["body_policy"] == "metadata_only"
+    for entry in payload["overlays"]:
+        assert _TASK_OVERLAY_BODY_KEYS.isdisjoint(entry)
+        assert entry["body_loaded"] is False
+        assert entry["path"] == "references/orchestration/task-overlays.md"
+        assert entry["portable_path"] == "@{GPD_INSTALL_DIR}/references/orchestration/task-overlays.md"
 
 
 def _load_project_contract_fixture() -> dict[str, object]:
@@ -1858,6 +1870,31 @@ class TestSkillsServer:
         assert "## Agent Role Kits" in result["content"]
         assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" in direct_paths
         assert "@{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md" in direct_paths
+
+    def test_get_skill_agent_surfaces_compatible_task_overlay_metadata_without_bodies(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        from gpd import registry as content_registry
+        from gpd.mcp.servers.skills_server import get_skill
+
+        repo_agents_dir = Path(__file__).resolve().parents[2] / "src/gpd/agents"
+        monkeypatch.setattr(content_registry, "AGENTS_DIR", repo_agents_dir)
+        content_registry.invalidate_cache()
+
+        result = get_skill("gpd-executor")
+
+        assert "error" not in result
+        assert result["structured_metadata_authority"]["compatible_task_overlays"] == "mirrored"
+        assert result["compatible_task_overlays"]["schema_version"] == 1
+        assert result["compatible_task_overlays"]["role"] == "gpd-executor"
+        assert result["compatible_task_overlays"]["compatible_task_overlay_ids"] == [
+            "executor.proof_bearing",
+            "executor.bounded_segment",
+        ]
+        assert result["compatible_task_overlays"]["overlay_count"] == 2
+        _assert_body_free_task_overlay_metadata(result["compatible_task_overlays"])
+        assert "selected_task_overlay_ids" not in result["content"]
+        assert "task_overlay_load_manifest" not in result["content"]
 
     def test_get_skill_surfaces_direct_plan_checker_schema_reference(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

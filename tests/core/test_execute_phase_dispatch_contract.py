@@ -39,7 +39,9 @@ def test_wave_planning_keeps_phase_wide_gates_without_full_checkpoint_or_verific
 def test_wave_dispatch_is_setup_router_without_executor_or_return_acceptance() -> None:
     wave_dispatch = _stage("wave-dispatch.md")
 
-    refresh_idx = wave_dispatch.index('WAVE_DISPATCH_INIT=$(gpd --raw init execute-phase "${PHASE_ARG}" --stage wave_dispatch)')
+    refresh_idx = wave_dispatch.index(
+        'WAVE_DISPATCH_INIT=$(gpd --raw init execute-phase "${PHASE_ARG}" --stage wave_dispatch)'
+    )
     convention_idx = wave_dispatch.index('<step name="lock_wave_conventions">')
     checkpoint_idx = wave_dispatch.index('<step name="create_wave_checkpoint_before_work">')
     route_idx = wave_dispatch.index('<step name="choose_wave_route">')
@@ -67,12 +69,30 @@ def test_wave_dispatch_is_setup_router_without_executor_or_return_acceptance() -
 def test_executor_dispatch_constructs_executor_children_with_child_readable_execute_plan_path() -> None:
     executor_dispatch = _stage("executor-dispatch.md")
 
-    assert 'EXECUTOR_DISPATCH_INIT=$(gpd --raw init execute-phase "${PHASE_ARG}" --stage executor_dispatch)' in executor_dispatch
+    assert (
+        'EXECUTOR_DISPATCH_INIT=$(gpd --raw init execute-phase "${PHASE_ARG}" --stage executor_dispatch)'
+        in executor_dispatch
+    )
     assert "EXECUTOR_HANDOFF_STARTED_AT=" in executor_dispatch
     assert 'subagent_type="gpd-executor"' in executor_dispatch
     assert "`workflows/execute-plan.md` is a child-readable workflow path" in executor_dispatch
     assert "- Workflow: {GPD_INSTALL_DIR}/workflows/execute-plan.md" in executor_dispatch
     assert "@{GPD_INSTALL_DIR}/workflows/execute-plan.md" not in executor_dispatch
+
+    protocol_idx = executor_dispatch.index("<selected_protocol_bundle_ids>{selected_protocol_bundle_ids}")
+    overlay_idx = executor_dispatch.index("<selected_task_overlay_ids>{selected_task_overlay_ids}")
+    review_idx = executor_dispatch.index("<review_cadence>{REVIEW_CADENCE}</review_cadence>")
+    assert protocol_idx < overlay_idx < review_idx
+    for overlay_tag in (
+        "<selected_task_overlay_ids>{selected_task_overlay_ids}</selected_task_overlay_ids>",
+        "<task_overlay_load_manifest>{task_overlay_load_manifest}</task_overlay_load_manifest>",
+        "<task_overlay_policy_summary>{task_overlay_policy_summary}</task_overlay_policy_summary>",
+    ):
+        assert overlay_tag in executor_dispatch
+    assert (
+        "read only selected task overlay `portable_path` entries listed in "
+        "`task_overlay_load_manifest.overlays` where `body_loaded` is `false`"
+    ) in executor_dispatch
 
     for required in (
         "strict_wait",
@@ -90,6 +110,11 @@ def test_executor_dispatch_constructs_executor_children_with_child_readable_exec
         "child_gate:",
         "apply-return-updates",
         'subagent_type="gpd-check-proof"',
+        "overlay_body",
+        "overlay_content",
+        "overlay_markdown",
+        "overlay_text",
+        "rendered_overlay_body",
     ):
         assert forbidden not in executor_dispatch
 

@@ -63,6 +63,12 @@ HEAVY_AUTHORITIES = {
     "templates/paper/figure-tracker.md",
     "templates/paper/experimental-comparison.md",
 }
+TASK_OVERLAY_AUTHORITY = "references/orchestration/task-overlays.md"
+TASK_OVERLAY_INIT_FIELDS = {
+    "selected_task_overlay_ids",
+    "task_overlay_load_manifest",
+    "task_overlay_policy_summary",
+}
 
 WAVE_FAMILY_STAGES = {
     "wave_dispatch",
@@ -156,6 +162,28 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
         "references/orchestration/continuous-execution.md",
     ):
         assert authority in closeout.must_not_eager_load
+
+
+def test_execute_phase_task_overlay_handles_are_executor_dispatch_only_and_lazy() -> None:
+    manifest = load_workflow_stage_manifest("execute-phase")
+    executor_dispatch = manifest.stage("executor_dispatch")
+
+    stages_with_overlay_fields = {
+        stage.id: [field for field in stage.required_init_fields if field in TASK_OVERLAY_INIT_FIELDS]
+        for stage in manifest.stages
+        if any(field in TASK_OVERLAY_INIT_FIELDS for field in stage.required_init_fields)
+    }
+
+    assert stages_with_overlay_fields == {
+        "executor_dispatch": [
+            "selected_task_overlay_ids",
+            "task_overlay_load_manifest",
+            "task_overlay_policy_summary",
+        ]
+    }
+    assert TASK_OVERLAY_AUTHORITY in executor_dispatch.must_not_eager_load
+    for stage in manifest.stages:
+        assert TASK_OVERLAY_AUTHORITY not in stage.loaded_authorities
 
 
 def test_execute_phase_split_stage_write_scopes_are_narrow() -> None:

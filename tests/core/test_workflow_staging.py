@@ -26,6 +26,7 @@ from gpd.core.context import (
     init_verify_work,
     init_write_paper,
 )
+from gpd.core.task_overlays import TASK_OVERLAY_REFERENCE_PATH
 from gpd.core.workflow_staging import (
     AUTONOMOUS_INIT_FIELDS,
     AUTONOMOUS_STAGE_MANIFEST_PATH,
@@ -1632,10 +1633,39 @@ def test_known_init_fields_for_execute_phase_include_bootstrap_and_wave_context(
     assert "plan_count" in known_init_fields
     assert "selected_protocol_bundle_ids" in known_init_fields
     assert "protocol_bundle_load_manifest" in known_init_fields
+    assert "selected_task_overlay_ids" in known_init_fields
+    assert "task_overlay_load_manifest" in known_init_fields
+    assert "task_overlay_policy_summary" in known_init_fields
     assert "reference_artifacts_content" in known_init_fields
     assert "current_execution" in known_init_fields
     assert "verification_report_skeleton_bridge" in known_init_fields
     assert "verification_report_finalizer_bridge" in known_init_fields
+
+
+def test_execute_phase_executor_dispatch_staged_init_includes_task_overlay_handles(tmp_path: Path) -> None:
+    _setup_generic_staged_init_project(tmp_path)
+
+    manifest = load_workflow_stage_manifest("execute-phase")
+    stage = manifest.stage("executor_dispatch")
+    payload = init_execute_phase(tmp_path, "1", stage="executor_dispatch")
+    load_manifest = payload["task_overlay_load_manifest"]
+
+    assert "selected_task_overlay_ids" in stage.required_init_fields
+    assert "task_overlay_load_manifest" in stage.required_init_fields
+    assert "task_overlay_policy_summary" in stage.required_init_fields
+    assert payload["selected_task_overlay_ids"] == ["executor.bounded_segment"]
+    assert isinstance(load_manifest, dict)
+    assert load_manifest["selection_source"] == "execute-phase.executor_dispatch"
+    assert load_manifest["role"] == "gpd-executor"
+    assert load_manifest["selected_task_overlay_ids"] == ["executor.bounded_segment"]
+    assert load_manifest["overlay_count"] == 1
+    overlays = load_manifest["overlays"]
+    assert isinstance(overlays, list)
+    assert overlays[0]["path"] == TASK_OVERLAY_REFERENCE_PATH
+    assert overlays[0]["portable_path"] == f"@{{GPD_INSTALL_DIR}}/{TASK_OVERLAY_REFERENCE_PATH}"
+    assert overlays[0]["body_loaded"] is False
+    assert "\n" not in payload["task_overlay_policy_summary"]
+    assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
 
 
 def test_validate_workflow_stage_manifest_payload_loads_execute_phase_manifest_shape() -> None:

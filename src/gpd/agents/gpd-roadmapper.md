@@ -185,28 +185,7 @@ Objective that supports no criterion:
 - Maybe it's follow-up scope
 - Maybe it belongs in a different phase
 
-## Example Gap Resolution
-
-```
-Phase 2: Effective Theory Construction
-Goal: The effective low-energy theory is derived and its regime of validity established
-
-Success Criteria:
-1. Effective Lagrangian written to specified order <- EFT-01 check
-2. Matching conditions computed <- EFT-02 check
-3. Known decoupling limit recovered <- EFT-03 check
-4. Regime of validity bounded explicitly <- GAP: no objective covers this yet
-5. All couplings have correct mass dimensions <- dimensional analysis (universal)
-
-Objectives: EFT-01, EFT-02, EFT-03
-
-Gap: Criterion 4 (regime of validity) has no explicit objective.
-
-Options:
-1. Add EFT-04: "Determine the breakdown scale of the EFT by analyzing higher-order corrections"
-2. Fold into EFT-02 (matching conditions implicitly determine validity range)
-3. Defer to Phase 3 (numerical exploration of breakdown)
-```
+Gap rule: if a criterion lacks an objective or an objective supports no criterion, either repair REQUIREMENTS.md, move the objective, or mark the criterion out of scope. Do not hide the mismatch.
 
 </goal_backward_phases>
 
@@ -311,70 +290,13 @@ Avoid horizontal layers such as "all derivations" or "all plots"; each phase sho
 
 Phases form a directed acyclic graph (DAG), not just a numbered list. Explicitly construct the dependency graph and identify the critical path.
 
-**Step 1: List all phase dependencies**
-
-For each phase, ask: "What MUST be complete before this phase can begin?" Not what's convenient — what's logically required.
-
-```
-Phase 1 → (none — entry point)
-Phase 2 → Phase 1  (needs formalism from Phase 1)
-Phase 3 → Phase 2  (needs analytical results)
-Phase 4 → Phase 2, Phase 3  (needs both analytical and numerical)
-```
-
-**Step 2: Identify parallel opportunities**
-
-Any phases without mutual dependencies can execute concurrently. This matters for `gpd:execute-phase` wave scheduling:
-
-```
-Wave 1: Phase 1 (sole entry point)
-Wave 2: Phase 2, Phase 3 (both only depend on Phase 1) ← PARALLEL
-Wave 3: Phase 4 (depends on both Phase 2 and Phase 3)
-```
-
-**Step 3: Compute the critical path**
-
-The critical path is the longest chain through the DAG. This determines minimum project duration.
-
-```
-Critical path: Phase 1 → Phase 2 → Phase 4 (3 sequential steps)
-Parallel path:  Phase 1 → Phase 3 → Phase 4 (also 3, but Phase 3 runs with Phase 2)
-```
-
-**Step 4: Document in ROADMAP.md**
-
-Include a dependency section in the roadmap:
-
-```markdown
-## Phase Dependencies
-
-| Phase | Depends On | Enables | Critical Path? |
-|-------|-----------|---------|:-:|
-| 1 - Foundations | — | 2, 3 | Yes |
-| 2 - Analytical | 1 | 4 | Yes |
-| 3 - Numerical | 1 | 4 | No (parallel with 2) |
-| 4 - Predictions | 2, 3 | — | Yes |
-
-**Critical path:** 1 → 2 → 4 (3 phases, minimum duration)
-**Parallelizable:** Phase 3 runs concurrently with Phase 2
-```
+For each phase, ask what must already be true before it starts. Document `## Phase Dependencies` with dependencies, enabled downstream phases, parallelizable waves, and the critical path.
 
 **Why this matters:** The executor's wave scheduler uses dependency information to run independent phases in parallel. Without explicit dependencies, phases execute sequentially, wasting time. With explicit dependencies, `gpd:execute-phase` can overlap independent work.
 
 ## Phase Risk Mitigation
 
-For each phase, identify the top risk and specify the mitigation:
-
-```markdown
-## Risk Register
-
-| Phase | Top Risk | Probability | Impact | Mitigation |
-|-------|---------|:-:|:-:|-----------|
-| 1 | Symmetry breaks unexpectedly | LOW | HIGH | Check against known limits in Phase 1 success criteria |
-| 2 | Perturbative series diverges | MEDIUM | HIGH | Backtrack trigger: if ratio test > 1, switch to resummation |
-| 3 | Sign problem in Monte Carlo | HIGH | MEDIUM | Fallback: constrained-path approximation or tensor network |
-| 4 | Disagreement with experiment | LOW | MEDIUM | Document as prediction; verify experimental systematics |
-```
+For each phase, include a compact `## Risk Register` row naming the top risk, probability, impact, mitigation, and any backtracking trigger.
 
 **Key principle:** Every HIGH-impact risk must have a named mitigation strategy or fallback method. Phases with HIGH-probability + HIGH-impact risks should have explicit backtracking checkpoints at the midpoint, not just at the boundary.
 
@@ -386,36 +308,7 @@ For each phase, identify the top risk and specify the mitigation:
 
 After phase identification, verify every v1 research objective is mapped.
 
-**Build coverage map:**
-
-```
-FORM-01 -> Phase 1
-FORM-02 -> Phase 1
-CALC-01 -> Phase 2
-CALC-02 -> Phase 2
-CALC-03 -> Phase 3
-NUM-01  -> Phase 3
-NUM-02  -> Phase 3
-VAL-01  -> Phase 4
-PHENO-01 -> Phase 4
-PHENO-02 -> Phase 4
-...
-
-Mapped: 10/10 check
-```
-
-**If orphaned objectives found:**
-
-```
-WARNING: Orphaned objectives (no phase):
-- INTERP-01: Establish physical interpretation of anomalous scaling exponent
-- INTERP-02: Connect result to conformal field theory prediction
-
-Options:
-1. Create Phase 5: Interpretation & Connections
-2. Add to existing Phase 4
-3. Defer to follow-up investigation (update REQUIREMENTS.md)
-```
+Build a coverage map from each objective ID to exactly one phase. If orphaned objectives remain, create a phase, move them into an existing phase, or explicitly defer them in REQUIREMENTS.md.
 
 **Do not proceed until coverage = 100%.**
 
@@ -533,52 +426,7 @@ Key sections:
 
 When presenting to user for approval, treat the draft as a review stop: the orchestrator presents it, collects feedback, and re-invokes the roadmapper for any follow-up write pass.
 
-```markdown
-## ROADMAP DRAFT
-
-**Phases:** [N]
-**Depth:** [from config]
-**Coverage:** [X]/[Y] objectives mapped | [A]/[A] contract items surfaced
-
-### Phase Structure
-
-| Phase                      | Goal   | Objectives                | Contract Items | Key Anchors | Success Criteria |
-| -------------------------- | ------ | ------------------------- | -------------- | ----------- | ---------------- |
-| 1 - Foundations            | [goal] | FORM-01, FORM-02          | [claim/deliv]  | [refs]      | 3 criteria       |
-| 2 - Analytical Calculation | [goal] | CALC-01, CALC-02, CALC-03 | [claim/deliv]  | [refs]      | 4 criteria       |
-| 3 - Numerical Validation   | [goal] | NUM-01, NUM-02, VAL-01    | [claim/deliv]  | [refs]      | 3 criteria       |
-
-### Success Criteria Preview
-
-**Phase 1: Foundations**
-
-1. [criterion]
-2. [criterion]
-
-**Phase 2: Analytical Calculation**
-
-1. [criterion]
-2. [criterion]
-3. [criterion]
-
-[... abbreviated for longer roadmaps ...]
-
-### Backtracking Triggers
-
-- Phase 2: If perturbative expansion diverges at target order, revisit Phase 1 assumptions
-- Phase 3: If numerical results disagree with analytics by > [tolerance], debug before proceeding
-
-### Coverage
-
-check All [X] v1 objectives mapped
-check No orphaned objectives
-check All decisive contract items surfaced
-check No orphaned anchors or forbidden proxies
-
-### Revision Prompt
-
-Approve roadmap or provide feedback; revision is a fresh roadmapper invocation.
-```
+Use `## ROADMAP DRAFT` with phases, depth, objective coverage, contract coverage, compact phase table, success-criteria preview, backtracking triggers, and revision prompt. Keep long roadmaps abbreviated; the files on disk carry the full detail.
 
 </output_formats>
 
@@ -747,71 +595,9 @@ The roadmap is a living document. Re-invoke the roadmapper when:
 
 ## Roadmap Created
 
-When files are written and returning to orchestrator:
-
-```markdown
-## ROADMAP CREATED
-
-**Files written:**
-
-- ROADMAP.md
-- STATE.md
-
-**Updated:**
-
-- REQUIREMENTS.md (traceability section)
-
-### Summary
-
-**Phases:** {N}
-**Depth:** {from config}
-**Coverage:** {X}/{X} objectives mapped check | {A}/{A} contract items surfaced
-
-| Phase      | Goal   | Objectives | Contract Items | Key Anchors |
-| ---------- | ------ | ---------- | -------------- | ----------- |
-| 1 - {name} | {goal} | {obj-ids}  | {contract-items} | {anchors} |
-| 2 - {name} | {goal} | {obj-ids}  | {contract-items} | {anchors} |
-
-### Success Criteria Preview
+When files are written and returning to orchestrator, use `## ROADMAP CREATED` with files written, updated REQUIREMENTS traceability, phase count, depth, objective and contract coverage, compact phase table, success-criteria preview, backtracking triggers, files ready for review, and coverage notes for any repaired gaps.
 
 For `shallow_mode=true`, preview success criteria only for fully detailed phases and list Phase 2+ criteria as deferred stubs. For `shallow_mode=false`, include every phase.
-
-**Phase 1: {name}**
-
-1. {criterion}
-2. {criterion}
-
-**Phase 2: {name}** {omit this criteria list when Phase 2 is a shallow-mode stub}
-
-1. {criterion}
-2. {criterion}
-
-{If shallow_mode=true:}
-
-### Deferred Stub Criteria
-
-- Phase 2+: detailed success criteria deferred to `gpd:plan-phase N`; roadmap stubs retain objective IDs and compact contract/anchor/proxy labels.
-
-### Backtracking Triggers
-
-- Phase {N}: {condition that triggers revisiting earlier work}
-
-### Files Ready for Review
-
-User can review actual files:
-
-- `cat ROADMAP.md`
-- `cat STATE.md`
-
-{If gaps found during creation:}
-
-### Coverage Notes
-
-WARNING: Issues found during creation:
-
-- {gap description}
-- Resolution applied: {what was done}
-```
 
 ## Roadmap Revised
 

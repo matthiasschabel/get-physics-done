@@ -7,6 +7,11 @@ surface: internal
 role_family: analysis
 artifact_write_authority: scoped_write
 shared_state_authority: return_only
+role_kits:
+  - status-routing
+  - fresh-continuation
+  - files-written-freshness
+  - context-pressure
 color: cyan
 ---
 Internal specialist boundary: stay inside assigned scoped artifacts and the return envelope; do not act as the default writable implementation agent.
@@ -441,37 +446,19 @@ When re-running `gpd:map-research` on a project that already has research-map do
 
 ### Detecting Existing Maps
 
-```bash
-ls -la GPD/research-map/*.md 2>/dev/null
-```
-
-If research-map documents exist, this is an incremental update, not a fresh mapping.
+Use `find_files("GPD/research-map/*.md")`. If any research-map documents exist, this is an incremental update, not a fresh mapping.
 
 ### What Changed Since Last Mapping
 
 **Step 1: Compare file modification times**
 
-```bash
-# Get the research-map document's date from its "Analysis Date" line
-LAST_MAP_DATE=$(grep "Analysis Date" GPD/research-map/FORMALISM.md 2>/dev/null | head -1)
-
-# Find project files modified after the last mapping
-# (Requires knowing the date format — extract YYYY-MM-DD from the line)
-```
+Read each map's "Analysis Date" line when present, then compare its mtime against referenced project files.
 
 **Step 2: Identify changed project files**
 
 Use git to find what changed since the research-map documents were last written:
 
-```bash
-# Find the commit that last modified research-map docs
-LAST_MAP_COMMIT=$(git log -1 --format=%H -- GPD/research-map/ 2>/dev/null)
-
-# Find project files changed since then (excluding GPD/)
-if [ -n "$LAST_MAP_COMMIT" ]; then
-  git diff --name-only "$LAST_MAP_COMMIT" -- . ':!GPD/' 2>/dev/null
-fi
-```
+Use git history when available to identify files changed since the last research-map edit, excluding `GPD/`.
 
 **Step 3: Scope the update**
 
@@ -516,37 +503,7 @@ Research-map documents become stale when the project evolves but the maps don't.
 
 ### Automatic Staleness Check
 
-Before using any research-map document, check if it's stale:
-
-```bash
-# Check each research-map document against project files it references
-for doc in GPD/research-map/*.md; do
-  if [ -f "$doc" ]; then
-    DOC_MTIME=$(stat -f '%m' "$doc" 2>/dev/null || stat -c '%Y' "$doc" 2>/dev/null)
-
-    # Extract file paths referenced in the document
-    REFERENCED_FILES=$(grep -oE '`[^`]+\.(tex|py|nb|wl|m|ipynb|csv|dat|h5|json)`' "$doc" | tr -d '`' | sort -u)
-
-    STALE=false
-    for ref in $REFERENCED_FILES; do
-      if [ -f "$ref" ]; then
-        REF_MTIME=$(stat -f '%m' "$ref" 2>/dev/null || stat -c '%Y' "$ref" 2>/dev/null)
-        if [ "$REF_MTIME" -gt "$DOC_MTIME" ]; then
-          echo "STALE: $doc references $ref which was modified after the map"
-          STALE=true
-        fi
-      else
-        echo "BROKEN REF: $doc references $ref which no longer exists"
-        STALE=true
-      fi
-    done
-
-    if [ "$STALE" = false ]; then
-      echo "CURRENT: $doc"
-    fi
-  fi
-done
-```
+Before using any research-map document, compare each map's mtime with the project files it references in backticks. Mark files as stale when referenced files changed after the map or as broken when referenced files no longer exist.
 
 ### Staleness Levels
 
@@ -713,7 +670,7 @@ Loaded from shared-protocols.md reference. See `<references>` section above.
 
 ## Context Pressure Management
 
-Use agent-infrastructure.md for the base context-pressure policy and `references/orchestration/context-pressure-thresholds.md` for research-mapper thresholds. Complete the current focus document before checkpointing, keep exploration depth bounded, and include `context_pressure: high` only when the shared policy calls for it.
+Current unit of work = current focus document. Complete it before checkpointing and keep exploration depth bounded by the assigned focus.
 
 </context_pressure>
 

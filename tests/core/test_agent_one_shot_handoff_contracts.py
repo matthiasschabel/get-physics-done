@@ -73,10 +73,13 @@ def test_roadmapper_makes_checkpoint_revision_flow_explicit() -> None:
     assert_agent_role_kit_section(agent)
     assert_prompt_contracts(
         content,
-        machine_exact("roadmapper revision heading", "### Revision Prompt"),
         *semantic_concept(
             "roadmapper checkpoint revision flow",
-            required="Approve roadmap or provide feedback; revision is a fresh roadmapper invocation.",
+            required=(
+                "revision prompt",
+                "re-invokes the roadmapper for any follow-up write pass",
+                "fresh-continuation",
+            ),
             forbidden="same-run wait",
             match=MatchMode.CASEFOLD_NORMALIZED,
         ),

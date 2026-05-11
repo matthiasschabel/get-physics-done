@@ -82,6 +82,11 @@
       "protocol_bundle_load_manifest",
       "protocol_bundle_verifier_extensions"
     ],
+    "task_overlay_handles": [
+      "selected_task_overlay_ids",
+      "task_overlay_load_manifest",
+      "task_overlay_policy_summary"
+    ],
     "convention_lock_context": [
       "convention_lock",
       "convention_lock_count"
@@ -502,6 +507,7 @@
         "contract_gate_status",
         "reference_runtime_context",
         "protocol_bundle_context",
+        "task_overlay_handles",
         "execution_resume_context",
         "state_integrity_context"
       ],
@@ -525,6 +531,7 @@
       ],
       "must_not_eager_load": [
         "references/orchestration/checkpoints.md",
+        "references/orchestration/task-overlays.md",
         "references/orchestration/agent-infrastructure.md",
         "references/orchestration/artifact-surfacing.md",
         "references/orchestration/child-artifact-gate.md",

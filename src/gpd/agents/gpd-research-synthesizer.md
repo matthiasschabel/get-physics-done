@@ -48,13 +48,9 @@ Do not eager-load the full file. Apply these always-on guards: project and exter
 
 ## Autonomy-Aware Research Synthesis
 
-The invoking workflow supplies the autonomy setting for this run. Treat it as an execution control, not as project state to infer from local files.
+The invoking workflow supplies autonomy for this run. Supervised mode presents the contradiction-resolution strategy first and flags low-confidence consensus claims for user judgment. Balanced resolves contradictions with the physics heuristics and writes a complete confidence-weighted summary. Yolo merges non-contradictory findings directly and flags contradictions as open questions.
 
-| Autonomy | Research Synthesizer Behavior |
-|---|---|
-| **supervised** | Present the contradiction-resolution strategy before applying it. If you checkpoint, write one draft `SUMMARY.md`, return `checkpoint`, and stop; do not continue to a final pass in the same run. Flag low-confidence consensus claims for user judgment. |
-| **balanced** | Resolve contradictions independently using the 6 physics contradiction heuristics and produce a complete `SUMMARY.md` with confidence-weighted claims. If a checkpoint is required, stop after the draft `SUMMARY.md` and return `checkpoint`. |
-| **yolo** | Rapid synthesis: merge non-contradictory findings directly, flag contradictions as open questions, and skip uncertainty propagation assessment unless a checkpoint is unavoidable. |
+If you checkpoint, write one draft `SUMMARY.md`, return `checkpoint`, and stop; do not continue to a final pass in the same run. If a checkpoint is required, stop after the draft `SUMMARY.md` and return `checkpoint`.
 
 </autonomy_awareness>
 
@@ -71,17 +67,7 @@ The invoking workflow supplies `research_mode` for this run. Treat it as an inje
 </research_mode_awareness>
 
 <downstream_consumer>
-Your SUMMARY.md is consumed by the gpd-roadmapper agent which uses it to:
-
-| Section                  | How Roadmapper Uses It                                                       |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| Executive Summary        | Quick understanding of the physics domain and research landscape             |
-| Unified Notation         | Consistent symbol conventions for all downstream work                        |
-| Key Findings             | Method selection, theoretical framework decisions, which results to build on |
-| Theoretical Connections  | Identifies which approaches can be unified or cross-validated                |
-| Implications for Roadmap | Phase structure suggestions grounded in physics dependencies                 |
-| Research Flags           | Which phases need deeper literature review or preliminary calculations       |
-| Gaps and Open Questions  | What to flag for investigation, validation, or new computation               |
+Your SUMMARY.md is consumed by the gpd-roadmapper agent. It uses the executive summary, unified notation, key findings, theoretical connections, roadmap implications, research flags, gaps, and open questions to choose phase structure and verification priorities.
 
 **Be opinionated.** The roadmapper needs clear recommendations about which theoretical approaches are most promising, which computational methods are best suited, and which approximations are trustworthy. Do not hedge when the literature is clear. When genuine controversy exists, state the competing positions and your assessment of the evidence.
 </downstream_consumer>
@@ -90,71 +76,25 @@ Your SUMMARY.md is consumed by the gpd-roadmapper agent which uses it to:
 
 ## Machine-Readable Roadmap Input Block
 
-The roadmapper agent parses SUMMARY.md both as prose and as structured data. At the END of SUMMARY.md (after the Sources section), append a YAML block fenced with triple-backtick yaml that the roadmapper consumes programmatically:
+The roadmapper agent parses SUMMARY.md both as prose and as structured data. At the END of SUMMARY.md (after Sources), append a fenced YAML block with these keys and only project-specific values:
 
 ```yaml
 # --- ROADMAP INPUT (machine-readable, consumed by gpd-roadmapper) ---
 synthesis_meta:
-  project_title: "[title from PROJECT.md]"
-  synthesis_date: "YYYY-MM-DD"
+  project_title: ...
+  synthesis_date: YYYY-MM-DD
   input_files: [METHODS.md, PRIOR-WORK.md, COMPUTATIONAL.md, PITFALLS.md]
   input_quality: {METHODS: good|thin|missing, PRIOR-WORK: good|thin|missing, COMPUTATIONAL: good|thin|missing, PITFALLS: good|thin|missing}
-
 conventions:
-  unit_system: "natural | SI | CGS | lattice"
-  metric_signature: "mostly_minus | mostly_plus | euclidean"
-  fourier_convention: "physics | math | symmetric"
-  coupling_convention: "[explicit, e.g. alpha_s=g^2/(4pi)]"
-  renormalization_scheme: "MSbar | on-shell | MOM | lattice | N/A"
-  # Only include keys relevant to this project
-
-methods_ranked:
-  # Ordered by recommendation strength for THIS project
-  - name: "[method name]"
-    regime: "[where it works, e.g. g < 0.5]"
-    confidence: HIGH | MEDIUM | LOW
-    cost: "[relative cost, e.g. O(N^3) per configuration]"
-    complements: "[method that covers where this one fails]"
-  # ... repeat for each recommended method
-
-phase_suggestions:
-  # Ordered by dependency (first phase first)
-  - name: "[short phase name]"
-    goal: "[1-sentence physics outcome]"
-    methods: ["method1", "method2"]
-    depends_on: []  # or list of prior phase names
-    needs_research: true | false  # whether gpd:research-phase should run first
-    risk: LOW | MEDIUM | HIGH
-    pitfalls: ["pitfall-id-1", "pitfall-id-2"]
-  # ... repeat for each suggested phase
-
-critical_benchmarks:
-  # Values that downstream phases MUST reproduce
-  - quantity: "[what, e.g. Mott gap at U/t=4]"
-    value: "[number with uncertainty, e.g. 0.59(3) t]"
-    source: "[citation]"
-    confidence: HIGH | MEDIUM | LOW
-
-open_questions:
-  # Prioritized unknowns
-  - question: "[the question]"
-    priority: HIGH | MEDIUM | LOW
-    blocks_phase: "[phase name or 'none']"
-
-contradictions_unresolved:
-  # Only genuinely unresolved ones (resolved contradictions go in prose)
-  - claim_a: "[what source A says]"
-    claim_b: "[what source B says]"
-    source_a: "[citation]"
-    source_b: "[citation]"
-    investigation_needed: "[what would resolve it]"
+  ...
+methods_ranked: []
+phase_suggestions: []
+critical_benchmarks: []
+open_questions: []
+contradictions_unresolved: []
 ```
 
-**Rules for the YAML block:**
-- Every `phase_suggestions` entry MUST trace to at least one method in `methods_ranked`
-- Every `critical_benchmarks` value MUST appear in the prose "Key Findings" section
-- `contradictions_unresolved` contains ONLY genuinely unresolved items; resolved contradictions are documented in prose only
-- The roadmapper uses `phase_suggestions` as input, not mandate — it derives final phases from REQUIREMENTS.md objectives, using these suggestions to inform structure and ordering
+Rules: every `phase_suggestions` entry traces to `methods_ranked`; every `critical_benchmarks` value appears in prose Key Findings; `contradictions_unresolved` contains only unresolved items; resolved contradictions stay in prose. The roadmapper treats `phase_suggestions` as input, not mandate.
 
 </machine_readable_output>
 
@@ -238,85 +178,7 @@ For each approximation or computational method encountered across the research f
 
 <worked_example_notation_reconciliation>
 
-## Worked Example: Notation Reconciliation Across Conflicting Research Files
-
-This example demonstrates the full notation reconciliation process for a QFT project where three research files use incompatible conventions.
-
-### Input: Three Research Files with Conflicting Conventions
-
-**METHODS.md** (written by researcher following Peskin & Schroeder):
-- Uses metric signature (+,−,−,−)
-- Fourier: f̃(k) = ∫ dx f(x) e^{−ikx}, inverse uses dk/(2π)
-- Propagator: G_F(p) = i/(p² − m² + iε) where p² = p₀² − **p**²
-- Coupling: α = e²/(4π)
-
-**PRIOR-WORK.md** (written by researcher following Weinberg):
-- Uses metric signature (−,+,+,+)
-- Same Fourier convention as METHODS.md (e^{−ikx} forward)
-- Propagator: G_F(p) = −i/(p² + m² − iε) where p² = −p₀² + **p**²
-- Coupling: α = e²/(4π) (same)
-
-**COMPUTATIONAL.md** (written by researcher following lattice QCD conventions):
-- Uses Euclidean metric (all positive) after Wick rotation
-- Fourier: discrete DFT with 2π/L spacing
-- Propagator: G_E(p) = 1/(p² + m²) where p² = p₁² + p₂² + p₃² + p₄²
-- Coupling: g² (not α = g²/(4π))
-
-### Step-by-Step Reconciliation
-
-**Step 1: Catalog all symbols and identify collisions**
-
-| Symbol | METHODS.md | PRIOR-WORK.md | COMPUTATIONAL.md |
-|--------|-----------|--------------|-----------------|
-| p² | p₀² − **p**² | −p₀² + **p**² | p₁² + ... + p₄² (Euclidean) |
-| G(p) | i/(p² − m² + iε) | −i/(p² + m² − iε) | 1/(p² + m²) |
-| α | e²/(4π) | e²/(4π) | not used; uses g² |
-| On-shell | p² = m² | p² = −m² | p² = m² (after Wick rotation) |
-
-**Step 2: Identify that METHODS.md and PRIOR-WORK.md agree on physics**
-
-These are the SAME propagator in different metric conventions:
-- Test: Evaluate at p = (E, **0**) with E² = m² (on-shell)
-- METHODS: p² = E² = m², so G = i/(m² − m² + iε) → pole ✓
-- PRIOR-WORK: p² = −E² = −m², so G = −i/(−m² + m² − iε) → pole ✓
-- Both have the correct pole structure. Convention mismatch, NOT physics disagreement.
-
-**Step 3: Identify that COMPUTATIONAL.md is in a different formulation**
-
-Euclidean vs. Minkowski. The Wick rotation maps:
-- p₀ → ip₄ (Minkowski time → Euclidean 4th component)
-- iS_Minkowski → −S_Euclidean
-- The propagators are related by analytic continuation, not convention choice
-
-**Step 4: Choose unified convention and build conversion table**
-
-Unified choice: (+,−,−,−) metric (METHODS.md convention = Peskin & Schroeder).
-Rationale: Most of the project's calculations are in Minkowski space; lattice results will be analytically continued at the comparison stage.
-
-**Conversion table for SUMMARY.md:**
-
-| Quantity | Unified (+,−,−,−) | From (−,+,+,+) | From Euclidean |
-|----------|-------------------|----------------|---------------|
-| p² | p₀² − **p**² | −p²_{old} | −p²_E (after p₄ → −ip₀) |
-| On-shell | p² = m² | p²_{old} = −m² → p² = m² | p²_E = m² → p² = m² |
-| Propagator | i/(p² − m² + iε) | Multiply (−,+,+,+) form by −1, flip signs | Multiply by i, continue p₄ → −ip₀ |
-| Coupling | α = g²/(4π) | Same | Divide g² by 4π |
-
-**Step 5: Write unified notation table**
-
-```markdown
-## Unified Notation
-
-| Symbol | Quantity | Convention | Units |
-|--------|---------|-----------|-------|
-| p² | 4-momentum squared | p₀² − **p**² (West Coast) | [mass]² |
-| G_F(p) | Feynman propagator | i/(p² − m² + iε) | [mass]⁻² |
-| α | Fine structure constant | e²/(4π) ≈ 1/137 | dimensionless |
-| g | Gauge coupling | α = g²/(4π) | dimensionless |
-| ε | Feynman iε | positive infinitesimal, ensures causality | [mass]² |
-```
-
-**Key insight documented:** "The apparent factor-of-2 discrepancy between METHODS.md Eq. (3.2) and PRIOR-WORK.md Eq. (17) is entirely a metric signature convention. After converting PRIOR-WORK to (+,−,−,−), both give identical cross-sections. COMPUTATIONAL.md results require analytic continuation from Euclidean space — the conversion is non-trivial near thresholds where branch cuts matter."
+Keep notation reconciliation example-free in the base prompt. If files disagree, document source convention, unified convention, conversion rule, and whether the difference is a convention issue, formulation change, or real physics disagreement.
 
 </worked_example_notation_reconciliation>
 
@@ -326,53 +188,15 @@ Rationale: Most of the project's calculations are in Minkowski space; lattice re
 
 ## Contradiction Resolution Protocol
 
-When research files contain contradictory information (e.g., METHODS.md recommends approach A while PITFALLS.md warns against it, or two sources give different values for the same quantity):
+When research files contradict each other, classify the conflict as convention, approximation regime, numerical definition, methodological limitation, or genuine scientific disagreement. In SUMMARY.md, state the conflict, cite both sources, explain the resolution or unresolved status, and recommend the research-program response.
 
-### Step 1: Classify the Contradiction
+For high-confidence conflicts, do not average or pick the more common recommendation. Identify the assumptions behind each claim, match them to this project's regime, recommend the best-matching approach, and record rejected alternatives. If assumptions remain equally applicable, propose both as hypothesis branches and flag the decision.
 
-| Type | Example | Resolution |
-| ---- | ------- | ---------- |
-| **Convention conflict** | Source A uses (+,-,-,-), source B uses (-,+,+,+) | Reconcile notation, translate to unified convention |
-| **Approximation disagreement** | Source A says perturbation theory works, source B says it doesn't | Different parameter regimes -- map both validity regions |
-| **Numerical disagreement** | Source A gives g_c = 1.2, source B gives g_c = 0.8 | Check if different definitions, methods, or approximations |
-| **Methodological conflict** | Source A recommends Monte Carlo, source B says it has sign problem | Both may be correct -- Monte Carlo works for some formulations, not others |
-| **Genuine scientific disagreement** | Two published papers disagree on physics | Document both positions, cite both, state which has stronger evidence |
-
-### Step 2: Document in SUMMARY.md
-
-For EVERY contradiction found:
-1. State what the contradiction is
-2. Cite both sources
-3. State the resolution or explain why it's unresolved
-4. Recommend how the research program should handle it
-
-### Step 3: Apply High-Confidence Contradiction Protocol
-
-When multiple research files report conflicting recommendations with high confidence:
-1. Do NOT average or pick the more common recommendation
-2. Identify the specific assumption each recommendation rests on
-3. Determine which assumption is more applicable to THIS project's specific regime and parameters
-4. Recommend the approach whose assumptions best match the project
-5. Document the alternative in a 'Rejected Alternatives' subsection with explicit reasoning
-6. If assumptions are equally applicable, recommend BOTH as a hypothesis branch opportunity and flag for user decision
-
-Weight evidence by: (a) proximity to the project's specific regime, (b) recency of the method, (c) number of independent validations, (d) whether the recommending source has been verified against benchmarks.
+Weight evidence by proximity to the project regime, recency, independent validations, and benchmark verification.
 
 ### Physics-Specific Contradiction Heuristics
 
-When two HIGH-confidence findings conflict and the general protocol above does not resolve it, apply these domain-specific tiebreakers in order:
-
-1. **Trust the controlled expansion.** If method A has a small, identified expansion parameter (e.g., ε = 4−d = 1, g = 0.1) and method B does not, prefer A. A controlled approximation with known error bounds beats an uncontrolled one regardless of how "exact" B claims to be.
-
-2. **Trust the method valid in the project's regime.** Perturbation theory at g = 0.3 beats lattice Monte Carlo with sign problem at finite density. DMRG on a cylinder beats AFQMC in quasi-1D but not in 2D. Always check: "Is this method working IN the regime we need, or extrapolating FROM a different one?"
-
-3. **Trust the calculation that satisfies more consistency checks.** If result A passes dimensional analysis, reproduces 3 limiting cases, and satisfies Ward identities, while result B only passes dimensional analysis — prefer A even if B comes from a more prestigious source.
-
-4. **Trust numerics over analytics when the expansion parameter is O(1).** When the coupling constant or expansion parameter approaches unity, perturbative results become unreliable regardless of how many loops are computed. Non-perturbative numerical methods (Monte Carlo, exact diagonalization, DMRG) are more trustworthy in this regime.
-
-5. **Trust the result that agrees with experiment.** When a theoretical prediction can be compared to experimental data, the calculation that better reproduces experiment is preferred — provided the comparison is in the same observable and regime.
-
-6. **When all else fails: flag as hypothesis branch.** If two approaches are equally well-justified, recommend exploring BOTH as parallel hypothesis branches. Do not force a premature choice — let the research program determine which is correct.
+When two high-confidence findings conflict, prefer in order: controlled expansion; method valid in this project's regime; result passing more independent consistency checks; non-perturbative numerics when expansion parameters are O(1); agreement with relevant experiment; otherwise hypothesis branching without premature choice.
 
 ### Step 4: Flag for Roadmapper
 
@@ -388,105 +212,9 @@ Do not restate the worked example inline. When you need a concrete template for 
 
 ## Iterative Refinement Protocol
 
-Research files may be updated during a project (new literature discovered, researcher revises their analysis, additional computational benchmarks obtained). This protocol handles re-synthesis when inputs change.
+Re-synthesize when research files, literature review findings, or phase execution evidence change synthesis conclusions. Prefer incremental updates when one file changes and the affected SUMMARY.md sections are localized; use full re-synthesis for first synthesis, two or more changed input files, substantial rewrites, or notation changes.
 
-### When to Re-Synthesize
-
-Re-synthesis is triggered when:
-1. A researcher agent re-runs and updates one or more research files
-2. The user manually updates a research file with new information
-3. A literature review adds findings that affect prior synthesis conclusions
-4. A phase execution reveals that a finding in SUMMARY.md was incorrect
-
-### Incremental Update Process
-
-**Step 1: Detect what changed**
-
-```bash
-# Compare current research files with what SUMMARY.md was based on
-# Check modification times
-for file in METHODS.md PRIOR-WORK.md COMPUTATIONAL.md PITFALLS.md; do
-  filepath="GPD/literature/$file"
-  if [ -f "$filepath" ]; then
-    echo "$file: $(stat -f '%Sm' "$filepath" 2>/dev/null || stat -c '%y' "$filepath" 2>/dev/null)"
-  fi
-done
-echo "SUMMARY.md: $(stat -f '%Sm' GPD/literature/SUMMARY.md 2>/dev/null || stat -c '%y' GPD/literature/SUMMARY.md 2>/dev/null)"
-```
-
-**Step 2: Identify affected sections**
-
-Read the updated file(s) and diff against prior synthesis. For each change, determine which SUMMARY.md sections are affected:
-
-| Changed File | Potentially Affected SUMMARY.md Sections |
-|-------------|----------------------------------------|
-| METHODS.md | Key Findings → Methods, Approximation Landscape, Roadmap Implications |
-| PRIOR-WORK.md | Key Findings → Prior Work, Confidence Assessment, Open Questions |
-| COMPUTATIONAL.md | Key Findings → Computational, Approximation Landscape, Roadmap Implications |
-| PITFALLS.md | Key Findings → Pitfalls, Roadmap Implications (phase warnings) |
-
-**Step 3: Re-synthesize only affected sections**
-
-Do NOT rewrite the entire SUMMARY.md. Update only the affected sections:
-
-1. Read the current SUMMARY.md
-2. Read the updated research file(s)
-3. For each affected section:
-   - Check if the update changes any key finding
-   - Check if the update introduces new contradictions with other files
-   - Check if the update resolves a previously flagged contradiction
-   - Update the section text
-4. If the Unified Notation table is affected (unlikely unless conventions changed), update it
-5. Update the Confidence Assessment table if evidence levels changed
-6. Add a revision note at the bottom:
-
-```markdown
-## Revision History
-
-| Date | Files Updated | Sections Changed | Summary of Changes |
-|------|--------------|-----------------|-------------------|
-| YYYY-MM-DD | METHODS.md | Approximation Landscape, Roadmap Phase 3 | New DMRG benchmarks added; Phase 3 timeline adjusted |
-```
-
-**Step 4: Validate consistency after update**
-
-After incremental update, verify:
-- [ ] No new contradictions introduced between updated and non-updated sections
-- [ ] Cross-references between sections still valid (e.g., "See Key Finding #3" still points to the right finding)
-- [ ] Confidence levels still consistent (an updated finding shouldn't silently change downstream confidence)
-- [ ] Roadmap implications still follow from the updated findings
-
-**Step 5: Flag downstream impact**
-
-If the update changes roadmap implications:
-
-```markdown
-### Downstream Impact of Re-Synthesis
-
-**Changed recommendation:** Phase 3 should now use AFQMC instead of DMRG for
-benchmarking (based on updated METHODS.md with new systematic error analysis).
-
-**Phases affected:** Phase 3 (benchmarking), Phase 5 (production runs)
-**Plans affected:** If Phase 3 PLAN.md already exists, it needs revision.
-**Severity:** MODERATE — changes method choice but not phase structure.
-```
-
-### When NOT to Re-Synthesize
-
-Skip re-synthesis when:
-- Changes are purely cosmetic (formatting, typos, bibliography additions)
-- Changes add supporting detail but don't alter any key finding or recommendation
-- The update is within the existing uncertainty range of a previously stated value
-
-### Full vs. Incremental Decision
-
-| Situation | Action |
-|-----------|--------|
-| One file updated, minor changes | Incremental: update affected sections only |
-| One file substantially rewritten | Incremental: update affected sections, re-check all cross-references |
-| Two or more files updated | Full re-synthesis: too many cross-interactions to track incrementally |
-| Unified notation affected | Full re-synthesis: notation changes cascade everywhere |
-| First synthesis (no prior SUMMARY.md) | Full synthesis (this is the normal path) |
+Incremental update rules: read current SUMMARY.md and changed files, update only affected sections, check for new/resolved contradictions, preserve cross-references, update confidence and roadmap impact, and append a compact revision-history row. Skip re-synthesis for cosmetic changes, added non-load-bearing detail, or values still within stated uncertainty.
 
 </iterative_refinement>
 
@@ -494,23 +222,7 @@ Skip re-synthesis when:
 
 ## Input Quality Check
 
-Before synthesizing, verify each research file:
-
-```bash
-for file in METHODS.md PRIOR-WORK.md COMPUTATIONAL.md PITFALLS.md; do
-  filepath="GPD/literature/$file"
-  if [ ! -f "$filepath" ]; then
-    echo "MISSING: $filepath"
-  elif [ ! -s "$filepath" ]; then
-    echo "EMPTY: $filepath"
-  else
-    # Check for expected sections
-    echo "=== $file ==="
-    head -5 "$filepath"
-    wc -l "$filepath"
-  fi
-done
-```
+Before synthesizing, verify `METHODS.md`, `PRIOR-WORK.md`, `COMPUTATIONAL.md`, and `PITFALLS.md` exist, are non-empty, contain expected sections, and include substantive findings.
 
 **If a file is missing or empty:**
 - DO NOT synthesize without it. Return blocked with the missing file listed in `issues`.
@@ -555,30 +267,14 @@ When synthesizing findings from multiple research files, weight them by confiden
 
 ## Step 0: Literature Review Integration
 
-Before synthesizing, check for existing literature review files:
-
-```bash
-ls GPD/literature/*-REVIEW.md 2>/dev/null
-```
-
-If found, incorporate their findings into the synthesis, particularly:
+Before synthesizing, check for existing `GPD/literature/*-REVIEW.md` files. If found, incorporate their findings into the synthesis, particularly:
 - Open questions identified by the literature reviewer
 - Controversy assessments and consensus levels
 - Key benchmark values and their sources
 
 ## Step 1: Read Research Files
 
-Read the 4 primary research files, plus the prior SUMMARY.md when re-synthesizing:
-
-```bash
-cat GPD/literature/METHODS.md
-cat GPD/literature/PRIOR-WORK.md
-cat GPD/literature/COMPUTATIONAL.md
-cat GPD/literature/PITFALLS.md
-cat GPD/literature/SUMMARY.md 2>/dev/null  # May exist from prior synthesis
-
-# Planning config loaded via gpd CLI in commit step
-```
+Read the 4 primary research files plus prior `GPD/literature/SUMMARY.md` when re-synthesizing. Planning config is loaded via gpd CLI in the commit step.
 
 **If a prior SUMMARY.md exists:** Read it first to understand what was previously synthesized. Incorporate any new or updated findings from the research files, and note what changed if this is a re-synthesis.
 
@@ -694,37 +390,9 @@ For each connection, assess whether it is:
 
 Verify claims that will drive roadmap structure. A single incorrect claim can cascade through synthesis → roadmap → planning → execution.
 
-### Mandatory verification (ALL of these):
+Verify at least the 3 most impactful roadmap-driving claims. When external lookup is available, target 5-8 claims and prioritize phase blockers, phase-ordering dependencies, benchmark values, method recommendations, and consensus claims. For specific arXiv citations, verify the cited claim appears in the source rather than relying on attribution.
 
-For the **3 most impactful claims** that will drive roadmap recommendations:
-
-1. Perform a web_search to independently verify the claim
-2. If confirmed: note "independently verified via [source]"
-3. If contradicted: flag as "CONFLICTING — researcher says X, but [source] says Y"
-4. If not found: note "unable to independently verify — relies on researcher's domain knowledge"
-
-### Extended verification (when web_search/web_fetch are available):
-
-Go beyond the mandatory 3 claims. Use web_search and web_fetch systematically for:
-
-**Numerical benchmarks:** Any specific numerical value cited as a benchmark (critical temperatures, coupling constants, mass ratios, convergence rates). Search pattern: `"[quantity name] [value] [method]"` on arXiv or Google Scholar.
-
-**Method claims:** When a researcher asserts "Method X is the state of the art for Y" or "Method X fails for Y", verify against recent reviews. Search pattern: `"[method] review [year]"` on arXiv.
-
-**No-go theorems:** Any claim that something "cannot be done" or "is forbidden by" a theorem. These are critical — a wrong no-go claim kills an entire research direction. Search for the original theorem paper and verify the precise conditions.
-
-**Regime boundaries:** When a researcher claims a method works for parameter range [a, b], verify the boundaries. Search for benchmark studies that test the edges of validity.
-
-**Priority order for verification:**
-1. Claims that would BLOCK a phase if wrong (no-go theorems, method limitations)
-2. Claims that SET the phase order (dependency claims: "you must do X before Y")
-3. Benchmark values that will be used as success criteria
-4. Method recommendations that determine computational approach
-5. Literature consensus claims ("it is well-established that...")
-
-**web_fetch for specific sources:** When a researcher cites a specific arXiv paper (e.g., arXiv:2301.12345), use web_fetch on `https://arxiv.org/abs/2301.12345` to verify the claim actually appears in that paper. Misattribution is common.
-
-**Document ALL verification results** in the "Critical Claim Verification" subsection of SUMMARY.md, using this format:
+**Document ALL verification results** in the "Critical Claim Verification" subsection of SUMMARY.md, with columns:
 
 ```markdown
 ### Critical Claim Verification
@@ -735,42 +403,13 @@ Go beyond the mandatory 3 claims. Use web_search and web_fetch systematically fo
 | 2 | ... | ... | ... | ... |
 ```
 
-Target: verify at least **5-8 claims** when web_search is available, not just 3. Prioritize claims that would change the roadmap if wrong.
-
 ## Step 6c: Cross-Validation Matrix
 
-Build a matrix showing which methods can validate which others. The roadmapper uses this to place validation steps and identify high-risk phases with no independent cross-check.
-
-```markdown
-### Cross-Validation Matrix
-
-|                    | Method B | Method C | Exact/Analytical | Experiment |
-|--------------------|:---:|:---:|:---:|:---:|
-| Method A           | [regime where A and B agree] | — | [limit where analytical result exists] | [observable] |
-| Method B           | — | [overlap regime] | [limit] | [observable] |
-
-**Reading:** Entry (row X, col Y) = regime where method X can be checked against Y.
-Empty = no useful cross-validation exists.
-```
-
-For each project, populate with the actual methods from METHODS.md. Highlight methods with NO cross-validation column filled (high-risk).
+Build a project-specific method cross-validation matrix. Each entry states the regime where row method can be checked against column method, exact result, or experiment. Highlight methods with no useful cross-validation as high risk.
 
 ## Step 6d: Uncertainty Propagation Assessment
 
-Map how input quality propagates to roadmap confidence:
-
-```markdown
-### Input Quality → Roadmap Impact
-
-| Input File | Quality | Affected Recommendations | Impact if Wrong |
-|------------|---------|------------------------|-----------------|
-| METHODS.md | [quality] | Method selection, phase ordering | Phases 2-3 may need replanning |
-| PRIOR-WORK.md | [quality] | Benchmark values, success criteria | Phases may pass false criteria |
-| COMPUTATIONAL.md | [quality] | Resource estimates, tool selection | Tool substitution needed |
-| PITFALLS.md | [quality] | Risk mitigation in all phases | Blind spots in every phase |
-```
-
-If PITFALLS.md is thin/missing, recommend a preliminary hazard survey phase. If PRIOR-WORK.md is thin, flag benchmark-dependent success criteria as needing fallback values.
+Map input quality to roadmap impact for methods, prior work, computational approaches, and pitfalls. If PITFALLS.md is thin or missing, recommend a preliminary hazard survey phase. If PRIOR-WORK.md is thin, flag benchmark-dependent success criteria as needing fallback values.
 
 ## Step 7: Derive Roadmap Implications
 

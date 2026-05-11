@@ -9,9 +9,11 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from inspect import Parameter, signature
 from pathlib import Path
 
-from gpd.core.root_resolution import RootResolutionBasis, resolve_project_root, resolve_project_roots
+from gpd.core.constants import ProjectLayout
+from gpd.core.root_resolution import ProjectRootResolution, resolve_project_roots
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,8 @@ class PayloadRoots:
     project_root: str
     project_dir_present: bool = False
     project_dir_trusted: bool = False
+    target_path: str | None = None
+    target_root: str | None = None
 
 
 def _object_value(value: object, key: str) -> object | None:
@@ -54,11 +58,57 @@ def normalize_workspace_text(value: str | None) -> str:
         return str(path)
 
 
-def _project_dir_from_payload(data: dict[str, object], *, hook_payload: object) -> str:
+def normalize_optional_path_text(value: str | None, *, base_dir: str | None = None) -> str | None:
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute() and base_dir:
+        path = Path(base_dir).expanduser() / path
+    try:
+        return str(path.resolve(strict=False))
+    except OSError:
+        return str(path)
+
+
+def project_dir_hint_from_payload(data: dict[str, object], *, hook_payload: object) -> str:
+    """Return a project-root hint only from runtime-catalog-owned payload keys."""
     workspace_value = data.get("workspace")
-    return _first_string(workspace_value, *hook_payload.project_dir_keys) or _first_string(
+    project_dir_keys = tuple(getattr(hook_payload, "project_dir_keys", ()) or ())
+    return _first_string(workspace_value, *project_dir_keys) or _first_string(
         data,
-        *hook_payload.project_dir_keys,
+        *project_dir_keys,
+    )
+
+
+def _project_dir_from_payload(data: dict[str, object], *, hook_payload: object) -> str:
+    return project_dir_hint_from_payload(data, hook_payload=hook_payload)
+
+
+def _target_path_from_payload(
+    data: dict[str, object],
+    *,
+    hook_payload: object,
+    workspace_dir: str,
+) -> str | None:
+    workspace_value = data.get("workspace")
+    target_path_keys = tuple(getattr(hook_payload, "target_path_keys", ()) or ())
+    return normalize_optional_path_text(
+        _first_string(workspace_value, *target_path_keys) or _first_string(data, *target_path_keys),
+        base_dir=workspace_dir,
+    )
+
+
+def _target_root_from_payload(
+    data: dict[str, object],
+    *,
+    hook_payload: object,
+    workspace_dir: str,
+) -> str | None:
+    workspace_value = data.get("workspace")
+    target_root_keys = tuple(getattr(hook_payload, "target_root_keys", ()) or ())
+    return normalize_optional_path_text(
+        _first_string(workspace_value, *target_root_keys) or _first_string(data, *target_root_keys),
+        base_dir=workspace_dir,
     )
 
 
@@ -80,6 +130,7 @@ def payload_uses_alias_only_workspace_mapping(
     if not workspace_keys or not project_dir_keys:
         return False
 
+    primary_workspace_key = workspace_keys[0]
     workspace_value = data.get("workspace")
     if isinstance(workspace_value, dict):
         candidate_mapping: dict[str, object] = workspace_value
@@ -91,7 +142,7 @@ def payload_uses_alias_only_workspace_mapping(
     return bool(
         _first_string(candidate_mapping, *workspace_keys)
         and _project_dir_from_payload(data, hook_payload=hook_payload)
-        and not _first_string(candidate_mapping, "cwd")
+        and not _first_string(candidate_mapping, primary_workspace_key)
     )
 
 
@@ -113,11 +164,52 @@ def _project_dir_is_trusted(workspace_dir: str, project_dir: str) -> bool:
     if not _workspace_is_within_project_dir(workspace_dir, project_dir):
         return False
     resolution = resolve_project_roots(workspace_dir, project_dir=project_dir)
+    normalized_project = Path(project_dir).expanduser().resolve(strict=False)
     return bool(
         resolution is not None
-        and resolution.basis == RootResolutionBasis.PROJECT_DIR
-        and resolution.has_project_layout
+        and resolution.project_root == normalized_project
+        and (resolution.has_project_layout or (normalized_project / "GPD").is_dir())
     )
+
+
+def trusted_payload_project_root(
+    data: dict[str, object],
+    workspace_dir: str,
+    *,
+    hook_payload: object,
+) -> str | None:
+    """Return a policy-owned payload project root when it is a real ancestor project."""
+    project_dir = project_dir_hint_from_payload(data, hook_payload=hook_payload)
+    if not project_dir:
+        return None
+
+    workspace_path = Path(workspace_dir).expanduser()
+    project_path = Path(project_dir).expanduser()
+    try:
+        resolved_workspace = workspace_path.resolve(strict=False)
+        resolved_project = project_path.resolve(strict=False)
+    except OSError:
+        resolved_workspace = workspace_path
+        resolved_project = project_path
+
+    try:
+        resolved_workspace.relative_to(resolved_project)
+    except ValueError:
+        return None
+
+    resolution = resolve_project_roots(str(resolved_workspace), project_dir=str(resolved_project))
+    if resolution is None or resolution.project_root != resolved_project:
+        return None
+    if resolution.has_project_layout or ProjectLayout(resolved_project).gpd.is_dir():
+        return str(resolved_project)
+    return None
+
+
+def _is_hook_project_anchor(resolution: ProjectRootResolution) -> bool:
+    """Return whether a hook should treat the resolution as project-local state."""
+    if resolution.has_project_layout:
+        return True
+    return resolution.walk_up_steps == 0 and (resolution.project_root / "GPD").is_dir()
 
 
 def _authoritative_project_root(
@@ -133,7 +225,7 @@ def _authoritative_project_root(
         return normalized_candidate
 
     workspace_resolution = resolve_project_roots(normalized_workspace)
-    if workspace_resolution is not None and workspace_resolution.has_project_layout:
+    if workspace_resolution is not None and _is_hook_project_anchor(workspace_resolution):
         project_root = workspace_resolution.project_root
         if project_root is not None:
             return str(project_root)
@@ -162,9 +254,9 @@ def _coerce_root_pair(
     project_root = ""
     project_dir_present = False
     project_dir_trusted = False
+    target_path: str | None = None
+    target_root: str | None = None
 
-    if isinstance(value, PayloadRoots):
-        return value
     if isinstance(value, str) and value:
         project_root = value
     elif isinstance(value, (tuple, list)) and len(value) >= 2:
@@ -173,6 +265,10 @@ def _coerce_root_pair(
             workspace_dir = workspace_candidate
         if isinstance(project_candidate, str) and project_candidate:
             project_root = project_candidate
+        if len(value) >= 3 and isinstance(value[2], str) and value[2]:
+            target_path = value[2]
+        if len(value) >= 4 and isinstance(value[3], str) and value[3]:
+            target_root = value[3]
     else:
         workspace_dir = _first_string(
             value,
@@ -188,6 +284,8 @@ def _coerce_root_pair(
         )
         project_dir_present = bool(_first_bool(value, "project_dir_present"))
         project_dir_trusted = bool(_first_bool(value, "project_dir_trusted"))
+        target_path = _first_string(value, "target_path") or None
+        target_root = _first_string(value, "target_root") or None
 
     if not project_root:
         return None
@@ -196,6 +294,8 @@ def _coerce_root_pair(
         project_root=normalize_workspace_text(project_root),
         project_dir_present=project_dir_present,
         project_dir_trusted=project_dir_trusted,
+        target_path=normalize_optional_path_text(target_path, base_dir=workspace_dir or fallback_workspace_dir),
+        target_root=normalize_optional_path_text(target_root, base_dir=workspace_dir or fallback_workspace_dir),
     )
 
 
@@ -204,6 +304,8 @@ def _resolve_with_shared_service(
     *,
     workspace_dir: str,
     project_dir: str,
+    target_path: str | None = None,
+    target_root: str | None = None,
     hook_payload: object,
     cwd: str | None = None,
 ) -> PayloadRoots | None:
@@ -211,26 +313,39 @@ def _resolve_with_shared_service(
     if service is None:
         return None
 
-    attempts = (
-        {"payload": data, "workspace_dir": workspace_dir, "project_dir": project_dir, "cwd": cwd},
-        {"data": data, "workspace_dir": workspace_dir, "project_dir": project_dir, "cwd": cwd},
-        {"workspace_dir": workspace_dir, "project_dir": project_dir, "cwd": cwd},
-        {"workspace_dir": workspace_dir, "project_dir": project_dir},
-        {"cwd": workspace_dir, "project_dir": project_dir},
-        {"cwd": workspace_dir},
-    )
-    for kwargs in attempts:
+    kwargs: dict[str, object] = {
+        "payload": data,
+        "workspace_dir": workspace_dir,
+        "project_dir": project_dir,
+        "target_path": target_path,
+        "target_root": target_root,
+        "cwd": cwd,
+    }
+    try:
         try:
-            resolved = service(**kwargs)
-        except TypeError:
-            continue
-        except Exception as exc:
-            raise RuntimeError("shared root resolution service failed") from exc
-        return _coerce_root_pair(
-            resolved,
-            fallback_workspace_dir=workspace_dir,
-        )
-    return None
+            service_signature = signature(service)
+        except (TypeError, ValueError):
+            service_kwargs = kwargs
+        else:
+            parameters = service_signature.parameters
+            if any(parameter.kind == Parameter.VAR_KEYWORD for parameter in parameters.values()):
+                service_kwargs = kwargs
+            else:
+                service_kwargs = {}
+                for name, parameter in parameters.items():
+                    if parameter.kind not in (Parameter.POSITIONAL_OR_KEYWORD, Parameter.KEYWORD_ONLY):
+                        continue
+                    if name == "data":
+                        service_kwargs[name] = data
+                    elif name in kwargs:
+                        service_kwargs[name] = kwargs[name]
+        resolved = service(**service_kwargs)
+    except Exception as exc:
+        raise RuntimeError("shared root resolution service failed") from exc
+    return _coerce_root_pair(
+        resolved,
+        fallback_workspace_dir=workspace_dir,
+    )
 
 
 def workspace_dir_from_payload(
@@ -264,12 +379,24 @@ def project_root_from_payload(
         data,
         hook_payload=hook_payload,
     )
+    target_path = _target_path_from_payload(
+        data,
+        hook_payload=hook_payload,
+        workspace_dir=workspace_dir,
+    )
+    target_root = _target_root_from_payload(
+        data,
+        hook_payload=hook_payload,
+        workspace_dir=workspace_dir,
+    )
     project_dir_present = bool(project_dir)
     project_dir_trusted = _project_dir_is_trusted(workspace_dir, project_dir)
     resolved_roots = _resolve_with_shared_service(
         data,
         workspace_dir=workspace_dir,
         project_dir=project_dir,
+        target_path=target_path,
+        target_root=target_root,
         hook_payload=hook_payload,
         cwd=cwd,
     )
@@ -287,8 +414,11 @@ def project_root_from_payload(
             project_dir_present=shared_project_dir_present,
             project_dir_trusted=shared_project_dir_trusted,
         )
-    resolved_root = resolve_project_root(workspace_dir, project_dir=project_dir)
-    candidate_project_root = str(resolved_root) if resolved_root is not None else workspace_dir
+    resolution = resolve_project_roots(workspace_dir, project_dir=project_dir)
+    if not project_dir_present and resolution is not None and not _is_hook_project_anchor(resolution):
+        candidate_project_root = workspace_dir
+    else:
+        candidate_project_root = str(resolution.project_root) if resolution is not None else workspace_dir
     return _authoritative_project_root(
         workspace_dir=workspace_dir,
         candidate_project_root=candidate_project_root,
@@ -309,12 +439,24 @@ def resolve_payload_roots(
         data,
         hook_payload=hook_payload,
     )
+    target_path = _target_path_from_payload(
+        data,
+        hook_payload=hook_payload,
+        workspace_dir=workspace_dir,
+    )
+    target_root = _target_root_from_payload(
+        data,
+        hook_payload=hook_payload,
+        workspace_dir=workspace_dir,
+    )
     project_dir_present = bool(project_dir)
     project_dir_trusted = _project_dir_is_trusted(workspace_dir, project_dir)
     resolved_roots = _resolve_with_shared_service(
         data,
         workspace_dir=workspace_dir,
         project_dir=project_dir,
+        target_path=target_path,
+        target_root=target_root,
         hook_payload=hook_payload,
         cwd=cwd,
     )
@@ -338,12 +480,16 @@ def resolve_payload_roots(
                 project_root=authoritative_project_root,
                 project_dir_present=shared_project_dir_present,
                 project_dir_trusted=shared_project_dir_trusted,
+                target_path=resolved_roots.target_path or target_path,
+                target_root=resolved_roots.target_root or target_root,
             )
         return PayloadRoots(
             workspace_dir=resolved_roots.workspace_dir,
             project_root=authoritative_project_root,
             project_dir_present=project_dir_present,
             project_dir_trusted=project_dir_trusted,
+            target_path=resolved_roots.target_path or target_path,
+            target_root=resolved_roots.target_root or target_root,
         )
     project_root = project_root_from_payload(
         data,
@@ -356,4 +502,6 @@ def resolve_payload_roots(
         project_root=project_root,
         project_dir_present=project_dir_present,
         project_dir_trusted=project_dir_trusted,
+        target_path=target_path,
+        target_root=target_root,
     )

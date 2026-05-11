@@ -49,6 +49,20 @@ def test_init_resume_keeps_requested_workspace_availability_separate_from_auto_s
     assert ctx["planning_exists"] is True
 
 
+def test_init_resume_no_recovery_does_not_label_unselected_project_root_as_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    ctx = init_resume(workspace, data_root=tmp_path / "data")
+
+    assert ctx["project_root"] is None
+    assert ctx["project_root_source"] is None
+    assert ctx["project_reentry_mode"] == "no-recovery"
+    assert ctx["project_reentry_selected_candidate"] is None
+
+
 def test_recoverable_project_context_treats_unreadable_state_as_non_recoverable(
     monkeypatch,
     tmp_path: Path,
@@ -68,3 +82,17 @@ def test_recoverable_project_context_treats_unreadable_state_as_non_recoverable(
     assert state_exists is False
     assert roadmap_exists is False
     assert project_exists is False
+
+
+def test_init_resume_ignores_empty_nested_gpd_stub_when_workspace_has_real_ancestor_project(
+    tmp_path: Path,
+) -> None:
+    project_root = _make_recoverable_project(tmp_path / "project")
+    nested_workspace = project_root / "workspace" / "notes"
+    (nested_workspace / PLANNING_DIR_NAME).mkdir(parents=True)
+
+    ctx = init_resume(nested_workspace)
+
+    assert ctx["project_root"] == str(project_root.resolve(strict=False))
+    assert ctx["project_root_source"] == "current_workspace"
+    assert ctx["workspace_root"] == str(nested_workspace.resolve(strict=False))

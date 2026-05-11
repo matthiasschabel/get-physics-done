@@ -7,7 +7,6 @@ Layer 1 code: stdlib + pathlib + re + pydantic only.
 from __future__ import annotations
 
 import re
-import shlex
 from datetime import UTC, datetime
 from functools import cmp_to_key
 from pathlib import Path
@@ -20,13 +19,12 @@ from gpd.contracts import (
     parse_comparison_verdicts_data_strict,
     parse_contract_results_data_artifact,
 )
+from gpd.core.child_return_application import ApplyChildReturnResult, apply_child_return_updates
 from gpd.core.constants import (
     PHASES_DIR_NAME,
     PLAN_SUFFIX,
     PLANNING_DIR_NAME,
-    REQUIRED_RETURN_FIELDS,
     STANDALONE_PLAN,
-    VALID_RETURN_STATUSES,
     VERIFICATION_SUFFIX,
     ProjectLayout,
 )
@@ -38,6 +36,7 @@ from gpd.core.frontmatter import (
     validate_frontmatter,
 )
 from gpd.core.observability import instrument_gpd_function
+from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.utils import (
     compare_phase_numbers,
     generate_slug,
@@ -47,6 +46,7 @@ from gpd.core.utils import (
 )
 
 __all__ = [
+    "ApplyChildReturnResult",
     "CurrentTimestampResult",
     "DecisionEntry",
     "GenerateSlugResult",
@@ -61,6 +61,7 @@ __all__ = [
     "cmd_current_timestamp",
     "cmd_generate_slug",
     "cmd_history_digest",
+    "cmd_apply_return_updates",
     "cmd_regression_check",
     "cmd_summary_extract",
     "cmd_validate_return",
@@ -142,6 +143,7 @@ class RegressionCheckResult(BaseModel):
     passed: bool
     issues: list[RegressionIssue] = Field(default_factory=list)
     phases_checked: int = 0
+    warning: str | None = None
 
 
 class ValidateReturnResult(BaseModel):
@@ -334,9 +336,7 @@ def _require_non_empty_string_list(
     normalized: list[str] = []
     for index, item in enumerate(value):
         if not isinstance(item, str) or not item.strip():
-            raise ValidationError(
-                f"Invalid {field_name} in {summary_path}: entry {index} must be a non-empty string"
-            )
+            raise ValidationError(f"Invalid {field_name} in {summary_path}: entry {index} must be a non-empty string")
         normalized.append(item.strip())
     return normalized
 
@@ -346,9 +346,7 @@ def _extract_key_files(value: object, *, summary_path: str) -> tuple[list[str], 
     if isinstance(value, dict):
         extra_keys = sorted(str(key) for key in value if key not in {"created", "modified"})
         if extra_keys:
-            raise ValidationError(
-                f"Invalid key-files in {summary_path}: unexpected key(s) {', '.join(extra_keys)}"
-            )
+            raise ValidationError(f"Invalid key-files in {summary_path}: unexpected key(s) {', '.join(extra_keys)}")
         created = _require_non_empty_string_list(
             value.get("created"),
             field_name="key-files.created",
@@ -405,6 +403,16 @@ def _parse_comparison_verdicts(value: object, summary_path: str) -> list[Compari
 _BODY_ONE_LINER_RE = re.compile(r"\A---[\s\S]*?---\s*(?:#[^\n]*\n\s*)?\*\*(.+?)\*\*")
 
 
+def _has_dependency_graph_provides(frontmatter: dict[str, object]) -> bool:
+    """Return whether summary frontmatter declares nested provides."""
+
+    dependency_graph = frontmatter.get("dependency-graph")
+    if not isinstance(dependency_graph, dict):
+        return False
+    nested_provides = dependency_graph.get("provides")
+    return nested_provides is not None and nested_provides != ""
+
+
 @instrument_gpd_function("commands.summary_extract")
 def cmd_summary_extract(
     cwd: Path,
@@ -433,11 +441,12 @@ def cmd_summary_extract(
         raise ValidationError(f"YAML parse error in {summary_path}: {exc}") from exc
 
     validation = validate_frontmatter(content, "summary", source_path=full_path)
-    if not validation.valid:
-        problems = [*validation.missing, *validation.errors]
-        raise ValidationError(
-            f"Invalid summary frontmatter in {summary_path}: {'; '.join(problems)}"
-        )
+    missing = list(validation.missing)
+    if "provides" in missing and _has_dependency_graph_provides(fm):
+        missing = [field for field in missing if field != "provides"]
+    if missing or validation.errors:
+        problems = [*missing, *validation.errors]
+        raise ValidationError(f"Invalid summary frontmatter in {summary_path}: {'; '.join(problems)}")
 
     # Extract one-liner: frontmatter first, fall back to body bold text
     one_liner = fm.get("one-liner")
@@ -656,7 +665,9 @@ def cmd_regression_check(cwd: Path, *, phase: str | None = None, quick: bool = F
             key=cmp_to_key(lambda a, b: compare_phase_numbers(a.name, b.name)),
         )
     except FileNotFoundError:
-        return RegressionCheckResult(passed=True, issues=[], phases_checked=0)
+        return RegressionCheckResult(
+            passed=True, issues=[], phases_checked=0, warning="No completed phases found to check"
+        )
 
     layout = ProjectLayout(cwd)
     completed_dirs: list[Path] = []
@@ -668,10 +679,14 @@ def cmd_regression_check(cwd: Path, *, phase: str | None = None, quick: bool = F
             completed_dirs.append(d)
 
     if not completed_dirs:
-        return RegressionCheckResult(passed=True, issues=[], phases_checked=0)
+        return RegressionCheckResult(
+            passed=True, issues=[], phases_checked=0, warning="No completed phases found to check"
+        )
     completed_dirs = [d for d in completed_dirs if _matches_phase_scope(d.name, phase)]
     if not completed_dirs:
-        return RegressionCheckResult(passed=True, issues=[], phases_checked=0)
+        return RegressionCheckResult(
+            passed=True, issues=[], phases_checked=0, warning="No completed phases found to check"
+        )
 
     if quick and len(completed_dirs) > 2:
         completed_dirs = completed_dirs[-2:]
@@ -785,84 +800,6 @@ def cmd_regression_check(cwd: Path, *, phase: str | None = None, quick: bool = F
     return RegressionCheckResult(passed=passed, issues=issues, phases_checked=len(completed_dirs))
 
 
-_GPD_RETURN_BLOCK_RE = re.compile(r"```ya?ml\s*\n(gpd_return:\s*\n[\s\S]*?)```")
-_GPD_RETURN_FIELD_RE = re.compile(r"^\s{2,4}(\w+):\s*(.+)")
-_GPD_RETURN_LIST_START_RE = re.compile(r"^\s{2,4}(\w+):\s*$")
-_GPD_RETURN_LIST_ITEM_RE = re.compile(r"^\s{4,}-\s*(.+)")
-
-
-def _strip_wrapping_quotes(value: str) -> str:
-    stripped = value.strip()
-    if len(stripped) >= 2 and stripped[0] == stripped[-1] and stripped[0] in {'"', "'"}:
-        return stripped[1:-1]
-    return stripped
-
-
-def _parse_inline_yaml_list(value: str) -> list[str]:
-    stripped = value.strip()
-    if not (stripped.startswith("[") and stripped.endswith("]")):
-        return []
-    inner = stripped[1:-1].strip()
-    if not inner:
-        return []
-
-    lexer = shlex.shlex(inner, posix=True)
-    lexer.whitespace = ","
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return [_strip_wrapping_quotes(token) for token in lexer if _strip_wrapping_quotes(token)]
-
-
-def _parse_gpd_return_fields(yaml_block: str) -> dict[str, object]:
-    fields: dict[str, object] = {}
-    active_list_key: str | None = None
-
-    for line in yaml_block.split("\n"):
-        if not line.strip() or line.strip() == "gpd_return:":
-            if not line.strip():
-                active_list_key = None
-            continue
-
-        list_start = _GPD_RETURN_LIST_START_RE.match(line)
-        if list_start:
-            active_list_key = list_start.group(1).strip()
-            fields[active_list_key] = []
-            continue
-
-        kv = _GPD_RETURN_FIELD_RE.match(line)
-        if kv:
-            active_list_key = None
-            key = kv.group(1).strip()
-            raw_value = kv.group(2).strip()
-            if raw_value.startswith("[") and raw_value.endswith("]"):
-                fields[key] = _parse_inline_yaml_list(raw_value)
-            else:
-                fields[key] = _strip_wrapping_quotes(raw_value)
-            continue
-
-        if active_list_key is not None:
-            list_item = _GPD_RETURN_LIST_ITEM_RE.match(line)
-            if list_item:
-                value = _strip_wrapping_quotes(list_item.group(1).strip())
-                if value:
-                    current = fields.get(active_list_key)
-                    if isinstance(current, list):
-                        current.append(value)
-                continue
-            if line.strip():
-                active_list_key = None
-
-    return fields
-
-
-def _field_present(value: object) -> bool:
-    if value is None:
-        return False
-    if isinstance(value, str):
-        return bool(value.strip())
-    return True
-
-
 @instrument_gpd_function("commands.validate_return")
 def cmd_validate_return(file_path: Path) -> ValidateReturnResult:
     """Validate a gpd_return YAML block in a file.
@@ -876,69 +813,36 @@ def cmd_validate_return(file_path: Path) -> ValidateReturnResult:
     if content is None:
         raise ValidationError(f"File not found: {file_path}")
 
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    return_match = _GPD_RETURN_BLOCK_RE.search(content)
-    if not return_match:
-        return ValidateReturnResult(
-            passed=False,
-            errors=["No gpd_return YAML block found"],
-            warnings=warnings,
-        )
-
-    yaml_block = return_match.group(1)
-    fields = _parse_gpd_return_fields(yaml_block)
-
-    # Check required fields
-    for field in REQUIRED_RETURN_FIELDS:
-        if not _field_present(fields.get(field)):
-            errors.append(f"Missing required field: {field}")
-
-    # Normalize status for comparison (strip whitespace, lowercase)
-    raw_status = fields.get("status", "")
-    status_lower = raw_status.strip().lower() if isinstance(raw_status, str) else ""
-
-    # Validate status value
-    if raw_status and status_lower not in VALID_RETURN_STATUSES:
-        errors.append(
-            f"Invalid status '{raw_status}'. Must be one of: {', '.join(sorted(VALID_RETURN_STATUSES))}"
-        )
-
-    # Validate task counts are numbers
-    for count_field in ("tasks_completed", "tasks_total"):
-        val = fields.get(count_field)
-        if isinstance(val, str):
-            try:
-                int(val)
-            except ValueError:
-                errors.append(f"{count_field} is not a number: '{val}'")
-
-    # Warn if completed but tasks_completed < tasks_total
-    if (
-        status_lower == "completed"
-        and isinstance(fields.get("tasks_completed"), str)
-        and isinstance(fields.get("tasks_total"), str)
-    ):
-        try:
-            done = int(str(fields["tasks_completed"]))
-            total = int(str(fields["tasks_total"]))
-            if done < total:
-                warnings.append(f"Status is 'completed' but tasks_completed ({done}) < tasks_total ({total})")
-        except ValueError:
-            pass
-
-    # Check optional but recommended fields
-    for field in ("duration_seconds",):
-        if not fields.get(field):
-            warnings.append(f"Recommended field missing: {field}")
-
-    passed = len(errors) == 0
+    validation = validate_gpd_return_markdown(content)
     return ValidateReturnResult(
-        passed=passed,
-        errors=errors,
-        warnings=warnings,
-        fields=fields,
-        warning_count=len(warnings),
+        passed=validation.passed,
+        errors=validation.errors,
+        warnings=validation.warnings,
+        fields=validation.fields,
+        warning_count=validation.warning_count,
     )
+
+
+@instrument_gpd_function("commands.apply_return_updates")
+def cmd_apply_return_updates(cwd: Path, file_path: Path) -> ApplyChildReturnResult:
+    """Validate and apply the durable subset of one ``gpd_return`` envelope."""
+    content = safe_read_file(file_path)
+    if content is None:
+        raise ValidationError(f"File not found: {file_path}")
+
+    validation = validate_gpd_return_markdown(content)
+    if not validation.passed or validation.envelope is None:
+        return ApplyChildReturnResult(
+            passed=False,
+            status="failed",
+            errors=list(validation.errors),
+            warnings=list(validation.warnings),
+        )
+
+    result = apply_child_return_updates(cwd, validation.envelope)
+    if validation.warnings:
+        result.warnings.extend(warning for warning in validation.warnings if warning not in result.warnings)
+    return result
+
+
 _MISSING = object()

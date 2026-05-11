@@ -28,15 +28,16 @@ def test_regression_check_searches_canonical_phase_summary_artifacts() -> None:
 def test_verify_work_searches_canonical_phase_summary_artifacts() -> None:
     workflow_text = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
 
-    assert 'ls "$phase_dir"/*SUMMARY.md 2>/dev/null' in workflow_text
-    assert "ls GPD/phases/*/*SUMMARY.md 2>/dev/null | sort" in workflow_text
+    assert 'ls "$PHASE_DIR_ABS"/*SUMMARY.md 2>/dev/null' in workflow_text
+    assert 'ls "$PROJECT_ROOT"/GPD/phases/*/*SUMMARY.md 2>/dev/null | sort' in workflow_text
 
 
 def test_verify_work_searches_canonical_phase_verification_artifacts() -> None:
     workflow_text = (WORKFLOWS_DIR / "verify-work.md").read_text(encoding="utf-8")
 
-    assert "rg -l '^session_status: (validating|diagnosed)$' GPD/phases/*/*-VERIFICATION.md 2>/dev/null | sort | head -5" in workflow_text
-    assert 'ls "$phase_dir"/*-VERIFICATION.md 2>/dev/null | head -1' in workflow_text
+    assert 'session_status=$(gpd frontmatter get "$file" --field session_status 2>/dev/null)' in workflow_text
+    assert 'done | sort | head -5' in workflow_text
+    assert 'ls "$PHASE_DIR_ABS"/*-VERIFICATION.md 2>/dev/null | head -1' in workflow_text
 
 
 def test_execute_plan_searches_standalone_and_numbered_phase_artifacts() -> None:
@@ -86,11 +87,15 @@ def test_summary_driven_workflows_search_canonical_summary_artifacts() -> None:
 
     assert "roadmap-plus-disk union" in complete_milestone
     assert "Standalone `PLAN.md` / `SUMMARY.md` artifacts" in complete_milestone
-    assert "for SUMMARY in GPD/phases/${PHASE_DIR}/*SUMMARY.md; do" in validate_conventions
+    assert 'PHASE_ARG="${ARGUMENTS:-}"' in validate_conventions
+    assert 'ROADMAP=$(gpd --raw roadmap analyze)' in validate_conventions
+    assert 'for SUMMARY in "${PHASE_DIR}"/*SUMMARY.md; do' in validate_conventions
+    assert 'for SUMMARY in GPD/phases/*/*SUMMARY.md; do' in validate_conventions
     assert "ls GPD/phases/*/*SUMMARY.md 2>/dev/null" in graph
     assert "cat GPD/phases/*/*SUMMARY.md" in write_paper
     assert 'cat "$PHASE_DIR"/*SUMMARY.md 2>/dev/null' in write_paper
-    assert 'VALIDATED=$(ls GPD/phases/*/*SUMMARY.md 2>/dev/null | xargs grep -El "approach_validated: true|comparison_verdicts:|contract_results:" 2>/dev/null | head -1)' in plan_phase
+    assert 'SUMMARY_FILE=$(ls GPD/phases/*/*SUMMARY.md 2>/dev/null | head -1)' in plan_phase
+    assert "inspect the loaded SUMMARY.md artifacts directly for decisive evidence before reusing research" in plan_phase
 
 
 def test_transition_workflow_surfaces_standalone_phase_artifact_support() -> None:
@@ -122,7 +127,7 @@ def test_command_surfaces_list_standalone_and_numbered_phase_artifacts() -> None
     regression_check = (COMMANDS_DIR / "regression-check.md").read_text(encoding="utf-8")
     show_phase = (COMMANDS_DIR / "show-phase.md").read_text(encoding="utf-8")
     audit = (COMMANDS_DIR / "audit-milestone.md").read_text(encoding="utf-8")
-    write_paper = (COMMANDS_DIR / "write-paper.md").read_text(encoding="utf-8")
+    write_paper = (WORKFLOWS_DIR / "write-paper.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/progress.md" in progress
     assert "GPD/phases/[current-phase-dir]/PLAN.md" in progress_workflow
@@ -135,15 +140,18 @@ def test_command_surfaces_list_standalone_and_numbered_phase_artifacts() -> None
     assert "Discovery:" not in show_phase
     assert "find_files: GPD/phases/*/*SUMMARY.md" in audit
     assert "completed summary frontmatter (`SUMMARY.md` and `*-SUMMARY.md`)" in regression_check
-    assert "ls GPD/phases/*/*SUMMARY.md 2>/dev/null" in write_paper
+    assert "cat GPD/phases/*/*SUMMARY.md" in write_paper
 
 
 def test_respond_to_referees_prefers_canonical_markdown_report_path() -> None:
     workflow_text = (WORKFLOWS_DIR / "respond-to-referees.md").read_text(encoding="utf-8")
 
-    assert "Use `GPD/REFEREE-REPORT{round_suffix}.md` as the canonical issue-ID source" in workflow_text
-    assert "use canonical `GPD/REFEREE-REPORT{round_suffix}.md` only" in workflow_text
-    assert "`GPD/review/REFEREE_RESPONSE{round_suffix}.md`" in workflow_text
-    assert "`GPD/AUTHOR-RESPONSE{round_suffix}.md`" in workflow_text
-    assert "Read the completed `GPD/AUTHOR-RESPONSE{round_suffix}.md` and `GPD/review/REFEREE_RESPONSE{round_suffix}.md`" in workflow_text
+    assert "`${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` remains the canonical issue-ID source" in workflow_text
+    assert "import or normalize it into `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` before parsing comments" in workflow_text
+    assert "Use that shared handoff for `round_suffix`, sibling-artifact discovery, and the canonical response-artifact pair for the active round." in workflow_text
+    assert "`${RESPONSE_REFEREE_PATH}`" in workflow_text
+    assert "`${RESPONSE_AUTHOR_PATH}`" in workflow_text
+    assert "Read the completed `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`" in workflow_text
+    assert "Do not write `AUTHOR-RESPONSE*` or `REFEREE_RESPONSE*` beside `${PAPER_DIR}` or beside the imported report source." in workflow_text
+    assert "keep auxiliary response outputs under the selected GPD roots" in workflow_text
     assert "`GPD/paper/referee-report-*.md` or `paper/referee-reports/*.md`" not in workflow_text

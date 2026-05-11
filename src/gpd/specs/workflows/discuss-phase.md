@@ -97,6 +97,8 @@ Gray areas are **methodological decisions the user cares about** -- things that 
    - Computational physics -> algorithm selection, convergence criteria, error estimation matter
    - Data analysis -> fitting method, error propagation, systematics treatment matter
 3. **Generate phase-specific gray areas** -- Not generic categories, but concrete physics decisions for THIS phase
+   - **Normal mode:** Generate 3-4 gray areas
+   - **`--auto` mode:** Generate only the top 2-3 most impactful gray areas (the ones that could most change the physics or results)
 
 **Don't use generic category labels** (Theory, Numerics, Analysis). Generate specific gray areas:
 
@@ -127,9 +129,23 @@ Phase: "Renormalization group flow of phi-4 theory"
 <process>
 
 <step name="initialize" priority="first">
-Phase number from argument (required).
+Phase number from argument (required). Detect `--auto` and `--compact` flags (mutually exclusive).
 
 ```bash
+AUTO_MODE=false
+COMPACT_MODE=false
+if echo "$ARGUMENTS" | grep -q "\-\-auto"; then
+  AUTO_MODE=true
+fi
+if echo "$ARGUMENTS" | grep -q "\-\-compact"; then
+  COMPACT_MODE=true
+fi
+if [ "$AUTO_MODE" = "true" ] && [ "$COMPACT_MODE" = "true" ]; then
+  echo "ERROR: --auto and --compact are mutually exclusive"
+  exit 1
+fi
+PHASE=$(echo "$ARGUMENTS" | sed -E 's/\-\-(auto|compact)//g' | tr -s ' ' | xargs)
+
 INIT=$(gpd --raw init phase-op "${PHASE}")
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
@@ -138,6 +154,21 @@ fi
 ```
 
 Parse JSON for: `commit_docs`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `padded_phase`, `has_research`, `has_context`, `has_plans`, `has_verification`, `plan_count`, `roadmap_exists`, `planning_exists`.
+
+**`--auto` mode behavior:**
+When AUTO_MODE=true, compress the entire discussion:
+- Generate 2-3 critical gray areas (not 3-4)
+- Ask 1 question per area (not 4)
+- No follow-up rounds ("more questions?" is skipped)
+- Write lightweight CONTEXT.md immediately
+- Auto-suggest proceeding to plan-phase
+
+**`--compact` mode behavior:**
+When COMPACT_MODE=true, skip the multi-round Socratic flow entirely:
+- Do NOT generate or present gray areas
+- Do NOT run `discuss_areas` / `present_gray_areas` / `ask_user` question loops
+- Jump directly to the `compact_form` step below, which renders a single form with the phase goal, 4-6 policy knobs, and an intent textarea, then writes CONTEXT.md from the submitted answers
+- Use when the user already knows what they want and does not need guided discovery
 
 **If `phase_found` is false:** Check ROADMAP.md before exiting.
 
@@ -170,9 +201,11 @@ ls ${phase_dir}/*-CONTEXT.md 2>/dev/null
 
 **If exists:**
 
+**`--auto` mode with existing context:** Reuse the existing CONTEXT.md as-is and skip straight to auto-progression (suggest plan-phase). The existing context is good enough for fast iteration.
+
 > **Platform note:** If `ask_user` is not available, present these options in plain text and wait for the user's freeform response.
 
-Use ask_user:
+Use ask_user (normal mode only):
 
 - header: "Existing context"
 - question: "Phase [X] already has context. What do you want to do?"
@@ -185,10 +218,45 @@ If "Update": Load existing, continue to analyze_phase
 If "View": Display CONTEXT.md, then offer update/skip
 If "Skip": Exit workflow
 
-**If doesn't exist:** Continue to analyze_phase.
+**If doesn't exist:** Continue to analyze_phase (or compact_form when `COMPACT_MODE=true`).
 </step>
 
-<step name="analyze_phase">
+<step name="compact_form" condition="COMPACT_MODE=true">
+Present a single one-screen form instead of the Socratic multi-round flow. Use `ask_user` with the full knob list embedded in the prompt body, and read one batched free-text response. Do not loop.
+
+**Screen to render:**
+
+```
+========================================
+ Phase ${phase_number}: ${phase_name}
+========================================
+
+Goal (from ROADMAP):
+  ${one_line_phase_goal}
+
+Knobs (current defaults shown; reply with "knob=value" pairs you want to change):
+
+  formalism       = ${default_formalism}        e.g. Lagrangian | Hamiltonian | EOM
+  conventions     = ${default_conventions}      e.g. (+---) | (-+++)
+  method          = ${default_method}           e.g. analytic | numerical | hybrid
+  precision       = ${default_precision}        e.g. leading-order | NLO | full
+  deliverable     = ${default_deliverable}      e.g. derivation | result-table | comparison-plot
+  skeptical_review= ${default_skeptical_review} e.g. on | off
+
+Intent (optional, free text):
+  <one paragraph describing what you want the phase to achieve>
+
+----------------------------------------
+Reply with any subset of:
+  knob=value
+  intent: ...
+Send "go" on its own line to accept all defaults and proceed.
+```
+
+Read exactly one response. Parse `knob=value` lines and an optional `intent: ...` block. Do not re-prompt; missing knobs keep their defaults. Skip the `analyze_phase`, `present_gray_areas`, and `discuss_areas` steps entirely and proceed directly to `write_context` using the submitted knob values as the CONTEXT.md payload.
+</step>
+
+<step name="analyze_phase" condition="COMPACT_MODE=false">
 Analyze the phase to identify gray areas worth discussing.
 
 **Read the phase description from ROADMAP.md and determine:**
@@ -218,7 +286,7 @@ Gray areas:
 
 </step>
 
-<step name="present_gray_areas">
+<step name="present_gray_areas" condition="COMPACT_MODE=false">
 Present the domain boundary and gray areas to user.
 
 **First, state the boundary:**
@@ -231,7 +299,9 @@ We'll clarify HOW to approach this problem.
 (New research questions belong in other phases.)
 ```
 
-**Then use ask_user (multiSelect: true):**
+**`--auto` mode:** Skip the multi-select. Auto-select the top 2-3 most impactful gray areas (ranked by how much they could change the physics). Announce: "Auto mode: focusing on the [N] most impactful decisions." Continue directly to discuss_areas.
+
+**Normal mode — use ask_user (multiSelect: true):**
 
 - header: "Discuss"
 - question: "Which methodological areas do you want to discuss for [phase name]?"
@@ -273,10 +343,13 @@ For "Critical exponents of 3D Ising model" (statistical mechanics):
 Continue to discuss_areas with selected areas.
 </step>
 
-<step name="discuss_areas">
+<step name="discuss_areas" condition="COMPACT_MODE=false">
 For each selected area, conduct a focused Socratic discussion loop.
 
-**Philosophy: 4 questions, then check.**
+**`--auto` mode:** Compressed discussion — 1 question per area, no follow-up rounds.
+For each area: ask the single most impactful question (the one whose answer would most change the approach), capture the response, move to the next area. After all areas, proceed directly to write_context. Skip the "More questions?" and "Ready to create context?" prompts.
+
+**Normal mode philosophy: 4 questions, then check.**
 
 Ask 4 questions per area before offering to continue or move on. Each answer often reveals the next question. Use Socratic probing throughout.
 
@@ -288,7 +361,7 @@ Ask 4 questions per area before offering to continue or move on. Each answer oft
    Let's talk about [Area].
    ```
 
-2. **Ask 4 questions using ask_user:**
+2. **Ask 4 questions using ask_user (normal mode) or 1 question (`--auto` mode):**
 
    - header: "[Area]"
    - question: Specific methodological decision for this area
@@ -314,7 +387,7 @@ Ask 4 questions per area before offering to continue or move on. Each answer oft
    If "More questions" -> ask 4 more, then check again
    If "Next area" -> proceed to next selected area
 
-   **Hard bound: Maximum 8 question rounds per area.** If 8 rounds are reached without the user selecting "Next area", summarize progress so far and move to the next area. If context usage exceeds 50% before reaching 8 rounds, summarize progress so far and suggest the user run `/clear` followed by `gpd:resume-work` to continue with fresh context.
+   **Hard bound: Maximum 8 question rounds per area.** If 8 rounds are reached without the user selecting "Next area", summarize progress so far and move to the next area. If context usage exceeds 50% before reaching 8 rounds, summarize progress so far and suggest a fresh context reset followed by `gpd:resume-work`.
 
 4. **After all areas complete:**
    - header: "Done"
@@ -497,13 +570,13 @@ Created: GPD/phases/${PADDED_PHASE}-${SLUG}/${PADDED_PHASE}-CONTEXT.md
 
 ---
 
-## >> Next Up
+## > Next Up
 
 **Phase ${PHASE}: [Name]** -- [Goal from ROADMAP.md]
 
 `gpd:plan-phase ${PHASE}`
 
-<sub>`/clear` first -> fresh context window</sub>
+<sub>Start a fresh context window</sub>
 
 ---
 
@@ -514,6 +587,18 @@ Created: GPD/phases/${PADDED_PHASE}-${SLUG}/${PADDED_PHASE}-CONTEXT.md
 
 ---
 ```
+
+**`--auto` mode progression:**
+When AUTO_MODE=true, instead of the static "Next Up" block, use ask_user:
+
+- header: "Continue?"
+- question: "Context captured. Ready to plan this phase?"
+- options:
+  - "Plan now" -- proceed to `gpd:plan-phase ${PHASE}`
+  - "Review context first" -- show CONTEXT.md, then offer to plan
+  - "Done for now" -- exit
+
+If "Plan now": Tell the user to run `gpd:plan-phase ${PHASE}` (the AI cannot chain commands directly, but this explicit suggestion enables one-click continuation in the web UI).
 
 </step>
 

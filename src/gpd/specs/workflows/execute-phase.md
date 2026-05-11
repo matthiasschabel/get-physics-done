@@ -1,31 +1,81 @@
 <purpose>
-Execute all plans in a research phase using wave-based parallel execution. Orchestrator stays lean -- delegates plan execution to subagents. Each plan may involve derivations, calculations, simulations, or analysis with proper checkpointing and validation at each step.
+Execute phase plans through wave-based delegation with checkpointing and validation.
 </purpose>
 
 <core_principle>
-Orchestrator coordinates, not executes. Each subagent loads the full execute-plan context. Orchestrator: discover plans -> analyze deps -> group waves -> spawn agents -> handle checkpoints -> collect results -> validate physics.
+Coordinate, do not perform plan work. The orchestrator discovers plans, groups waves, dispatches executors, handles checkpoints, collects returns, and validates physics.
 </core_principle>
 
 <required_reading>
-Load the structured init-state payload first; reopen STATE.md only if the payload is missing, stale, or flagged by `state_load_source` / `state_integrity_issues`.
-For agent selection strategy and verification failure routing, see `@{GPD_INSTALL_DIR}/references/orchestration/meta-orchestration.md`.
-For artifact class definitions and review priority rules, see `@{GPD_INSTALL_DIR}/references/orchestration/artifact-surfacing.md`.
+Load the structured init-state payload first; reopen STATE.md only if a later staged refresh is missing, stale, or flagged by `state_load_source` / `state_integrity_issues`.
+For agent selection strategy and verification failure routing, see `{GPD_INSTALL_DIR}/references/orchestration/meta-orchestration.md`.
+For artifact class definitions and review priority rules, see `{GPD_INSTALL_DIR}/references/orchestration/artifact-surfacing.md`.
 </required_reading>
 
 <process>
 
-<step name="initialize" priority="first">
-Load all context in one call:
+<step name="normalize_arguments" priority="first">
+Normalize phase and flags before any init call. The first non-flag positional token is the phase; flags may appear before or after it.
 
 ```bash
-INIT=$(gpd --raw init execute-phase "${PHASE_ARG}")
+PHASE_ARG=""
+EXECUTE_FLAGS=()
+for token in $ARGUMENTS; do
+  case "$token" in
+    --*) EXECUTE_FLAGS+=("$token") ;;
+    *) [ -z "$PHASE_ARG" ] && PHASE_ARG="$token" ;;
+  esac
+done
+GAPS_ONLY=false
+for flag in "${EXECUTE_FLAGS[@]}"; do
+  [ "$flag" = "--gaps-only" ] && GAPS_ONLY=true
+done
+
+if [ -z "$PHASE_ARG" ]; then
+  echo "ERROR: missing phase. Usage: execute-phase <phase-number> [--gaps-only]"
+  exit 1
+fi
+```
+</step>
+
+<step name="initialize" priority="first">
+Load the bootstrap stage first. Keep later wave and closeout context on demand.
+
+```bash
+load_execute_phase_stage() {
+  local stage_name="$1"
+  local init_payload=""
+  local init_stderr=""
+  local init_status=0
+
+  if [ -n "$stage_name" ]; then
+    init_stderr=$(mktemp)
+    init_payload=$(gpd --raw init execute-phase "${PHASE_ARG}" --stage "${stage_name}" 2>"$init_stderr")
+    init_status=$?
+    if [ "$init_status" -ne 0 ] || [ -z "$init_payload" ]; then
+      echo "ERROR: staged gpd initialization failed for stage '${stage_name}' (exit ${init_status})."
+      [ -n "$init_payload" ] && echo "stdout: ${init_payload}"
+      [ -s "$init_stderr" ] && echo "stderr: $(cat "$init_stderr")"
+      rm -f "$init_stderr"
+      return 1
+    fi
+    rm -f "$init_stderr"
+
+    printf '%s' "$init_payload"
+    return 0
+  fi
+
+  gpd --raw init execute-phase "${PHASE_ARG}"
+}
+
+BOOTSTRAP_INIT=$(load_execute_phase_stage phase_bootstrap)
 if [ $? -ne 0 ]; then
-  echo "ERROR: gpd initialization failed: $INIT"
+  echo "ERROR: gpd initialization failed: $BOOTSTRAP_INIT"
   exit 1
 fi
 ```
 
-Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `autonomy`, `review_cadence`, `research_mode`, `parallelization`, `max_unattended_minutes_per_plan`, `max_unattended_minutes_per_wave`, `checkpoint_after_n_tasks`, `checkpoint_after_first_load_bearing_result`, `checkpoint_before_downstream_dependent_tasks`, `verifier_enabled`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `state_load_source`, `state_integrity_issues`, `convention_lock`, `convention_lock_count`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`, `selected_protocol_bundle_ids`, `protocol_bundle_context`.
+Parse JSON for: `executor_model`, `verifier_model`, `commit_docs`, `autonomy`, `review_cadence`, `research_mode`, `parallelization`, `max_unattended_minutes_per_plan`, `max_unattended_minutes_per_wave`, `checkpoint_after_n_tasks`, `checkpoint_after_first_load_bearing_result`, `checkpoint_before_downstream_dependent_tasks`, `verifier_enabled`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `platform`.
 
 **If `phase_found` is false:** Error -- phase directory not found.
 **If `plan_count` is 0:** Error -- no plans found in phase.
@@ -35,26 +85,74 @@ If `project_contract_load_info.status` starts with `blocked`, STOP and show the 
 
 If `project_contract_validation.valid` is false, STOP and show the explicit `project_contract_validation.errors` before execution. Do not treat a visible-but-blocked contract as an approved execution contract.
 
-Treat `project_contract` as the authoritative machine-readable execution contract only when `project_contract_gate.authoritative` is true.
-Treat `effective_reference_intake` as the carry-forward anchor ledger for refs, baselines, prior outputs, and unresolved context gaps.
-Use `active_reference_context` and `reference_artifacts_content` to interpret that ledger, not to replace it with markdown-only guesses.
-Before launching any plan, require that the selected `PLAN.md` passes `gpd validate plan-preflight <PLAN.md>` when specialized tool requirements are declared.
+**If `project_contract_gate.authoritative` is not true:** STOP and checkpoint with the user. Show `project_contract_gate`, `project_contract_load_info.errors`, `project_contract_load_info.warnings`, and `project_contract_validation.errors` if present. Do not plan, execute, verify, fingerprint, align, or pass `project_contract` to subagents until the gate is authoritative. End with `## > Next Up`: primary `gpd:sync-state` or `gpd:new-project` as appropriate, then `gpd:execute-phase ${PHASE_ARG}` after repair, plus `gpd:suggest-next`.
+
+Run the executable lifecycle authority gate before branch handling, plan preflight, wave planning, contract fingerprinting, alignment summary, or any executor/verifier delegation:
+
+```bash
+LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate execute-phase "${PHASE_ARG}")
+if [ $? -ne 0 ]; then
+  echo "$LIFECYCLE_CONTRACT_GATE"
+  exit 1
+fi
+```
+
+Later staged refreshes surface `effective_reference_intake`, `active_reference_context`, and `reference_artifacts_content` for anchor-aware routing and wave planning. Stable knowledge docs may appear only through those shared reference surfaces as reviewed background; they do not become a separate authority tier. Do not assume bootstrap already loaded that broader reference context.
+Before branch handling, scripts, computations, dispatches, subagents, writes, or claims, require that the selected `PLAN.md` passes `gpd validate plan-preflight <PLAN.md>` as part of `validate_selected_plans_before_execution`.
 
 When `parallelization` is false, plans within a wave execute sequentially.
 
 **Mode-aware behavior:**
-- `autonomy=supervised`: Pause for user confirmation before each wave. Show the plan summary and wait for approval.
-- `autonomy=balanced` (default): Execute waves automatically and pause only if errors, ambiguities, or scope-changing decisions arise at a wave boundary.
-- `autonomy=yolo`: Execute all waves without user prompts on clean passes. Do NOT skip required correctness gates, first-result sanity checks, skeptical review stops, or anchor-gated fanout reviews. A clean pass may auto-continue only after the gate is explicitly cleared.
-- `research_mode=explore`: Favor thoroughness — always run verification, expand context budget.
-- `research_mode=exploit`: Favor speed — skip optional research steps, tighter context budget, suppress optional tangents unless the user explicitly requested them, but never skip required first-result, skeptical, or pre-fanout review gates.
+- `autonomy` controls who gets interrupted at a wave boundary.
+- `research_mode` only adjusts depth and optional tangents; it does not relax required gates.
 - `research_mode=balanced` (default): Use the standard execution depth and keep the default contract, anchor, and review coverage unless the wave needs broader or narrower review.
+- `review_cadence` controls bounded phase pauses.
+- `execute-plan.md owns plan-local execution semantics; this workflow only owns phase-wide routing and wave risk.`
+- Even in `yolo`, do NOT skip required correctness gates, first-result sanity checks, skeptical review stops, or anchor-gated fanout reviews. A clean pass may auto-continue only after the gate is explicitly cleared.
 - `research_mode=adaptive`: Start with explore-style coverage, then narrow only after prior decisive `contract_results`, decisive `comparison_verdicts`, or an explicit approach lock show that the method family is stable. Do NOT narrow just because a wave advanced or one proxy passed.
-- Model profile and research mode may change depth, task granularity, or prose volume. They do NOT waive first-result, skeptical, or pre-fanout review gates.
-- `review_cadence`: Controls when bounded review gates appear. `autonomy` controls who must approve or inspect those gates. These are separate axes.
+- Model profile may change depth, task granularity, or prose volume, but it does not waive required gates.
+- `review_cadence` is read here only to schedule phase pauses; detailed gate ownership remains in `execute-plan.md`.
 - `workflow.verifier=false`, sparse cadence, yolo autonomy, or any manual "skip verification" request do NOT disable mandatory proof red-teaming for proof-bearing or `proof_obligation` work.
 </step>
 
+<step name="validate_selected_plans_before_execution" priority="first">
+Validate the selected plans before any execution-side work. If this gate fails, do not run workspace scripts, numerical computations, task dispatches, subagents, artifact writes, branch creation, or result claims.
+```bash
+SELECTED_PLAN_FILES=()
+for plan in "$phase_dir"/*-PLAN.md; do
+  [ -e "$plan" ] || continue
+  if [ "$GAPS_ONLY" = true ]; then
+    GAP_CLOSURE=$(gpd frontmatter get "$plan" --field gap_closure 2>/dev/null || echo false)
+    [ "$GAP_CLOSURE" = "true" ] || continue
+  fi
+  SELECTED_PLAN_FILES+=("$plan")
+done
+if [ ${#SELECTED_PLAN_FILES[@]} -eq 0 ]; then
+  echo "ERROR: no executable PLAN.md files found for phase ${PHASE_ARG}. Revise or recreate the missing/invalid plan, then rerun execute-phase for ${PHASE_ARG}."
+  exit 1
+fi
+PLAN_GATE_FAILED=false
+for plan in "${SELECTED_PLAN_FILES[@]}"; do
+  gpd validate plan-contract "$plan" || PLAN_GATE_FAILED=true
+  if ! gpd verify plan "$plan"; then
+    PLAN_GATE_FAILED=true
+  fi
+  PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "$plan") || {
+    echo "ERROR: plan preflight failed for $(basename "$plan")"
+    echo "$PLAN_PREFLIGHT"
+    PLAN_GATE_FAILED=true
+  }
+  gpd verify references "$plan" || PLAN_GATE_FAILED=true
+done
+gpd phase validate-waves "$phase_number" || PLAN_GATE_FAILED=true
+if [ "$PLAN_GATE_FAILED" = true ]; then
+  echo "Plan validation/preflight failed before execution; no workspace scripts, numerical computations, task dispatches, subagents, artifact writes, or result claims were authorized."
+  echo "Next: revise or recreate the invalid PLAN.md, then rerun execute-phase for ${PHASE_ARG}."
+  exit 1
+fi
+```
+`gpd:plan-phase {N}` is the supported public plan repair route. Invoke it with explicit instructions to revise or recreate the invalid `PLAN.md`, then rerun `gpd:execute-phase {N}`.
+</step>
 <step name="handle_branching">
 Check `branching_strategy` from init:
 
@@ -73,6 +171,7 @@ All subsequent commits go to this branch. User handles merging.
 Classify the phase type to drive agent selection and context budget decisions. Scan the phase goal and plan objectives for indicator keywords.
 
 ```bash
+PHASE_CLASSIFICATION_INIT=$(load_execute_phase_stage phase_classification) || { echo "ERROR: phase_classification init failed"; exit 1; }
 PHASE_GOAL=$(gpd --raw roadmap get-phase "${phase_number}" | gpd json get .goal --default "")
 PLAN_OBJECTIVES=""
 for plan in "$phase_dir"/*-PLAN.md; do
@@ -111,7 +210,7 @@ Translate the phase classification into concrete execution parameters that drive
 ```bash
 # Defaults
 CONVENTION_LOCK_REQUIRED=false
-PRE_EXECUTION_AGENTS=()
+PRE_EXECUTION_SPECIALISTS=()
 INTER_WAVE_CHECKS=("convention" "dimensional")
 EXECUTOR_CONTEXT_HINT="standard"
 WAVE_TIMEOUT_FACTOR=1.0
@@ -119,17 +218,7 @@ FORCE_SEQUENTIAL=false
 YOLO_RESTRICTIONS=()
 ```
 
-**Per-class overrides (applied cumulatively for multi-class phases):**
-
-| Class | Parameter Overrides |
-|---|---|
-| **derivation** | `CONVENTION_LOCK_REQUIRED=true` — refuse to start if conventions unlocked. `INTER_WAVE_CHECKS+=("identity_scan")` — check for unverified identities between waves. `EXECUTOR_CONTEXT_HINT="derivation-heavy"` — hint executors to allocate 70% of context to step-by-step work. `WAVE_TIMEOUT_FACTOR=1.5` — derivations run longer. `YOLO_RESTRICTIONS+=("no_skip_verification")` — even in yolo mode, do NOT skip verification for derivation phases (sign errors cost more than the verification). |
-| **numerical** | `INTER_WAVE_CHECKS+=("convergence_spot_check")` — between waves, scan SUMMARY for convergence metrics and flag regressions. `EXECUTOR_CONTEXT_HINT="code-heavy"` — hint executors to reserve context for code output and numerical tables. `PRE_EXECUTION_AGENTS+=("experiment-designer")` — if experiment-designer is enabled, spawn before wave 1 to validate parameter ranges. |
-| **literature** | `FORCE_SEQUENTIAL=true` — literature plans build on each other's findings; parallel risks redundant searches. `EXECUTOR_CONTEXT_HINT="reading-heavy"` — hint executors to budget for large literature ingestion. `INTER_WAVE_CHECKS=("convention")` — skip dimensional checks (no equations). |
-| **paper-writing** | `PRE_EXECUTION_AGENTS+=("notation-coordinator")` — ensure notation glossary is current before any section drafting. `INTER_WAVE_CHECKS+=("latex_compile")` — compile after each wave to catch LaTeX errors early. `EXECUTOR_CONTEXT_HINT="prose-heavy"` — hint executors to balance equation density with exposition. |
-| **formalism** | `CONVENTION_LOCK_REQUIRED=true`. `PRE_EXECUTION_AGENTS+=("notation-coordinator")` — conventions must be established before framework setup. `INTER_WAVE_CHECKS+=("identity_scan")`. |
-| **analysis** | `INTER_WAVE_CHECKS+=("plausibility_scan")` — between waves, scan results for physically implausible values (NaN, sign changes, order-of-magnitude jumps). |
-| **validation** | `YOLO_RESTRICTIONS+=("no_skip_verification" "no_skip_inter_wave")` — validation phases must run all checks regardless of autonomy mode. `INTER_WAVE_CHECKS+=("identity_scan" "convergence_spot_check" "plausibility_scan")` — run all inter-wave checks. |
+**Per-class overrides:** Apply the case block below cumulatively for multi-class phases. It is the executable source of truth for convention locks, specialist routing, inter-wave checks, executor context hints, timeout factors, sequential forcing, and yolo restrictions.
 
 **Apply overrides:**
 
@@ -146,7 +235,7 @@ for CLASS in "${PHASE_CLASSES[@]}"; do
     numerical)
       INTER_WAVE_CHECKS+=("convergence_spot_check")
       EXECUTOR_CONTEXT_HINT="code-heavy"
-      PRE_EXECUTION_AGENTS+=("experiment-designer")
+      PRE_EXECUTION_SPECIALISTS+=("experiment-designer")  # gpd-experiment-designer
       ;;
     literature)
       FORCE_SEQUENTIAL=true
@@ -154,13 +243,13 @@ for CLASS in "${PHASE_CLASSES[@]}"; do
       INTER_WAVE_CHECKS=("convention")
       ;;
     paper-writing)
-      PRE_EXECUTION_AGENTS+=("notation-coordinator")
+      PRE_EXECUTION_SPECIALISTS+=("notation-coordinator")
       INTER_WAVE_CHECKS+=("latex_compile")
       EXECUTOR_CONTEXT_HINT="prose-heavy"
       ;;
     formalism)
       CONVENTION_LOCK_REQUIRED=true
-      PRE_EXECUTION_AGENTS+=("notation-coordinator")
+      PRE_EXECUTION_SPECIALISTS+=("notation-coordinator")
       INTER_WAVE_CHECKS+=("identity_scan")
       ;;
     analysis)
@@ -173,7 +262,7 @@ for CLASS in "${PHASE_CLASSES[@]}"; do
   esac
 done
 
-echo "Execution adaptation: convention_lock=${CONVENTION_LOCK_REQUIRED}, pre_agents=[${PRE_EXECUTION_AGENTS[*]}], inter_wave=[${INTER_WAVE_CHECKS[*]}], context_hint=${EXECUTOR_CONTEXT_HINT}, timeout_factor=${WAVE_TIMEOUT_FACTOR}"
+echo "Execution adaptation: convention_lock=${CONVENTION_LOCK_REQUIRED}, pre_specialists=[${PRE_EXECUTION_SPECIALISTS[*]}], inter_wave=[${INTER_WAVE_CHECKS[*]}], context_hint=${EXECUTOR_CONTEXT_HINT}, timeout_factor=${WAVE_TIMEOUT_FACTOR}"
 ```
 
 **Convention lock enforcement:**
@@ -188,35 +277,18 @@ if [ "$CONV_STATUS" != "locked" ] && [ "$CONV_STATUS" != "complete" ]; then
   echo ""
   echo "Fix with one of:"
   echo "  gpd convention set"
-  echo "  gpd:validate-conventions"
+  echo "  validate conventions through the runtime workflow"
   echo ""
   echo "HALTING — convention errors in derivation/formalism phases compound across every step."
   exit 1
 fi
 ```
 
-**This is a hard gate.** When `CONVENTION_LOCK_REQUIRED=true` and conventions are not locked, execution MUST NOT proceed. Do not skip this gate in any autonomy mode (including yolo). Convention errors are irreversible — they invalidate all downstream results.
+**Hard gate:** when `CONVENTION_LOCK_REQUIRED=true` and conventions are not locked, execution MUST NOT proceed in any autonomy mode. Convention errors invalidate downstream results.
 
-**Pre-execution agent spawning:**
+**Pre-execution specialist routing:**
 
-If `PRE_EXECUTION_AGENTS` is non-empty, spawn them sequentially before wave 1:
-
-```bash
-for AGENT_TYPE in "${PRE_EXECUTION_AGENTS[@]}"; do
-  case "$AGENT_TYPE" in
-    notation-coordinator)
-      AGENT_MODEL=$(gpd resolve-model gpd-notation-coordinator)
-      # Spawn notation-coordinator to verify/establish conventions
-      # task(subagent_type="gpd-notation-coordinator", model="{AGENT_MODEL}", readonly=false, ...)
-      ;;
-    experiment-designer)
-      AGENT_MODEL=$(gpd resolve-model gpd-experiment-designer)
-      # Spawn experiment-designer to validate parameter ranges
-      # task(subagent_type="gpd-experiment-designer", model="{AGENT_MODEL}", readonly=false, ...)
-      ;;
-  esac
-done
-```
+The `pre_execution_specialists` stage consumes `PRE_EXECUTION_SPECIALISTS` and loads delegation guidance for real one-shot handoffs. This workflow chooses specialist types; it does not inline placeholder `task(...)` calls or wait for child confirmation in the same run.
 
 **Force-sequential override:**
 
@@ -224,10 +296,7 @@ If `FORCE_SEQUENTIAL=true`, override `PARALLELIZATION` to false for this phase r
 
 **YOLO mode restrictions:**
 
-If `autonomy=yolo` and `YOLO_RESTRICTIONS` is non-empty, restrict yolo behavior:
-
-- `no_skip_verification`: Do not skip the verification step even in yolo mode. Derivation and validation phases produce irreversible errors that cost more to debug than to verify.
-- `no_skip_inter_wave`: Do not skip inter-wave gates even in yolo mode. Convention drift between waves in these phase types creates compound errors.
+If `autonomy=yolo` and `YOLO_RESTRICTIONS` is non-empty, restrict yolo behavior: `no_skip_verification` keeps verification mandatory; `no_skip_inter_wave` keeps inter-wave gates mandatory.
 
 Log any restrictions: `"YOLO mode restricted for phase class (${PHASE_CLASSES[*]}): ${YOLO_RESTRICTIONS[*]}"`
 
@@ -239,12 +308,7 @@ Include `EXECUTOR_CONTEXT_HINT` in the executor spawn prompt so subagents can se
 <context_hint>{EXECUTOR_CONTEXT_HINT}</context_hint>
 ```
 
-Hint meanings:
-- `standard`: Default allocation — balanced between derivation, code, and prose.
-- `derivation-heavy`: Reserve 70% of context for step-by-step mathematical work. Minimize prose. Use `\therefore` not paragraphs.
-- `code-heavy`: Reserve space for code blocks, numerical output tables, and convergence plots. Summarize analytical steps briefly.
-- `reading-heavy`: Reserve space for literature citations and comparisons. Budget for reading 5-10 paper summaries.
-- `prose-heavy`: Balance equations with exposition. Every equation needs 2-3 sentences of context.
+Hint meanings: `standard` balances derivation/code/prose; `derivation-heavy`, `code-heavy`, `reading-heavy`, and `prose-heavy` reserve context for their named work type without changing required gates.
 </step>
 
 <step name="validate_phase">
@@ -256,61 +320,94 @@ Report: "Found {plan_count} plans in {phase_dir} ({incomplete_count} incomplete)
 <step name="detect_proof_obligation_work">
 Classify whether any selected plan is proof-bearing before execution and before honoring verifier-disabled or sparse-review settings.
 
-Treat a plan as proof-bearing when any of the following are true:
+@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md
 
-- the approved contract or plan contract names an observable or claim with kind `proof_obligation`
-- the phase goal, plan objective, or task text mentions `theorem`, `lemma`, `corollary`, `proposition`, `claim`, `proof`, `prove`, `show that`, `existence`, or `uniqueness`
-- the result is a formal derivation whose acceptance depends on named hypotheses, parameters, quantifiers, or conclusion clauses being covered explicitly
-
-If classification is ambiguous, default to proof-bearing.
-
-For each proof-bearing plan, require a sibling proof audit artifact named `{plan_id}-PROOF-REDTEAM.md`. This audit is mandatory and fail-closed. It must:
-
-1. inventory the theorem or claim text being established
-2. enumerate named parameters, hypotheses, quantifier/domain obligations, and conclusion clauses
-3. map those obligations to concrete proof locations or proof-step references
-4. flag any missing parameter or hypothesis coverage immediately
-5. attempt an adversarial special-case or counterexample probe so a proof of a narrower case is not mistaken for the full claim
-6. set canonical audit `status: passed | gaps_found | human_needed`
+For each proof-bearing plan, require a sibling `{plan_id}-PROOF-REDTEAM.md` artifact that follows the shared gate above.
 
 Never treat a clean `SUMMARY.md`, correct algebra in a subset of cases, or "human will inspect later" as a substitute for this artifact.
 When runtime delegation is available, `gpd-check-proof` is the canonical owner of this sibling artifact. The executor may draft the proof and theorem inventory, but it must not self-certify theorem-proof alignment as its own independent redteam.
 </step>
 
-<step name="structural_validation">
-Run structural validation on all plans before execution begins:
+<step name="refresh_wave_planning_context">
+Refresh the wave-planning stage so the orchestrator does not keep late execution context pinned in bootstrap state:
 
 ```bash
-VALIDATION_FAILED=false
-
-# Validate each plan's frontmatter and structure
-for plan in "$phase_dir"/*-PLAN.md; do
-  if ! gpd verify plan "$plan"; then
-    echo "ERROR: plan-structure validation failed for $(basename "$plan")"
-    VALIDATION_FAILED=true
-  fi
-done
-
-# Validate wave dependencies
-if ! gpd phase validate-waves "$phase_number"; then
-  echo "ERROR: wave dependency validation failed"
-  VALIDATION_FAILED=true
-fi
-
-# Check cross-references in plans
-for plan in "$phase_dir"/*-PLAN.md; do
-  if ! gpd verify references "$plan"; then
-    echo "ERROR: reference validation failed for $(basename "$plan")"
-    VALIDATION_FAILED=true
-  fi
-done
-
-if [ "$VALIDATION_FAILED" = true ]; then
-  echo "Structural validation failed. Fix the issues above before proceeding."
+WAVE_PLANNING_INIT=$(load_execute_phase_stage wave_planning)
+if [ $? -ne 0 ]; then
+  echo "ERROR: wave-planning stage refresh failed: $WAVE_PLANNING_INIT"
+  exit 1
 fi
 ```
 
-**If `VALIDATION_FAILED` is true:** Present all collected errors to the user. Do not proceed with execution until structural issues are resolved.
+Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `reference_artifacts_content`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
+</step>
+
+<step name="claim_deliverable_alignment_check">
+Gate execution on explicit confirmation that the machine-readable claim matches user intent for Phase {N}.
+
+Read the persisted alignment status and the current contract/context fingerprints before rendering anything:
+
+```bash
+ALIGNMENT_STATUS=$(gpd contract alignment-status 2>/dev/null || echo '{}')
+CONTRACT_HASH=$(gpd contract fingerprint 2>/dev/null)
+CONTEXT_HASH=$(gpd contract context-fingerprint 2>/dev/null)
+CONFIRMED_AT=$(echo "$ALIGNMENT_STATUS" | gpd json get .confirmed_at --default null)
+CONFIRMED_CONTRACT_HASH=$(echo "$ALIGNMENT_STATUS" | gpd json get .confirmed_contract_hash --default null)
+CONFIRMED_CONTEXT_HASH=$(echo "$ALIGNMENT_STATUS" | gpd json get .confirmed_context_hash --default null)
+```
+
+**Fingerprint gate:** Fail closed if either fingerprint command fails or resolves to an empty value before rendering the prompt or recording confirmation. Do not compare blank hashes, do not suppress the gate, and do not call `gpd contract record-alignment` on this path.
+
+```bash
+if [ -z "$CONTRACT_HASH" ] || [ -z "$CONTEXT_HASH" ]; then
+  echo "ERROR: claim_deliverable_alignment_check could not resolve contract/context fingerprints."
+  echo "Next Up: discuss, plan, then execute phase {N}"
+  exit 1
+fi
+```
+
+**Gating:** Fires when `autonomy=supervised` OR `review_cadence=dense` OR any selected plan is proof-bearing per `detect_proof_obligation_work`. Skip only under `autonomy=yolo AND review_cadence in {adaptive, sparse} AND no proof-bearing plans`; log `claim_deliverable_alignment_check: skipped (autonomy=yolo, cadence=adaptive, no proof-bearing plans)` and continue to `discover_and_group_plans` without prompting.
+
+**Suppression:** If `confirmed_at` is set AND the current `contract_fingerprint == confirmed_contract_hash` AND `context_guidance_fingerprint == confirmed_context_hash`, skip and log `claim_deliverable_alignment_check: skipped (already confirmed this session)`. Use `gpd contract alignment-status` plus `CONTRACT_HASH`/`CONTEXT_HASH`.
+
+**Render:** When fired and not suppressed, render a one-screen `Claim ↔ Deliverable Alignment` table. Left column: CONTEXT.md + `ContractContextIntake`; right column: `gpd contract alignment-summary`. Cap each cell at 5 bullets.
+
+```
+| User intent (CONTEXT)               | Machine contract                    |
+|-------------------------------------|-------------------------------------|
+| Observables: ...                    | Claims: ...                         |
+| Deliverables: ...                   | Deliverables: ...                   |
+| Must-have references: ...           | Acceptance tests: ...               |
+| Stop-or-rethink conditions: ...     |                                     |
+```
+
+**ask_user:** Present exactly one question with 4 options. Enter selects `Y`.
+
+```
+ask_user([
+  {
+    question: "Does the machine contract above match your intent for Phase {N}? Press Enter to proceed, or pick an option to revise.",
+    header: "Claim ↔ Deliverable Alignment",
+    multiSelect: false,
+    options: [
+      { label: "Y: proceed (Recommended, Enter = Y)", description: "Record confirmed alignment and continue." },
+      { label: "e: edit CONTEXT", description: "Revise intent with gpd:discuss-phase {N}, then re-enter once." },
+      { label: "p: edit PLAN contract", description: "Revise the machine contract with gpd:plan-phase {N}, then re-enter once." },
+      { label: "n: abort", description: "Stop cleanly. Next Up is gpd:execute-phase {N} after alignment is resolved." }
+    ]
+  }
+])
+```
+
+**Interactive answer requirement:** Only an explicit `ask_user` answer of `Y: proceed` authorizes record-alignment. The command invocation, missing `ask_user` support, timeout, empty answer, or any noninteractive run is not an alignment answer. Otherwise STOP before `gpd contract record-alignment`, branch/checkpoint writes, scripts/numerical computations, dispatches/subagents, and artifacts. End: `Blocked: claim-deliverable alignment needs an explicit user answer. Next Up: rerun gpd:execute-phase {N} interactively.`
+**On "Y: proceed" (or Enter from that `ask_user` prompt):** Record alignment and continue:
+```bash
+gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$CONTEXT_HASH"
+```
+
+**On "n: abort":** Exit cleanly. Do NOT spawn any executor and do NOT proceed to `discover_and_group_plans`. Emit a final line `"Next Up: gpd:execute-phase {N}"` so the operator can resume after resolving alignment.
+
+**On "e" / "p":** Hand off to `gpd:discuss-phase {N}` or `gpd:plan-phase {N}`, then re-enter once. If the same key is chosen again, defer to that workflow and stop looping.
 </step>
 
 <step name="discover_and_group_plans">
@@ -320,9 +417,9 @@ Load plan inventory with wave grouping in one call:
 PLAN_INDEX=$(gpd phase index "${phase_number}")
 ```
 
-Parse JSON for: `phase`, `plans[]` (each with `id`, `wave`, `interactive`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves` (map of wave number -> plan IDs), `incomplete`, `has_checkpoints`.
+Parse JSON for: `phase`, `plans[]` (each with `id`, `wave`, `interactive`, `gap_closure`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves` (map of wave number -> plan IDs), `incomplete`, `has_checkpoints`.
 
-**Filtering:** Skip plans where `has_summary: true`. If `--gaps-only`: also skip non-gap_closure plans. If all filtered: "No matching incomplete plans" -> exit.
+**Filtering:** Skip plans where `has_summary: true`. If `$GAPS_ONLY` is true, also skip non-gap_closure plans. If all filtered: "No matching incomplete plans" -> exit.
 
 **Intra-wave dependency validation:** Verify that no plan's `depends_on` references another plan in the SAME wave (which would be a circular dependency within a wave):
 
@@ -390,13 +487,25 @@ Report:
 Translate cadence config plus wave risk into concrete execution boundaries before any executor is spawned.
 
 ```bash
-REVIEW_CADENCE=$(echo "$INIT" | gpd json get .review_cadence --default adaptive)
+REVIEW_CADENCE=$(echo "$INIT" | gpd json get .review_cadence --default dense)
 RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)
-MAX_UNATTENDED_MINUTES_PER_PLAN=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_plan --default 45)
-MAX_UNATTENDED_MINUTES_PER_WAVE=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_wave --default 90)
-CHECKPOINT_AFTER_N_TASKS=$(echo "$INIT" | gpd json get .checkpoint_after_n_tasks --default 3)
+MAX_UNATTENDED_MINUTES_PER_PLAN=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_plan --default 15)
+MAX_UNATTENDED_MINUTES_PER_WAVE=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_wave --default 30)
+CHECKPOINT_AFTER_N_TASKS=$(echo "$INIT" | gpd json get .checkpoint_after_n_tasks --default 1)
 CHECKPOINT_AFTER_FIRST_RESULT=$(echo "$INIT" | gpd json get .checkpoint_after_first_load_bearing_result --default true)
 CHECKPOINT_BEFORE_DOWNSTREAM=$(echo "$INIT" | gpd json get .checkpoint_before_downstream_dependent_tasks --default true)
+STRICT_WAIT=$(gpd --raw config get strict_wait 2>/dev/null || echo false)
+NEVER_INTERRUPT_WORKERS=$(gpd --raw config get never_interrupt_running_workers 2>/dev/null || echo false)
+NEVER_AUTO_CLOSE_CHILDREN=$(gpd --raw config get never_auto_close_child_agents 2>/dev/null || echo false)
+
+# strict_wait disables the unattended-minutes timeouts entirely: workers are
+# allowed to run to natural completion rather than returning early checkpoints
+# at the configured unattended-minute marks. never_interrupt_running_workers is
+# a narrower form of the same guarantee.
+if [ "$STRICT_WAIT" = "true" ] || [ "$NEVER_INTERRUPT_WORKERS" = "true" ]; then
+  MAX_UNATTENDED_MINUTES_PER_PLAN=0
+  MAX_UNATTENDED_MINUTES_PER_WAVE=0
+fi
 ```
 
 **Core invariant:** `autonomy` decides who gets interrupted. `review_cadence` decides when the system must stop, inspect, or re-question. Even in `yolo`, required first-result and pre-fanout gates still run; the difference is that a clean pass can auto-continue.
@@ -418,6 +527,8 @@ When a wave is risky:
 - set `PRE_FANOUT_REVIEW_REQUIRED=true`
 - set `SEGMENT_TASK_CAP=${CHECKPOINT_AFTER_N_TASKS}`
 - force bounded continuation segments even when the authored plan has no checkpoints
+
+**Dense cadence override:** when `review_cadence=dense`, treat every wave as risky regardless of the heuristic checks above, applying the "When a wave is risky" bullets unconditionally (in particular `FIRST_RESULT_GATE_REQUIRED=true` and `PRE_FANOUT_REVIEW_REQUIRED=true`). The "not risky" branch does not apply; a clean pass may auto-continue once the gate fires, but the gate must fire.
 
 When a wave is not risky:
 
@@ -443,8 +554,36 @@ This is proposal-first, not a new execution state machine. Tangent proposals rid
 When `RESEARCH_MODE=exploit`, suppress optional tangents by default: classify them as `ignore` or `defer` unless the prompt or the user explicitly asked for tangent exploration.
 </step>
 
+<step name="prepare_pre_execution_specialists">
+Load the specialist-routing stage only when a pre-wave specialist is actually needed.
+
+```bash
+if [ ${#PRE_EXECUTION_SPECIALISTS[@]} -gt 0 ]; then
+  PRE_EXECUTION_INIT=$(load_execute_phase_stage pre_execution_specialists)
+  if [ $? -ne 0 ]; then
+    echo "ERROR: pre-execution-specialists stage refresh failed: $PRE_EXECUTION_INIT"
+    exit 1
+  fi
+fi
+```
+
+Use this stage only at explicit one-shot specialist handoff sites. Do not recreate placeholder `task(...)` examples here, do not wait in place for user approval inside a child run, and do not treat a named specialist route as complete unless its later artifact gate passes.
+</step>
+
 <step name="execute_waves">
 Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true` AND `FORCE_SEQUENTIAL=false`, sequential otherwise. (Literature phases force sequential execution — see `adapt_to_computation_type`.)
+
+Refresh the wave-dispatch stage immediately before spawning executors so plan execution sees only the late-loaded context it actually needs:
+
+```bash
+WAVE_DISPATCH_INIT=$(load_execute_phase_stage wave_dispatch)
+if [ $? -ne 0 ]; then
+  echo "ERROR: wave-dispatch stage refresh failed: $WAVE_DISPATCH_INIT"
+  exit 1
+fi
+```
+
+Parse JSON for: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `current_execution`, `has_live_execution`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `execution_blocked`, `execution_resumable`, `execution_paused_at`, `current_execution_resume_file`, `handoff_resume_file`, `recorded_handoff_resume_file`, `missing_handoff_resume_file`, `execution_resume_file`, `execution_resume_file_source`, `resume_projection`, `current_hostname`, `current_platform`, `session_hostname`, `session_platform`, `session_last_date`, `session_stopped_at`, `machine_change_detected`, `machine_change_notice`, `state_load_source`, `state_integrity_issues`.
 
 **For each wave:**
 
@@ -461,11 +600,17 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 
    **Pre-flight convention check for parallel waves:** Before spawning wave executors in parallel, verify all plans in the wave reference the same `convention_lock` values. For each plan in the wave, extract any convention references (metric signature, Fourier convention, unit system) and cross-compare. If any plan's conventions differ from the locked values, resolve the discrepancy before spawning. This prevents the most insidious class of parallel execution bugs: two agents computing with different sign conventions whose results are later combined.
 
-2. **Create wave-level checkpoint** before any plan in the wave starts:
-
+2. **Create wave-level checkpoint** before any plan starts. This is the rollback authority gate for the wave. Finish it before scripts, numerical computation, dispatch, subagents, artifacts, or claims. Do not run computation and then checkpoint afterward.
    ```bash
-   WAVE_CHECKPOINT="gpd-checkpoint/phase-${phase_number}-wave-${WAVE_NUM}-$(date +%s)-$$"
-   git tag "${WAVE_CHECKPOINT}"
+   PROJECT_ROOT=$(pwd -P); while [ "$PROJECT_ROOT" != "/" ] && [ ! -d "$PROJECT_ROOT/GPD" ]; do PROJECT_ROOT=$(dirname "$PROJECT_ROOT"); done
+   GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+   [ -d "$PROJECT_ROOT/GPD" ] && [ -n "$GIT_ROOT" ] && [ "$(cd "$GIT_ROOT" && pwd -P)" = "$PROJECT_ROOT" ] || { echo "ERROR: rollback checkpoint needs project-local git root; refusing ambient rollback checkpoint. Next Up: run from project root or initialize fixture-local git/checkpoint support."; exit 1; }
+   WAVE_CHECKPOINT="gpd-checkpoint-phase-${phase_number}-wave-${WAVE_NUM}-$(date +%s)-$$"
+   if git rev-parse --verify "refs/tags/${WAVE_CHECKPOINT}" >/dev/null 2>&1; then WAVE_CHECKPOINT="${WAVE_CHECKPOINT}-retry"; fi
+   if ! git tag "${WAVE_CHECKPOINT}"; then
+     echo "ERROR: failed to create wave checkpoint tag ${WAVE_CHECKPOINT}" >&2
+     exit 1
+   fi
    ```
 
    Store the tag for wave-level recovery.
@@ -485,8 +630,7 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
    ---
    ```
 
-   - Bad: "Executing Hamiltonian diagonalization plan"
-   - Good: "Diagonalizing the spin-chain Hamiltonian using Bethe ansatz -- extracts exact energy spectrum and correlation functions in the thermodynamic limit. Required before computing transport coefficients in Wave 3."
+   Example: describe what the plan computes or derives and why it matters; avoid generic "executing plan" narration.
 
    **If this wave is marked risky fanout:** run `probe_then_fanout` instead of blind full-wave scaleout.
 
@@ -500,9 +644,13 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 4. **Spawn executor agents:**
 
    Pass paths only -- executors read files themselves with fresh context.
-   This keeps orchestrator context lean (~10-15%).
+   This keeps orchestrator context lean; use `references/orchestration/context-budget.md` for numeric budget targets.
+
+   Canonical runtime delegation convention for every `task()` block in this workflow:
 
    @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+
+   The shared note owns runtime-neutral task construction and handoff gates. Later handoff blocks should reference this convention instead of restating those rules.
 
    ```
    task(
@@ -577,7 +725,7 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 
    After a proof-bearing executor has written its proof artifact(s) and `SUMMARY.md`, but before the wave-level spot-check accepts the plan, spawn `gpd-check-proof` in a fresh context:
 
-   > **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents. If subagent spawning is unavailable, execute these steps sequentially in the main context.
+   > Apply the canonical runtime delegation convention above.
 
    ```
    task(
@@ -585,8 +733,9 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
      model="{check_proof_model}",
      readonly=false,
      prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions.
+Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md before writing any proof audit artifact.
 
-       Operate in proof-redteam mode with a fresh context.
+       Operate in proof-redteam mode with a fresh context and follow the proof-redteam protocol's one-shot return semantics.
 
        Write to: {phase_dir}/{plan_id}-PROOF-REDTEAM.md
 
@@ -622,29 +771,27 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
    For each SUMMARY.md:
 
    - Verify first 2 files from `key-files.created` exist on disk
+   - If the SUMMARY marks any `key-files.created` / `key-files.modified` paths as required or final-deliverable, verify those paths on disk before accepting success
 	   - Check `git log --oneline --grep="{phase}-{plan}"` returns >=1 commit
 	   - Check for `## Self-Check: FAILED` marker
 	   - Check for `## Validation: FAILED` marker (physics-specific)
 	   - For proof-bearing plans, verify the sibling `{plan_id}-PROOF-REDTEAM.md` artifact exists and has `status: passed`
-	   - Validate the gpd_return envelope:
+	   - Validate and apply the gpd_return envelope through the canonical child-return path:
 
      ```bash
-     RETURN_CHECK=$(gpd --raw validate-return "${SUMMARY_FILE}")
-     if [ "$RETURN_CHECK" != "passed" ]; then
-       echo "WARNING: validate-return failed for $(basename "$SUMMARY_FILE")"
-       # Mark plan as NEEDS_REVIEW but continue — missing envelope is not fatal
+     RETURN_APPLY=$(gpd --raw apply-return-updates "${SUMMARY_FILE}")
+     RETURN_PASSED=$(python -c 'import json, sys; print(str(bool(json.loads(sys.argv[1]).get("passed", False))).lower())' "$RETURN_APPLY")
+     if [ "$RETURN_PASSED" != "true" ]; then
+       echo "ERROR: apply-return-updates failed for $(basename "$SUMMARY_FILE")"
+       exit 1
      fi
      ```
 
-	   If ANY spot-check fails, including a missing or non-passing proof-redteam artifact for proof-bearing work: report which plan failed, route to `wave_failure_handling` -- do NOT silently continue.
+	   If ANY spot-check fails, including a missing or non-passing proof-redteam artifact for proof-bearing work, or if `apply-return-updates` does not report `passed: true`: report which plan failed, route to `wave_failure_handling` -- do NOT silently continue.
 
-   **IMPORTANT: Executor subagents MUST NOT write STATE.md directly.** Return state updates (position, decisions, metrics) in the structured return envelope. The orchestrator applies them sequentially after each agent completes. This prevents parallel write conflicts where multiple agents overwrite each other's STATE.md changes.
+   **IMPORTANT: Executor subagents MUST NOT write STATE.md directly.** Return state updates (position, decisions, metrics) in the structured return envelope. The orchestrator applies them through `gpd apply-return-updates` after each agent completes. This prevents parallel write conflicts where multiple agents overwrite each other's STATE.md changes and keeps durable child-return ownership in one place.
 
-   After each plan completes successfully (not just after each wave), the **orchestrator** runs:
-   1. `gpd state advance` immediately
-   2. `gpd state record-metric` for the completed plan
-   3. This ensures crash recovery loses at most ONE plan's state, not an entire wave
-   4. By the time the wave-complete report is emitted, `GPD/STATE.md` already reflects every successful plan from that wave
+   By the time the wave-complete report is emitted, the canonical applicator has already persisted every successful plan from that wave. Do not duplicate that state mutation here.
 
    If pass:
 
@@ -699,6 +846,7 @@ Execute each wave in sequence. Within a wave: parallel if `PARALLELIZATION=true`
 	   - if the plan is proof-bearing, `{plan_id}-PROOF-REDTEAM.md` exists and reports `status: passed`
 	   - decisive anchors still missing were explicitly named and re-questioned if necessary
 	   - if the contract owed a decisive comparison, either that comparison now has a pass verdict or the downstream work was explicitly scoped so it does not rely on that unresolved claim
+	   - if `review_cadence=dense` and the just-completed first wave emitted no `result/produce` or `result/log` event at all, STOP and require explicit user confirmation before advancing — a dense wave that produced no result event is indistinguishable from a silent failure and the first-result gate never had anything to trip on
 
    If this gate fails: STOP — do not let wrong early assumptions scale out.
 
@@ -1027,20 +1175,15 @@ done
 <step name="checkpoint_handling">
 Plans with `interactive: true` require user interaction.
 
+```bash
+CHECKPOINT_RESUME_INIT=$(load_execute_phase_stage checkpoint_resume) || { echo "ERROR: checkpoint_resume init failed"; exit 1; }
+```
+
 **Flow:**
 
 1. Spawn agent for checkpoint plan
 2. Agent runs until checkpoint task or validation gate -> returns structured state
-3. Agent return includes: completed tasks table, current task + blocker, checkpoint type/details, what's awaited, and the bounded execution segment envelope
-   - For first-result or pre-fanout pauses, the bounded segment envelope must also carry:
-     - `checkpoint_reason`
-     - `first_result_gate_pending` or `pre_fanout_review_pending`
-     - `pre_fanout_review_cleared` when review was accepted but downstream unlock is still outstanding
-     - `skeptical_requestioning_required`
-     - `skeptical_requestioning_summary`
-     - `weakest_unchecked_anchor`
-     - `disconfirming_observation`
-     - `downstream_locked`
+3. Agent return includes completed tasks, current blocker, awaited item, and bounded execution segment; first-result/pre-fanout pauses add gate flags, skeptical re-questioning fields, and `downstream_locked`.
 4. **Present to user:**
 
    ```
@@ -1051,6 +1194,12 @@ Plans with `interactive: true` require user interaction.
 
    [Checkpoint Details from agent return]
    [Awaiting section from agent return]
+
+   ## > Next Up
+
+   `gpd:resume-work`
+
+   Also available: `gpd:execute-phase {PHASE_NUMBER}` or `gpd:suggest-next`
    ```
 
 5. User responds: "approved"/"done" | issue description | decision selection
@@ -1071,7 +1220,7 @@ Plans with `interactive: true` require user interaction.
 <step name="context_budget_check">
 **Before aggregating results, estimate context consumption:**
 
-Count the SUMMARY files that will be read and estimate their impact on orchestrator context:
+Count the SUMMARY files that will be read and estimate their impact on orchestrator context using the summary-aggregation heuristic in `references/orchestration/context-budget.md`.
 
 ```bash
 SUMMARY_COUNT=$(ls "${phase_dir}"/*-SUMMARY.md 2>/dev/null | wc -l)
@@ -1098,6 +1247,10 @@ done
 
 <step name="aggregate_results">
 After all waves:
+
+```bash
+AGGREGATE_VERIFY_INIT=$(load_execute_phase_stage aggregate_and_verify) || { echo "ERROR: aggregate_and_verify init failed"; exit 1; }
+```
 
 ```markdown
 ## Phase {X}: {Name} Execution Complete
@@ -1149,11 +1302,7 @@ Generated figures and plots should live in stable workspace roots such as `artif
 
 **If any figures found:**
 
-Read the figure tracker template:
-
-```bash
-cat {GPD_INSTALL_DIR}/templates/paper/figure-tracker.md
-```
+Read the figure tracker template from `{GPD_INSTALL_DIR}/templates/paper/figure-tracker.md` using the runtime's normal file-read mechanism.
 
 **If `paper/FIGURE_TRACKER.md` already exists:** Append new figures to the existing registry. Do not overwrite existing entries.
 
@@ -1339,22 +1488,63 @@ gpd commit \
 
 Verify phase achieved its GOAL, not just completed tasks.
 
-**Phase-class-aware verification:** Pass the phase classification (from `classify_phase` step) to the verifier so it can prioritize checks:
-- **Derivation phases:** Promote `5.1` dimensional analysis, `5.2` numerical spot-checks, `5.3` limiting cases, and any domain-specific identity or symmetry checks surfaced by the loaded verifier checklist.
-- **Numerical phases:** Promote `5.5` numerical convergence, `5.14` statistical validation, `5.2` numerical spot-checks, and benchmark reproduction when the contract names a decisive anchor.
-- **Formalism phases:** Promote `5.1` dimensional analysis, `5.3` limiting cases, `5.9` Ward identities / sum rules when applicable, and literature cross-checks for the defining equations.
-- **Validation phases:** Run the full relevant universal registry plus every required contract-aware check. Validation IS the purpose of the phase.
-- **Analysis phases:** Promote `5.7` order-of-magnitude checks, `5.8` physical plausibility, `5.6` literature cross-checks, and any contract-aware fit or estimator checks needed by the claim.
+**Phase-class-aware verification:** Pass the phase classification from `classify_phase` so the verifier prioritizes checks: derivation -> dimensional/numerical spot/limit/identity checks; numerical -> convergence, statistical validation, spot checks, decisive benchmarks; formalism -> dimensional, limiting, Ward/sum-rule, literature checks; validation -> full relevant universal registry plus contract-aware checks; analysis -> order-of-magnitude, plausibility, literature, and fit/estimator checks.
 
 Include in the verifier spawn prompt: `<phase_class>{PHASE_CLASSES}</phase_class>` so the verifier can adjust its check prioritization.
 
-Follow the verification workflow. Read `{GPD_INSTALL_DIR}/workflows/verify-phase.md` using the file_read tool.
+Spawn `gpd-verifier` in a fresh context; the child reads `{GPD_INSTALL_DIR}/workflows/verify-phase.md`.
 
-Read status after verification completes:
+> Apply the canonical runtime delegation convention above.
 
-```bash
-grep "^status:" "$phase_dir"/*-VERIFICATION.md 2>/dev/null | head -1 | cut -d: -f2 | tr -d ' '
 ```
+task(
+  subagent_type="gpd-verifier",
+  model="{verifier_model}",
+  readonly=false,
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instructions.
+
+Verify Phase {PHASE_NUMBER} against its phase goal and plan contracts.
+
+<phase_class>{PHASE_CLASSES}</phase_class>
+
+Load before verdict:
+- {GPD_INSTALL_DIR}/workflows/verify-phase.md
+- {GPD_INSTALL_DIR}/templates/verification-report.md
+- {GPD_INSTALL_DIR}/templates/contract-results-schema.md
+
+<files_to_read>
+- Phase plans and summaries: {phase_dir}
+- Roadmap: GPD/ROADMAP.md
+- State: GPD/STATE.md and GPD/state.json
+</files_to_read>
+
+Run `gpd --raw init phase-op {PHASE_NUMBER}` and keep the project contract, reference/protocol context, and `phase_proof_review_status` visible. Stable knowledge docs surfaced there are background only.
+
+Write to: {phase_dir}/{phase_number}-VERIFICATION.md
+
+<spawn_contract>
+write_scope:
+  mode: scoped_write
+  allowed_paths:
+    - "{phase_dir}/{phase_number}-VERIFICATION.md"
+expected_artifacts:
+  - "{phase_dir}/{phase_number}-VERIFICATION.md"
+shared_state_policy: return_only
+</spawn_contract>
+
+Return one typed `gpd_return` envelope with `status`, `files_written`, and canonical `verification_status` (`passed | gaps_found | expert_needed | human_needed`).",
+  description="Verify Phase {PHASE_NUMBER} goal"
+)
+```
+
+Read status after verification completes through the typed child-return contract:
+
+- `gpd_return.status: completed` means success only after verifying that:
+  1. `${phase_dir}/${phase_number}-VERIFICATION.md` exists on disk and is readable
+  2. the same path appears in `gpd_return.files_written`
+  3. `gpd validate verification-contract "${phase_dir}/${phase_number}-VERIFICATION.md"` passes before any downstream routing
+- If a canonical verification file already existed before this run, do not treat it as fresh verifier output unless the child reported that same path in `gpd_return.files_written`.
+- Route only on `gpd_return.status` and the validated frontmatter; do not use `grep "^status:"`, headings, or marker strings to decide success.
 
 | Status         | Action                                                      |
 | -------------- | ----------------------------------------------------------- |
@@ -1392,11 +1582,11 @@ All automated checks passed. {N} items need human review:
 {Any dimensional inconsistencies, failed limiting cases, or conservation law violations}
 
 ---
-## >> Next Up
+## > Next Up
 
 `gpd:plan-phase {X} --gaps`
 
-<sub>`/clear` first -> fresh context window</sub>
+<sub>Start a fresh context window</sub>
 
 Also: `cat {phase_dir}/{phase}-VERIFICATION.md` -- full report
 Also: `gpd:verify-work {X}` -- manual review first
@@ -1418,13 +1608,13 @@ TOTAL_COUNT=$(rg -c '^status: (passed|gaps_found|expert_needed|human_needed)$' "
 | Failure Pattern | Recovery | Cost |
 |---|---|---|
 | 1 contract target failed, rest passed | Re-execute the specific failing plan only | 1 subagent |
-| Multiple failures, same error type (e.g., all sign errors) | Spawn notation-coordinator to check conventions, then re-execute | 2 subagents |
+| Multiple failures, same error type (e.g., all sign errors) | Stop and route through `gpd:validate-conventions`; repair happens in a fresh continuation before re-execution | validate + follow-up |
 | Multiple failures, different error types | Escalate to user -- approach may be fundamentally wrong | 0 (user decides) |
 | Same gap persists after 1 gap-closure | Spawn debugger to identify root cause before 2nd attempt | 1-2 subagents |
 
 **For localized failures (1 contract target):** Skip full gap-closure planning. Instead, directly re-execute the single plan that produced the failed result with explicit error context:
 
-> **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents. If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> Apply the canonical runtime delegation convention above.
 
 ```
 task(
@@ -1452,7 +1642,7 @@ task(
 )
 ```
 
-**For systematic failures:** Spawn notation-coordinator first to check for convention drift, then re-execute with corrected conventions.
+**For systematic failures:** Do not route notation repair inline from this workflow. Stop and point the user to `gpd:validate-conventions`; if convention repair is needed, that workflow and the fresh continuation handoff own the `gpd-notation-coordinator` spawn and typed return routing. After conventions are validated, re-enter `gpd:execute-phase {X}` or `gpd:execute-phase {X} --gaps-only` as appropriate.
 
 **For persistent failures (same gap after 1 cycle):** Spawn debugger BEFORE the second gap-closure attempt:
 
@@ -1460,7 +1650,7 @@ task(
 DEBUGGER_MODEL=$(gpd resolve-model gpd-debugger)
 ```
 
-> **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents. If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> Apply the canonical runtime delegation convention above.
 
 ```
 task(
@@ -1468,9 +1658,10 @@ task(
   model="{debugger_model}",
   readonly=false,
   prompt="First, read {GPD_AGENTS_DIR}/gpd-debugger.md for your role and instructions.
-  Investigate why gap closure did not resolve this verification failure.
-  file_read: {VERIFICATION_FILE}, {GAP_CLOSURE_SUMMARY}, {ORIGINAL_SUMMARY}
-  Identify the root cause and recommend: fix-and-retry vs re-plan vs escalate.",
+
+  Use {GPD_INSTALL_DIR}/templates/debug-subagent-prompt.md as the explicit one-shot debug contract. Populate it from the failed verification file, the gap-closure summary, and the original summary; set `goal: find_root_cause_only`, `symptoms_prefilled: true`, and `Create: GPD/debug/{FAILED_PLAN}.md`.
+
+  Return exactly one typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, include the session file, and stop. Do not route on heading markers or continue the investigation interactively inside the child.",
   description="Diagnose persistent verification failure"
 )
 ```
@@ -1505,7 +1696,7 @@ Phase {X} has failed verification twice after gap closure attempts.
 Do NOT attempt a third automated cycle.
 ```
 
-**After gap closure execution completes (`--gaps-only` mode):**
+**After gap closure execution completes (`$GAPS_ONLY` is true):**
 
 Automatically re-verify the phase to confirm gaps are closed:
 
@@ -1513,7 +1704,7 @@ Automatically re-verify the phase to confirm gaps are closed:
 VERIFIER_MODEL=$(gpd resolve-model gpd-verifier)
 ```
 
-> **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents. If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> Apply the canonical runtime delegation convention above.
 
 ```
 task(
@@ -1542,22 +1733,31 @@ Re-verify Phase {PHASE_NUMBER} after gap closure.
 	- Roadmap: GPD/ROADMAP.md
 	</files_to_read>
 
-	Rebuild the structured phase context with `gpd --raw init phase-op {PHASE_NUMBER}` and keep `project_contract`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, and `phase_proof_review_status` visible while re-checking the remaining gaps.
+	Rebuild the structured phase context with `gpd --raw init phase-op {PHASE_NUMBER}` and keep `project_contract`, `project_contract_gate`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, and `phase_proof_review_status` visible while re-checking the remaining gaps. Treat any stable knowledge docs surfaced in those fields as reviewed background only: they may inform interpretation, but they do not override the contract, proof audits, or decisive evidence.
 
 	Focus on the gaps that were previously marked failed, partial, blocked, or otherwise unresolved in the previous verification. If the prior report carries `session_status: diagnosed`, use the recorded root causes and missing actions as the starting point for re-verification. For proof-bearing work, re-check every required `*-PROOF-REDTEAM.md` artifact and keep the phase blocked until those audits report `status: passed`.
 	Check whether the gap closure plans have resolved each issue.
 	Update VERIFICATION.md with new status for each gap.
-	Return verification status: passed | gaps_found.",
+	Return exactly one typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, include `files_written`, and write `{phase_dir}/{phase}-VERIFICATION.md` before returning. Use the verifier's canonical `verification_status: passed | gaps_found | expert_needed | human_needed` inside the structured return or the written report; do not return bare `passed | gaps_found` text as the routing surface.",
   description="Re-verify Phase {PHASE_NUMBER} after gap closure"
 )
 ```
 
-**If the verifier agent fails to spawn or returns an error:** Proceed without automated re-verification. Note in the phase status that post-gap-closure verification was skipped. The user should run `gpd:verify-work` separately to confirm gaps are closed. If the phase is proof-bearing, do NOT mark it complete on this path; proof-obligation work remains blocked until re-verification and proof-redteam audits actually clear.
+**If the verifier agent fails to spawn or returns an error:** Stop in a blocked state. Do not mark the phase complete or clear gap-closure state on this path. End with `## > Next Up`: primary `gpd:verify-work {PHASE_NUMBER}` to confirm gaps are closed, plus `gpd:resume-work` and `gpd:suggest-next`. If the phase is proof-bearing, do NOT mark it complete on this path; proof-obligation work remains blocked until re-verification and proof-redteam audits actually clear. Do not trust the runtime handoff status by itself. Do not let a stale existing verification file satisfy the success path.
 
-| Re-verification Result | Action |
-| ---------------------- | ------ |
-| `passed` | Mark phase complete, proceed to `update_roadmap` |
-| `gaps_found` | Report remaining gaps and STOP -- do not auto-loop. Present: "Re-verification found {N} remaining gaps. Review: {phase_dir}/{phase}-VERIFICATION.md" |
+**Handle the verifier response through `gpd_return.status`:**
+
+- `gpd_return.status: completed`:
+  1. Do not accept `gpd_return.status: completed` until `{phase_dir}/{phase}-VERIFICATION.md` exists on disk.
+  2. The same path appears in `gpd_return.files_written`.
+  3. If either check fails, treat the re-verification handoff as blocked. Do not let a stale existing verification file satisfy the success path.
+  4. After the artifact gate passes, use the canonical verifier verdict from `gpd_return.verification_status` or the written report frontmatter:
+     - `passed` -> mark phase complete, proceed to `update_roadmap`
+     - `gaps_found` / `expert_needed` / `human_needed` -> report remaining gaps and STOP -- do not auto-loop. Present: "Re-verification found {N} remaining gaps. Review: {phase_dir}/{phase}-VERIFICATION.md" and end with `## > Next Up`: primary `gpd:plan-phase {PHASE_NUMBER} --gaps`, then `gpd:execute-phase {PHASE_NUMBER} --gaps-only`, `gpd:verify-work {PHASE_NUMBER}`, and `gpd:suggest-next`.
+- `gpd_return.status: checkpoint`: stop, surface the checkpoint payload, and end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:verify-work {PHASE_NUMBER}` and `gpd:suggest-next`. Do not wait in place for user input inside this run.
+- `gpd_return.status: blocked` / `gpd_return.status: failed`: stop in a blocked state, surface the issues, keep gap-closure state intact, and end with `## > Next Up`: primary `gpd:verify-work {PHASE_NUMBER}`, plus `gpd:resume-work` and `gpd:suggest-next`.
+
+**If the verifier output is malformed or omits `gpd_return.status`:** Treat it as blocked. Do not infer success from prose headings or untyped routing.
 
 </step>
 
@@ -1572,86 +1772,51 @@ CONSISTENCY_MODEL=$(gpd resolve-model gpd-consistency-checker)
 
 Spawn the consistency checker in rapid mode:
 
-> **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents. If subagent spawning is unavailable, execute these steps sequentially in the main context.
+> Apply the canonical runtime delegation convention above.
 
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-consistency-checker.md for your role and instructions.
 
 <mode>rapid</mode>
 <phase>{PHASE_NUMBER}</phase>
 
+<spawn_contract>
+write_scope:
+  mode: scoped_write
+  allowed_paths:
+    - "{phase_dir}/CONSISTENCY-CHECK.md"
+expected_artifacts:
+  - "{phase_dir}/CONSISTENCY-CHECK.md"
+shared_state_policy: return_only
+</spawn_contract>
+
 Check phase {PHASE_NUMBER} results against the full conventions ledger and all accumulated project state.
 Use the structured init-state payload (`convention_lock` / `derived_convention_lock`) and SUMMARY.md frontmatter convention fields first.
 Use `gpd convention list` and `file_read: GPD/STATE.md, GPD/state.json` only if the payload is missing or inconsistent.
 file_read: All SUMMARY.md files from phase {PHASE_NUMBER}
 
-Return consistency_status with any issues found.
+Return exactly one typed `gpd_return` envelope with `status: completed | checkpoint | blocked | failed`, include `files_written`, and write `{phase_dir}/CONSISTENCY-CHECK.md`. Append the same typed YAML `gpd_return` block to `{phase_dir}/CONSISTENCY-CHECK.md` before returning so the canonical applicator can validate the durable handoff from the artifact itself.
 ", subagent_type="gpd-consistency-checker", model="{consistency_model}", readonly=false, description="Rapid consistency check")
 
-**If the consistency checker agent fails to spawn or returns an error:** Proceed without cross-phase consistency checking for this wave. Note in the phase status that consistency verification was skipped. The user should run `gpd:validate-conventions` after execution completes to catch any convention drift.
-
-**If INCONSISTENT:** STOP execution. Present issues to user with resolution options:
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD > CONVENTION INCONSISTENCY DETECTED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-{issues from consistency checker}
-
-──────────────────────────────────────────────────────
-Options:
-  1. "Resolve conventions" -- spawn notation coordinator to fix (Recommended)
-  2. "Force continue" -- proceed despite inconsistency (--force-inconsistent)
-  3. "Stop" -- halt and investigate manually
-──────────────────────────────────────────────────────
-```
-
-**If "Resolve conventions":** Spawn gpd-notation-coordinator to fix the conflicts:
+**Artifact gate:** Do not accept `gpd_return.status: completed` until `{phase_dir}/CONSISTENCY-CHECK.md` exists on disk. If the artifact is missing, treat the handoff as blocked even when the runtime reported success.
 
 ```bash
-NOTATION_MODEL=$(gpd resolve-model gpd-notation-coordinator)
+CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"
+if [ ! -f "$CONSISTENCY_REPORT" ]; then
+  echo "ERROR: consistency-check artifact missing: $CONSISTENCY_REPORT"
+  exit 1
+fi
 ```
 
-> **Runtime delegation:** Spawn a subagent for the task below. Adapt the `task()` call to your runtime's agent spawning mechanism. If `model` resolves to `null` or an empty string, omit it so the runtime uses its default model. Always pass `readonly=false` for file-producing agents. If subagent spawning is unavailable, execute these steps sequentially in the main context.
+**If the consistency checker agent fails to spawn or returns an error:** Treat the consistency check as blocked. Do not proceed as if the phase was checked. End with `## > Next Up`: primary `gpd:validate-conventions`, plus `gpd:resume-work`, `gpd:execute-phase {PHASE_NUMBER}`, and `gpd:suggest-next`.
 
-```
-task(
-  subagent_type="gpd-notation-coordinator",
-  model="{NOTATION_MODEL}",
-  readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-notation-coordinator.md for your role and instructions.
+**Handle the checker response through `gpd_return.status`:**
+- `gpd_return.status: completed`: accept only if the artifact gate passes. Surface any `issues` as warnings, then continue.
+- `gpd_return.status: checkpoint`: stop, surface the checkpoint payload from the checker, and end with `## > Next Up`: primary `gpd:resume-work`, plus `gpd:validate-conventions` and `gpd:suggest-next`. Do not wait in place for user input inside this run.
+- `gpd_return.status: blocked` / `gpd_return.status: failed`: stop execution, surface the returned issues, and end with `## > Next Up`: primary `gpd:validate-conventions`, plus `gpd:resume-work` and `gpd:suggest-next`. If the user wants convention repair, route through `gpd:validate-conventions`; the fresh continuation handoff owns any notation-coordinator work.
 
-<task>
-Resolve convention inconsistencies found by consistency checker after phase {PHASE_NUMBER} execution.
-</task>
+**If the checker output is malformed or omits `gpd_return.status`:** Treat it as blocked. Do not infer success from prose headings or untyped routing. Do not hand-author or paste a synthetic `gpd_return` into an already-returned report in the orchestrator; retry or repair the checker handoff so the child owns the typed envelope.
 
-<issues>
-{consistency_checker_issues}
-</issues>
-
-<project_context>
-file_read: GPD/STATE.md, GPD/state.json, GPD/CONVENTIONS.md only if the structured payload is missing or inconsistent
-Prefer the structured init-state payload (`convention_lock` / `derived_convention_lock`) first; only reopen `STATE.md` / `state.json` if the payload is missing or inconsistent.
-file_read: All SUMMARY.md files from phase {PHASE_NUMBER}
-Load conventions: gpd convention list
-</project_context>
-
-<output>
-1. Update convention lock via gpd convention set (if lock is wrong)
-2. Update CONVENTIONS.md (if doc is stale)
-3. Flag any phase artifacts that need re-execution with corrected conventions
-4. Return CONVENTION UPDATE or CONVENTION CONFLICT
-</output>
-",
-  description="Resolve convention conflicts after Phase {PHASE_NUMBER}"
-)
-```
-
-**If the notation coordinator agent fails to spawn or returns an error:** The consistency issues remain unresolved. Offer: 1) Retry notation coordinator, 2) Resolve conflicts manually by editing CONVENTIONS.md and using `gpd convention set`, 3) Force continue with known inconsistencies (log to DECISIONS.md). Do not silently proceed — convention errors compound across phases.
-
-Handle notation-coordinator return:
-- **`CONVENTION UPDATE`:** Conventions fixed. Commit CONVENTIONS.md. If any phase artifacts were flagged for re-execution, present them to user. Continue to phase completion.
-- **`CONVENTION CONFLICT`:** Unresolvable conflict requiring user decision. Present options and wait.
+Convention repair is intentionally out-of-line here. Do not spawn `gpd-notation-coordinator` from `execute-phase`, do not route on checker-local prose markers, and do not accept a stale convention document as proof of repair. The next step is `gpd:validate-conventions`, followed by `gpd:resume-work` or a fresh `gpd:execute-phase {PHASE_NUMBER}` continuation after that workflow reports a typed result and the convention lock is valid.
 
 **If "Force continue":** Log the forced override to DECISIONS.md:
 
@@ -1662,20 +1827,23 @@ gpd state add-decision \
   --rationale "${USER_RATIONALE}"
 ```
 
-**If WARNING:** Present warnings, ask user whether to proceed or investigate.
-**If CONSISTENT:** Continue to phase completion.
+**If `gpd_return.status: completed`:** Continue to phase completion.
 </step>
 
 <step name="orchestrator_self_check">
 
-**Orchestrator Self-Accountability Checkpoint** — before marking phase complete, verify that the VERIFICATION.md lists specific attack vectors, independent limiting cases, and literature cross-references — not just confirmations. If all checks passed on first attempt with zero issues, run one additional targeted check on the most load-bearing result.
+Before marking complete, verify VERIFICATION.md lists attack vectors, limiting cases, and literature cross-references. If no issues appeared, run one targeted check on the most load-bearing result.
 
 </step>
 
 <step name="update_roadmap">
 Mark phase complete in ROADMAP.md (date, status).
 
-Follow the full transition protocol. Read `{GPD_INSTALL_DIR}/workflows/transition.md` using the file_read tool for PROJECT.md evolution, DECISIONS.md updates, and parallel phase detection.
+```bash
+CLOSEOUT_INIT=$(load_execute_phase_stage closeout) || { echo "ERROR: closeout init failed"; exit 1; }
+```
+
+Follow `{GPD_INSTALL_DIR}/workflows/transition.md` for PROJECT.md, DECISIONS.md, and parallel phase detection.
 
 ```bash
 PRE_CHECK=$(gpd pre-commit-check --files GPD/ROADMAP.md GPD/STATE.md "${phase_dir}"/*-VERIFICATION.md GPD/REQUIREMENTS.md 2>&1) || true
@@ -1689,11 +1857,10 @@ gpd commit "docs(phase-${phase_number}): complete phase execution" --files GPD/R
 <step name="cleanup_phase_checkpoints">
 **After successful phase completion (all plans passed + verification passed):**
 
-Remove all `gpd-checkpoint/*` tags for this phase -- they are no longer needed.
+Remove all `gpd-checkpoint-phase-{phase}-*` tags for this phase -- they are no longer needed.
 
 ```bash
-# List all checkpoint tags for this phase
-PHASE_TAGS=$(git tag -l "gpd-checkpoint/phase-${phase_number}-*")
+PHASE_TAGS=$(git tag -l "gpd-checkpoint-phase-${phase_number}-*")
 
 if [ -n "${PHASE_TAGS}" ]; then
   echo "Cleaning up ${phase_number} checkpoint tags..."
@@ -1710,7 +1877,7 @@ fi
 
 | Condition                               | Action                                             |
 | --------------------------------------- | -------------------------------------------------- |
-| All plans passed + verification passed  | Delete all `gpd-checkpoint/phase-{X}-*` tags       |
+| All plans passed + verification passed  | Delete all `gpd-checkpoint-phase-{X}-*` tags       |
 | Any plans failed (even if kept partial) | Keep all checkpoint tags                           |
 | Verification found gaps                 | Keep all checkpoint tags                           |
 | Phase marked complete after gap closure | Delete checkpoint tags from successful re-run only |
@@ -1723,16 +1890,26 @@ fi
 After phase completion, check the project's autonomy mode. If yolo or balanced with no pending checkpoint, auto-route to the next phase. If supervised, or if a checkpoint requires review, pause with a clear status message showing: current phase completed, why execution paused, exact next command to continue, and key artifacts to review. See `{GPD_INSTALL_DIR}/references/orchestration/continuous-execution.md` for the standard checkpoint protocol.
 </continuation_routing>
 
+Never end with only "ready to plan/continue" prose. After a successful closeout, choose exactly one matching variant and emit a `Next Up` block with concrete commands; do not print conditional "if context is missing/exists" labels in the final answer.
+
+- If the next phase has no `*-CONTEXT.md`, make `gpd:discuss-phase {X+1}` the primary command and show `gpd:plan-phase {X+1}` as the direct-plan alternative.
+- If the next phase already has context, make `gpd:plan-phase {X+1}` the primary command.
+- Always include `gpd:suggest-next` as the shortest recovery/confirmation command when the user only wants the next action.
+
 **If more phases:**
 
 ```
-## Next Up
+## > Next Up
 
 **Phase {X+1}: {Name}** -- {Goal}
 
-`gpd:plan-phase {X+1}`
+Primary: `{chosen primary command}`
 
-<sub>`/clear` first for fresh context</sub>
+**Also available:**
+- `{secondary command}` -- when relevant
+- `gpd:suggest-next` -- confirm the next action
+
+<sub>Start a fresh context window, then run the primary command above.</sub>
 ```
 
 **If milestone complete:**
@@ -1743,6 +1920,10 @@ MILESTONE COMPLETE!
 All {N} phases executed.
 
 `gpd:complete-milestone`
+
+**Also available:** `gpd:suggest-next`
+
+<sub>Start a fresh context window, then run `gpd:complete-milestone`.</sub>
 ```
 
 </step>
@@ -1750,7 +1931,7 @@ All {N} phases executed.
 </process>
 
 <context_efficiency>
-Orchestrator: ~10-15% context. Subagents: fresh contexts. No polling (Task blocks). No context bleed.
+Orchestrator stays lean per `references/orchestration/context-budget.md`; subagents get fresh contexts. No polling (Task blocks). No context bleed.
 </context_efficiency>
 
 <failure_handling>

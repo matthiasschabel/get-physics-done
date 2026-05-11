@@ -1,4 +1,4 @@
-"""Focused regressions for skill-routing quality."""
+"""Focused assertions for skill-routing quality."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ import anyio
 from gpd.registry import SkillDef
 
 
-def _skill(name: str, *, category: str, registry_name: str) -> SkillDef:
+def _skill(name: str, *, category: str, registry_name: str, source_kind: str = "command") -> SkillDef:
     return SkillDef(
         name=name,
         description=name,
         content=name,
         category=category,
         path=f"/tmp/{name}.md",
-        source_kind="command",
+        source_kind=source_kind,
         registry_name=registry_name,
     )
 
@@ -124,7 +124,9 @@ def test_route_skill_uses_live_registry_names_for_missing_manual_keyword_routes(
         return_value=[
             _skill("gpd-help", category="help", registry_name="help"),
             _skill("gpd-check-todos", category="project", registry_name="check-todos"),
+            _skill("gpd-new-milestone", category="project", registry_name="new-milestone"),
             _skill("gpd-compare-branches", category="project", registry_name="compare-branches"),
+            _skill("gpd-record-backtrack", category="management", registry_name="record-backtrack"),
             _skill("gpd-record-insight", category="project", registry_name="record-insight"),
             _skill("gpd-merge-phases", category="project", registry_name="merge-phases"),
             _skill("gpd-set-profile", category="project", registry_name="set-profile"),
@@ -133,11 +135,71 @@ def test_route_skill_uses_live_registry_names_for_missing_manual_keyword_routes(
         ],
     ):
         assert route_skill("check pending todos")["suggestion"] == "gpd-check-todos"
+        assert route_skill("start a new milestone")["suggestion"] == "gpd-new-milestone"
         assert route_skill("compare two branches side by side")["suggestion"] == "gpd-compare-branches"
         assert route_skill("record an insight from this session")["suggestion"] == "gpd-record-insight"
+        assert route_skill("record a backtrack after undoing work")["suggestion"] == "gpd-record-backtrack"
         assert route_skill("merge two phases together")["suggestion"] == "gpd-merge-phases"
         assert route_skill("set the research profile")["suggestion"] == "gpd-set-profile"
         assert route_skill("reapply local patches after update")["suggestion"] == "gpd-reapply-patches"
+
+
+def test_route_skill_uses_phrase_level_routes_for_onboarding_and_setup_commands() -> None:
+    from gpd.mcp.servers.skills_server import route_skill
+
+    with patch(
+        "gpd.mcp.servers.skills_server._load_skill_index",
+        return_value=[
+            _skill("gpd-help", category="help", registry_name="help"),
+            _skill("gpd-execute-phase", category="execution", registry_name="execute-phase"),
+            _skill("gpd-map-research", category="research", registry_name="map-research"),
+            _skill("gpd-set-tier-models", category="settings", registry_name="set-tier-models"),
+            _skill("gpd-start", category="help", registry_name="start"),
+            _skill("gpd-tour", category="help", registry_name="tour"),
+        ],
+    ):
+        assert route_skill("map an existing folder before planning")["suggestion"] == "gpd-map-research"
+        assert route_skill("refresh the research map")["suggestion"] == "gpd-map-research"
+        assert route_skill("pin exact tier models for this runtime")["suggestion"] == "gpd-set-tier-models"
+        assert route_skill("guided first run for a new folder")["suggestion"] == "gpd-start"
+        assert route_skill("want a guided overview of the main commands")["suggestion"] == "gpd-tour"
+        assert route_skill("guided first run for a new folder")["suggestion"] != "gpd-execute-phase"
+
+
+def test_route_skill_uses_phrase_priorities_for_publication_review_workflows() -> None:
+    from gpd.mcp.servers.skills_server import route_skill
+
+    with patch(
+        "gpd.mcp.servers.skills_server._load_skill_index",
+        return_value=[
+            _skill("gpd-help", category="help", registry_name="help"),
+            _skill("gpd-write-paper", category="paper", registry_name="write-paper"),
+            _skill("gpd-literature-review", category="research", registry_name="literature-review"),
+            _skill("gpd-peer-review", category="review", registry_name="peer-review"),
+            _skill("gpd-respond-to-referees", category="paper", registry_name="respond-to-referees"),
+            _skill("gpd-review-knowledge", category="knowledge", registry_name="review-knowledge"),
+        ],
+    ):
+        assert route_skill("review manuscript before submission")["suggestion"] == "gpd-peer-review"
+        assert route_skill("referee response for the paper")["suggestion"] == "gpd-respond-to-referees"
+        assert route_skill("respond to referee comments")["suggestion"] == "gpd-respond-to-referees"
+        assert route_skill("approve knowledge note for promotion")["suggestion"] == "gpd-review-knowledge"
+        assert route_skill("promote knowledge draft")["suggestion"] == "gpd-review-knowledge"
+
+
+def test_route_skill_prefers_command_skills_over_agent_skills_on_equal_score() -> None:
+    from gpd.mcp.servers.skills_server import route_skill
+
+    skills = [
+        _skill("gpd-debugger-agent", category="debugging", registry_name="debug", source_kind="agent"),
+        _skill("gpd-debug", category="debugging", registry_name="debug", source_kind="command"),
+        _skill("gpd-help", category="help", registry_name="help"),
+    ]
+
+    with patch("gpd.mcp.servers.skills_server._load_skill_index", return_value=skills):
+        result = route_skill("debug this failure")
+
+    assert result["suggestion"] == "gpd-debug"
 
 
 def test_canonicalize_command_surface_rewrites_real_command_examples_only() -> None:

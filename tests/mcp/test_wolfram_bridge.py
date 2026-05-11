@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from contextlib import asynccontextmanager
 
 import pytest
@@ -24,6 +28,40 @@ def test_resolve_api_key_rejects_compatibility_alias() -> None:
 
     with pytest.raises(RuntimeError, match="GPD_WOLFRAM_MCP_API_KEY"):
         resolve_api_key({"WOLFRAM_MCP_SERVICE_API_KEY": "legacy-token"})
+
+
+def test_managed_wolfram_summary_only_reports_canonical_api_key_env() -> None:
+    from gpd.mcp.managed_integrations import WOLFRAM_MANAGED_INTEGRATION, WOLFRAM_MCP_API_KEY_ENV_VAR
+
+    summary = WOLFRAM_MANAGED_INTEGRATION.config_summary({"WOLFRAM_MCP_SERVICE_API_KEY": "legacy-token"})
+    serialized = json.dumps(summary)
+
+    assert summary["api_key_env_var"] == WOLFRAM_MCP_API_KEY_ENV_VAR
+    assert summary["api_key_env_vars"] == [WOLFRAM_MCP_API_KEY_ENV_VAR]
+    assert summary["missing_api_key_env_vars"] == [WOLFRAM_MCP_API_KEY_ENV_VAR]
+    assert summary["api_key_recovery"] == f"Set {WOLFRAM_MCP_API_KEY_ENV_VAR}."
+    assert "ignored_legacy_api_key_env_vars" not in summary
+    assert "WOLFRAM_MCP_SERVICE_API_KEY" not in serialized
+
+
+def test_module_entrypoint_invokes_main_without_eager_package_import_warning() -> None:
+    env = os.environ.copy()
+    env.pop("GPD_WOLFRAM_MCP_API_KEY", None)
+    env.pop("WOLFRAM_MCP_SERVICE_API_KEY", None)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "gpd.mcp.integrations.wolfram_bridge"],
+        capture_output=True,
+        env=env,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    combined_output = result.stdout + result.stderr
+
+    assert result.returncode != 0
+    assert "GPD_WOLFRAM_MCP_API_KEY" in combined_output
+    assert "RuntimeWarning" not in combined_output
 
 
 def test_resolve_endpoint_and_api_key_use_the_managed_descriptor_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -80,6 +118,22 @@ def test_load_settings_rejects_an_empty_endpoint_override() -> None:
             {
                 GPD_WOLFRAM_MCP_API_KEY_ENV: "secret-token",
                 WOLFRAM_MCP_ENDPOINT_ENV_VAR: "   ",
+            }
+        )
+
+
+def test_load_settings_rejects_a_non_https_endpoint_override() -> None:
+    from gpd.mcp.integrations.wolfram_bridge import (
+        GPD_WOLFRAM_MCP_API_KEY_ENV,
+        WOLFRAM_MCP_ENDPOINT_ENV_VAR,
+        load_settings,
+    )
+
+    with pytest.raises(RuntimeError, match="GPD_WOLFRAM_MCP_ENDPOINT must be an HTTPS URL"):
+        load_settings(
+            {
+                GPD_WOLFRAM_MCP_API_KEY_ENV: "secret-token",
+                WOLFRAM_MCP_ENDPOINT_ENV_VAR: "http://example.invalid/api/mcp",
             }
         )
 
@@ -249,12 +303,46 @@ async def test_bridge_list_resource_templates_preserves_cursor_and_next_cursor()
 
 
 def test_build_server_registers_expected_server_name() -> None:
-    from gpd.mcp.integrations.wolfram_bridge import WolframBridgeConfig, build_server
+    from gpd.mcp.integrations.wolfram_bridge import WOLFRAM_MANAGED_SERVER_KEY, WolframBridgeConfig, build_server
 
     server, bridge = build_server(WolframBridgeConfig(api_key="bridge-token", endpoint="https://example.invalid/mcp"))
 
     assert bridge.config.endpoint == "https://example.invalid/mcp"
-    assert server.name == "gpd-wolfram"
+    assert server.name == WOLFRAM_MANAGED_SERVER_KEY
+
+
+@pytest.mark.asyncio
+async def test_build_server_resource_handlers_match_lowlevel_server_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    from mcp import types
+
+    from gpd.mcp.integrations.wolfram_bridge import WolframBridgeConfig, build_server
+
+    server, bridge = build_server(WolframBridgeConfig(api_key="bridge-token", endpoint="https://example.invalid/mcp"))
+    template = types.ResourceTemplate(name="wolf-template", uriTemplate="wolfram://{name}")
+
+    async def fake_read_resource(uri: str):
+        return types.ReadResourceResult(
+            contents=[types.TextResourceContents(uri=uri, text="content", mimeType="text/plain")]
+        )
+
+    async def fake_list_resource_templates(cursor: str | None = None):
+        assert cursor == "cursor-1"
+        return types.ListResourceTemplatesResult(resourceTemplates=[template], nextCursor="cursor-ignored")
+
+    monkeypatch.setattr(bridge, "read_resource", fake_read_resource)
+    monkeypatch.setattr(bridge, "list_resource_templates", fake_list_resource_templates)
+
+    read_response = await server.request_handlers[types.ReadResourceRequest](
+        types.ReadResourceRequest(params=types.ReadResourceRequestParams(uri="https://example.invalid/resource"))
+    )
+    templates_response = await server.request_handlers[types.ListResourceTemplatesRequest](
+        types.ListResourceTemplatesRequest(params=types.PaginatedRequestParams(cursor="cursor-1"))
+    )
+
+    assert read_response.root.contents[0].text == "content"
+    assert read_response.root.contents[0].mimeType == "text/plain"
+    assert templates_response.root.resourceTemplates == [template]
+    assert templates_response.root.nextCursor == "cursor-ignored"
 
 
 def test_pyproject_exposes_the_wolfram_console_script() -> None:

@@ -1,10 +1,26 @@
 ---
 name: gpd:respond-to-referees
-description: Structure a point-by-point response to referee reports and update the manuscript
-argument-hint: "[path to referee report or 'paste']"
-context_mode: project-required
-requires:
-  files: ["paper/*.tex", "paper/*.md", "manuscript/*.tex", "manuscript/*.md", "draft/*.tex", "draft/*.md"]
+description: Structure a point-by-point response to referee reports for an explicit manuscript target or the current GPD manuscript
+argument-hint: "[--manuscript PATH] (--report PATH [--report PATH...] | paste)"
+context_mode: project-aware
+command-policy:
+  schema_version: 1
+  subject_policy:
+    subject_kind: publication
+    resolution_mode: explicit_or_project_manuscript
+    explicit_input_kinds:
+      - manuscript_path
+      - referee_report_path
+      - paste_referee_report
+    allow_external_subjects: true
+    supported_roots:
+      - paper
+      - manuscript
+      - draft
+  output_policy:
+    output_mode: managed
+    managed_root_kind: gpd_managed_durable
+    default_output_subtree: GPD
 review-contract:
   review_mode: publication
   schema_version: 1
@@ -26,6 +42,27 @@ review-contract:
     - manuscript
     - referee_report_source
     - conventions
+  scope_variants:
+    - scope: managed_publication_subject
+      activation: manuscript subject under `GPD/publication/{subject_slug}/manuscript`
+      required_outputs_override:
+        - "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md"
+        - "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md"
+    - scope: explicit_external_manuscript
+      activation: explicit `--manuscript` subject outside the current project's canonical manuscript roots
+      relaxed_preflight_checks:
+        - project_state
+        - conventions
+      required_outputs_override:
+        - "GPD/publication/{subject_slug}/review/REFEREE_RESPONSE{round_suffix}.md"
+        - "GPD/publication/{subject_slug}/AUTHOR-RESPONSE{round_suffix}.md"
+      required_evidence_override:
+        - explicit manuscript subject
+        - one or more referee report sources
+      blocking_conditions_override:
+        - missing manuscript subject
+        - missing referee report source
+        - degraded review integrity
 allowed-tools:
   - file_read
   - file_write
@@ -39,56 +76,27 @@ allowed-tools:
 <objective>
 Structure a point-by-point response to referee reports and revise the manuscript accordingly.
 
-Keep the wrapper focused on referee triage, revision routing, and synchronized response artifacts.
-
-**Why subagent:** Referee triage and synchronized manuscript revision burn context fast. Fresh context keeps the orchestrator lean.
+Keep the wrapper focused on referee triage, revision routing, and synchronized response artifacts while the workflow owns the full revision pipeline.
+**Why subagent:** Referee triage and synchronized revisions burn context fast. Fresh context keeps orchestration lean.
 </objective>
 
 <execution_context>
 @{GPD_INSTALL_DIR}/workflows/respond-to-referees.md
-@{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md
-@{GPD_INSTALL_DIR}/templates/paper/bibliography-audit-schema.md
-@{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md
-@{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md
+@{GPD_INSTALL_DIR}/references/publication/publication-review-wrapper-guidance.md
 </execution_context>
 
 <context>
-Referee report source: $ARGUMENTS (file path or "paste" for inline input)
-
-@GPD/STATE.md
-@GPD/AUTHOR-RESPONSE{round_suffix}.md
-@GPD/review/REFEREE_RESPONSE{round_suffix}.md
-@GPD/review/REVIEW-LEDGER{round_suffix}.json
-@GPD/review/REFEREE-DECISION{round_suffix}.json
-
-Check for prior response and staged review files:
-
-```bash
-ls GPD/AUTHOR-RESPONSE*.md 2>/dev/null
-ls GPD/review/REFEREE_RESPONSE*.md 2>/dev/null
-ls GPD/review/REVIEW-LEDGER*.json GPD/review/REFEREE-DECISION*.json 2>/dev/null
-```
-
-Use centralized preflight to resolve the active manuscript only from the canonical manuscript roots `paper/`, `manuscript/`, or `draft/` via the manuscript-root manifest/config/entrypoint resolver. For this command, the explicit argument is the referee-report source path (or the `paste` sentinel), not a manuscript selector. Do not reintroduce first-match wildcard discovery here.
-
+Referee report source: $ARGUMENTS (file path or `paste`). Preferred explicit intake is `--manuscript PATH` plus one or more `--report PATH`; single report path or `paste` shorthand requires a project-resolved manuscript.
+Normalize explicit intake into one validator-safe subject payload before `validate command-context` or `validate review-preflight`; pass payloads beginning with `--` after an end-of-options marker.
+The workflow resolves the manuscript root, review artifacts, and revision targets. Keep manuscript edits on the resolved manuscript root, not the report path. Project-backed response rounds keep the current global `GPD/` / `GPD/review/` ownership. Explicit external subjects may bind the same GPD-owned response lineage to a subject-owned publication root at `GPD/publication/{subject_slug}`; that is a bounded continuation path, not a full relocation of manuscript-local publication artifacts.
 </context>
 
 <process>
-@{GPD_INSTALL_DIR}/references/publication/publication-review-wrapper-guidance.md
-@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md
-@{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md
-
-Follow `@{GPD_INSTALL_DIR}/workflows/respond-to-referees.md` exactly.
+Follow the included respond-to-referees workflow exactly.
 </process>
 
 <success_criteria>
-- [ ] Referee reports parsed and all comments categorized and prioritized
-- [ ] `GPD/review/REVIEW-LEDGER*.json` and `GPD/review/REFEREE-DECISION*.json` consumed when available
-- [ ] `GPD/AUTHOR-RESPONSE{round_suffix}.md` and `GPD/review/REFEREE_RESPONSE{round_suffix}.md` created with complete point-by-point structure
-- [ ] Comments triaged into response-only, revision, and new calculation groups
-- [ ] All responses drafted and revisions applied via paper-writer agents
-- [ ] Revised manuscript compiles without errors
-- [ ] Internal consistency verified after revisions (max 3 iterations)
-- [ ] Response letter generated with change summary
-- [ ] All artifacts committed
+- [ ] Workflow ran end to end with one manuscript subject and one or more referee report sources
+- [ ] Referee response, manuscript revision artifacts, and review artifacts stayed synchronized
+- [ ] GPD-authored auxiliary outputs stayed under selected GPD roots, with workflow-owned gates handled inside the workflow
 </success_criteria>

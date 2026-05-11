@@ -44,11 +44,19 @@ from gpd.core.constants import (
 )
 from gpd.core.contract_validation import _format_schema_error
 from gpd.core.errors import GPDError
+from gpd.core.knowledge_review_hash import compute_knowledge_reviewed_content_sha256
 from gpd.core.observability import instrument_gpd_function
 from gpd.core.root_resolution import resolve_project_root
 from gpd.core.strict_yaml import load_strict_yaml
 from gpd.core.tool_preflight import PlanToolPreflightError, parse_plan_tool_requirements
-from gpd.core.utils import matching_phase_artifact_count, phase_artifact_display_name, phase_artifact_id, safe_read_file
+from gpd.core.utils import (
+    is_phase_complete,
+    matching_phase_artifact_count,
+    normalize_ascii_slug,
+    phase_artifact_display_name,
+    phase_artifact_id,
+    safe_read_file,
+)
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -64,10 +72,12 @@ __all__ = [
     "splice_frontmatter",
     "deep_merge_frontmatter",
     "parse_contract_block",
+    "compute_knowledge_reviewed_content_sha256",
     # Schema validation
     "FRONTMATTER_SCHEMAS",
     "FrontmatterValidation",
     "validate_frontmatter",
+    "validate_knowledge_frontmatter",
     # Verification result types
     "FileCheckResult",
     "SummaryVerification",
@@ -90,6 +100,7 @@ __all__ = [
 PLAN_FRONTMATTER_TYPES = ("execute", "tdd")
 SUMMARY_DEPTH_VALUES = ("minimal", "standard", "full", "complex")
 VERIFICATION_REPORT_STATUSES = ("passed", "gaps_found", "expert_needed", "human_needed")
+KNOWLEDGE_GATE_VALUES = ("off", "warn", "block")
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -190,7 +201,7 @@ def splice_frontmatter(content: str, updates: dict) -> str:
     Preserves the body and detects CRLF vs LF line endings from the original
     content.  If *content* has no frontmatter block, one is prepended.
     """
-    meta, body = extract_frontmatter(content)
+    meta, _body = extract_frontmatter(content)
     meta.update(updates)
 
     eol = "\r\n" if "\r\n" in content else "\n"
@@ -258,11 +269,116 @@ def _prefixed_validation_errors(field_name: str, exc: Exception) -> list[str]:
     return [f"{field_name}: {exc}"]
 
 
+def _dedupe_messages(messages: list[str]) -> list[str]:
+    """Return messages in first-seen order without duplicates."""
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for message in messages:
+        if message in seen:
+            continue
+        seen.add(message)
+        deduped.append(message)
+    return deduped
+
+
+def _contract_results_diagnostic_hints(exc: Exception) -> list[str]:
+    """Return local hints for common contract-results schema mixups."""
+
+    if not isinstance(exc, PydanticValidationError):
+        return []
+
+    hints: list[str] = []
+    subject_sections = {"claims", "deliverables", "acceptance_tests"}
+    for error in exc.errors():
+        loc = tuple(error.get("loc", ()))
+        if len(loc) >= 3 and loc[0] in subject_sections and loc[-1] == "status":
+            if error.get("input") == "gaps_found":
+                location = ".".join(str(part) for part in loc)
+                hints.append(
+                    f"{location}: gaps_found is a top-level verification status, not a nested "
+                    "contract_results status; use passed, partial, failed, blocked, or not_attempted"
+                )
+        elif len(loc) >= 3 and loc[0] == "forbidden_proxies" and loc[-1] == "status":
+            if error.get("input") == "passed":
+                location = ".".join(str(part) for part in loc)
+                hints.append(
+                    f"{location}: forbidden proxy status cannot be passed; use rejected when the proxy "
+                    "was ruled out, or violated/unresolved when it remains a problem"
+                )
+        elif loc == ("status",):
+            hints.append(
+                "status: contract_results has no aggregate status; use top-level verification.status "
+                "for passed, gaps_found, expert_needed, or human_needed"
+            )
+
+    return _dedupe_messages(hints)
+
+
+def _comparison_verdicts_diagnostic_hints(exc: Exception) -> list[str]:
+    """Return local hints for common comparison-verdict schema mixups."""
+
+    cause = exc if isinstance(exc, PydanticValidationError) else exc.__cause__
+    if not isinstance(cause, PydanticValidationError):
+        return []
+
+    index_prefix = ""
+    if match := re.match(r"\[(\d+)\]\s+", str(exc)):
+        index_prefix = f"[{match.group(1)}] "
+
+    hints: list[str] = []
+    for error in cause.errors():
+        loc = tuple(error.get("loc", ()))
+        if loc == ("evidence",):
+            hints.append(
+                f"{index_prefix}evidence: comparison_verdicts do not carry evidence; "
+                "attach evidence under contract_results entries"
+            )
+        elif loc == ("comparison_kind",) and error.get("input") == "reproducibility":
+            hints.append(
+                f"{index_prefix}comparison_kind: reproducibility is an acceptance-test kind, not a "
+                "comparison verdict kind; use benchmark, prior_work, experiment, cross_method, baseline, or other"
+            )
+
+    return _dedupe_messages(hints)
+
+
+def _raw_comparison_verdict_contract_id_errors(value: object, contract: ResearchContract) -> list[str]:
+    """Return contract-ID diagnostics for raw verdicts that failed schema parsing."""
+
+    if not isinstance(value, list):
+        return []
+
+    known_subject_ids = (
+        {claim.id for claim in contract.claims}
+        | {deliverable.id for deliverable in contract.deliverables}
+        | {test.id for test in contract.acceptance_tests}
+        | {reference.id for reference in contract.references}
+    )
+    known_reference_ids = {reference.id for reference in contract.references}
+
+    errors: list[str] = []
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            continue
+        subject_id = entry.get("subject_id")
+        if isinstance(subject_id, str) and subject_id not in known_subject_ids:
+            errors.append(f"comparison_verdicts: [{index}] references unknown subject_id {subject_id}")
+        reference_id = entry.get("reference_id")
+        if isinstance(reference_id, str) and reference_id not in known_reference_ids:
+            errors.append(f"comparison_verdicts: [{index}] references unknown reference_id {reference_id}")
+    return _dedupe_messages(errors)
+
+
 def _source_path_project_root(source_path: Path | None) -> Path | None:
     """Return the project root inferred from a file source path, when available."""
 
     if source_path is None:
         return None
+    source_dir = source_path.parent.resolve(strict=False)
+    for candidate in (source_dir, *source_dir.parents):
+        if (candidate / "GPD").is_dir():
+            return candidate
     return resolve_project_root(source_path.parent, require_layout=False)
 
 
@@ -352,9 +468,7 @@ def parse_contract_block(content: str, *, source_path: Path | None = None) -> Re
         project_root=_source_path_project_root(source_path),
     )
     if resolution.errors:
-        raise FrontmatterValidationError(
-            "Invalid contract frontmatter: " + "; ".join(resolution.errors)
-        )
+        raise FrontmatterValidationError("Invalid contract frontmatter: " + "; ".join(resolution.errors))
     return resolution.contract
 
 
@@ -382,7 +496,194 @@ FRONTMATTER_SCHEMAS: dict[str, dict[str, list[str]]] = {
     "verification": {
         "required": ["phase", "verified", "status", "score"],
     },
+    "knowledge": {
+        "required": [
+            "knowledge_schema_version",
+            "knowledge_id",
+            "title",
+            "topic",
+            "status",
+            "created_at",
+            "updated_at",
+            "sources",
+            "coverage_summary",
+        ],
+    },
 }
+
+
+def validate_knowledge_frontmatter(
+    content: str,
+    source_path: Path | None = None,
+) -> FrontmatterValidation:
+    """Validate knowledge frontmatter against the strict knowledge-doc schema."""
+
+    meta, body = extract_frontmatter(content)
+    required = FRONTMATTER_SCHEMAS["knowledge"]["required"]
+    missing = [f for f in required if _resolve_field(meta, f) is None]
+    present = [f for f in required if _resolve_field(meta, f) is not None]
+
+    errors: list[str] = []
+
+    unknown_fields = sorted(set(meta) - _KNOWLEDGE_TOP_LEVEL_FIELDS)
+    for field_name in unknown_fields:
+        errors.append(f"knowledge.{field_name}: unsupported field")
+
+    if meta.get("knowledge_schema_version") != 1:
+        errors.append("knowledge.knowledge_schema_version: must be the literal integer 1")
+
+    _validate_knowledge_string_field(meta, "knowledge_id", errors)
+    knowledge_id = meta.get("knowledge_id")
+    if isinstance(knowledge_id, str):
+        slug = knowledge_id.strip()
+        if not slug.startswith("K-") or not slug[2:] or normalize_ascii_slug(slug[2:]) != slug[2:]:
+            errors.append("knowledge.knowledge_id: must use canonical K-{ascii-hyphen-slug} format")
+
+    _validate_knowledge_string_field(meta, "title", errors)
+    _validate_knowledge_string_field(meta, "topic", errors)
+
+    status = meta.get("status")
+    if not isinstance(status, str) or not status.strip():
+        errors.append("knowledge.status: expected a non-empty string")
+        status_value = ""
+    else:
+        status_value = status.strip()
+        if status_value not in _KNOWLEDGE_STATUS_VALUES:
+            errors.append("knowledge.status: must be one of draft, in_review, stable, superseded")
+
+    created_at = _validate_knowledge_datetime_field(meta, "created_at", errors)
+    updated_at = _validate_knowledge_datetime_field(meta, "updated_at", errors)
+    if created_at is not None and updated_at is not None and updated_at < created_at:
+        errors.append("knowledge.updated_at must be on or after knowledge.created_at")
+
+    sources = meta.get("sources")
+    if not isinstance(sources, list):
+        errors.append("knowledge.sources: expected a list")
+        sources = []
+    elif not sources:
+        errors.append("knowledge.sources: must contain at least one source record")
+    for index, source in enumerate(sources):
+        if not isinstance(source, dict):
+            errors.append(f"knowledge.sources[{index}]: expected an object")
+            continue
+        allowed_source_fields = {
+            "source_id",
+            "kind",
+            "locator",
+            "title",
+            "why_it_matters",
+            "source_artifacts",
+            "reference_id",
+            "arxiv_id",
+            "doi",
+            "url",
+        }
+        for field_name in sorted(set(source) - allowed_source_fields):
+            errors.append(f"knowledge.sources[{index}].{field_name}: unsupported field")
+        _validate_knowledge_string_field(source, "source_id", errors)
+        _validate_knowledge_string_field(source, "locator", errors)
+        _validate_knowledge_string_field(source, "title", errors)
+        _validate_knowledge_string_field(source, "why_it_matters", errors)
+        source_kind = source.get("kind")
+        if source_kind is not None:
+            if not isinstance(source_kind, str) or not source_kind.strip():
+                errors.append(f"knowledge.sources[{index}].kind: expected a non-empty string")
+            elif source_kind.strip() not in ("paper", "dataset", "prior_artifact", "spec", "website", "other"):
+                errors.append(
+                    f"knowledge.sources[{index}].kind: must be one of paper, dataset, prior_artifact, spec, website, other"
+                )
+        source_artifacts = source.get("source_artifacts", [])
+        if source_artifacts is not None:
+            if not isinstance(source_artifacts, list):
+                errors.append(f"knowledge.sources[{index}].source_artifacts: expected a list")
+            else:
+                for artifact_index, artifact in enumerate(source_artifacts):
+                    if not isinstance(artifact, str) or not artifact.strip():
+                        errors.append(
+                            f"knowledge.sources[{index}].source_artifacts[{artifact_index}]: expected a non-empty string"
+                        )
+                    elif _is_absolute_path(artifact) or _has_parent_path_component(artifact):
+                        errors.append(
+                            f"knowledge.sources[{index}].source_artifacts[{artifact_index}]: must be project-relative"
+                        )
+        for optional_field in ("reference_id", "arxiv_id", "doi", "url"):
+            optional_value = source.get(optional_field)
+            if optional_value is not None and (not isinstance(optional_value, str) or not optional_value.strip()):
+                errors.append(f"knowledge.sources[{index}].{optional_field}: expected a string")
+
+    coverage_summary = meta.get("coverage_summary")
+    if not isinstance(coverage_summary, dict):
+        errors.append("knowledge.coverage_summary: expected an object")
+    else:
+        allowed_summary_fields = {"covered_topics", "excluded_topics", "open_gaps"}
+        for field_name in sorted(set(coverage_summary) - allowed_summary_fields):
+            errors.append(f"knowledge.coverage_summary.{field_name}: unsupported field")
+        for field_name in ("covered_topics", "excluded_topics", "open_gaps"):
+            _validate_knowledge_string_list_field(
+                coverage_summary.get(field_name),
+                field_name=f"coverage_summary.{field_name}",
+                errors=errors,
+            )
+
+    review = meta.get("review")
+    current_content_sha256 = compute_knowledge_reviewed_content_sha256(content)
+    if status_value == "draft":
+        if review is not None:
+            errors.append("knowledge.review is forbidden when status is draft")
+    elif status_value == "in_review":
+        if review is not None:
+            _validate_knowledge_review_block(
+                review,
+                status=status_value,
+                current_content_sha256=current_content_sha256,
+                errors=errors,
+            )
+    elif status_value == "stable":
+        if review is None:
+            errors.append("knowledge.review is required when status is stable")
+        else:
+            _validate_knowledge_review_block(
+                review,
+                status=status_value,
+                current_content_sha256=current_content_sha256,
+                errors=errors,
+            )
+    elif status_value == "superseded":
+        if review is not None:
+            _validate_knowledge_review_block(
+                review,
+                status=status_value,
+                current_content_sha256=current_content_sha256,
+                errors=errors,
+            )
+
+        superseded_by = meta.get("superseded_by")
+        if not isinstance(superseded_by, str) or not superseded_by.strip():
+            errors.append("knowledge.superseded_by: expected a non-empty string")
+        else:
+            slug = superseded_by.strip()
+            if not slug.startswith("K-") or not slug[2:] or normalize_ascii_slug(slug[2:]) != slug[2:]:
+                errors.append("knowledge.superseded_by: must use canonical K-{ascii-hyphen-slug} format")
+            if slug == knowledge_id:
+                errors.append("knowledge.superseded_by must reference a different knowledge_id")
+    else:
+        if meta.get("superseded_by") is not None:
+            errors.append(f"knowledge.superseded_by is forbidden when status is {status_value or 'invalid'}")
+
+    if status_value in {"draft", "in_review", "stable"} and meta.get("superseded_by") is not None:
+        errors.append(f"knowledge.superseded_by is forbidden when status is {status_value}")
+
+    if source_path is not None and source_path.stem != str(knowledge_id or ""):
+        errors.append(f"knowledge_id must match the filename stem ({source_path.stem!r} != {knowledge_id!r})")
+
+    return FrontmatterValidation(
+        valid=len(missing) == 0 and not errors,
+        missing=missing,
+        present=present,
+        errors=errors,
+        schema_name="knowledge",
+    )
+
 
 UNSUPPORTED_FRONTMATTER_FIELDS: dict[str, dict[str, str]] = {
     "plan": {
@@ -404,6 +705,11 @@ UNSUPPORTED_FRONTMATTER_FIELDS: dict[str, dict[str, str]] = {
         "verification_inputs": "verification_inputs is not part of the contract-first verification schema; use contract_results and comparison_verdicts instead",
         "contract_evidence": "contract_evidence is not part of the contract-first verification schema; use contract_results instead",
         "independently_confirmed": "independently_confirmed is not part of the contract-first verification schema; keep aggregate confirmation counts in body prose instead",
+        "artifact_hashes": "artifact_hashes is runtime hash scratch, not verification frontmatter; put hashes in body evidence or structured contract_results evidence",
+        "stale_artifact_hashes_rejected": "stale_artifact_hashes_rejected is stale-hash scratch, not verification frontmatter; put hashes in body evidence or structured contract_results evidence",
+        "runtime": "runtime is session metadata, not verification frontmatter; keep runtime details in body evidence or return envelopes",
+        "computational_oracle": "computational_oracle is enforced by the verification-contract validator from body evidence, not an ad hoc frontmatter flag",
+        "gpd_return": "gpd_return is a return envelope, not verification frontmatter; keep typed return data outside YAML frontmatter",
     },
 }
 
@@ -423,6 +729,211 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _is_absolute_path(path_text: str) -> bool:
+    """Cross-platform absolute-path check for string paths.
+
+    ``Path(x).is_absolute()`` uses the *native* platform flavour, so on Linux
+    it will **not** recognise ``C:\\foo`` as absolute (and vice-versa for
+    ``/foo`` on Windows).  This helper covers both families:
+
+    * ``/foo``  -> True on every OS  (Unix absolute)
+    * ``C:\\foo`` or ``C:/foo`` -> True on Windows via ``Path``
+    * ``relative/path`` -> False everywhere
+    """
+    if path_text.startswith("/"):
+        return True
+    if re.match(r"^[A-Za-z]:[\\/]", path_text):
+        return True
+    if path_text.startswith("\\\\"):
+        return True
+    return Path(path_text).is_absolute()
+
+
+def _has_parent_path_component(path_text: str) -> bool:
+    return any(part == ".." for part in path_text.replace("\\", "/").split("/"))
+
+
+_KNOWLEDGE_STATUS_VALUES = ("draft", "in_review", "stable", "superseded")
+_KNOWLEDGE_TOP_LEVEL_FIELDS = {
+    "knowledge_schema_version",
+    "knowledge_id",
+    "title",
+    "topic",
+    "status",
+    "created_at",
+    "updated_at",
+    "sources",
+    "coverage_summary",
+    "review",
+    "superseded_by",
+}
+_KNOWLEDGE_REVIEW_CANONICAL_FIELDS = {
+    "reviewed_at",
+    "review_round",
+    "reviewer_kind",
+    "reviewer_id",
+    "decision",
+    "summary",
+    "approval_artifact_path",
+    "approval_artifact_sha256",
+    "reviewed_content_sha256",
+    "stale",
+}
+_KNOWLEDGE_REVIEW_DECISION_VALUES = ("approved", "needs_changes", "rejected")
+
+
+def _parse_iso8601_datetime(value: object) -> datetime | None:
+    """Parse an ISO 8601 timestamp or return ``None`` when invalid."""
+
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        return datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _is_lower_hex_sha256(value: object) -> bool:
+    """Return True when *value* is a lowercase SHA-256 digest string."""
+
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and value == value.lower()
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _validate_knowledge_string_field(meta: dict[str, object], field_name: str, errors: list[str]) -> None:
+    """Append an error when a required field is not a non-empty string."""
+
+    value = meta.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"knowledge.{field_name}: expected a non-empty string")
+
+
+def _validate_knowledge_string_list_field(
+    value: object,
+    *,
+    field_name: str,
+    errors: list[str],
+) -> None:
+    """Append an error when a field is not a list of non-empty strings."""
+
+    if not isinstance(value, list):
+        errors.append(f"knowledge.{field_name}: expected a list")
+        return
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"knowledge.{field_name}: entry {index} must be a non-empty string")
+
+
+def _validate_knowledge_datetime_field(meta: dict[str, object], field_name: str, errors: list[str]) -> datetime | None:
+    """Append an error when a required field is not an ISO 8601 timestamp."""
+
+    value = meta.get(field_name)
+    parsed = _parse_iso8601_datetime(value)
+    if parsed is None:
+        errors.append(f"knowledge.{field_name}: expected an ISO 8601 timestamp")
+    return parsed
+
+
+def _validate_knowledge_sha256_field(meta: dict[str, object], field_name: str, errors: list[str]) -> str | None:
+    """Append an error when a required field is not a lowercase SHA-256 digest."""
+
+    value = meta.get(field_name)
+    if not _is_lower_hex_sha256(value):
+        errors.append(f"knowledge.review.{field_name}: expected a lowercase 64-hex sha256 digest")
+        return None
+    return str(value)
+
+
+def _validate_knowledge_project_relative_path(
+    meta: dict[str, object],
+    field_name: str,
+    errors: list[str],
+) -> str | None:
+    """Append an error when a required field is not a project-relative path."""
+
+    value = meta.get(field_name)
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"knowledge.review.{field_name}: expected a non-empty string")
+        return None
+    stripped = value.strip()
+    if _is_absolute_path(stripped) or _has_parent_path_component(stripped):
+        errors.append(f"knowledge.review.{field_name}: must be a project-relative path")
+        return None
+    return stripped
+
+
+def _validate_knowledge_review_block(
+    review: object,
+    *,
+    status: str,
+    current_content_sha256: str,
+    errors: list[str],
+) -> None:
+    """Validate the knowledge review block against the requested lifecycle state."""
+
+    if not isinstance(review, dict):
+        errors.append("knowledge.review: expected an object")
+        return
+
+    review_field_names = set(review)
+    unknown_fields = sorted(review_field_names - _KNOWLEDGE_REVIEW_CANONICAL_FIELDS)
+    for field_name in unknown_fields:
+        errors.append(f"knowledge.review.{field_name}: unsupported field")
+
+    reviewed_at = _validate_knowledge_datetime_field(review, "reviewed_at", errors)
+    decision = review.get("decision")
+    if not isinstance(decision, str) or not decision.strip():
+        errors.append("knowledge.review.decision: expected a non-empty string")
+        decision_value = None
+    else:
+        decision_value = decision.strip()
+        if decision_value not in _KNOWLEDGE_REVIEW_DECISION_VALUES:
+            errors.append("knowledge.review.decision: must be one of approved, needs_changes, rejected")
+
+    summary = review.get("summary")
+    if not isinstance(summary, str) or not summary.strip():
+        errors.append("knowledge.review.summary: expected a non-empty string")
+
+    if not isinstance(review.get("reviewer_kind"), str) or not review.get("reviewer_kind", "").strip():
+        errors.append("knowledge.review.reviewer_kind: expected a non-empty string")
+    if not isinstance(review.get("reviewer_id"), str) or not review.get("reviewer_id", "").strip():
+        errors.append("knowledge.review.reviewer_id: expected a non-empty string")
+    if reviewed_at is None:
+        errors.append("knowledge.review.reviewed_at: expected an ISO 8601 timestamp")
+    review_round = review.get("review_round")
+    if type(review_round) is not int or review_round < 1:
+        errors.append("knowledge.review.review_round: expected an integer >= 1")
+    _validate_knowledge_project_relative_path(review, "approval_artifact_path", errors)
+    _validate_knowledge_sha256_field(review, "approval_artifact_sha256", errors)
+    reviewed_content_sha256 = _validate_knowledge_sha256_field(review, "reviewed_content_sha256", errors)
+    stale = review.get("stale")
+    if type(stale) is not bool:
+        errors.append("knowledge.review.stale: expected a boolean")
+
+    if decision_value == "approved":
+        if status == "draft":
+            errors.append("knowledge.review.decision: approved review is forbidden when status is draft")
+        elif status == "in_review":
+            if review.get("stale") is not True:
+                errors.append("knowledge.review.stale: approved in_review docs must be marked stale: true")
+        elif status == "stable":
+            if review.get("stale") is not False:
+                errors.append("knowledge.review.stale: approved stable docs must be marked stale: false")
+            if reviewed_content_sha256 is not None and reviewed_content_sha256 != current_content_sha256:
+                errors.append(
+                    "knowledge.review.reviewed_content_sha256 does not match the current trusted content hash"
+                )
+
+
 def _resolve_contract_artifact_path(
     *,
     project_root: Path | None,
@@ -430,7 +941,7 @@ def _resolve_contract_artifact_path(
     path_text: str,
 ) -> tuple[Path | None, str | None]:
     artifact_path = Path(path_text)
-    if artifact_path.is_absolute():
+    if _is_absolute_path(path_text):
         return None, "must be a project-relative path"
 
     anchor_dir = artifact_dir or project_root
@@ -477,6 +988,23 @@ def _validate_required_scalar_field(meta: dict[str, object], field_name: str, er
     value = meta.get(field_name)
     if value is None or isinstance(value, (list, dict, bool)):
         errors.append(f"{field_name}: expected a non-null scalar")
+
+
+def _validate_completed_field(meta: dict[str, object], errors: list[str]) -> None:
+    """Append an error when the ``completed`` field is not a scalar or bool.
+
+    Unlike `_validate_required_scalar_field`, this accepts booleans because
+    YAML parses bare ``true``/``false`` as bool.  Downstream coercion in
+    ``checkpoints.py`` converts the value via ``str(v) or ""``: ``True``
+    becomes ``"True"`` (displayed as-is) and ``False`` becomes ``""`` (no
+    completion date shown) because ``False or ""`` evaluates to ``""``.
+    Both outcomes are intentional.
+    """
+    if "completed" not in meta:
+        return
+    value = meta.get("completed")
+    if value is None or isinstance(value, (list, dict)):
+        errors.append("completed: expected a date string or boolean")
 
 
 def _validate_required_int_field(meta: dict[str, object], field_name: str, errors: list[str]) -> None:
@@ -614,7 +1142,11 @@ def _unsupported_frontmatter_errors(schema_name: str, meta: dict[str, object]) -
 
 
 def _validate_non_empty_string_list_field(meta: dict[str, object], field_name: str, errors: list[str]) -> None:
-    """Append validation errors when a field is not a list of non-empty strings."""
+    """Append validation errors when a field is not a list of non-empty strings.
+
+    Integer and float values are coerced to strings in-place so that
+    YAML ``depends_on: [5]`` (parsed as ``[5]``) is accepted.
+    """
     if field_name not in meta:
         return
     value = meta.get(field_name)
@@ -622,8 +1154,100 @@ def _validate_non_empty_string_list_field(meta: dict[str, object], field_name: s
         errors.append(f"{field_name}: expected a list")
         return
     for index, item in enumerate(value):
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            value[index] = str(item)
+            item = value[index]
         if not isinstance(item, str) or not item.strip():
             errors.append(f"{field_name}: entry {index} must be a non-empty string")
+
+
+def _summary_provides_value(meta: dict[str, object]) -> tuple[object | None, str | None]:
+    """Return summary provides data from the canonical or nested dependency graph field."""
+    if "provides" in meta:
+        return meta.get("provides"), "provides"
+    dependency_graph = meta.get("dependency-graph")
+    if isinstance(dependency_graph, dict) and "provides" in dependency_graph:
+        return dependency_graph.get("provides"), "dependency-graph.provides"
+    return None, None
+
+
+def _summary_required_field_present(meta: dict[str, object], field_name: str) -> bool:
+    """Return whether a summary required field is present."""
+    if field_name == "provides":
+        _value, label = _summary_provides_value(meta)
+        return label is not None
+    return _resolve_field(meta, field_name) is not None
+
+
+def _validate_summary_provides_field(meta: dict[str, object], errors: list[str]) -> None:
+    """Validate summary provides data from either supported frontmatter location."""
+    value, label = _summary_provides_value(meta)
+    if label is None:
+        return
+    if not isinstance(value, list):
+        errors.append(f"{label}: expected a list")
+        return
+    for index, item in enumerate(value):
+        if isinstance(item, (int, float)) and not isinstance(item, bool):
+            value[index] = str(item)
+            item = value[index]
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{label}: entry {index} must be a non-empty string")
+
+
+def _validate_knowledge_deps_field(meta: dict[str, object], errors: list[str]) -> None:
+    """Append validation errors for the optional top-level ``knowledge_deps`` field."""
+
+    field_name = "knowledge_deps"
+    if field_name not in meta:
+        return
+    value = meta.get(field_name)
+    if not isinstance(value, list):
+        errors.append(f"{field_name}: expected a list")
+        return
+
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str):
+            errors.append(f"{field_name}: entry {index} must be a non-empty string")
+            continue
+        knowledge_id = item.strip()
+        if not knowledge_id:
+            errors.append(f"{field_name}: entry {index} must be a non-empty string")
+            continue
+        if (
+            not knowledge_id.startswith("K-")
+            or not knowledge_id[2:]
+            or normalize_ascii_slug(knowledge_id[2:]) != knowledge_id[2:]
+        ):
+            errors.append(f"{field_name}: entry {index} must use canonical K-{{ascii-hyphen-slug}} format")
+            continue
+        if knowledge_id in seen and knowledge_id not in duplicates:
+            duplicates.append(knowledge_id)
+        seen.add(knowledge_id)
+
+    if duplicates:
+        joined = ", ".join(duplicates)
+        errors.append(f"{field_name}: duplicate ids are not allowed: {joined}")
+
+
+def _validate_knowledge_gate_field(meta: dict[str, object], errors: list[str]) -> None:
+    """Append validation errors for the optional top-level ``knowledge_gate`` field."""
+
+    field_name = "knowledge_gate"
+    if field_name not in meta:
+        return
+    value = meta.get(field_name)
+    if not isinstance(value, str):
+        errors.append(f"{field_name}: expected a string")
+        return
+    gate_value = value.strip()
+    if not gate_value:
+        errors.append(f"{field_name}: expected a non-empty string")
+        return
+    if gate_value not in KNOWLEDGE_GATE_VALUES:
+        errors.append(f"{field_name}: must be one of off, warn, block")
 
 
 def _plan_contract_ref_fragment_error(plan_contract_ref: str) -> str | None:
@@ -656,7 +1280,7 @@ def _plan_contract_ref_path_error(plan_contract_ref: str) -> str | None:
         return "plan_contract_ref: must reference a canonical project-root-relative GPD PLAN path"
 
     relative_plan_path = Path(path_text[2:] if path_text.startswith("./") else path_text)
-    if relative_plan_path.is_absolute():
+    if _is_absolute_path(path_text[2:] if path_text.startswith("./") else path_text):
         return "plan_contract_ref: must reference a canonical project-root-relative GPD PLAN path"
     if any(part == ".." for part in relative_plan_path.parts):
         return "plan_contract_ref: must not traverse parent directories"
@@ -756,9 +1380,7 @@ def _claim_pass_proof_audit_errors(
         )
 
     allowed_proof_paths = {
-        path
-        for deliverable_id in claim.proof_deliverables
-        if (path := deliverable_path_by_id.get(deliverable_id))
+        path for deliverable_id in claim.proof_deliverables if (path := deliverable_path_by_id.get(deliverable_id))
     }
     if allowed_proof_paths and audit.proof_artifact_path not in allowed_proof_paths:
         errors.append(
@@ -808,10 +1430,7 @@ def _proof_audit_errors(
     errors: list[str] = []
     observable_kind_by_id = {observable.id: observable.kind for observable in contract.observables}
     acceptance_test_kind_by_id = {test.id: test.kind for test in contract.acceptance_tests}
-    deliverable_path_by_id = {
-        deliverable.id: deliverable.path
-        for deliverable in contract.deliverables
-    }
+    deliverable_path_by_id = {deliverable.id: deliverable.path for deliverable in contract.deliverables}
 
     for claim in contract.claims:
         if not claim_requires_proof_audit(claim, observable_kind_by_id):
@@ -901,6 +1520,7 @@ def _summary_contract_errors(
     *,
     project_root: Path | None = None,
     artifact_dir: Path | None = None,
+    allow_incomplete_must_surface_references: bool = False,
 ) -> list[str]:
     """Return summary-to-contract alignment issues for a contract-backed plan."""
 
@@ -1006,8 +1626,11 @@ def _summary_contract_errors(
         completed = set(usage.completed_actions)
         missing = set(reference.required_actions) - completed
         if reference.must_surface and missing:
+            recorded_missing = set(usage.missing_actions)
+            if allow_incomplete_must_surface_references and usage.status == "missing" and missing <= recorded_missing:
+                continue
             errors.append(
-                f"Reference {reference.id} missing required_actions in summary: {', '.join(sorted(missing))}"
+                f"Reference {reference.id} missing required_actions in completed_actions: " + ", ".join(sorted(missing))
             )
 
     for verdict in comparison_verdicts:
@@ -1118,6 +1741,7 @@ def _verification_contract_errors(
         comparison_verdicts,
         project_root=project_root,
         artifact_dir=artifact_dir,
+        allow_incomplete_must_surface_references=True,
     )
 
     decisive_incomplete = False
@@ -1211,9 +1835,7 @@ def _verification_status_errors(
         errors.append("status: passed is inconsistent with non-empty suggested_contract_checks")
 
     non_passed_subjects = [
-        f"claim {entry_id}"
-        for entry_id, entry in contract_results.claims.items()
-        if entry.status != "passed"
+        f"claim {entry_id}" for entry_id, entry in contract_results.claims.items() if entry.status != "passed"
     ]
     non_passed_subjects.extend(
         f"deliverable {entry_id}"
@@ -1249,8 +1871,7 @@ def _verification_status_errors(
     ]
     if unresolved_proxies:
         errors.append(
-            "status: passed is inconsistent with unresolved forbidden_proxies: "
-            + ", ".join(sorted(unresolved_proxies))
+            "status: passed is inconsistent with unresolved forbidden_proxies: " + ", ".join(sorted(unresolved_proxies))
         )
 
     return errors
@@ -1284,9 +1905,7 @@ def _resolve_plan_contract_candidate(
     try:
         meta, _body = extract_frontmatter(content)
     except FrontmatterParseError as exc:
-        return True, _PlanContractResolution(
-            errors=[f"referenced PLAN frontmatter YAML parse error: {exc}"]
-        )
+        return True, _PlanContractResolution(errors=[f"referenced PLAN frontmatter YAML parse error: {exc}"])
 
     if not _frontmatter_identity_matches(meta, artifact_meta):
         return False, _PlanContractResolution()
@@ -1369,9 +1988,7 @@ def _find_matching_plan_contract(
         )
         if resolution.errors:
             matching_candidates.append(
-                _PlanContractResolution(
-                    errors=[f"referenced PLAN contract: {error}" for error in resolution.errors]
-                )
+                _PlanContractResolution(errors=[f"referenced PLAN contract: {error}" for error in resolution.errors])
             )
             continue
         matching_candidates.append(resolution)
@@ -1380,9 +1997,7 @@ def _find_matching_plan_contract(
     if len(valid_candidates) == 1:
         return valid_candidates[0]
     if len(valid_candidates) > 1:
-        return _PlanContractResolution(
-            errors=["multiple matching sibling PLAN contracts found; add plan_contract_ref"]
-        )
+        return _PlanContractResolution(errors=["multiple matching sibling PLAN contracts found; add plan_contract_ref"])
     if matching_candidates:
         return matching_candidates[0]
     return _PlanContractResolution()
@@ -1402,11 +2017,18 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
         available = ", ".join(FRONTMATTER_SCHEMAS)
         raise FrontmatterValidationError(f"Unknown schema: {schema_name}. Available: {available}")
 
+    if schema_name == "knowledge":
+        return validate_knowledge_frontmatter(content, source_path=source_path)
+
     meta, _ = extract_frontmatter(content)  # may raise FrontmatterParseError
     required = schema["required"]
 
-    missing = [f for f in required if _resolve_field(meta, f) is None]
-    present = [f for f in required if _resolve_field(meta, f) is not None]
+    if schema_name == "summary":
+        missing = [f for f in required if not _summary_required_field_present(meta, f)]
+        present = [f for f in required if _summary_required_field_present(meta, f)]
+    else:
+        missing = [f for f in required if _resolve_field(meta, f) is None]
+        present = [f for f in required if _resolve_field(meta, f) is not None]
     errors: list[str] = []
 
     errors.extend(_unsupported_frontmatter_errors(schema_name, meta))
@@ -1422,11 +2044,12 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
         _validate_required_bool_field(meta, "interactive", errors)
         _validate_required_object_field(meta, "conventions", errors)
     elif schema_name == "summary":
-        for field_name in ("phase", "plan", "completed"):
+        for field_name in ("phase", "plan"):
             _validate_required_scalar_field(meta, field_name, errors)
+        _validate_completed_field(meta, errors)
         _validate_required_string_field(meta, "depth", errors)
         _validate_string_enum_field(meta, "depth", errors, allowed_values=SUMMARY_DEPTH_VALUES)
-        _validate_non_empty_string_list_field(meta, "provides", errors)
+        _validate_summary_provides_field(meta, errors)
     elif schema_name == "verification":
         _validate_required_scalar_field(meta, "phase", errors)
         _validate_required_scalar_field(meta, "verified", errors)
@@ -1439,9 +2062,7 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
         if not isinstance(raw_status, str):
             errors.append("status: expected a string")
         elif raw_status.strip() not in VERIFICATION_REPORT_STATUSES:
-            errors.append(
-                "status: must be one of passed, gaps_found, expert_needed, human_needed"
-            )
+            errors.append("status: must be one of passed, gaps_found, expert_needed, human_needed")
 
     if isinstance(meta.get("contract"), dict):
         resolution = _validate_contract_mapping(
@@ -1452,6 +2073,10 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
         errors.extend(f"contract: {issue}" for issue in resolution.errors)
     elif "contract" in meta:
         errors.append("contract: expected an object")
+
+    if schema_name == "plan":
+        _validate_knowledge_deps_field(meta, errors)
+        _validate_knowledge_gate_field(meta, errors)
 
     if schema_name == "plan" and "tool_requirements" in meta:
         try:
@@ -1481,14 +2106,20 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
         contract_results = None
         comparison_verdicts: list[ComparisonVerdict] = []
         suggested_contract_checks: list[SuggestedContractCheck] = []
+        contract_results_parse_failed = False
+        comparison_verdicts_parse_failed = False
         try:
             contract_results = _parse_contract_results(meta)
         except (PydanticValidationError, TypeError, ValueError) as exc:
+            contract_results_parse_failed = True
             errors.extend(_prefixed_validation_errors("contract_results", exc))
+            errors.extend(f"contract_results: {hint}" for hint in _contract_results_diagnostic_hints(exc))
         try:
             comparison_verdicts = _parse_comparison_verdicts(meta)
         except (PydanticValidationError, TypeError, ValueError) as exc:
+            comparison_verdicts_parse_failed = True
             errors.extend(_prefixed_validation_errors("comparison_verdicts", exc))
+            errors.extend(f"comparison_verdicts: {hint}" for hint in _comparison_verdicts_diagnostic_hints(exc))
 
         if schema_name == "verification":
             try:
@@ -1516,19 +2147,32 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
             if plan_contract is not None:
                 if not isinstance(plan_contract_ref, str):
                     errors.append("plan_contract_ref: required for contract-backed plan")
-                if contract_results is None:
-                    errors.append("contract_results: required for contract-backed plan")
-                else:
-                    if schema_name == "verification":
-                        verification_errors = _verification_contract_errors(
+                if comparison_verdicts_parse_failed:
+                    errors.extend(
+                        _raw_comparison_verdict_contract_id_errors(
+                            meta.get("comparison_verdicts"),
                             plan_contract,
-                            contract_results,
-                            comparison_verdicts,
-                            suggested_contract_checks,
-                            project_root=project_root,
-                            artifact_dir=artifact_dir,
                         )
-                        errors.extend(verification_errors)
+                    )
+                if contract_results is None:
+                    if contract_results_parse_failed and "contract_results" in meta:
+                        errors.append("contract_results: present but invalid; contract alignment skipped")
+                    else:
+                        errors.append("contract_results: required for contract-backed plan")
+                else:
+                    if comparison_verdicts_parse_failed and "comparison_verdicts" in meta:
+                        errors.append("comparison_verdicts: present but invalid; contract alignment skipped")
+                    if schema_name == "verification":
+                        if not comparison_verdicts_parse_failed:
+                            verification_errors = _verification_contract_errors(
+                                plan_contract,
+                                contract_results,
+                                comparison_verdicts,
+                                suggested_contract_checks,
+                                project_root=project_root,
+                                artifact_dir=artifact_dir,
+                            )
+                            errors.extend(verification_errors)
                         errors.extend(
                             _verification_status_errors(
                                 meta.get("status"),
@@ -1536,7 +2180,7 @@ def validate_frontmatter(content: str, schema_name: str, source_path: Path | Non
                                 suggested_contract_checks,
                             )
                         )
-                    else:
+                    elif not comparison_verdicts_parse_failed:
                         errors.extend(
                             _summary_contract_errors(
                                 plan_contract,
@@ -1793,7 +2437,9 @@ def verify_summary(
     if self_check == "failed":
         errors.append("Self-check section indicates failure")
 
-    passed = len(errors) == 0 and len(missing_files) == 0 and self_check != "failed" and not (not commits_exist and hashes)
+    passed = (
+        len(errors) == 0 and len(missing_files) == 0 and self_check != "failed" and not (not commits_exist and hashes)
+    )
     return SummaryVerification(
         passed=passed,
         summary_exists=True,
@@ -1941,11 +2587,12 @@ def verify_phase_completeness(cwd: Path, phase: str) -> PhaseCompleteness:
     if orphans:
         warnings.append(f"Summaries without plans: {', '.join(orphans)}")
 
+    summary_count = matching_phase_artifact_count(plans, summaries)
     return PhaseCompleteness(
-        complete=len(errors) == 0,
+        complete=is_phase_complete(len(plans), summary_count),
         phase_number=phase_info.phase_number,
         plan_count=len(plans),
-        summary_count=matching_phase_artifact_count(plans, summaries),
+        summary_count=summary_count,
         incomplete_plans=incomplete,
         orphan_summaries=orphans,
         errors=errors,

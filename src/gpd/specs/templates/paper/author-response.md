@@ -11,6 +11,8 @@ Canonical source of truth for `GPD/AUTHOR-RESPONSE{round_suffix}.md`.
 
 Use this structure whenever drafting the internal response tracker that later review rounds and the referee workflow will read. The journal-facing `GPD/review/REFEREE_RESPONSE{round_suffix}.md` mirrors the same issue IDs, classifications, statuses, and new-calculation tracking.
 
+The paired response-artifact contract at `{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md` owns the one-shot completion gate, the fresh `gpd_return.files_written` requirement, and the rule that `fixed` is only valid after the manuscript edit already exists on disk.
+
 ---
 
 ## File Template
@@ -19,6 +21,9 @@ Use this structure whenever drafting the internal response tracker that later re
 ---
 response_to: REFEREE-REPORT{round_suffix}.md
 round: {N}
+manuscript_path: {path/to/active-manuscript.tex}
+review_ledger: ${selected_review_root}/REVIEW-LEDGER{round_suffix}.json
+referee_decision: ${selected_review_root}/REFEREE-DECISION{round_suffix}.json
 date: YYYY-MM-DDTHH:MM:SSZ
 issues_fixed: {count}
 issues_rebutted: {count}
@@ -90,3 +95,4 @@ Draft the journal-facing letter from the same issue-by-issue content and keep th
 - Keep `needs-calculation` visible whenever a response requires new research work.
 - Keep `Source phase for new work` explicit for every comment that depends on future work.
 - Do not omit the status field; later review rounds rely on it.
+- Use `fixed` only when the corresponding manuscript edit is already on disk.

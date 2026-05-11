@@ -163,45 +163,13 @@ Or: "None --- plan executed exactly as written."
 
 Before recording completion, verify that no live first-result, skeptical, or pre-fanout gate remains in the bounded execution state. A pre-fanout review is not retired until both the matching gate clear and the matching fanout unlock have been recorded.
 
-After SUMMARY.md, update STATE.md using gpd CLI:
+After SUMMARY.md, apply durable child-return state effects through the canonical applicator:
 
 ```bash
-# Advance plan counter (handles edge cases automatically)
-gpd state advance
-
-# Recalculate progress bar from disk state
-gpd state update-progress
-
-# Record execution metrics
-gpd state record-metric \
-  --phase "${PHASE}" --plan "${PLAN}" --duration "${DURATION}" \
-  --tasks "${TASK_COUNT}" --files "${ARTIFACT_COUNT}"
-
-# Add decisions (extract from SUMMARY.md key-decisions)
-for decision in "${DECISIONS[@]}"; do
-  gpd state add-decision \
-    --phase "${PHASE}" --summary "${decision}"
-done
-
-# Add key results to global results registry
-for result in "${KEY_RESULTS[@]}"; do
-  gpd result add \
-    --phase "${PHASE}" --description "${result}"
-done
-
-# Update session info
-gpd state record-session \
-  --stopped-at "Completed ${PHASE}-${PLAN}-PLAN.md"
+gpd apply-return-updates "${SUMMARY_FILE}"
 ```
 
-**State command behaviors:**
-
-- `state advance`: Increments Current Plan, detects last-plan edge case, sets status
-- `state update-progress`: Recalculates progress bar from SUMMARY.md counts on disk
-- `state record-metric`: Appends to Performance Metrics table
-- `state add-decision`: Adds to Decisions section, removes placeholders
-- `result add`: Adds to intermediate results registry for cross-referencing
-- `state record-session`: Updates Last session timestamp and Stopped At fields; omit `--resume-file` to preserve the current handoff pointer or pass `--resume-file "—"` to clear it explicitly
+The canonical applicator owns plan advance, progress recompute, metric recording, decisions, blockers, and session cleanup for spawned-agent completion. Do not duplicate those effects with direct `gpd state ...` commands in the completion path.
 
 **gpd CLI error handling:**
 
@@ -318,12 +286,35 @@ If the workflow expects a spawned-agent handoff, the same `gpd_return` object ma
 
 ```yaml
 gpd_return:
-  state_updates: [...]
-  contract_updates: [...]
-  decisions: [...]
-  blockers: [...]
-  continuation_update: {...}
+  status: completed | checkpoint | blocked | failed
+  files_written: ["GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md"]
+  issues: [list of issues encountered, if any]
+  next_actions: [concrete commands or exact artifact review actions]
+  state_updates:
+    advance_plan: true
+    update_progress: true
+    record_metric:
+      phase: "{phase}"
+      plan: "{plan}"
+      duration: NNN
+      tasks: N
+      files: N
+  contract_updates:
+    claim_id: { ... }
+  decisions:
+    - summary: "{decision summary}"
+      phase: "{phase}"
+  blockers:
+    - text: "{blocker text}"
+  continuation_update:
+    handoff:
+      stopped_at: "Completed ${PHASE}-${PLAN}-PLAN.md"
+      resume_file: null
+      last_result_id: null
+    bounded_segment: null
 ```
+
+`gpd apply-return-updates` records handoff timestamp/provenance; omit `recorded_at` and `recorded_by` from child returns.
 
 Include ALL checkpoints (previous + new if continuation agent).
 

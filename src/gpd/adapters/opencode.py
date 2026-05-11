@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import shutil
 from collections.abc import Mapping
@@ -23,32 +22,30 @@ from pathlib import Path
 from gpd.adapters.base import RuntimeAdapter
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
+    DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
     MANIFEST_NAME,
     PATCHES_DIR_NAME,
     UPDATE_CACHE_FILENAME,
-    _default_install_target,
-    _normalize_install_scope_flag,
-    _paths_equal,
     compile_markdown_for_runtime,
     compute_path_prefix,
     convert_tool_references_in_body,
-    file_hash,
-    generate_manifest,
     get_global_dir,
     hook_python_interpreter,
     install_gpd_content,
-    managed_hook_paths,
     parse_jsonc,
     prune_empty_ancestors,
     remove_empty_json_object_file,
     remove_stale_agents,
     render_markdown_frontmatter,
-    replace_placeholders,
-    should_preserve_public_local_cli_command,
+    rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
-    strip_sub_tags,
 )
+from gpd.adapters.install_utils import (
+    write_manifest as _shared_write_manifest,
+)
+from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
+from gpd.command_labels import validated_public_command_prefix
 from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
@@ -95,11 +92,13 @@ _COLOR_NAME_TO_HEX: dict[str, str] = {
 }
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$")
-_SHELL_FENCE_LANGUAGES = frozenset({"bash", "sh", "shell", "zsh"})
 _GPD_SLASH_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9/_.-])/gpd:(?P<command>[A-Za-z][A-Za-z0-9-]*)\b")
+_GPD_BARE_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_./$-])gpd:([a-z0-9-]+)\b")
 _OPENCODE_PERMISSION_DECISIONS = frozenset({"allow", "ask", "deny"})
 _OPENCODE_YOLO_PERMISSION = "allow"
-_MANIFEST_OPENCODE_GENERATED_COMMAND_FILES_KEY = "opencode_generated_command_files"
+_GPD_OPENCODE_COMMAND_MARKER = "<!-- Managed by Get Physics Done (GPD). -->"
+_MANIFEST_OPENCODE_MANAGED_CONFIG_KEY = "opencode_managed_config"
+_MANIFEST_OPENCODE_PERMISSION_RESTORE_KEY = "permission_restore"
 
 # ---------------------------------------------------------------------------
 # XDG config directory resolution
@@ -120,6 +119,16 @@ def get_opencode_global_dir(explicit_dir: str | None = None) -> Path:
     return Path(get_global_dir("opencode", explicit_dir))
 
 
+def _manifest_opencode_generated_command_files_key() -> str:
+    """Return the catalog-owned manifest key for generated OpenCode commands."""
+    return get_manifest_metadata_list_policy_key(
+        "opencode",
+        value_kind="path_segment",
+        item_prefix="gpd-",
+        item_suffix=".md",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tool name conversion
 # ---------------------------------------------------------------------------
@@ -138,9 +147,11 @@ def _project_managed_mcp_servers(
     env: Mapping[str, str] | None = None,
     *,
     cwd: Path | None = None,
+    python_path: str | None = None,
 ) -> dict[str, dict[str, object]]:
     """Project shared optional integrations into OpenCode's neutral MCP shape."""
-    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd)
+    python_path = python_path or hook_python_interpreter()
+    return _managed_integrations.projected_managed_optional_mcp_servers(env, cwd=cwd, python_path=python_path)
 
 
 def _managed_mcp_server_keys() -> frozenset[str]:
@@ -161,20 +172,17 @@ def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None
     Transformations:
     - Replace tool name references in content
     - Replace /gpd: with /gpd- (flat command structure)
-    - Replace bare ~/.claude references with the resolved OpenCode config dir
     - Parse YAML frontmatter:
       - Strip name: field (OpenCode uses filename for command name)
       - Convert color names to hex
       - Convert allowed-tools: YAML array to tools: object with {tool: true}
     """
-    resolved_config_dir = path_prefix[:-1] if path_prefix and path_prefix.endswith("/") else path_prefix
-    if not resolved_config_dir:
-        resolved_config_dir = "~/.config/opencode"
-
     converted = content
     converted = convert_tool_references_in_body(converted, _TOOL_REFERENCE_MAP)
+    public_prefix = validated_public_command_prefix(get_runtime_descriptor("opencode"))
+    converted = converted.replace("`gpd:`", f"`{public_prefix}`")
     converted = _GPD_SLASH_COMMAND_RE.sub(r"/gpd-\g<command>", converted)
-    converted = re.sub(r"~/\.claude\b", lambda m: resolved_config_dir, converted)
+    converted = _GPD_BARE_COMMAND_RE.sub(r"gpd-\1", converted)
 
     preamble, frontmatter, separator, body = split_markdown_frontmatter(converted)
     if not frontmatter:
@@ -244,96 +252,29 @@ def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None
 
 def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
     """Rewrite fenced-shell command-position ``gpd`` calls to the runtime bridge."""
-    rewritten: list[str] = []
-    in_shell_fence = False
-
-    for line in content.splitlines(keepends=True):
-        stripped = line.lstrip()
-        if stripped.startswith("```"):
-            if in_shell_fence:
-                in_shell_fence = False
-            else:
-                fence_language = stripped[3:].strip().lower()
-                in_shell_fence = fence_language in _SHELL_FENCE_LANGUAGES
-            rewritten.append(line)
-            continue
-
-        if in_shell_fence:
-            rewritten.append(_rewrite_gpd_shell_line(line, bridge_command))
-            continue
-
-        rewritten.append(line)
-
-    return "".join(rewritten)
+    return rewrite_gpd_cli_invocations_to_runtime_bridge(
+        content,
+        bridge_command,
+        shell_fence_languages=DEFAULT_RUNTIME_BRIDGE_SHELL_FENCE_LANGUAGES,
+    )
 
 
-def _rewrite_gpd_shell_line(line: str, bridge_command: str) -> str:
-    """Rewrite only command-position ``gpd`` tokens on a shell line."""
-    pieces: list[str] = []
-    index = 0
-    in_single = False
-    in_double = False
-
-    while index < len(line):
-        char = line[index]
-        previous = line[index - 1] if index > 0 else ""
-
-        if char == "'" and not in_double:
-            in_single = not in_single
-            pieces.append(char)
-            index += 1
-            continue
-
-        if char == '"' and not in_single and previous != "\\":
-            in_double = not in_double
-            pieces.append(char)
-            index += 1
-            continue
-
-        if (
-            not in_single
-            and not in_double
-            and line.startswith("gpd", index)
-            and _is_gpd_command_start(line, index)
-            and _is_gpd_token_end(line, index + 3)
-        ):
-            if should_preserve_public_local_cli_command(line[index:]):
-                pieces.append("gpd")
-                index += 3
-                continue
-            pieces.append(bridge_command)
-            index += 3
-            continue
-
-        pieces.append(char)
-        index += 1
-
-    return "".join(pieces)
+def _render_opencode_command_markdown(content: str, *, path_prefix: str, bridge_command: str | None = None) -> str:
+    """Render one canonical command markdown source into OpenCode command content."""
+    if bridge_command:
+        content = _rewrite_gpd_cli_invocations(content, bridge_command)
+    return _inject_opencode_command_marker(convert_claude_to_opencode_frontmatter(content, path_prefix))
 
 
-def _is_gpd_command_start(line: str, index: int) -> bool:
-    """Return whether ``gpd`` starts a shell command token at *index*."""
-    probe = index - 1
-    while probe >= 0 and line[probe] in " \t":
-        probe -= 1
-
-    if probe < 0:
-        return True
-
-    if line[probe] in "|;(!":
-        return True
-
-    if probe >= 1 and line[probe - 1 : probe + 1] in {"&&", "||", "$("}:
-        return True
-
-    return False
-
-
-def _is_gpd_token_end(line: str, end_index: int) -> bool:
-    """Return whether the token ending at *end_index* is a standalone ``gpd``."""
-    if end_index >= len(line):
-        return True
-    return line[end_index].isspace() or line[end_index] in {'"', "'", "`", ";", "|", "&", ")", "<", ">"}
+def _inject_opencode_command_marker(content: str) -> str:
+    """Insert the OpenCode flat-command ownership marker once."""
+    if _GPD_OPENCODE_COMMAND_MARKER in content:
+        return content
+    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
+    marker = f"{_GPD_OPENCODE_COMMAND_MARKER}\n"
+    if not frontmatter:
+        return marker + content
+    return render_markdown_frontmatter(preamble, frontmatter, separator, marker + body)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +307,7 @@ def copy_flattened_commands(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     manifest_root = workflow_target_dir or dest_dir.parent
-    tracked_command_files = set(_load_manifest_opencode_generated_command_files(manifest_root))
+    tracked_command_files = set(_load_manifest_opencode_command_files(manifest_root))
     # Remove only previously generated command files before copying new ones.
     if tracked_command_files:
         for name in tracked_command_files:
@@ -403,9 +344,11 @@ def copy_flattened_commands(
                 workflow_target_dir=workflow_target_dir,
                 explicit_target=explicit_target,
             )
-            if bridge_command:
-                content = _rewrite_gpd_cli_invocations(content, bridge_command)
-            content = convert_claude_to_opencode_frontmatter(content, path_prefix)
+            content = _render_opencode_command_markdown(
+                content,
+                path_prefix=path_prefix,
+                bridge_command=bridge_command,
+            )
 
             dest_path.write_text(content, encoding="utf-8")
             if managed_command_files is not None and dest_name.startswith("gpd-"):
@@ -510,13 +453,13 @@ def _load_manifest_opencode_generated_command_files(target_dir: Path) -> tuple[s
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return ()
 
     if not isinstance(manifest, dict):
         return ()
 
-    command_files = manifest.get(_MANIFEST_OPENCODE_GENERATED_COMMAND_FILES_KEY)
+    command_files = manifest.get(_manifest_opencode_generated_command_files_key())
     if not isinstance(command_files, list):
         return ()
 
@@ -528,28 +471,25 @@ def _load_manifest_opencode_generated_command_files(target_dir: Path) -> tuple[s
 
 
 def _load_manifest_opencode_command_files(target_dir: Path) -> tuple[str, ...]:
-    """Return tracked OpenCode command filenames, falling back to manifest files entries."""
-    generated_command_files = _load_manifest_opencode_generated_command_files(target_dir)
-    if generated_command_files:
-        return generated_command_files
+    """Return tracked OpenCode command filenames from all manifest-backed surfaces."""
+    tracked = list(_load_manifest_opencode_generated_command_files(target_dir))
 
     manifest_path = target_dir / MANIFEST_NAME
     if not manifest_path.exists():
-        return ()
+        return tuple(dict.fromkeys(tracked))
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ()
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return tuple(dict.fromkeys(tracked))
 
     if not isinstance(manifest, dict):
-        return ()
+        return tuple(dict.fromkeys(tracked))
 
     manifest_files = manifest.get("files")
     if not isinstance(manifest_files, dict):
-        return ()
+        return tuple(dict.fromkeys(tracked))
 
-    tracked: list[str] = []
     for rel_path in manifest_files:
         if not isinstance(rel_path, str) or not rel_path.startswith("command/"):
             continue
@@ -557,6 +497,34 @@ def _load_manifest_opencode_command_files(target_dir: Path) -> tuple[str, ...]:
         if name.startswith("gpd-") and name.endswith(".md"):
             tracked.append(name)
     return tuple(dict.fromkeys(tracked))
+
+
+def _opencode_flat_command_has_managed_marker(command_path: Path) -> bool:
+    """Return whether an OpenCode flat command file carries the GPD marker."""
+    try:
+        content = command_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return _GPD_OPENCODE_COMMAND_MARKER in content
+
+
+def _remove_marker_backed_opencode_flat_gpd_commands(command_dir: Path) -> int:
+    """Remove only marker-backed files in OpenCode's flat GPD command namespace."""
+    removed = 0
+    try:
+        entries = list(command_dir.iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        if (
+            entry.is_file()
+            and entry.name.startswith("gpd-")
+            and entry.suffix == ".md"
+            and _opencode_flat_command_has_managed_marker(entry)
+        ):
+            entry.unlink()
+            removed += 1
+    return removed
 
 
 def _clone_json_value(value: object) -> object:
@@ -589,6 +557,31 @@ def _normalize_opencode_permission_value(permission_value: object) -> tuple[dict
     return {}, permission_value is not None
 
 
+def _opencode_permission_shape_restore_state(permission_value: object) -> dict[str, object] | None:
+    if (
+        isinstance(permission_value, str)
+        and permission_value in _OPENCODE_PERMISSION_DECISIONS
+        and permission_value != _OPENCODE_YOLO_PERMISSION
+    ):
+        return {"kind": "scalar", "value": permission_value}
+    return None
+
+
+def _restore_opencode_permission_shape_if_safe(
+    config: dict[str, object],
+    restore_state: dict[str, object] | None,
+) -> bool:
+    if not isinstance(restore_state, dict) or restore_state.get("kind") != "scalar":
+        return False
+    restore_value = restore_state.get("value")
+    if restore_value not in _OPENCODE_PERMISSION_DECISIONS or restore_value == _OPENCODE_YOLO_PERMISSION:
+        return False
+    if config.get("permission") != {"*": restore_value}:
+        return False
+    config["permission"] = restore_value
+    return True
+
+
 def _opencode_permission_rule_is_allow(rule: object) -> bool:
     """Return whether a permission rule resolves entirely to allow."""
     if isinstance(rule, str):
@@ -607,11 +600,12 @@ def _opencode_permission_is_yolo(permission_value: object) -> bool:
     return False
 
 
-def configure_opencode_permissions(config_dir: Path) -> bool:
+def _configure_opencode_permissions_with_restore(config_dir: Path) -> tuple[bool, dict[str, object] | None]:
     """Configure OpenCode permissions to allow reading GPD reference docs.
 
-    Modifies opencode.json to add permission.read and permission.external_directory
-    grants for the GPD path. Returns True if config was modified.
+    Modifies opencode.json to allow permission.read and permission.external_directory
+    access for the managed GPD path. Returns whether config was modified plus
+    metadata needed to restore user-visible scalar permission shape on uninstall.
     """
     config_state, config_parse_error = _read_opencode_config_state(config_dir)
     if config_parse_error is not None:
@@ -619,8 +613,9 @@ def configure_opencode_permissions(config_dir: Path) -> bool:
     config = config_state or {}
     permission_value = config.get("permission")
     if _opencode_permission_is_yolo(permission_value):
-        return False
+        return False, None
 
+    permission_restore_state = _opencode_permission_shape_restore_state(permission_value)
     permission_config, coerced = _normalize_opencode_permission_value(permission_value)
     if permission_value is None:
         coerced = False
@@ -656,6 +651,12 @@ def configure_opencode_permissions(config_dir: Path) -> bool:
         config["permission"] = permission_config
         _write_opencode_config(config_dir, config)
 
+    return modified, permission_restore_state
+
+
+def configure_opencode_permissions(config_dir: Path) -> bool:
+    """Configure OpenCode permissions to allow reading GPD reference docs."""
+    modified, _ = _configure_opencode_permissions_with_restore(config_dir)
     return modified
 
 
@@ -672,159 +673,43 @@ def write_manifest(
     install_scope: str | None = None,
     explicit_target: bool | None = None,
     managed_command_file_names: tuple[str, ...] | None = None,
-) -> dict:
-    """Write file manifest after installation for future modification detection.
-
-    OpenCode-specific: scans ``command/gpd-*.md`` (flat) instead of
-    ``commands/gpd/`` (nested).
-    """
-    from datetime import UTC, datetime
-
-    gpd_dir = config_dir / "get-physics-done"
-    command_dir = config_dir / "command"
-    agents_dir = config_dir / "agents"
-    hooks_dir = config_dir / "hooks"
-
-    manifest: dict = {
-        "version": version,
-        "timestamp": datetime.now(UTC).isoformat(),
-        "files": {},
-    }
-    if isinstance(runtime, str) and runtime.strip():
-        manifest["runtime"] = runtime.strip()
-    normalized_scope = _normalize_install_scope_flag(install_scope)
-    if normalized_scope == "--local":
-        manifest["install_scope"] = "local"
-    elif normalized_scope == "--global":
-        manifest["install_scope"] = "global"
-    manifest["install_target_dir"] = str(config_dir)
-    if explicit_target is not None:
-        manifest["explicit_target"] = bool(explicit_target)
-    elif isinstance(runtime, str) and runtime.strip() and normalized_scope in {"--local", "--global"}:
-        default_target = _default_install_target(runtime.strip(), normalized_scope)
-        if default_target is not None:
-            manifest["explicit_target"] = not _paths_equal(config_dir, default_target)
+    metadata: dict[str, object] | None = None,
+) -> dict[str, object]:
+    """Write OpenCode's manifest through the shared flat-command writer."""
+    if managed_command_file_names is None:
+        command_dir = config_dir / "command"
+        managed_command_file_names = (
+            tuple(
+                sorted(
+                    entry.name
+                    for entry in command_dir.iterdir()
+                    if entry.is_file() and entry.name.startswith("gpd-") and entry.suffix == ".md"
+                )
+            )
+            if command_dir.exists()
+            else ()
+        )
+    manifest_metadata: dict[str, object] = dict(metadata or {})
     if managed_command_file_names:
-        manifest[_MANIFEST_OPENCODE_GENERATED_COMMAND_FILES_KEY] = sorted(
+        manifest_metadata[_manifest_opencode_generated_command_files_key()] = sorted(
             {
                 name
                 for name in managed_command_file_names
                 if isinstance(name, str) and name.startswith("gpd-") and name.endswith(".md")
             }
         )
-
-    # get-physics-done/ files
-    gpd_hashes = generate_manifest(gpd_dir)
-    for rel, h in gpd_hashes.items():
-        manifest["files"]["get-physics-done/" + rel] = h
-
-    # command/gpd-*.md files (OpenCode flat structure)
-    command_names = managed_command_file_names
-    if command_names is None:
-        command_names = tuple(
-            sorted(
-                f.name
-                for f in command_dir.iterdir()
-                if f.name.startswith("gpd-") and f.name.endswith(".md")
-            )
-        ) if command_dir.exists() else ()
-    for name in command_names:
-        command_path = command_dir / name
-        if command_path.is_file():
-            manifest["files"]["command/" + name] = file_hash(command_path)
-
-    # agents/gpd-*.md files
-    if agents_dir.exists():
-        for f in sorted(agents_dir.iterdir()):
-            if f.name.startswith("gpd-") and f.name.endswith(".md"):
-                manifest["files"]["agents/" + f.name] = file_hash(f)
-
-    # hooks/ files
-    if hooks_dir.exists():
-        for rel, h in generate_manifest(hooks_dir).items():
-            manifest["files"]["hooks/" + rel] = h
-
-    manifest_path = config_dir / MANIFEST_NAME
-    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return manifest
-
-
-# ---------------------------------------------------------------------------
-# Copy directory with path replacement (OpenCode-specific)
-# ---------------------------------------------------------------------------
-
-
-def _copy_dir_contents(
-    src_dir: Path,
-    target_dir: Path,
-    path_prefix: str,
-    install_scope: str | None = None,
-) -> None:
-    """Recursively copy directory contents with path replacement in .md files.
-
-    OpenCode-specific: applies frontmatter conversion to all .md files.
-    """
-    for entry in sorted(src_dir.iterdir()):
-        dest_path = target_dir / entry.name
-        if entry.is_dir():
-            dest_path.mkdir(parents=True, exist_ok=True)
-            _copy_dir_contents(entry, dest_path, path_prefix, install_scope)
-        elif entry.name.endswith(".md"):
-            content = entry.read_text(encoding="utf-8")
-            content = replace_placeholders(content, path_prefix, "opencode", install_scope)
-            content = convert_claude_to_opencode_frontmatter(content, path_prefix)
-            content = strip_sub_tags(content)
-            dest_path.write_text(content, encoding="utf-8")
-        else:
-            shutil.copy2(entry, dest_path)
-
-
-def copy_with_path_replacement(
-    src_dir: Path,
-    dest_dir: Path,
-    path_prefix: str,
-    install_scope: str | None = None,
-) -> None:
-    """Safely copy directory with path replacement, using copy-to-temp-then-swap.
-
-    Prevents data loss if the copy fails partway through.
-    OpenCode-specific: uses ``_copy_dir_contents`` which applies frontmatter conversion.
-    """
-    tmp_dir = dest_dir.parent / f"{dest_dir.name}.tmp.{os.getpid()}"
-    old_dir = dest_dir.parent / f"{dest_dir.name}.old.{os.getpid()}"
-
-    # Clean up any leftover dirs from a previous interrupted install
-    if tmp_dir.exists():
-        shutil.rmtree(tmp_dir)
-    if old_dir.exists():
-        shutil.rmtree(old_dir)
-
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    try:
-        _copy_dir_contents(src_dir, tmp_dir, path_prefix, install_scope)
-
-        # Swap into place: rename-old-then-rename-new
-        if dest_dir.exists():
-            dest_dir.rename(old_dir)
-        try:
-            tmp_dir.rename(dest_dir)
-        except OSError:
-            # Rename failed — restore old directory
-            if old_dir.exists():
-                old_dir.rename(dest_dir)
-            raise
-
-        # Swap succeeded — clean up old
-        if old_dir.exists():
-            shutil.rmtree(old_dir)
-    except Exception:
-        # Copy or swap failed — clean up temp, leave existing install intact
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir)
-        if dest_dir.exists() and old_dir.exists():
-            shutil.rmtree(old_dir)
-        raise
+    return _shared_write_manifest(
+        config_dir,
+        version,
+        runtime=runtime or "opencode",
+        flat_command_file_names=managed_command_file_names,
+        include_nested_commands=False,
+        include_hooks=False,
+        agent_suffixes=(".md",),
+        metadata=manifest_metadata or None,
+        install_scope=install_scope,
+        explicit_target=explicit_target,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -832,25 +717,41 @@ def copy_with_path_replacement(
 # ---------------------------------------------------------------------------
 
 
-def uninstall_opencode(target_dir: Path, *, config_dir: Path, allow_empty_config_removal: bool) -> dict[str, int]:
+def uninstall_opencode(
+    target_dir: Path,
+    *,
+    config_dir: Path,
+    allow_empty_config_removal: bool,
+    remove_untracked_managed_commands: bool = False,
+) -> dict[str, int]:
     """Uninstall GPD from an OpenCode config directory.
 
     Removes GPD-specific files/directories, preserves user content.
     Returns a dict with counts of removed items.
     """
-    counts: dict[str, int] = {"commands": 0, "agents": 0, "hooks": 0, "dirs": 0, "permissions": 0}
-    managed_hooks = managed_hook_paths(target_dir)
+    counts: dict[str, int] = {
+        "commands": 0,
+        "agents": 0,
+        "hooks": 0,
+        "dirs": 0,
+        "permissions": 0,
+        "mcpServers": 0,
+    }
     runtime_permission_state: dict[str, object] | None = None
+    permission_restore_state: dict[str, object] | None = None
     tracked_command_files = _load_manifest_opencode_command_files(target_dir)
 
     # 1. Remove command/gpd-*.md files
     command_dir = target_dir / "command"
-    if command_dir.exists() and tracked_command_files:
-        for name in tracked_command_files:
-            command_path = command_dir / name
-            if command_path.is_file():
-                command_path.unlink()
-                counts["commands"] += 1
+    if command_dir.exists():
+        if remove_untracked_managed_commands and not tracked_command_files:
+            counts["commands"] += _remove_marker_backed_opencode_flat_gpd_commands(command_dir)
+        elif tracked_command_files:
+            for name in tracked_command_files:
+                command_path = command_dir / name
+                if command_path.is_file():
+                    command_path.unlink()
+                    counts["commands"] += 1
 
     # 2. Remove get-physics-done directory
     gpd_dir = target_dir / "get-physics-done"
@@ -863,12 +764,17 @@ def uninstall_opencode(target_dir: Path, *, config_dir: Path, allow_empty_config
     if manifest_file.exists():
         try:
             manifest_payload = json.loads(manifest_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             manifest_payload = {}
         if isinstance(manifest_payload, dict):
             state = manifest_payload.get("gpd_runtime_permissions")
             if isinstance(state, dict):
                 runtime_permission_state = state
+            managed_config = manifest_payload.get(_MANIFEST_OPENCODE_MANAGED_CONFIG_KEY)
+            if isinstance(managed_config, dict):
+                restore_state = managed_config.get(_MANIFEST_OPENCODE_PERMISSION_RESTORE_KEY)
+                if isinstance(restore_state, dict):
+                    permission_restore_state = restore_state
         manifest_file.unlink()
     patches_path = target_dir / PATCHES_DIR_NAME
     if patches_path.exists():
@@ -881,15 +787,6 @@ def uninstall_opencode(target_dir: Path, *, config_dir: Path, allow_empty_config
             if f.name.startswith("gpd-") and f.name.endswith(".md"):
                 f.unlink()
                 counts["agents"] += 1
-
-    # 4. Remove GPD hooks
-    hooks_dir = target_dir / "hooks"
-    if hooks_dir.exists():
-        for rel_path in sorted(managed_hooks):
-            hook_path = target_dir / rel_path
-            if hook_path.is_file():
-                hook_path.unlink()
-                counts["hooks"] += 1
 
     # 4b. Remove GPD update cache files.
     cache_dir = target_dir / CACHE_DIR_NAME
@@ -904,15 +801,15 @@ def uninstall_opencode(target_dir: Path, *, config_dir: Path, allow_empty_config
     oc_config_dir_mcp = config_dir
     oc_config_path_mcp = oc_config_dir_mcp / "opencode.json"
     if oc_config_path_mcp.exists():
-        try:
-            oc_mcp = parse_jsonc(oc_config_path_mcp.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+        oc_mcp, oc_config_parse_error = _read_opencode_config_state(oc_config_dir_mcp)
+        if oc_config_parse_error is not None:
             oc_mcp = None
         if isinstance(oc_mcp, dict) and isinstance(oc_mcp.get("mcp"), dict):
             gpd_keys = [k for k in oc_mcp["mcp"] if k in _managed_mcp_server_keys()]
             for k in gpd_keys:
                 del oc_mcp["mcp"][k]
             if gpd_keys:
+                counts["mcpServers"] += len(gpd_keys)
                 if not oc_mcp["mcp"]:
                     del oc_mcp["mcp"]
                 oc_config_path_mcp.write_text(json.dumps(oc_mcp, indent=2) + "\n", encoding="utf-8")
@@ -921,12 +818,8 @@ def uninstall_opencode(target_dir: Path, *, config_dir: Path, allow_empty_config
     oc_config_dir = config_dir
     oc_config_path = oc_config_dir / "opencode.json"
     if oc_config_path.exists():
-        try:
-            oc_config = parse_jsonc(oc_config_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            oc_config = None
-        if not isinstance(oc_config, dict):
-            oc_config = None
+        oc_config, config_parse_error = _read_opencode_config_state(oc_config_dir)
+        config_parse_failed = config_parse_error is not None
         modified = False
 
         restore_state = (
@@ -934,7 +827,7 @@ def uninstall_opencode(target_dir: Path, *, config_dir: Path, allow_empty_config
             if isinstance(runtime_permission_state, dict) and runtime_permission_state.get("mode") == "yolo"
             else None
         )
-        if isinstance(restore_state, dict):
+        if isinstance(restore_state, dict) and not config_parse_failed:
             if oc_config is None:
                 oc_config = {}
             if restore_state.get("had_permission"):
@@ -956,6 +849,8 @@ def uninstall_opencode(target_dir: Path, *, config_dir: Path, allow_empty_config
                         del oc_config["permission"][perm_type]
             if not oc_config["permission"]:
                 del oc_config["permission"]
+            elif _restore_opencode_permission_shape_if_safe(oc_config, permission_restore_state):
+                modified = True
 
         if modified:
             oc_config_path.write_text(json.dumps(oc_config, indent=2) + "\n", encoding="utf-8")
@@ -1048,6 +943,7 @@ class OpenCodeAdapter(RuntimeAdapter):
         surface_kind: str,
         path_prefix: str,
         command_name: str | None = None,
+        bridge_command: str | None = None,
     ) -> str:
         del command_name
         if surface_kind != "command":
@@ -1055,11 +951,15 @@ class OpenCodeAdapter(RuntimeAdapter):
                 content,
                 surface_kind=surface_kind,
                 path_prefix=path_prefix,
+                bridge_command=bridge_command,
             )
-        return convert_claude_to_opencode_frontmatter(content, path_prefix)
+        return _render_opencode_command_markdown(content, path_prefix=path_prefix, bridge_command=bridge_command)
 
     def translate_shared_command_references(self, content: str) -> str:
-        return content.replace("/gpd:", self.public_command_surface_prefix)
+        result = content.replace("/gpd:", self.public_command_surface_prefix)
+        result = result.replace("`gpd:`", f"`{self.public_command_surface_prefix}`")
+        result = _GPD_BARE_COMMAND_RE.sub(r"gpd-\1", result)
+        return result
 
     def get_commit_attribution(self, *, explicit_config_dir: str | None = None) -> str | None:
         """OpenCode opts out when `disable_ai_attribution` is enabled."""
@@ -1089,11 +989,18 @@ class OpenCodeAdapter(RuntimeAdapter):
         """Return OpenCode-owned files required for a complete install."""
         return ("opencode.json",)
 
+    def _preflight_runtime_config(self, target_dir: Path, is_global: bool) -> None:
+        """Fail before copying files when OpenCode-owned config is malformed."""
+        self._preflight_project_integrations_config(target_dir, is_global)
+        _, config_parse_error = _read_opencode_config_state(target_dir)
+        if config_parse_error is not None:
+            raise RuntimeError("OpenCode opencode.json is malformed; refusing to overwrite it during install.")
+
     def missing_install_artifacts(self, target_dir: Path) -> tuple[str, ...]:
         """Return missing OpenCode install artifacts, including the command surface."""
         missing = list(super().missing_install_artifacts(target_dir))
         command_dir = target_dir / "command"
-        tracked_command_files = _load_manifest_opencode_generated_command_files(target_dir)
+        tracked_command_files = _load_manifest_opencode_command_files(target_dir)
 
         if not tracked_command_files:
             missing.append("command/gpd-*.md")
@@ -1136,6 +1043,8 @@ class OpenCodeAdapter(RuntimeAdapter):
             managed_command_files=generated_command_files,
         )
         self._generated_command_files = tuple(sorted(generated_command_files))
+        if count <= 0 or not self._generated_command_files:
+            failures.append("command/gpd-*.md")
         return count
 
     def _install_content(self, gpd_root: Path, target_dir: Path, path_prefix: str, failures: list[str]) -> None:
@@ -1193,17 +1102,19 @@ class OpenCodeAdapter(RuntimeAdapter):
         self._hooks_count = 0
 
     def _configure_runtime(self, target_dir: Path, is_global: bool) -> dict[str, object]:
+        self._opencode_permission_restore_state = None
         _, config_parse_error = _read_opencode_config_state(target_dir)
         if config_parse_error is not None:
             raise RuntimeError("OpenCode opencode.json is malformed; refusing to overwrite it during install.")
-        configure_opencode_permissions(target_dir)
+        _, self._opencode_permission_restore_state = _configure_opencode_permissions_with_restore(target_dir)
 
         # Wire MCP servers into opencode.json.
         from gpd.mcp.builtin_servers import build_mcp_servers_dict
 
-        mcp_servers = build_mcp_servers_dict(python_path=hook_python_interpreter())
+        python_path = hook_python_interpreter()
+        mcp_servers = build_mcp_servers_dict(python_path=python_path)
         project_cwd = None if is_global or getattr(self, "_install_explicit_target", False) else target_dir.parent
-        managed_mcp_servers = _project_managed_mcp_servers(cwd=project_cwd)
+        managed_mcp_servers = _project_managed_mcp_servers(cwd=project_cwd, python_path=python_path)
         if managed_mcp_servers:
             mcp_servers.update(managed_mcp_servers)
         mcp_count = 0
@@ -1227,7 +1138,9 @@ class OpenCodeAdapter(RuntimeAdapter):
         desired_mode = "yolo" if autonomy == "yolo" else "default"
         managed_state = self._runtime_permissions_manifest_state(target_dir) or {}
         managed_by_gpd = managed_state.get("mode") == "yolo"
-        configured_mode = "malformed" if not config_valid else "yolo" if _opencode_permission_is_yolo(permission_value) else "default"
+        configured_mode = (
+            "malformed" if not config_valid else "yolo" if _opencode_permission_is_yolo(permission_value) else "default"
+        )
         requires_relaunch = False
         next_step: str | None = None
 
@@ -1243,13 +1156,13 @@ class OpenCodeAdapter(RuntimeAdapter):
                 else 'OpenCode is not yet configured for prompt-free execution; set `permission` to `"allow"`.'
             )
             if config_aligned:
-                next_step = (
-                    "Restart OpenCode so the current session picks up the prompt-free permission setting."
-                )
+                next_step = "Restart OpenCode so the current session picks up the prompt-free permission setting."
         else:
             config_aligned = not managed_by_gpd
             if managed_by_gpd:
-                message = "OpenCode is still pinned to a GPD-managed `permission = allow` setting from an earlier yolo sync."
+                message = (
+                    "OpenCode is still pinned to a GPD-managed `permission = allow` setting from an earlier yolo sync."
+                )
             elif configured_mode == "yolo":
                 message = (
                     "OpenCode is still configured for `permission = allow`, but GPD left it untouched because "
@@ -1343,6 +1256,12 @@ class OpenCodeAdapter(RuntimeAdapter):
         return result
 
     def _write_manifest(self, target_dir: Path, version: str) -> None:
+        metadata: dict[str, object] = {}
+        permission_restore_state = getattr(self, "_opencode_permission_restore_state", None)
+        if isinstance(permission_restore_state, dict):
+            metadata[_MANIFEST_OPENCODE_MANAGED_CONFIG_KEY] = {
+                _MANIFEST_OPENCODE_PERMISSION_RESTORE_KEY: permission_restore_state,
+            }
         write_manifest(
             target_dir,
             version,
@@ -1350,6 +1269,7 @@ class OpenCodeAdapter(RuntimeAdapter):
             install_scope=self._current_install_scope_flag(),
             explicit_target=getattr(self, "_install_explicit_target", False),
             managed_command_file_names=getattr(self, "_generated_command_files", ()),
+            metadata=metadata or None,
         )
 
     def uninstall(self, target_dir: Path) -> dict[str, object]:
@@ -1364,10 +1284,15 @@ class OpenCodeAdapter(RuntimeAdapter):
 
         with gpd_span("adapter.uninstall", runtime=self.runtime_name, target=str(target_dir)) as span:
             self._validate_target_runtime(target_dir, action="uninstall from")
+            has_authoritative_manifest = self._has_authoritative_install_manifest(target_dir)
+            remove_untracked_managed_commands = (
+                has_authoritative_manifest and not _load_manifest_opencode_command_files(target_dir)
+            )
             result = uninstall_opencode(
                 target_dir,
                 config_dir=target_dir,
-                allow_empty_config_removal=self._has_authoritative_install_manifest(target_dir),
+                allow_empty_config_removal=has_authoritative_manifest,
+                remove_untracked_managed_commands=remove_untracked_managed_commands,
             )
             removed: list[str] = []
             if result["commands"]:
@@ -1378,13 +1303,15 @@ class OpenCodeAdapter(RuntimeAdapter):
                 removed.append(f"{result['agents']} GPD agents")
             if result["hooks"]:
                 removed.append(f"{result['hooks']} GPD hooks")
+            if result["mcpServers"]:
+                removed.append(f"{result['mcpServers']} GPD MCP servers")
             if result["permissions"]:
                 removed.append("opencode.json permissions")
 
             span.set_attribute("gpd.removed_count", len(removed))
             logger.info("Uninstalled GPD from %s: removed %d items", self.runtime_name, len(removed))
 
-            return {"runtime": self.runtime_name, "target": str(target_dir), "removed": removed}
+            return {"runtime": self.runtime_name, "target": str(target_dir), "removed": removed, **result}
 
 
 __all__ = [
@@ -1395,7 +1322,6 @@ __all__ = [
     "configure_opencode_permissions",
     "copy_flattened_commands",
     "copy_agents_as_agent_files",
-    "copy_with_path_replacement",
     "write_manifest",
     "uninstall_opencode",
 ]

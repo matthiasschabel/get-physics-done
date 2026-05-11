@@ -8,10 +8,10 @@ VERIFICATION_SERVER_DESCRIPTION_INTRO = (
     "symmetry verification, and coverage gap analysis."
 )
 VERIFICATION_CONTRACT_SURFACE_SUMMARY_TEXT = (
-    "Contract-aware request surfaces are closed and schema-driven. The full contract payload "
-    "rules live on the `contract` input schema. Proof-oriented checks still require an "
-    "authoritative contract payload. Use `suggest_contract_checks(...)` to surface the exact "
-    "per-check request metadata before calling `run_contract_check(...)`."
+    "Contract-aware requests are closed and schema-driven; full rules live on the `contract` input schema. "
+    "Proof checks require authoritative contract payloads. Missing grounding, evidence, or proof artifacts "
+    "stay explicit. Use `suggest_contract_checks(...)` before `run_contract_check(...)`. "
+    "Only contract-payload enum case drift is recoverable; observed enums must match source evidence exactly."
 )
 
 VERIFICATION_BINDING_TARGETS = (
@@ -36,7 +36,7 @@ _VERIFICATION_CONTRACT_POLICY_CLAUSES = (
     "Nested object schemas are closed at every level: unknown top-level or nested keys, "
     "non-object sections, blank strings, and malformed members are hard errors; "
     "recoverable normalization is limited to singleton string/list drift and "
-    "closed-enum case drift.",
+    "contract-payload closed-enum case drift, while observed enum-like source values must match exactly.",
     "Plan-style contracts need non-empty `context_intake`, explicit non-empty "
     "`uncertainty_markers.weakest_anchors` and "
     "`uncertainty_markers.disconfirming_observations`, and project-scoping payloads "
@@ -46,8 +46,8 @@ _VERIFICATION_CONTRACT_POLICY_CLAUSES = (
     "explicit grounding context; scoping-only contracts may omit claims only when they "
     "still preserve a target, unresolved question, or grounding input.",
     "When `references[]` is present and no other concrete grounding exists, at least one "
-    "`references[].must_surface=true` anchor is required; otherwise missing "
-    "`must_surface=true` is a warning that should be repaired. "
+    "`references[].must_surface=true` anchor is required and its absence is a blocker; "
+    "otherwise missing `must_surface=true` is a non-blocking warning that should be repaired. "
     "`references[].carry_forward_to` uses workflow scope labels only, never contract IDs, "
     "and `references[].must_surface` requires non-empty `applies_to` and "
     "`required_actions` lists.",
@@ -55,6 +55,8 @@ _VERIFICATION_CONTRACT_POLICY_CLAUSES = (
     "claim/deliverable/acceptance-test/reference kinds when that would make resolution ambiguous.",
     "Contract context must stay consistent with metadata defaults and explicit metadata fields, "
     "so benchmark anchors, regime labels, and family selections cannot contradict it.",
+    "Missing grounding, evidence, prior outputs, or proof artifacts are blockers to surface explicitly, "
+    "never invitations to invent replacement content or inferred completion state.",
     "For proof-oriented checks, omit or exactly match derived "
     "`metadata.expected_behavior`, `metadata.claim_statement`, "
     "`metadata.hypothesis_ids`, `metadata.theorem_parameter_symbols`, and "

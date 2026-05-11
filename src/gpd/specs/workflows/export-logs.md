@@ -1,5 +1,5 @@
 <purpose>
-Export GPD observability session logs and execution traces to files. Reads session event streams from `GPD/observability/sessions/` and trace logs from `GPD/traces/`, applies optional filters, and writes results to `GPD/exports/logs/` or a custom directory. Supports JSONL (raw), JSON (pretty-printed), and markdown (human-readable report) formats.
+Export GPD observability session logs and execution traces to files. Reads session event streams from `GPD/observability/sessions/` and trace logs from `GPD/traces/`, applies optional filters, and writes results to `GPD/exports/logs/` or a custom directory. Supports JSONL (raw), JSON (pretty-printed), and markdown (human-readable report) formats. The raw exporter validates the requested format before creating output directories and refuses to write when no session logs exist.
 </purpose>
 
 <required_reading>
@@ -12,7 +12,11 @@ Read all files referenced by the invoking prompt's execution_context before star
 **Validate GPD project and observability data:**
 
 ```bash
-gpd validate command-context gpd:export-logs $ARGUMENTS
+CONTEXT=$(gpd --raw validate command-context export-logs "$ARGUMENTS")
+if [ $? -ne 0 ]; then
+  echo "$CONTEXT"
+  exit 1
+fi
 ```
 
 Check that `GPD/observability/sessions/` exists and contains at least one `.jsonl` file:
@@ -31,14 +35,14 @@ ls GPD/observability/sessions/*.jsonl 2>/dev/null | head -5
 No observability sessions found in GPD/observability/sessions/.
 
 Session logs are recorded automatically during GPD command execution.
-Run any GPD command first, then retry gpd:export-logs.
+Run any GPD command first, then retry `export-logs`.
 ```
 
 Exit.
 </step>
 
 <step name="parse_arguments">
-**Parse export arguments from $ARGUMENTS:**
+**Parse export arguments from `$ARGUMENTS` safely:**
 
 | Argument | Default | Meaning |
 |----------|---------|---------|
@@ -46,10 +50,14 @@ Exit.
 | `--session <id>` | (none) | Export only this session |
 | `--last N` | (none) | Export the N most recent sessions |
 | `--command <label>` | (none) | Filter sessions by command label |
+| `--phase <phase>` | (none) | Filter events by phase identifier |
+| `--category <name>` | (none) | Filter events by event category |
 | `--no-traces` | false | Exclude execution traces |
 | `--output-dir <path>` | `GPD/exports/logs/` | Custom output directory |
 
 If no arguments provided, use defaults (all sessions, JSONL format, include traces, default output dir).
+
+Treat `$ARGUMENTS` as opaque user input, not shell syntax. Do not evaluate it, run it through a shell-interpreter wrapper, or concatenate it into a shell command. Preserve spaces inside values such as output paths or command/category labels. If a value cannot be unambiguously assigned to one of the known flags above, stop and ask the user for the exact format, filter, or output path instead of guessing.
 
 **If format is not recognized:**
 
@@ -67,26 +75,23 @@ Exit.
 <step name="run_export">
 **Execute the export via CLI:**
 
-Build the CLI invocation from parsed arguments:
+Invoke `gpd --raw observe export` once. Pass only the recognized options that were actually requested, and pass every option value as its own quoted argv value:
 
-```bash
-EXPORT_ARGS=""
-if [ -n "$FORMAT" ]; then EXPORT_ARGS="$EXPORT_ARGS --format $FORMAT"; fi
-if [ -n "$SESSION" ]; then EXPORT_ARGS="$EXPORT_ARGS --session $SESSION"; fi
-if [ -n "$LAST" ]; then EXPORT_ARGS="$EXPORT_ARGS --last $LAST"; fi
-if [ -n "$COMMAND" ]; then EXPORT_ARGS="$EXPORT_ARGS --command $COMMAND"; fi
-if [ -n "$OUTPUT_DIR" ]; then EXPORT_ARGS="$EXPORT_ARGS --output-dir $OUTPUT_DIR"; fi
-if [ "$NO_TRACES" = "true" ]; then EXPORT_ARGS="$EXPORT_ARGS --no-traces"; fi
+- `--format "$FORMAT"`
+- `--session "$SESSION"`
+- `--last "$LAST"`
+- `--command "$COMMAND"`
+- `--phase "$PHASE"`
+- `--category "$CATEGORY"`
+- `--output-dir "$OUTPUT_DIR"`
+- `--no-traces`
 
-RESULT=$(gpd --raw observe export $EXPORT_ARGS)
+Never pass raw `$ARGUMENTS` to `observe export`, never build `EXPORT_ARGS`, and never run the export through a shell-interpreter wrapper. For example, a spaced path must be passed as one quoted `--output-dir` value.
 
-if [ $? -ne 0 ]; then
-  echo "ERROR: export failed: $RESULT"
-  exit 1
-fi
-```
+If the command exits nonzero, display the raw CLI error and stop.
 
 Parse the JSON result for `exported`, `output_dir`, `sessions_exported`, `events_exported`, `traces_exported`, and `files_written`.
+Also parse `empty_export` and `reason`; if true, label the output as an intentionally empty filtered export.
 </step>
 
 <step name="present_results">
@@ -114,8 +119,9 @@ Parse the JSON result for `exported`, `output_dir`, `sessions_exported`, `events
 ───────────────────────────────────────────────────────────────
 
 **Also available:**
-- `gpd:export-logs --format markdown` — human-readable report
-- `gpd:export-logs --last 5` — export only recent sessions
+- `export-logs --format markdown` — human-readable report
+- `export-logs --last 5` — export only recent sessions
+- `export-logs --command execute-phase --phase 3 --category workflow` — narrow by command, phase, and event category
 - `gpd observe show` — inspect events interactively
 - `gpd observe sessions` — list available sessions
 
@@ -134,6 +140,8 @@ No events matched the specified filters.
 Try broadening filters or run `gpd observe sessions` to see available sessions.
 ```
 
+If `empty_export` is true, use the same warning even when timestamped empty files were written.
+
 </step>
 
 </process>
@@ -142,6 +150,7 @@ Try broadening filters or run `gpd observe sessions` to see available sessions.
 
 - Don't export without checking that observability data exists first
 - Don't silently overwrite previous exports — timestamped filenames prevent collisions
+- Don't treat `empty_export: true` as a meaningful data export; label it as empty and explain the filters
 - Don't include the `.active-trace` marker file in trace exports
 - Don't fail on malformed JSONL lines — skip them gracefully
 - Don't export binary or non-JSONL files from the observability tree
@@ -155,6 +164,7 @@ Export is complete when:
 - [ ] Session logs read and filtered
 - [ ] Traces included (unless --no-traces)
 - [ ] Files written to output directory with timestamped names
+- [ ] Empty filtered exports labeled when `empty_export` is true
 - [ ] Summary displayed with file paths and counts
 
 </success_criteria>

@@ -1,5 +1,5 @@
 <purpose>
-Initialize a new physics research project through unified flow: questioning, literature survey (optional), mathematical framework, computational setup, target venue identification. This is the most leveraged moment in any research project — deep questioning here means better formulations, better methods, better results. One workflow takes you from research idea to ready-for-investigation.
+Initialize a physics research project through one flow: intake, optional survey, framework, computational setup, venue target, and ready-for-investigation roadmap.
 </purpose>
 
 <required_reading>
@@ -11,15 +11,24 @@ Read all files referenced by the invoking prompt's execution_context before star
 ## Auto Mode Detection
 
 Check if `--auto` flag is present in $ARGUMENTS.
+Check if `--minimal` flag is also present in $ARGUMENTS.
+
+**If both `--auto` and `--minimal` are present, stop before any durable write:**
+
+```
+Error: --auto and --minimal cannot be combined.
+
+Choose either `gpd:new-project --auto @proposal.md` for full auto intake or
+`gpd:new-project --minimal [@file.md]` for the lean core-artifact path.
+```
+
+Do not initialize git, create `GPD/`, write state, or write progress for this conflict exit.
 
 **If auto mode:**
 
-- Auto mode compresses intake; it does not override autonomy review gates after the scoping contract is approved
-- Do not assume scope is already correct just because a document exists
-- Existing-work routing may be compressed to one lightweight question, but cannot be skipped when prior artifacts are detected
-- Skip full deep questioning, but still synthesize a scoping contract from the supplied document
-- Ask at most one repair prompt if blocking scoping fields are missing
-- Config questions still required (Step 5)
+- Compress intake, but do not skip existing-work routing, scoping skepticism, or later autonomy gates
+- Synthesize the scoping contract from the supplied document; ask at most one repair prompt for missing blocking fields
+- Config questions still run in Step 5
 - Require one explicit scoping approval gate before requirements and roadmap generation
 - After config and scope approval: run Steps 6-9 automatically with smart defaults:
   - Literature survey: Always yes
@@ -38,6 +47,8 @@ Usage: gpd:new-project --auto @your-proposal.md
 The document should describe the physics problem you want to investigate.
 ```
 
+Stop before git initialization, `GPD/` creation, state writes, or progress writes.
+
 </auto_mode>
 
 <minimal_mode>
@@ -46,20 +57,20 @@ The document should describe the physics problem you want to investigate.
 
 Check if `--minimal` flag is present in $ARGUMENTS.
 
-**If minimal mode:** After Step 1 (Setup), skip the entire standard flow (Steps 2-9) and execute the **Minimal Initialization Path** below instead.
+**If minimal mode:** After Step 1 read-only setup and Step 2 existing-work routing complete, skip the rest of the standard flow (Steps 3-9) and execute the **Minimal Initialization Path** below instead.
 
-Minimal mode creates the SAME directory structure and file set as the full path -- just with less conversational overhead. It still must produce a scoping contract with decisive outputs, anchors, and explicit approval so downstream workflows (`gpd:plan-phase`, `gpd:execute-phase`, etc.) work identically.
+Minimal mode creates only `GPD/PROJECT.md`, `GPD/config.json`, `GPD/REQUIREMENTS.md`, `GPD/ROADMAP.md`, `GPD/STATE.md`, and `GPD/state.json` with the approved `project_contract`. It does not promise literature-survey files or `GPD/CONVENTIONS.md`, but still needs decisive outputs, anchors, and explicit scope approval for downstream workflows.
 
 **Two variants:**
 
 1. `--minimal @file.md` — Input file provided. Parse it for research context.
-2. `--minimal` (no file) — Ask ONE question, then generate everything from the response.
+2. `--minimal` (no file) — Ask one structured intake question, repair blocking scoping gaps if needed, require scope approval, then create the documented core startup artifacts.
 
 ---
 
 ### Minimal Initialization Path
 
-**After Step 1 completes (init checks, git, project_exists guard):**
+**After Step 1 read-only setup and Step 2 existing-work routing complete:**
 
 #### M1. Gather Research Context
 
@@ -67,13 +78,10 @@ Minimal mode creates the SAME directory structure and file set as the full path 
 
 Parse the input markdown for:
 
-- **Research question** — Look for headings like "Research Question", "Objective", "Goal", or the first substantive paragraph
-- **Decisive observables and deliverables** — Look for explicit plots, figures, datasets, calculations, derivations, or benchmark outputs the user says matter
-- **Existing decomposition, if any** — Look for numbered lists, headings like "Phases", "Plan", "Steps", "Milestones", or any clear sequence of investigation chunks. Treat these as optional grounding, not as a setup prerequisite.
-- **Key parameters** — Look for mentions of physical parameters, coupling constants, energy scales, system sizes
-- **Theoretical framework** — Infer from terminology (QFT, condensed matter, GR, statistical mechanics, etc.)
-- **Computational tools** — Any mentioned software, libraries, or numerical methods
-- **Must-keep context** — Look for must-read references, benchmark values, prior outputs, figures, notebooks, and any stop/rethink conditions
+- Research question or objective
+- Decisive observables, deliverables, plots, figures, datasets, calculations, derivations, or benchmark outputs
+- Existing decomposition, if any; treat it as optional grounding, not a setup prerequisite
+- Key parameters, theoretical framework, computational tools, must-read references, benchmarks, prior outputs, figures, notebooks, and stop/rethink conditions
 
 If the file cannot be parsed (no discernible research question or objective), error:
 
@@ -83,7 +91,7 @@ Error: Could not extract research context from the provided file.
 The file should contain at minimum:
 - A research question or objective
 
-It should ideally also name at least one decisive output, anchor, prior output, or explicit "anchor unknown / need grounding / target not yet chosen" note so any repair prompt can stay narrow. Missing-anchor notes preserve uncertainty, but they do not satisfy approval on their own.
+It should ideally also name one decisive output, anchor, prior output, or explicit "need grounding / target not yet chosen" note so repair stays narrow.
 
 Example structure:
   # Research Question
@@ -94,10 +102,9 @@ Example structure:
 
   # Anchors
   Compare against the known 3D Ising result from the literature.
-
-  # Optional First Investigation Chunk
-  Set up the Monte Carlo simulation and finite-size scaling workflow.
 ```
+
+Stop after this error with `## > Next Up`: tell the user to edit the file and rerun `gpd:new-project --minimal @your-file.md`.
 
 **If `--minimal` without file** (`gpd:new-project --minimal`):
 
@@ -114,6 +121,16 @@ Wait for response. From the single response, extract:
 
 #### M1.5. Synthesize And Approve The Scoping Contract
 
+Load the approval-stage payload before schema-governed contract authoring:
+
+```bash
+SCOPE_APPROVAL_INIT=$(gpd --raw init new-project --stage scope_approval)
+if [ $? -ne 0 ]; then
+  echo "ERROR: scope-approval init failed: $SCOPE_APPROVAL_INIT"
+  # STOP -- display the error to the user and do not proceed.
+fi
+```
+
 Build a canonical scoping contract from the extracted input.
 Before you ask for approval, keep the contract as a literal JSON object for the `project_contract` subsection of `templates/project-contract-schema.md`, and use that schema as the canonical source of truth for the object rules. Do not restate the full contract rules here; keep only the approval-critical reminders below.
 
@@ -127,25 +144,22 @@ Before you ask for approval, keep the contract as a literal JSON object for the 
 **Fields to capture even if still uncertain:**
 
 - In-scope and out-of-scope boundaries
-- Must-read references, benchmarks, or prior outputs
-- User-stated observables, deliverables, decisive plots, or artifact expectations
+- Must-read references or prior outputs
+- User-stated observables, deliverables, or artifact expectations
 - User-stated stop conditions, rethink triggers, or "come back to me before continuing" guidance
-- Initial investigation chunk or decomposition sketch if the user already knows it
 - Weakest anchor
 - What would look like progress but should not count as success
 - What result would make the current framing look wrong or incomplete
 - Unresolved questions / context gaps
 
-**Preservation rule:** Keep named observables, figures, datasets, derivations, papers, benchmarks, notebooks, prior runs, and stop conditions recognizable in the contract; if the anchor is unknown, record that explicitly instead of inventing a paper, benchmark, or baseline.
-Prefer explicit missing-anchor wording such as `Which reference should serve as the decisive benchmark anchor?`, `Benchmark reference not yet selected`, or `decisive target not yet chosen`.
+**Preservation rule:** Keep named observables, figures, datasets, derivations, papers, benchmarks, notebooks, prior runs, and stop conditions recognizable in the contract; if the anchor is unknown, record that explicitly instead of inventing a paper, benchmark, or baseline. Use the schema's grounding-linkage rules for accepted missing-anchor wording.
 Do not force a phase list just to make the scoping contract look complete. If decomposition is still unclear, record that uncertainty and let `ROADMAP.md` start with a single coarse phase or first grounded investigation chunk.
 If the init JSON already contains `project_contract`, `project_contract_load_info`, or `project_contract_validation`, preserve that state in the approval gate and continuation decision. Do not collapse a visible-but-blocked contract into a blank slate when deciding whether this is a fresh project or a continuation.
 
 If a blocking field is missing, ask exactly one repair prompt that targets only the missing field. Do not silently continue with placeholders.
 If no must-read references are confirmed yet, record that explicitly in the contract rather than inventing one.
-If the user does not know the anchor yet, preserve that explicitly in `scope.unresolved_questions`, `context_intake.context_gaps`, or `uncertainty_markers.weakest_anchors` rather than inventing a paper, benchmark, or baseline. Accepted shorthand like `need grounding` or `target not yet chosen` is fine when it clearly refers to the missing decisive anchor.
-If the user supplied explicit observables, deliverables, prior outputs, or stop conditions, preserve them in the contract using wording the user would still recognize. Do not paraphrase them into generic "benchmark" or "artifact" language unless the user asked you to broaden them.
-For observables, preserve any user-named decisive quantity, signal, or behavior, especially the first smoking-gun check they would trust over softer proxies or limiting cases.
+If the user does not know the anchor yet, preserve that explicitly in `scope.unresolved_questions`, `context_intake.context_gaps`, or `uncertainty_markers.weakest_anchors` rather than inventing a paper, benchmark, or baseline.
+If the user supplied explicit observables, deliverables, prior outputs, or stop conditions, preserve them in the contract using wording the user would still recognize. Preserve any user-named decisive quantity, signal, or behavior, especially the first smoking-gun check they would trust over softer proxies or limiting cases.
 If the user named a prior output or review checkpoint that must ground approval or be carried forward, put it in `context_intake.must_include_prior_outputs`. Use `context_intake.crucial_inputs` for user-stated observables, stop conditions, review requests, or constraints that must stay visible but do not themselves replace approved-mode grounding.
 Do not approve a scoping contract that strips decisive outputs, anchors, prior outputs, or review/stop triggers down to generic placeholders. The approved contract must preserve the user guidance that downstream planning needs.
 If the only checks captured so far are limiting cases, sanity checks, or qualitative expectations, treat the contract as still underspecified unless the user explicitly states that these are the decisive standard.
@@ -160,7 +174,7 @@ Before you show the approval gate, build the raw contract as a literal JSON obje
 - `context_intake`, `approach_policy`, and `uncertainty_markers` must each stay as objects, not strings or lists.
 - `schema_version` must be the integer `1`, `references[].must_surface` must stay a boolean `true` or `false`, and `context_intake`, `uncertainty_markers`, and `references[]` must stay visible in the approval gate so the contract still reflects the real inputs
 
-@{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md
+Use the schema discipline reference at `{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md`.
 
 Then present a concise scoping summary and require explicit approval:
 
@@ -172,6 +186,10 @@ Then present a concise scoping summary and require explicit approval:
   - "Review raw contract" -- show the structured contract
   - "Stop here" -- do not create downstream artifacts
 
+Headless or non-interactive mode is not scope approval. If you cannot get an explicit "Approve scope", stop with `## > Next Up`; never auto-select approval.
+
+If the user selects "Stop here", end with `## > Next Up`: primary `gpd:new-project` (or `gpd:new-project --minimal @file.md` for file-backed minimal intake) and `gpd:suggest-next` if any project state was written.
+
 **CRITICAL:** Minimal mode is still allowed to be lean, but it is not allowed to be contract-free.
 
 After approval, validate the contract before persisting it:
@@ -181,6 +199,16 @@ printf '%s\n' "$PROJECT_CONTRACT_JSON" | gpd --raw validate project-contract - -
 ```
 
 If validation fails, show the errors, revise the scoping contract, and do NOT continue to downstream artifact generation.
+If repair would require inventing anchors, references, baselines, DOI/arXiv/file locators, or prior outputs, stop and ask instead.
+If a validation or persistence shell call is denied by runtime policy, stop and report the policy block; do not substitute unvalidated file writes.
+
+Before persistence, cross the **First Mutation Gate**: invalid-argument exits, existing-work routing, recovery routing, scoping repair, explicit approval, and approved-mode validation have all passed.
+
+If `has_git` from the Step 1 init payload is false, initialize git now and only now:
+
+```bash
+git init
+```
 
 After validation passes, persist the approved contract into `GPD/state.json` from the same stdin payload:
 
@@ -188,145 +216,19 @@ After validation passes, persist the approved contract into `GPD/state.json` fro
 printf '%s\n' "$PROJECT_CONTRACT_JSON" | gpd state set-project-contract -
 ```
 
+This state-writer call writes `state.json`, regenerates `STATE.md`, refreshes `state.json.bak`, and may leave `state.json.lock`.
+
 Do not write `/tmp` intermediates for the approved contract. Prefer piping the exact approved JSON directly to `gpd ... -`. Only write a file if the user explicitly wants a durable saved copy, and if so place it under the project, not an OS temp directory.
 
 #### M2. Create PROJECT.md
 
-Populate `GPD/PROJECT.md` using the template from `templates/project.md`.
+Load `{GPD_INSTALL_DIR}/templates/project.md` at this stage and populate `GPD/PROJECT.md` from the approved scoping contract plus the M1 context. Do not inline or recreate the template body in this workflow.
 
-Fill in what was extracted. For sections without enough information, use sensible placeholder text that signals incompleteness:
+Populate only fields supported by extracted input. When information is missing, say that explicitly (`None confirmed yet`, `To be determined during Phase 1`, or `anchor not yet selected`) instead of inventing anchors, references, or phase structure. Preserve user-named observables, deliverables, prior outputs, stop/rethink conditions, and required references in wording the user would recognize.
 
-```markdown
-# [Extracted Research Title]
+Keep requirements in `GPD/REQUIREMENTS.md`; `PROJECT.md` only mirrors the contract-critical anchors and readable project context. If no conventions file exists yet, say conventions are not established by minimal mode instead of implying `GPD/CONVENTIONS.md` was created. Add `GPD/NOTATION_GLOSSARY.md` later only if the project needs a dedicated symbol glossary.
 
-## What This Is
-
-[Extracted research description — keep it concise, 2-3 sentences from the input]
-
-## Core Research Question
-
-[Extracted research question]
-
-## Scoping Contract Summary
-
-### Contract Coverage
-
-- [Claim / deliverable]: [What counts as success]
-- [Acceptance signal]: [Benchmark match, proof obligation, figure, dataset, or note]
-- [False progress to reject]: [Proxy that must not count]
-
-### User Guidance To Preserve
-
-- **User-stated observables:** [Specific quantity, curve, figure, or smoking-gun signal]
-- **User-stated deliverables:** [Specific table, plot, derivation, dataset, note, or code output]
-- **Must-have references / prior outputs:** [Paper, notebook, run, figure, or benchmark that must remain visible]
-- **Stop / rethink conditions:** [When to pause, ask again, or re-scope before continuing]
-
-### Scope Boundaries
-
-**In scope**
-
-- [Approved in-scope item]
-
-**Out of scope**
-
-- [Approved out-of-scope item]
-
-### Active Anchor Registry
-
-- [Anchor ID or short label]: [Paper, dataset, spec, benchmark, or prior artifact]
-  - Why it matters: [What it constrains]
-  - Carry forward: [planning | execution | verification | writing]
-  - Required action: [read | use | compare | cite | avoid]
-
-### Carry-Forward Inputs
-
-- [Prior output, notebook, figure, baseline, or "None confirmed yet"]
-
-### Skeptical Review
-
-- **Weakest anchor:** [Least-certain assumption, reference, or prior result]
-- **Disconfirming observation:** [What would make the framing look wrong]
-- **False progress to reject:** [What might look promising but should not count as success]
-
-### Open Contract Questions
-
-- [Unresolved question or context gap]
-
-## Research Context
-
-### Physical System
-
-[Inferred from input]
-
-### Theoretical Framework
-
-[Inferred from input, or "To be determined during Phase 1"]
-
-### Key Parameters and Scales
-
-| Parameter | Symbol | Regime | Notes |
-| --------- | ------ | ------ | ----- |
-| [param 1] | [sym]  | [range] | [notes] |
-
-### Known Results
-
-- [Known prior result, benchmark, or "To be filled after survey"]
-
-### What Is New
-
-[What this project is trying to establish]
-
-### Computational Environment
-
-[Extracted from input, or "To be determined"]
-
-## Notation and Conventions
-
-See `GPD/CONVENTIONS.md`. Add `GPD/NOTATION_GLOSSARY.md` later only if the project needs a dedicated symbol glossary.
-
-## Unit System
-
-[Inferred from input, or "To be determined from conventions setup"]
-
-If the project may rely on Wolfram capability, distinguish a local Mathematica / Wolfram Language install from the shared optional Wolfram integration config. Add `--live-executable-probes` to `gpd doctor` if you also want cheap local executable probes such as `pdflatex --version` or `wolframscript -version`, but that stays separate from the shared path enabled with `gpd integrations enable wolfram`, and it is still separate from `gpd validate plan-preflight <PLAN.md>` and from local install checks.
-
-## Requirements
-
-### Validated
-
-(None yet — derive and validate to confirm)
-
-### Active
-
-- [ ] [One requirement per extracted phase goal]
-
-### Out of Scope
-
-(To be refined as project progresses)
-
-## Key References
-
-[Approved must-read references, benchmarks, or "None confirmed yet"]
-
-## Target Publication
-
-(To be determined)
-
-## Constraints
-
-(None specified)
-
-## Key Decisions
-
-| Decision                                    | Rationale              | Outcome   |
-| ------------------------------------------- | ---------------------- | --------- |
-| Minimal initialization — defer deep scoping | Fast project bootstrap | — Pending |
-
----
-
-_Last updated: [today's date] after initialization (minimal)_
-```
+If the project may rely on Wolfram capability, distinguish a local Mathematica / Wolfram Language install from the shared optional Wolfram integration config. Add `--live-executable-probes` to `gpd doctor` if you also want cheap local executable probes such as `pdflatex --version`, `pdftotext -v`, or `wolframscript -version`, but that stays separate from the shared path enabled with `gpd integrations enable wolfram`, and it is still separate from `gpd validate plan-preflight <PLAN.md>` and from local install checks.
 
 #### M3. Create REQUIREMENTS.md
 
@@ -367,9 +269,9 @@ For each phase, create one or more requirements using the standard format:
 
 #### M4. Create ROADMAP.md
 
-Create `GPD/ROADMAP.md` directly from the phase descriptions or inferred work chunks (no roadmapper agent).
+For minimal bootstrap only, write a lightweight local `GPD/ROADMAP.md` directly from the approved contract and the template below. Do not claim or invoke the staged post-scope roadmapping handoff in the minimal path; the full initialization path owns the `post_scope` roadmapper handoff.
 
-Use the coarsest decomposition the approved contract actually supports. If the input only supports one grounded stage so far, create a one-phase roadmap and carry later decomposition as an open question instead of inventing filler phases.
+Use the coarsest decomposition the approved contract actually supports. If the input only supports one grounded stage so far, keep the roadmap coarse and carry later decomposition as an open question instead of inventing filler phases.
 
 Use the standard roadmap template structure:
 
@@ -416,75 +318,9 @@ Plans:
 
 #### M5. Create STATE.md and config.json
 
-**STATE.md** — Initialize using the standard template:
+**STATE.md** — Load `{GPD_INSTALL_DIR}/templates/state.md` only when writing `GPD/STATE.md`; do not inline the template body in this workflow.
 
-```markdown
-# Research State
-
-## Project Reference
-
-See: GPD/PROJECT.md (updated [today's date])
-
-**Core research question:** [From PROJECT.md]
-**Current focus:** Phase 1 — [Phase 1 name]
-
-## Current Position
-
-**Current Phase:** 1
-**Current Phase Name:** [Phase 1 name]
-**Total Phases:** [N]
-**Current Plan:** 0
-**Total Plans in Phase:** 0
-**Status:** Ready to plan
-**Last Activity:** [today's date]
-**Last Activity Description:** Project initialized (minimal)
-
-**Progress:** [░░░░░░░░░░] 0%
-
-## Active Calculations
-
-None yet.
-
-## Intermediate Results
-
-None yet.
-
-## Open Questions
-
-[Populate from approved scoping-contract unresolved questions. If none, say "None yet."]
-
-## Performance Metrics
-
-| Label | Duration | Tasks | Files |
-| ----- | -------- | ----- | ----- |
-| -     | -        | -     | -     |
-
-## Accumulated Context
-
-### Decisions
-
-- [Phase 1]: Minimal mode — scoping contract approved before phase planning
-
-### Active Approximations
-
-None yet.
-
-### Pending Todos
-
-None yet.
-
-### Blockers/Concerns
-
-None yet.
-
-## Session Continuity
-
-**Last session:** [current ISO timestamp]
-**Stopped at:** Project initialized (minimal)
-**Resume file:** —
-**Hostname:** [current hostname]
-**Platform:** [current platform]
-```
+Initialize it with the project reference, core research question, Phase 1 ready-to-plan position, empty active calculations and intermediate results, approved-contract unresolved questions, and no pending todos or blockers unless the user supplied them. Record the last activity as `Project initialized (minimal)` and keep the session-continuity fields consistent with the JSON continuation fields below.
 
 Initialize the canonical continuity fields under `GPD/state.json.continuation` so `gpd:resume-work` sees the same durable state when JSON is healthy:
 
@@ -499,10 +335,10 @@ Initialize the canonical continuity fields under `GPD/state.json.continuation` s
 
 ```json
 {
-  "autonomy": "balanced",
+  "autonomy": "supervised",
   "research_mode": "balanced",
   "execution": {
-    "review_cadence": "adaptive"
+    "review_cadence": "dense"
   },
   "parallelization": true,
   "planning": {
@@ -532,7 +368,7 @@ gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md 
 
 #### M7. Done — Offer Next Step
 
-```
+```text
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  GPD >>> RESEARCH PROJECT INITIALIZED (MINIMAL)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -550,13 +386,24 @@ gpd commit "docs: initialize research project (minimal)" --files GPD/PROJECT.md 
 **[N] phases** | **[N] requirements** | Ready to investigate
 
 Note: Initialized with --minimal. Literature survey and deep scoping
-were skipped. Use gpd:settings to adjust workflow preferences.
+were skipped, and notation conventions were not established. Use
+gpd:settings to adjust workflow preferences.
 
 ---------------------------------------------------------------
 
-## >> Next Up
+## > Next Up
 
 **Phase 1: [Phase Name]** — [Goal from ROADMAP.md]
+
+`gpd:discuss-phase 1`
+
+<sub>Start a fresh context window, then run `gpd:discuss-phase 1`.</sub>
+
+---
+
+**Also available:**
+- `gpd:plan-phase 1` — skip discussion and plan directly
+- `gpd:suggest-next` — confirm the next action
 ```
 
 Use ask_user:
@@ -568,9 +415,9 @@ Use ask_user:
   - "Review artifacts first" — I want to check the generated files
   - "Done for now" — I'll continue later
 
-**If "Discuss phase 1":** Tell the user to run `gpd:discuss-phase 1` (and suggest `/clear` first for a fresh context window).
+**If "Discuss phase 1":** Tell the user to start a fresh context window, then run `gpd:discuss-phase 1`.
 
-**If "Review artifacts first":** List the files and let the user inspect them. Suggest edits if needed, then re-offer planning.
+**If "Review artifacts first":** List the files and let the user inspect them. Suggest edits if needed, then re-offer `gpd:discuss-phase 1` as primary and `gpd:plan-phase 1` as the direct-plan alternative.
 
 **If "Done for now":** Exit. Remind them to use `gpd:resume-work` or `gpd:discuss-phase 1` when ready.
 
@@ -582,69 +429,49 @@ Use ask_user:
 
 <process>
 
+Runtime label: Show `gpd:` as native labels; keep local CLI `gpd ...` unchanged.
+
 ## 1. Setup
 
 **MANDATORY FIRST STEP — Execute these checks before ANY user interaction:**
 
 ```bash
-INIT=$(gpd --raw init new-project)
+INIT=$(gpd --raw init new-project --stage scope_intake)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed with the workflow.
 fi
 ```
 
-Parse JSON for: `researcher_model`, `synthesizer_model`, `roadmapper_model`, `commit_docs`, `autonomy`, `research_mode`, `project_exists`, `has_research_map`, `planning_exists`, `has_research_files`, `has_project_manifest`, `needs_research_map`, `has_git`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+Parse JSON for: `researcher_model`, `synthesizer_model`, `commit_docs`, `autonomy`, `research_mode`, `project_exists`, `state_exists`, `roadmap_exists`, `recoverable_project_exists`, `partial_project_exists`, `project_recovery_status`, `has_research_map`, `planning_exists`, `has_research_files`, `research_file_samples`, `has_project_manifest`, `needs_research_map`, `has_git`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
 
 **Mode-aware behavior:**
-- `autonomy=supervised`: Pause for user confirmation after each major step (questioning, scoping contract, research, roadmap). Show summaries and wait for approval before proceeding.
-- `autonomy=balanced` (default): Execute the full pipeline automatically. Pause only if research results are ambiguous, the roadmap has gaps, or scope-setting decisions need user judgment. The initial scoping contract is always a user-judgment checkpoint.
+- `autonomy=supervised` (default): Pause for user confirmation after each major step (questioning, scoping contract, research, roadmap). Show summaries and wait for approval before proceeding.
+- `autonomy=balanced`: Execute the full pipeline automatically. Pause only if research results are ambiguous, the roadmap has gaps, or scope-setting decisions need user judgment. The initial scoping contract is always a user-judgment checkpoint.
 - `autonomy=yolo`: Execute full pipeline, skip optional literature survey, auto-approve roadmap. Do NOT skip the initial scoping-contract approval gate. Do NOT skip the requirement to show contract coverage in the roadmap.
 - `--auto` changes how intake happens, not who owns later review gates. If `autonomy=supervised`, keep the roadmap approval checkpoint even in auto mode.
 - `research_mode=explore`: Expand literature survey (spawn 5+ researchers), broader questioning, include speculative research directions in roadmap.
 - `research_mode=exploit`: Focused literature survey (2-3 researchers), targeted questioning, lean roadmap with minimal exploratory phases.
 - `research_mode=balanced` (default): Use the standard literature-survey depth and keep the default anchor and contract coverage unless scoping or evidence calls for broader or narrower review.
 - `research_mode=adaptive`: Start broad enough to compare viable approaches while scoping the project. Narrow the roadmap only after anchors or decisive evidence make one method family clearly preferable.
-- Before `GPD/config.json` exists, the `autonomy` and `research_mode` values from `gpd --raw init new-project` are temporary defaults, not a durable user choice. Let those defaults govern the initial questioning and scoping pass, then run Step 5 immediately after scope approval and before the first project-artifact commit so the durable config takes over before research and roadmap execution.
+- Before `GPD/config.json` exists, the `autonomy` and `research_mode` values from `gpd --raw init new-project --stage scope_intake` are temporary defaults, not a durable user choice. Let those defaults govern the initial questioning and scoping pass, then run Step 5 immediately after scope approval and before the first project-artifact commit so the durable config takes over before research and roadmap execution.
 - Treat `project_contract` as approved scope only when `project_contract_gate.authoritative` is true. If the gate is false, keep the contract visible for scoping diagnostics and repair, not as authoritative downstream scope.
 
-**If `project_exists` is true:** Error — project already initialized. Use `gpd:progress`.
+Setup is read-only. Do not initialize git, create `GPD/`, write state, or write/delete `GPD/init-progress.json` here. Treat `has_git` as input to the First Mutation Gate.
 
-**If `has_git` is false:** Initialize git:
+**Check for previous initialization attempt before generic project/recovery hard-stops:**
 
-```bash
-git init
-```
+Use the structured setup fields from `SCOPE_INIT`; do not manually parse `GPD/init-progress.json` in the prompt.
 
-**Check for previous initialization attempt:**
-
-```bash
-if [ -f GPD/init-progress.json ]; then
-  # Guard against corrupted JSON (e.g., from interrupted write)
-  PREV_STEP=""
-  PREV_DESC=""
-  INIT_PROGRESS_RAW=$(cat GPD/init-progress.json 2>/dev/null || echo "")
-  if [ -n "$INIT_PROGRESS_RAW" ]; then
-    PREV_STEP=$(echo "$INIT_PROGRESS_RAW" | gpd json get .step --default "" 2>/dev/null)
-    PREV_DESC=$(echo "$INIT_PROGRESS_RAW" | gpd json get .description --default "" 2>/dev/null)
-  fi
-
-  # If JSON was corrupted (empty step), treat as fresh start
-  if [ -z "$PREV_STEP" ]; then
-    echo "WARNING: init-progress.json exists but is corrupted or empty. Starting fresh."
-    rm -f GPD/init-progress.json
-  fi
-fi
-```
-
-If `init-progress.json` exists and is valid, offer to resume:
+- If `init_progress_status="corrupt_init_progress"` or `init_progress_corrupt=true`, stop for explicit recovery handling. Say `GPD/init-progress.json exists but is corrupted or empty.` Do not delete it automatically; ask the user to inspect, move, or delete it before restarting.
+- If `init_progress_status="interrupted_init_progress"` and `init_progress_valid=true`, offer to resume even when `project_exists` or `recoverable_project_exists` is also true; this file means an interrupted initialization checkpoint owns the next routing decision.
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  GPD > PREVIOUS INITIALIZATION DETECTED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Completed through step {PREV_STEP}: {PREV_DESC}
+Completed through step {init_progress_step}: {init_progress_description}
 
 ──────────────────────────────────────────────────────
 Options:
@@ -653,8 +480,14 @@ Options:
 ──────────────────────────────────────────────────────
 ```
 
-If resume: continue from the next unfinished checkpoint after `PREV_STEP` (check which artifacts already exist on disk to confirm).
-If start fresh: delete `init-progress.json` and proceed normally.
+If resume: continue from the next unfinished checkpoint after `init_progress_step` (check which artifacts already exist on disk to confirm).
+If start fresh: delete `init-progress.json` only after the user explicitly chooses that option, then proceed normally.
+
+If no valid `GPD/init-progress.json` is present, apply the generic project/recovery guards:
+
+**If `project_exists` is true:** Error — project already initialized. Use `gpd:progress`.
+
+**If `recoverable_project_exists` is true but `project_exists` is false:** Error — this folder contains partial/recoverable GPD state, not a fresh project. Do not overwrite it. Use `gpd:resume-work` or `gpd:sync-state` to inspect/recover it; if the user really wants a clean restart, ask them to explicitly move or delete the existing `GPD/` artifacts first. A `GPD/` folder with `state.json`/`STATE.md` plus `ROADMAP.md` but no `PROJECT.md` belongs in this branch.
 
 ## 2. Existing Work Offer
 
@@ -670,7 +503,7 @@ If no prior artifacts are detected, continue directly to Step 3 / Step 4 as appr
 
 **If `needs_research_map` is true** (from init — existing research artifacts detected but no research map):
 
-> **Platform note:** If `ask_user` is not available, present these options in plain text and wait for the user's freeform response.
+@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md
 
 Use ask_user:
 
@@ -688,9 +521,9 @@ Run `gpd:map-research` first, then return to `gpd:new-project`
 
 Exit command.
 
-If `project_contract` is present in the init JSON, keep `project_contract`, `project_contract_load_info`, and `project_contract_validation` visible while deciding whether this is fresh work or a continuation. Preserve blockers, warnings, and approval state rather than flattening them into a blank-slate prompt.
+If `project_contract` is present in the init JSON, keep `project_contract` and `project_contract_load_info` visible while deciding whether this is fresh work or a continuation. Treat `project_contract_validation` as approval-stage authority rather than a stage-1 requirement. Preserve blockers, warnings, and approval state rather than flattening them into a blank-slate prompt.
 
-**If "Skip mapping" OR `needs_research_map` is false:** Continue to Step 3.
+**If "Skip mapping" OR `needs_research_map` is false:** Existing-work routing is complete. If `--minimal` is active, go to the Minimal Initialization Path now. Otherwise continue to Step 3.
 
 ## 3. Deep Questioning
 
@@ -719,22 +552,15 @@ Based on what they said, ask follow-up questions that dig into their response. U
 Keep following threads. Each answer opens new threads to explore. Ask about:
 
 - What physical system or phenomenon motivated this
-- What they currently suspect about the answer, and what evidence would change their mind
 - What theoretical framework they are working in
-- What approximations or limits they are considering
 - What observable or measurable quantities they care about
 - What exact output, artifact, or benchmark would count as success
-- What exact observable, figure, derivation, dataset, or note they would personally look for first
-- What first smoking-gun observable, curve, benchmark reproduction, or scaling law they would trust before softer sanity checks
-- What would look like progress but should not count as success
-- Whether passing limiting cases, generic expectations, or qualitative agreement without that smoking gun should still count as failure
-- What references, benchmark results, datasets, or prior internal outputs must stay visible
-- What prior plots, notebooks, code outputs, or existing artifacts already matter and must not be ignored
+- What exact smoking-gun observable, curve, benchmark reproduction, or scaling law they would trust before softer sanity checks
+- What references, benchmark results, datasets, or prior outputs must stay visible
 - What should make the system stop, re-scope, or ask them again before a long execution branch
 - Which anchor or assumption feels weakest right now
 - What result would make the current framing look wrong or incomplete
-- What computational resources they have access to
-- Whether this connects to existing experimental data
+- What would look like progress but should not count as success
 
 If the user names a specific observable, deliverable, anchor paper, benchmark, figure, notebook, or prior result, reflect it back using recognizable wording and treat it as binding context unless the user later revises it.
 
@@ -759,17 +585,9 @@ Context to gather:
 - Research question (precise, falsifiable or answerable)
 - Physical system and regime
 - Theoretical framework (QFT, condensed matter, GR, statistical mechanics, etc.)
-- Key parameters and scales
-- User-stated observables, smoking-gun signals, or decisive plots
-- Decisive outputs, deliverables, or benchmark targets
-- Must-read references, baselines, and prior outputs to carry forward
-- User-stated stop conditions, rethink triggers, or review requests before long execution
-- Known results in the field (what has been done)
-- What is new or open (what has NOT been done)
-- Computational vs analytical approach preference
-- Target audience and venue (journal, conference)
-- Timeline and collaboration context
-- Available computational resources
+- Key observables or decisive outputs
+- Must-read references or prior outputs
+- User-stated stop conditions or rethink triggers before long execution
 - Weakest anchor or assumption
 - Disconfirming observation / change-course trigger
 - False-progress signals to reject
@@ -801,30 +619,11 @@ Keep the same blocking fields, preservation rules, schema discipline, approval o
 
 If `GPD/config.json` does not exist yet, run Step 5 now before generating or committing `PROJECT.md`. This keeps the opening focused on the physics question while still letting `planning.commit_docs` and other durable workflow settings apply before the first project-artifact commit. After Step 5 completes, return here and continue.
 
-Then synthesize all context into `GPD/PROJECT.md` using the template from `templates/project.md`.
+Then synthesize all context into `GPD/PROJECT.md` using `{GPD_INSTALL_DIR}/templates/project.md`. Load the template at this stage; do not inline or recreate template-owned skeletons in this workflow.
 
 **For fresh research projects:**
 
-Initialize research questions as hypotheses:
-
-```markdown
-## Research Questions
-
-### Answered
-
-(None yet — investigate to answer)
-
-### Active
-
-- [ ] [Research question 1]
-- [ ] [Research question 2]
-- [ ] [Research question 3]
-
-### Out of Scope
-
-- [Question 1] — [why: e.g., requires experiment, different subfield]
-- [Question 2] — [why]
-```
+Initialize research questions as hypotheses: answered questions should say none yet, active questions should come from the approved scope, and out-of-scope questions should include the reason they were excluded.
 
 **For continuation projects (existing work map exists):**
 
@@ -834,128 +633,21 @@ Infer answered questions from existing work:
 2. Identify what has already been established
 3. These become the initial Answered set
 
-```markdown
-## Research Questions
-
-### Answered
-
-- [checkmark] [Existing result 1] — established
-- [checkmark] [Existing result 2] — established
-- [checkmark] [Existing result 3] — established
-
-### Active
-
-- [ ] [New question 1]
-- [ ] [New question 2]
-
-### Out of Scope
-
-- [Question 1] — [why]
-```
-
 **Scoping Contract Summary:**
 
-Ensure PROJECT.md visibly summarizes the approved contract, including:
-
-```markdown
-## Scoping Contract Summary
-
-### Contract Coverage
-
-- [Claim / deliverable]: [What counts as success]
-- [Acceptance signal]: [Benchmark match, proof obligation, figure, dataset, or note]
-- [False progress to reject]: [Proxy that must not count]
-
-### Scope Boundaries
-
-**In scope**
-
-- [Approved in-scope item]
-
-**Out of scope**
-
-- [Approved out-of-scope item]
-
-### Active Anchor Registry
-
-- [Anchor ID or short label]: [Paper, dataset, spec, benchmark, or prior artifact]
-  - Why it matters: [What it constrains]
-  - Carry forward: [planning | execution | verification | writing]
-  - Required action: [read | use | compare | cite | avoid]
-
-### Carry-Forward Inputs
-
-- [Prior output, notebook, figure, baseline, or "None confirmed yet"]
-
-### Skeptical Review
-
-- **Weakest anchor:** [Least-certain assumption, reference, or prior result]
-- **Unvalidated assumptions:** [What is currently assumed rather than checked]
-- **Competing explanation:** [Alternative story that could also fit]
-- **Disconfirming observation:** [What would make the framing look wrong]
-- **False progress to reject:** [What might look promising but should not count as success]
-
-### Open Contract Questions
-
-- [Unresolved question or context gap]
-```
+Ensure `PROJECT.md` visibly summarizes the approved contract using the canonical template section. Include contract coverage, user guidance to preserve, scope boundaries, active anchors, carry-forward inputs, skeptical-review items, and open contract questions. Do not create a second project-contract schema or omit user-stated stop/rethink guidance.
 
 **Key Decisions:**
 
-Initialize with any decisions made during questioning:
-
-```markdown
-## Key Decisions
-
-| Decision                  | Rationale | Outcome   |
-| ------------------------- | --------- | --------- |
-| [Choice from questioning] | [Why]     | — Pending |
-```
+Initialize with decisions made during questioning, using the template's key-decision table and preserving the rationale for each choice.
 
 **Research Context:**
 
-```markdown
-## Research Context
-
-### Physical System
-
-[Description of the system under study]
-
-### Theoretical Framework
-
-[QFT / condensed matter / GR / statistical mechanics / etc.]
-
-### Key Parameters and Scales
-
-| Parameter | Symbol | Regime  | Notes   |
-| --------- | ------ | ------- | ------- |
-| [param 1] | [sym]  | [range] | [notes] |
-
-### Known Results
-
-- [Prior work 1] — [reference]
-- [Prior work 2] — [reference]
-
-### What Is New
-
-[What this project contributes beyond existing work]
-
-### Target Venue
-
-[Journal or conference, with rationale]
-
-### Computational Environment
-
-[Available resources: local workstation, cluster, cloud, specific codes]
-```
+Capture the physical system, theoretical framework, key parameters and scales, known results, novelty, target venue when known, and computational environment. If a field is unknown, mark it as unresolved rather than inventing a plausible value.
 
 **Last updated footer:**
 
-```markdown
----
-
-_Last updated: [date] after initialization_
-```
+Record the date and initialization trigger in the template footer.
 
 Do not compress. Capture everything gathered.
 
@@ -988,6 +680,8 @@ Treat the selected setup as a workflow preset bundle over the existing config kn
 
 First surface a preset choice so the user can start from a bundle or jump straight to customization. If a preset is selected, preview the changed knobs before writing `GPD/config.json`, then ask for explicit apply or customize. Do not persist a separate preset key.
 
+Before writing `GPD/config.json`, infer or confirm the selected runtime id using the same active-runtime rule as `gpd:settings`. Record it as `SELECTED_RUNTIME`. Any runtime-scoped model override follow-up must use `model_overrides.<SELECTED_RUNTIME>`, and runtime permissions sync must pass `--runtime "$SELECTED_RUNTIME"` so the configured model/runtime target and the permission target cannot drift.
+
 Use ask_user:
 
 - header: "Workflow Setup"
@@ -1000,18 +694,18 @@ Use ask_user:
   - "Full research" — core research defaults plus publication readiness tracking for projects expected to end in a paper
   - "Customize settings" — choose `autonomy`, `research_mode`, `parallelization`, `planning.commit_docs`, `execution.review_cadence`, workflow agents, and `model_profile` individually
 
-**If a preset is selected:** Resolve the selected catalog preset into the existing config keys, show the changed knobs before writing config.json, and if the user wants to adjust the bundle, fall back to "Customize settings". For the recommended `core-research` preset, that preview should surface `autonomy=balanced`, `research_mode=balanced`, `parallelization=true`, `planning.commit_docs=true`, `execution.review_cadence=adaptive`, and `model_profile=review`. Example for `core-research`:
+**If a preset is selected:** Resolve the selected catalog preset into the existing config keys, show the changed knobs before writing config.json, and if the user wants to adjust the bundle, fall back to "Customize settings". For the recommended `core-research` preset, that preview should surface `autonomy=supervised`, `research_mode=balanced`, `parallelization=true`, `planning.commit_docs=true`, `execution.review_cadence=dense`, and `model_profile=review`. Example for `core-research`:
 
 ```json
 {
-  "autonomy": "balanced",
+  "autonomy": "supervised",
   "research_mode": "balanced",
   "parallelization": true,
   "planning": {
     "commit_docs": true
   },
   "execution": {
-    "review_cadence": "adaptive"
+    "review_cadence": "dense"
   },
   "model_profile": "review",
   "workflow": {
@@ -1025,7 +719,7 @@ Use ask_user:
 Display confirmation:
 
 ```
-Config: Balanced autonomy | Adaptive review cadence | Balanced research mode | Parallel | All agents | Review profile
+Config: Supervised autonomy | Dense review cadence | Balanced research mode | Parallel | All agents | Review profile
 (Change anytime with gpd:settings)
 ```
 
@@ -1035,7 +729,7 @@ Skip to "Commit config.json" below.
 
 ---
 
-**Round 1 — Core workflow settings (4 questions):**
+**Round 1 — Core workflow settings (5 questions):**
 
 ```
 questions: [
@@ -1044,9 +738,9 @@ questions: [
     question: "How much autonomy should GPD have?",
     multiSelect: false,
     options: [
-      { label: "Balanced (Recommended)", description: "Routine work is automatic; pause on important physics decisions, ambiguities, blockers, or scope changes" },
-      { label: "YOLO", description: "Fastest mode. Auto-approve checkpoints, sync the active runtime to its most autonomous permission mode when supported, and keep going unless a hard stop fires" },
-      { label: "Supervised", description: "Confirm each major step before proceeding" }
+      { label: "Supervised (Recommended)", description: "Default for new projects. Checkpoint every physics-bearing decision so the researcher can verify and redirect early." },
+      { label: "Balanced", description: "Routine work is automatic; pause on important physics decisions, ambiguities, blockers, or scope changes" },
+      { label: "YOLO", description: "Fastest mode. Auto-approve checkpoints, sync the active runtime to its most autonomous permission mode when supported, and keep going unless a hard stop fires" }
     ]
   },
   {
@@ -1058,6 +752,16 @@ questions: [
       { label: "Explore", description: "Broader literature search and more alternative approaches" },
       { label: "Exploit", description: "Focused execution with minimal branching" },
       { label: "Adaptive", description: "Start broad, then narrow once the best path is clear" }
+    ]
+  },
+  {
+    header: "Review Cadence",
+    question: "How often should execution stop for review checkpoints?",
+    multiSelect: false,
+    options: [
+      { label: "Dense (Recommended)", description: "Default for rigorous research. Force first-result and pre-fanout gates on every execution wave." },
+      { label: "Adaptive", description: "Gate risky or load-bearing work while allowing clean routine segments to continue." },
+      { label: "Sparse", description: "Fewest review stops; required correctness, proof, and blocker gates still run." }
     ]
   },
   {
@@ -1147,6 +851,9 @@ Create `GPD/config.json` with all settings:
   "planning": {
     "commit_docs": true|false
   },
+  "execution": {
+    "review_cadence": "dense|adaptive|sparse"
+  },
   "model_profile": "deep-theory|numerical|exploratory|review|paper-writing",
   "workflow": {
     "research": true|false,
@@ -1163,14 +870,14 @@ Create `GPD/config.json` with all settings:
 
 **If planning.commit_docs = Yes:**
 
-- No additional gitignore entries needed
+- Keep `GPD/` tracked, but add `GPD/state.json.bak` and `GPD/state.json.lock` to `.gitignore` (create/update if needed). The backup is local crash recovery and the lockfile is local write coordination; neither is a durable project artifact.
 
 **Sync runtime permissions after writing config.json:**
 
 Run this regardless of whether the user chose recommended defaults or custom settings. For `autonomy=yolo`, this should persist or prepare the runtime's most autonomous permission mode. For non-yolo autonomy, it should restore any earlier GPD-managed yolo override.
 
 ```bash
-PERMISSIONS_SYNC=$(gpd --raw permissions sync --autonomy "$SELECTED_AUTONOMY" 2>/dev/null || true)
+PERMISSIONS_SYNC=$(gpd --raw permissions sync --runtime "$SELECTED_RUNTIME" --autonomy "$SELECTED_AUTONOMY" 2>/dev/null || true)
 echo "$PERMISSIONS_SYNC"
 ```
 
@@ -1202,7 +909,20 @@ CHECKPOINT
 
 ## 5.5. Resolve Model Profile
 
-Use models from init: `researcher_model`, `synthesizer_model`, `roadmapper_model`.
+Run a fresh post-scope init immediately before literature survey, requirements finalization, roadmapping, or conventions. Treat this late-stage init as the source of truth for downstream model selection, commit policy, and approval-state visibility.
+
+```bash
+POST_SCOPE_INIT=$(gpd --raw init new-project --stage post_scope)
+if [ $? -ne 0 ]; then
+  echo "ERROR: post-scope init failed: $POST_SCOPE_INIT"
+  exit 1
+fi
+```
+
+Parse JSON for: `researcher_model`, `synthesizer_model`, `roadmapper_model`, `commit_docs`, `autonomy`, `research_mode`, `project_contract`, `project_contract_gate`, `project_contract_load_info`, `project_contract_validation`.
+
+Do not reuse stale bootstrap values for literature survey, roadmapping, or conventions once this post-scope init succeeds.
+Use the staged `research_mode` from `POST_SCOPE_INIT` for all scout handoffs. Do not reread config inside the scouts.
 
 ## 6. Literature Survey Decision
 
@@ -1228,10 +948,10 @@ Display stage banner:
 Surveying [research domain] landscape...
 ```
 
-Create research directory:
+Create literature directory:
 
 ```bash
-mkdir -p GPD/research
+mkdir -p GPD/literature
 ```
 
 **Determine project context:**
@@ -1276,6 +996,8 @@ What are the key known results, exact solutions, and established techniques in [
 [PROJECT.md summary - research question, physical system, theoretical framework, key parameters]
 </project_context>
 
+Research mode from the staged post-scope init: {research_mode}. Use it as authoritative for this scout.
+
 <downstream_consumer>
 Your PRIOR-WORK.md feeds into research planning. Be precise:
 - Specific results with references (author, year, journal)
@@ -1291,21 +1013,21 @@ Your PRIOR-WORK.md feeds into research planning. Be precise:
 </quality_gate>
 
 <output>
-Write to: GPD/research/PRIOR-WORK.md
+Write to: GPD/literature/PRIOR-WORK.md
 Use template: {GPD_INSTALL_DIR}/templates/research-project/PRIOR-WORK.md
 </output>
 <spawn_contract>
 write_scope:
   mode: scoped_write
   allowed_paths:
-    - GPD/research/PRIOR-WORK.md
+    - GPD/literature/PRIOR-WORK.md
 expected_artifacts:
-  - GPD/research/PRIOR-WORK.md
+  - GPD/literature/PRIOR-WORK.md
 shared_state_policy: return_only
 </spawn_contract>
 ", subagent_type="gpd-project-researcher", model="{researcher_model}", readonly=false, description="Prior work research")
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+# Apply the canonical runtime delegation convention already loaded above.
 
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-project-researcher.md for your role and instructions.
 
@@ -1328,6 +1050,8 @@ What analytical techniques, numerical methods, and computational tools are stand
 [PROJECT.md summary]
 </project_context>
 
+Research mode from the staged post-scope init: {research_mode}. Use it as authoritative for this scout.
+
 <downstream_consumer>
 Your METHODS.md feeds into approach selection. Categorize clearly:
 - Analytical methods (exact solutions, perturbation theory, RG, etc.)
@@ -1343,21 +1067,21 @@ Your METHODS.md feeds into approach selection. Categorize clearly:
 </quality_gate>
 
 <output>
-Write to: GPD/research/METHODS.md
+Write to: GPD/literature/METHODS.md
 Use template: {GPD_INSTALL_DIR}/templates/research-project/METHODS.md
 </output>
 <spawn_contract>
 write_scope:
   mode: scoped_write
   allowed_paths:
-    - GPD/research/METHODS.md
+    - GPD/literature/METHODS.md
 expected_artifacts:
-  - GPD/research/METHODS.md
+  - GPD/literature/METHODS.md
 shared_state_policy: return_only
 </spawn_contract>
 ", subagent_type="gpd-project-researcher", model="{researcher_model}", readonly=false, description="Methods research")
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+# Apply the canonical runtime delegation convention already loaded above.
 
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-project-researcher.md for your role and instructions.
 
@@ -1380,6 +1104,8 @@ What computational approaches, algorithms, and software tools are available for 
 [PROJECT.md summary]
 </project_context>
 
+Research mode from the staged post-scope init: {research_mode}. Use it as authoritative for this scout.
+
 <downstream_consumer>
 Your COMPUTATIONAL.md informs the computational strategy. Include:
 - Algorithms with convergence criteria and scaling behavior
@@ -1396,21 +1122,21 @@ Your COMPUTATIONAL.md informs the computational strategy. Include:
 </quality_gate>
 
 <output>
-Write to: GPD/research/COMPUTATIONAL.md
+Write to: GPD/literature/COMPUTATIONAL.md
 Use template: {GPD_INSTALL_DIR}/templates/research-project/COMPUTATIONAL.md
 </output>
 <spawn_contract>
 write_scope:
   mode: scoped_write
   allowed_paths:
-    - GPD/research/COMPUTATIONAL.md
+    - GPD/literature/COMPUTATIONAL.md
 expected_artifacts:
-  - GPD/research/COMPUTATIONAL.md
+  - GPD/literature/COMPUTATIONAL.md
 shared_state_policy: return_only
 </spawn_contract>
 ", subagent_type="gpd-project-researcher", model="{researcher_model}", readonly=false, description="Computational approaches research")
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+# Apply the canonical runtime delegation convention already loaded above.
 
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-project-researcher.md for your role and instructions.
 
@@ -1433,6 +1159,8 @@ What are the open problems, common mistakes, and known pitfalls in [research dom
 [PROJECT.md summary]
 </project_context>
 
+Research mode from the staged post-scope init: {research_mode}. Use it as authoritative for this scout.
+
 <downstream_consumer>
 Your PITFALLS.md prevents wasted effort. For each pitfall:
 - Warning signs (how to detect early)
@@ -1449,27 +1177,31 @@ Your PITFALLS.md prevents wasted effort. For each pitfall:
 </quality_gate>
 
 <output>
-Write to: GPD/research/PITFALLS.md
+Write to: GPD/literature/PITFALLS.md
 Use template: {GPD_INSTALL_DIR}/templates/research-project/PITFALLS.md
 </output>
 <spawn_contract>
 write_scope:
   mode: scoped_write
   allowed_paths:
-    - GPD/research/PITFALLS.md
+    - GPD/literature/PITFALLS.md
 expected_artifacts:
-  - GPD/research/PITFALLS.md
+  - GPD/literature/PITFALLS.md
 shared_state_policy: return_only
 </spawn_contract>
 ", subagent_type="gpd-project-researcher", model="{researcher_model}", readonly=false, description="Pitfalls research")
 ```
 
+**Handle scout returns:** Route on the full canonical `gpd_return` envelope (`status`, `files_written`, `issues`, and `next_actions`), and fail closed unless `gpd_return.status` is typed and the expected artifact is freshly named in `gpd_return.files_written`. If `checkpoint`, present it to the user, collect the response, and spawn a fresh continuation; do not keep the original scout alive. If `blocked`, surface the blocker, stop this scout path, and do not treat it as a retryable success. If `failed`, surface the failure and retry only once. If `completed`, verify the expected artifact exists on disk and is named in the fresh `gpd_return.files_written`. Treat any preexisting scout file as stale unless the same path appears in the fresh return. Do not trust runtime completion text alone.
+
+Any scout `checkpoint`, `blocked`, or final `failed` stop must end with `## > Next Up`: primary `gpd:new-project` (it will detect `GPD/init-progress.json` when present and offer resume) and `gpd:suggest-next`.
+
 **If any research agent fails to spawn or returns an error:** Verify which required scout artifacts exist (`PRIOR-WORK.md`, `METHODS.md`, `COMPUTATIONAL.md`, `PITFALLS.md`). Retry only the missing scout tasks once. If any required research file is still missing after the retry, STOP this survey path and present the missing artifacts. Do not proceed with a partial literature survey. Do not synthesize from incomplete scout output. Do not silently downgrade to manual main-context research.
 
-After all 4 agents complete (or partial completion handled), spawn synthesizer to create SUMMARY.md:
+After all 4 scout artifacts are present on disk and each fresh `gpd_return.files_written` proves its expected artifact, spawn synthesizer to create SUMMARY.md:
 
 ```
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+# Apply the canonical runtime delegation convention already loaded above.
 
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-research-synthesizer.md for your role and instructions.
 
@@ -1481,15 +1213,15 @@ Synthesize literature survey outputs into SUMMARY.md.
 Read these files:
 - GPD/PROJECT.md
 - GPD/config.json
-- GPD/research/PRIOR-WORK.md
-- GPD/research/METHODS.md
-- GPD/research/COMPUTATIONAL.md
-- GPD/research/PITFALLS.md
-- GPD/research/SUMMARY.md (if re-synthesizing an existing survey)
+- GPD/literature/PRIOR-WORK.md
+- GPD/literature/METHODS.md
+- GPD/literature/COMPUTATIONAL.md
+- GPD/literature/PITFALLS.md
+- GPD/literature/SUMMARY.md (if re-synthesizing an existing survey)
 </research_files>
 
 <output>
-Write to: GPD/research/SUMMARY.md
+Write to: GPD/literature/SUMMARY.md
 Use template: {GPD_INSTALL_DIR}/templates/research-project/SUMMARY.md
 Do NOT commit — the orchestrator handles commits.
 </output>
@@ -1497,17 +1229,21 @@ Do NOT commit — the orchestrator handles commits.
 write_scope:
   mode: scoped_write
   allowed_paths:
-    - GPD/research/SUMMARY.md
+    - GPD/literature/SUMMARY.md
 expected_artifacts:
-  - GPD/research/SUMMARY.md
+  - GPD/literature/SUMMARY.md
 shared_state_policy: return_only
 </spawn_contract>
 ", subagent_type="gpd-research-synthesizer", model="{synthesizer_model}", readonly=false, description="Synthesize research")
 ```
 
-**Artifact gate:** If a scout reports success but its `expected_artifacts` entry (`GPD/research/{FILE}`) is missing, treat that scout as incomplete. If the synthesizer reports success but `GPD/research/SUMMARY.md` is missing, treat that handoff as incomplete. Do not trust the runtime handoff status by itself.
+**Handle the synthesizer return:** Route on the full canonical `gpd_return` envelope (`status`, `files_written`, `issues`, and `next_actions`), and fail closed unless `gpd_return.status` is typed and `GPD/literature/SUMMARY.md` is freshly named in `gpd_return.files_written`. If `checkpoint`, present it to the user, collect the response, and spawn a fresh continuation after the response. If `blocked`, surface the blocker and stop this synth path until it is resolved. If `failed`, surface the failure and retry once. If `completed`, verify `GPD/literature/SUMMARY.md` exists and is named in the fresh return. Do not trust runtime completion text alone.
 
-**If the synthesizer agent fails to spawn or returns an error:** Retry once if `GPD/research/SUMMARY.md` is missing. If the summary artifact is still missing after the retry, STOP and surface the blocker. Do not fabricate a fallback summary in the main context when the chosen survey path asked for a synthesized research brief.
+Any synthesizer `checkpoint`, `blocked`, or final `failed` stop must end with `## > Next Up`: primary `gpd:new-project` (resume from staged init state when present) and `gpd:suggest-next`.
+
+**Artifact gate:** If a scout reports success but its `expected_artifacts` entry (`GPD/literature/{FILE}`) is missing, treat that scout as incomplete. If the synthesizer reports success but `GPD/literature/SUMMARY.md` is missing, treat that handoff as incomplete. Do not trust the runtime handoff status by itself.
+
+**If the synthesizer agent fails to spawn or returns an error:** Treat any preexisting `GPD/literature/SUMMARY.md` as stale. Retry once only to obtain a fresh typed `gpd_return` that names `GPD/literature/SUMMARY.md` in `gpd_return.files_written`. If the summary artifact is still missing, or the retry does not produce a fresh typed return naming it, STOP and surface the blocker. Do not fabricate a fallback summary in the main context when the chosen survey path asked for a synthesized research brief.
 
 Display research complete banner and key findings:
 
@@ -1522,19 +1258,19 @@ Display research complete banner and key findings:
 **Standard Methods:** [from SUMMARY.md]
 **Watch Out For:** [from SUMMARY.md]
 
-Files: `GPD/research/`
+Files: `GPD/literature/`
 ```
 
 **Commit research files:**
 
 ```bash
-PRE_CHECK=$(gpd pre-commit-check --files GPD/research/PRIOR-WORK.md GPD/research/METHODS.md GPD/research/COMPUTATIONAL.md GPD/research/PITFALLS.md GPD/research/SUMMARY.md 2>&1) || true
+PRE_CHECK=$(gpd pre-commit-check --files GPD/literature/PRIOR-WORK.md GPD/literature/METHODS.md GPD/literature/COMPUTATIONAL.md GPD/literature/PITFALLS.md GPD/literature/SUMMARY.md 2>&1) || true
 echo "$PRE_CHECK"
 
 gpd commit "docs: literature survey complete" \
-  --files GPD/research/PRIOR-WORK.md GPD/research/METHODS.md \
-  GPD/research/COMPUTATIONAL.md GPD/research/PITFALLS.md \
-  GPD/research/SUMMARY.md
+  --files GPD/literature/PRIOR-WORK.md GPD/literature/METHODS.md \
+  GPD/literature/COMPUTATIONAL.md GPD/literature/PITFALLS.md \
+  GPD/literature/SUMMARY.md
 ```
 
 **Checkpoint step 6:**
@@ -1568,7 +1304,7 @@ Read PROJECT.md and `GPD/state.json` and extract:
 - Decisive outputs, deliverables, and forbidden proxies from the contract
 - Must-read references, prior outputs, and known baselines from the contract
 
-**If literature survey exists:** Read research/METHODS.md and PRIOR-WORK.md and extract available approaches.
+**If literature survey exists:** Read GPD/literature/METHODS.md and GPD/literature/PRIOR-WORK.md and extract available approaches.
 
 **If auto mode:**
 
@@ -1727,7 +1463,7 @@ Display stage banner:
 
 Spawn gpd-roadmapper agent with context:
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+Apply the canonical runtime delegation convention already loaded above.
 
 ```
 task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and instructions.
@@ -1736,22 +1472,44 @@ task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and in
 
 **Read these files before proceeding:**
 - `GPD/PROJECT.md` — Project definition and research question
-- `GPD/state.json` — Approved project contract in `project_contract`
 - `GPD/REQUIREMENTS.md` — Derived requirements
-- `GPD/research/SUMMARY.md` — Literature survey (if exists)
+- `GPD/literature/SUMMARY.md` — Literature survey (if exists)
 - `GPD/config.json` — Project configuration
+- `GPD/state.json` — Continuity state only; do not treat a bare read of `project_contract` there as authoritative
+
+**Contract authority surfaces:**
+- `project_contract` — approved scope payload
+- `project_contract_gate` — whether the contract is authoritative
+- `project_contract_load_info` — load / continuation status for the contract
+- `project_contract_validation` — validation result for the contract
+
+**Contract context:**
+- `project_contract`: {project_contract}
+- `project_contract_gate`: {project_contract_gate}
+- `project_contract_load_info`: {project_contract_load_info}
+- `project_contract_validation`: {project_contract_validation}
+
+Project contract: {project_contract}
+Project contract gate: {project_contract_gate}
+Project contract load info: {project_contract_load_info}
+Project contract validation: {project_contract_validation}
+
+<shallow_mode>true</shallow_mode>
+
+Shallow mode: produce Phase 1 fully detailed (Goal, Depends on, Requirements, Contract Coverage, 2-5 Success Criteria, placeholder plans) and Phases 2+ as compact stubs only: title, one-line Goal, objective IDs, compact contract/anchor/proxy labels, `**Plans:** 0 plans`, and a single `- [ ] TBD (run plan-phase N to break down)` entry. The researcher fleshes out detailed success criteria and task decomposition for each subsequent phase on demand via `gpd:plan-phase N`.
 
 </planning_context>
 
 <instructions>
-Create research roadmap:
-1. Derive phases from requirements AND the approved project contract. Use the smallest decomposition that keeps decisive outputs, anchor handoffs, and verification legible. A tightly scoped project may have a single phase or a coarse early roadmap. Do NOT invent literature, numerics, or paper phases unless the requirements or contract demand them.
-2. Map every requirement to exactly one phase
-3. For each phase, include explicit contract coverage in ROADMAP.md showing the decisive contract items, deliverables, anchor coverage, and forbidden proxies advanced by that phase
-4. Derive 2-5 success criteria per phase (concrete, verifiable results) that respect the decisive outputs, anchors, and forbidden proxies in the approved project contract
-5. Validate 100% requirement coverage and surface all contract-critical items
-6. Write files immediately (ROADMAP.md, STATE.md, update REQUIREMENTS.md traceability) while preserving any existing `GPD/state.json` fields, especially `project_contract` and previously recorded open questions
-7. Return ROADMAP CREATED with summary
+Create research roadmap through the staged post-scope continuation handoff. Keep the handoff orchestration-only: do not reinterpret contract authority, do not widen scope, and do not invent an alternate roadmap path.
+1. If `project_contract_gate.authoritative` is false, `project_contract_load_info.status` starts with `blocked`, or `project_contract_validation.valid` is false, return `gpd_return.status: checkpoint` rather than guessing.
+2. Otherwise, derive the smallest decomposition that keeps decisive outputs, anchor handoffs, and verification legible. A tightly scoped project may have a single phase or a coarse early roadmap. Do NOT invent literature, numerics, or paper phases unless the requirements or contract demand them.
+3. Map every requirement to exactly one phase.
+4. For Phase 1, include explicit contract coverage in ROADMAP.md showing the decisive contract items, deliverables, anchor coverage, and forbidden proxies advanced by that phase. Phases 2+ are stubs under shallow_mode — they carry objective IDs and compact contract/anchor/proxy labels, but no detailed contract coverage narrative until the researcher runs `gpd:plan-phase N`.
+5. Derive 2-5 success criteria for Phase 1 (concrete, verifiable results) that respect the decisive outputs, anchors, and forbidden proxies in the approved project contract. Phases 2+ omit success criteria in shallow mode.
+6. Validate 100% requirement coverage. In shallow mode, surface contract-critical identity for all phases through objective IDs and compact contract/anchor/proxy labels, but require detailed per-phase coverage and success criteria only for Phase 1.
+7. Write files immediately (ROADMAP.md, STATE.md, update REQUIREMENTS.md traceability) while preserving any existing `GPD/state.json` fields, especially `project_contract` and previously recorded open questions.
+8. Return a typed `gpd_return` envelope with `status` and `files_written`, and use `gpd_return.files_written` to prove freshness; do not rely on runtime completion text alone.
 
 Write files first, then return. This ensures artifacts persist even if context is lost.
 </instructions>
@@ -1765,6 +1523,7 @@ write_scope:
 expected_artifacts:
   - GPD/ROADMAP.md
   - GPD/STATE.md
+  - GPD/REQUIREMENTS.md
 shared_state_policy: direct
 </spawn_contract>
 ", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Create research roadmap")
@@ -1772,17 +1531,36 @@ shared_state_policy: direct
 
 **Handle roadmapper return:**
 
-**If the roadmapper agent fails to spawn or returns an error:** Check whether both `GPD/ROADMAP.md` and `GPD/STATE.md` already exist and are non-trivial (the agent writes files first). If both artifacts exist, verify them and continue. Otherwise retry the roadmapper once. If either required artifact is still missing after the retry, STOP and surface the blocker. Do not create a second main-context roadmap implementation path, and do not continue with `REQUIREMENTS.md` but no canonical roadmap/state pair.
+Route on `gpd_return.status` and `gpd_return.files_written`.
+Do not route on the `## ROADMAP CREATED` heading alone.
+Do not route on the `## ROADMAP BLOCKED` heading alone.
 
-**Artifact gate:** If the roadmapper reports `## ROADMAP CREATED` but `GPD/ROADMAP.md` or `GPD/STATE.md` is missing, treat the handoff as incomplete. Do not trust the runtime handoff status by itself.
+**If the roadmapper agent fails to spawn or returns an error:** Do not infer completion from files that already exist on disk. Treat any preexisting `GPD/ROADMAP.md`, `GPD/STATE.md`, or `GPD/REQUIREMENTS.md` as a stale baseline unless this run returns a fresh typed `gpd_return` that names them in `gpd_return.files_written`. Check whether both `GPD/ROADMAP.md` and `GPD/STATE.md` already exist and are non-trivial (the agent writes files first) only as a partial-write recovery aid, not as proof of freshness. Otherwise retry the roadmapper once. If either required artifact is still missing after the retry, STOP and surface the blocker. Do not create a second main-context roadmap implementation path, and do not continue with `REQUIREMENTS.md` but no canonical roadmap/state pair.
 
-**If `## ROADMAP BLOCKED`:**
+**Artifact gate:** If the roadmapper reports `gpd_return.status: completed` but `GPD/ROADMAP.md` or `GPD/STATE.md` is missing, treat the handoff as incomplete. Do not trust the runtime handoff status by itself.
+If the roadmapper reports `gpd_return.status: completed`, verify that `GPD/ROADMAP.md`, `GPD/STATE.md`, and `GPD/REQUIREMENTS.md` are readable and named in `gpd_return.files_written`. If any expected artifact was already present before this handoff, it only counts as fresh output when the same path appears in `gpd_return.files_written`.
+
+**If `gpd_return.status: checkpoint`:**
+
+- Present the checkpoint
+- Collect the user's response
+- Re-spawn the roadmapper with a fresh continuation handoff once the blocker is resolved
+
+**If `gpd_return.status: blocked`:**
 
 - Present blocker information
 - Work with user to resolve
 - Re-spawn when resolved
 
-**If `## ROADMAP CREATED`:**
+**If `gpd_return.status: failed`:**
+
+- Present the failure details
+- Retry the roadmapper once
+- If the retry still fails, surface the blocker and stop
+
+Any roadmapper `checkpoint`, `blocked`, or final `failed` stop must end with `## > Next Up`: primary `gpd:new-project` (resume from `GPD/init-progress.json` when present), plus `gpd:suggest-next`.
+
+**If `gpd_return.status: completed`:**
 
 Read the created ROADMAP.md and present it nicely inline:
 
@@ -1844,7 +1622,7 @@ Use ask_user:
 - Get user's adjustment notes
 - Re-spawn roadmapper with revision context:
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+Apply the canonical runtime delegation convention already loaded above.
 
   ```
   task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and instructions.
@@ -1855,8 +1633,12 @@ Use ask_user:
 
   Read `GPD/ROADMAP.md` for the current roadmap.
 
+  <shallow_mode>true</shallow_mode>
+
+  Shallow mode: keep Phase 1 fully detailed (Goal, Depends on, Requirements, Contract Coverage, 2-5 Success Criteria, placeholder plans) and Phases 2+ as compact stubs only (title + one-line Goal + objective IDs + compact contract/anchor/proxy labels + `**Plans:** 0 plans` + a single `- [ ] TBD (run plan-phase N to break down)` entry). Do not promote Phases 2+ to full detail during revision unless the user's feedback explicitly requests it.
+
   Update the roadmap based on feedback. Edit files in place.
-  Return ROADMAP REVISED with changes made.
+  Return `gpd_return.status: completed` with changes made and fresh `gpd_return.files_written` entries for updated roadmap artifacts.
   </revision>
   ", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Revise roadmap")
   ```
@@ -1887,11 +1669,16 @@ CHECKPOINT
 
 ## 8.5. Establish Conventions
 
-**After roadmap is committed, spawn gpd-notation-coordinator to establish notation conventions.**
+**After the staged roadmap commit is recorded, spawn gpd-notation-coordinator to establish notation conventions.**
 
 This step is critical for multi-phase projects where convention mismatches cause silent errors (wrong signs, factors of 2*pi, metric signature confusion).
 
-**If auto mode:** Auto-approve subfield defaults without user confirmation.
+**Convention setup mode is driven by autonomy, not by whether the intake used `--auto`:**
+
+- `autonomy=supervised` (default): use `interactive` mode. The notation coordinator must return a checkpoint proposal before writing anything, the orchestrator presents it to the user, and a fresh continuation handoff performs the final write after confirmation/override.
+- `autonomy=balanced`: use `auto` mode. Lock clear subfield defaults automatically and only return a checkpoint/conflict if the context contains a genuine ambiguity or cross-subfield conflict that needs user judgment.
+- `autonomy=yolo`: use `auto` mode and accept the returned conventions automatically.
+- `--auto` only compresses intake. It does not force interactive convention review for `balanced` / `yolo`, and it does not remove the supervised checkpoint.
 
 Display stage banner:
 
@@ -1907,14 +1694,29 @@ Display stage banner:
 NOTATION_MODEL=$(gpd resolve-model gpd-notation-coordinator)
 ```
 
-If `NOTATION_MODEL` is empty or null, omit `model=` entirely in the spawn call. If it has a concrete value, include `model="$NOTATION_MODEL"`.
+If `NOTATION_MODEL` is empty or null, omit `model=` entirely in the spawn call. Continue without commentary about the missing override; that empty result is the normal "use the runtime default model" path, not a warning. If it has a concrete value, include `model="$NOTATION_MODEL"`.
 
-Spawn gpd-notation-coordinator:
+Set `CONVENTION_MODE` before spawning:
 
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+- `interactive` only when `autonomy=supervised`
+- `auto` for `autonomy=balanced` and `autonomy=yolo`
+
+Spawn gpd-notation-coordinator. Use the same prompt for both model paths; only the spawn call arguments differ:
+
+Apply the canonical runtime delegation convention already loaded above.
+
+```text
+If NOTATION_MODEL has a concrete value:
+  task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", model="$NOTATION_MODEL", readonly=false, description="Establish project conventions")
+
+If NOTATION_MODEL is empty or null:
+  task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", readonly=false, description="Establish project conventions")
+```
+
+`NOTATION_PROMPT`:
 
 ```
-  task(prompt="First, read {GPD_AGENTS_DIR}/gpd-notation-coordinator.md for your role and instructions.
+First, read {GPD_AGENTS_DIR}/gpd-notation-coordinator.md for your role and instructions.
 
 <task>
 Establish initial conventions for this research project.
@@ -1925,21 +1727,30 @@ Read these files:
 - GPD/PROJECT.md — Project definition, physics subfield, theoretical framework
 - GPD/ROADMAP.md — Phase structure (what conventions will be needed)
 - GPD/REQUIREMENTS.md — Research requirements
-- GPD/research/SUMMARY.md — Literature survey (if exists)
+- GPD/literature/SUMMARY.md — Literature survey (if exists)
 </project_context>
 
 <mode>
-{auto | interactive}
-Auto mode: Use subfield defaults, lock all, skip user confirmation.
-Interactive mode: Present suggested conventions, wait for user confirmation/override.
+{CONVENTION_MODE}
+Auto mode: Use subfield defaults, lock all, skip user confirmation unless a genuine ambiguity or conflict blocks completion.
+Interactive mode: Return `status: checkpoint` with the suggested conventions, rationale, test values, and any conflicts. Do NOT write `GPD/CONVENTIONS.md` and do NOT call `gpd convention set` until the orchestrator collects the user's confirmation/override and spawns a fresh continuation handoff.
 </mode>
 
 <output>
+If mode=`auto`:
 1. Create: GPD/CONVENTIONS.md (full convention reference)
 2. Lock conventions via: gpd convention set
-3. Return CONVENTIONS ESTABLISHED with summary
+3. Return `gpd_return.status: completed` with a convention summary
+
+If mode=`interactive`:
+1. Return a checkpoint proposal only
+2. Include the suggested conventions, rationale, test values, and any conflicts
+3. Leave file creation and `gpd convention set` for the continuation handoff after user confirmation
 </output>
+Use only when mode=`auto`.
+
 <spawn_contract>
+activation: mode == auto
 write_scope:
   mode: scoped_write
   allowed_paths:
@@ -1948,10 +1759,29 @@ expected_artifacts:
   - GPD/CONVENTIONS.md
 shared_state_policy: direct
 </spawn_contract>
-", subagent_type="gpd-notation-coordinator", model="{NOTATION_MODEL}", readonly=false, description="Establish project conventions")
+
+<spawn_contract_interactive>
+activation: mode == interactive
+write_scope:
+  mode: no_write
+  allowed_paths: []
+expected_artifacts: []
+expected_return:
+  status: checkpoint
+shared_state_policy: none
+</spawn_contract_interactive>
 ```
 
 **Handle notation-coordinator return:**
+
+- **Artifact gate:** For `auto` mode and for the approved continuation handoff, accept success only when `gpd_return.status` is typed as completed, `GPD/CONVENTIONS.md` is named in fresh `gpd_return.files_written`, and the file exists on disk. If the coordinator returns success but the artifact is missing, treat the handoff as incomplete. Do not write returned convention content in the main context and do not re-execute the convention task in the main context. If the return contains usable convention content, spawn one fresh `gpd-notation-coordinator` continuation with the original context, the returned content, and instructions to persist `GPD/CONVENTIONS.md` and the convention lock. If no usable content is available, or that continuation still fails the artifact gate, fail closed: surface the incomplete handoff and stop rather than proceeding with unstored conventions.
+
+- **If `gpd_return.status: checkpoint`:** Present the proposed conventions, rationale, test values, and any conflict table to the user. Collect confirmation or overrides. Then spawn a fresh `gpd-notation-coordinator` handoff (NOT send-message/resume) with:
+  1. the original project context,
+  2. the proposal returned by the first handoff,
+  3. the user-approved / user-overridden convention values,
+  4. instructions to write `GPD/CONVENTIONS.md`, run `gpd convention set` for each approved category, and return `gpd_return.status: completed`.
+  Treat that continuation handoff as the normal success path for `autonomy=supervised`, not as an error.
 
 **If the notation-coordinator agent fails to spawn or returns an error:** Use a deterministic fallback instead of hardcoded defaults:
 
@@ -1966,9 +1796,9 @@ shared_state_policy: direct
    gpd convention set metric_signature "$RESOLVED_METRIC"
    ```
 
-6. Note that full convention establishment was skipped. The user can run `gpd:validate-conventions` or rerun convention setup later, but the fallback lock must match the values written into `GPD/CONVENTIONS.md`.
+6. Note that full convention establishment was skipped. The user can run `gpd:validate-conventions`; the fallback lock must match the values written into `GPD/CONVENTIONS.md`.
 
-- **`CONVENTIONS ESTABLISHED`:** Display confirmation with convention summary. Commit CONVENTIONS.md:
+- **Conventions established:** Display confirmation with convention summary. Commit CONVENTIONS.md:
 
   ```bash
   PRE_CHECK=$(gpd pre-commit-check --files GPD/CONVENTIONS.md 2>&1) || true
@@ -2008,7 +1838,7 @@ Present completion with next steps:
 |----------------|-----------------------------|
 | Project        | `GPD/PROJECT.md`      |
 | Config         | `GPD/config.json`     |
-| Literature     | `GPD/research/`       |
+| Literature     | `GPD/literature/`     |
 | Requirements   | `GPD/REQUIREMENTS.md` |
 | Roadmap        | `GPD/ROADMAP.md`      |
 | Conventions    | `GPD/CONVENTIONS.md`  |
@@ -2017,18 +1847,21 @@ Present completion with next steps:
 
 ---------------------------------------------------------------
 
-## >> Next Up
+## > Next Up
 
 **Phase 1: [Phase Name]** — [Goal from ROADMAP.md]
 
-gpd:discuss-phase 1 — gather context and clarify approach
+`gpd:discuss-phase 1`
 
-<sub>/clear first -> fresh context window</sub>
+<sub>Start a fresh context window, then run `gpd:discuss-phase 1`.</sub>
+
+Discuss first; plan after context is clear. Phase stubs stay lean; expand them with `gpd:plan-phase N` when reached.
 
 ---
 
 **Also available:**
-- gpd:plan-phase 1 — skip discussion, plan directly
+- `gpd:plan-phase 1` — skip discussion only when Phase 1 is already clear enough to plan
+- `gpd:suggest-next` — confirm the next action
 
 ---------------------------------------------------------------
 ```
@@ -2037,9 +1870,11 @@ gpd:discuss-phase 1 — gather context and clarify approach
 
 <output>
 
+**Full mode output:**
+
 - `GPD/PROJECT.md`
 - `GPD/config.json`
-- `GPD/research/` (if literature survey selected)
+- `GPD/literature/` (if literature survey selected)
   - `PRIOR-WORK.md`
   - `METHODS.md`
   - `COMPUTATIONAL.md`
@@ -2050,6 +1885,15 @@ gpd:discuss-phase 1 — gather context and clarify approach
 - `GPD/STATE.md`
 - `GPD/state.json` with `project_contract`
 - `GPD/CONVENTIONS.md` (established by gpd-notation-coordinator)
+
+**Minimal mode output:**
+
+- `GPD/PROJECT.md`
+- `GPD/config.json`
+- `GPD/REQUIREMENTS.md`
+- `GPD/ROADMAP.md`
+- `GPD/STATE.md`
+- `GPD/state.json` with `project_contract`
 
 </output>
 
@@ -2070,13 +1914,21 @@ gpd:discuss-phase 1 — gather context and clarify approach
 - [ ] gpd-roadmapper spawned with context
 - [ ] Roadmap files written immediately (not draft)
 - [ ] User feedback incorporated (if any)
-- [ ] ROADMAP.md created with phases, requirement mappings, success criteria
+- [ ] ROADMAP.md created with phases, requirement mappings, Phase 1 success criteria, and compact stub contract identity for Phases 2+
 - [ ] STATE.md initialized
 - [ ] REQUIREMENTS.md traceability updated
 - [ ] gpd-notation-coordinator spawned to establish conventions
 - [ ] CONVENTIONS.md created with subfield-appropriate conventions — **committed**
 - [ ] Convention lock populated via `gpd convention set`
 - [ ] User knows next step is `gpd:discuss-phase 1`
+
+**Minimal mode success criteria (if `--minimal`):**
+- [ ] `GPD/` created and the repo initialized
+- [ ] Structured intake captured the core question, decisive outputs, anchors, and known gaps
+- [ ] Scoping contract approved, validated, and persisted before artifact generation
+- [ ] `PROJECT.md`, `config.json`, `REQUIREMENTS.md`, `ROADMAP.md`, `STATE.md`, and `state.json` created and committed
+- [ ] No promise is made that `GPD/literature/` or `GPD/CONVENTIONS.md` exists
+- [ ] User offered "Discuss phase 1 now?"
 
 **Atomic commits:** Each phase commits its artifacts immediately. If context is lost, artifacts persist.
 

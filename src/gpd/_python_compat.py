@@ -5,6 +5,14 @@ from __future__ import annotations
 import sys
 
 MIN_SUPPORTED_PYTHON = (3, 11)
+MIN_SUPPORTED_PYTHON_LABEL = ".".join(str(part) for part in MIN_SUPPORTED_PYTHON)
+PREFERRED_PYTHON_VERSIONS = ((3, 13), (3, 12), MIN_SUPPORTED_PYTHON)
+PREFERRED_VERSIONED_PYTHON_MINORS = tuple(
+    version[1]
+    for version in PREFERRED_PYTHON_VERSIONS
+    if version[0] == MIN_SUPPORTED_PYTHON[0]
+)
+RECOMMENDED_PYTHON_VERSION = PREFERRED_PYTHON_VERSIONS[0]
 
 
 def unsupported_python_message(*, version_info: tuple[int, ...] | None = None) -> str:
@@ -13,11 +21,10 @@ def unsupported_python_message(*, version_info: tuple[int, ...] | None = None) -
     version = version_info if version_info is not None else sys.version_info
     major = int(version[0]) if len(version) > 0 else 0
     minor = int(version[1]) if len(version) > 1 else 0
-    required = ".".join(str(part) for part in MIN_SUPPORTED_PYTHON)
     return (
         "get-physics-done requires Python "
-        f"{required}+; current interpreter is Python {major}.{minor}. "
-        "Use `uv run ...` or a Python 3.11+ environment."
+        f"{MIN_SUPPORTED_PYTHON_LABEL}+; current interpreter is Python {major}.{minor}. "
+        f"Use `uv run ...` or a Python {MIN_SUPPORTED_PYTHON_LABEL}+ environment."
     )
 
 

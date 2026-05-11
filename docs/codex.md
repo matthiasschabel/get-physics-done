@@ -13,8 +13,9 @@ Back to the onboarding hub: [GPD Onboarding Hub](./README.md).
 Use Codex if you want GPD inside the OpenAI Codex CLI and are comfortable with
 the `$gpd-...` command style.
 
-If you are on Windows, the official Codex docs currently say Windows support is
-experimental and recommend using Codex in WSL for the best experience.
+The official Codex CLI docs list macOS, Windows, and Linux support. On Windows,
+run Codex natively in PowerShell with the Windows sandbox for the normal path,
+or use WSL2 when your repository or tools need a Linux-native environment.
 
 ## What must already be true
 
@@ -77,6 +78,8 @@ Suggested order for beginners: `$gpd-help`, `$gpd-start`, `$gpd-tour`, then
 either `$gpd-new-project --minimal`, `$gpd-map-research`, or
 `$gpd-resume-work`.
 
+GPD is designed to favor scientific rigor and critical thinking. Treat preferred answers as hypotheses to test, and if a citation, artifact, or run result is missing, keep that gap explicit instead of inventing it.
+
 ## Return to work
 
 - Use `$gpd-resume-work` when this folder already has GPD state and you want to
@@ -114,3 +117,4 @@ You are in the right place when:
 
 - OpenAI: [Codex CLI docs](https://developers.openai.com/codex/cli)
 - OpenAI: [Codex authentication](https://developers.openai.com/codex/auth)
+- OpenAI: [Codex Windows setup](https://developers.openai.com/codex/windows)

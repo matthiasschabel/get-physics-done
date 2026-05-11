@@ -74,6 +74,8 @@ Suggested order for beginners: `/gpd:help`, `/gpd:start`, `/gpd:tour`, then
 either `/gpd:new-project --minimal`, `/gpd:map-research`, or
 `/gpd:resume-work`.
 
+GPD is designed to favor scientific rigor and critical thinking. Treat preferred answers as hypotheses to test, and if a citation, artifact, or run result is missing, keep that gap explicit instead of inventing it.
+
 ## Return to work
 
 - Use `/gpd:resume-work` when this folder already has GPD state and you want to
@@ -89,6 +91,26 @@ either `/gpd:new-project --minimal`, `/gpd:map-research`, or
 After your first successful start or later, use `/gpd:settings` to review
 autonomy, workflow defaults, and model-cost posture. Use `/gpd:set-tier-models`
 when you only want to pin concrete `tier-1`, `tier-2`, and `tier-3` model ids.
+
+## Readiness before unattended runs
+
+After `/gpd:settings` changes autonomy, or before an overnight run, check the
+active runtime from your normal terminal:
+
+```bash
+gpd validate unattended-readiness --runtime claude-code --autonomy supervised
+```
+
+Use the autonomy mode you selected if it is not `supervised`. If the verdict is
+`not-ready`, apply the runtime permission update and check again:
+
+```bash
+gpd permissions sync --runtime claude-code --autonomy supervised
+gpd validate unattended-readiness --runtime claude-code --autonomy supervised
+```
+
+If the verdict is `relaunch-required`, exit Claude Code and relaunch `claude`
+from this project folder before treating unattended use as ready.
 
 ## What success looks like
 

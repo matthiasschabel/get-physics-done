@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import posixpath
 import re
 from collections import Counter
 from enum import StrEnum
@@ -12,6 +11,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from pydantic import ValidationError as PydanticValidationError
 
+from gpd.core.publication_review_paths import (
+    normalize_review_path_label,
+    resolve_review_manuscript_path,
+    review_artifact_round,
+)
 from gpd.mcp.paper.models import (
     ClaimIndex,
     ProofAuditStatus,
@@ -30,6 +34,7 @@ __all__ = [
     "RefereeDecisionInput",
     "RefereeDecisionReport",
     "evaluate_referee_decision",
+    "validate_referee_decision_ledger_consistency",
     "validate_stage_review_artifact_payload",
     "validate_stage_review_artifact_file",
     "validate_stage_review_artifact_alignment",
@@ -139,6 +144,8 @@ def _load_review_json_artifact(path: Path) -> object:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ValueError(f"{path.as_posix()} does not exist") from exc
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"{path.as_posix()} is not valid UTF-8 JSON: {exc}") from exc
     except OSError as exc:
         raise ValueError(f"failed to read {path.as_posix()}: {exc}") from exc
     except json.JSONDecodeError as exc:
@@ -158,13 +165,30 @@ def _canonical_stage_artifact_details(stage_artifact_path: Path) -> tuple[str, s
     match = _STRICT_STAGE_ARTIFACT_RE.fullmatch(stage_artifact_path.name)
     if match is None:
         return None
-    round_text = match.group("round")
-    round_number = int(round_text) if round_text else 1
-    return match.group("stage_id"), match.group("round_suffix") or "", round_number
+    round_details = review_artifact_round(stage_artifact_path, pattern=_STRICT_STAGE_ARTIFACT_RE)
+    if round_details is None:
+        return None
+    round_number, round_suffix = round_details
+    return match.group("stage_id"), round_suffix, round_number
 
 
 def _claim_index_path_for_round(stage_artifact_path: Path, *, round_suffix: str) -> Path:
     return stage_artifact_path.with_name(f"CLAIMS{round_suffix}.json")
+
+
+def _claim_index_paths_for_stage_artifact(
+    stage_artifact_path: Path,
+    *,
+    round_suffix: str,
+    fallback_review_root: Path | None = None,
+) -> tuple[Path, ...]:
+    sibling_path = _claim_index_path_for_round(stage_artifact_path, round_suffix=round_suffix)
+    candidates = [sibling_path]
+    if fallback_review_root is not None:
+        fallback_path = fallback_review_root / f"CLAIMS{round_suffix}.json"
+        if fallback_path.resolve(strict=False) != sibling_path.resolve(strict=False):
+            candidates.append(fallback_path)
+    return tuple(candidates)
 
 
 def _round_suffix_for_round(round_number: int) -> str:
@@ -175,21 +199,30 @@ def _canonical_stage_artifact_name(stage_id: str, round_number: int) -> str:
     return f"STAGE-{stage_id}{_round_suffix_for_round(round_number)}.json"
 
 
-def _load_claim_index_for_stage_artifact(stage_artifact_path: Path, *, round_suffix: str) -> tuple[ClaimIndex | None, list[str]]:
-    claim_index_path = _claim_index_path_for_round(stage_artifact_path, round_suffix=round_suffix)
-    if not claim_index_path.exists():
-        return None, [f"matching claim index is missing: {claim_index_path.as_posix()}"]
+def _load_claim_index_for_stage_artifact(
+    stage_artifact_path: Path,
+    *,
+    round_suffix: str,
+    fallback_review_root: Path | None = None,
+) -> tuple[ClaimIndex | None, list[str]]:
+    claim_index_paths = _claim_index_paths_for_stage_artifact(
+        stage_artifact_path,
+        round_suffix=round_suffix,
+        fallback_review_root=fallback_review_root,
+    )
+    for claim_index_path in claim_index_paths:
+        if not claim_index_path.exists():
+            continue
+        try:
+            payload = _load_review_json_artifact(claim_index_path)
+            return ClaimIndex.model_validate(payload), []
+        except ValueError as exc:
+            return None, [f"matching claim index could not be loaded: {exc}"]
+        except PydanticValidationError as exc:
+            return None, ["matching claim index is invalid: " + _format_model_errors(exc, label=claim_index_path.name)]
 
-    try:
-        payload = _load_review_json_artifact(claim_index_path)
-        return ClaimIndex.model_validate(payload), []
-    except ValueError as exc:
-        return None, [f"matching claim index could not be loaded: {exc}"]
-    except PydanticValidationError as exc:
-        return None, [
-            "matching claim index is invalid: "
-            + _format_model_errors(exc, label=claim_index_path.name)
-        ]
+    missing_paths = ", ".join(path.as_posix() for path in claim_index_paths)
+    return None, [f"matching claim index is missing: {missing_paths}"]
 
 
 def validate_stage_review_artifact_alignment(
@@ -198,6 +231,7 @@ def validate_stage_review_artifact_alignment(
     artifact_path: Path,
     claim_index: ClaimIndex | None,
     expected_manuscript_path: str | None = None,
+    expected_manuscript_label: str = "expected manuscript",
     expected_manuscript_sha256: str | None = None,
     require_claim_index_error: bool = True,
 ) -> list[str]:
@@ -222,8 +256,10 @@ def validate_stage_review_artifact_alignment(
                 f"{artifact_path.name} round does not match filename suffix ({stage_report.round} != {expected_round})"
             )
 
-    if expected_manuscript_path and _normalize_path_label(stage_report.manuscript_path) != _normalize_path_label(expected_manuscript_path):
-        errors.append(f"{artifact_path.name} manuscript_path does not match the referee decision manuscript_path")
+    if expected_manuscript_path and normalize_review_path_label(
+        stage_report.manuscript_path
+    ) != normalize_review_path_label(expected_manuscript_path):
+        errors.append(f"{artifact_path.name} manuscript_path does not match the {expected_manuscript_label}")
     if expected_manuscript_sha256 and stage_report.manuscript_sha256 != expected_manuscript_sha256:
         errors.append(f"{artifact_path.name} manuscript_sha256 does not match the active manuscript snapshot")
 
@@ -235,8 +271,8 @@ def validate_stage_review_artifact_alignment(
         )
         return errors
 
-    normalized_stage_path = _normalize_path_label(stage_report.manuscript_path)
-    normalized_claim_path = _normalize_path_label(claim_index.manuscript_path)
+    normalized_stage_path = normalize_review_path_label(stage_report.manuscript_path)
+    normalized_claim_path = normalize_review_path_label(claim_index.manuscript_path)
     if normalized_stage_path != normalized_claim_path:
         errors.append(
             f"{artifact_path.name} manuscript_path does not match the matching claim index ({stage_report.manuscript_path} != {claim_index.manuscript_path})"
@@ -249,12 +285,12 @@ def validate_stage_review_artifact_alignment(
     claim_ids = [claim.claim_id for claim in claim_index.claims]
     duplicate_claim_ids = sorted(claim_id for claim_id, count in Counter(claim_ids).items() if count > 1)
     if duplicate_claim_ids:
-        errors.append(
-            "matching claim index contains duplicate claim IDs: " + ", ".join(duplicate_claim_ids)
-        )
+        errors.append("matching claim index contains duplicate claim IDs: " + ", ".join(duplicate_claim_ids))
 
     known_claim_ids = set(claim_ids)
-    unknown_claims_reviewed = sorted(claim_id for claim_id in set(stage_report.claims_reviewed) if claim_id not in known_claim_ids)
+    unknown_claims_reviewed = sorted(
+        claim_id for claim_id in set(stage_report.claims_reviewed) if claim_id not in known_claim_ids
+    )
     if unknown_claims_reviewed:
         errors.append(
             f"{artifact_path.name} claims_reviewed not found in the matching claim index: "
@@ -296,11 +332,7 @@ def validate_stage_review_artifact_alignment(
 
     if stage_report.stage_kind == ReviewStageKind.math:
         claims_by_id = {claim.claim_id: claim for claim in claim_index.claims}
-        theorem_bearing_claim_ids = {
-            claim.claim_id
-            for claim in claim_index.claims
-            if claim.theorem_bearing
-        }
+        theorem_bearing_claim_ids = {claim.claim_id for claim in claim_index.claims if claim.theorem_bearing}
         unreviewed_theorem_claim_ids = sorted(
             claim_id for claim_id in theorem_bearing_claim_ids if claim_id not in set(stage_report.claims_reviewed)
         )
@@ -315,7 +347,8 @@ def validate_stage_review_artifact_alignment(
         )
         if missing_proof_audits:
             errors.append(
-                f"{artifact_path.name} theorem-bearing claims must have proof_audits: " + ", ".join(missing_proof_audits)
+                f"{artifact_path.name} theorem-bearing claims must have proof_audits: "
+                + ", ".join(missing_proof_audits)
             )
 
         not_applicable_theorem_audits = sorted(
@@ -339,7 +372,9 @@ def validate_stage_review_artifact_alignment(
                 errors.append(
                     f"{artifact_path.name} theorem-bearing proof_audit {audit.claim_id} must include proof_locations"
                 )
-            missing_checked_assumptions = sorted(set(claim.theorem_assumptions) - set(audit.theorem_assumptions_checked))
+            missing_checked_assumptions = sorted(
+                set(claim.theorem_assumptions) - set(audit.theorem_assumptions_checked)
+            )
             if missing_checked_assumptions and audit.alignment_status == ProofAuditStatus.aligned:
                 errors.append(
                     f"{artifact_path.name} aligned proof_audit {audit.claim_id} is missing theorem_assumptions_checked coverage: "
@@ -360,10 +395,10 @@ def validate_stage_review_artifact_alignment(
             or audit.uncovered_parameters
             or audit.coverage_gaps
         )
-        if (
-            theorem_proof_gap_claim_ids
-            and stage_report.recommendation_ceiling in {ReviewRecommendation.accept, ReviewRecommendation.minor_revision}
-        ):
+        if theorem_proof_gap_claim_ids and stage_report.recommendation_ceiling in {
+            ReviewRecommendation.accept,
+            ReviewRecommendation.minor_revision,
+        }:
             errors.append(
                 f"{artifact_path.name} recommendation_ceiling cannot exceed `major_revision` when proof_audits report theorem-to-proof gaps: "
                 + ", ".join(theorem_proof_gap_claim_ids)
@@ -396,8 +431,7 @@ def _strict_stage_artifact_errors(stage_artifacts: list[str]) -> list[str]:
         )
     if invalid_stage_artifacts:
         errors.append(
-            "Strict staged peer review rejects noncanonical stage artifacts: "
-            + ", ".join(invalid_stage_artifacts)
+            "Strict staged peer review rejects noncanonical stage artifacts: " + ", ".join(invalid_stage_artifacts)
         )
     if len(round_suffixes) > 1:
         errors.append("Strict staged peer review requires all specialist stage artifacts to use the same round suffix.")
@@ -407,7 +441,9 @@ def _strict_stage_artifact_errors(stage_artifacts: list[str]) -> list[str]:
 def _strict_referee_decision_field_errors(data: RefereeDecisionInput) -> list[str]:
     """Return strict-mode errors for omitted referee-decision policy inputs."""
 
-    missing_fields = [field_name for field_name in _STRICT_REFEREE_DECISION_FIELDS if field_name not in data.model_fields_set]
+    missing_fields = [
+        field_name for field_name in _STRICT_REFEREE_DECISION_FIELDS if field_name not in data.model_fields_set
+    ]
     if not missing_fields:
         return []
     return [
@@ -416,18 +452,13 @@ def _strict_referee_decision_field_errors(data: RefereeDecisionInput) -> list[st
     ]
 
 
-def _normalize_path_label(path_text: str) -> str:
-    normalized = path_text.strip().replace("\\", "/")
-    if not normalized:
-        return ""
-    return posixpath.normpath(normalized)
-
-
 def _review_ledger_consistency_errors(data: RefereeDecisionInput, review_ledger: ReviewLedger) -> list[str]:
     errors: list[str] = []
 
-    normalized_decision_path = _normalize_path_label(data.manuscript_path) if data.manuscript_path.strip() else ""
-    normalized_ledger_path = _normalize_path_label(review_ledger.manuscript_path) if review_ledger.manuscript_path.strip() else ""
+    normalized_decision_path = normalize_review_path_label(data.manuscript_path) if data.manuscript_path.strip() else ""
+    normalized_ledger_path = (
+        normalize_review_path_label(review_ledger.manuscript_path) if review_ledger.manuscript_path.strip() else ""
+    )
     if not normalized_ledger_path:
         errors.append("review ledger manuscript_path must be non-empty")
     if normalized_decision_path and normalized_ledger_path and normalized_decision_path != normalized_ledger_path:
@@ -463,7 +494,9 @@ def _review_ledger_consistency_errors(data: RefereeDecisionInput, review_ledger:
         for issue in review_ledger.issues
         if issue.blocking and issue.status != ReviewIssueStatus.resolved
     )
-    missing_blocking_issue_ids = [issue_id for issue_id in unresolved_blocking_issue_ids if issue_id not in blocking_issue_ids]
+    missing_blocking_issue_ids = [
+        issue_id for issue_id in unresolved_blocking_issue_ids if issue_id not in blocking_issue_ids
+    ]
     if missing_blocking_issue_ids:
         errors.append(
             "unresolved blocking review-ledger issues missing from blocking_issue_ids: "
@@ -496,6 +529,15 @@ def _review_ledger_consistency_errors(data: RefereeDecisionInput, review_ledger:
     return errors
 
 
+def validate_referee_decision_ledger_consistency(
+    data: RefereeDecisionInput,
+    review_ledger: ReviewLedger,
+) -> list[str]:
+    """Return ledger/decision semantic errors without applying recommendation policy."""
+
+    return _review_ledger_consistency_errors(data, review_ledger)
+
+
 def _strict_stage_artifact_consistency_errors(
     stage_artifacts: list[str],
     *,
@@ -519,6 +561,7 @@ def _strict_stage_artifact_consistency_errors(
             validate_stage_review_artifact_file(
                 artifact_path,
                 expected_manuscript_path=expected_manuscript_path,
+                expected_manuscript_label="referee decision manuscript_path",
                 expected_manuscript_sha256=expected_manuscript_sha256,
             )
         )
@@ -535,7 +578,11 @@ def _strict_proof_redteam_errors(
         return []
 
     math_artifact_name = next(
-        (artifact_name for artifact_name in data.stage_artifacts if Path(artifact_name.strip()).name.startswith("STAGE-math")),
+        (
+            artifact_name
+            for artifact_name in data.stage_artifacts
+            if Path(artifact_name.strip()).name.startswith("STAGE-math")
+        ),
         None,
     )
     if math_artifact_name is None:
@@ -563,11 +610,7 @@ def _strict_proof_redteam_errors(
     except (ValueError, PydanticValidationError):
         return []
 
-    theorem_claim_ids = sorted(
-        claim.claim_id
-        for claim in claim_index.claims
-        if claim.theorem_bearing
-    )
+    theorem_claim_ids = sorted(claim.claim_id for claim in claim_index.claims if claim.theorem_bearing)
     if not theorem_claim_ids:
         return []
 
@@ -607,9 +650,7 @@ def _strict_proof_redteam_errors(
 
         theorem_audits = [audit for audit in stage_report.proof_audits if audit.claim_id in theorem_claim_ids]
         actual_proof_audit_coverage_complete = len(theorem_audits) == len(theorem_claim_ids) and all(
-            not audit.uncovered_assumptions
-            and not audit.uncovered_parameters
-            and not audit.coverage_gaps
+            not audit.uncovered_assumptions and not audit.uncovered_parameters and not audit.coverage_gaps
             for audit in theorem_audits
         )
         actual_theorem_proof_alignment_adequate = (
@@ -631,11 +672,71 @@ def _strict_proof_redteam_errors(
     return errors
 
 
+def _strict_referee_decision_theorem_claim_ids(
+    data: RefereeDecisionInput,
+    *,
+    project_root: Path | None,
+) -> list[str] | None:
+    """Return theorem-bearing claim IDs when strict stage artifacts make them knowable."""
+
+    if project_root is None:
+        return None
+
+    math_artifact_name = next(
+        (
+            artifact_name
+            for artifact_name in data.stage_artifacts
+            if Path(artifact_name.strip()).name.startswith("STAGE-math")
+        ),
+        None,
+    )
+    if math_artifact_name is None:
+        return None
+
+    math_artifact_path = Path(math_artifact_name)
+    if not math_artifact_path.is_absolute():
+        math_artifact_path = project_root / math_artifact_path
+    if not math_artifact_path.exists():
+        return None
+
+    details = _canonical_stage_artifact_details(math_artifact_path)
+    if details is None:
+        return None
+    _stage_id, round_suffix, _round_number = details
+
+    claim_index_path = math_artifact_path.with_name(f"CLAIMS{round_suffix}.json")
+    try:
+        claim_index = ClaimIndex.model_validate(_load_review_json_artifact(claim_index_path))
+    except (ValueError, PydanticValidationError):
+        return None
+    return sorted(claim.claim_id for claim in claim_index.claims if claim.theorem_bearing)
+
+
+def _strict_referee_decision_manuscript_requires_theorem_review(
+    data: RefereeDecisionInput,
+    *,
+    project_root: Path | None,
+) -> bool | None:
+    """Return whether the manuscript itself requires proof review when knowable."""
+
+    if project_root is None or not data.manuscript_path.strip():
+        return None
+    manuscript = resolve_review_manuscript_path(project_root, data.manuscript_path)
+    try:
+        from gpd.core.proof_review import manuscript_requires_theorem_bearing_review
+
+        return manuscript_requires_theorem_bearing_review(project_root, manuscript)
+    except Exception:
+        return None
+
+
 def validate_stage_review_artifact_file(
     artifact_path: Path,
     *,
     expected_manuscript_path: str | None = None,
+    expected_manuscript_label: str = "expected manuscript",
     expected_manuscript_sha256: str | None = None,
+    claim_index_fallback_root: Path | None = None,
 ) -> list[str]:
     """Return semantic validation errors for a stage-review file."""
 
@@ -654,7 +755,9 @@ def validate_stage_review_artifact_file(
         stage_report,
         artifact_path=artifact_path,
         expected_manuscript_path=expected_manuscript_path,
+        expected_manuscript_label=expected_manuscript_label,
         expected_manuscript_sha256=expected_manuscript_sha256,
+        claim_index_fallback_root=claim_index_fallback_root,
     )
 
 
@@ -663,7 +766,9 @@ def validate_stage_review_artifact_payload(
     *,
     artifact_path: Path,
     expected_manuscript_path: str | None = None,
+    expected_manuscript_label: str = "expected manuscript",
     expected_manuscript_sha256: str | None = None,
+    claim_index_fallback_root: Path | None = None,
 ) -> list[str]:
     """Return semantic validation errors for one typed stage-review artifact."""
 
@@ -679,6 +784,7 @@ def validate_stage_review_artifact_payload(
     claim_index, claim_index_errors = _load_claim_index_for_stage_artifact(
         artifact_path,
         round_suffix=round_suffix,
+        fallback_review_root=claim_index_fallback_root,
     )
     errors.extend(claim_index_errors)
     errors.extend(
@@ -687,6 +793,7 @@ def validate_stage_review_artifact_payload(
             artifact_path=artifact_path,
             claim_index=claim_index,
             expected_manuscript_path=expected_manuscript_path,
+            expected_manuscript_label=expected_manuscript_label,
             expected_manuscript_sha256=expected_manuscript_sha256,
             require_claim_index_error=not claim_index_errors,
         )
@@ -710,6 +817,11 @@ def evaluate_referee_decision(
     warnings: list[str] = []
     high_impact = _is_high_impact(data.target_journal)
     consistency_errors: list[str] = []
+    theorem_claim_ids = _strict_referee_decision_theorem_claim_ids(data, project_root=project_root)
+    manuscript_requires_theorem_review = _strict_referee_decision_manuscript_requires_theorem_review(
+        data,
+        project_root=project_root,
+    )
 
     if strict:
         if not data.manuscript_path.strip():
@@ -742,6 +854,12 @@ def evaluate_referee_decision(
         if strict_proof_redteam_errors:
             consistency_errors.extend(strict_proof_redteam_errors)
             allowed = _worse_recommendation(allowed, ReviewRecommendation.major_revision)
+        if manuscript_requires_theorem_review is True and theorem_claim_ids == []:
+            consistency_errors.append(
+                "Strict staged peer review found theorem-bearing manuscript text but the staged claim index "
+                "declares no theorem-bearing claims."
+            )
+            allowed = _worse_recommendation(allowed, ReviewRecommendation.major_revision)
     elif not data.stage_artifacts:
         warnings.append("No staged review artifacts were listed in the final decision input.")
 
@@ -763,18 +881,34 @@ def evaluate_referee_decision(
 
     if not data.physical_assumptions_justified:
         if data.unsupported_claims_are_central and not data.reframing_possible_without_new_results:
-            reasons.append("Physical assumptions adjacent to the main claims are unjustified and not salvageable by reframing alone.")
+            reasons.append(
+                "Physical assumptions adjacent to the main claims are unjustified and not salvageable by reframing alone."
+            )
             allowed = _worse_recommendation(allowed, ReviewRecommendation.reject)
         else:
-            reasons.append("Physical assumptions adjacent to the mathematics require substantive justification or restriction.")
+            reasons.append(
+                "Physical assumptions adjacent to the mathematics require substantive justification or restriction."
+            )
             allowed = _worse_recommendation(allowed, ReviewRecommendation.major_revision)
 
-    if not data.proof_audit_coverage_complete:
+    proof_gates_apply = (
+        manuscript_requires_theorem_review is True or theorem_claim_ids is None or bool(theorem_claim_ids)
+    )
+    if not proof_gates_apply and (not data.proof_audit_coverage_complete or not data.theorem_proof_alignment_adequate):
+        warnings.append(
+            "No theorem-bearing claims were found in the staged claim index; theorem-proof decision flags are treated as not applicable."
+        )
+
+    if proof_gates_apply and not data.proof_audit_coverage_complete:
         reasons.append("Central theorem-bearing claims are missing explicit proof-audit coverage.")
         allowed = _worse_recommendation(allowed, ReviewRecommendation.major_revision)
 
-    if not data.theorem_proof_alignment_adequate:
-        if data.unsupported_claims_are_central or not data.central_claims_supported or not data.reframing_possible_without_new_results:
+    if proof_gates_apply and not data.theorem_proof_alignment_adequate:
+        if (
+            data.unsupported_claims_are_central
+            or not data.central_claims_supported
+            or not data.reframing_possible_without_new_results
+        ):
             reasons.append("Theorem statements and proofs are misaligned on explicit assumptions or parameters.")
             allowed = _worse_recommendation(allowed, ReviewRecommendation.reject)
         else:
@@ -790,7 +924,9 @@ def evaluate_referee_decision(
         )
         allowed = _worse_recommendation(
             allowed,
-            ReviewRecommendation.reject if high_impact or not data.reframing_possible_without_new_results else ReviewRecommendation.major_revision,
+            ReviewRecommendation.reject
+            if high_impact or not data.reframing_possible_without_new_results
+            else ReviewRecommendation.major_revision,
         )
 
     if _at_or_below(data.novelty, ReviewAdequacy.insufficient):
@@ -800,7 +936,9 @@ def evaluate_referee_decision(
         reasons.append("Weak or poorly positioned novelty requires at least a major revision.")
         allowed = _worse_recommendation(
             allowed,
-            ReviewRecommendation.reject if high_impact or not data.reframing_possible_without_new_results else ReviewRecommendation.major_revision,
+            ReviewRecommendation.reject
+            if high_impact or not data.reframing_possible_without_new_results
+            else ReviewRecommendation.major_revision,
         )
 
     if _at_or_below(data.venue_fit, ReviewAdequacy.insufficient):
@@ -810,7 +948,9 @@ def evaluate_referee_decision(
         reasons.append("Venue fit is too weak for acceptance without major reframing.")
         allowed = _worse_recommendation(
             allowed,
-            ReviewRecommendation.reject if high_impact or not data.reframing_possible_without_new_results else ReviewRecommendation.major_revision,
+            ReviewRecommendation.reject
+            if high_impact or not data.reframing_possible_without_new_results
+            else ReviewRecommendation.major_revision,
         )
 
     if _at_or_below(data.literature_positioning, ReviewAdequacy.insufficient):
@@ -841,7 +981,9 @@ def evaluate_referee_decision(
     if review_ledger is not None:
         consistency_errors.extend(_review_ledger_consistency_errors(data, review_ledger))
 
-    recommendation_valid = _RECOMMENDATION_ORDER.get(data.final_recommendation, 99) >= _RECOMMENDATION_ORDER.get(allowed, 99)
+    recommendation_valid = _RECOMMENDATION_ORDER.get(data.final_recommendation, 99) >= _RECOMMENDATION_ORDER.get(
+        allowed, 99
+    )
     valid = recommendation_valid and not consistency_errors
 
     if not recommendation_valid:

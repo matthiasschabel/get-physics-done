@@ -21,16 +21,19 @@ from gpd.core.errors import GPDError
 from gpd.core.health import run_health
 from gpd.core.observability import gpd_span
 from gpd.core.phases import progress_render
+from gpd.core.root_resolution import resolve_project_root
 from gpd.core.state import (
     _project_contract_runtime_payload_for_state,
     peek_state_json,
     state_advance_plan,
     state_validate,
 )
-from gpd.core.utils import is_phase_complete
+from gpd.core.utils import is_phase_complete, matching_phase_artifact_count
 from gpd.mcp.servers import (
     ABSOLUTE_PROJECT_DIR_SCHEMA,
     configure_mcp_logging,
+    mutating_tool_annotations,
+    read_only_tool_annotations,
     resolve_absolute_project_dir,
     stable_mcp_error,
     stable_mcp_response,
@@ -42,6 +45,19 @@ logger = configure_mcp_logging("gpd-state")
 mcp = FastMCP("gpd-state")
 
 AbsoluteProjectDirInput = Annotated[str, WithJsonSchema(ABSOLUTE_PROJECT_DIR_SCHEMA)]
+FixModeInput = Annotated[
+    bool,
+    WithJsonSchema(
+        {
+            "type": "boolean",
+            "default": False,
+            "description": "If true, attempt auto-fixes and allow the health check to modify project files.",
+        }
+    ),
+]
+
+_PROJECT_MUTATION_TOOL_ANNOTATIONS = mutating_tool_annotations(destructive=False, idempotent=False)
+_PROJECT_FIX_TOOL_ANNOTATIONS = mutating_tool_annotations(destructive=True, idempotent=False)
 
 
 def load_state_json(cwd: Path) -> dict | None:
@@ -51,18 +67,23 @@ def load_state_json(cwd: Path) -> dict | None:
     stable even when the underlying state read path evolves.
     """
 
+    project_root = resolve_project_root(cwd, require_layout=True) or cwd.expanduser().resolve(strict=False)
+
     state_obj, _issues, state_source = peek_state_json(
-        cwd,
+        project_root,
         recover_intent=False,
         surface_blocked_project_contract=True,
+        acquire_lock=False,
     )
     if state_obj is None:
         return None
 
-    project_contract_load_info, project_contract_validation, project_contract_gate = _project_contract_runtime_payload_for_state(
-        cwd,
-        state_obj=state_obj,
-        state_source=state_source,
+    project_contract_load_info, project_contract_validation, project_contract_gate = (
+        _project_contract_runtime_payload_for_state(
+            project_root,
+            state_obj=state_obj,
+            state_source=state_source,
+        )
     )
     merged_state = dict(state_obj)
     merged_state.pop("session", None)
@@ -72,7 +93,7 @@ def load_state_json(cwd: Path) -> dict | None:
     return merged_state
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only_tool_annotations())
 def get_state(project_dir: AbsoluteProjectDirInput) -> dict:
     """Get the current project state.
 
@@ -89,7 +110,7 @@ def get_state(project_dir: AbsoluteProjectDirInput) -> dict:
             state_obj = load_state_json(cwd)
             if state_obj is None:
                 return stable_mcp_error(
-                    "No project state found. Run 'gpd init new-project' to initialize a GPD project state."
+                    "No project state found. Run the active runtime's new-project command to initialize a GPD project state."
                 )
             return stable_mcp_response(state_obj)
         except (GPDError, OSError, ValueError, TimeoutError) as exc:
@@ -98,7 +119,7 @@ def get_state(project_dir: AbsoluteProjectDirInput) -> dict:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only_tool_annotations())
 def get_phase_info(project_dir: AbsoluteProjectDirInput, phase: str) -> dict:
     """Get detailed information about a specific phase.
 
@@ -117,7 +138,7 @@ def get_phase_info(project_dir: AbsoluteProjectDirInput, phase: str) -> dict:
             if info is None:
                 return stable_mcp_error(f"Phase {phase} not found")
             plan_count = len(info.plans)
-            summary_count = len(info.summaries)
+            summary_count = matching_phase_artifact_count(info.plans, info.summaries)
             return stable_mcp_response(
                 {
                     "phase_number": info.phase_number,
@@ -135,7 +156,7 @@ def get_phase_info(project_dir: AbsoluteProjectDirInput, phase: str) -> dict:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_PROJECT_MUTATION_TOOL_ANNOTATIONS)
 def advance_plan(project_dir: AbsoluteProjectDirInput) -> dict:
     """Advance the project state to the next plan.
 
@@ -156,7 +177,7 @@ def advance_plan(project_dir: AbsoluteProjectDirInput) -> dict:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only_tool_annotations())
 def get_progress(project_dir: AbsoluteProjectDirInput) -> dict:
     """Get overall project progress summary.
 
@@ -178,7 +199,7 @@ def get_progress(project_dir: AbsoluteProjectDirInput) -> dict:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only_tool_annotations())
 def validate_state(project_dir: AbsoluteProjectDirInput) -> dict:
     """Run comprehensive state validation checks.
 
@@ -193,7 +214,12 @@ def validate_state(project_dir: AbsoluteProjectDirInput) -> dict:
         return stable_mcp_error("project_dir must be an absolute path")
     with gpd_span("mcp.state.validate"):
         try:
-            result = state_validate(cwd)
+            result = state_validate(
+                cwd,
+                recover_intent=False,
+                surface_blocked_project_contract=True,
+                acquire_lock=False,
+            )
             return stable_mcp_response(result.model_dump())
         except (GPDError, OSError, ValueError, TimeoutError) as exc:
             return stable_mcp_error(exc)
@@ -201,8 +227,8 @@ def validate_state(project_dir: AbsoluteProjectDirInput) -> dict:
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
-def run_health_check(project_dir: AbsoluteProjectDirInput, fix: bool = False) -> dict:
+@mcp.tool(annotations=_PROJECT_FIX_TOOL_ANNOTATIONS)
+def run_health_check(project_dir: AbsoluteProjectDirInput, fix: FixModeInput = False) -> dict:
     """Run the full project health dashboard.
 
     Checks environment, project structure, storage-path policy, state validity,
@@ -226,7 +252,7 @@ def run_health_check(project_dir: AbsoluteProjectDirInput, fix: bool = False) ->
             return stable_mcp_error(exc)
 
 
-@mcp.tool()
+@mcp.tool(annotations=read_only_tool_annotations())
 def get_config(project_dir: AbsoluteProjectDirInput) -> dict:
     """Get the project GPD configuration.
 

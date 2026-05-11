@@ -1,14 +1,20 @@
 # Execute-Plan: Checkpoint Protocol
 
-Referenced by `src/gpd/specs/workflows/execute-plan.md`. Governs checkpoint creation, previous attempt detection, checkpoint handling during execution, and cleanup.
+Referenced by `{GPD_INSTALL_DIR}/workflows/execute-plan.md`. Governs checkpoint creation, previous attempt detection, checkpoint handling during execution, and cleanup.
 
 ## Create Rollback Tag
 
 **Create a git rollback tag before any plan execution begins.** This enables clean recovery if the plan fails partway through. The git tag is a rollback primitive, not the bounded execution checkpoint state itself.
 
 ```bash
-CHECKPOINT_TAG="gpd-checkpoint/phase-${PHASE}-plan-${PLAN}-$(date +%s)"
-git tag "${CHECKPOINT_TAG}"
+CHECKPOINT_TAG="gpd-checkpoint-phase-${PHASE}-plan-${PLAN}-$(date +%s)"
+if git rev-parse --verify "refs/tags/${CHECKPOINT_TAG}" >/dev/null 2>&1; then
+  CHECKPOINT_TAG="${CHECKPOINT_TAG}-$$"
+fi
+if ! git tag "${CHECKPOINT_TAG}"; then
+  echo "ERROR: failed to create checkpoint tag ${CHECKPOINT_TAG}" >&2
+  exit 1
+fi
 ```
 
 Store the tag name for use in failure recovery:
@@ -90,11 +96,11 @@ See references/orchestration/checkpoints.md for details.
 
 When spawned via task and hitting checkpoint: return structured state (cannot interact with user directly).
 
-**Required return:** 1) Completed Tasks table (hashes + files) 2) Current task (what's blocking) 3) Checkpoint Details (user-facing content) 4) Awaiting (what's needed from user) 5) `execution_segment` runtime handoff payload with cursor, checkpoint cause, completed tasks, resume preconditions, and any first-result or pre-fanout gate state. If the stop is durably recorded, the same payload is what later persists as `continuation.bounded_segment`.
+**Required return:** 1) Completed Tasks table (hashes + files) 2) Current task (what's blocking) 3) Checkpoint Details (user-facing content) 4) Awaiting (what the orchestrator must resolve before continuation) 5) `execution_segment` runtime handoff payload with cursor, checkpoint cause, completed tasks, resume preconditions, and any first-result or pre-fanout gate state. If the stop is durably recorded, the same payload is what later persists as `continuation.bounded_segment`.
 
 If the stop is tied to first-result, skeptical, or pre-fanout review, the `execution_segment` must say which gate is still pending. A gate clear must name the specific reason being retired, and `fanout unlock` never substitutes for that clear. For `pre_fanout`, return `pre_fanout_review_cleared: true` when the review outcome is known but downstream unlock is still outstanding.
 
-Orchestrator parses -> presents to user -> spawns fresh continuation with your completed tasks state plus the `execution_segment` payload. The fresh continuation uses that payload as transport state; the persisted `continuation.bounded_segment` copy is what survives if the pause is recorded durably. You will NOT be resumed. In main context: use checkpoint protocol above.
+Orchestrator parses -> presents to user -> spawns fresh continuation with your completed tasks state plus the `execution_segment` payload. The fresh continuation uses that payload as transport state; the persisted `continuation.bounded_segment` copy is what survives if the pause is recorded durably. The child never waits for user approval inside the same run and will NOT be resumed in place. In main context: use checkpoint protocol above.
 
 ## Cleanup Checkpoint
 

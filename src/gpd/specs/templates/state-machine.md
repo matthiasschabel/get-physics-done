@@ -11,24 +11,24 @@ Reference document specifying all valid entity lifecycles, state ownership, and 
 
 ## Continuation Surfaces
 
-Phase 5 separates three layers that were previously blurred together:
+GPD separates three distinct continuation layers:
 
 1. An append-only execution lineage records what happened.
-2. A derived execution head projects the latest resumable execution state for compatibility surfaces.
-3. `state.json.continuation.bounded_segment` remains the durable bounded-resume authority.
+2. A derived execution head reports the latest resumable execution state.
+3. `state.json.continuation.bounded_segment` is the durable bounded-resume authority.
 
-Current public behavior exposes the canonical continuation decision through `gpd --raw resume`, which reads `state.json.continuation` first and only consults compatibility surfaces when canonical continuation is missing or incomplete. `session` is a compatibility mirror, and `.continue-here.md` plus `current-execution.json` are projections, not peer authorities.
+Current public behavior exposes the canonical continuation decision through `gpd --raw resume`, which reads `state.json.continuation`, execution lineage, and current handoff artifacts and emits one resume view. `.continue-here.md` and `current-execution.json` are context surfaces, not peer authorities.
 
 | Surface | Role | Authority Level | Notes |
 |---------|------|-----------------|-------|
-| `GPD/state.json` | Storage authority | Authoritative | Machine-readable project state, including canonical `continuation`; `session` is the compatibility mirror |
+| `GPD/state.json` | Storage authority | Authoritative | Machine-readable project state, including canonical `continuation` |
 | `GPD/state.json.bak` | Recovery backup | Fallback only | Used when the primary JSON state is unreadable or unavailable |
-| `GPD/STATE.md` | Editable mirror | Reconstruction/edit surface | Human-readable mirror of state; also the final reconstruction source if both JSON files are unavailable |
+| `GPD/STATE.md` | Editable state document | Reconstruction/edit surface | Human-readable state document; also the final reconstruction source if both JSON files are unavailable |
 | Execution lineage | Append-only execution history | Authoritative for provenance only | Records execution/workflow transitions and can rebuild the execution head |
-| Derived execution head / `GPD/observability/current-execution.json` | Compatibility mirror | Non-authoritative | Latest execution snapshot rebuilt from lineage; used by live status surfaces |
-| `GPD/phases/.../.continue-here.md` | Temporary handoff artifact | Non-authoritative | Written by `gpd:pause-work`; may be referenced by canonical continuation, session compatibility, or a live execution snapshot |
+| Derived execution head / `GPD/observability/current-execution.json` | Live execution snapshot | Non-authoritative | Latest execution snapshot rebuilt from lineage; used by live status surfaces |
+| `GPD/phases/.../.continue-here.md` | Temporary handoff artifact | Non-authoritative | Written by `gpd:pause-work`; may be referenced by canonical continuation or a live execution snapshot |
 
-The canonical continuation decision comes from `gpd --raw resume`, not from reading any one of these files in isolation. Canonical `state.json.continuation.bounded_segment` wins first; the derived execution head only fills compatibility gaps. The temporary handoff artifact and derived execution head remain projections, not independent sources of truth.
+The canonical continuation decision comes from `gpd --raw resume`, not from reading any one of these files in isolation. Canonical `state.json.continuation.bounded_segment` wins for bounded resume. Temporary handoff artifacts and the derived execution head are context surfaces, not independent sources of truth.
 
 ---
 
@@ -40,10 +40,10 @@ The canonical continuation decision comes from `gpd --raw resume`, not from read
 Created → Active → Paused → Active → Complete → Archived
 ```
 
-- **Owner surfaces**: `GPD/state.json` (authoritative state, including canonical `continuation`), `GPD/STATE.md` (editable mirror), append-only execution lineage, derived execution head / `GPD/observability/current-execution.json`, optional `.continue-here.md` projection
+- **Owner surfaces**: `GPD/state.json` (authoritative state, including canonical `continuation`), `GPD/STATE.md` (editable state document), append-only execution lineage, derived execution head / `GPD/observability/current-execution.json`, optional `.continue-here.md` handoff artifact
 - **Created → Active**: `gpd:new-project` completes (ROADMAP.md exists, STATE.md initialized)
 - **Active → Paused**: `gpd:pause-work` (explicit user action, records canonical continuation and may write `.continue-here.md`)
-- **Paused → Active**: `gpd:resume-work` (restores context from authoritative state plus any handoff projection or derived execution head mirror)
+- **Paused → Active**: `gpd:resume-work` (restores context from authoritative state plus any handoff artifact or derived execution head)
 - **Active → Complete**: All phases reach `complete` status
 - **Complete → Archived**: `gpd:complete-milestone` (archives ROADMAP.md, REQUIREMENTS.md to `milestones/`, updates MILESTONES.md)
 
@@ -64,7 +64,7 @@ Disk status values (from `roadmap_analyze`): `no_directory`, `empty`, `discussed
 - **Researched → Planned**: `gpd:plan-phase` completes (`{NN}-{plan}-PLAN.md` files created with wave frontmatter)
 - **Planned → Executing**: `gpd:execute-phase` starts (STATE.md Status set to "Ready to execute", Current Plan set to 1)
 - **Executing → Phase complete**: `gpd state advance` when `currentPlan >= totalPlans` (Status set to "Phase complete — ready for verification")
-- **Phase complete → Verified**: `gpd:verify-work` completes (`{NN}-VERIFICATION.md` and/or `{NN}-VALIDATION.md` created)
+- **Phase complete → Verified**: `gpd:verify-work` completes (`{NN}-VERIFICATION.md` and/or `{NN}-VALIDATION.md` created), then `gpd state record-verification --phase {NN}` atomically sets Status to `Verified` (or `Blocked` on a failed verifier)
 - **Verified → Complete**: `gpd phase complete {N}` (ROADMAP checkbox marked `[x]`, STATE.md advances to next phase)
 - **Executing → Blocked**: Dependency not met or failure encountered (blocker added via `gpd state add-blocker`)
 - **Blocked → Executing**: Blocker resolved via `gpd state resolve-blocker`
@@ -80,8 +80,8 @@ Disk status values (from `roadmap_analyze`): `no_directory`, `empty`, `discussed
 ### Verification Synthesis
 
 Two verification tracks exist:
-1. **Automated (verify-phase.md):** Computational checks via gpd-verifier subagent → VERIFICATION.md
-2. **Interactive (verify-work.md):** Conversational walkthrough with researcher → detailed check results
+1. **Automated verification:** Computational checks via verifier subagent → VERIFICATION.md
+2. **Interactive verification:** Conversational walkthrough with researcher → detailed check results
 
 **When both are required:** Novel results, publication-bound phases, milestone-final phases
 **When automated suffices:** Standard computations with clear benchmarks, intermediate phases
@@ -152,7 +152,7 @@ Active → Audited → Complete → Archived
 | Blockers | STATE.md (Blockers section) | `gpd state add-blocker/resolve-blocker` |
 | Approximations | state.json (`approximations`) | `gpd approximation add/list/check` |
 | Propagated Uncertainties | state.json (`propagated_uncertainties`) | `gpd uncertainty add/list` |
-| Session Continuity | state.json (`continuation` authority + `session` compatibility mirror) + STATE.md | `gpd state record-session` |
+| Session Continuity | state.json (`continuation` authority) rendered into STATE.md's Session Continuity block | `gpd state record-session` |
 | Performance Metrics | STATE.md (Performance Metrics table) | `gpd state record-metric` |
 | Phase Completion | ROADMAP.md (checkbox `[x]`) | `gpd phase complete` |
 | Milestone Completion | MILESTONES.md | `gpd milestone complete` |
@@ -164,8 +164,8 @@ Active → Audited → Complete → Archived
 | Transition | Command / Workflow | Files Modified |
 |-----------|---------|---------------|
 | Project: Created → Active | `gpd:new-project` | PROJECT.md, ROADMAP.md, STATE.md, state.json, config.json created |
-| Project: Active → Paused | `gpd:pause-work` | state.json + STATE.md (canonical continuation / paused marker), `.continue-here.md` temporary handoff projection may be created |
-| Project: Paused → Active | `gpd:resume-work` | Guided by `gpd --raw resume` over canonical state, editable mirror, temporary handoff projection, and any derived execution head mirror; STATE.md paused marker may be cleared and the handoff projection may be consumed |
+| Project: Active → Paused | `gpd:pause-work` | state.json + STATE.md (canonical continuation / paused marker), `.continue-here.md` temporary handoff artifact may be created |
+| Project: Paused → Active | `gpd:resume-work` | Guided by `gpd --raw resume` over canonical state, STATE.md, temporary handoff artifacts, and any derived execution head; STATE.md paused marker may be cleared and the handoff artifact may be consumed |
 | Phase: Not started → Discussed | `gpd:discuss-phase` | `{NN}-CONTEXT.md` created |
 | Phase: → Researched | `gpd:research-phase` or `gpd:plan-phase` | `{NN}-RESEARCH.md` created |
 | Phase: Researched → Planned | `gpd:plan-phase` | `{NN}-{plan}-PLAN.md` files created, STATE.md updated |
@@ -182,7 +182,7 @@ Active → Audited → Complete → Archived
 | Blocker resolved | `gpd state resolve-blocker` | STATE.md (Blockers section), state.json synced |
 | Metric recorded | `gpd state record-metric` | STATE.md (Performance Metrics table), state.json synced |
 | Progress recalculated | `gpd state update-progress` | STATE.md (Progress bar), state.json synced |
-| Session recorded | `gpd state record-session` | STATE.md (Session section), state.json synced through canonical continuation |
+| Session recorded | `gpd state record-session` | STATE.md Session Continuity block rendered from canonical continuation |
 | State compacted | `gpd state compact` | STATE.md (trimmed), STATE-ARCHIVE.md (appended) |
 
 ---
@@ -217,7 +217,7 @@ STATE.md and state.json are kept in sync via `sync_state_json()`:
 
 - **state.json** is the authoritative machine-readable storage surface
 - **state.json.bak** is the crash-recovery backup if the primary JSON state becomes unreadable or unavailable
-- **STATE.md** is the editable human-readable mirror, rendered by `generate_state_markdown()` and still usable as the final reconstruction source when both JSON files are unavailable
+- **STATE.md** is the editable human-readable state document, rendered by `generate_state_markdown()` and still usable as the final reconstruction source when both JSON files are unavailable
 - Every write to STATE.md triggers `sync_state_json()` which parses markdown edits and merges them into existing JSON
 - Every write to state.json via `save_state_json()` also regenerates STATE.md
 - `state_validate` cross-checks position fields between both files
@@ -225,10 +225,10 @@ STATE.md and state.json are kept in sync via `sync_state_json()`:
 
 For continuation specifically:
 
-- `.continue-here.md` is the canonical temporary handoff projection, not the storage authority
+- `.continue-here.md` is the canonical temporary handoff artifact, not the storage authority
 - append-only execution lineage is the provenance record, not the bounded-resume authority
-- the derived execution head and `GPD/observability/current-execution.json` are compatibility mirrors, not the storage authority
-- `gpd --raw resume` resolves the canonical continuation view with `state.json.continuation` first and compatibility fallback only for incomplete bounded-segment recovery
+- the derived execution head and `GPD/observability/current-execution.json` report live execution status, not the storage authority
+- `gpd --raw resume` resolves the canonical continuation view from `state.json.continuation`, execution lineage, and current handoff artifacts
 
 ---
 

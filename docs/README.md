@@ -14,6 +14,7 @@ Make sure these are already true:
 - Node.js 20+ is available in that same terminal.
 - Python 3.11+ with the standard `venv` module is available there too.
 - Use `--local` while learning so GPD only affects the current folder.
+- Normal installs and `--reinstall` use the PyPI pinned release first, with tagged GitHub release sources only as fallback. `--upgrade` opts into the latest unreleased GitHub `main` source.
 
 <details>
 <summary>What this hub does not do</summary>
@@ -21,6 +22,7 @@ Make sure these are already true:
 - GPD is not a standalone app. It installs commands into Claude Code, Codex, Gemini CLI, GitHub Copilot CLI, or OpenCode.
 - GPD does not install your runtime for you.
 - GPD does not include model access, billing, or API credits.
+- If evidence, references, or artifacts are missing, say so explicitly; GPD should not invent them.
 - This hub is the beginner path, not the full reference. Use the OS guide, runtime guide, and later `help` / `gpd --help` for the exact commands and deeper diagnostics.
 
 </details>
@@ -52,6 +54,8 @@ into the runtime.
 
 </details>
 
+GPD favors scientific rigor and explicit uncertainty. Treat preferred answers as hypotheses to test, and if a citation, result, or artifact cannot be found or produced, keep that gap explicit instead of guessing.
+
 ## First: terminal vs runtime
 
 You will use two different places:
@@ -67,7 +71,7 @@ You will use two different places:
 - **`--local`**: install GPD for just this project or folder.
 - **`gpd resume`**: the terminal-side recovery step.
 - **`resume-work`**: the in-runtime command you use after reopening the right workspace.
-- **`settings`**: the guided runtime command for changing autonomy, workflow defaults, and model-cost posture after your first successful start or later.
+- **`settings`**: after your first successful start or later, use the runtime `settings` command to review autonomy, workflow defaults, model-cost posture, runtime permission sync, and preset/tier overrides. The safest model-cost starting point is `review` plus runtime defaults.
 - **`set-tier-models`**: the direct runtime command for pinning concrete `tier-1`, `tier-2`, and `tier-3` model ids.
 
 </details>

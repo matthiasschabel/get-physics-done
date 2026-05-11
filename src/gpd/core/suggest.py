@@ -16,6 +16,7 @@ from pathlib import Path
 from pydantic import ValidationError as PydanticValidationError
 
 from gpd.command_labels import canonical_command_label
+from gpd.contracts import ConventionLock
 from gpd.core.constants import (
     LITERATURE_DIR_NAME,
     PHASES_DIR_NAME,
@@ -36,23 +37,29 @@ from gpd.core.manuscript_artifacts import (
     locate_publication_artifact,
     resolve_current_manuscript_artifacts,
     resolve_current_manuscript_resolution,
+    resolve_current_publication_subject,
 )
 from gpd.core.phases import _milestone_completion_snapshot
+from gpd.core.project_reentry import resolve_project_reentry
 from gpd.core.proof_review import (
     manuscript_requires_theorem_bearing_review,
+    publication_lineage_roots,
     resolve_manuscript_proof_review_status,
 )
-from gpd.core.public_surface_contract import recovery_local_snapshot_command
-from gpd.core.publication_review_paths import (
-    manuscript_matches_review_artifact_path,
-    review_artifact_round,
+from gpd.core.public_surface_contract import recovery_cross_workspace_command, recovery_local_snapshot_command
+from gpd.core.publication_runtime import (
+    resolve_latest_publication_response_artifacts,
+    resolve_latest_publication_review_artifacts,
+    resolve_publication_response_freshness,
 )
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.runtime_command_surfaces import format_active_runtime_command
 from gpd.core.utils import (
     is_phase_complete as _is_phase_complete,
 )
-from gpd.core.utils import matching_phase_artifact_count as _matching_phase_artifact_count
+from gpd.core.utils import (
+    matching_phase_artifact_count as _matching_phase_artifact_count,
+)
 from gpd.core.utils import (
     phase_sort_key as _phase_sort_key,
 )
@@ -74,8 +81,6 @@ __all__ = [
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 CORE_CONVENTIONS = ("metric_signature", "natural_units", "coordinate_system")
-_REVIEW_LEDGER_FILENAME_RE = re.compile(r"^REVIEW-LEDGER(?P<round_suffix>-R(?P<round>\d+))?\.json$")
-_REFEREE_DECISION_FILENAME_RE = re.compile(r"^REFEREE-DECISION(?P<round_suffix>-R(?P<round>\d+))?\.json$")
 
 
 # ─── Data Models ──────────────────────────────────────────────────────────────
@@ -131,7 +136,7 @@ class SuggestContext:
     has_paper: bool = False
     has_literature_review: bool = False
     has_referee_report: bool = False
-    autonomy: str = "balanced"
+    autonomy: str = "supervised"
     research_mode: str = "balanced"
     adaptive_approach_locked: bool = False
 
@@ -159,6 +164,7 @@ class _PhaseAnalysis:
     incomplete_count: int
     has_research: bool
     has_verification: bool
+    verification_status: str
 
 
 # ─── Internal Helpers ─────────────────────────────────────────────────────────
@@ -188,8 +194,50 @@ def _is_verification_file(name: str) -> bool:
     return name.endswith(VERIFICATION_SUFFIX)
 
 
+def _phase_verification_status(phase_path: Path, files: list[str]) -> str:
+    """Classify phase verification freshness from local verification artifacts."""
+    verification_files = sorted(file for file in files if _is_verification_file(file))
+    if not verification_files:
+        return "missing"
 
+    statuses: list[str] = []
+    for filename in verification_files:
+        try:
+            text = (phase_path / filename).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            statuses.append("invalid")
+            continue
+        match = re.search(r"(?im)^\s*status\s*:\s*([a-zA-Z0-9_-]+)\s*$", text)
+        if match:
+            statuses.append(match.group(1).strip().lower())
+            continue
+        lowered = text.lower()
+        if re.search(r"\b(stale|expired|outdated)\b", lowered):
+            statuses.append("stale")
+        elif re.search(r"\b(gaps?_found|gap[s ]+found|failed|invalid)\b", lowered):
+            statuses.append("gaps_found")
+        else:
+            statuses.append("passed")
 
+    blocking = {
+        "stale",
+        "gaps_found",
+        "gap_found",
+        "failed",
+        "failure",
+        "invalid",
+        "human_needed",
+        "expert_needed",
+        "needs_human",
+        "needs_expert",
+        "missing",
+    }
+    for status in statuses:
+        if status in blocking:
+            return "gaps_found" if status in {"gap_found", "failed", "failure"} else status
+    if any(status in {"passed", "verified", "complete", "completed"} for status in statuses):
+        return "passed"
+    return "present"
 
 
 def _load_config(cwd: Path) -> dict[str, object]:
@@ -281,7 +329,8 @@ def _scan_phases(cwd: Path) -> list[_PhaseAnalysis]:
         plans = [f for f in files if _is_plan_file(f)]
         summaries = [f for f in files if _is_summary_file(f)]
         has_research = any(_is_research_file(f) for f in files)
-        has_verification = any(_is_verification_file(f) for f in files)
+        verification_status = _phase_verification_status(phase_path, files)
+        has_verification = verification_status != "missing"
 
         plan_count = len(plans)
         summary_count = _matching_phase_artifact_count(plans, summaries)
@@ -306,11 +355,11 @@ def _scan_phases(cwd: Path) -> list[_PhaseAnalysis]:
                 incomplete_count=max(0, plan_count - summary_count),
                 has_research=has_research,
                 has_verification=has_verification,
+                verification_status=verification_status,
             )
         )
 
     return results
-
 
 
 def _phase_label(phase: _PhaseAnalysis) -> str:
@@ -384,30 +433,12 @@ def _has_literature_review(cwd: Path) -> bool:
     return any(f.name.endswith("-REVIEW.md") for f in lit_dir.iterdir() if f.is_file())
 
 
-def _has_author_response(cwd: Path) -> bool:
-    responses_dir = _planning_dir(cwd)
-    if not responses_dir.is_dir():
-        return False
-    return any(path.is_file() for path in responses_dir.glob("AUTHOR-RESPONSE*.md"))
-
-
-def _latest_referee_decision_recommendation(cwd: Path) -> str | None:
-    review_dir = _planning_dir(cwd) / "review"
-    if not review_dir.is_dir():
+def _latest_referee_decision_recommendation(decision_path: Path | None) -> str | None:
+    if decision_path is None:
         return None
 
-    decision_by_round: dict[int, Path] = {}
-    for path in sorted(review_dir.glob("REFEREE-DECISION*.json")):
-        details = review_artifact_round(path, pattern=_REFEREE_DECISION_FILENAME_RE)
-        if details is not None:
-            decision_by_round[details[0]] = path
-
-    if not decision_by_round:
-        return None
-
-    latest_round = max(decision_by_round)
     try:
-        payload = json.loads(decision_by_round[latest_round].read_text(encoding="utf-8"))
+        payload = json.loads(decision_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     recommendation = payload.get("final_recommendation")
@@ -415,30 +446,6 @@ def _latest_referee_decision_recommendation(cwd: Path) -> str | None:
         return None
     normalized = recommendation.strip().lower()
     return normalized or None
-
-
-def _latest_publication_review_package(review_dir: Path) -> tuple[Path, Path] | None:
-    ledger_by_round: dict[int, Path] = {}
-    decision_by_round: dict[int, Path] = {}
-
-    for path in sorted(review_dir.glob("REVIEW-LEDGER*.json")):
-        details = review_artifact_round(path, pattern=_REVIEW_LEDGER_FILENAME_RE)
-        if details is not None:
-            ledger_by_round[details[0]] = path
-    for path in sorted(review_dir.glob("REFEREE-DECISION*.json")):
-        details = review_artifact_round(path, pattern=_REFEREE_DECISION_FILENAME_RE)
-        if details is not None:
-            decision_by_round[details[0]] = path
-
-    if not ledger_by_round or not decision_by_round:
-        return None
-
-    latest_round = max({*ledger_by_round.keys(), *decision_by_round.keys()})
-    ledger_path = ledger_by_round.get(latest_round)
-    decision_path = decision_by_round.get(latest_round)
-    if ledger_path is None or decision_path is None:
-        return None
-    return ledger_path, decision_path
 
 
 def _manuscript_has_submission_support_artifacts(cwd: Path, manuscript_entrypoint: Path | None) -> bool:
@@ -507,30 +514,31 @@ def _publication_review_package_allows_submission(cwd: Path, manuscript_entrypoi
     if manuscript_entrypoint is None or manuscript_entrypoint.suffix != ".tex":
         return False
 
-    review_dir = _planning_dir(cwd) / "review"
-    if not review_dir.is_dir():
+    latest_review_artifacts = resolve_latest_publication_review_artifacts(
+        cwd,
+        manuscript_entrypoint=manuscript_entrypoint,
+    )
+    if latest_review_artifacts is None:
+        return False
+    response_freshness = resolve_publication_response_freshness(
+        cwd,
+        manuscript_entrypoint=manuscript_entrypoint,
+        review_artifacts=latest_review_artifacts,
+    )
+    if response_freshness.requires_fresh_review:
         return False
 
-    latest_package = _latest_publication_review_package(review_dir)
-    if latest_package is None:
+    ledger_path = latest_review_artifacts.review_ledger
+    decision_path = latest_review_artifacts.referee_decision
+    if ledger_path is None or decision_path is None:
         return False
 
-    ledger_path, decision_path = latest_package
     try:
         from gpd.core.referee_policy import evaluate_referee_decision
         from gpd.mcp.paper.review_artifacts import read_referee_decision, read_review_ledger
 
         review_ledger = read_review_ledger(ledger_path)
         decision = read_referee_decision(decision_path)
-        if not manuscript_matches_review_artifact_path(review_ledger.manuscript_path, manuscript_entrypoint, cwd=cwd):
-            return False
-        manuscript_matches_decision = manuscript_matches_review_artifact_path(
-            decision.manuscript_path,
-            manuscript_entrypoint,
-            cwd=cwd,
-        )
-        if not manuscript_matches_decision:
-            return False
         report = evaluate_referee_decision(
             decision,
             strict=True,
@@ -560,8 +568,55 @@ def _conventions_are_ready(cwd: Path) -> bool:
     return all(convention_lock.get(key) and not is_bogus_value(convention_lock.get(key)) for key in CORE_CONVENTIONS)
 
 
+def _missing_conventions_from_state(state: dict[str, object]) -> tuple[str, ...]:
+    """Return canonical missing convention keys from a loaded state payload."""
+    convention_lock = state.get("convention_lock")
+    if not isinstance(convention_lock, dict):
+        return ()
+
+    try:
+        lock = ConventionLock.model_validate(convention_lock)
+    except PydanticValidationError:
+        return ()
+
+    from gpd.core.conventions import convention_check
+
+    return tuple(entry.key for entry in convention_check(lock).missing)
+
+
+def _format_missing_conventions_reason(missing: tuple[str, ...]) -> str:
+    """Format a readable missing-convention recommendation without truncating the count."""
+    from gpd.core.conventions import CONVENTION_LABELS
+
+    labels = [CONVENTION_LABELS.get(key, key.replace("_", " ").title()) for key in missing]
+    preview_count = min(4, len(labels))
+    preview = ", ".join(labels[:preview_count])
+    if len(labels) > preview_count:
+        preview += f", and {len(labels) - preview_count} more"
+    plural = "field" if len(labels) == 1 else "fields"
+    return f"{len(labels)} convention {plural} missing: {preview} — define before calculations"
+
+
+def _is_bounded_external_write_paper_lane(cwd: Path, manuscript_entrypoint: Path | None) -> bool:
+    """Return whether the active managed manuscript is the standalone external-authoring lane."""
+
+    if manuscript_entrypoint is None or _path_exists(cwd, f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}"):
+        return False
+
+    publication_subject = resolve_current_publication_subject(cwd, allow_markdown=True)
+    if not publication_subject.resolved or publication_subject.manuscript_entrypoint is None:
+        return False
+    return (
+        publication_subject.publication_lane_kind == "managed_publication_manuscript"
+        and publication_subject.manuscript_entrypoint.resolve(strict=False)
+        == manuscript_entrypoint.resolve(strict=False)
+    )
+
+
 def _publication_submission_is_strictly_ready(cwd: Path, manuscript_entrypoint: Path | None) -> bool:
     if manuscript_entrypoint is None:
+        return False
+    if _is_bounded_external_write_paper_lane(cwd, manuscript_entrypoint):
         return False
     if _current_publication_blockers(cwd):
         return False
@@ -587,14 +642,36 @@ def _manuscript_submission_proof_review_is_fresh(
 
 
 def _has_referee_report(cwd: Path) -> bool:
-    """Check for canonical referee report files in `GPD/` only."""
+    """Check for the active manuscript's referee report bundle."""
 
-    reports_dir = _planning_dir(cwd)
-    if not reports_dir.is_dir():
+    manuscript_resolution = resolve_current_manuscript_resolution(cwd, allow_markdown=True)
+    manuscript_entrypoint = (
+        manuscript_resolution.manuscript_entrypoint if manuscript_resolution.status == "resolved" else None
+    )
+    if manuscript_entrypoint is None:
         return False
-    if _has_author_response(cwd) and _latest_referee_decision_recommendation(cwd) == "accept":
+
+    publication_root, review_dir = publication_lineage_roots(cwd, manuscript_entrypoint)
+    review_artifacts = resolve_latest_publication_review_artifacts(
+        cwd,
+        manuscript_entrypoint=manuscript_entrypoint,
+    )
+    if review_artifacts is None or review_artifacts.referee_report_md is None:
+        return any(path.is_file() for path in publication_root.glob("REFEREE-REPORT*.md")) or any(
+            path.is_file() for path in review_dir.glob("REFEREE-REPORT*.md")
+        )
+
+    response_artifacts = resolve_latest_publication_response_artifacts(
+        cwd,
+        review_artifacts=review_artifacts,
+    )
+    if (
+        response_artifacts is not None
+        and response_artifacts.complete
+        and _latest_referee_decision_recommendation(review_artifacts.referee_decision) == "accept"
+    ):
         return False
-    return any(f.is_file() for f in reports_dir.glob("REFEREE-REPORT*.md"))
+    return True
 
 
 def _has_adaptive_lock_signal(cwd: Path) -> bool:
@@ -610,7 +687,9 @@ def _has_adaptive_lock_signal(cwd: Path) -> bool:
         "approach_validated: true",
     )
     decisive_pass_re = re.compile(r"subject_role:\s*decisive[\s\S]{0,400}?verdict:\s*pass\b", re.IGNORECASE)
-    decisive_failure_re = re.compile(r"subject_role:\s*decisive[\s\S]{0,400}?verdict:\s*(?:tension|fail)\b", re.IGNORECASE)
+    decisive_failure_re = re.compile(
+        r"subject_role:\s*decisive[\s\S]{0,400}?verdict:\s*(?:tension|fail)\b", re.IGNORECASE
+    )
     passed_status_re = re.compile(r"^status:\s*passed\b", re.IGNORECASE | re.MULTILINE)
     for path in sorted(phases_dir.rglob("*.md")):
         if not path.is_file():
@@ -640,7 +719,7 @@ def _apply_mode_adjustments(
 ) -> None:
     """Adjust priorities based on research_mode and autonomy settings."""
     research_mode = config.get("research_mode", "balanced")
-    autonomy = config.get("autonomy", "balanced")
+    autonomy = config.get("autonomy", "supervised")
 
     for s in suggestions:
         # Research mode adjustments
@@ -690,6 +769,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
     """
     suggestions: list[_MutableRecommendation] = []
     ctx_kwargs: dict[str, object] = {}
+
     def format_command(action):
         return _format_command(action, cwd=cwd)
 
@@ -697,10 +777,51 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
     project_exists = _path_exists(cwd, f"{PLANNING_DIR_NAME}/{PROJECT_FILENAME}")
     roadmap_exists = _path_exists(cwd, f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}")
     manuscript_resolution = resolve_current_manuscript_resolution(cwd, allow_markdown=True)
-    manuscript_entrypoint = manuscript_resolution.manuscript_entrypoint if manuscript_resolution.status == "resolved" else None
+    manuscript_entrypoint = (
+        manuscript_resolution.manuscript_entrypoint if manuscript_resolution.status == "resolved" else None
+    )
     manuscript_state_is_blocked = manuscript_resolution.status in {"ambiguous", "invalid"}
 
     if not project_exists and manuscript_entrypoint is None:
+        reentry = resolve_project_reentry(cwd)
+        if reentry.has_recoverable_current_workspace:
+            only = Recommendation(
+                action="resume-work",
+                priority=1,
+                command=format_command("resume-work"),
+                reason="Recoverable GPD state found in this workspace — resume or reconcile it before starting fresh",
+            )
+            return SuggestResult(
+                suggestions=[only],
+                total_suggestions=1,
+                suggestion_count=1,
+                top_action=only,
+                context=SuggestContext(),
+            )
+        recoverable_recent = [
+            candidate
+            for candidate in reentry.candidates
+            if candidate.source == "recent_project" and candidate.recoverable
+        ]
+        if recoverable_recent:
+            count = len(recoverable_recent)
+            only = Recommendation(
+                action="resume-recent",
+                priority=1,
+                command=recovery_cross_workspace_command(),
+                reason=(
+                    f"No active project found here, but {count} recent recoverable project"
+                    f"{'' if count == 1 else 's'} are available — choose one, reopen it, then run "
+                    f"{canonical_command_label('resume-work')}"
+                ),
+            )
+            return SuggestResult(
+                suggestions=[only],
+                total_suggestions=1,
+                suggestion_count=1,
+                top_action=only,
+                context=SuggestContext(),
+            )
         only = Recommendation(
             action="new-project",
             priority=1,
@@ -797,18 +918,25 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
             )
         )
 
-    # 5b. Verify completed phase that lacks verification
+    # 5b. Verify completed phase that lacks fresh/passing verification
     unverified_complete = next(
-        (p for p in phase_analysis if p.status == "complete" and not p.has_verification),
+        (p for p in phase_analysis if p.status == "complete" and p.verification_status != "passed"),
         None,
     )
     if unverified_complete:
+        if unverified_complete.verification_status == "missing":
+            reason = f"Phase {unverified_complete.number} is complete but unverified — run verification"
+        else:
+            reason = (
+                f"Phase {unverified_complete.number} verification is {unverified_complete.verification_status} "
+                "— refresh verification before closeout"
+            )
         suggestions.append(
             _MutableRecommendation(
                 action="verify-work",
-                priority=4,
+                priority=2,
                 command=f"{format_command('verify-work')} {unverified_complete.number}",
-                reason=f"Phase {unverified_complete.number} is complete but unverified — run verification",
+                reason=reason,
                 phase=unverified_complete.number,
             )
         )
@@ -904,22 +1032,18 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         )
 
     # ── 10. Convention gaps ─────────────────────────────────────────────
-    if state:
-        convention_lock = state.get("convention_lock")
-        if isinstance(convention_lock, dict):
-            from gpd.core.conventions import is_bogus_value
-
-            missing = [k for k in CORE_CONVENTIONS if not convention_lock.get(k) or is_bogus_value(convention_lock.get(k))]
-            if missing:
-                ctx_kwargs["missing_conventions"] = tuple(missing)
-                suggestions.append(
-                    _MutableRecommendation(
-                        action="set-conventions",
-                        priority=6,
-                        command=format_command("validate-conventions"),
-                        reason=f"Core conventions not set: {', '.join(missing)} — define before calculations",
-                    )
+    if state and not any(s.action == "resume" for s in suggestions):
+        missing = _missing_conventions_from_state(state)
+        if missing:
+            ctx_kwargs["missing_conventions"] = missing
+            suggestions.append(
+                _MutableRecommendation(
+                    action="set-conventions",
+                    priority=6,
+                    command=format_command("validate-conventions"),
+                    reason=_format_missing_conventions_reason(missing),
                 )
+            )
 
     # ── 11. No roadmap yet ──────────────────────────────────────────────
     if not roadmap_exists:
@@ -933,7 +1057,10 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         )
 
     # ── 12. All phases complete → milestone audit ───────────────────────
-    if all_complete and phase_analysis:
+    all_complete_verified = all_complete and phase_analysis and all(
+        phase.verification_status == "passed" for phase in phase_analysis
+    )
+    if all_complete_verified:
         suggestions.append(
             _MutableRecommendation(
                 action="audit-milestone",
@@ -948,6 +1075,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
     has_latex_manuscript = manuscript_entrypoint is not None and manuscript_entrypoint.suffix == ".tex"
     has_lit_review = _has_literature_review(cwd)
     has_referee = _has_referee_report(cwd)
+    bounded_external_write_paper_lane = _is_bounded_external_write_paper_lane(cwd, manuscript_entrypoint)
     submission_ready_review = _publication_submission_is_strictly_ready(cwd, manuscript_entrypoint)
 
     ctx_kwargs["has_paper"] = has_paper_flag
@@ -956,8 +1084,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
 
     # 13a. All phases complete + verified → suggest paper writing
     if all_complete and phase_analysis and not has_paper_flag and not manuscript_state_is_blocked:
-        all_verified = all(p.has_verification for p in phase_analysis)
-        if all_verified:
+        if all_complete_verified:
             suggestions.append(
                 _MutableRecommendation(
                     action="write-paper",
@@ -1006,7 +1133,11 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
                     action="peer-review",
                     priority=4,
                     command=format_command("peer-review"),
-                    reason="Paper draft exists — run standalone peer review before submission packaging",
+                    reason=(
+                        "Managed external-authoring manuscript exists — route to standalone peer review next"
+                        if bounded_external_write_paper_lane
+                        else "Paper draft exists — run standalone peer review before submission packaging"
+                    ),
                 )
             )
     # ── 14. No phases at all → need to plan ─────────────────────────────
@@ -1021,7 +1152,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
         )
 
     # ── Mode-aware priority adjustments ─────────────────────────────────
-    autonomy_val = str(config.get("autonomy", "balanced"))
+    autonomy_val = str(config.get("autonomy", "supervised"))
     research_mode_val = str(config.get("research_mode", "balanced"))
     ctx_kwargs["autonomy"] = autonomy_val
     ctx_kwargs["research_mode"] = research_mode_val
@@ -1048,14 +1179,14 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
 
 
 def _load_state_json_safe(cwd: Path) -> dict[str, object] | None:
-    """Load state.json without depending on the full state module's recovery logic.
+    """Load visible state without mutating local recovery/lock artifacts.
 
-    Tries ``gpd.core.state.load_state_json`` if available; falls back to direct read.
+    Tries the read-only state loader if available; falls back to direct read.
     """
     try:
-        from gpd.core.state import load_state_json
+        from gpd.core.state import load_state_json_readonly
 
-        return load_state_json(cwd)
+        return load_state_json_readonly(cwd)
     except (FileNotFoundError, OSError, ImportError):
         logger.debug("suggest: state load failed", exc_info=True)
 

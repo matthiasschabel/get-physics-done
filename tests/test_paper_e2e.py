@@ -18,7 +18,14 @@ from gpd.mcp.paper.compiler import (
     check_journal_dependencies,
 )
 from gpd.mcp.paper.journal_map import get_journal_spec
-from gpd.mcp.paper.models import Author, FigureRef, PaperConfig, Section, derive_output_filename
+from gpd.mcp.paper.models import (
+    REQUIRED_GPD_ACKNOWLEDGMENT,
+    Author,
+    FigureRef,
+    PaperConfig,
+    Section,
+    derive_output_filename,
+)
 
 
 def _allow_journal_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,6 +135,7 @@ class TestBuildPaper:
         assert output.tex_path.exists()
         tex_content = output.tex_path.read_text()
         assert r"\documentclass" in tex_content
+        assert REQUIRED_GPD_ACKNOWLEDGMENT in tex_content
         assert "Generated with Get Physics Done" in tex_content
         assert (tmp_path / "references.bib").exists()
         bib_content = (tmp_path / "references.bib").read_text()
@@ -147,9 +155,13 @@ class TestBuildPaper:
         assert "bib-references" in artifact_ids
         assert f"pdf-{output_stem}" in artifact_ids
         assert "audit-bibliography" in artifact_ids
-        bib_artifact = next(artifact for artifact in manifest_content["artifacts"] if artifact["artifact_id"] == "bib-references")
+        bib_artifact = next(
+            artifact for artifact in manifest_content["artifacts"] if artifact["artifact_id"] == "bib-references"
+        )
         assert bib_artifact["metadata"]["entry_source"] == "bib_data"
-        audit_artifact = next(artifact for artifact in manifest_content["artifacts"] if artifact["artifact_id"] == "audit-bibliography")
+        audit_artifact = next(
+            artifact for artifact in manifest_content["artifacts"] if artifact["artifact_id"] == "audit-bibliography"
+        )
         assert audit_artifact["path"] == "BIBLIOGRAPHY-AUDIT.json"
 
     @pytest.mark.asyncio
@@ -207,9 +219,13 @@ class TestBuildPaper:
         assert {entry.key for entry in output.bibliography_audit.entries} == {"einstein1905", "bohr1913"}
         assert output.reference_bibtex_keys == {"lit-ref-bohr-1913": "bohr1913"}
         assert output.manifest is not None
-        bib_artifact = next(artifact for artifact in output.manifest.artifacts if artifact.artifact_id == "bib-references")
+        bib_artifact = next(
+            artifact for artifact in output.manifest.artifacts if artifact.artifact_id == "bib-references"
+        )
         assert bib_artifact.metadata["entry_source"] == "bib_data+citation_sources"
-        audit_artifact = next(artifact for artifact in output.manifest.artifacts if artifact.artifact_id == "audit-bibliography")
+        audit_artifact = next(
+            artifact for artifact in output.manifest.artifacts if artifact.artifact_id == "audit-bibliography"
+        )
         assert audit_artifact.path == "BIBLIOGRAPHY-AUDIT.json"
 
     @pytest.mark.asyncio
@@ -248,7 +264,7 @@ class TestBuildPaper:
         assert output.manifest is not None
         figure_artifact = next(artifact for artifact in output.manifest.artifacts if artifact.category == "figure")
         assert figure_artifact.path == "figures/velocity.png"
-        assert figure_artifact.sources[0].path == str(fig_path)
+        assert figure_artifact.sources[0].path == "velocity.png"
         assert figure_artifact.metadata["label"] == "velocity"
 
     @pytest.mark.asyncio
@@ -296,7 +312,9 @@ class TestBuildPaper:
         assert output.reference_bibtex_keys == {"lit-ref-einstein-1905": "einstein1905"}
         manifest_ids = {artifact.artifact_id for artifact in output.manifest.artifacts}
         assert "audit-bibliography" in manifest_ids
-        bib_artifact = next(artifact for artifact in output.manifest.artifacts if artifact.artifact_id == "bib-references")
+        bib_artifact = next(
+            artifact for artifact in output.manifest.artifacts if artifact.artifact_id == "bib-references"
+        )
         assert bib_artifact.metadata["entry_source"] == "citation_sources"
 
     @pytest.mark.asyncio
@@ -353,9 +371,7 @@ class TestBuildPaper:
         assert "@article{preferred1905" in bib_content
 
     @pytest.mark.asyncio
-    async def test_build_paper_preserves_stable_reference_ids_in_bibliography_hook(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_build_paper_preserves_stable_reference_ids_in_bibliography_hook(self, tmp_path, monkeypatch):
         from gpd.mcp.paper import compiler as paper_compiler
         from gpd.mcp.paper.compiler import build_paper
 
@@ -440,7 +456,8 @@ class TestBuildPaper:
 
         figure_artifact = next(artifact for artifact in output.manifest.artifacts if artifact.category == "figure")
         assert figure_artifact.metadata["label"] == "existing"
-        assert figure_artifact.sources[0].path == str(existing_figure)
+        assert figure_artifact.sources[0].path == "external:existing.png"
+        assert figure_artifact.sources[0].role == "external-source-figure"
 
     @pytest.mark.asyncio
     async def test_build_paper_fails_when_some_figures_cannot_be_prepared_but_keeps_valid_figures(
@@ -477,7 +494,7 @@ class TestBuildPaper:
         output = await build_paper(config, tmp_path)
 
         assert output.success is False
-        assert output.pdf_path == pdf_path
+        assert output.pdf_path is None
         assert any("Figure preparation failed for" in error for error in output.errors)
         assert "figures/good.png" in output.tex_content
         assert "bad.gif" not in output.tex_content
@@ -485,7 +502,7 @@ class TestBuildPaper:
         figure_artifacts = [artifact for artifact in output.manifest.artifacts if artifact.category == "figure"]
         assert len(figure_artifacts) == 1
         assert figure_artifacts[0].metadata["label"] == "good"
-        assert figure_artifacts[0].sources[0].path == str(good_figure)
+        assert figure_artifacts[0].sources[0].path == "good.png"
 
 
 # ---- Public API surface test ----
@@ -716,3 +733,33 @@ class TestClassFileFallback:
         assert "jheppub.sty not found" in output.errors[0]
         assert output.manifest_path == tmp_path / "ARTIFACT-MANIFEST.json"
         assert output.manifest is not None
+
+    @pytest.mark.asyncio
+    async def test_build_paper_warns_on_zero_citations(self, tmp_path, monkeypatch):
+        """Assert build_paper warns when bib has entries but tex has no citations."""
+        from gpd.mcp.paper.compiler import build_paper
+
+        config = PaperConfig(
+            title="Test Paper",
+            authors=[Author(name="Test Author")],
+            abstract="Abstract text.",
+            sections=[Section(title="Introduction", content="No citations here.")],
+        )
+        bib = BibliographyData()
+        bib.entries["ref2020"] = Entry("article", [("title", "Ref"), ("author", "Doe"), ("year", "2020")])
+
+        output_stem = derive_output_filename(config)
+        pdf_path = tmp_path / f"{output_stem}.pdf"
+        mock_result = CompilationResult(success=True, pdf_path=pdf_path)
+        pdf_path.write_bytes(b"%PDF-fake")
+
+        async def mock_compile(tex_path, output_dir, compiler="pdflatex"):
+            return mock_result
+
+        _allow_journal_dependencies(monkeypatch)
+        monkeypatch.setattr("gpd.mcp.paper.compiler.compile_paper", mock_compile)
+
+        output = await build_paper(config, tmp_path, bib_data=bib)
+
+        assert output.citation_warnings
+        assert any("zero" in w.lower() for w in output.citation_warnings)

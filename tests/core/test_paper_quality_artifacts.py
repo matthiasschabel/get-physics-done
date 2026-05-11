@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
 
 from gpd.core.errors import GPDError
+from gpd.core.manuscript_artifacts import resolve_explicit_publication_subject
 from gpd.core.paper_quality import score_paper_quality
 from gpd.core.paper_quality_artifacts import build_paper_quality_input
 
@@ -16,6 +18,39 @@ STAGE0_FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _sha256_text(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def _artifact_manifest_payload(
+    manuscript_path: Path,
+    *,
+    title: str,
+    journal: str = "jhep",
+    artifact_id: str = "tex-paper",
+) -> dict[str, object]:
+    digest = hashlib.sha256(manuscript_path.read_bytes()).hexdigest()
+    return {
+        "version": 1,
+        "paper_title": title,
+        "journal": journal,
+        "created_at": "2026-03-13T00:00:00+00:00",
+        "manuscript_sha256": digest,
+        "manuscript_mtime_ns": manuscript_path.stat().st_mtime_ns,
+        "artifacts": [
+            {
+                "artifact_id": artifact_id,
+                "category": "tex",
+                "path": manuscript_path.name,
+                "sha256": digest,
+                "produced_by": "test",
+                "sources": [],
+                "metadata": {},
+            }
+        ],
+    }
 
 
 def _full_convention_lock() -> dict[str, str]:
@@ -67,6 +102,7 @@ contract:
   schema_version: 1
   scope:
     question: What benchmark must this plan recover?
+    in_scope: [benchmark comparison]
   context_intake:
     must_read_refs: [ref-benchmark]
     must_include_prior_outputs: [GPD/phases/00-baseline/00-01-SUMMARY.md]
@@ -112,8 +148,9 @@ Body.
 
 
 def test_build_paper_quality_input_reads_contract_and_comparison_artifacts(tmp_path: Path) -> None:
+    manuscript = tmp_path / "paper" / "benchmark_paper.tex"
     _write(
-        tmp_path / "paper" / "benchmark_paper.tex",
+        manuscript,
         r"""
 \documentclass{article}
 \begin{document}
@@ -130,25 +167,7 @@ The benchmark was recovered within tolerance.
     )
     _write(
         tmp_path / "paper" / "ARTIFACT-MANIFEST.json",
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Benchmark Paper",
-                "journal": "jhep",
-                "created_at": "2026-03-13T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "benchmark_paper.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript, title="Benchmark Paper")),
     )
     _write(
         tmp_path / "paper" / "BIBLIOGRAPHY-AUDIT.json",
@@ -255,6 +274,68 @@ comparison_verdicts:
     assert result.figures.decisive_artifact_roles_clear.satisfied == 1
     assert result.results.decisive_artifacts_with_explicit_verdicts.satisfied == 1
     assert result.results.decisive_artifacts_benchmark_anchored.satisfied == 1
+
+
+@pytest.mark.parametrize(
+    "figure_registry_yaml",
+    [
+        """
+  - id: fig-drift
+    label: benchmark
+    path: paper/figures/benchmark.pdf
+    unexpected_schema_key: stale
+""",
+        """
+  - id: fig-drift
+    label: benchmark
+    path: paper/figures/benchmark.pdf
+    contract_ids: claim-benchmark
+""",
+        """
+  - not-a-mapping
+""",
+        "\n",
+        " null\n",
+    ],
+)
+def test_build_paper_quality_input_surfaces_figure_tracker_schema_drift(
+    tmp_path: Path,
+    figure_registry_yaml: str,
+) -> None:
+    _write(
+        tmp_path / "paper" / "figure_drift.tex",
+        r"""
+\documentclass{article}
+\begin{document}
+\begin{abstract}
+Figure tracker drift.
+\end{abstract}
+\section{Introduction}
+Intro.
+\section{Conclusion}
+Done.
+\end{document}
+""".strip()
+        + "\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Figure Drift", "jhep", output_filename="figure_drift")),
+    )
+    _write(
+        tmp_path / "paper" / "FIGURE_TRACKER.md",
+        f"""---
+figure_registry:{figure_registry_yaml}
+---
+
+# Figure Tracker
+""",
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.journal_extra_checks["figure_tracker_parse_ok"] is False
+    assert result.figures.axes_labeled_with_units.total == 0
 
 
 def test_build_paper_quality_input_preserves_project_local_contract_anchors_through_verified_ledgers(
@@ -366,8 +447,9 @@ Done.
 
 
 def test_build_paper_quality_input_recurses_into_nested_manuscript_files(tmp_path: Path) -> None:
+    manuscript = tmp_path / "paper" / "topic_specific_stem.tex"
     _write(
-        tmp_path / "paper" / "topic_specific_stem.tex",
+        manuscript,
         r"""
 \documentclass{article}
 \begin{document}
@@ -399,25 +481,7 @@ TODO finalize the nested conclusion.
     )
     _write(
         tmp_path / "paper" / "ARTIFACT-MANIFEST.json",
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Recursive Manuscript",
-                "journal": "generic",
-                "created_at": "2026-04-02T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "topic_specific_stem.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript, title="Recursive Manuscript", journal="jhep")),
     )
     _write(
         tmp_path / "paper" / "BIBLIOGRAPHY-AUDIT.json",
@@ -455,7 +519,50 @@ TODO finalize the nested conclusion.
     assert result.completeness.placeholders_cleared.passed is False
 
 
-def test_build_paper_quality_input_falls_back_to_supported_config_journal_when_manifest_is_unsupported(
+def test_build_paper_quality_input_ignores_latex_comment_placeholders(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "paper" / "commented_placeholders.tex",
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\begin{abstract}Done.\\end{abstract}\n"
+        "\\section{Introduction}Complete introduction.\n"
+        "% TODO legacy note should not block.\n"
+        "% FIXME another commented note should not block.\n"
+        "\\section{Conclusion}Complete conclusion.\n"
+        "\\end{document}\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Commented Placeholders", "jhep", output_filename="commented_placeholders")),
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.completeness.placeholders_cleared.passed is True
+
+
+def test_build_paper_quality_input_blocks_commented_result_pending_markers(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "paper" / "pending_marker.tex",
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "\\begin{abstract}Pending marker test.\\end{abstract}\n"
+        "\\section{Introduction}Complete introduction.\n"
+        "% [RESULT PENDING: phase 1, task 2 -- fill benchmark value]\n"
+        "\\section{Conclusion}Complete conclusion.\n"
+        "\\end{document}\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Pending Marker", "jhep", output_filename="pending_marker")),
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.completeness.placeholders_cleared.passed is False
+
+
+def test_build_paper_quality_input_falls_back_to_supported_config_journal_when_manifest_hash_is_stale(
     tmp_path: Path,
 ) -> None:
     _write(
@@ -464,7 +571,7 @@ def test_build_paper_quality_input_falls_back_to_supported_config_journal_when_m
     )
     _write(
         tmp_path / "paper" / "PAPER-CONFIG.json",
-        json.dumps(_paper_config_payload("Config Fallback Title", "jhep")),
+        json.dumps(_paper_config_payload("Config Fallback Title", "jhep", output_filename="config_fallback_title")),
     )
     _write(
         tmp_path / "paper" / "ARTIFACT-MANIFEST.json",
@@ -472,7 +579,7 @@ def test_build_paper_quality_input_falls_back_to_supported_config_journal_when_m
             {
                 "version": 1,
                 "paper_title": "Manifest Title",
-                "journal": "prd",
+                "journal": "prl",
                 "created_at": "2026-03-13T00:00:00+00:00",
                 "artifacts": [],
             }
@@ -518,7 +625,9 @@ def test_build_paper_quality_input_normalizes_empty_contract_results_reference_l
             "      pass_condition: Matches internal baseline within tolerance\n",
             1,
         )
-        .replace("      evidence_required: [deliv-figure, ref-benchmark]\n", "      evidence_required: [deliv-figure]\n", 1),
+        .replace(
+            "      evidence_required: [deliv-figure, ref-benchmark]\n", "      evidence_required: [deliv-figure]\n", 1
+        ),
     )
     _write(
         plan_dir / "01-SUMMARY.md",
@@ -650,7 +759,18 @@ def test_build_paper_quality_input_does_not_fall_back_to_paper_root_when_manuscr
         build_paper_quality_input(tmp_path)
 
 
-def test_build_paper_quality_input_prefers_valid_config_when_manifest_is_invalid(
+def test_build_paper_quality_input_rejects_an_explicit_unresolved_publication_subject(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "paper" / "curvature_flow_bounds.tex",
+        "\\documentclass{article}\\begin{document}\\section{Introduction}Intro.\\section{Conclusion}Done.\\end{document}\n",
+    )
+
+    subject = resolve_explicit_publication_subject(tmp_path, "paper/curvature_flow_bounds.tex")
+    with pytest.raises(GPDError, match="paper-quality artifact resolution requires an unambiguous manuscript root"):
+        build_paper_quality_input(tmp_path, publication_subject=subject)
+
+
+def test_build_paper_quality_input_rejects_invalid_manifest_even_with_valid_config(
     tmp_path: Path,
 ) -> None:
     _write(tmp_path / "paper" / "config-entry.tex", "\\documentclass{article}\\begin{document}Config.\\end{document}\n")
@@ -690,15 +810,14 @@ def test_build_paper_quality_input_prefers_valid_config_when_manifest_is_invalid
                     }
                 ],
             }
-            ),
-        )
+        ),
+    )
 
-    result = build_paper_quality_input(tmp_path)
+    with pytest.raises(GPDError, match="paper-quality artifact resolution requires an unambiguous manuscript root"):
+        build_paper_quality_input(tmp_path)
 
-    assert result.title == "Config Title"
 
-
-def test_build_paper_quality_input_ignores_stale_manifest_metadata_when_config_entrypoint_is_active(
+def test_build_paper_quality_input_rejects_manifest_without_freshness_hash_even_with_valid_config(
     tmp_path: Path,
 ) -> None:
     _write(
@@ -715,14 +834,55 @@ def test_build_paper_quality_input_ignores_stale_manifest_metadata_when_config_e
             {
                 "version": 1,
                 "paper_title": "Stale Manifest Title",
-                "journal": "prd",
+                "journal": "prl",
                 "created_at": "2026-03-13T00:00:00+00:00",
                 "artifacts": [
                     {
                         "artifact_id": "main-tex",
                         "category": "tex",
-                        "path": "missing-entry.tex",
+                        "path": "config-entry.tex",
                         "sha256": "b" * 64,
+                        "produced_by": "paper-compiler",
+                        "sources": [],
+                        "metadata": {},
+                    }
+                ],
+            }
+        ),
+    )
+
+    with pytest.raises(GPDError, match="manifest is missing manuscript_sha256"):
+        build_paper_quality_input(tmp_path)
+
+
+def test_build_paper_quality_input_trusts_manifest_metadata_when_manuscript_hash_matches(
+    tmp_path: Path,
+) -> None:
+    manuscript = (
+        "\\documentclass{article}\\begin{document}\\begin{abstract}A.\\end{abstract}"
+        "\\section{Introduction}Intro.\\section{Conclusion}Done.\\end{document}\n"
+    )
+    manuscript_sha256 = _sha256_text(manuscript)
+    _write(tmp_path / "paper" / "active-entry.tex", manuscript)
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Config Title", "jhep", output_filename="active-entry")),
+    )
+    _write(
+        tmp_path / "paper" / "ARTIFACT-MANIFEST.json",
+        json.dumps(
+            {
+                "version": 1,
+                "paper_title": "Fresh Manifest Title",
+                "journal": "prl",
+                "created_at": "2026-03-13T00:00:00+00:00",
+                "manuscript_sha256": manuscript_sha256,
+                "artifacts": [
+                    {
+                        "artifact_id": "main-tex",
+                        "category": "tex",
+                        "path": "active-entry.tex",
+                        "sha256": manuscript_sha256,
                         "produced_by": "paper-compiler",
                         "sources": [],
                         "metadata": {},
@@ -734,8 +894,66 @@ def test_build_paper_quality_input_ignores_stale_manifest_metadata_when_config_e
 
     result = build_paper_quality_input(tmp_path)
 
-    assert result.title == "Config Title"
-    assert result.journal == "jhep"
+    assert result.title == "Fresh Manifest Title"
+    assert result.journal == "prl"
+
+
+def test_build_paper_quality_input_discovers_nested_artifact_manifest(tmp_path: Path) -> None:
+    manuscript = tmp_path / "paper" / "nested_sidecar_entry.tex"
+    _write(
+        manuscript,
+        "\\documentclass{article}\\begin{document}\\begin{abstract}A.\\end{abstract}"
+        "\\section{Introduction}Intro.\\section{Conclusion}Done.\\end{document}\n",
+    )
+    _write(
+        tmp_path / "paper" / ".paper-meta" / "ARTIFACT-MANIFEST.json",
+        json.dumps(_artifact_manifest_payload(manuscript, title="Nested Manifest Title", journal="prl")),
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.title == "Nested Manifest Title"
+    assert result.journal == "prl"
+
+
+def test_build_paper_quality_input_rejects_manifest_metadata_when_manuscript_hash_is_stale(
+    tmp_path: Path,
+) -> None:
+    manuscript = (
+        "\\documentclass{article}\\begin{document}\\begin{abstract}A.\\end{abstract}"
+        "\\section{Introduction}Intro.\\section{Conclusion}Done.\\end{document}\n"
+    )
+    _write(tmp_path / "paper" / "active-entry.tex", manuscript)
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Config Title", "jhep", output_filename="active-entry")),
+    )
+    _write(
+        tmp_path / "paper" / "ARTIFACT-MANIFEST.json",
+        json.dumps(
+            {
+                "version": 1,
+                "paper_title": "Stale Manifest Title",
+                "journal": "prl",
+                "created_at": "2026-03-13T00:00:00+00:00",
+                "manuscript_sha256": "0" * 64,
+                "artifacts": [
+                    {
+                        "artifact_id": "main-tex",
+                        "category": "tex",
+                        "path": "active-entry.tex",
+                        "sha256": _sha256_text(manuscript),
+                        "produced_by": "paper-compiler",
+                        "sources": [],
+                        "metadata": {},
+                    }
+                ],
+            }
+        ),
+    )
+
+    with pytest.raises(GPDError, match="manuscript_sha256 does not match"):
+        build_paper_quality_input(tmp_path)
 
 
 def test_build_paper_quality_input_surfaces_convention_lock_and_derivation_assertion_coverage(
@@ -827,7 +1045,7 @@ def test_build_paper_quality_input_counts_python_and_tex_derivation_artifacts(
     assert result.conventions.assert_convention_coverage.total == 3
 
 
-def test_build_paper_quality_input_ignores_invalid_artifact_manifest_and_falls_back_to_config(tmp_path: Path) -> None:
+def test_build_paper_quality_input_rejects_invalid_artifact_manifest_instead_of_falling_back(tmp_path: Path) -> None:
     _write(
         tmp_path / "paper" / "curvature_flow_bounds.tex",
         "\\documentclass{article}\\begin{document}\\section{Introduction}Intro.\\section{Conclusion}Done.\\end{document}\n",
@@ -842,17 +1060,25 @@ def test_build_paper_quality_input_ignores_invalid_artifact_manifest_and_falls_b
             {
                 "version": 2,
                 "paper_title": "Broken Manifest Title",
-                "journal": "prd",
+                "journal": "prl",
                 "created_at": "2026-03-13T00:00:00+00:00",
-                "artifacts": [],
+                "artifacts": [
+                    {
+                        "artifact_id": "main-tex",
+                        "category": "tex",
+                        "path": "config_fallback_title.tex",
+                        "sha256": "0" * 64,
+                        "produced_by": "paper-compiler",
+                        "sources": [],
+                        "metadata": {},
+                    }
+                ],
             }
         ),
     )
 
-    result = build_paper_quality_input(tmp_path)
-
-    assert result.title == "Config Fallback Title"
-    assert result.journal == "jhep"
+    with pytest.raises(GPDError, match="paper-quality artifact resolution requires an unambiguous manuscript root"):
+        build_paper_quality_input(tmp_path)
 
 
 def test_build_paper_quality_input_ignores_invalid_bibliography_audit(tmp_path: Path) -> None:
@@ -1057,6 +1283,75 @@ Done.
     assert result.citations.citation_keys_resolve.total == 1
 
 
+def test_build_paper_quality_input_does_not_consume_extra_keys_from_invalid_config(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "paper" / "config_title.tex",
+        r"""
+\documentclass{article}
+\begin{document}
+\begin{abstract}
+Invalid config extra-key test.
+\end{abstract}
+\section{Introduction}
+Intro.
+\section{Conclusion}
+Done.
+\end{document}
+""".strip()
+        + "\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(
+            {
+                "title": "Config Title",
+                "journal": "jhep",
+                "journal_extra_checks": {"abstract_broad_significance": True},
+            }
+        ),
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.title == "Config Title"
+    assert result.journal == "jhep"
+    assert "abstract_broad_significance" not in result.journal_extra_checks
+
+
+def test_build_paper_quality_input_accepts_an_explicit_publication_subject(tmp_path: Path) -> None:
+    manuscript = tmp_path / "draft" / "main.tex"
+    _write(
+        manuscript,
+        r"""
+\documentclass{article}
+\begin{document}
+\begin{abstract}
+Explicit subject test.
+\end{abstract}
+\section{Introduction}
+Intro.
+\section{Conclusion}
+Done.
+\end{document}
+""".strip()
+        + "\n",
+    )
+    _write(
+        tmp_path / "draft" / "ARTIFACT-MANIFEST.json",
+        json.dumps(_artifact_manifest_payload(manuscript, title="Explicit Subject Title", artifact_id="main-tex")),
+    )
+    _write(
+        tmp_path / "draft" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Explicit Subject Title", "jhep", output_filename="main")),
+    )
+
+    subject = resolve_explicit_publication_subject(tmp_path, "draft/main.tex")
+    result = build_paper_quality_input(tmp_path, publication_subject=subject)
+
+    assert result.title == "Explicit Subject Title"
+    assert result.journal == "jhep"
+
+
 def test_build_paper_quality_input_uses_active_manuscript_root_and_canonical_config(tmp_path: Path) -> None:
     (tmp_path / "paper").mkdir()
     _write(
@@ -1150,9 +1445,102 @@ Done.
     assert result.completeness.required_sections_present.total == 3
 
 
-def test_build_paper_quality_input_collects_comparison_verdicts_from_active_manuscript_root(tmp_path: Path) -> None:
+def test_build_paper_quality_input_detects_empty_citation_and_reference_commands(tmp_path: Path) -> None:
     _write(
-        tmp_path / "manuscript" / "curvature_flow_bounds.tex",
+        tmp_path / "paper" / "curvature_flow_bounds.md",
+        """
+# Curvature Flow Bounds
+
+## Abstract
+Markdown manuscript test.
+
+## Introduction
+See \\cite{} and Eq.~\\ref{}.
+
+## Conclusion
+Done.
+""".strip()
+        + "\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Curvature Flow Bounds", "jhep")),
+    )
+
+    result = build_paper_quality_input(tmp_path)
+    report = score_paper_quality(result)
+
+    assert result.journal_extra_checks["empty_citation_commands_absent"] is False
+    assert result.journal_extra_checks["empty_reference_commands_absent"] is False
+    blocker_checks = {issue.check for issue in report.blocking_issues}
+    assert "empty_citation_commands_absent" in blocker_checks
+    assert "empty_reference_commands_absent" in blocker_checks
+
+
+def test_build_paper_quality_input_ignores_commented_citations_and_references(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "paper" / "curvature_flow_bounds.md",
+        """
+# Curvature Flow Bounds
+
+## Abstract
+Markdown manuscript test.
+
+## Introduction
+% See \\cite{missing2026}, \\cite{MISSING:legacy}, and Eq.~\\eqref{}.
+No active citation here.
+
+## Conclusion
+Done.
+""".strip()
+        + "\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Curvature Flow Bounds", "jhep")),
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.citations.citation_keys_resolve.total == 0
+    assert result.citations.missing_placeholders.passed is True
+    assert result.journal_extra_checks["empty_citation_commands_absent"] is True
+    assert result.journal_extra_checks["empty_reference_commands_absent"] is True
+
+
+def test_build_paper_quality_input_preserves_escaped_percent_before_citation_lint(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "paper" / "curvature_flow_bounds.md",
+        """
+# Curvature Flow Bounds
+
+## Abstract
+Markdown manuscript test.
+
+## Introduction
+Value is 50\\% of \\cite{missing2026}; see Eq.~\\Cref{}.
+
+## Conclusion
+Done.
+""".strip()
+        + "\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Curvature Flow Bounds", "jhep")),
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.citations.citation_keys_resolve.total == 1
+    assert result.citations.citation_keys_resolve.satisfied == 0
+    assert result.journal_extra_checks["empty_reference_commands_absent"] is False
+
+
+def test_build_paper_quality_input_collects_comparison_verdicts_from_active_manuscript_root(tmp_path: Path) -> None:
+    manuscript = tmp_path / "manuscript" / "curvature_flow_bounds.tex"
+    _write(
+        manuscript,
         "\\documentclass{article}\\begin{document}\\begin{abstract}A.\\end{abstract}\\section{Introduction}Intro.\\section{Conclusion}Done.\\end{document}\n",
     )
     _write(
@@ -1161,25 +1549,7 @@ def test_build_paper_quality_input_collects_comparison_verdicts_from_active_manu
     )
     _write(
         tmp_path / "manuscript" / "ARTIFACT-MANIFEST.json",
-        json.dumps(
-            {
-                "version": 1,
-                "paper_title": "Curvature Flow Bounds",
-                "journal": "jhep",
-                "created_at": "2026-03-13T00:00:00+00:00",
-                "artifacts": [
-                    {
-                        "artifact_id": "tex-paper",
-                        "category": "tex",
-                        "path": "curvature_flow_bounds.tex",
-                        "sha256": "0" * 64,
-                        "produced_by": "test",
-                        "sources": [],
-                        "metadata": {},
-                    }
-                ],
-            }
-        ),
+        json.dumps(_artifact_manifest_payload(manuscript, title="Curvature Flow Bounds")),
     )
     _write(
         tmp_path / "manuscript" / "BIBLIOGRAPHY-AUDIT.json",
@@ -1607,48 +1977,52 @@ def test_build_paper_quality_input_marks_explicit_null_contract_results_ledger_p
     plan_dir = tmp_path / "GPD" / "phases" / "01-benchmark"
     _write(plan_dir / "01-01-PLAN.md", (STAGE0_FIXTURES_DIR / "plan_with_contract.md").read_text(encoding="utf-8"))
 
-    summary = (FIXTURES_DIR / "summary_with_contract_results.md").read_text(encoding="utf-8").replace(
-        "contract_results:\n"
-        "  claims:\n"
-        "    claim-benchmark:\n"
-        "      status: passed\n"
-        "      summary: Benchmark claim verified against the decisive anchor.\n"
-        "      linked_ids: [deliv-figure, test-benchmark, ref-benchmark]\n"
-        "      evidence:\n"
-        "        - verifier: gpd-verifier\n"
-        "          method: benchmark reproduction\n"
-        "          confidence: high\n"
-        "          claim_id: claim-benchmark\n"
-        "          deliverable_id: deliv-figure\n"
-        "          acceptance_test_id: test-benchmark\n"
-        "          reference_id: ref-benchmark\n"
-        "          evidence_path: GPD/phases/01-benchmark/01-VERIFICATION.md\n"
-        "  deliverables:\n"
-        "    deliv-figure:\n"
-        "      status: passed\n"
-        "      path: figures/benchmark.png\n"
-        "      summary: Figure produced with uncertainty band and benchmark overlay.\n"
-        "      linked_ids: [claim-benchmark, test-benchmark]\n"
-        "  acceptance_tests:\n"
-        "    test-benchmark:\n"
-        "      status: passed\n"
-        "      summary: Benchmark reproduced within the contracted tolerance.\n"
-        "      linked_ids: [claim-benchmark, deliv-figure, ref-benchmark]\n"
-        "  references:\n"
-        "    ref-benchmark:\n"
-        "      status: completed\n"
-        "      completed_actions: [read, compare, cite]\n"
-        "      missing_actions: []\n"
-        "      summary: Benchmark anchor surfaced in the comparison figure and manuscript text.\n"
-        "  forbidden_proxies:\n"
-        "    fp-benchmark:\n"
-        "      status: rejected\n"
-        "      notes: Qualitative trend agreement was not accepted without the numerical benchmark check.\n"
-        "  uncertainty_markers:\n"
-        "    weakest_anchors: [Reference tolerance interpretation]\n"
-        "    disconfirming_observations: [Benchmark agreement disappears once normalization is fixed]\n",
-        "contract_results:\n",
-        1,
+    summary = (
+        (FIXTURES_DIR / "summary_with_contract_results.md")
+        .read_text(encoding="utf-8")
+        .replace(
+            "contract_results:\n"
+            "  claims:\n"
+            "    claim-benchmark:\n"
+            "      status: passed\n"
+            "      summary: Benchmark claim verified against the decisive anchor.\n"
+            "      linked_ids: [deliv-figure, test-benchmark, ref-benchmark]\n"
+            "      evidence:\n"
+            "        - verifier: gpd-verifier\n"
+            "          method: benchmark reproduction\n"
+            "          confidence: high\n"
+            "          claim_id: claim-benchmark\n"
+            "          deliverable_id: deliv-figure\n"
+            "          acceptance_test_id: test-benchmark\n"
+            "          reference_id: ref-benchmark\n"
+            "          evidence_path: GPD/phases/01-benchmark/01-VERIFICATION.md\n"
+            "  deliverables:\n"
+            "    deliv-figure:\n"
+            "      status: passed\n"
+            "      path: figures/benchmark.png\n"
+            "      summary: Figure produced with uncertainty band and benchmark overlay.\n"
+            "      linked_ids: [claim-benchmark, test-benchmark]\n"
+            "  acceptance_tests:\n"
+            "    test-benchmark:\n"
+            "      status: passed\n"
+            "      summary: Benchmark reproduced within the contracted tolerance.\n"
+            "      linked_ids: [claim-benchmark, deliv-figure, ref-benchmark]\n"
+            "  references:\n"
+            "    ref-benchmark:\n"
+            "      status: completed\n"
+            "      completed_actions: [read, compare, cite]\n"
+            "      missing_actions: []\n"
+            "      summary: Benchmark anchor surfaced in the comparison figure and manuscript text.\n"
+            "  forbidden_proxies:\n"
+            "    fp-benchmark:\n"
+            "      status: rejected\n"
+            "      notes: Qualitative trend agreement was not accepted without the numerical benchmark check.\n"
+            "  uncertainty_markers:\n"
+            "    weakest_anchors: [Reference tolerance interpretation]\n"
+            "    disconfirming_observations: [Benchmark agreement disappears once normalization is fixed]\n",
+            "contract_results:\n",
+            1,
+        )
     )
     _write(plan_dir / "01-SUMMARY.md", summary)
 
@@ -1815,9 +2189,7 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
     write_paper = (repo_root / "src/gpd/specs/workflows/write-paper.md").read_text(encoding="utf-8")
     peer_review = (repo_root / "src/gpd/specs/workflows/peer-review.md").read_text(encoding="utf-8")
     respond = (repo_root / "src/gpd/specs/workflows/respond-to-referees.md").read_text(encoding="utf-8")
-    internal_template = (repo_root / "src/gpd/specs/templates/paper/internal-comparison.md").read_text(
-        encoding="utf-8"
-    )
+    internal_template = (repo_root / "src/gpd/specs/templates/paper/internal-comparison.md").read_text(encoding="utf-8")
     experimental_template = (repo_root / "src/gpd/specs/templates/paper/experimental-comparison.md").read_text(
         encoding="utf-8"
     )
@@ -1833,12 +2205,15 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
     assert "${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md" in peer_review
     assert "GPD/comparisons/*-COMPARISON.md" in peer_review
     assert "Treat bundle guidance as additive skepticism only" in peer_review
-    assert "review-support artifacts are scaffolding, not substitutes for contract-backed evidence" in peer_review
+    assert "review-support artifacts are scaffolding, not substitutes for authoritative evidence" in peer_review
 
     assert "protocol_bundle_context" in respond
     assert "missing decisive evidence we already owed" in respond
     assert "prefer fulfilling that existing obligation or narrowing the claim" in respond
-    assert "Treat referee requests beyond the manuscript's honest scope as optional unless they expose a real support gap" in respond
+    assert (
+        "Treat referee requests beyond the manuscript's honest scope as optional unless they expose a real support gap"
+        in respond
+    )
 
     assert "protocol_bundle_ids (optional):" not in internal_template
     assert "bundle_expectations (optional):" not in internal_template
@@ -1848,3 +2223,29 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
     assert "bundle_expectations (optional):" not in experimental_template
     assert "omit `protocol_bundle_ids` and `bundle_expectations` entirely" in experimental_template.lower()
     assert "additive provenance" in experimental_template
+
+
+def test_build_paper_quality_input_counts_natbib_citations(tmp_path: Path) -> None:
+    """Ensure natbib commands like \\citep and \\citet are counted."""
+    _write(
+        tmp_path / "paper" / "natbib_test.md",
+        "# Natbib Test\n\n"
+        "## Abstract\nTest.\n\n"
+        "## Introduction\n"
+        "See \\citep{bench2026} and \\citet{other2025}.\n\n"
+        "## Conclusion\nDone.\n",
+    )
+    _write(
+        tmp_path / "paper" / "PAPER-CONFIG.json",
+        json.dumps(_paper_config_payload("Natbib Test", "mnras")),
+    )
+    _write(
+        tmp_path / "paper" / "refs.bib",
+        "@article{bench2026,\n  title={Benchmark},\n  author={Doe},\n  year={2026}\n}\n"
+        "@article{other2025,\n  title={Other},\n  author={Smith},\n  year={2025}\n}\n",
+    )
+
+    result = build_paper_quality_input(tmp_path)
+
+    assert result.citations.citation_keys_resolve.total == 2
+    assert result.citations.citation_keys_resolve.satisfied >= 1

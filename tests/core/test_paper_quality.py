@@ -13,6 +13,7 @@ from gpd.core.paper_quality import (
     CompletenessQualityInput,
     ConventionsQualityInput,
     CoverageMetric,
+    DraftingFinding,
     EquationsQualityInput,
     FiguresQualityInput,
     PaperQualityInput,
@@ -20,9 +21,18 @@ from gpd.core.paper_quality import (
     VerificationConfidence,
     VerificationQualityInput,
     score_paper_quality,
+    validate_tex_draft,
 )
 
-TEMPLATE_PATH = Path(__file__).resolve().parents[2] / "src" / "gpd" / "specs" / "templates" / "paper" / "paper-quality-input-schema.md"
+TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "gpd"
+    / "specs"
+    / "templates"
+    / "paper"
+    / "paper-quality-input-schema.md"
+)
 
 
 def _full_metric(total: int) -> CoverageMetric:
@@ -153,6 +163,7 @@ def test_score_paper_quality_flags_blockers():
     assert "report_passed" in blocking_checks
     assert "no_unreliable_results" in blocking_checks
     assert "comparison_with_prior_work_present" in blocking_checks
+    assert "placeholders_cleared" in blocking_checks
 
 
 def test_score_paper_quality_blocks_missing_citation_audit_when_citations_are_applicable():
@@ -313,6 +324,7 @@ def test_score_paper_quality_blocks_invalid_contract_and_comparison_ledgers() ->
                 "contract_results_parse_ok": False,
                 "contract_results_alignment_ok": False,
                 "comparison_verdicts_valid": False,
+                "figure_tracker_parse_ok": False,
             },
         )
     )
@@ -322,6 +334,82 @@ def test_score_paper_quality_blocks_invalid_contract_and_comparison_ledgers() ->
     assert "contract_results_parse_ok" in blocking_checks
     assert "contract_results_alignment_ok" in blocking_checks
     assert "comparison_verdicts_valid" in blocking_checks
+    assert "figure_tracker_parse_ok" in blocking_checks
+
+
+def test_score_paper_quality_blocks_empty_citation_and_reference_commands() -> None:
+    report = score_paper_quality(
+        PaperQualityInput(
+            title="Broken manuscript commands",
+            journal="generic",
+            equations=EquationsQualityInput(
+                labeled=_full_metric(1),
+                symbols_defined=_full_metric(1),
+                dimensionally_verified=_full_metric(1),
+                limiting_cases_verified=_full_metric(1),
+            ),
+            figures=FiguresQualityInput(
+                axes_labeled_with_units=_full_metric(1),
+                error_bars_present=_full_metric(1),
+                referenced_in_text=_full_metric(1),
+                captions_self_contained=_full_metric(1),
+                colorblind_safe=_full_metric(1),
+            ),
+            citations=CitationsQualityInput(
+                citation_keys_resolve=_full_metric(1),
+                missing_placeholders=BinaryCheck(passed=True),
+                key_prior_work_cited=BinaryCheck(passed=True),
+                hallucination_free=BinaryCheck(passed=True),
+            ),
+            conventions=ConventionsQualityInput(
+                convention_lock_complete=BinaryCheck(passed=True),
+                assert_convention_coverage=_full_metric(1),
+                notation_consistent=BinaryCheck(passed=True),
+            ),
+            verification=VerificationQualityInput(
+                report_passed=BinaryCheck(passed=True),
+                contract_targets_verified=_full_metric(1),
+                key_result_confidences=[VerificationConfidence.independently_confirmed],
+            ),
+            completeness=CompletenessQualityInput(
+                abstract_written_last=BinaryCheck(passed=True),
+                required_sections_present=_full_metric(3),
+                placeholders_cleared=BinaryCheck(passed=True),
+                supplemental_cross_referenced=BinaryCheck(passed=True),
+            ),
+            results=ResultsQualityInput(
+                uncertainties_present=_full_metric(1),
+                comparison_with_prior_work_present=BinaryCheck(passed=True),
+                physical_interpretation_present=BinaryCheck(passed=True),
+            ),
+            journal_extra_checks={
+                "empty_citation_commands_absent": False,
+                "empty_reference_commands_absent": False,
+            },
+        )
+    )
+
+    assert report.ready_for_submission is False
+    blocking_checks = {issue.check for issue in report.blocking_issues}
+    assert "empty_citation_commands_absent" in blocking_checks
+    assert "empty_reference_commands_absent" in blocking_checks
+
+
+def test_score_paper_quality_blocks_missing_manuscript_reference_bridge() -> None:
+    report = score_paper_quality(
+        PaperQualityInput(
+            title="Reference Bridge Blocked",
+            journal="jhep",
+            journal_extra_checks={
+                "manuscript_reference_status_present": False,
+                "manuscript_reference_bridge_complete": False,
+            },
+        )
+    )
+
+    blocking_checks = {issue.check for issue in report.blocking_issues}
+    assert "manuscript_reference_status_present" in blocking_checks
+    assert "manuscript_reference_bridge_complete" in blocking_checks
 
 
 def test_score_paper_quality_applies_journal_adjustments():
@@ -377,6 +465,24 @@ def test_score_paper_quality_applies_journal_adjustments():
 
     assert report_with_extra.adjusted_score > report_without_extra.adjusted_score
     assert report_with_extra.minimum_submission_score == 85.0
+
+
+def test_builder_journals_have_scorer_rules_or_explicit_fallbacks() -> None:
+    from gpd.core.paper_quality import BUILDER_SCORER_FALLBACKS, JOURNAL_RULES, SCORING_ONLY_JOURNALS
+    from gpd.mcp.paper.models import SUPPORTED_PAPER_JOURNALS
+
+    supported_scorer_or_fallback = set(JOURNAL_RULES) | set(BUILDER_SCORER_FALLBACKS)
+    assert set(SUPPORTED_PAPER_JOURNALS) <= supported_scorer_or_fallback
+    assert set(BUILDER_SCORER_FALLBACKS) <= set(SUPPORTED_PAPER_JOURNALS)
+    assert SCORING_ONLY_JOURNALS.isdisjoint(SUPPORTED_PAPER_JOURNALS)
+
+
+@pytest.mark.parametrize("journal", ["mnras", "jfm"])
+def test_score_paper_quality_uses_explicit_generic_fallback_for_builder_journals(journal: str) -> None:
+    report = score_paper_quality(PaperQualityInput(title="Fallback Paper", journal=journal))
+
+    assert report.journal == journal
+    assert report.minimum_submission_score == 80.0
 
 
 def test_severity_in_module_all():
@@ -464,8 +570,7 @@ def test_category_max_scores_match_constant():
 
     for name, cat in report.categories.items():
         assert cat.max_score == CATEGORY_MAX[name], (
-            f"Category {name!r}: max_score={cat.max_score} does not match "
-            f"CATEGORY_MAX[{name!r}]={CATEGORY_MAX[name]}"
+            f"Category {name!r}: max_score={cat.max_score} does not match CATEGORY_MAX[{name!r}]={CATEGORY_MAX[name]}"
         )
 
 
@@ -652,3 +757,69 @@ def test_paper_quality_input_rejects_unknown_nested_fields() -> None:
 
     with pytest.raises(ValidationError, match="verification.report_exists"):
         PaperQualityInput.model_validate(payload)
+
+
+def test_validate_tex_draft_reports_structured_findings() -> None:
+    findings = validate_tex_draft(
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "Value is 50\\% TODO.\n"
+        "See \\cite{} and \\ref{}.\n"
+        "\\begin{equation}\n"
+        "E = mc^2\n"
+        "\\end{equation}\n"
+        "\\end{document}\n"
+    )
+
+    assert findings
+    assert all(isinstance(finding, DraftingFinding) for finding in findings)
+    checks = {finding.check for finding in findings}
+    assert "placeholder_marker" in checks
+    assert "empty_citation_command" in checks
+    assert "empty_reference_command" in checks
+    assert "unlabeled_equation" in checks
+    assert findings[0].severity == "blocker"
+
+
+@pytest.mark.parametrize("command", ["ref", "eqref", "autoref", "pageref", "nameref", "cref", "Cref"])
+def test_validate_tex_draft_detects_empty_reference_command_variants(command: str) -> None:
+    findings = validate_tex_draft(
+        f"\\documentclass{{article}}\n\\begin{{document}}\nSee \\{command}{{}}.\n\\end{{document}}\n"
+    )
+
+    assert any(finding.check == "empty_reference_command" for finding in findings)
+
+
+def test_validate_tex_draft_ignores_commented_markup() -> None:
+    findings = validate_tex_draft(
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "% TODO in a comment should not block.\n"
+        "% \\cite{}\n"
+        "% \\eqref{}\n"
+        "\\end{document}\n"
+    )
+
+    assert findings == []
+
+
+def test_validate_tex_draft_preserves_escaped_percent_before_reference_lint() -> None:
+    findings = validate_tex_draft(
+        "\\documentclass{article}\n\\begin{document}\nValue is 50\\% of Eq.~\\eqref{}.\n\\end{document}\n"
+    )
+
+    assert any(finding.check == "empty_reference_command" and finding.line == 3 for finding in findings)
+
+
+def test_validate_tex_draft_detects_natbib_empty_citep() -> None:
+    findings = validate_tex_draft("\\documentclass{article}\n\\begin{document}\nSee \\citep{}.\n\\end{document}\n")
+    checks = {finding.check for finding in findings}
+    assert "empty_citation_command" in checks
+
+
+def test_validate_tex_draft_detects_natbib_missing_citep() -> None:
+    findings = validate_tex_draft(
+        "\\documentclass{article}\n\\begin{document}\nSee \\citep{MISSING:ref1}.\n\\end{document}\n"
+    )
+    checks = {finding.check for finding in findings}
+    assert "missing_citation_placeholder" in checks

@@ -15,8 +15,6 @@ Ensure config exists and load current state:
 
 ```bash
 gpd config ensure-section
-# Compatibility note for installer text checks:
-# INIT=$(gpd --raw init progress --include state,config)
 INIT=$(gpd --raw init progress --include state,config --no-project-reentry)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
@@ -30,9 +28,11 @@ This creates `GPD/config.json` with defaults if missing and loads current config
 <step name="determine_runtime">
 Infer the active runtime before prompting for model IDs.
 
-Use the current command syntax, tool names, environment, and local runtime config directories to infer the active runtime identifier for this install. For GPD-owned model resolution surfaces, prefer the runtime with a concrete GPD install when a higher-priority runtime appears active but is not actually installed for this workspace.
+Apply the shared active-runtime rule from `gpd:settings`: infer from command syntax, tool names, environment, and local runtime config directories; prefer a concrete GPD install over an uninstalled higher-priority hint.
 
 If the runtime is still ambiguous, ask the user which runtime they want to configure before continuing.
+
+Record the chosen runtime id as `ACTIVE_RUNTIME` for config writes.
 
 If `model_overrides.<runtime>` already exists, surface the current `tier-1` / `tier-2` / `tier-3` values before asking what to change.
 </step>
@@ -88,34 +88,28 @@ Guidance for that follow-up:
 - Treat blank / `runtime default` / `none` as "no override for this tier".
 - Treat literal `default` as a real model alias only when the active runtime supports it and the user explicitly intends that alias.
 
-runtime-native examples are intentionally not hard-coded here. The installer projects the active runtime's own example guidance from the adapter catalog, so this shared workflow stays generic while still allowing each runtime to show its accepted model-string style.
+Runtime-native examples are intentionally not hard-coded here. Ask for the exact string accepted by the active runtime and preserve it unchanged; if the user is unsure, recommend keeping runtime defaults and checking the runtime/provider's own model documentation.
 </step>
 
 <step name="update_config">
-Merge the result into `GPD/config.json`:
+Use the deterministic config helper for all writes. Do not hand-merge `model_overrides` JSON in this workflow.
 
-- If the user chose **Use runtime defaults (Recommended)**, clear `model_overrides.<active_runtime>`.
-- If the user chose **Leave current setting unchanged**, preserve `model_overrides.<active_runtime>` exactly as-is.
-- If the user chose **Pin exact tier models**, write only the non-empty tier values under `model_overrides.<active_runtime>`.
-- Preserve `model_overrides` for all other runtimes.
+- **Use runtime defaults (Recommended):** clear this runtime's override map only.
+  ```bash
+  gpd --raw config set-tier-models --runtime "$ACTIVE_RUNTIME" --clear
+  ```
+- **Pin exact tier models:** pass only tiers the user explicitly pinned.
+  ```bash
+  gpd --raw config set-tier-models --runtime "$ACTIVE_RUNTIME" \
+    --tier-1 "$TIER_1_MODEL" \
+    --tier-2 "$TIER_2_MODEL" \
+    --tier-3 "$TIER_3_MODEL"
+  ```
+- **Leave current setting unchanged:** do not call the helper and do not write config.
 
-The resulting config shape is:
+The helper preserves other runtime maps, trims surrounding whitespace, treats blank / `runtime default` / `none` as clearing that tier, removes `model_overrides.<active_runtime>` when no tier overrides remain, and preserves runtime-native punctuation/case inside non-empty model strings.
 
-```json
-{
-  ...existing_config,
-  "model_overrides": {
-    ...existing_model_overrides_for_other_runtimes,
-    "<active_runtime>": {
-      "tier-1": "runtime-native model string",
-      "tier-2": "runtime-native model string",
-      "tier-3": "runtime-native model string"
-    }
-  }
-}
-```
-
-If all three tiers are cleared for the active runtime, omit `model_overrides.<active_runtime>` entirely.
+If `gpd --raw config set-tier-models --help` is missing, stop and report that the installed CLI is stale; do not fall back to prompt-authored JSON merging.
 
 Do **not** change:
 

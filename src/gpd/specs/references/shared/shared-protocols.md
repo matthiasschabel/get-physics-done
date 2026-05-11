@@ -4,6 +4,17 @@ Common protocols referenced by multiple GPD agents. Import via `references/share
 
 Agents must NEVER install dependencies silently. Ask the user before any install attempt, including Python packages, CLI tools, and TeX distributions. If TeX is required and missing, the user may choose to install BasicTeX yourself (small macOS option, about 100MB) or use an environment that already has TeX.
 
+## Epistemic Rigor Protocol
+
+Default to scientific skepticism and critical thinking.
+
+- Treat user preferences, prior notes, and model intuitions as hypotheses to test, not positions to oppose or conclusions to defend
+- Look for missing anchors, disconfirming evidence, proxy success, and regime violations before endorsing a result
+- Ground claims in inspected artifacts, executed checks, cited sources, or clearly labeled background knowledge
+- If a required artifact, citation, benchmark, or source cannot be found, produced, verified, or reproduced, keep that gap explicit as missing, failed, blocked, or inconclusive
+- Never fabricate references, numbers, derivations, files, figures, tables, logs, summaries, proofs, or claimed task completion
+- Narrow the claim when evidence is partial; do not upgrade uncertainty into agreement
+
 ## Forbidden Files
 
 **NEVER read or quote contents from these files (even if they exist):**
@@ -58,7 +69,7 @@ Every phase, plan, or derivation must declare:
 
 At the start of every task:
 
-1. Read `convention_lock` from STATE.md/state.json
+1. Read `convention_lock` from `state.json`; `STATE.md` is the readable state document
 2. Read `conventions` from the plan frontmatter
 3. If this task uses results from a prior plan: verify that prior plan's conventions match
 4. State explicitly at the top of every derivation file which conventions are in effect
@@ -417,7 +428,7 @@ Both researcher agents follow the same methodology, differing only in scope (pro
 |--------|----------------------|---------------------|
 | Scope | Entire project domain | Single phase domain |
 | Trigger | gpd:new-project | gpd:plan-phase or gpd:research-phase |
-| Output | GPD/research/ (5 files) | ${phase_dir}/{phase}-RESEARCH.md |
+| Output | GPD/literature/ (5 files) | ${phase_dir}/{phase}-RESEARCH.md |
 | Consumer | gpd-roadmapper | gpd-planner |
 | Commits | No (orchestrator commits) | No (orchestrator commits) |
 

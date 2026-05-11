@@ -65,6 +65,8 @@ Options:
 
 If user chooses sync: update STATE.md position, progress bar, and plan counters to match disk reality using `gpd state` commands.
 
+Confirmation contract: before any command that writes reconciled state, ask for an explicit user decision. If `ask_user` is available, present the three options above with `Sync STATE.md to disk` as the recommended option. If `ask_user` is not available, require a typed reply that exactly matches one of `Sync STATE.md to disk`, `Keep STATE.md`, or `Show details`; do not infer consent from a vague acknowledgement.
+
 **If no discrepancies:** Report "STATE.md is consistent with disk artifacts." and continue to full report.
 </step>
 
@@ -72,14 +74,16 @@ If user chooses sync: update STATE.md position, progress bar, and plan counters 
 **Load progress context (with file contents to avoid redundant reads):**
 
 ```bash
-INIT=$(gpd --raw init progress --include state,roadmap,project,config)
+INIT=$(gpd --raw init progress --include state,roadmap,project,config,references)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   # STOP — display the error to the user and do not proceed.
 fi
 ```
 
-Extract from init JSON: `project_exists`, `roadmap_exists`, `state_exists`, `phases`, `current_phase`, `next_phase`, `milestone_version`, `completed_count`, `phase_count`, `paused_at`, `autonomy`, `research_mode`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
+Extract from init JSON: `project_exists`, `roadmap_exists`, `state_exists`, `phases`, `current_phase`, `next_phase`, `milestone_version`, `completed_count`, `phase_count`, `paused_at`, `autonomy`, `research_mode`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `knowledge_doc_files`, `knowledge_doc_count`, `stable_knowledge_doc_files`, `stable_knowledge_doc_count`, `knowledge_doc_status_counts`, `derived_knowledge_docs`, `derived_knowledge_doc_count`, `knowledge_doc_warnings`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
+
+`phases`, `current_phase`, `next_phase`, `completed_count`, and `phase_count` are derived from the same canonical roadmap inventory used by `gpd --raw roadmap analyze`, including roadmap phases whose directories do not exist yet. Do not rescan only `GPD/phases/` to override them.
 
 **File contents (from --include):** `state_content`, `roadmap_content`, `project_content`, `config_content`. These are null if files don't exist.
 
@@ -106,6 +110,11 @@ All file contents are already loaded via `--include` in init_context step:
 - `project_contract_validation` — contract approval gate for authoritative use
 - `effective_reference_intake` — structured carry-forward ledger for refs, baselines, prior outputs, and context gaps
 - `active_reference_context` / `reference_artifacts_content` — readable anchor context to explain the next-step recommendation
+- `knowledge_doc_files` / `knowledge_doc_count` — inventory-visible knowledge docs loaded from `GPD/knowledge/`
+- `stable_knowledge_doc_files` / `stable_knowledge_doc_count` — reviewed docs that are runtime-active for shared reference context
+- `knowledge_doc_status_counts` — lifecycle mix across `draft`, `in_review`, `stable`, and `superseded`
+- `derived_knowledge_docs` / `derived_knowledge_doc_count` — stable runtime-active docs surfaced for this run
+- `knowledge_doc_warnings` — parse/read problems forwarded from knowledge discovery
 
 No additional file reads needed.
 
@@ -157,15 +166,21 @@ Use this instead of manually reading/parsing ROADMAP.md.
 - Note `paused_at` if work was paused (from init context)
 - Count pending items: use `gpd --raw init todos`
 - Check for active debug sessions: `ls GPD/debug/*.md 2>/dev/null | grep -v resolved | wc -l`
-- Check state compaction health: `gpd --raw state compact 2>&1` — if output contains `"warn": true`, STATE.md is growing large. Note this for the report.
+- Check state compaction health; capture non-fatally because `gpd --raw health` can exit 1 while still printing parseable JSON:
+  ```bash
+  HEALTH_JSON=$(gpd --raw health 2>/dev/null || true)
+  ```
+  If `HEALTH_JSON` parses, inspect the `State Compaction` check. If its status is `warn`, STATE.md is growing large. Report only; do not run raw state compaction from `gpd:progress`.
   </step>
 
 <step name="report">
 **Generate progress bar from gpd CLI, then present rich status report:**
 
 ```bash
-# Get formatted progress bar
 PROGRESS_BAR=$(gpd --raw progress bar)
+
+# Structured progress with live_execution and execution-preference flags.
+PROGRESS_JSON=$(gpd --raw progress)
 ```
 
 Present:
@@ -175,6 +190,17 @@ Present:
 
 **Progress:** {PROGRESS_BAR}
 **Profile:** [deep-theory/numerical/exploratory/review/paper-writing]
+**Execution preferences:** strict_wait={strict_wait} | never_interrupt_workers={never_interrupt_running_workers} | never_auto_close_children={never_auto_close_child_agents}
+
+## Live Execution
+(Only show this block when PROGRESS_JSON.live_execution.phase is set.)
+
+Active phase/plan: Phase {live_execution.phase}, Plan {live_execution.plan} (wave {live_execution.wave})
+Current task: {live_execution.current_task} ({live_execution.current_task_index}/{live_execution.current_task_total})
+Last artifact: {live_execution.last_artifact_path}
+Last result:   {live_execution.last_result_label}
+Updated:       {live_execution.last_updated_age_label}
+Status:        {live_execution.segment_status}{ if live_execution.waiting_reason }, waiting: {live_execution.waiting_reason}{ endif }
 
 ## Recent Work
 - [Phase X, Plan Y]: [what was accomplished - 1 line from summary-extract]
@@ -205,6 +231,13 @@ CONTEXT: [present if has_context | - if not]
 
 ## What's Next
 [Next phase/plan objective from roadmap analyze]
+
+## Knowledge Status
+Inventory-visible knowledge docs: {knowledge_doc_count}
+Runtime-active knowledge docs: {stable_knowledge_doc_count}
+Lifecycle mix: {knowledge_doc_status_counts}
+Runtime-active knowledge surfaced in this run: {derived_knowledge_doc_count}
+Warnings: {knowledge_doc_warnings}
 ```
 
 If STATE.md exceeds 1500 lines, append after the report:
@@ -213,23 +246,25 @@ If STATE.md exceeds 1500 lines, append after the report:
 STATE.md is large (N lines). Consider running `gpd:compact-state` to archive historical entries.
 ```
 
-If the compaction health check reported `"warn": true`, append:
+If the read-only health report's `State Compaction` check has status `warn`, append:
 
 ```
-STATE.md is approaching compaction threshold (N lines). Will auto-compact at next phase transition.
+STATE.md is approaching compaction threshold (N lines). `gpd:progress` did not modify it; use `gpd:compact-state` when you want to archive historical entries.
 ```
 
 **Deep diagnostics (--full mode only):** Run the health dashboard for comprehensive system checks:
 
 ```bash
-HEALTH=$(gpd --raw health 2>/dev/null)
+HEALTH=$(gpd --raw health 2>/dev/null || true)
 ```
 
-If health reports any issues (non-empty `issues` array), append a summary:
+Do not stop just because raw health returned nonzero; if `HEALTH` contains parseable JSON, use that JSON.
+
+If `HEALTH.summary.warn > 0` or `HEALTH.summary.fail > 0`, append a summary:
 
 ```
 ## System Health
-{issue_count} issue(s) detected. Run `gpd health --fix` to auto-repair.
+{warn_count} warning(s), {fail_count} failure(s) detected. Run `gpd:health --fix` to auto-repair what it can.
 ```
 
 </step>
@@ -304,13 +339,13 @@ Read its `<objective>` section.
 ```
 ---
 
-## >> Next Up
+## > Next Up
 
 **{phase}-{plan}: [Plan Name]** — [objective summary from PLAN.md]
 
 `gpd:execute-phase {phase}`
 
-<sub>`/clear` first, then run `gpd:execute-phase {phase}`</sub>
+<sub>Start a fresh context window, then run `gpd:execute-phase {phase}`</sub>
 
 ---
 ```
@@ -326,14 +361,14 @@ Check if `{phase}-CONTEXT.md` exists in phase directory.
 ```
 ---
 
-## >> Next Up
+## > Next Up
 
 **Phase {N}: {Name}** — {Goal from ROADMAP.md}
 <sub>Context gathered, ready to plan</sub>
 
 `gpd:plan-phase {phase-number}`
 
-<sub>`/clear` first, then run `gpd:plan-phase {phase-number}`</sub>
+<sub>Start a fresh context window, then run `gpd:plan-phase {phase-number}`</sub>
 
 ---
 ```
@@ -343,13 +378,13 @@ Check if `{phase}-CONTEXT.md` exists in phase directory.
 ```
 ---
 
-## >> Next Up
+## > Next Up
 
 **Phase {N}: {Name}** — {Goal from ROADMAP.md}
 
 `gpd:discuss-phase {phase}` — gather context and clarify approach
 
-<sub>`/clear` first, then run `gpd:discuss-phase {phase}`</sub>
+<sub>Start a fresh context window, then run `gpd:discuss-phase {phase}`</sub>
 
 ---
 
@@ -369,7 +404,7 @@ VERIFICATION.md exists with gaps (diagnosed issues like failing limiting cases o
 ```
 ---
 
-## !! Validation Gaps Found
+## Validation Gaps Found
 
 **{phase}-VERIFICATION.md** has {N} gaps requiring fixes.
 
@@ -377,7 +412,7 @@ Examples: [e.g., "Dimension mismatch in eq. 14", "Wrong sign in g -> 0 limit"]
 
 `gpd:plan-phase {phase} --gaps`
 
-<sub>`/clear` first, then run `gpd:plan-phase {phase} --gaps`</sub>
+<sub>Start a fresh context window, then run `gpd:plan-phase {phase} --gaps`</sub>
 
 ---
 
@@ -397,13 +432,13 @@ Gap-closure plans were created by `gpd:plan-phase --gaps` but have not been exec
 ```
 ---
 
-## !! Gap-Closure Plans Ready
+## Gap-Closure Plans Ready
 
 **{GAP_PLANS_UNEXECUTED} gap-closure plan(s)** exist but have not been executed.
 
 `gpd:execute-phase {phase} --gaps-only`
 
-<sub>`/clear` first, then run `gpd:execute-phase {phase} --gaps-only`</sub>
+<sub>Start a fresh context window, then run `gpd:execute-phase {phase} --gaps-only`</sub>
 
 ---
 
@@ -445,13 +480,13 @@ Read ROADMAP.md to get the next phase's name and goal.
 
 ## Phase {Z} Complete
 
-## >> Next Up
+## > Next Up
 
 **Phase {Z+1}: {Name}** — {Goal from ROADMAP.md}
 
 `gpd:discuss-phase {Z+1}` — gather context and clarify approach
 
-<sub>`/clear` first, then run `gpd:discuss-phase {Z+1}`</sub>
+<sub>Start a fresh context window, then run `gpd:discuss-phase {Z+1}`</sub>
 
 ---
 
@@ -473,13 +508,13 @@ Read ROADMAP.md to get the next phase's name and goal.
 
 All {N} phases finished!
 
-## >> Next Up
+## > Next Up
 
 **Complete Milestone** — archive results and prepare for next
 
-`gpd:complete-milestone`
+`gpd:complete-milestone {milestone_version}`
 
-<sub>`/clear` first, then run `gpd:complete-milestone`</sub>
+<sub>Start a fresh context window, then run `gpd:complete-milestone {milestone_version}`</sub>
 
 ---
 
@@ -504,13 +539,13 @@ Read MILESTONES.md to find the last completed milestone version.
 
 Ready to plan the next research direction.
 
-## >> Next Up
+## > Next Up
 
 **Start Next Milestone** — questioning -> literature survey -> objectives -> roadmap
 
 `gpd:new-milestone`
 
-<sub>`/clear` first, then run `gpd:new-milestone`</sub>
+<sub>Start a fresh context window, then run `gpd:new-milestone`</sub>
 
 ---
 ```

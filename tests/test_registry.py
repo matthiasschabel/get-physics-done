@@ -2,12 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
+from gpd import cli as cli_module
 from gpd import registry
-from gpd.core.model_visible_text import agent_visibility_note, command_visibility_note, review_contract_visibility_note
+from gpd.core.model_visible_text import (
+    COMMAND_POLICY_PROMPT_WRAPPER_KEY,
+    agent_visibility_note,
+    command_visibility_note,
+    review_contract_visibility_note,
+    skeptical_rigor_guardrails_section,
+)
+from gpd.core.workflow_staging import WorkflowStageManifest
 from gpd.registry import (
     AgentDef,
     CommandDef,
@@ -15,12 +24,21 @@ from gpd.registry import (
     _parse_agent_file,
     _parse_command_file,
     _parse_frontmatter,
+    _parse_interactive_spawn_contracts,
+    _parse_spawn_contracts,
     _parse_tools,
     _RegistryCache,
     load_agents_from_dir,
     render_command_visibility_sections_from_frontmatter,
 )
 from gpd.specs import SPECS_DIR as CANONICAL_SPECS_DIR
+
+NEW_PROJECT_COMMAND_PATH = Path(__file__).resolve().parents[1] / "src" / "gpd" / "commands" / "new-project.md"
+RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT = {
+    "write_scope": {"mode": "scoped_write", "allowed_paths": ["GPD/literature/SUMMARY.md"]},
+    "expected_artifacts": ["GPD/literature/SUMMARY.md"],
+    "shared_state_policy": "return_only",
+}
 
 
 def _write_review_contract_command(tmp_path: Path, file_name: str, review_contract_body: str) -> Path:
@@ -82,6 +100,8 @@ class TestParseFrontmatter:
         assert agent_visibility_note().startswith("Agent YAML rules. Use this YAML.")
         assert command_visibility_note().startswith("Command YAML rules. Use this YAML.")
         assert review_contract_visibility_note().startswith("Review-contract YAML rules. Use this YAML.")
+        assert len(command_visibility_note()) <= 2_500
+        assert len(review_contract_visibility_note()) <= 2_500
 
     def test_malformed_yaml_frontmatter_raises(self) -> None:
         text = "---\nname: test\nbad: [unterminated\n---\nBody."
@@ -205,6 +225,7 @@ class TestParseAgentFile:
         assert "artifact_write_authority: scoped_write" in agent.system_prompt
         assert "shared_state_authority: direct" in agent.system_prompt
         assert "tools:\n- file_read\n- file_write" in agent.system_prompt
+        assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.endswith("System prompt.")
         assert agent.source == "agents"
 
@@ -230,6 +251,7 @@ class TestParseAgentFile:
         assert agent.color == ""
         assert agent.source == "agents"
         assert agent.system_prompt.startswith("## Agent Requirements\n")
+        assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.endswith("Prompt.")
 
     def test_agent_file_parses_explicit_commit_authority(self, tmp_path: Path) -> None:
@@ -309,21 +331,21 @@ class TestParseAgentFile:
 
     def test_agent_file_tools_list_rejects_blank_members(self, tmp_path: Path) -> None:
         f = tmp_path / "bad-tools-list-blank.md"
-        f.write_text("---\nname: bad-agent\ntools:\n  - file_read\n  - \"  \"\n---\nBody.", encoding="utf-8")
+        f.write_text('---\nname: bad-agent\ntools:\n  - file_read\n  - "  "\n---\nBody.', encoding="utf-8")
 
         with pytest.raises(ValueError, match="tools for bad-agent must not contain blank entries"):
             _parse_agent_file(f, source="agents")
 
     def test_agent_file_allowed_tools_list_rejects_blank_members(self, tmp_path: Path) -> None:
         f = tmp_path / "bad-allowed-tools-list-blank.md"
-        f.write_text("---\nname: bad-agent\nallowed-tools:\n  - file_read\n  - \"\"\n---\nBody.", encoding="utf-8")
+        f.write_text('---\nname: bad-agent\nallowed-tools:\n  - file_read\n  - ""\n---\nBody.', encoding="utf-8")
 
         with pytest.raises(ValueError, match="allowed-tools for bad-agent must not contain blank entries"):
             _parse_agent_file(f, source="agents")
 
     def test_agent_file_blank_commit_authority_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "blank-authority.md"
-        f.write_text("---\nname: bad\ncommit_authority: \"  \"\n---\nPrompt.", encoding="utf-8")
+        f.write_text('---\nname: bad\ncommit_authority: "  "\n---\nPrompt.', encoding="utf-8")
 
         with pytest.raises(ValueError, match="commit_authority for bad must be a non-empty string"):
             _parse_agent_file(f, source="agents")
@@ -351,7 +373,7 @@ class TestParseAgentFile:
         expected_error: str,
     ) -> None:
         f = tmp_path / "bad-metadata-blank.md"
-        f.write_text(f"---\nname: bad\n{field_name}: \"  \"\n---\nPrompt.", encoding="utf-8")
+        f.write_text(f'---\nname: bad\n{field_name}: "  "\n---\nPrompt.', encoding="utf-8")
 
         with pytest.raises(ValueError, match=expected_error):
             _parse_agent_file(f, source="agents")
@@ -363,7 +385,8 @@ class TestParseAgentFile:
         assert agent.system_prompt.startswith("## Agent Requirements\n")
         assert "Agent YAML rules. Use this YAML." in agent.system_prompt
         assert "commit_authority:" in agent.system_prompt
-        assert agent.system_prompt.endswith("```")
+        assert skeptical_rigor_guardrails_section() in agent.system_prompt
+        assert agent.system_prompt.rstrip().endswith("disconfirming check still needed.")
 
     def test_agent_file_invalid_frontmatter_raises_with_path(self, tmp_path: Path) -> None:
         f = tmp_path / "broken.md"
@@ -399,6 +422,211 @@ class TestParseAgentFile:
             _parse_agent_file(f, source="agents")
 
 
+class TestParseSpawnContracts:
+    """Tests for spawn-contract sidecar parsing and validation."""
+
+    @staticmethod
+    def _contract_block(
+        *,
+        output: str = "GPD/out.md",
+        mode: str = "scoped_write",
+        shared_state_policy: str = "return_only",
+        allowed_paths: tuple[str, ...] | None = None,
+        expected_artifacts: tuple[str, ...] | None = None,
+    ) -> str:
+        allowed = allowed_paths if allowed_paths is not None else (output,)
+        expected = expected_artifacts if expected_artifacts is not None else (output,)
+        allowed_block = (
+            "  allowed_paths: []\n"
+            if not allowed
+            else "  allowed_paths:\n" + "".join(f"    - {path}\n" for path in allowed)
+        )
+        expected_block = (
+            "expected_artifacts: []\n"
+            if not expected
+            else "expected_artifacts:\n" + "".join(f"  - {path}\n" for path in expected)
+        )
+        return (
+            "<spawn_contract>\n"
+            "write_scope:\n"
+            f"  mode: {mode}\n"
+            f"{allowed_block}"
+            f"{expected_block}"
+            f"shared_state_policy: {shared_state_policy}\n"
+            "</spawn_contract>"
+        )
+
+    def test_parse_spawn_contracts_dedupes_identical_blocks_in_first_seen_order(self) -> None:
+        first = self._contract_block(output="GPD/first.md")
+        second = self._contract_block(output="GPD/second.md", shared_state_policy="direct")
+
+        contracts = _parse_spawn_contracts(
+            "\n\n".join([first, first, second, first]),
+            owner_name="gpd:test",
+        )
+
+        assert contracts == (
+            {
+                "write_scope": {"mode": "scoped_write", "allowed_paths": ["GPD/first.md"]},
+                "expected_artifacts": ["GPD/first.md"],
+                "shared_state_policy": "return_only",
+            },
+            {
+                "write_scope": {"mode": "scoped_write", "allowed_paths": ["GPD/second.md"]},
+                "expected_artifacts": ["GPD/second.md"],
+                "shared_state_policy": "direct",
+            },
+        )
+
+    def test_parse_spawn_contracts_rejects_invalid_write_scope_mode(self) -> None:
+        with pytest.raises(
+            ValueError,
+            match="invalid write_scope\\.mode 'global'; expected one of: scoped_write, direct",
+        ):
+            _parse_spawn_contracts(
+                self._contract_block(mode="global"),
+                owner_name="gpd:test",
+            )
+
+    def test_parse_spawn_contracts_rejects_unknown_write_scope_fields(self) -> None:
+        with pytest.raises(ValueError, match="unexpected write_scope fields: owner"):
+            _parse_spawn_contracts(
+                "<spawn_contract>\n"
+                "write_scope:\n"
+                "  mode: scoped_write\n"
+                "  allowed_paths:\n"
+                "    - GPD/out.md\n"
+                "  owner: child\n"
+                "expected_artifacts:\n"
+                "  - GPD/out.md\n"
+                "shared_state_policy: return_only\n"
+                "</spawn_contract>",
+                owner_name="gpd:test",
+            )
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected_error"),
+        [
+            (
+                {"allowed_paths": ()},
+                r"write_scope\.allowed_paths must not be empty",
+            ),
+            (
+                {"allowed_paths": ("GPD/out.md", "GPD/out.md")},
+                r"write_scope\.allowed_paths\[1\] duplicates write_scope\.allowed_paths\[0\]",
+            ),
+            (
+                {"expected_artifacts": ()},
+                r"expected_artifacts must not be empty",
+            ),
+            (
+                {"expected_artifacts": ("GPD/out.md", "GPD/out.md")},
+                r"expected_artifacts\[1\] duplicates expected_artifacts\[0\]",
+            ),
+        ],
+    )
+    def test_parse_spawn_contracts_rejects_empty_or_duplicate_lists(
+        self,
+        kwargs: dict[str, tuple[str, ...]],
+        expected_error: str,
+    ) -> None:
+        with pytest.raises(ValueError, match=expected_error):
+            _parse_spawn_contracts(
+                self._contract_block(**kwargs),
+                owner_name="gpd:test",
+            )
+
+    def test_parse_spawn_contracts_rejects_invalid_shared_state_policy(self) -> None:
+        with pytest.raises(
+            ValueError,
+            match="invalid shared_state_policy 'mutable'; expected one of: return_only, direct",
+        ):
+            _parse_spawn_contracts(
+                self._contract_block(shared_state_policy="mutable"),
+                owner_name="gpd:test",
+            )
+
+    def test_parse_interactive_spawn_contracts_validates_no_write_checkpoint_contract(self) -> None:
+        contracts = _parse_interactive_spawn_contracts(
+            "<spawn_contract_interactive>\n"
+            "activation: mode == interactive\n"
+            "write_scope:\n"
+            "  mode: no_write\n"
+            "  allowed_paths: []\n"
+            "expected_artifacts: []\n"
+            "expected_return:\n"
+            "  status: checkpoint\n"
+            "shared_state_policy: none\n"
+            "</spawn_contract_interactive>",
+            owner_name="gpd:test",
+        )
+
+        assert contracts == (
+            {
+                "activation": "mode == interactive",
+                "write_scope": {"mode": "no_write", "allowed_paths": []},
+                "expected_artifacts": [],
+                "expected_return": {"status": "checkpoint"},
+                "shared_state_policy": "none",
+            },
+        )
+
+    def test_parse_interactive_spawn_contracts_rejects_write_contract_shape(self) -> None:
+        with pytest.raises(ValueError, match="invalid write_scope\\.mode 'scoped_write'; expected one of: no_write"):
+            _parse_interactive_spawn_contracts(
+                "<spawn_contract_interactive>\n"
+                "activation: mode == interactive\n"
+                "write_scope:\n"
+                "  mode: scoped_write\n"
+                "  allowed_paths:\n"
+                "    - GPD/CONVENTIONS.md\n"
+                "expected_artifacts:\n"
+                "  - GPD/CONVENTIONS.md\n"
+                "expected_return:\n"
+                "  status: completed\n"
+                "shared_state_policy: direct\n"
+                "</spawn_contract_interactive>",
+                owner_name="gpd:test",
+            )
+
+    def test_parse_interactive_spawn_contracts_rejects_unknown_write_scope_fields(self) -> None:
+        with pytest.raises(ValueError, match="unexpected write_scope fields: owner"):
+            _parse_interactive_spawn_contracts(
+                "<spawn_contract_interactive>\n"
+                "activation: mode == interactive\n"
+                "write_scope:\n"
+                "  mode: no_write\n"
+                "  allowed_paths: []\n"
+                "  owner: child\n"
+                "expected_artifacts: []\n"
+                "expected_return:\n"
+                "  status: checkpoint\n"
+                "shared_state_policy: none\n"
+                "</spawn_contract_interactive>",
+                owner_name="gpd:test",
+            )
+
+    @pytest.mark.parametrize(
+        "field_block",
+        [
+            "write_scope:\n  mode: no_write\n  allowed_paths:\nexpected_artifacts: []\n",
+            "write_scope:\n  mode: no_write\n  allowed_paths: []\nexpected_artifacts:\n",
+        ],
+    )
+    def test_parse_interactive_spawn_contracts_rejects_null_list_fields(self, field_block: str) -> None:
+        with pytest.raises(ValueError, match="must be a list"):
+            _parse_interactive_spawn_contracts(
+                "<spawn_contract_interactive>\n"
+                "activation: mode == interactive\n"
+                f"{field_block}"
+                "expected_return:\n"
+                "  status: checkpoint\n"
+                "shared_state_policy: none\n"
+                "</spawn_contract_interactive>",
+                owner_name="gpd:test",
+            )
+
+
 class TestParseCommandFile:
     """Tests for _parse_command_file with various file contents."""
 
@@ -418,16 +646,24 @@ class TestParseCommandFile:
         assert cmd.project_reentry_capable is False
         assert cmd.requires == {"files": ["GPD/ROADMAP.md"]}
         assert cmd.allowed_tools == ["file_read", "shell"]
+        assert cmd.command_policy == registry.CommandPolicy(
+            schema_version=1,
+            supporting_context_policy=registry.CommandSupportingContextPolicy(
+                project_context_mode="project-required",
+                project_reentry_mode="disallowed",
+                required_file_patterns=["GPD/ROADMAP.md"],
+            ),
+        )
         assert cmd.content.startswith("## Command Requirements\n\n")
         assert "Closed schema; no extra keys." in cmd.content
-        assert "Strict booleans only." in cmd.content
+        assert "Strict booleans only" in cmd.content
         assert command_visibility_note() in cmd.content
         assert "GPD/ROADMAP.md" in cmd.content
+        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in cmd.content
+        assert skeptical_rigor_guardrails_section() in cmd.content
         assert cmd.content.endswith("Command body.")
 
-    def test_command_file_with_requires_and_review_contract_renders_requirements_first(
-        self, tmp_path: Path
-    ) -> None:
+    def test_command_file_with_requires_and_review_contract_renders_requirements_first(self, tmp_path: Path) -> None:
         f = tmp_path / "review.md"
         f.write_text(
             "---\n"
@@ -455,7 +691,7 @@ class TestParseCommandFile:
 
         assert cmd.content.startswith("## Command Requirements\n\n")
         assert "Closed schema; no extra keys." in cmd.content
-        assert "Strict booleans only." in cmd.content
+        assert "Strict booleans only" in cmd.content
         assert cmd.content.index("## Review Contract") > cmd.content.index("## Command Requirements")
         assert cmd.content.endswith("Body.")
 
@@ -470,6 +706,13 @@ class TestParseCommandFile:
         assert cmd.project_reentry_capable is False
         assert cmd.requires == {}
         assert cmd.allowed_tools == []
+        assert cmd.command_policy == registry.CommandPolicy(
+            schema_version=1,
+            supporting_context_policy=registry.CommandSupportingContextPolicy(
+                project_context_mode="project-required",
+                project_reentry_mode="disallowed",
+            ),
+        )
 
     def test_command_requires_non_dict_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "bad-requires.md"
@@ -515,7 +758,7 @@ class TestParseCommandFile:
 
     def test_command_allowed_tools_list_rejects_blank_members(self, tmp_path: Path) -> None:
         f = tmp_path / "bad-tools-members-blank.md"
-        f.write_text("---\nname: bad\nallowed-tools:\n  - file_read\n  - \"\"\n---\nBody.", encoding="utf-8")
+        f.write_text('---\nname: bad\nallowed-tools:\n  - file_read\n  - ""\n---\nBody.', encoding="utf-8")
 
         with pytest.raises(ValueError, match="allowed-tools for bad must not contain blank entries"):
             _parse_command_file(f, source="commands")
@@ -541,6 +784,7 @@ class TestParseCommandFile:
 
         assert "agent: gpd-planner" in rendered
         assert "context_mode: project-required" in rendered
+        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in rendered
 
     def test_render_command_visibility_sections_comment_only_frontmatter_keeps_default_constraints(self) -> None:
         rendered = render_command_visibility_sections_from_frontmatter(
@@ -551,6 +795,7 @@ class TestParseCommandFile:
         assert "## Command Requirements" in rendered
         assert "context_mode: project-required" in rendered
         assert "project_reentry_capable: false" in rendered
+        assert "project_reentry_mode: disallowed" in rendered
 
     def test_command_agent_frontmatter_key_is_explicitly_allowed(self, tmp_path: Path) -> None:
         f = tmp_path / "plan-phase.md"
@@ -562,6 +807,147 @@ class TestParseCommandFile:
         assert cmd.agent == "gpd-planner"
         assert "agent: gpd-planner" in cmd.content
         assert cmd.content.endswith("Body.")
+
+    def test_command_policy_frontmatter_is_parsed_and_merged_with_legacy_metadata(self, tmp_path: Path) -> None:
+        f = tmp_path / "peer-review.md"
+        f.write_text(
+            "---\n"
+            "name: gpd:peer-review\n"
+            "context_mode: project-aware\n"
+            "requires:\n"
+            "  files:\n"
+            "    - PROJECT.md\n"
+            "command-policy:\n"
+            "  schema_version: 1\n"
+            "  subject_policy:\n"
+            "    subject_kind: publication\n"
+            "    resolution_mode: explicit_or_project_manuscript\n"
+            "    explicit_input_kinds:\n"
+            "      - manuscript_path\n"
+            "    allow_external_subjects: true\n"
+            "  output_policy:\n"
+            "    output_mode: managed\n"
+            "    managed_root_kind: gpd_managed_durable\n"
+            "    default_output_subtree: GPD/review\n"
+            "---\n"
+            "Body.",
+            encoding="utf-8",
+        )
+
+        cmd = _parse_command_file(f, source="commands")
+
+        assert cmd.command_policy == registry.CommandPolicy(
+            schema_version=1,
+            subject_policy=registry.CommandSubjectPolicy(
+                subject_kind="publication",
+                resolution_mode="explicit_or_project_manuscript",
+                explicit_input_kinds=["manuscript_path"],
+                allow_external_subjects=True,
+            ),
+            supporting_context_policy=registry.CommandSupportingContextPolicy(
+                project_context_mode="project-aware",
+                project_reentry_mode="disallowed",
+                required_file_patterns=["PROJECT.md"],
+            ),
+            output_policy=registry.CommandOutputPolicy(
+                output_mode="managed",
+                managed_root_kind="gpd_managed_durable",
+                default_output_subtree="GPD/review",
+            ),
+        )
+        assert "context_mode: project-aware" in cmd.content
+        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in cmd.content
+        assert "subject_kind: publication" in cmd.content
+        assert "default_output_subtree: GPD/review" in cmd.content
+
+    def test_command_policy_rejects_prompt_wrapper_alias_in_frontmatter(self, tmp_path: Path) -> None:
+        f = tmp_path / "write-paper.md"
+        f.write_text(
+            "---\nname: gpd:write-paper\ncommand_policy:\n  schema_version: 1\n---\nBody.",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Invalid command-policy in .*write-paper\.md.*canonical frontmatter key 'command-policy'",
+        ):
+            _parse_command_file(f, source="commands")
+
+    def test_command_policy_rejects_conflicts_with_companion_context_metadata(self, tmp_path: Path) -> None:
+        f = tmp_path / "peer-review.md"
+        f.write_text(
+            "---\n"
+            "name: gpd:peer-review\n"
+            "context_mode: project-required\n"
+            "command-policy:\n"
+            "  schema_version: 1\n"
+            "  supporting_context_policy:\n"
+            "    project_context_mode: project-aware\n"
+            "---\n"
+            "Body.",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Invalid command-policy in .*peer-review\.md.*must stay aligned with companion command metadata",
+        ):
+            _parse_command_file(f, source="commands")
+
+    def test_publication_command_policy_can_override_companion_supporting_context_metadata(
+        self, tmp_path: Path
+    ) -> None:
+        f = tmp_path / "arxiv-submission.md"
+        f.write_text(
+            "---\n"
+            "name: gpd:arxiv-submission\n"
+            "context_mode: project-required\n"
+            "requires:\n"
+            "  files:\n"
+            "    - paper/*.tex\n"
+            "review-contract:\n"
+            "  review_mode: publication\n"
+            "  schema_version: 1\n"
+            "  preflight_checks:\n"
+            "    - command_context\n"
+            "    - manuscript\n"
+            "command-policy:\n"
+            "  schema_version: 1\n"
+            "  supporting_context_policy:\n"
+            "    project_context_mode: project-aware\n"
+            "    required_file_patterns: []\n"
+            "  subject_policy:\n"
+            "    explicit_input_kinds:\n"
+            "      - manuscript_root\n"
+            "      - manuscript_path\n"
+            "    allowed_suffixes:\n"
+            "      - .tex\n"
+            "---\n"
+            "Body.",
+            encoding="utf-8",
+        )
+
+        cmd = _parse_command_file(f, source="commands")
+
+        assert cmd.context_mode == "project-required"
+        assert cmd.command_policy == registry.CommandPolicy(
+            schema_version=1,
+            subject_policy=registry.CommandSubjectPolicy(
+                subject_kind="publication",
+                resolution_mode="explicit_or_project_manuscript",
+                explicit_input_kinds=["manuscript_root", "manuscript_path"],
+                supported_roots=["paper"],
+                allowed_suffixes=[".tex"],
+            ),
+            supporting_context_policy=registry.CommandSupportingContextPolicy(
+                project_context_mode="project-aware",
+                project_reentry_mode="disallowed",
+                required_file_patterns=[],
+            ),
+        )
+        assert "context_mode: project-required" in cmd.content
+        assert "project_context_mode: project-aware" in cmd.content
+        assert "allowed_suffixes:" in cmd.content
 
     def test_command_agent_validation_uses_canonical_inventory_not_patched_agents_dir(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -589,12 +975,7 @@ class TestParseCommandFile:
     def test_command_parses_project_reentry_capable_for_project_required_commands(self, tmp_path: Path) -> None:
         f = tmp_path / "resume-work.md"
         f.write_text(
-            "---\n"
-            "name: gpd:resume-work\n"
-            "context_mode: project-required\n"
-            "project_reentry_capable: true\n"
-            "---\n"
-            "Body.",
+            "---\nname: gpd:resume-work\ncontext_mode: project-required\nproject_reentry_capable: true\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -603,24 +984,27 @@ class TestParseCommandFile:
         assert cmd.context_mode == "project-required"
         assert cmd.project_reentry_capable is True
 
+    def test_new_project_command_source_uses_narrow_contract_schema_without_include_markers(self) -> None:
+        command_text = NEW_PROJECT_COMMAND_PATH.read_text(encoding="utf-8")
 
-    def test_new_project_registry_surface_uses_narrow_contract_schema_without_include_markers(self) -> None:
-        rendered = registry.get_command("gpd:new-project").content
+        assert "project-contract-schema.md" in command_text
+        assert "project-contract-grounding-linkage.md" in command_text
+        assert "staged_loading" not in command_text
+        assert "new-project-stage-manifest.json" not in command_text
+        assert "<!-- [included:" not in command_text
+        assert "<!-- [end included] -->" not in command_text
 
-        assert "`schema_version` must be the integer `1`" in rendered
-        assert "### `position`" not in rendered
-        assert "### `active_calculations`" not in rendered
-        assert "<!-- [included:" not in rendered
-        assert "<!-- [end included] -->" not in rendered
+    def test_new_project_command_source_stays_prompt_budget_thin(self) -> None:
+        command_text = NEW_PROJECT_COMMAND_PATH.read_text(encoding="utf-8")
+
+        assert "staged_loading" not in command_text
+        assert "new-project-stage-manifest.json" not in command_text
+        assert "conditional_authorities" not in command_text
 
     def test_command_project_reentry_capable_rejects_non_boolean_values(self, tmp_path: Path) -> None:
         f = tmp_path / "resume-work.md"
         f.write_text(
-            "---\n"
-            "name: gpd:resume-work\n"
-            "project_reentry_capable: maybe\n"
-            "---\n"
-            "Body.",
+            "---\nname: gpd:resume-work\nproject_reentry_capable: maybe\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -635,11 +1019,7 @@ class TestParseCommandFile:
     ) -> None:
         f = tmp_path / "resume-work.md"
         f.write_text(
-            "---\n"
-            "name: gpd:resume-work\n"
-            f"project_reentry_capable: {raw_value}\n"
-            "---\n"
-            "Body.",
+            f"---\nname: gpd:resume-work\nproject_reentry_capable: {raw_value}\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -676,11 +1056,7 @@ class TestParseCommandFile:
     ) -> None:
         f = tmp_path / "resume-work.md"
         f.write_text(
-            "---\n"
-            "name: gpd:resume-work\n"
-            f"{frontmatter_line}\n"
-            "---\n"
-            "Body.",
+            f"---\nname: gpd:resume-work\n{frontmatter_line}\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -690,12 +1066,7 @@ class TestParseCommandFile:
     def test_command_project_reentry_capable_requires_project_required_context_mode(self, tmp_path: Path) -> None:
         f = tmp_path / "start.md"
         f.write_text(
-            "---\n"
-            "name: gpd:start\n"
-            "context_mode: projectless\n"
-            "project_reentry_capable: true\n"
-            "---\n"
-            "Body.",
+            "---\nname: gpd:start\ncontext_mode: projectless\nproject_reentry_capable: true\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -714,7 +1085,7 @@ class TestParseCommandFile:
 
     def test_command_blank_context_mode_raises(self, tmp_path: Path) -> None:
         f = tmp_path / "help.md"
-        f.write_text("---\nname: gpd:help\ncontext_mode: \"  \"\n---\nBody.", encoding="utf-8")
+        f.write_text('---\nname: gpd:help\ncontext_mode: "  "\n---\nBody.', encoding="utf-8")
 
         with pytest.raises(ValueError, match="context_mode for gpd:help must be a non-empty string"):
             _parse_command_file(f, source="commands")
@@ -800,7 +1171,7 @@ class TestParseCommandFile:
     def test_command_without_review_contract_has_no_hidden_default_contract(self, tmp_path: Path) -> None:
         f = tmp_path / "peer-review.md"
         f.write_text(
-            "---\nname: gpd:peer-review\ndescription: Peer review\nrequires:\n  files: [\"paper/*.tex\"]\n---\nBody.",
+            '---\nname: gpd:peer-review\ndescription: Peer review\nrequires:\n  files: ["paper/*.tex"]\n---\nBody.',
             encoding="utf-8",
         )
         cmd = _parse_command_file(f, source="commands")
@@ -825,12 +1196,12 @@ class TestParseCommandFile:
         f = _write_review_contract_command(
             tmp_path,
             f"{field_name}-non-string-member.md",
-            f"  {field_name}:\n"
-            "    - valid\n"
-            "    - true\n",
+            f"  {field_name}:\n    - valid\n    - true\n",
         )
 
-        with pytest.raises(ValueError, match=rf"Invalid review-contract in .*{field_name}-non-string-member\.md.*{field_name}"):
+        with pytest.raises(
+            ValueError, match=rf"Invalid review-contract in .*{field_name}-non-string-member\.md.*{field_name}"
+        ):
             _parse_command_file(f, source="commands")
 
     @pytest.mark.parametrize(
@@ -852,7 +1223,9 @@ class TestParseCommandFile:
             f"  {field_name}: 7\n",
         )
 
-        with pytest.raises(ValueError, match=rf"Invalid review-contract in .*{field_name}-invalid-scalar\.md.*{field_name}"):
+        with pytest.raises(
+            ValueError, match=rf"Invalid review-contract in .*{field_name}-invalid-scalar\.md.*{field_name}"
+        ):
             _parse_command_file(f, source="commands")
 
     def test_command_review_contract_list_fields_reject_singleton_string_scalars(self, tmp_path: Path) -> None:
@@ -888,9 +1261,7 @@ class TestParseCommandFile:
         f = _write_review_contract_command(
             tmp_path,
             f"{field_name}-blank-member.md",
-            f"  {field_name}:\n"
-            "    - valid\n"
-            '    - "   "\n',
+            f'  {field_name}:\n    - valid\n    - "   "\n',
         )
 
         with pytest.raises(
@@ -899,7 +1270,9 @@ class TestParseCommandFile:
         ):
             _parse_command_file(f, source="commands")
 
-    def test_command_review_contract_conditional_list_fields_reject_singleton_string_scalars(self, tmp_path: Path) -> None:
+    def test_command_review_contract_conditional_list_fields_reject_singleton_string_scalars(
+        self, tmp_path: Path
+    ) -> None:
         f = _write_review_contract_command(
             tmp_path,
             "singleton-list-scalars.md",
@@ -944,9 +1317,77 @@ class TestParseCommandFile:
         assert requirement.blocking_conditions == []
         assert requirement.stage_artifacts == ["GPD/review/PROOF-REDTEAM{round_suffix}.md"]
 
-    def test_command_review_contract_rejects_duplicate_conditional_requirement_when(
-        self, tmp_path: Path
-    ) -> None:
+    def test_command_review_contract_parses_scope_variants(self, tmp_path: Path) -> None:
+        f = _write_review_contract_command(
+            tmp_path,
+            "scope-variants.md",
+            "  scope_variants:\n"
+            "    - scope: explicit_artifact\n"
+            "      activation: explicit manuscript path was supplied\n"
+            "      relaxed_preflight_checks:\n"
+            "        - manuscript\n"
+            "      optional_preflight_checks:\n"
+            "        - bibliography_audit\n"
+            "      required_outputs_override:\n"
+            "        - GPD/review/ARTIFACT-REPORT.md\n",
+        )
+
+        cmd = _parse_command_file(f, source="commands")
+
+        assert cmd.review_contract is not None
+        assert cmd.review_contract.scope_variants == [
+            registry.ReviewContractScopeVariant(
+                scope="explicit_artifact",
+                activation="explicit manuscript path was supplied",
+                relaxed_preflight_checks=["manuscript"],
+                optional_preflight_checks=["bibliography_audit"],
+                required_outputs_override=["GPD/review/ARTIFACT-REPORT.md"],
+            )
+        ]
+
+    def test_peer_review_registry_exposes_compat_publication_subject_policy(self) -> None:
+        command = registry.get_command("peer-review")
+
+        assert command.command_policy is not None
+        assert command.command_policy.subject_policy == registry.CommandSubjectPolicy(
+            subject_kind="publication",
+            resolution_mode="explicit_or_project_manuscript",
+            explicit_input_kinds=["manuscript_root", "manuscript_path", "publication_artifact_path"],
+            allow_external_subjects=True,
+            allow_interactive_without_subject=True,
+            supported_roots=["paper", "manuscript", "draft"],
+            allowed_suffixes=[".tex", ".md", ".txt", ".pdf", ".docx", ".csv", ".tsv", ".xlsx", ".xlsm"],
+            bootstrap_allowed=False,
+        )
+
+    def test_peer_review_registry_exposes_compat_explicit_artifact_scope_variant(self) -> None:
+        command = registry.get_command("peer-review")
+
+        assert command.review_contract is not None
+        assert (
+            registry.ReviewContractScopeVariant(
+                scope="explicit_artifact",
+                activation="explicit external artifact subject was supplied",
+                relaxed_preflight_checks=[
+                    "project_state",
+                    "roadmap",
+                    "conventions",
+                    "research_artifacts",
+                    "verification_reports",
+                    "manuscript_proof_review",
+                ],
+                optional_preflight_checks=[
+                    "artifact_manifest",
+                    "bibliography_audit",
+                    "bibliography_audit_clean",
+                    "reproducibility_manifest",
+                    "reproducibility_ready",
+                ],
+            )
+            in command.review_contract.scope_variants
+        )
+
+    def test_command_review_contract_rejects_duplicate_conditional_requirement_when(self, tmp_path: Path) -> None:
         f = _write_review_contract_command(
             tmp_path,
             "duplicate-conditional-requirements.md",
@@ -986,8 +1427,7 @@ class TestParseCommandFile:
         f = _write_review_contract_command(
             tmp_path,
             "conditional-requirements-non-mapping-item.md",
-            "  conditional_requirements:\n"
-            "    - oops\n",
+            "  conditional_requirements:\n    - oops\n",
         )
 
         with pytest.raises(
@@ -996,13 +1436,13 @@ class TestParseCommandFile:
         ):
             _parse_command_file(f, source="commands")
 
-    def test_command_review_contract_conditional_requirements_reject_unknown_nested_fields(self, tmp_path: Path) -> None:
+    def test_command_review_contract_conditional_requirements_reject_unknown_nested_fields(
+        self, tmp_path: Path
+    ) -> None:
         f = _write_review_contract_command(
             tmp_path,
             "conditional-requirements-unknown-field.md",
-            "  conditional_requirements:\n"
-            "    - when: theorem-bearing claims are present\n"
-            "      legacy_note: stale\n",
+            "  conditional_requirements:\n    - when: theorem-bearing claims are present\n      legacy_note: stale\n",
         )
 
         with pytest.raises(
@@ -1061,8 +1501,7 @@ class TestParseCommandFile:
         f = _write_review_contract_command(
             tmp_path,
             "conditional-requirements-empty.md",
-            "  conditional_requirements:\n"
-            "    - when: theorem-bearing claims are present\n",
+            "  conditional_requirements:\n    - when: theorem-bearing claims are present\n",
         )
 
         with pytest.raises(
@@ -1099,12 +1538,7 @@ class TestParseCommandFile:
     def test_command_review_contract_review_mode_requires_string(self, tmp_path: Path, raw_value: str) -> None:
         f = tmp_path / f"review-mode-{raw_value}.md"
         f.write_text(
-            "---\n"
-            "name: gpd:review-mode-invalid\n"
-            "review-contract:\n"
-            f"  review_mode: {raw_value}\n"
-            "---\n"
-            "Body.",
+            f"---\nname: gpd:review-mode-invalid\nreview-contract:\n  review_mode: {raw_value}\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -1114,12 +1548,7 @@ class TestParseCommandFile:
     def test_command_review_contract_review_mode_rejects_unsupported_value(self, tmp_path: Path) -> None:
         f = tmp_path / "review-mode-unsupported.md"
         f.write_text(
-            "---\n"
-            "name: gpd:review-mode-unsupported\n"
-            "review-contract:\n"
-            "  review_mode: draft\n"
-            "---\n"
-            "Body.",
+            "---\nname: gpd:review-mode-unsupported\nreview-contract:\n  review_mode: draft\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -1133,9 +1562,7 @@ class TestParseCommandFile:
         f = _write_review_contract_command(
             tmp_path,
             "preflight-checks-unsupported.md",
-            "  preflight_checks:\n"
-            "    - project_state\n"
-            "    - review_queue\n",
+            "  preflight_checks:\n    - project_state\n    - review_queue\n",
         )
 
         with pytest.raises(
@@ -1178,12 +1605,7 @@ class TestParseCommandFile:
     def test_command_review_contract_requires_explicit_schema_version(self, tmp_path: Path) -> None:
         f = tmp_path / "missing-schema-version.md"
         f.write_text(
-            "---\n"
-            "name: gpd:missing-schema-version\n"
-            "review-contract:\n"
-            "  review_mode: publication\n"
-            "---\n"
-            "Body.",
+            "---\nname: gpd:missing-schema-version\nreview-contract:\n  review_mode: publication\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -1196,11 +1618,7 @@ class TestParseCommandFile:
     def test_command_review_contract_rejects_explicit_null_block(self, tmp_path: Path) -> None:
         f = tmp_path / "null-review-contract.md"
         f.write_text(
-            "---\n"
-            "name: gpd:null-review-contract\n"
-            "review-contract:\n"
-            "---\n"
-            "Body.",
+            "---\nname: gpd:null-review-contract\nreview-contract:\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -1232,12 +1650,7 @@ class TestParseCommandFile:
     def test_command_review_contract_unknown_keys_raise(self, tmp_path: Path) -> None:
         f = tmp_path / "write-paper.md"
         f.write_text(
-            "---\n"
-            "name: gpd:write-paper\n"
-            "review-contract:\n"
-            "  approval_gate: strict\n"
-            "---\n"
-            "Body.",
+            "---\nname: gpd:write-paper\nreview-contract:\n  approval_gate: strict\n---\nBody.",
             encoding="utf-8",
         )
 
@@ -1335,6 +1748,21 @@ class TestDiscovery:
         monkeypatch.setattr(registry, "COMMANDS_DIR", tmp_path / "nonexistent-commands")
         assert registry._discover_commands() == {}
 
+    def test_local_cli_bridge_workflow_exemptions_are_explicit_and_covered(self) -> None:
+        command_stems = {path.stem for path in registry.COMMANDS_DIR.glob("*.md")}
+        workflow_stems = {path.stem for path in (CANONICAL_SPECS_DIR / "workflows").glob("*.md")}
+
+        assert command_stems - workflow_stems == set(registry.LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS)
+        assert registry.LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS == frozenset({"health", "suggest-next"})
+
+        health_text = (registry.COMMANDS_DIR / "health.md").read_text(encoding="utf-8")
+        suggest_next_text = (registry.COMMANDS_DIR / "suggest-next.md").read_text(encoding="utf-8")
+        assert "gpd --raw health" in health_text
+        assert "@{GPD_INSTALL_DIR}/workflows/health.md" not in health_text
+        assert "gpd --raw suggest" in suggest_next_text
+        assert "Local CLI fallback: `gpd --raw suggest`" in suggest_next_text
+        assert "@{GPD_INSTALL_DIR}/workflows/suggest-next.md" not in suggest_next_text
+
     def test_commands_keyed_by_stem_not_frontmatter_name(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
@@ -1384,12 +1812,150 @@ class TestDiscovery:
         with pytest.raises(ValueError, match="does not match file stem"):
             registry._discover_agents()
 
+    def test_debug_command_and_debugger_agent_remain_registry_discoverable(self) -> None:
+        registry.invalidate_cache()
+
+        debug_command = registry.get_command("gpd:debug")
+        debug_skill = registry.get_skill("gpd-debug")
+        debugger_agent = registry.get_agent("gpd-debugger")
+        debugger_skill = registry.get_skill("gpd-debugger")
+
+        assert debug_command.name == "gpd:debug"
+        assert debug_command.agent is None
+        assert debug_command.context_mode == "project-required"
+        assert debug_command.project_reentry_capable is False
+        assert debug_command.allowed_tools == ["file_read", "shell", "task", "ask_user"]
+        assert "gpd-debugger" in debug_command.content
+
+        assert debug_skill.source_kind == "command"
+        assert debugger_skill.source_kind == "agent"
+        assert debug_skill.name == "gpd-debug"
+        assert debugger_skill.name == "gpd-debugger"
+        assert debugger_agent.surface == "public"
+        assert debugger_agent.role_family == "worker"
+        assert (
+            "public writable production agent specialized for discrepancy investigation" in debugger_agent.system_prompt
+        )
+        assert {"gpd-debug", "gpd-debugger"}.issubset(registry.list_skills())
+
+    def test_consistency_checker_remains_registry_discoverable(self) -> None:
+        registry.invalidate_cache()
+
+        skill = registry.get_skill("gpd-consistency-checker")
+        agent = registry.get_agent("gpd-consistency-checker")
+
+        assert skill.name == "gpd-consistency-checker"
+        assert skill.source_kind == "agent"
+        assert skill.category == "verification"
+        assert skill.path.endswith("gpd-consistency-checker.md")
+        assert agent.surface == "internal"
+        assert agent.role_family == "verification"
+        assert agent.commit_authority == "orchestrator"
+        assert agent.artifact_write_authority == "scoped_write"
+        assert agent.shared_state_authority == "return_only"
+        assert agent.tools == ["file_read", "file_write", "shell", "search_files", "find_files"]
+        assert "gpd-consistency-checker" in registry.list_skills()
+
+    def test_research_phase_vertical_remains_registry_discoverable(self) -> None:
+        registry.invalidate_cache()
+
+        research_command = registry.get_command("gpd:research-phase")
+        research_skill = registry.get_skill("gpd-research-phase")
+        phase_researcher_skill = registry.get_skill("gpd-phase-researcher")
+
+        assert research_command.name == "gpd:research-phase"
+        assert research_command.context_mode == "project-required"
+        assert research_skill.name == "gpd-research-phase"
+        assert research_skill.category == "research"
+        assert phase_researcher_skill.name == "gpd-phase-researcher"
+        assert phase_researcher_skill.category == "research"
+        assert {"gpd-research-phase", "gpd-phase-researcher"}.issubset(registry.list_skills())
+
+    def test_literature_review_vertical_remains_registry_discoverable(self) -> None:
+        registry.invalidate_cache()
+
+        literature_command = registry.get_command("gpd:literature-review")
+        literature_skill = registry.get_skill("gpd-literature-review")
+        reviewer_skill = registry.get_skill("gpd-literature-reviewer")
+
+        assert literature_command.name == "gpd:literature-review"
+        assert literature_command.context_mode == "project-aware"
+        assert literature_skill.name == "gpd-literature-review"
+        assert literature_skill.category == "research"
+        assert reviewer_skill.name == "gpd-literature-reviewer"
+        assert reviewer_skill.category == "research"
+        assert {"gpd-literature-review", "gpd-literature-reviewer"}.issubset(registry.list_skills())
+
+    def test_current_workspace_helper_commands_remain_project_aware_in_registry(self) -> None:
+        registry.invalidate_cache()
+
+        for command_name in (
+            "compare-experiment",
+            "compare-results",
+            "digest-knowledge",
+            "review-knowledge",
+            "discover",
+            "explain",
+            "literature-review",
+        ):
+            command = registry.get_command(command_name)
+
+            assert command.name == f"gpd:{command_name}"
+            assert command.context_mode == "project-aware"
+            assert command.project_reentry_capable is False
+
+    def test_project_aware_cli_predicates_take_input_labels_from_command_policy(self) -> None:
+        registry.invalidate_cache()
+
+        for command_name, predicate in cli_module._PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES.items():
+            command = registry.get_command(command_name)
+
+            assert callable(predicate)
+            assert cli_module._command_explicit_input_labels_from_policy(command), command_name
+
+    def test_project_aware_label_only_policy_does_not_make_analysis_helpers_subject_required(self) -> None:
+        registry.invalidate_cache()
+
+        for command_name in (
+            "derive-equation",
+            "dimensional-analysis",
+            "limiting-cases",
+            "numerical-convergence",
+            "parameter-sweep",
+            "sensitivity-analysis",
+        ):
+            command = registry.get_command(command_name)
+            subject_policy = command.command_policy.subject_policy
+
+            assert subject_policy is not None
+            assert subject_policy.explicit_input_kinds
+            assert subject_policy.resolution_mode is None
+            assert cli_module._command_has_typed_subject_policy(command) is False
+
+    def test_command_skill_categories_cover_current_registry_without_other_fallbacks(self) -> None:
+        registry.invalidate_cache()
+
+        expected_categories = {
+            "gpd-review-knowledge": "research",
+            "gpd-digest-knowledge": "research",
+            "gpd-autonomous": "execution",
+            "gpd-tangent": "planning",
+        }
+        for skill_name, expected_category in expected_categories.items():
+            assert registry.get_skill(skill_name).category == expected_category
+
+        command_fallbacks = [
+            skill.name
+            for skill in (registry.get_skill(name) for name in registry.list_skills())
+            if skill.source_kind == "command" and skill.category == "other"
+        ]
+        assert command_fallbacks == []
+
+
 class TestSkillDiscovery:
     """Tests for canonical skills derived from primary commands and agents."""
 
-    def test_skills_use_primary_commands_and_agents_only(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_skills_use_primary_commands_and_agents_only(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "help.md").write_text(
@@ -1438,7 +2004,16 @@ class TestSkillDiscovery:
 class TestRegistryPromptIncludeInlining:
     """Tests for registry-loaded content surfaces that inline shared includes."""
 
-    def test_registry_projection_strips_generic_html_comments(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _assert_lightweight_source_surface(self, skill: SkillDef, paths: tuple[str, ...]) -> None:
+        for path in paths:
+            lightweight = f"{{GPD_INSTALL_DIR}}/{path}"
+            eager = f"@{{GPD_INSTALL_DIR}}/{path}"
+            assert lightweight in skill.content
+            assert eager not in skill.content
+
+    def test_registry_projection_strips_generic_html_comments(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "commented.md").write_text(
@@ -1486,22 +2061,442 @@ class TestRegistryPromptIncludeInlining:
         finally:
             registry.invalidate_cache()
 
-    def test_verifier_system_prompt_inlines_included_verification_checklists(self) -> None:
+    def test_verifier_system_prompt_keeps_verifier_routing_stub_and_schema_references_visible(self) -> None:
         agent = registry.get_agent("gpd-verifier")
 
-        assert "Verifier Profile-Specific Checks" in agent.system_prompt
-        assert "**For every checklist item: perform the CHECK, do not search_files for the CONCEPT.**" in agent.system_prompt
-        assert "# Verification Report Template" in agent.system_prompt
-        assert "# Contract Results Schema" in agent.system_prompt
+        durable_fragments = (
+            "## Domain Routing Stub",
+            "Load only the matching domain checklist pack(s);",
+            "# Verification Report Template",
+            "# Contract Results Schema",
+            "# Canonical Schema Discipline",
+            "Fallback report-writer rule",
+            "`verification_report_skeleton_bridge`",
+            "`writer_command`",
+            "body-only evidence",
+            "Follow `body_contract` when present",
+            "body-only Markdown",
+            "one fenced executed `python`/`bash` block",
+            "adjacent `**Output:**` plus fenced `output`",
+            "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
+            "Do not hand-author or reflow `VERIFICATION.md` YAML",
+            "Use `skeleton_command` only as a read-only preview",
+            "Keep `gpd_return`, computational-oracle/runtime details, command transcripts, hashes, and prose-only evidence out of frontmatter",
+            "Omit ambiguous `evidence[]`",
+            "contract-results-schema.md#compact-gap-report-crib",
+            "# Compact Gap Report Crib",
+            "Do not add `contract_results.status` or `contract_results.summary`",
+            "perform exactly one bounded repair pass",
+            "max two targeted repairs",
+            "After the second validator failure total",
+            "stop all edits and return `gpd_return.status: blocked`",
+            "only after the canonical report passes frontmatter and contract validation",
+        )
+        for fragment in durable_fragments:
+            assert fragment in agent.system_prompt
         assert "<!-- [included:" not in agent.system_prompt
 
-    def test_write_paper_command_content_inlines_contract_schema_dependencies(self) -> None:
+    def test_verify_work_skill_surface_keeps_fallback_schema_bridge_visible(self) -> None:
+        skill = registry.get_skill("gpd-verify-work")
+
+        durable_fragments = (
+            "fallback verifier execution is still `gpd-verifier` execution",
+            "verification_report_skeleton_bridge",
+            "write body-only evidence",
+            "satisfies bridge `body_contract`",
+            "one fenced executed `python`/`bash` block",
+            "adjacent `**Output:**` plus fenced `output`",
+            "following `PASS`/`FAIL`/`INCONCLUSIVE` verdict",
+            "replace `BODY.md` in its `writer_command`",
+            "The writer serializes YAML and validates before canonical acceptance.",
+            "Use `skeleton_command` only as read-only preview context",
+            "do not hand-author or reflow frontmatter",
+            "keep command transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` out of YAML",
+            "Read the runtime-projected `{GPD_AGENTS_DIR}/gpd-verifier.md` and schema refs for verifier policy",
+            "not for wrapper-side schema recreation",
+            "do not route to gaps unless a schema-valid gap report exists",
+        )
+
+        assert skill.source_kind == "command"
+        for fragment in durable_fragments:
+            assert fragment in skill.content
+
+    def test_project_researcher_system_prompt_keeps_one_shot_checkpoint_contract_visible(self) -> None:
+        agent = registry.get_skill("gpd-project-researcher")
+
+        assert agent.source_kind == "agent"
+        assert agent.path.endswith("gpd-project-researcher.md")
+        assert "Checkpoint after the initial survey with scope confirmation." in agent.content
+        assert "gpd_return:" in agent.content
+        assert (
+            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
+            in agent.content
+        )
+        assert "commit_authority: orchestrator" in agent.content
+        assert "Authority: use the frontmatter-derived Agent Requirements block" not in agent.content
+        assert "## Agent Requirements" in agent.content
+        assert "wait for confirmation" not in agent.content
+        assert "pause here for approval" not in agent.content
+        assert "ask the user then continue" not in agent.content
+
+    def test_plan_checker_registry_surface_keeps_direct_plan_contract_schema_and_checkpoint_contract_visible(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from functools import lru_cache
+        from shutil import copytree
+
+        agents_dir = tmp_path / "agents"
+        copytree(Path(__file__).resolve().parents[1] / "src" / "gpd" / "agents", agents_dir)
+        plan_checker_path = agents_dir / "gpd-plan-checker.md"
+        plan_checker_text = plan_checker_path.read_text(encoding="utf-8")
+        plan_checker_text = plan_checker_text.replace(
+            "artifact_write_authority: return_only",
+            "artifact_write_authority: read_only",
+        )
+        plan_checker_path.write_text(
+            plan_checker_text.replace(
+                "tools: file_read, file_write, shell, find_files, search_files, web_search, web_fetch",
+                "tools: file_read, shell, find_files, search_files, web_search, web_fetch",
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(registry, "AGENTS_DIR", agents_dir)
+        monkeypatch.setattr(registry, "_builtin_agent_names", lru_cache(maxsize=1)(lambda: frozenset()))
+        registry.invalidate_cache()
+
+        skill = registry.get_skill("gpd-plan-checker")
+
+        assert skill.source_kind == "agent"
+        assert skill.path.endswith("gpd-plan-checker.md")
+        assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in skill.content
+        assert (
+            "This is a one-shot handoff. If user input is needed, return `status: checkpoint`; do not wait inside the same run."
+            in skill.content
+        )
+        assert "approved_plans: [list of plan IDs that passed]" in skill.content
+        assert "blocked_plans: [list of plan IDs needing revision or escalation]" in skill.content
+
+    def test_write_paper_command_surface_uses_staged_loading_for_contract_schemas(self) -> None:
         command = registry.get_command("gpd:write-paper")
 
-        assert "Paper Config Schema" in command.content
-        assert "Review Ledger Schema" in command.content
-        assert "Referee Decision Schema" in command.content
-        assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape" in command.content
+        assert command.staged_loading is not None
+        assert "Paper Config Schema" not in command.content
+        assert "Review Ledger Schema" not in command.content
+        assert "Referee Decision Schema" not in command.content
+        assert (
+            "templates/paper/paper-config-schema.md"
+            in command.staged_loading.stage("outline_and_scaffold").loaded_authorities
+        )
+        assert (
+            "references/publication/peer-review-panel.md"
+            in command.staged_loading.stage("publication_review").loaded_authorities
+        )
+        assert (
+            "templates/paper/review-ledger-schema.md"
+            in command.staged_loading.stage("publication_review").loaded_authorities
+        )
+        assert (
+            "templates/paper/referee-decision-schema.md"
+            in command.staged_loading.stage("publication_review").loaded_authorities
+        )
+
+    def test_write_paper_registry_surface_exposes_bounded_external_authoring_lane(self) -> None:
+        command = registry.get_command("gpd:write-paper")
+
+        assert command.context_mode == "project-aware"
+        assert command.command_policy is not None
+        assert command.command_policy.supporting_context_policy is not None
+        assert command.command_policy.supporting_context_policy.project_context_mode == "project-aware"
+        assert command.command_policy.subject_policy is not None
+        assert command.command_policy.subject_policy.explicit_input_kinds == ["authoring_intake_manifest"]
+        assert command.command_policy.subject_policy.allow_external_subjects is False
+        assert command.command_policy.subject_policy.allow_interactive_without_subject is False
+        assert "context_mode: project-aware" in command.content
+        assert "authoring_intake_manifest" in command.content
+        assert command.review_contract is not None
+        assert command.review_contract.scope_variants == [
+            registry.ReviewContractScopeVariant(
+                scope="explicit_intake_manifest",
+                activation="validated explicit external authoring intake manifest was supplied outside a project",
+                relaxed_preflight_checks=[
+                    "project_state",
+                    "roadmap",
+                    "conventions",
+                    "research_artifacts",
+                    "verification_reports",
+                    "manuscript_proof_review",
+                ],
+                optional_preflight_checks=[
+                    "artifact_manifest",
+                    "bibliography_audit",
+                    "bibliography_audit_clean",
+                    "reproducibility_manifest",
+                    "reproducibility_ready",
+                ],
+                required_outputs_override=[
+                    "${PAPER_DIR}/{topic_specific_stem}.tex",
+                    "${PAPER_DIR}/PAPER-CONFIG.json",
+                    "${PAPER_DIR}/ARTIFACT-MANIFEST.json",
+                    "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json",
+                    "${PAPER_DIR}/reproducibility-manifest.json",
+                ],
+                required_evidence_override=[
+                    "validated external authoring intake manifest with explicit claim-to-evidence bindings"
+                ],
+                blocking_conditions_override=["invalid or incomplete external authoring intake manifest"],
+            )
+        ]
+
+    def test_write_paper_registry_surface_matches_frontmatter_external_authoring_contract(self) -> None:
+        command = registry.get_command("gpd:write-paper")
+        meta, _ = _parse_frontmatter(Path(command.path).read_text(encoding="utf-8"))
+        policy_meta = meta["command-policy"]
+        subject_policy_meta = policy_meta["subject_policy"]
+        supporting_context_meta = policy_meta["supporting_context_policy"]
+        review_contract_meta = meta["review-contract"]
+        frontmatter_scope_variants = {
+            str(variant["scope"]): variant for variant in review_contract_meta["scope_variants"]
+        }
+        scope_variant_meta = frontmatter_scope_variants["explicit_intake_manifest"]
+
+        assert command.argument_hint == meta["argument-hint"]
+        assert command.context_mode == meta["context_mode"]
+        assert command.command_policy is not None
+        assert command.command_policy.subject_policy is not None
+        assert command.command_policy.subject_policy.explicit_input_kinds == subject_policy_meta["explicit_input_kinds"]
+        assert (
+            command.command_policy.subject_policy.allow_external_subjects
+            == subject_policy_meta["allow_external_subjects"]
+        )
+        assert (
+            command.command_policy.subject_policy.allow_interactive_without_subject
+            == subject_policy_meta["allow_interactive_without_subject"]
+        )
+        assert command.command_policy.subject_policy.bootstrap_allowed == subject_policy_meta["bootstrap_allowed"]
+        assert command.command_policy.supporting_context_policy is not None
+        assert (
+            command.command_policy.supporting_context_policy.project_context_mode
+            == supporting_context_meta["project_context_mode"]
+        )
+        assert (
+            command.command_policy.supporting_context_policy.project_reentry_mode
+            == supporting_context_meta["project_reentry_mode"]
+        )
+
+        assert command.review_contract is not None
+        scope_variants = {str(variant.scope): variant for variant in command.review_contract.scope_variants}
+        scope_variant = scope_variants["explicit_intake_manifest"]
+        assert scope_variant.relaxed_preflight_checks == scope_variant_meta["relaxed_preflight_checks"]
+        assert scope_variant.optional_preflight_checks == scope_variant_meta["optional_preflight_checks"]
+        assert scope_variant.required_outputs_override == scope_variant_meta["required_outputs_override"]
+        assert scope_variant.required_evidence_override == scope_variant_meta["required_evidence_override"]
+        assert scope_variant.blocking_conditions_override == scope_variant_meta["blocking_conditions_override"]
+
+    def test_write_paper_external_authoring_validator_accepts_order_equivalent_scope_lists(self) -> None:
+        command_policy = registry.CommandPolicy(
+            subject_policy=registry.CommandSubjectPolicy(
+                explicit_input_kinds=["authoring_intake_manifest"],
+                allow_external_subjects=False,
+                allow_interactive_without_subject=False,
+                bootstrap_allowed=True,
+            ),
+            supporting_context_policy=registry.CommandSupportingContextPolicy(
+                project_context_mode="project-aware",
+                project_reentry_mode="disallowed",
+            ),
+        )
+        review_contract = registry.ReviewCommandContract(
+            review_mode="publication",
+            required_outputs=[],
+            required_evidence=[],
+            blocking_conditions=[],
+            preflight_checks=[],
+            scope_variants=[
+                registry.ReviewContractScopeVariant(
+                    scope="explicit_intake_manifest",
+                    activation="validated external intake",
+                    relaxed_preflight_checks=[
+                        "manuscript_proof_review",
+                        "verification_reports",
+                        "research_artifacts",
+                        "conventions",
+                        "roadmap",
+                        "project_state",
+                    ],
+                    optional_preflight_checks=[
+                        "reproducibility_ready",
+                        "reproducibility_manifest",
+                        "bibliography_audit_clean",
+                        "bibliography_audit",
+                        "artifact_manifest",
+                    ],
+                    required_outputs_override=[
+                        "${PAPER_DIR}/reproducibility-manifest.json",
+                        "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json",
+                        "${PAPER_DIR}/ARTIFACT-MANIFEST.json",
+                        "${PAPER_DIR}/PAPER-CONFIG.json",
+                        "${PAPER_DIR}/{topic_specific_stem}.tex",
+                    ],
+                    required_evidence_override=[
+                        "validated external authoring intake manifest with explicit claim-to-evidence bindings"
+                    ],
+                    blocking_conditions_override=["invalid or incomplete external authoring intake manifest"],
+                )
+            ],
+        )
+
+        registry._validate_write_paper_external_authoring_frontmatter(
+            Path(registry.get_command("gpd:write-paper").path),
+            command_name="gpd:write-paper",
+            context_mode="project-aware",
+            command_policy=command_policy,
+            review_contract=review_contract,
+        )
+
+    def test_write_paper_external_authoring_validator_rejects_duplicate_scope_list_entries(self) -> None:
+        command_policy = registry.CommandPolicy(
+            subject_policy=registry.CommandSubjectPolicy(
+                explicit_input_kinds=["authoring_intake_manifest"],
+                allow_external_subjects=False,
+                allow_interactive_without_subject=False,
+                bootstrap_allowed=True,
+            ),
+            supporting_context_policy=registry.CommandSupportingContextPolicy(
+                project_context_mode="project-aware",
+                project_reentry_mode="disallowed",
+            ),
+        )
+        review_contract = registry.ReviewCommandContract(
+            review_mode="publication",
+            required_outputs=[],
+            required_evidence=[],
+            blocking_conditions=[],
+            preflight_checks=[],
+            scope_variants=[
+                registry.ReviewContractScopeVariant(
+                    scope="explicit_intake_manifest",
+                    activation="validated external intake",
+                    relaxed_preflight_checks=[
+                        "project_state",
+                        "project_state",
+                        "roadmap",
+                        "conventions",
+                        "research_artifacts",
+                        "verification_reports",
+                        "manuscript_proof_review",
+                    ],
+                    optional_preflight_checks=[
+                        "artifact_manifest",
+                        "bibliography_audit",
+                        "bibliography_audit_clean",
+                        "reproducibility_manifest",
+                        "reproducibility_ready",
+                    ],
+                    required_outputs_override=[
+                        "${PAPER_DIR}/{topic_specific_stem}.tex",
+                        "${PAPER_DIR}/PAPER-CONFIG.json",
+                        "${PAPER_DIR}/ARTIFACT-MANIFEST.json",
+                        "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json",
+                        "${PAPER_DIR}/reproducibility-manifest.json",
+                    ],
+                    required_evidence_override=[
+                        "validated external authoring intake manifest with explicit claim-to-evidence bindings"
+                    ],
+                    blocking_conditions_override=["invalid or incomplete external authoring intake manifest"],
+                )
+            ],
+        )
+
+        with pytest.raises(ValueError, match=r"relaxed_preflight_checks must not contain duplicates"):
+            registry._validate_write_paper_external_authoring_frontmatter(
+                Path(registry.get_command("gpd:write-paper").path),
+                command_name="gpd:write-paper",
+                context_mode="project-aware",
+                command_policy=command_policy,
+                review_contract=review_contract,
+            )
+
+    def test_publication_review_skills_keep_the_needed_contract_references_visible(self) -> None:
+        from gpd.mcp.servers.skills_server import get_skill
+
+        referee = get_skill("gpd-referee")
+        review_reader = get_skill("gpd-review-reader")
+
+        assert "error" not in referee
+        assert any(path.endswith("peer-review-panel.md") for path in referee["contract_references"])
+        assert any(
+            entry["path"].endswith("publication-review-round-artifacts.md") for entry in referee["referenced_files"]
+        )
+        assert any(entry["path"].endswith("publication-response-artifacts.md") for entry in referee["referenced_files"])
+        assert any(path.endswith("review-ledger-schema.md") for path in referee["schema_references"])
+        assert any(path.endswith("referee-decision-schema.md") for path in referee["schema_references"])
+
+        assert "error" not in review_reader
+        assert any(path.endswith("peer-review-panel.md") for path in review_reader["contract_references"])
+        assert review_reader["schema_references"] == []
+        assert any(path.endswith("review-ledger-schema.md") for path in review_reader["transitive_schema_references"])
+        assert any(
+            path.endswith("referee-decision-schema.md") for path in review_reader["transitive_schema_references"]
+        )
+
+    def test_check_proof_registry_surface_preserves_lightweight_path_mentions(self) -> None:
+        skill = registry.get_skill("gpd-check-proof")
+
+        assert skill.source_kind == "agent"
+        assert skill.path.endswith("gpd-check-proof.md")
+        self._assert_lightweight_source_surface(
+            skill,
+            (
+                "references/shared/shared-protocols.md",
+                "references/orchestration/agent-infrastructure.md",
+                "references/physics-subfields.md",
+                "references/verification/core/verification-core.md",
+                "templates/proof-redteam-schema.md",
+                "references/verification/core/proof-redteam-protocol.md",
+                "references/publication/peer-review-panel.md",
+            ),
+        )
+        assert "Proof-redteam" in skill.content
+        assert "Manuscript review on demand only" in skill.content
+
+    def test_paper_writer_registry_surface_preserves_lightweight_path_mentions(self) -> None:
+        skill = registry.get_skill("gpd-paper-writer")
+
+        assert skill.source_kind == "agent"
+        assert skill.path.endswith("gpd-paper-writer.md")
+        self._assert_lightweight_source_surface(
+            skill,
+            (
+                "references/shared/shared-protocols.md",
+                "references/orchestration/agent-infrastructure.md",
+                "templates/notation-glossary.md",
+                "templates/latex-preamble.md",
+                "references/publication/publication-pipeline-modes.md",
+                "references/publication/paper-writer-cookbook.md",
+                "references/publication/figure-generation-templates.md",
+                "references/publication/publication-response-writer-handoff.md",
+                "templates/paper/author-response.md",
+                "templates/paper/referee-response.md",
+            ),
+        )
+
+    def test_bibliographer_registry_surface_preserves_lightweight_path_mentions(self) -> None:
+        skill = registry.get_skill("gpd-bibliographer")
+
+        assert skill.source_kind == "agent"
+        assert skill.path.endswith("gpd-bibliographer.md")
+        self._assert_lightweight_source_surface(
+            skill,
+            (
+                "references/shared/shared-protocols.md",
+                "references/physics-subfields.md",
+                "references/orchestration/agent-infrastructure.md",
+                "templates/notation-glossary.md",
+                "references/publication/bibtex-standards.md",
+                "references/publication/publication-pipeline-modes.md",
+                "references/publication/bibliography-advanced-search.md",
+            ),
+        )
 
 
 class TestNonMdFilesIgnored:
@@ -1596,6 +2591,18 @@ class TestRegistryCache:
         assert cache._commands is None
         assert cache._skills is None
 
+    def test_invalidate_cache_clears_workflow_stage_manifest_cache(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        calls: list[str] = []
+
+        monkeypatch.setattr(registry, "invalidate_workflow_stage_manifest_cache", lambda: calls.append("called"))
+
+        registry.invalidate_cache()
+
+        assert calls == ["called"]
+
     def test_invalidate_forces_re_discovery(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         agents_dir = tmp_path / "agents"
         agents_dir.mkdir()
@@ -1623,6 +2630,7 @@ class TestPublicAPI:
     def _clean_cache(self):
         """Ensure registry cache is invalidated before and after each test."""
         from gpd import registry
+
         registry.invalidate_cache()
         yield
         registry.invalidate_cache()
@@ -1661,7 +2669,9 @@ class TestPublicAPI:
 
         assert registry.list_agents() == ["alpha", "bravo", "charlie"]
 
-    def test_canonical_agent_names_follows_monkeypatched_agent_root(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_canonical_agent_names_follows_monkeypatched_agent_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         agents_dir = tmp_path / "patched-agents"
         agents_dir.mkdir()
         (agents_dir / "zeta.md").write_text("---\nname: zeta\n---\nPrompt.", encoding="utf-8")
@@ -1700,6 +2710,10 @@ class TestPublicAPI:
         registry.invalidate_cache()
 
         assert registry.list_commands() == ["apple", "zebra"]
+        assert registry.list_commands(name_format="slug") == ["apple", "zebra"]
+        assert registry.list_commands(name_format="label") == ["gpd:apple", "gpd:zebra"]
+        with pytest.raises(ValueError, match="name_format"):
+            registry.list_commands(name_format="runtime")  # type: ignore[arg-type]
 
     def test_list_skills_returns_sorted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         commands_dir = tmp_path / "commands"
@@ -1716,7 +2730,9 @@ class TestPublicAPI:
 
         assert registry.list_skills() == ["gpd-debugger", "gpd-plan-phase"]
 
-    def test_list_review_commands_returns_only_review_commands(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_list_review_commands_returns_only_review_commands(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "peer-review.md").write_text(
@@ -1740,6 +2756,10 @@ class TestPublicAPI:
         registry.invalidate_cache()
 
         assert registry.list_review_commands() == ["gpd:peer-review"]
+        assert registry.list_review_commands(name_format="label") == ["gpd:peer-review"]
+        assert registry.list_review_commands(name_format="slug") == ["peer-review"]
+        with pytest.raises(ValueError, match="name_format"):
+            registry.list_review_commands(name_format="runtime")  # type: ignore[arg-type]
 
     def test_get_agent_returns_correct_def(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         agents_dir = tmp_path / "agents"
@@ -1781,6 +2801,460 @@ class TestPublicAPI:
         assert cmd.name == "gpd:test-cmd"
         assert cmd.description == "Tested"
 
+    def test_get_command_new_project_surfaces_staged_loading_manifest(self) -> None:
+        registry.invalidate_cache()
+
+        cmd = registry.get_command("gpd:new-project")
+
+        assert cmd.staged_loading is not None
+        assert cmd.staged_loading.workflow_id == "new-project"
+        assert cmd.staged_loading.stage_ids() == ("scope_intake", "scope_approval", "post_scope")
+        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/new-project.md",)
+        assert "project_contract_gate" in cmd.staged_loading.stages[0].required_init_fields
+        assert "project_contract_load_info" in cmd.staged_loading.stages[0].required_init_fields
+        assert cmd.staged_loading.stages[0].produced_state == (
+            "intake routing state",
+            "scoping-contract gate state",
+        )
+        assert cmd.staged_loading.stages[0].checkpoints == (
+            "detect existing workspace state",
+            "surface the first scoping question",
+            "preserve contract gate visibility without assuming approval-stage authority",
+        )
+        assert cmd.staged_loading.stages[1].produced_state == (
+            "approved project contract",
+            "approval-state persistence",
+        )
+        assert cmd.staged_loading.stages[1].checkpoints == (
+            "approval gate has passed",
+            "project contract is ready for persistence",
+        )
+        assert cmd.staged_loading.stages[2].produced_state == (
+            "project artifacts",
+            "workflow preferences",
+            "downstream stage handoff",
+        )
+        assert cmd.staged_loading.stages[2].checkpoints == (
+            "approval gate has passed",
+            "stage-aware deferred reads are now allowed",
+        )
+
+    def test_get_command_new_project_surfaces_spawn_contract_inventory(self) -> None:
+        registry.invalidate_cache()
+
+        command = registry.get_command("gpd:new-project")
+        skill = registry.get_skill("gpd-new-project")
+
+        assert command.spawn_contracts
+        assert skill.spawn_contracts == command.spawn_contracts
+        assert len(command.spawn_contracts) == 7
+        assert all("write_scope" in contract for contract in command.spawn_contracts)
+        assert all("expected_artifacts" in contract for contract in command.spawn_contracts)
+        assert {contract["shared_state_policy"] for contract in command.spawn_contracts} == {
+            "return_only",
+            "direct",
+        }
+        assert {contract["write_scope"]["mode"] for contract in command.spawn_contracts} == {"scoped_write"}
+
+    def test_get_command_new_project_surfaces_notation_auto_and_interactive_contracts(self) -> None:
+        registry.invalidate_cache()
+
+        command = registry.get_command("gpd:new-project")
+        skill = registry.get_skill("gpd-new-project")
+
+        auto_contract = {
+            "activation": "mode == auto",
+            "write_scope": {"mode": "scoped_write", "allowed_paths": ["GPD/CONVENTIONS.md"]},
+            "expected_artifacts": ["GPD/CONVENTIONS.md"],
+            "shared_state_policy": "direct",
+        }
+        interactive_contract = {
+            "activation": "mode == interactive",
+            "write_scope": {"mode": "no_write", "allowed_paths": []},
+            "expected_artifacts": [],
+            "expected_return": {"status": "checkpoint"},
+            "shared_state_policy": "none",
+        }
+
+        assert auto_contract in command.spawn_contracts
+        assert command.interactive_spawn_contracts == (interactive_contract,)
+        assert skill.interactive_spawn_contracts == command.interactive_spawn_contracts
+
+    def test_registry_spawn_contract_inventory_dedupes_repeated_continuation_sidecars(self) -> None:
+        registry.invalidate_cache()
+
+        plan_phase = registry.get_command("gpd:plan-phase")
+        research_phase = registry.get_command("gpd:research-phase")
+
+        expected = {
+            "write_scope": {
+                "mode": "scoped_write",
+                "allowed_paths": ["{phase_dir}/{phase_number}-RESEARCH.md"],
+            },
+            "expected_artifacts": ["{phase_dir}/{phase_number}-RESEARCH.md"],
+            "shared_state_policy": "return_only",
+        }
+        assert plan_phase.spawn_contracts == (expected,)
+        assert research_phase.spawn_contracts == (expected,)
+
+    def test_get_command_new_milestone_surfaces_roadmapper_handoff(self) -> None:
+        registry.invalidate_cache()
+
+        command = registry.get_command("gpd:new-milestone")
+
+        assert "gpd-roadmapper spawned with staged continuation context" in command.content
+        assert "gpd-roadmapper" in command.content
+        assert "roadmapper" in command.content
+
+    def test_get_command_new_milestone_surfaces_staged_loading_manifest(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        manifest_path = tmp_path / "new-milestone-stage-manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "workflow_id": "new-milestone",
+                    "stages": [
+                        {
+                            "id": "milestone_bootstrap",
+                            "order": 1,
+                            "purpose": "milestone lookup and routing",
+                            "mode_paths": ["workflows/new-milestone.md"],
+                            "required_init_fields": [],
+                            "loaded_authorities": ["workflows/new-milestone.md"],
+                            "conditional_authorities": [],
+                            "must_not_eager_load": ["references/research/questioning.md"],
+                            "allowed_tools": ["file_read", "task"],
+                            "writes_allowed": [],
+                            "produced_state": [],
+                            "next_stages": [],
+                            "checkpoints": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        original_resolve_manifest_path = registry.resolve_workflow_stage_manifest_path
+        monkeypatch.setattr(
+            registry,
+            "resolve_workflow_stage_manifest_path",
+            lambda workflow_id: (
+                manifest_path if workflow_id == "new-milestone" else original_resolve_manifest_path(workflow_id)
+            ),
+        )
+        registry.invalidate_cache()
+
+        command = registry.get_command("gpd:new-milestone")
+
+        assert command.staged_loading is not None
+        assert command.staged_loading.workflow_id == "new-milestone"
+        assert command.staged_loading.stage_ids() == ("milestone_bootstrap",)
+        assert command.staged_loading.stages[0].loaded_authorities == ("workflows/new-milestone.md",)
+        assert command.staged_loading.stages[0].must_not_eager_load == ("references/research/questioning.md",)
+        assert command.staged_loading.stages[0].writes_allowed == ()
+        assert command.staged_loading.stages[0].next_stages == ()
+
+    def test_research_synthesizer_surface_keeps_canonical_summary_return_contract_visible(self) -> None:
+        registry.invalidate_cache()
+
+        synthesizer = registry.get_skill("gpd-research-synthesizer")
+        new_project = registry.get_skill("gpd-new-project")
+        new_milestone = registry.get_skill("gpd-new-milestone")
+        new_project_command = registry.get_command("gpd:new-project")
+        new_milestone_command = registry.get_command("gpd:new-milestone")
+
+        assert synthesizer.source_kind == "agent"
+        assert synthesizer.path.endswith("gpd-research-synthesizer.md")
+        assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer.content
+        assert "files_written` must list only files actually written in this run." in synthesizer.content
+        assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in synthesizer.content
+        assert "gpd_return:" in synthesizer.content
+
+        assert new_project.spawn_contracts == new_project_command.spawn_contracts
+        assert new_milestone.spawn_contracts == new_milestone_command.spawn_contracts
+        assert RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT in new_project.spawn_contracts
+        assert RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT in new_milestone.spawn_contracts
+        assert new_project.spawn_contracts[4] == RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT
+        assert new_milestone.spawn_contracts[1] == RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT
+
+    def test_get_command_plan_phase_surfaces_staged_loading_manifest(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as tmp:
+            commands_dir = Path(tmp) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "plan-phase.md").write_text(
+                "---\nname: gpd:plan-phase\ndescription: Plan phase\nallowed-tools:\n  - file_read\n---\nBody.",
+                encoding="utf-8",
+            )
+
+            manifest_path = Path(tmp) / "plan-phase-stage-manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "workflow_id": "plan-phase",
+                        "stages": [
+                            {
+                                "id": "phase_bootstrap",
+                                "order": 1,
+                                "purpose": "phase lookup and routing",
+                                "mode_paths": ["workflows/plan-phase.md"],
+                                "required_init_fields": [],
+                                "loaded_authorities": ["workflows/plan-phase.md"],
+                                "conditional_authorities": [],
+                                "must_not_eager_load": ["references/ui/ui-brand.md"],
+                                "allowed_tools": ["file_read"],
+                                "writes_allowed": [],
+                                "produced_state": [],
+                                "next_stages": ["planner_authoring"],
+                                "checkpoints": [],
+                            },
+                            {
+                                "id": "planner_authoring",
+                                "order": 2,
+                                "purpose": "planner handoff",
+                                "mode_paths": ["workflows/plan-phase.md"],
+                                "required_init_fields": ["researcher_model"],
+                                "loaded_authorities": [
+                                    "workflows/plan-phase.md",
+                                    "templates/planner-subagent-prompt.md",
+                                ],
+                                "conditional_authorities": [],
+                                "must_not_eager_load": ["references/ui/ui-brand.md"],
+                                "allowed_tools": ["file_read"],
+                                "writes_allowed": ["GPD/phases"],
+                                "produced_state": [],
+                                "next_stages": [],
+                                "checkpoints": [],
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            original_resolve_manifest_path = registry.resolve_workflow_stage_manifest_path
+            monkeypatch = pytest.MonkeyPatch()
+            monkeypatch.setattr(registry, "COMMANDS_DIR", commands_dir)
+            monkeypatch.setattr(
+                registry,
+                "resolve_workflow_stage_manifest_path",
+                lambda workflow_id: (
+                    manifest_path if workflow_id == "plan-phase" else original_resolve_manifest_path(workflow_id)
+                ),
+            )
+            try:
+                registry.invalidate_cache()
+                cmd = registry.get_command("plan-phase")
+            finally:
+                monkeypatch.undo()
+                registry.invalidate_cache()
+
+            assert cmd.staged_loading is not None
+            assert cmd.staged_loading.workflow_id == "plan-phase"
+            assert cmd.staged_loading.stage_ids() == ("phase_bootstrap", "planner_authoring")
+            assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/plan-phase.md",)
+            assert "templates/planner-subagent-prompt.md" in cmd.staged_loading.stages[1].loaded_authorities
+
+    def test_get_command_verify_work_surfaces_staged_loading_manifest(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        manifest_path = repo_root / "src" / "gpd" / "specs" / "workflows" / "verify-work-stage-manifest.json"
+        original_resolve_manifest_path = registry.resolve_workflow_stage_manifest_path
+        monkeypatch.setattr(
+            registry,
+            "resolve_workflow_stage_manifest_path",
+            lambda workflow_id: (
+                manifest_path if workflow_id == "verify-work" else original_resolve_manifest_path(workflow_id)
+            ),
+        )
+        registry.invalidate_cache()
+
+        cmd = registry.get_command("verify-work")
+
+        assert cmd.staged_loading is not None
+        assert cmd.staged_loading.workflow_id == "verify-work"
+        assert cmd.staged_loading.stage_ids() == (
+            "session_router",
+            "phase_bootstrap",
+            "inventory_build",
+            "interactive_validation",
+            "gap_repair",
+        )
+        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/verify-work.md",)
+        assert cmd.staged_loading.stages[2].loaded_authorities == (
+            "workflows/verify-work.md",
+            "references/verification/meta/verification-independence.md",
+        )
+        assert cmd.staged_loading.stages[2].next_stages == ("interactive_validation",)
+        assert cmd.staged_loading.stages[2].checkpoints == (
+            "verifier delegation completed",
+            "handoff remains fail-closed",
+            "anchor obligations explicit",
+        )
+        assert cmd.staged_loading.stages[3].allowed_tools == (
+            "ask_user",
+            "file_read",
+            "file_edit",
+            "file_write",
+            "find_files",
+            "search_files",
+            "shell",
+            "task",
+        )
+        assert cmd.staged_loading.stages[3].loaded_authorities == (
+            "workflows/verify-work.md",
+            "templates/research-verification.md",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md",
+        )
+        assert cmd.staged_loading.stages[3].writes_allowed == ("GPD/phases/XX-name/XX-VERIFICATION.md",)
+        assert cmd.staged_loading.stages[3].next_stages == ("gap_repair",)
+        assert cmd.staged_loading.stages[3].checkpoints == (
+            "verification file can be written",
+            "writer-stage schema is visible",
+            "check results remain contract-backed",
+        )
+        assert cmd.staged_loading.stages[4].loaded_authorities == (
+            "workflows/verify-work.md",
+            "templates/research-verification.md",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "references/shared/canonical-schema-discipline.md",
+            "references/protocols/error-propagation-protocol.md",
+        )
+        assert cmd.staged_loading.stages[4].writes_allowed == ("GPD/phases/XX-name/XX-VERIFICATION.md",)
+        assert cmd.staged_loading.stages[4].next_stages == ()
+        assert cmd.staged_loading.stages[4].checkpoints == (
+            "gaps are diagnosed",
+            "repair plans are verified",
+            "verification closeout is ready",
+        )
+
+    def test_get_command_execute_phase_surfaces_staged_loading_manifest(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+        (commands_dir / "execute-phase.md").write_text(
+            "---\nname: gpd:execute-phase\ndescription: Execute phase\nallowed-tools:\n  - file_read\n---\nBody.",
+            encoding="utf-8",
+        )
+
+        manifest_path = tmp_path / "execute-phase-stage-manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "workflow_id": "execute-phase",
+                    "stages": [
+                        {
+                            "id": "phase_bootstrap",
+                            "order": 1,
+                            "purpose": "phase lookup and routing",
+                            "mode_paths": ["workflows/execute-phase.md"],
+                            "required_init_fields": [],
+                            "loaded_authorities": ["workflows/execute-phase.md"],
+                            "conditional_authorities": [],
+                            "must_not_eager_load": ["references/ui/ui-brand.md"],
+                            "allowed_tools": ["file_read"],
+                            "writes_allowed": [],
+                            "produced_state": [],
+                            "next_stages": [],
+                            "checkpoints": [],
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        original_resolve_manifest_path = registry.resolve_workflow_stage_manifest_path
+        monkeypatch.setattr(registry, "COMMANDS_DIR", commands_dir)
+        monkeypatch.setattr(
+            registry,
+            "resolve_workflow_stage_manifest_path",
+            lambda workflow_id: (
+                manifest_path if workflow_id == "execute-phase" else original_resolve_manifest_path(workflow_id)
+            ),
+        )
+        registry.invalidate_cache()
+
+        cmd = registry.get_command("execute-phase")
+
+        assert cmd.staged_loading is not None
+        assert cmd.staged_loading.workflow_id == "execute-phase"
+        assert cmd.staged_loading.stage_ids() == ("phase_bootstrap",)
+        assert cmd.staged_loading.stages[0].loaded_authorities == ("workflows/execute-phase.md",)
+
+    def test_get_command_research_phase_surfaces_staged_loading_manifest(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        manifest_path = repo_root / "src" / "gpd" / "specs" / "workflows" / "research-phase-stage-manifest.json"
+        original_resolve_manifest_path = registry.resolve_workflow_stage_manifest_path
+        monkeypatch.setattr(
+            registry,
+            "resolve_workflow_stage_manifest_path",
+            lambda workflow_id: (
+                manifest_path if workflow_id == "research-phase" else original_resolve_manifest_path(workflow_id)
+            ),
+        )
+        registry.invalidate_cache()
+
+        cmd = registry.get_command("research-phase")
+
+        assert cmd.staged_loading is not None
+        assert cmd.staged_loading.workflow_id == "research-phase"
+        assert cmd.staged_loading.stage_ids() == ("phase_bootstrap", "research_handoff")
+        assert cmd.staged_loading.stages[0].loaded_authorities == (
+            "workflows/research-phase.md",
+            "references/orchestration/model-profile-resolution.md",
+        )
+        assert "references/orchestration/runtime-delegation-note.md" in cmd.staged_loading.stages[0].must_not_eager_load
+        assert cmd.staged_loading.stages[1].loaded_authorities == (
+            "workflows/research-phase.md",
+            "references/orchestration/model-profile-resolution.md",
+            "references/orchestration/runtime-delegation-note.md",
+        )
+        assert cmd.staged_loading.stages[1].writes_allowed == ("GPD/phases/XX-name/XX-RESEARCH.md",)
+        assert "reference_artifacts_content" in cmd.staged_loading.stages[1].required_init_fields
+
+    def test_get_agent_phase_researcher_surfaces_one_shot_handoff_contract(self) -> None:
+        agent = registry.get_agent("gpd-phase-researcher")
+
+        assert agent.name == "gpd-phase-researcher"
+        assert "## Active Anchor References" in agent.system_prompt
+        assert "## Don't Re-Derive" in agent.system_prompt
+        assert "## RESEARCH COMPLETE" in agent.system_prompt
+        assert "## RESEARCH BLOCKED" in agent.system_prompt
+        assert "gpd_return:" in agent.system_prompt
+        assert (
+            "# Base fields (`status`, `files_written`, `issues`, `next_actions`) follow agent-infrastructure.md."
+            in agent.system_prompt
+        )
+        assert "RESEARCH.md" in agent.system_prompt
+
+    def test_registry_cache_invalidation_clears_new_project_stage_manifest(self) -> None:
+        registry.invalidate_cache()
+        first = registry.get_command("gpd:new-project").staged_loading
+        assert first is not None
+
+        registry.invalidate_cache()
+        second = registry.get_command("gpd:new-project").staged_loading
+        assert second is not None
+
+        assert first is not second
+
     def test_get_command_accepts_public_command_label(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
@@ -1798,10 +3272,30 @@ class TestPublicAPI:
         assert cmd.name == "gpd:peer-review"
         assert cmd.description == "Peer review"
 
-    def test_get_command_rejects_foreign_bare_slash_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_command_accepts_inline_arguments_on_command_labels(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
-        (commands_dir / "help.md").write_text("---\nname: gpd:help\ndescription: Help\n---\nHelp body.", encoding="utf-8")
+        (commands_dir / "new-project.md").write_text(
+            "---\nname: gpd:new-project\ndescription: New project\n---\nNew project body.",
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(registry, "COMMANDS_DIR", commands_dir)
+        registry.invalidate_cache()
+
+        for label in ("gpd:new-project --minimal", "$gpd-new-project --minimal", "new-project --minimal"):
+            assert registry.get_command(label).name == "gpd:new-project"
+
+    def test_get_command_rejects_foreign_bare_slash_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        commands_dir = tmp_path / "commands"
+        commands_dir.mkdir()
+        (commands_dir / "help.md").write_text(
+            "---\nname: gpd:help\ndescription: Help\n---\nHelp body.", encoding="utf-8"
+        )
 
         monkeypatch.setattr(registry, "COMMANDS_DIR", commands_dir)
         registry.invalidate_cache()
@@ -1865,7 +3359,9 @@ class TestPublicAPI:
         assert skill.name == "gpd-execute-phase"
         assert skill.registry_name == "execute-phase"
 
-    def test_get_skill_rejects_foreign_bare_slash_command(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_get_skill_rejects_foreign_bare_slash_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         commands_dir = tmp_path / "commands"
         commands_dir.mkdir()
         (commands_dir / "execute-phase.md").write_text(
@@ -1911,6 +3407,16 @@ class TestPublicAPI:
         assert resume_work.project_reentry_capable is True
         assert quick.context_mode == "project-required"
         assert quick.project_reentry_capable is False
+
+    def test_real_project_aware_commands_do_not_ship_unenforced_requires_files_metadata(self) -> None:
+        """Project-aware commands should not advertise requires.files until command-context enforcement uses it."""
+        registry.invalidate_cache()
+
+        for command_name in ("discover", "compare-experiment"):
+            command = registry.get_command(command_name)
+
+            assert command.context_mode == "project-aware"
+            assert command.requires == {}
 
     def test_real_slides_skill_uses_output_category(self) -> None:
         registry.invalidate_cache()
@@ -1996,6 +3502,45 @@ class TestDataclasses:
         with pytest.raises((AttributeError, TypeError)):
             cmd.new_attr = "nope"  # type: ignore[misc]
 
+    def test_command_def_accepts_staged_loading_sidecar(self) -> None:
+        from gpd.core.workflow_staging import WorkflowStage
+
+        staged_loading = WorkflowStageManifest(
+            schema_version=1,
+            workflow_id="new-project",
+            stages=(
+                WorkflowStage(
+                    id="scope_intake",
+                    order=1,
+                    purpose="intake",
+                    mode_paths=("workflows/new-project.md",),
+                    required_init_fields=(),
+                    loaded_authorities=("workflows/new-project.md",),
+                    conditional_authorities=(),
+                    must_not_eager_load=(),
+                    allowed_tools=(),
+                    writes_allowed=(),
+                    produced_state=(),
+                    next_stages=(),
+                    checkpoints=(),
+                ),
+            ),
+        )
+        cmd = CommandDef(
+            name="c",
+            description="d",
+            argument_hint="",
+            context_mode="project-required",
+            requires={},
+            allowed_tools=[],
+            content="",
+            path="/p",
+            source="commands",
+            staged_loading=staged_loading,
+        )
+
+        assert cmd.staged_loading is staged_loading
+
     def test_skill_def_frozen(self) -> None:
         skill = SkillDef(
             name="gpd-test",
@@ -2034,7 +3579,6 @@ class TestSkillCategoryMap:
         import ast
         import inspect
 
-
         source = inspect.getsource(registry)
         tree = ast.parse(source)
 
@@ -2049,7 +3593,7 @@ class TestSkillCategoryMap:
             pytest.fail("_SKILL_CATEGORY_MAP not found in registry source")
 
     def test_peer_review_appears_exactly_once(self) -> None:
-        """Regression: 'gpd-peer-review' was duplicated at two positions."""
+        """Assert 'gpd-peer-review' appears exactly once (no duplicates)."""
         import ast
         import inspect
 
@@ -2067,3 +3611,28 @@ class TestSkillCategoryMap:
         from gpd.registry import _infer_skill_category
 
         assert _infer_skill_category("gpd-peer-review") == "paper"
+
+
+def test_executor_skill_defers_completion_only_materials_until_summary_creation() -> None:
+    skill = registry.get_skill("gpd-executor")
+    bootstrap, _, _ = skill.content.partition("<summary_creation>")
+
+    assert skill.name == "gpd-executor"
+    assert skill.source_kind == "agent"
+    assert "templates/summary.md" not in bootstrap
+    assert "templates/calculation-log.md" not in bootstrap
+    assert "Order-of-Limits Awareness" not in bootstrap
+
+
+def test_planner_skill_defers_late_planning_materials_into_on_demand_references() -> None:
+    skill = registry.get_skill("gpd-planner")
+    bootstrap, separator, _ = skill.content.partition("On-demand references:")
+
+    assert skill.name == "gpd-planner"
+    assert skill.source_kind == "agent"
+    assert separator == "On-demand references:"
+    assert "Phase Plan Prompt" in bootstrap
+    assert "PLAN Contract Schema" in bootstrap
+    assert "Read config.json for planning behavior settings." not in bootstrap
+    assert "## Summary Template" not in bootstrap
+    assert "Order-of-Limits Awareness" not in bootstrap

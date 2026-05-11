@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,7 @@ def test_runtime_cli_rejects_manifestless_ancestor_install(monkeypatch: pytest.M
     captured = capsys.readouterr()
     assert exit_code == 127
     assert f"GPD runtime bridge rejected missing install manifest at `{ancestor.resolve()}`." in captured.err
+    assert str(nested_cwd / adapter.config_dir_name) not in captured.err
 
 
 def test_runtime_cli_rejects_wrong_runtime_manifest_for_explicit_target(
@@ -111,7 +113,7 @@ def test_runtime_cli_rejects_wrong_runtime_manifest_for_explicit_target(
     assert exit_code == 127
     assert f"GPD runtime bridge mismatch for {primary_adapter.display_name} at `{target_dir}`." in captured.err
     assert f"pins {secondary_adapter.display_name} (`{_SECONDARY_RUNTIME}`)" in captured.err
-    assert f"--target-dir {target_dir}" in captured.err
+    assert f"--target-dir {shlex.quote(str(target_dir))}" in captured.err
 
 
 def test_repair_command_projects_target_dir_only_for_explicit_targets(tmp_path: Path) -> None:
@@ -138,4 +140,4 @@ def test_repair_command_projects_target_dir_only_for_explicit_targets(tmp_path: 
 
     assert implicit_command == f"{adapter.update_command} --local"
     assert "--target-dir" not in implicit_command
-    assert explicit_command == f"{adapter.update_command} --local --target-dir {explicit_target}"
+    assert explicit_command == f"{adapter.update_command} --local --target-dir {shlex.quote(str(explicit_target))}"

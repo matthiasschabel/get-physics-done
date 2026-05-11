@@ -11,14 +11,23 @@ from pathlib import Path
 
 import pytest
 
+from gpd.adapters import base as base_adapter
 from gpd.adapters.codex import (
     CodexAdapter,
+    _configure_config_toml,
     _convert_codex_tool_name,
     _convert_to_codex_skill,
+    _inject_codex_command_runtime_note,
     _normalize_codex_questioning,
+    _remove_gpd_notify_config,
     _tracked_codex_generated_skill_dirs,
 )
-from gpd.adapters.install_utils import build_runtime_cli_bridge_command, file_hash, hook_python_interpreter
+from gpd.adapters.install_utils import (
+    build_runtime_cli_bridge_command,
+    compile_markdown_for_runtime,
+    file_hash,
+    hook_python_interpreter,
+)
 from gpd.registry import load_agents_from_dir
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
@@ -43,6 +52,42 @@ def expected_codex_bridge(target: Path, *, is_global: bool = False, explicit_tar
         is_global=is_global,
         explicit_target=explicit_target,
     )
+
+
+def _assert_no_manifestless_gpd_artifacts(target: Path, skills_dir: Path) -> None:
+    assert not (target / "gpd-file-manifest.json").exists()
+    assert not (target / "get-physics-done").exists()
+    assert not (target / "agents").exists()
+    assert not (target / "hooks").exists()
+    assert not (target / "config.toml").exists()
+    assert not any(skills_dir.glob("gpd-*"))
+
+
+def _assert_no_new_codex_install_artifacts(target: Path, skills_dir: Path) -> None:
+    assert not (target / "gpd-file-manifest.json").exists()
+    assert not (target / "get-physics-done").exists()
+    assert not (target / "agents").exists()
+    assert not (target / "hooks").exists()
+    assert not any(skills_dir.glob("gpd-*"))
+
+
+def test_codex_command_runtime_note_injection_is_idempotent() -> None:
+    content = "---\nname: gpd-probe\ndescription: Probe\n---\n```bash\ngpd status\n```\n"
+    launcher = "/runtime/gpd-cli"
+
+    once = _inject_codex_command_runtime_note(content, launcher)
+    twice = _inject_codex_command_runtime_note(once, launcher)
+
+    assert once == twice
+    assert twice.count("<codex_runtime_notes>") == 1
+    assert twice.count("Codex shell compatibility:") == 1
+    assert twice.count("When shell steps call the GPD CLI") == 1
+    assert f"put the runtime bridge directly in command position: {launcher}" in twice
+    assert "Do not store it in a scalar variable" in twice
+    assert "GPD_CLI=" not in twice
+    assert f'gpd_cli() {{ {launcher} "$@"; }}' in twice
+    assert "use `cmd_status=$?`; `status` is a reserved read-only parameter" in twice
+    assert "The bridge already pins Codex" not in twice
 
 
 def _make_checkout(tmp_path: Path, version: str) -> Path:
@@ -198,17 +243,7 @@ class TestConvertToCodexSkill:
 
     def test_duplicate_tools_deduplicated(self) -> None:
         """Tools appearing in both tools: and allowed-tools: are deduplicated."""
-        content = (
-            "---\n"
-            "name: test\n"
-            "description: D\n"
-            "tools: Read, Bash\n"
-            "allowed-tools:\n"
-            "  - Read\n"
-            "  - Write\n"
-            "---\n"
-            "Body"
-        )
+        content = "---\nname: test\ndescription: D\ntools: Read, Bash\nallowed-tools:\n  - Read\n  - Write\n---\nBody"
         result = _convert_to_codex_skill(content, "gpd-test")
         # Extract allowed-tools entries from the frontmatter
         fm = result.split("---")[1]
@@ -217,17 +252,7 @@ class TestConvertToCodexSkill:
 
     def test_duplicate_tools_in_allowed_tools_only(self) -> None:
         """Duplicate entries within allowed-tools: alone are deduplicated."""
-        content = (
-            "---\n"
-            "name: test\n"
-            "description: D\n"
-            "allowed-tools:\n"
-            "  - Read\n"
-            "  - Bash\n"
-            "  - Read\n"
-            "---\n"
-            "Body"
-        )
+        content = "---\nname: test\ndescription: D\nallowed-tools:\n  - Read\n  - Bash\n  - Read\n---\nBody"
         result = _convert_to_codex_skill(content, "gpd-test")
         fm = result.split("---")[1]
         tool_entries = [line.strip()[2:] for line in fm.splitlines() if line.strip().startswith("- ")]
@@ -239,6 +264,76 @@ class TestConvertToCodexSkill:
         result = _convert_to_codex_skill(content, "gpd-test")
 
         assert_review_contract_prompt_surface(result)
+
+    def test_command_metadata_is_not_duplicated_in_codex_skill_frontmatter(self) -> None:
+        content = compile_markdown_for_runtime(
+            "---\n"
+            "name: gpd:respond-to-referees\n"
+            "description: D\n"
+            'argument-hint: "[--manuscript PATH]"\n'
+            "context_mode: project-aware\n"
+            "requires:\n"
+            "  files:\n"
+            "    - paper/*.tex\n"
+            "command-policy:\n"
+            "  schema_version: 1\n"
+            "  subject_policy:\n"
+            "    subject_kind: publication\n"
+            "    resolution_mode: explicit_or_project_manuscript\n"
+            "    explicit_input_kinds:\n"
+            "      - manuscript_path\n"
+            "    allow_external_subjects: true\n"
+            "review-contract:\n"
+            "  review_mode: publication\n"
+            "  schema_version: 1\n"
+            "  required_outputs:\n"
+            "    - GPD/review/REFEREE_RESPONSE{round_suffix}.md\n"
+            "allowed-tools:\n"
+            "  - Read\n"
+            "---\n"
+            "Body",
+            runtime="codex",
+            path_prefix="/prefix/",
+        )
+
+        result = _convert_to_codex_skill(content, "gpd-respond-to-referees")
+        frontmatter = result.split("---", 2)[1]
+
+        assert "name: gpd-respond-to-referees" in frontmatter
+        assert "description: D" in frontmatter
+        assert "allowed-tools:" in frontmatter
+        assert "read_file" in frontmatter
+        assert "argument-hint:" not in frontmatter
+        assert "context_mode:" not in frontmatter
+        assert "requires:" not in frontmatter
+        assert "command-policy:" not in frontmatter
+        assert "review-contract:" not in frontmatter
+        assert result.count("## Command Requirements") == 1
+        assert result.count("## Review Contract") == 1
+
+
+class TestSharedCommandReferences:
+    def test_bare_runnable_command_references_convert_without_rewriting_paths_or_urls(
+        self,
+        adapter: CodexAdapter,
+    ) -> None:
+        content = (
+            "Run `gpd:resume-work`, then /gpd:help.\n"
+            "Leave `gpd:not-a-command` and /gpd:not-a-command untouched.\n"
+            "Keep https://docs.example/gpd:help, /tmp/gpd:help, ./gpd:help, and C:\\tmp\\gpd:help untouched.\n"
+        )
+
+        result = adapter.translate_shared_command_references(content)
+
+        assert "`$gpd-resume-work`" in result
+        assert "$gpd-help" in result
+        assert "`gpd:not-a-command`" in result
+        assert "/gpd:not-a-command" in result
+        assert "$gpd-not-a-command" not in result
+        assert "https://docs.example/gpd:help" in result
+        assert "/tmp/gpd:help" in result
+        assert "./gpd:help" in result
+        assert "C:\\tmp\\gpd:help" in result
 
 
 class TestInstall:
@@ -283,6 +378,69 @@ class TestInstall:
         assert not any(d.name.startswith("gpd-") for d in shared_skills.iterdir() if d.is_dir())
         assert (shared_skills / "custom-keep" / "SKILL.md").exists()
 
+    def test_custom_global_install_uses_explicit_skills_dir_despite_env_override(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        outside_root = tmp_path.parent / "codex-skills-leak"
+        leak_skills_dir = outside_root / ".agents" / "skills"
+        monkeypatch.setenv("CODEX_SKILLS_DIR", str(leak_skills_dir))
+
+        target = tmp_path / "custom-global" / adapter.config_dir_name
+        target.mkdir(parents=True)
+        safe_skills_dir = target.parent / ".agents" / "skills"
+
+        result = adapter.install(gpd_root, target, is_global=True, skills_dir=safe_skills_dir)
+
+        assert result["skills_dir"] == str(safe_skills_dir)
+        assert safe_skills_dir.is_relative_to(tmp_path)
+        assert any(d.name.startswith("gpd-") for d in safe_skills_dir.iterdir() if d.is_dir())
+        assert not leak_skills_dir.exists()
+
+    def test_global_install_rejects_external_env_skills_dir_before_writing_artifacts(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        target = tmp_path / "home" / adapter.config_dir_name
+        target.mkdir(parents=True)
+        external_skills = tmp_path / "outside-home" / ".agents" / "skills"
+        monkeypatch.setenv("CODEX_SKILLS_DIR", str(external_skills))
+
+        with pytest.raises(RuntimeError, match="must live under the Codex config owner directory"):
+            adapter.install(gpd_root, target, is_global=True)
+
+        _assert_no_new_codex_install_artifacts(target, external_skills)
+
+    def test_install_rejects_symlinked_skills_dir_without_replacing_topology(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        real_skills = tmp_path / "real-skills"
+        real_skills.mkdir()
+        skills = tmp_path / ".agents" / "skills"
+        skills.parent.mkdir()
+        try:
+            skills.symlink_to(real_skills, target_is_directory=True)
+        except OSError as exc:
+            pytest.skip(f"directory symlinks unavailable: {exc}")
+
+        with pytest.raises(RuntimeError, match="must not be a symlink"):
+            adapter.install(gpd_root, target, is_global=False, skills_dir=skills)
+
+        assert skills.is_symlink()
+        assert skills.resolve(strict=False) == real_skills.resolve(strict=False)
+        _assert_no_new_codex_install_artifacts(target, real_skills)
+
     def test_install_creates_skills(self, adapter: CodexAdapter, gpd_root: Path, tmp_path: Path) -> None:
         target = tmp_path / ".codex"
         target.mkdir()
@@ -317,6 +475,25 @@ class TestInstall:
 
         assert (preserved_skill / "SKILL.md").read_text(encoding="utf-8") == "keep"
         assert (preserved_skill / "notes.txt").read_text(encoding="utf-8") == "extra"
+
+    def test_install_refuses_to_overwrite_unmarked_planned_gpd_skill_collision(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        colliding_skill = skills / "gpd-help"
+        colliding_skill.mkdir(parents=True)
+        (colliding_skill / "SKILL.md").write_text("user-owned help skill", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="existing unowned skill path"):
+            adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert (colliding_skill / "SKILL.md").read_text(encoding="utf-8") == "user-owned help skill"
+        assert not (target / "gpd-file-manifest.json").exists()
 
     def test_reinstall_removes_stale_manifest_tracked_generated_gpd_skills(
         self,
@@ -359,7 +536,10 @@ class TestInstall:
 
         existing_skill = skills / "gpd-help"
         existing_skill.mkdir()
-        (existing_skill / "SKILL.md").write_text("old help", encoding="utf-8")
+        (existing_skill / "SKILL.md").write_text(
+            "<!-- Managed by Get Physics Done (GPD). -->\nold help",
+            encoding="utf-8",
+        )
         preserved_skill = skills / "custom-keep"
         preserved_skill.mkdir()
         (preserved_skill / "SKILL.md").write_text("keep", encoding="utf-8")
@@ -372,7 +552,9 @@ class TestInstall:
         with pytest.raises(RuntimeError, match="boom"):
             adapter.install(gpd_root, target, skills_dir=skills)
 
-        assert (existing_skill / "SKILL.md").read_text(encoding="utf-8") == "old help"
+        assert (existing_skill / "SKILL.md").read_text(encoding="utf-8") == (
+            "<!-- Managed by Get Physics Done (GPD). -->\nold help"
+        )
         assert (preserved_skill / "SKILL.md").read_text(encoding="utf-8") == "keep"
 
     def test_install_failure_after_live_backup_restores_original_skills(
@@ -389,7 +571,10 @@ class TestInstall:
 
         existing_skill = skills / "gpd-help"
         existing_skill.mkdir()
-        (existing_skill / "SKILL.md").write_text("old help", encoding="utf-8")
+        (existing_skill / "SKILL.md").write_text(
+            "<!-- Managed by Get Physics Done (GPD). -->\nold help",
+            encoding="utf-8",
+        )
         preserved_skill = skills / "custom-keep"
         preserved_skill.mkdir()
         (preserved_skill / "SKILL.md").write_text("keep", encoding="utf-8")
@@ -412,8 +597,163 @@ class TestInstall:
         with pytest.raises(RuntimeError, match="boom after backup"):
             adapter.install(gpd_root, target, skills_dir=skills)
 
-        assert (existing_skill / "SKILL.md").read_text(encoding="utf-8") == "old help"
+        assert (existing_skill / "SKILL.md").read_text(encoding="utf-8") == (
+            "<!-- Managed by Get Physics Done (GPD). -->\nold help"
+        )
         assert (preserved_skill / "SKILL.md").read_text(encoding="utf-8") == "keep"
+
+    def test_install_rolls_back_config_and_skills_when_configure_fails_after_mutation(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        config_path = target / "config.toml"
+        config_path.write_text('model = "gpt-5"\n', encoding="utf-8")
+        before_config = config_path.read_text(encoding="utf-8")
+        skills = tmp_path / "skills"
+        preserved_skill = skills / "custom-keep"
+        preserved_skill.mkdir(parents=True)
+        (preserved_skill / "SKILL.md").write_text("keep", encoding="utf-8")
+
+        def fail_mcp_write(*args, **kwargs):
+            raise RuntimeError("configure boom")
+
+        monkeypatch.setattr("gpd.adapters.codex._write_mcp_servers_codex_toml", fail_mcp_write)
+
+        with pytest.raises(RuntimeError, match="configure boom"):
+            adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert config_path.read_text(encoding="utf-8") == before_config
+        assert (preserved_skill / "SKILL.md").read_text(encoding="utf-8") == "keep"
+        _assert_no_new_codex_install_artifacts(target, skills)
+
+    def test_install_rollback_snapshots_only_owned_codex_surfaces(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        sessions_dir = target / "sessions"
+        sessions_dir.mkdir()
+        (sessions_dir / "transcript.jsonl").write_text('{"user":"keep"}\n', encoding="utf-8")
+        skills = tmp_path / "skills"
+        preserved_skill = skills / "custom-keep"
+        preserved_skill.mkdir(parents=True)
+        (preserved_skill / "SKILL.md").write_text("keep", encoding="utf-8")
+        copied_paths: list[Path] = []
+        original_copy_path = base_adapter._InstallRollbackSnapshot._copy_path
+
+        def track_copy_path(src: Path, dest: Path) -> None:
+            copied_paths.append(src)
+            if src in {target, skills}:
+                raise AssertionError(f"rollback copied broad root {src}")
+            original_copy_path(src, dest)
+
+        def fail_mcp_write(*args, **kwargs):
+            raise RuntimeError("configure boom")
+
+        monkeypatch.setattr(base_adapter._InstallRollbackSnapshot, "_copy_path", staticmethod(track_copy_path))
+        monkeypatch.setattr("gpd.adapters.codex._write_mcp_servers_codex_toml", fail_mcp_write)
+
+        with pytest.raises(RuntimeError, match="configure boom"):
+            adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert target not in copied_paths
+        assert skills not in copied_paths
+        assert (sessions_dir / "transcript.jsonl").read_text(encoding="utf-8") == '{"user":"keep"}\n'
+        assert (preserved_skill / "SKILL.md").read_text(encoding="utf-8") == "keep"
+        _assert_no_new_codex_install_artifacts(target, skills)
+
+    def test_install_rollback_restores_symlinked_config_referent_when_manifest_write_fails(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        real_config = tmp_path / "config-real.toml"
+        real_config.write_text('model = "gpt-5"\n', encoding="utf-8")
+        config_path = target / "config.toml"
+        config_path.symlink_to(real_config)
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        def fail_manifest(*args, **kwargs):
+            raise RuntimeError("manifest boom")
+
+        monkeypatch.setattr("gpd.adapters.codex.write_manifest", fail_manifest)
+
+        with pytest.raises(RuntimeError, match="manifest boom"):
+            adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert config_path.is_symlink()
+        assert config_path.resolve(strict=True) == real_config
+        assert real_config.read_text(encoding="utf-8") == 'model = "gpt-5"\n'
+        _assert_no_new_codex_install_artifacts(target, skills)
+
+    def test_install_rolls_back_config_and_skills_when_manifest_write_fails(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        config_path = target / "config.toml"
+        config_path.write_text('model = "gpt-5"\n', encoding="utf-8")
+        before_config = config_path.read_text(encoding="utf-8")
+        skills = tmp_path / "skills"
+        preserved_skill = skills / "custom-keep"
+        preserved_skill.mkdir(parents=True)
+        (preserved_skill / "SKILL.md").write_text("keep", encoding="utf-8")
+
+        def fail_manifest(*args, **kwargs):
+            raise RuntimeError("manifest boom")
+
+        monkeypatch.setattr("gpd.adapters.codex.write_manifest", fail_manifest)
+
+        with pytest.raises(RuntimeError, match="manifest boom"):
+            adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert config_path.read_text(encoding="utf-8") == before_config
+        assert (preserved_skill / "SKILL.md").read_text(encoding="utf-8") == "keep"
+        _assert_no_new_codex_install_artifacts(target, skills)
+
+    def test_install_rolls_back_config_manifest_and_skills_when_verify_fails(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        config_path = target / "config.toml"
+        config_path.write_text('model = "gpt-5"\n', encoding="utf-8")
+        before_config = config_path.read_text(encoding="utf-8")
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        def fail_verify(self: CodexAdapter, target_dir: Path) -> None:
+            raise RuntimeError("verify boom")
+
+        monkeypatch.setattr(CodexAdapter, "_verify", fail_verify)
+
+        with pytest.raises(RuntimeError, match="verify boom"):
+            adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert config_path.read_text(encoding="utf-8") == before_config
+        _assert_no_new_codex_install_artifacts(target, skills)
 
     def test_install_rewrites_gpd_cli_calls_to_runtime_cli_bridge(
         self,
@@ -433,13 +773,21 @@ class TestInstall:
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
 
         assert "Codex shell compatibility:" in skill
-        assert f"When shell steps call the GPD CLI, use {expected_bridge}" in skill
-        assert "validates the install contract" in skill
+        assert f"When shell steps call the GPD CLI, put the runtime bridge directly in command position: {expected_bridge}" in skill
+        assert "Do not store it in a scalar variable" in skill
+        assert "GPD_CLI=" not in skill
+        assert f'gpd_cli() {{ {expected_bridge} "$@"; }}' in skill
+        assert "use `cmd_status=$?`; `status` is a reserved read-only parameter" in skill
+        assert "The bridge already pins Codex" not in skill
         assert "`GPD_ACTIVE_RUNTIME=codex uv run gpd ...`" not in skill
         assert expected_bridge + " config ensure-section" in skill
-        assert f'INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)' in skill
-        assert 'echo "ERROR: gpd initialization failed: $INIT"' in skill
+        assert expected_bridge + ' config set model_profile "$PROFILE"' in skill
+        assert f"INIT=$({expected_bridge} --raw init progress --include state,config --no-project-reentry)" not in skill
+        assert 'echo "ERROR: gpd initialization failed: $INIT"' not in skill
         assert expected_bridge + " config ensure-section" in workflow
+        assert expected_bridge + ' config set model_profile "$PROFILE"' in workflow
+        assert f"{expected_bridge} --raw init progress --include state,config" not in workflow
+        assert "$ARGUMENTS.profile" not in workflow
         assert f'if ! {expected_bridge} verify plan "$plan"; then' in execute_phase
         assert f'INIT=$({expected_bridge} --raw init plan-phase "${{PHASE}}")' in agent
         assert "```bash\ngpd config ensure-section\n" not in workflow
@@ -461,13 +809,22 @@ class TestInstall:
         tour_skill = (local_skills / "gpd-tour" / "SKILL.md").read_text(encoding="utf-8")
         settings_skill = (local_skills / "gpd-settings" / "SKILL.md").read_text(encoding="utf-8")
 
-        assert "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly." in help_skill
-        assert "For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`." in help_skill
+        assert (
+            "Use `gpd --help` to inspect the executable local install/readiness/permissions/diagnostics surface directly."
+            in help_skill
+        )
+        assert (
+            "For a normal-terminal, current-workspace read-only recovery snapshot without launching the runtime, use `gpd resume`."
+            in help_skill
+        )
         assert "For a normal-terminal, read-only machine-local usage / cost summary, use `gpd cost`." in help_skill
         assert "The normal terminal is where you install GPD, run `gpd --help`, and run" in tour_skill
         assert "`gpd resume` is the normal-terminal recovery step for reopening the right" in tour_skill
         assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_skill
-        assert "use `gpd cost` after runs for advisory local usage / cost, optional USD budget guardrails, and the current profile tier mix" in settings_skill
+        assert (
+            "use `gpd cost` after runs for advisory local usage / cost, optional USD budget guardrails, and the current profile tier mix"
+            in settings_skill
+        )
         assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*--help`", help_skill) is None
         assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*resume(?:\s|`)", help_skill) is None
         assert re.search(r"`[^`\n]*gpd\.runtime_cli[^`\n]*cost`", help_skill) is None
@@ -575,16 +932,37 @@ class TestInstall:
         assert config_toml.exists()
         content = config_toml.read_text(encoding="utf-8")
         escaped_exe = hook_python_interpreter().replace("\\", "\\\\")
-        expected_notify = (
-            f'notify = ["{escaped_exe}", '
-            f'"{(target / "hooks" / "notify.py").as_posix()}"]'
-        )
+        expected_notify = f'notify = ["{escaped_exe}", "{(target / "hooks" / "notify.py").as_posix()}"]'
         assert "# GPD update notification" in content
         assert expected_notify in content
         assert "[features]" in content
         assert "multi_agent = true" in content
         assert "[agents.gpd-executor]" in content
         assert 'config_file = "agents/gpd-executor.toml"' in content
+
+    def test_install_does_not_point_notify_at_preexisting_unowned_hook(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        hooks_dir = target / "hooks"
+        hooks_dir.mkdir()
+        custom_notify = hooks_dir / "notify.py"
+        custom_notify.write_text("print('user hook')\n", encoding="utf-8")
+        (gpd_root / "hooks" / "notify.py").unlink()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert custom_notify.read_text(encoding="utf-8") == "print('user hook')\n"
+        config = tomllib.loads((target / "config.toml").read_text(encoding="utf-8"))
+        assert "notify" not in config
+        content = (target / "config.toml").read_text(encoding="utf-8")
+        assert "GPD update notification" not in content
 
     def test_install_registers_agent_roles_in_config_toml(
         self, adapter: CodexAdapter, gpd_root: Path, tmp_path: Path
@@ -631,15 +1009,15 @@ class TestInstall:
         skills = tmp_path / "skills"
         skills.mkdir()
         (target / "config.toml").write_text(
-            '[mcp_servers.gpd-wolfram]\n'
+            "[mcp_servers.gpd-wolfram]\n"
             'command = "python3"\n'
             'args = ["-m", "legacy.wolfram"]\n'
             'cwd = "/tmp/custom-wolfram"\n'
-            '\n'
-            '[mcp_servers.gpd-wolfram.env]\n'
+            "\n"
+            "[mcp_servers.gpd-wolfram.env]\n"
             'EXTRA_FLAG = "1"\n'
-            '\n'
-            '[mcp_servers.custom-server]\n'
+            "\n"
+            "[mcp_servers.custom-server]\n"
             'command = "node"\n'
             'args = ["custom.js"]\n',
             encoding="utf-8",
@@ -651,8 +1029,8 @@ class TestInstall:
 
         parsed = tomllib.loads((target / "config.toml").read_text(encoding="utf-8"))
         server = parsed["mcp_servers"][WOLFRAM_MANAGED_SERVER_KEY]
-        assert server["command"] == "gpd-mcp-wolfram"
-        assert server["args"] == []
+        assert server["command"] == hook_python_interpreter()
+        assert server["args"] == ["-m", "gpd.mcp.integrations.wolfram_bridge"]
         assert server["cwd"] == "/tmp/custom-wolfram"
         assert server["env"] == {
             "EXTRA_FLAG": "1",
@@ -707,6 +1085,24 @@ class TestInstall:
             adapter.install(gpd_root, target, is_global=False, skills_dir=skills)
 
         assert config_toml_path.read_text(encoding="utf-8") == before
+
+    def test_install_fails_closed_for_malformed_project_integrations_before_copying_artifacts(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+        (tmp_path / "GPD").mkdir()
+        (tmp_path / "GPD" / "integrations.json").write_text('{"wolfram":', encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match="Malformed integrations config"):
+            adapter.install(gpd_root, target, is_global=False, skills_dir=skills)
+
+        _assert_no_manifestless_gpd_artifacts(target, skills)
 
     def test_install_translates_tool_references_in_skill_body(self, adapter: CodexAdapter, tmp_path: Path) -> None:
         gpd_root = _make_checkout(tmp_path, "9.9.9")
@@ -848,8 +1244,7 @@ class TestRuntimePermissions:
         target = tmp_path / ".codex"
         target.mkdir()
         (target / "config.toml").write_text(
-            'approval_policy = "on-request"\n'
-            'sandbox_mode = "workspace-write"\n',
+            'approval_policy = "on-request"\nsandbox_mode = "workspace-write"\n',
             encoding="utf-8",
         )
         skills = tmp_path / "skills"
@@ -936,7 +1331,7 @@ class TestRuntimePermissions:
         adapter.install(gpd_root, target, skills_dir=skills)
 
         config_path = target / "config.toml"
-        config_path.write_text('approval_policy = [\n', encoding="utf-8")
+        config_path.write_text("approval_policy = [\n", encoding="utf-8")
         before = config_path.read_text(encoding="utf-8")
 
         status = adapter.runtime_permissions_status(target, autonomy="yolo")
@@ -964,14 +1359,14 @@ class TestRuntimePermissions:
         skills = tmp_path / "skills"
         skills.mkdir()
         config_path = target / "config.toml"
-        config_path.write_text('approval_policy = [\n', encoding="utf-8")
+        config_path.write_text("approval_policy = [\n", encoding="utf-8")
         before = config_path.read_text(encoding="utf-8")
 
         with pytest.raises(RuntimeError, match="malformed"):
             adapter.install(gpd_root, target, skills_dir=skills)
 
         assert config_path.read_text(encoding="utf-8") == before
-        assert not (target / "gpd-file-manifest.json").exists()
+        _assert_no_new_codex_install_artifacts(target, skills)
 
     @pytest.mark.parametrize("config_line", ('mcp_servers = "oops"\n', 'agents = "oops"\n'))
     def test_wrong_shaped_config_toml_fails_closed_during_install(
@@ -993,7 +1388,7 @@ class TestRuntimePermissions:
             adapter.install(gpd_root, target, skills_dir=skills)
 
         assert config_path.read_text(encoding="utf-8") == before
-        assert not (target / "gpd-file-manifest.json").exists()
+        _assert_no_new_codex_install_artifacts(target, skills)
 
     def test_reinstall_rewrites_stale_managed_notify_interpreter(
         self,
@@ -1021,7 +1416,8 @@ class TestRuntimePermissions:
         adapter.install(gpd_root, target, is_global=False)
 
         content = (target / "config.toml").read_text(encoding="utf-8")
-        assert f'notify = ["{selected_python}", ".codex/hooks/notify.py"]' in content
+        parsed_config = tomllib.loads(content)
+        assert parsed_config["notify"] == [selected_python, ".codex/hooks/notify.py"]
         assert 'notify = ["python3", ".codex/hooks/notify.py"]' not in content
 
     def test_install_uses_gpd_python_override_for_notify_and_mcp(
@@ -1095,6 +1491,112 @@ class TestRuntimePermissions:
         assert manifest["codex_generated_skill_dirs"]
         assert result["skills"] == len(manifest["codex_generated_skill_dirs"])
         assert (foreign_skill / "SKILL.md").exists()
+
+    def test_reinstall_removes_manifest_file_tracked_stale_skill_dirs(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+        stale_skill = skills / "gpd-old-generated"
+        stale_skill.mkdir()
+        (stale_skill / "SKILL.md").write_text("stale generated skill\n", encoding="utf-8")
+        user_skill = skills / "gpd-user-keep"
+        user_skill.mkdir()
+        (user_skill / "SKILL.md").write_text("keep\n", encoding="utf-8")
+
+        manifest_path = target / "gpd-file-manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.pop("codex_generated_skill_dirs", None)
+        manifest["files"]["skills/gpd-old-generated/SKILL.md"] = "old-hash"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert not stale_skill.exists()
+        assert (user_skill / "SKILL.md").exists()
+
+    def test_reinstall_preserves_untracked_user_owned_gpd_agent_files(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+        user_agent = target / "agents" / "gpd-user-keep.md"
+        user_role = target / "agents" / "gpd-user-keep.toml"
+        user_agent.write_text(
+            "---\nname: gpd-user-keep\ndescription: User owned\n---\nKeep me.\n",
+            encoding="utf-8",
+        )
+        user_role.write_text('developer_instructions = "keep me"\n', encoding="utf-8")
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert user_agent.read_text(encoding="utf-8").endswith("Keep me.\n")
+        assert user_role.read_text(encoding="utf-8") == 'developer_instructions = "keep me"\n'
+        parsed = tomllib.loads((target / "config.toml").read_text(encoding="utf-8"))
+        assert "gpd-user-keep" not in parsed.get("agents", {})
+
+    def test_install_refuses_to_overwrite_untracked_user_owned_planned_gpd_agent(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        agents = target / "agents"
+        agents.mkdir(parents=True)
+        user_agent = agents / "gpd-verifier.md"
+        user_role = agents / "gpd-verifier.toml"
+        user_agent.write_text("user-owned verifier\n", encoding="utf-8")
+        user_role.write_text('developer_instructions = "user owned"\n', encoding="utf-8")
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        with pytest.raises(RuntimeError, match="existing unowned agent path"):
+            adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert user_agent.read_text(encoding="utf-8") == "user-owned verifier\n"
+        assert user_role.read_text(encoding="utf-8") == 'developer_instructions = "user owned"\n'
+        assert not (target / "gpd-file-manifest.json").exists()
+        assert not (target / "get-physics-done").exists()
+        assert not any(skills.glob("gpd-*"))
+
+    def test_reinstall_removes_marker_backed_stale_gpd_agent_files(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+        stale_agent = target / "agents" / "gpd-stale.md"
+        stale_role = target / "agents" / "gpd-stale.toml"
+        stale_agent.write_text("<!-- Managed by Get Physics Done (GPD). -->\nstale\n", encoding="utf-8")
+        stale_role.write_text(
+            '# Managed by Get Physics Done (GPD).\ndeveloper_instructions = "stale"\n', encoding="utf-8"
+        )
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+
+        assert not stale_agent.exists()
+        assert not stale_role.exists()
 
     def test_install_returns_counts(self, adapter: CodexAdapter, gpd_root: Path, tmp_path: Path) -> None:
         target = tmp_path / ".codex"
@@ -1183,7 +1685,7 @@ description: Nested command include expansion regression
                 "use ask_user with current values pre-selected:\n\n"
                 "```\n"
                 "ask_user([\n"
-                "  {\"question\": \"How much autonomy should the AI have?\"}\n"
+                '  {"question": "How much autonomy should the AI have?"}\n'
                 "])\n"
                 "```\n",
                 "plain_text_prompt([",
@@ -1310,8 +1812,7 @@ class TestUninstall:
         adapter.uninstall(target)
 
         assert not original_shared_skills.exists() or not any(
-            entry.is_dir() and entry.name.startswith("gpd-")
-            for entry in original_shared_skills.iterdir()
+            entry.is_dir() and entry.name.startswith("gpd-") for entry in original_shared_skills.iterdir()
         )
         assert (preserved_skill / "SKILL.md").exists()
 
@@ -1334,7 +1835,9 @@ class TestUninstall:
         adapter.uninstall(target)
         local_skills = tmp_path / ".agents" / "skills"
 
-        assert not local_skills.exists() or not any(d.name.startswith("gpd-") for d in local_skills.iterdir() if d.is_dir())
+        assert not local_skills.exists() or not any(
+            d.name.startswith("gpd-") for d in local_skills.iterdir() if d.is_dir()
+        )
         assert (shared_skills / "custom-keep" / "SKILL.md").exists()
 
     def test_uninstall_removes_skills(self, adapter: CodexAdapter, gpd_root: Path, tmp_path: Path) -> None:
@@ -1346,7 +1849,9 @@ class TestUninstall:
 
         result = adapter.uninstall(target, skills_dir=skills)
 
-        gpd_skills = [d for d in skills.iterdir() if d.is_dir() and d.name.startswith("gpd-")] if skills.exists() else []
+        gpd_skills = (
+            [d for d in skills.iterdir() if d.is_dir() and d.name.startswith("gpd-")] if skills.exists() else []
+        )
         assert len(gpd_skills) == 0
         assert any("skills" in item for item in result["removed"])
 
@@ -1373,6 +1878,55 @@ class TestUninstall:
         assert (preserved_skill / "SKILL.md").exists()
         assert "gpd-user-keep" not in tracked_skill_names
 
+    def test_uninstall_preserves_untracked_user_owned_gpd_agent_files(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+        user_agent = target / "agents" / "gpd-user-keep.md"
+        user_role = target / "agents" / "gpd-user-keep.toml"
+        user_agent.write_text(
+            "---\nname: gpd-user-keep\ndescription: User owned\n---\nKeep me.\n",
+            encoding="utf-8",
+        )
+        user_role.write_text('developer_instructions = "keep me"\n', encoding="utf-8")
+
+        adapter.uninstall(target, skills_dir=skills)
+
+        assert user_agent.read_text(encoding="utf-8").endswith("Keep me.\n")
+        assert user_role.read_text(encoding="utf-8") == 'developer_instructions = "keep me"\n'
+
+    def test_uninstall_removes_marker_backed_gpd_agent_files(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+        marker_agent = target / "agents" / "gpd-marker.md"
+        marker_role = target / "agents" / "gpd-marker.toml"
+        marker_agent.write_text("<!-- Managed by Get Physics Done (GPD). -->\nremove\n", encoding="utf-8")
+        marker_role.write_text(
+            '# Managed by Get Physics Done (GPD).\ndeveloper_instructions = "remove"\n', encoding="utf-8"
+        )
+
+        adapter.uninstall(target, skills_dir=skills)
+
+        assert not marker_agent.exists()
+        assert not marker_role.exists()
+
     def test_install_completeness_and_uninstall_fallback_to_live_skill_surface_when_manifest_drifts(
         self,
         adapter: CodexAdapter,
@@ -1396,6 +1950,27 @@ class TestUninstall:
         adapter.uninstall(target, skills_dir=skills)
 
         assert all(not (skills / name).exists() for name in tracked_skill_names)
+
+    def test_install_completeness_requires_skill_md_in_each_tracked_skill_dir(
+        self,
+        adapter: CodexAdapter,
+        gpd_root: Path,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.install(gpd_root, target, skills_dir=skills)
+        manifest = json.loads((target / "gpd-file-manifest.json").read_text(encoding="utf-8"))
+        missing_skill_name = manifest["codex_generated_skill_dirs"][0]
+        (skills / missing_skill_name / "SKILL.md").unlink()
+
+        missing = adapter.missing_install_artifacts(target)
+
+        assert adapter.has_complete_install(target) is False
+        assert any(item.startswith("codex generated skills surface") for item in missing)
 
     def test_missing_install_artifacts_does_not_use_packaged_source_skill_fallback(
         self,
@@ -1425,7 +2000,9 @@ class TestUninstall:
         )
 
         assert _tracked_codex_generated_skill_dirs(target, skills_dir=skills) == ()
-        assert str(skills) in adapter.missing_install_artifacts(target)
+        missing = adapter.missing_install_artifacts(target)
+        assert str(skills) not in missing
+        assert any(item.startswith("codex generated skills surface") for item in missing)
         assert adapter.has_complete_install(target) is False
 
     def test_missing_codex_skills_dir_metadata_does_not_fall_back_to_generic_manifest_skills_dir(
@@ -1452,7 +2029,9 @@ class TestUninstall:
         missing = adapter.missing_install_artifacts(target)
         expected_local_skills = target.parent / ".agents" / "skills"
         assert str(skills) not in missing
-        assert str(expected_local_skills) in missing
+        assert str(expected_local_skills) not in missing
+        assert any(str(expected_local_skills) in item for item in missing)
+        assert any(item.startswith("codex generated skills surface") for item in missing)
         assert str(env_skills) not in missing
 
         adapter.uninstall(target)
@@ -1556,11 +2135,11 @@ class TestUninstall:
         skills = tmp_path / "skills"
         skills.mkdir()
         (target / "config.toml").write_text(
-            '[mcp_servers.gpd-wolfram]\n'
+            "[mcp_servers.gpd-wolfram]\n"
             'command = "python3"\n'
             'args = ["-m", "legacy.wolfram"]\n'
-            '\n'
-            '[mcp_servers.custom-server]\n'
+            "\n"
+            "[mcp_servers.custom-server]\n"
             'command = "node"\n'
             'args = ["custom.js"]\n',
             encoding="utf-8",
@@ -1591,7 +2170,7 @@ class TestUninstall:
         hook_python = hook_python_interpreter().replace("\\", "\\\\")
         config_toml.write_text(
             'model = "gpt-4"\n'
-            '# My notes about gpd-style naming\n'
+            "# My notes about gpd-style naming\n"
             'custom = "my-gpd-tool"\n'
             f'notify = ["{hook_python}", "/path/notify.py"]\n',
             encoding="utf-8",
@@ -1612,9 +2191,7 @@ class TestUninstall:
         target = tmp_path / ".codex"
         target.mkdir()
         (target / "config.toml").write_text(
-            '[agents.reviewer]\n'
-            'description = "Code reviewer"\n'
-            'config_file = "agents/reviewer.toml"\n',
+            '[agents.reviewer]\ndescription = "Code reviewer"\nconfig_file = "agents/reviewer.toml"\n',
             encoding="utf-8",
         )
         skills = tmp_path / "skills"
@@ -1635,10 +2212,7 @@ class TestUninstall:
         config_toml = target / "config.toml"
         hook_python = hook_python_interpreter().replace("\\", "\\\\")
         config_toml.write_text(
-            'model = "gpt-4"\n'
-            "\n"
-            "# GPD update notification\n"
-            f'notify = ["{hook_python}", "/path/notify.py"]\n',
+            f'model = "gpt-4"\n\n# GPD update notification\nnotify = ["{hook_python}", "/path/notify.py"]\n',
             encoding="utf-8",
         )
         skills = tmp_path / "skills"
@@ -1651,20 +2225,72 @@ class TestUninstall:
 
 
 class TestNotifyConfiguration:
+    def test_uninstall_preserves_section_scoped_notify_when_removing_top_level_gpd_notify(
+        self,
+        adapter: CodexAdapter,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        config_toml = target / "config.toml"
+        config_toml.write_text(
+            "# GPD update notification\n"
+            'notify = ["python3", ".codex/hooks/notify.py"]\n'
+            "\n"
+            "[profiles.test]\n"
+            'notify = ["python3", ".codex/hooks/notify.py"]\n',
+            encoding="utf-8",
+        )
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.uninstall(target, skills_dir=skills)
+
+        content = config_toml.read_text(encoding="utf-8")
+        parsed = tomllib.loads(content)
+        assert "notify" not in parsed
+        assert parsed["profiles"]["test"]["notify"] == ["python3", ".codex/hooks/notify.py"]
+        assert "GPD update notification" not in content
+
+    def test_uninstall_preserves_array_table_scoped_notify_when_removing_top_level_gpd_notify(
+        self,
+        adapter: CodexAdapter,
+        tmp_path: Path,
+    ) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        config_toml = target / "config.toml"
+        config_toml.write_text(
+            "# GPD update notification\n"
+            'notify = ["python3", ".codex/hooks/notify.py"]\n'
+            "\n"
+            "[[profiles]]\n"
+            'name = "test"\n'
+            'notify = ["python3", ".codex/hooks/notify.py"]\n',
+            encoding="utf-8",
+        )
+        skills = tmp_path / "skills"
+        skills.mkdir()
+
+        adapter.uninstall(target, skills_dir=skills)
+
+        content = config_toml.read_text(encoding="utf-8")
+        parsed = tomllib.loads(content)
+        assert "notify" not in parsed
+        assert parsed["profiles"][0]["notify"] == ["python3", ".codex/hooks/notify.py"]
+        assert "GPD update notification" not in content
+
     def test_wraps_existing_notify_and_restores_it_on_uninstall(
         self,
         adapter: CodexAdapter,
         tmp_path: Path,
     ) -> None:
-        from gpd.adapters.codex import _configure_config_toml
-
         target = tmp_path / ".codex"
         target.mkdir()
         (target / "hooks").mkdir()
         config_toml = target / "config.toml"
         config_toml.write_text(
-            'model = "gpt-5"\n'
-            'notify = ["toolctl", "/path/to/my-tool"]\n',
+            'model = "gpt-5"\nnotify = ["toolctl", "/path/to/my-tool"]\n',
             encoding="utf-8",
         )
 
@@ -1687,13 +2313,29 @@ class TestNotifyConfiguration:
         assert "notify.py" not in cleaned
         assert "GPD original notify" not in cleaned
 
+    def test_notify_reinstall_preserves_original_backup_for_uninstall(self, tmp_path: Path) -> None:
+        target = tmp_path / ".codex"
+        target.mkdir()
+        config_toml = target / "config.toml"
+        config_toml.write_text('notify = ["toolctl", "/path/to/my-tool"]\n', encoding="utf-8")
+
+        _configure_config_toml(target, is_global=False)
+        _configure_config_toml(target, is_global=False)
+
+        reinstalled = config_toml.read_text(encoding="utf-8")
+        assert reinstalled.count("# GPD original notify:") == 1
+        assert '# GPD original notify: ["toolctl", "/path/to/my-tool"]' in reinstalled
+        assert "gpd-codex-notify-wrapper-v1" in reinstalled
+
+        cleaned = _remove_gpd_notify_config(reinstalled, target_dir=target)
+        assert 'notify = ["toolctl", "/path/to/my-tool"]' in cleaned
+        assert "gpd-codex-notify-wrapper-v1" not in cleaned
+
     def test_wraps_custom_notify_py_and_restores_it_on_uninstall(
         self,
         adapter: CodexAdapter,
         tmp_path: Path,
     ) -> None:
-        from gpd.adapters.codex import _configure_config_toml
-
         target = tmp_path / ".codex"
         target.mkdir()
         (target / "hooks").mkdir()
@@ -1748,13 +2390,13 @@ class TestNotifyConfiguration:
         target = tmp_path / ".codex"
         target.mkdir()
         (target / "config.toml").write_text(
-            '[mcp_servers.gpd-state]\n'
+            "[mcp_servers.gpd-state]\n"
             'command = "python3"\n'
             'args = ["-m", "old.server"]\n'
-            'startup_timeout_sec = 45\n'
+            "startup_timeout_sec = 45\n"
             'cwd = "/tmp/custom-gpd"\n'
-            '\n'
-            '[mcp_servers.gpd-state.env]\n'
+            "\n"
+            "[mcp_servers.gpd-state.env]\n"
             'LOG_LEVEL = "INFO"\n'
             'EXTRA_FLAG = "1"\n',
             encoding="utf-8",
@@ -1785,15 +2427,12 @@ class TestNotifyConfiguration:
         adapter: CodexAdapter,
         tmp_path: Path,
     ) -> None:
-        from gpd.adapters.codex import _configure_config_toml
-
         target = tmp_path / ".codex"
         target.mkdir()
         (target / "hooks").mkdir()
         config_toml = target / "config.toml"
         config_toml.write_text(
-            '[features]\n'
-            'multi_agent = false\n',
+            "[features]\nmulti_agent = false\n",
             encoding="utf-8",
         )
 

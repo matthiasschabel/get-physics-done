@@ -5,21 +5,33 @@
     {
       "id": "scope_intake",
       "order": 1,
-      "purpose": "startup routing, scoping intake, and first-question capture",
+      "purpose": "startup routing, lean scoping intake, and continuation detection",
       "mode_paths": [
         "workflows/new-project.md"
       ],
       "required_init_fields": [
         "researcher_model",
         "synthesizer_model",
-        "roadmapper_model",
         "commit_docs",
         "autonomy",
         "research_mode",
         "project_exists",
+        "state_exists",
+        "roadmap_exists",
+        "recoverable_project_exists",
+        "partial_project_exists",
+        "project_recovery_status",
+        "init_progress_exists",
+        "init_progress_status",
+        "init_progress_valid",
+        "init_progress_corrupt",
+        "init_progress_step",
+        "init_progress_description",
+        "init_progress_path",
         "has_research_map",
         "planning_exists",
         "has_research_files",
+        "research_file_samples",
         "has_project_manifest",
         "needs_research_map",
         "has_git",
@@ -43,6 +55,7 @@
       "must_not_eager_load": [
         "references/research/questioning.md",
         "references/ui/ui-brand.md",
+        "references/shared/canonical-schema-discipline.md",
         "templates/project.md",
         "templates/requirements.md",
         "templates/project-contract-grounding-linkage.md",
@@ -66,7 +79,7 @@
       "checkpoints": [
         "detect existing workspace state",
         "surface the first scoping question",
-        "preserve contract gate visibility"
+        "preserve contract gate visibility without assuming approval-stage authority"
       ]
     },
     {
@@ -92,7 +105,8 @@
         "references/research/questioning.md",
         "references/ui/ui-brand.md",
         "templates/project.md",
-        "templates/requirements.md"
+        "templates/requirements.md",
+        "templates/state.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -102,7 +116,10 @@
         "ask_user"
       ],
       "writes_allowed": [
-        "GPD/state.json"
+        "GPD/state.json",
+        "GPD/STATE.md",
+        "GPD/state.json.bak",
+        "GPD/state.json.lock"
       ],
       "produced_state": [
         "approved project contract",
@@ -119,7 +136,7 @@
     {
       "id": "post_scope",
       "order": 3,
-      "purpose": "deferred downstream project writing and late-stage orchestration",
+      "purpose": "deferred downstream project writing, staged roadmapping, and conventions continuation",
       "mode_paths": [
         "workflows/new-project.md"
       ],
@@ -138,7 +155,8 @@
       "loaded_authorities": [
         "references/ui/ui-brand.md",
         "templates/project.md",
-        "templates/requirements.md"
+        "templates/requirements.md",
+        "templates/state.md"
       ],
       "conditional_authorities": [],
       "must_not_eager_load": [],
@@ -155,13 +173,16 @@
         "GPD/ROADMAP.md",
         "GPD/STATE.md",
         "GPD/state.json",
+        "GPD/state.json.bak",
+        "GPD/state.json.lock",
         "GPD/config.json",
         "GPD/CONVENTIONS.md",
-        "GPD/research/PRIOR-WORK.md",
-        "GPD/research/METHODS.md",
-        "GPD/research/COMPUTATIONAL.md",
-        "GPD/research/PITFALLS.md",
-        "GPD/research/SUMMARY.md"
+        "GPD/init-progress.json",
+        "GPD/literature/PRIOR-WORK.md",
+        "GPD/literature/METHODS.md",
+        "GPD/literature/COMPUTATIONAL.md",
+        "GPD/literature/PITFALLS.md",
+        "GPD/literature/SUMMARY.md"
       ],
       "produced_state": [
         "project artifacts",

@@ -9,6 +9,7 @@ import os
 import re
 import tempfile
 import time
+import unicodedata
 from collections.abc import Hashable, Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -39,7 +40,11 @@ __all__ = [
     "compare_phase_numbers",
     "dedupe_preserve_order",
     "file_lock",
+    "format_plan_duration",
+    "format_plan_label",
     "generate_slug",
+    "is_canonical_plan_label",
+    "normalize_ascii_slug",
     "is_phase_complete",
     "matching_phase_artifact_count",
     "phase_normalize",
@@ -79,6 +84,81 @@ def phase_normalize(name: str) -> str:
         except ValueError:
             normalized.append(part)
     return ".".join(normalized) + suffix
+
+
+def format_plan_label(phase: str | None, plan: str | None) -> str | None:
+    """Canonical rendering of the ``Phase NN PNN-KK`` metrics label.
+
+    Accepts the many shapes callers pass from executor returns:
+
+    - ``phase="01"``, ``plan="01-03"`` → ``"Phase 01 P01-03"``
+    - ``phase="1"``,  ``plan="03"``   → ``"Phase 01 P01-03"``
+    - ``phase="1"``,  ``plan="1-3"``  → ``"Phase 01 P01-03"``
+
+    Returns ``None`` when inputs cannot be normalized into a ``PNN-KK`` plan
+    token, so callers can reject malformed rows at write time.
+    """
+    if phase is None or plan is None:
+        return None
+    phase_str = str(phase).strip()
+    plan_str = str(plan).strip()
+    if not phase_str or not plan_str:
+        return None
+    phase_norm = phase_normalize(phase_str)
+
+    # Plan may be a bare index ("03"), a composite ("01-03" / "1-3"), or already
+    # prefixed ("P01-03").
+    if plan_str.lower().startswith("p"):
+        plan_str = plan_str[1:]
+    match = re.match(r"^(\d+)-(\d+)$", plan_str)
+    if match:
+        plan_phase = phase_normalize(match.group(1))
+        plan_index = str(int(match.group(2))).zfill(2)
+        if plan_phase != phase_norm:
+            return None
+        return f"Phase {phase_norm} P{plan_phase}-{plan_index}"
+    if plan_str.isdigit():
+        plan_index = str(int(plan_str)).zfill(2)
+        return f"Phase {phase_norm} P{phase_norm}-{plan_index}"
+    return None
+
+
+_PLAN_LABEL_RE = re.compile(r"^Phase\s+(\d+(?:\.\d+)*)\s+P(\d+(?:\.\d+)*)-(\d+)$")
+
+
+def is_canonical_plan_label(label: str) -> bool:
+    """Whether *label* matches the canonical ``Phase NN PNN-KK`` format."""
+    return bool(_PLAN_LABEL_RE.match(label.strip())) if label else False
+
+
+def format_plan_duration(value: object) -> str:
+    """Render an executor-supplied duration with a sub-second floor.
+
+    Accepts raw integers, floats, "12s", "1.5s", or already-formatted "12m30s".
+    Sub-second work is rendered ``"<1s"`` instead of ``"0s"`` so the dashboard
+    is honest about completed-but-brief plans.
+    """
+    if value is None:
+        return "-"
+    text = str(value).strip()
+    if not text:
+        return "-"
+    # Raw int/float seconds.
+    try:
+        seconds = float(text)
+    except ValueError:
+        seconds = None
+    if seconds is None:
+        m = re.match(r"^(\d+(?:\.\d+)?)s$", text)
+        if m:
+            seconds = float(m.group(1))
+    if seconds is None:
+        return text
+    if seconds < 0:
+        return "-"
+    if seconds < 1:
+        return "<1s"
+    return f"{int(round(seconds))}s"
 
 
 def phase_unpad(name: str) -> str:
@@ -180,10 +260,22 @@ def generate_slug(text: str) -> str | None:
 
     "Hello World!" -> "hello-world", "" -> None.
     """
-    if not text:
+    return normalize_ascii_slug(text)
+
+
+def normalize_ascii_slug(value: object) -> str | None:
+    """Generate a lowercase ASCII slug from arbitrary text.
+
+    Unicode input is normalized, stripped to ASCII, and collapsed to
+    hyphen-separated tokens. Empty output returns ``None``.
+    """
+    if value is None:
         return None
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower())
-    return slug.strip("-") or None
+    normalized = unicodedata.normalize("NFKD", str(value).strip().casefold())
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_text)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug or None
 
 
 def dedupe_preserve_order(values: Iterable[_HashableT]) -> list[_HashableT]:
@@ -279,6 +371,28 @@ def safe_read_file_truncated(path: Path, max_chars: int | None = None) -> str | 
     return content[:limit] + f"\n\n...truncated ({len(content)} chars total, showing first {limit})."
 
 
+def _replace_with_retry(
+    src: str | Path,
+    dst: str | Path,
+    *,
+    max_attempts: int = 5,
+) -> None:
+    """Perform ``os.replace(src, dst)`` with retry for Dropbox/sync delays.
+
+    On Windows, cloud-sync tools (Dropbox, OneDrive) may hold a brief lock on
+    the destination file.  Retrying with exponential back-off (100-1600 ms)
+    avoids transient ``PermissionError`` without masking real failures.
+    """
+    for attempt in range(max_attempts):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == max_attempts - 1:
+                raise
+            time.sleep(0.1 * (2 ** attempt))  # 100, 200, 400, 800, 1600 ms
+
+
 def atomic_write(filepath: Path, content: str) -> None:
     """Write a file atomically via temp file + fsync + rename.
 
@@ -296,7 +410,7 @@ def atomic_write(filepath: Path, content: str) -> None:
         os.fsync(fd.fileno())
         fd.close()
         fd = None
-        os.replace(tmp_path, filepath)
+        _replace_with_retry(tmp_path, filepath)
         tmp_path = None
     finally:
         if fd is not None:
@@ -350,6 +464,10 @@ def file_lock(path: Path, timeout: float = 5.0) -> Iterator[None]:
     Usage:
         with file_lock(some_path):
             # exclusive access to some_path
+
+    The sidecar lockfile is intentionally durable.  Unlinking it on release can
+    let a racing process recreate and lock a different inode while another
+    waiter still holds an open descriptor to the original lockfile.
     """
     lock_path = path.with_suffix(path.suffix + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
@@ -373,7 +491,3 @@ def file_lock(path: Path, timeout: float = 5.0) -> Iterator[None]:
             except OSError:
                 pass
             lock_fd.close()
-            try:
-                lock_path.unlink(missing_ok=True)
-            except OSError:
-                pass

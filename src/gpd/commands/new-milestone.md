@@ -1,6 +1,6 @@
 ---
 name: gpd:new-milestone
-description: Start a new research milestone cycle — update PROJECT.md and route to requirements
+description: Start a new research milestone cycle — staged init, requirements, and roadmap
 argument-hint: "[milestone name, e.g., 'v1.1 Finite-Temperature Extension']"
 context_mode: project-required
 allowed-tools:
@@ -13,19 +13,19 @@ allowed-tools:
 
 
 <objective>
-Start a new research milestone: questioning → literature research (optional) → requirements → roadmap.
+Start a new research milestone: questioning -> literature research (optional) -> requirements -> staged roadmap handoff.
 
 Continuation equivalent of new-project. Research project exists, PROJECT.md has history. Gathers "what's next", updates PROJECT.md, then runs requirements → roadmap cycle while honoring `planning.commit_docs` for milestone artifact commits.
 
 **Creates/Updates:**
 
 - `GPD/PROJECT.md` — updated with new milestone goals
-- `GPD/research/` — domain and literature research (optional, NEW research objectives only)
+- `GPD/literature/` — domain and literature survey (optional, NEW research objectives only)
 - `GPD/REQUIREMENTS.md` — scoped requirements for this milestone
 - `GPD/ROADMAP.md` — phase structure (continues numbering)
 - `GPD/STATE.md` — reset for new milestone
 
-**After:** `gpd:plan-phase [N]` to start execution.
+**After:** `gpd:discuss-phase [N]` to clarify the first new phase before planning. Use `gpd:plan-phase [N]` only when the phase context is already clear.
 </objective>
 
 <execution_context>
@@ -46,7 +46,8 @@ Milestone name: $ARGUMENTS (optional - will prompt if not provided)
 </context>
 
 <process>
-**Follow the new-milestone workflow** from `@{GPD_INSTALL_DIR}/workflows/new-milestone.md`.
+**Follow the included new-milestone workflow.**
+Use the workflow's staged init: bootstrap context first, then a fresh late-stage init before roadmapping. The roadmapper handoff must prove freshness with a typed return and `files_written`.
 
 Load late-stage authorities only when the workflow reaches the matching stage:
 - Read {GPD_INSTALL_DIR}/references/research/questioning.md only when you need guided milestone questioning.
@@ -64,18 +65,7 @@ Load late-stage authorities only when the workflow reaches the matching stage:
 
 <success_criteria>
 
-- [ ] PROJECT.md updated with Current Milestone section
-- [ ] STATE.md reset for new milestone
-- [ ] MILESTONE-CONTEXT.md consumed and deleted (if existed)
-- [ ] Literature survey completed (if selected) — 4 parallel agents, milestone-aware
-- [ ] Research requirements gathered and scoped per category
-- [ ] REQUIREMENTS.md created with REQ-IDs
-- [ ] gpd-roadmapper spawned with phase numbering context
-- [ ] Roadmap files written immediately (not draft)
-- [ ] User feedback incorporated (if any)
-- [ ] ROADMAP.md phases continue from previous milestone
-- [ ] All commits made when `planning.commit_docs` is true
-- [ ] User knows next step: `gpd:discuss-phase [N]`
-
-**Atomic commits:** Each phase commits its artifacts immediately.
+- [ ] New-milestone workflow executed as the authority for staged milestone mechanics
+- [ ] Late-stage authorities loaded only at their workflow-owned stages
+- [ ] `planning.commit_docs` and next-step routing preserved by the workflow contract
 </success_criteria>

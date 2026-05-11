@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from gpd.contracts import ConventionLock
 from gpd.core.conventions import (
@@ -17,6 +18,7 @@ from gpd.core.conventions import (
     convention_check,
     convention_diff,
     convention_list,
+    convention_lock_from_state_payload,
     convention_set,
     is_bogus_value,
     normalize_key,
@@ -27,6 +29,19 @@ from gpd.core.conventions import (
     validate_assertions,
 )
 from gpd.core.errors import ConventionError
+
+
+def test_convention_lock_rejects_unknown_top_level_fields() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        ConventionLock.model_validate({"metric_signature": "mostly-plus", "legacy_metric": "mostly-minus"})
+
+
+def test_convention_lock_from_state_payload_fails_closed_on_unknown_fields() -> None:
+    with pytest.raises(ConventionError, match="Malformed state.json.convention_lock"):
+        convention_lock_from_state_payload(
+            {"convention_lock": {"metric_signature": "mostly-plus", "legacy_metric": "mostly-minus"}},
+            source_label="state.json",
+        )
 
 # ─── normalize_key ────────────────────────────────────────────────────────────
 
@@ -69,6 +84,7 @@ def test_bogus_values():
     assert is_bogus_value("null") is True
     assert is_bogus_value("undefined") is True
     assert is_bogus_value("none") is True
+    assert is_bogus_value("not set") is True
     assert is_bogus_value("  None  ") is True
 
 
@@ -141,6 +157,14 @@ def test_convention_set_force_overwrite():
     assert lock.metric_signature == "mostly-minus"
 
 
+def test_convention_set_overwrites_placeholder_without_force():
+    lock = ConventionLock(metric_signature="not set")
+    result = convention_set(lock, "metric_signature", "mostly-plus")
+    assert result.updated is True
+    assert result.previous == "not set"
+    assert lock.metric_signature == "mostly-plus"
+
+
 def test_convention_set_custom():
     lock = ConventionLock()
     result = convention_set(lock, "my_custom_convention", "some-value")
@@ -169,6 +193,16 @@ def test_convention_list_with_values():
     assert isinstance(entry, ConventionEntry)
     assert entry.is_set is True
     assert entry.value == "mostly-plus"
+
+
+def test_convention_list_treats_placeholder_as_unset():
+    lock = ConventionLock(metric_signature="not set")
+    result = convention_list(lock)
+    entry = result.conventions["metric_signature"]
+    assert result.set_count == 0
+    assert result.unset_count == len(KNOWN_CONVENTIONS)
+    assert entry.is_set is False
+    assert entry.value == "not set"
 
 
 # ─── convention_diff ─────────────────────────────────────────────────────────
@@ -227,6 +261,16 @@ def test_convention_check_with_custom():
     lock.custom_conventions["my_custom"] = "value"
     result = convention_check(lock)
     assert result.custom_count == 1
+
+
+def test_convention_check_treats_placeholder_as_missing():
+    lock = ConventionLock(metric_signature="not set")
+    result = convention_check(lock)
+    assert result.complete is False
+    assert result.set_count == 0
+    assert result.missing_count == len(KNOWN_CONVENTIONS)
+    assert all(entry.key != "metric_signature" for entry in result.set_conventions)
+    assert any(entry.key == "metric_signature" for entry in result.missing)
 
 
 # ─── parse_assert_conventions ────────────────────────────────────────────────

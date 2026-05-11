@@ -3,6 +3,8 @@ Verify research phase goal achievement through decisive verification. Check that
 
 Executed by a verification subagent spawned from execute-phase.md.
 
+`verify-phase` is the canonical owner of the verifier/proof child-return contract and artifact-gate seam for phase verification. Shared handoff mechanics live in `references/verification/core/verification-child-return-contract.md`, while report-schema and proof-audit authority stay local to this workflow.
+
 The standalone `gpd:verify-work` workflow reuses the same verification criteria through `verify-work.md`; this file itself is executed by the execute-phase orchestrator.
 </purpose>
 
@@ -36,12 +38,14 @@ For most research targets that means actual computation. For proof-bearing or `p
 </core_principle>
 
 <required_reading>
-@{GPD_INSTALL_DIR}/references/verification/core/verification-core.md
-@{GPD_INSTALL_DIR}/references/verification/core/verification-numerical.md
-@{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md
-@{GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md
-@{GPD_INSTALL_DIR}/templates/verification-report.md
-@{GPD_INSTALL_DIR}/templates/contract-results-schema.md
+Do not raw-include the verification reference library at workflow load. Load only at the consuming step:
+
+- `{GPD_INSTALL_DIR}/references/verification/core/verification-core.md` -> universal decisive-check rules in `verify_contract_targets`
+- `{GPD_INSTALL_DIR}/references/verification/core/verification-numerical.md` -> numerical/statistical checks in `physics_specific_verification`
+- `{GPD_INSTALL_DIR}/references/verification/core/verification-child-return-contract.md` -> verifier return envelope routing
+- `{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md` -> context include/exclude choices
+- `{GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md` -> uncertainty or propagation targets
+- `{GPD_INSTALL_DIR}/templates/verification-report.md` and `{GPD_INSTALL_DIR}/templates/contract-results-schema.md` -> immediately before writing `VERIFICATION.md`
 </required_reading>
 
 <process>
@@ -79,10 +83,10 @@ grep -E "^| ${phase_number}" GPD/REQUIREMENTS.md 2>/dev/null
 
 Extract **phase goal** from ROADMAP.md (the research outcome to verify, not tasks) and **requirements** from REQUIREMENTS.md if it exists.
 
-**Verification independence:** Load only what the verifier needs to judge results on their own merits. See @{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md.
+**Verification independence:** Load only what the verifier needs to judge results on their own merits. See {GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md.
 
 If `derived_manuscript_proof_review_status` is present, use it as the structured freshness summary for any manuscript-local proof-bearing artifact and keep the corresponding `*-PROOF-REDTEAM.md` artifact authoritative for pass/fail decisions.
-If `project_contract_gate.visible` is true, keep `project_contract`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, and `protocol_bundle_context` in the verifier context even when `project_contract_gate.authoritative` is false. They remain visible carry-forward context, not authoritative scope, until the gate clears.
+If `project_contract_gate.visible` is true, keep `project_contract`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, and `protocol_bundle_context` in the verifier context even when `project_contract_gate.authoritative` is false. They remain visible carry-forward context, not authoritative scope, until the gate clears. Stable knowledge docs that surface through this context are reviewed background synthesis only: they may guide check selection and interpretation, but they do not override the contract, the gate, or decisive evidence.
 
 **INCLUDE in verification context:**
 
@@ -154,24 +158,55 @@ If the phase includes a theorem-style claim or `proof_obligation` and no structu
 <step name="proof_obligation_gate">
 Detect whether any verification target is proof-bearing.
 
-Treat a target as proof-bearing when:
+Use the shared verification child-return contract for the generic handoff mechanics; keep the proof-redteam requirements below authoritative.
 
-- the contract includes an observable or claim with kind `proof_obligation`
-- a claim, deliverable, or acceptance test is theorem-style (`theorem`, `lemma`, `corollary`, `proposition`, `claim`, `proof`, `prove`, `show that`)
-- the result is a formal derivation whose truth depends on all named hypotheses, parameters, or quantifiers being used correctly
+Load `{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md` now if any target is proof-bearing.
 
-If ambiguous, default to proof-bearing.
-
-For each proof-bearing plan or claim, require the sibling `*-PROOF-REDTEAM.md` artifact. Read it and verify that it contains:
-
-1. the theorem or claim text being audited
-2. the inventory of named parameters, hypotheses, quantifier/domain obligations, and conclusion clauses
-3. explicit coverage notes showing where each obligation is used in the proof
-4. at least one adversarial special-case or counterexample probe
-5. canonical `status: passed | gaps_found | human_needed`
+For each proof-bearing plan or claim, require the sibling `*-PROOF-REDTEAM.md` artifact. Read it and verify that it follows the shared gate above.
 
 Missing artifact, missing theorem inventory, or `status != passed` is a blocking gap. Do not allow the phase verification report to finish at `status: passed` while any required proof-redteam artifact is missing or open.
 When runtime delegation is available and a required audit is missing, malformed, or stale, spawn `gpd-check-proof` once to repair that gap before finalizing the verdict. If the proof critic cannot produce a passed audit, keep the target blocked rather than inferring theorem-proof alignment from the main verifier context.
+</step>
+
+<step name="proof_redteam_repair">
+When the proof-obligation gate finds a missing, stale, malformed, or non-passing proof-redteam artifact, resolve the proof-critic model and spawn a fresh repair handoff once.
+
+```bash
+CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)
+```
+
+> Runtime delegation rule: this is a single-turn handoff. Follow the shared verification child-return contract: if the spawned agent needs user input, it must checkpoint and return; do not keep the original run waiting inside the same task. Never trust the return text alone.
+
+```
+task(
+  subagent_type="gpd-check-proof",
+  model="{check_proof_model}",
+  readonly=false,
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions.
+Then read {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md before writing any proof audit artifact.
+
+Operate in proof-redteam repair mode with a fresh context and follow the shared verification child-return contract.
+
+Write to:
+- `${phase_dir}/${phase_number}-PROOF-REDTEAM.md`
+
+<spawn_contract>
+write_scope:
+  mode: scoped_write
+  allowed_paths:
+    - ${phase_dir}/${phase_number}-PROOF-REDTEAM.md
+expected_artifacts:
+  - ${phase_dir}/${phase_number}-PROOF-REDTEAM.md
+shared_state_policy: return_only
+</spawn_contract>
+
+Read the proof-bearing plan or claim artifacts, the relevant PLAN contract slice, and any current verification artifact before repairing the audit.
+Return through the typed proof-redteam handoff contract.",
+  description="Repair proof redteam artifact for phase {phase_number}"
+)
+```
+
+After the repair run returns, re-open `${phase_dir}/${phase_number}-PROOF-REDTEAM.md` from disk and confirm the artifact exists and reports `status: passed` before continuing. If the artifact is still missing, stale, malformed, or not passed, keep the phase blocked.
 </step>
 
 <step name="batch_verification_triage">
@@ -476,7 +511,7 @@ A requirement is SATISFIED only if the supporting user-visible claims / delivera
 2. **Verify conservation laws** numerically by computing conserved quantities at multiple time steps
 3. **Check numerical results against analytical limiting cases** by evaluating at parameter values where analytical results are known
 4. **Spot-check output values** against independently computed test cases
-5. Reference: @{GPD_INSTALL_DIR}/workflows/numerical-convergence.md for detailed methodology
+5. Reference: {GPD_INSTALL_DIR}/workflows/numerical-convergence.md for detailed methodology
 
 For each numerical result, record:
 
@@ -522,7 +557,7 @@ If both summaries exist, check for cross-phase consistency by reading:
 2. **Previous summary artifact** — "Approximations Used" table and "Key Results" / "Equations Derived"
 3. **STATE.md** — "Active Approximations" table and "Convention Lock"
 
-Reference: @{GPD_INSTALL_DIR}/references/verification/core/verification-core.md (+ relevant domain verification file)
+Reference: {GPD_INSTALL_DIR}/references/verification/core/verification-core.md (+ relevant domain verification file)
 
 **Check the four most common cross-phase errors:**
 
@@ -588,7 +623,7 @@ See {GPD_INSTALL_DIR}/templates/verification-report.md for complete template.
 </step>
 
 <step name="oracle_gate_check">
-**Before returning, verify that VERIFICATION.md contains at least one computational oracle block.**
+**Before returning, verify that VERIFICATION.md exists on disk, is named in the return envelope, passes the verification-contract schema gate, and contains at least one computational oracle block.**
 
 Scan the written VERIFICATION.md for evidence of actual code execution:
 
@@ -608,19 +643,22 @@ if [ -f "$VERIFICATION_FILE" ]; then
 fi
 ```
 
-If no computational output blocks are found, the verification is INCOMPLETE. The verifier must go back and execute at least one computational check before the workflow can proceed.
+If the file is missing, absent from `gpd_return.files_written`, or fails `gpd validate verification-contract "${VERIFICATION_FILE}"`, the verification is INCOMPLETE. The validator enforces the computational oracle evidence gate, so a report with no executed code/output/verdict block cannot pass. The verifier must go back and execute at least one computational check before the workflow can proceed.
 
 This gate enforces the principle that verification must involve external computation, not just LLM reasoning about physics.
 </step>
 
 <step name="return_to_orchestrator">
-Return status (`passed` | `gaps_found` | `expert_needed` | `human_needed`), score (N/M contract targets), independently confirmed count (K/M), report path.
+Route on `gpd_return.status`, not on headings. If the run reports `completed`, accept it only after `VERIFICATION.md` exists on disk, is named in `gpd_return.files_written`, and passes `gpd validate verification-contract "${phase_dir}/${phase_number}-VERIFICATION.md"`. For proof-bearing phases, the sibling `*-PROOF-REDTEAM.md` must also exist and report `status: passed` before the phase can be treated as verified. If the run reports `checkpoint`, present the checkpoint and start a fresh continuation after user input. If it reports `blocked` or `failed`, keep the session fail-closed and surface the issues.
+
+Return status (`passed` | `gaps_found` | `expert_needed` | `human_needed`), score (N/M contract targets), and report path. Keep any independent-confirmed tally in the report body or markdown return narrative only; do not add it to verification frontmatter or `gpd_return`.
 
 If gaps_found: list gaps with contract IDs, computation evidence, comparison verdict failures or forbidden-proxy violations, and recommended fix plan names.
 If expert_needed: list items requiring expert review with explanation of why computational verification was insufficient.
 If human_needed: list items requiring non-expert human review with explanation of why computational verification was insufficient.
 
 Orchestrator routes: `passed` -> update_roadmap | `gaps_found` -> create/execute fixes, re-verify | `expert_needed` -> present to researcher/expert review | `human_needed` -> present to researcher.
+When this workflow returns directly to the user or a blocking status stops orchestration, include concrete `next_actions`: `gpd:plan-phase {phase} --gaps` for gaps, `gpd:verify-work {phase}` to rerun verification, `gpd:show-phase {phase}` to review artifacts, and `gpd:suggest-next` as the recovery/confirmation route.
 </step>
 
 </process>

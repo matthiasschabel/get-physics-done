@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
@@ -12,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator,
 from pydantic import ValidationError as PydanticValidationError
 
 from gpd.core.root_resolution import resolve_project_root
+from gpd.core.utils import normalize_ascii_slug
 from gpd.mcp.managed_integrations import (
     WOLFRAM_MANAGED_INTEGRATION,
     WOLFRAM_MANAGED_SERVER_KEY,
@@ -25,6 +27,7 @@ _TOOL_ALIASES = {
     "wolframscript": "wolfram",
 }
 _SUPPORTED_TOOLS = {"wolfram", "command"}
+_KNOWLEDGE_GATE_VALUES = {"off", "warn", "block"}
 
 
 class PlanToolPreflightError(ValueError):
@@ -96,6 +99,22 @@ class PlanToolCheck(BaseModel):
     required: bool = True
 
 
+class KnowledgeDependencyCheck(BaseModel):
+    """One explicit knowledge dependency evaluated against the current project state."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    knowledge_id: str
+    status: str
+    resolved: bool
+    runtime_active: bool
+    blocking: bool
+    detail: str
+    record_path: str | None = None
+    successor: str | None = None
+    review_fresh: bool | None = None
+
+
 _TOOL_REQUIREMENTS_ADAPTER = TypeAdapter(list[PlanToolRequirement])
 
 
@@ -121,19 +140,15 @@ class PlanToolPreflightResult(BaseModel):
     validation_passed: bool = True
     valid: bool
     passed: bool
+    knowledge_gate: str = "off"
+    knowledge_deps: list[str] = Field(default_factory=list)
     requirements: list[PlanToolCheck] = Field(default_factory=list)
     checks: list[PlanToolCheck] = Field(default_factory=list)
+    knowledge_dependency_checks: list[KnowledgeDependencyCheck] = Field(default_factory=list)
     blocking_conditions: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     guidance: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class _ToolSpec:
-    provider: str
-    command: str | None
-    warning: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,13 +157,17 @@ class _CommandRunnerPolicy:
     selector_delimiter: str | None = None
 
 
-_TOOL_SPECS: dict[str, _ToolSpec] = {
-    "wolfram": _ToolSpec(
-        provider="wolframscript",
-        command="wolframscript",
-        warning="Availability is PATH-based or shared-integration config only; live execution and license state are not proven.",
-    ),
-}
+@dataclass(frozen=True, slots=True)
+class _KnowledgeDependencyEvaluation:
+    checks: list[KnowledgeDependencyCheck]
+    warnings: list[str]
+    blocking_conditions: list[str]
+    guidance: str
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.warnings or self.blocking_conditions)
+
 
 _WOLFRAM_CAVEAT = "Availability is config-level only; live execution and license state are not proven."
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
@@ -173,6 +192,58 @@ def _format_validation_error(exc: PydanticValidationError) -> str:
         msg = str(error.get("msg", "invalid value"))
         messages.append(f"{loc}: {msg}" if loc else msg)
     return "; ".join(messages) if messages else str(exc)
+
+
+def _parse_knowledge_gate(raw: object) -> str:
+    if raw is None:
+        return "off"
+    if raw is False:
+        return "off"
+    if not isinstance(raw, str):
+        raise PlanToolPreflightError("knowledge_gate: expected a string")
+    gate_value = raw.strip()
+    if not gate_value:
+        raise PlanToolPreflightError("knowledge_gate: expected a non-empty string")
+    if gate_value not in _KNOWLEDGE_GATE_VALUES:
+        raise PlanToolPreflightError("knowledge_gate: must be one of off, warn, block")
+    return gate_value
+
+
+def _parse_knowledge_deps(raw: object) -> list[str]:
+    if raw is None:
+        return []
+    if raw == []:
+        return []
+    if not isinstance(raw, list):
+        raise PlanToolPreflightError("knowledge_deps: expected a list")
+
+    dependencies: list[str] = []
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, str):
+            raise PlanToolPreflightError(f"knowledge_deps: entry {index} must be a non-empty string")
+        knowledge_id = item.strip()
+        if not knowledge_id:
+            raise PlanToolPreflightError(f"knowledge_deps: entry {index} must be a non-empty string")
+        if (
+            not knowledge_id.startswith("K-")
+            or not knowledge_id[2:]
+            or normalize_ascii_slug(knowledge_id[2:]) != knowledge_id[2:]
+        ):
+            raise PlanToolPreflightError(
+                f"knowledge_deps: entry {index} must use canonical K-{{ascii-hyphen-slug}} format"
+            )
+        if knowledge_id in seen and knowledge_id not in duplicates:
+            duplicates.append(knowledge_id)
+        seen.add(knowledge_id)
+        dependencies.append(knowledge_id)
+
+    if duplicates:
+        joined = ", ".join(duplicates)
+        raise PlanToolPreflightError(f"knowledge_deps: duplicate ids are not allowed: {joined}")
+
+    return dependencies
 
 
 def parse_plan_tool_requirements(raw: object) -> list[PlanToolRequirement]:
@@ -243,10 +314,14 @@ def _shell_wrapped_command(argv: list[str]) -> str | None:
             if index + 1 < len(argv):
                 return argv[index + 1]
             return None
+        if token.startswith("--command="):
+            return token.split("=", 1)[1]
         if token.startswith("-") and "c" in token[1:]:
             if index + 1 < len(argv):
                 return argv[index + 1]
             return None
+        if token.startswith("-") or token.startswith("+"):
+            continue
         break
     return None
 
@@ -287,7 +362,7 @@ def _unwrap_command_runner(argv: list[str]) -> tuple[list[str] | None, str | Non
         selector = target_argv[0]
         if policy.selector_delimiter in selector:
             _prefix, candidate = selector.rsplit(policy.selector_delimiter, 1)
-            if _is_python_launcher(candidate):
+            if candidate:
                 return [candidate, *target_argv[1:]], None
     return target_argv, None
 
@@ -349,6 +424,12 @@ def _command_executable_from_argv(argv: list[str]) -> tuple[str | None, str | No
             return None, parse_error
         return _command_executable_from_argv(nested_argv or [])
 
+    runner_argv, runner_error = _unwrap_command_runner(working)
+    if runner_error is not None:
+        return None, runner_error
+    if runner_argv != working:
+        return _command_executable_from_argv(runner_argv or [])
+
     return working[0], None
 
 
@@ -398,6 +479,40 @@ def _path_within_workspace_roots(path: Path, *, cwd: Path | None) -> bool:
         except ValueError:
             continue
     return False
+
+
+def _command_executable_probe_path(executable: str | None, *, cwd: Path | None) -> tuple[Path | None, str | None]:
+    """Resolve command executables without leaking relative paths to the caller cwd."""
+    if not executable:
+        return None, "command requirement must include an executable"
+
+    if "/" not in executable and "\\" not in executable:
+        path = shutil.which(executable)
+        return (Path(path).resolve(strict=False), None) if path else (None, f"{executable} not found on PATH")
+
+    normalized_executable = executable.replace("\\", "/")
+    executable_path = Path(normalized_executable).expanduser()
+    windows_absolute = re.match(r"^[A-Za-z]:/", normalized_executable) is not None
+    if executable_path.is_absolute() or windows_absolute:
+        path = shutil.which(executable)
+        if path:
+            return Path(path).resolve(strict=False), None
+    if executable_path.is_absolute():
+        candidate = executable_path.resolve(strict=False)
+    elif windows_absolute:
+        return None, f"{executable} not found on PATH"
+    elif cwd is not None:
+        candidate = (cwd / executable_path).resolve(strict=False)
+    else:
+        return None, f"repo-local command executable requires a project workspace: {executable}"
+
+    if not _path_within_workspace_roots(candidate, cwd=cwd):
+        return None, f"repo-local command executable must stay within the project roots: {executable}"
+    if not candidate.is_file():
+        return None, f"repo-local command executable not found: {executable} (looked under {candidate})"
+    if not os.access(candidate, os.X_OK):
+        return None, f"repo-local command executable is not executable: {executable} (resolved to {candidate})"
+    return candidate, None
 
 
 def _missing_python_script_target_issue(target: str, *, cwd: Path | None) -> str | None:
@@ -515,13 +630,13 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
         executable, parse_error = _command_executable(command)
         if parse_error is not None:
             return False, parse_error, "command", []
-        path = shutil.which(executable) if executable else None
-        if path:
+        path, executable_error = _command_executable_probe_path(executable, cwd=cwd)
+        if path is not None:
             target_issue = _command_target_issue(command, cwd=cwd)
             if target_issue is not None:
                 return False, target_issue, "command", []
-            return True, f"{executable} found at {Path(path).resolve(strict=False)}", "command", []
-        return False, f"{executable} not found on PATH", "command", []
+            return True, f"{executable} found at {path}", "command", []
+        return False, executable_error or f"{executable} not found on PATH", "command", []
 
     if requirement.tool == "wolfram":
         path = shutil.which("wolframscript")
@@ -553,15 +668,142 @@ def _probe_tool(requirement: PlanToolRequirement, *, cwd: Path | None = None) ->
         )
         return False, detail, WOLFRAM_MANAGED_SERVER_KEY, warnings
 
-    spec = _TOOL_SPECS.get(requirement.tool)
-    if spec is None or spec.command is None:
-        return False, f"no probe implemented for tool {requirement.tool}", "unknown", []
+    return False, f"no probe implemented for tool {requirement.tool}", "unknown", []
 
-    path = shutil.which(spec.command)
-    warnings = [spec.warning] if spec.warning else []
-    if path:
-        return True, f"{spec.command} found at {Path(path).resolve(strict=False)}", spec.provider, warnings
-    return False, f"{spec.command} not found on PATH", spec.provider, warnings
+
+def _knowledge_dependency_status(record) -> str:
+    if record.runtime_active:
+        return "ok"
+    if record.status == "superseded":
+        return "superseded"
+    if record.status == "stable" and (record.review_fresh is False or record.stale is True):
+        return "stale_review"
+    if record.status in {"draft", "in_review"}:
+        return "not_runtime_active"
+    return "not_runtime_active"
+
+
+def _knowledge_dependency_detail(
+    *,
+    dep_id: str,
+    status: str,
+    record,
+    successor: str | None,
+    resolution_reason: str | None,
+) -> str:
+    if status == "ok":
+        return f"{dep_id} is runtime-active at {record.path}"
+    if status == "missing":
+        return resolution_reason or f"knowledge doc not found for {dep_id}"
+    if status == "ambiguous":
+        return resolution_reason or f"multiple knowledge docs match {dep_id}"
+    if status == "superseded":
+        if successor:
+            return (
+                f"{dep_id} is superseded by {successor}; update knowledge_deps to the runtime-active successor"
+            )
+        return f"{dep_id} is superseded; update knowledge_deps to the runtime-active successor"
+    if status == "stale_review":
+        return f"{dep_id} is stable but its approval review is stale"
+    if status == "not_runtime_active":
+        return f"{dep_id} exists but is not runtime-active"
+    return resolution_reason or f"{dep_id} failed knowledge dependency validation"
+
+
+def _evaluate_knowledge_dependencies(
+    project_root: Path,
+    *,
+    knowledge_deps: list[str],
+    knowledge_gate: str,
+) -> _KnowledgeDependencyEvaluation:
+    if knowledge_gate == "off" or not knowledge_deps:
+        return _KnowledgeDependencyEvaluation(checks=[], warnings=[], blocking_conditions=[], guidance="")
+
+    from gpd.core.knowledge_index import iter_knowledge_supersession_chain, resolve_knowledge_doc
+
+    checks: list[KnowledgeDependencyCheck] = []
+    warnings: list[str] = []
+    blocking_conditions: list[str] = []
+    guidance_fragments: list[str] = []
+
+    for dep_id in knowledge_deps:
+        resolution = resolve_knowledge_doc(project_root, dep_id)
+        record = resolution.record
+        successor: str | None = None
+        if record is None:
+            if resolution.candidates:
+                status = "ambiguous"
+                detail = resolution.reason or f"multiple knowledge docs match {dep_id}"
+            else:
+                status = "missing"
+                detail = resolution.reason or f"knowledge doc not found for {dep_id}"
+            resolved = False
+            runtime_active = False
+            review_fresh = None
+            record_path = None
+        else:
+            status = _knowledge_dependency_status(record)
+            resolved = True
+            runtime_active = record.runtime_active
+            review_fresh = record.review_fresh
+            record_path = record.path
+            if status == "superseded":
+                chain = iter_knowledge_supersession_chain(project_root, dep_id)
+                if len(chain) > 1:
+                    successor = chain[1].knowledge_id
+            detail = _knowledge_dependency_detail(
+                dep_id=dep_id,
+                status=status,
+                record=record,
+                successor=successor,
+                resolution_reason=resolution.reason,
+            )
+
+        blocking = knowledge_gate == "block" and status in {
+            "missing",
+            "ambiguous",
+            "not_runtime_active",
+            "stale_review",
+            "superseded",
+        }
+        check = KnowledgeDependencyCheck(
+            knowledge_id=dep_id,
+            status=status,
+            resolved=resolved,
+            runtime_active=runtime_active,
+            blocking=blocking,
+            detail=detail,
+            record_path=record_path,
+            successor=successor,
+            review_fresh=review_fresh,
+        )
+        checks.append(check)
+
+        if status == "ok":
+            continue
+
+        message = f"{dep_id}: {detail}"
+        warnings.append(message)
+        guidance_fragments.append(message)
+        if blocking:
+            blocking_conditions.append(message)
+
+    if blocking_conditions:
+        guidance = "Resolve explicit knowledge dependency blockers before execution."
+        if guidance_fragments:
+            guidance = f"{guidance} {' '.join(guidance_fragments)}"
+    elif warnings:
+        guidance = "Review explicit knowledge dependency warnings before execution."
+        guidance = f"{guidance} {' '.join(guidance_fragments)}"
+    else:
+        guidance = "Explicit knowledge dependencies are runtime-active."
+
+    return _KnowledgeDependencyEvaluation(
+        checks=checks,
+        warnings=warnings,
+        blocking_conditions=blocking_conditions,
+        guidance=guidance,
+    )
 
 
 def build_plan_tool_preflight(
@@ -580,50 +822,79 @@ def build_plan_tool_preflight(
             validation_passed=False,
             valid=False,
             passed=False,
+            knowledge_gate="off",
+            knowledge_deps=[],
             errors=[f"Plan not found: {resolved_path}"],
             guidance=f"Plan not found: {resolved_path}",
         )
 
-    active_requirements = requirements
     command_workspace_root = resolve_project_root(resolved_path.parent, require_layout=True) or resolved_path.parent
-    if active_requirements is None:
-        try:
-            content = resolved_path.read_text(encoding="utf-8")
-        except OSError as exc:
-            return PlanToolPreflightResult(
-                plan_path=str(resolved_path),
-                validation_passed=False,
-                valid=False,
-                passed=False,
-                errors=[f"Could not read plan: {exc}"],
-                guidance=f"Could not read plan: {exc}",
-            )
+    try:
+        content = resolved_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return PlanToolPreflightResult(
+            plan_path=str(resolved_path),
+            validation_passed=False,
+            valid=False,
+            passed=False,
+            knowledge_gate="off",
+            knowledge_deps=[],
+            errors=[f"Could not read plan: {exc}"],
+            guidance=f"Could not read plan: {exc}",
+        )
 
-        try:
-            meta, _body = extract_frontmatter(content)
-        except FrontmatterParseError as exc:
-            return PlanToolPreflightResult(
-                plan_path=str(resolved_path),
-                validation_passed=False,
-                valid=False,
-                passed=False,
-                errors=[f"Could not parse plan frontmatter: {exc}"],
-                guidance=f"Could not parse plan frontmatter: {exc}",
-            )
+    try:
+        meta, _body = extract_frontmatter(content)
+    except FrontmatterParseError as exc:
+        return PlanToolPreflightResult(
+            plan_path=str(resolved_path),
+            validation_passed=False,
+            valid=False,
+            passed=False,
+            knowledge_gate="off",
+            knowledge_deps=[],
+            errors=[f"Could not parse plan frontmatter: {exc}"],
+            guidance=f"Could not parse plan frontmatter: {exc}",
+        )
 
+    try:
+        knowledge_gate = _parse_knowledge_gate(meta.get("knowledge_gate"))
+        knowledge_deps = _parse_knowledge_deps(meta.get("knowledge_deps"))
+    except PlanToolPreflightError as exc:
+        return PlanToolPreflightResult(
+            plan_path=str(resolved_path),
+            validation_passed=False,
+            valid=False,
+            passed=False,
+            knowledge_gate="off",
+            knowledge_deps=[],
+            errors=[f"Invalid knowledge dependency controls: {exc}"],
+            guidance=f"Invalid knowledge dependency controls: {exc}",
+        )
+
+    validation_errors: list[str] = []
+    if requirements is None:
         validation = validate_frontmatter(content, "plan", source_path=resolved_path)
         validation_errors = [f"Missing required frontmatter field: {field}" for field in validation.missing]
         validation_errors.extend(validation.errors)
+        if isinstance(meta.get("knowledge_gate"), bool) and meta.get("knowledge_gate") is False:
+            validation_errors = [
+                error for error in validation_errors if error != "knowledge_gate: expected a string"
+            ]
         if validation_errors:
             return PlanToolPreflightResult(
                 plan_path=str(resolved_path),
                 validation_passed=False,
                 valid=False,
                 passed=False,
+                knowledge_gate=knowledge_gate,
+                knowledge_deps=knowledge_deps,
                 errors=validation_errors,
                 guidance="Fix invalid PLAN frontmatter before specialized-tool preflight can pass.",
             )
 
+    active_requirements = requirements
+    if active_requirements is None:
         try:
             active_requirements = parse_plan_tool_requirements(meta.get("tool_requirements"))
         except PlanToolPreflightError as exc:
@@ -632,16 +903,28 @@ def build_plan_tool_preflight(
                 validation_passed=False,
                 valid=False,
                 passed=False,
+                knowledge_gate=knowledge_gate,
+                knowledge_deps=knowledge_deps,
                 errors=[f"Invalid tool_requirements: {exc}"],
                 guidance=f"Invalid tool_requirements: {exc}",
             )
 
-    if not active_requirements:
+    knowledge_eval = _evaluate_knowledge_dependencies(
+        command_workspace_root,
+        knowledge_deps=knowledge_deps,
+        knowledge_gate=knowledge_gate,
+    )
+
+    has_tool_requirements = bool(active_requirements)
+
+    if not has_tool_requirements and not knowledge_deps:
         return PlanToolPreflightResult(
             plan_path=str(resolved_path),
             validation_passed=True,
             valid=True,
             passed=True,
+            knowledge_gate=knowledge_gate,
+            knowledge_deps=knowledge_deps,
             requirements=[],
             checks=[],
             guidance="No machine-checkable specialized tool requirements declared.",
@@ -696,6 +979,9 @@ def build_plan_tool_preflight(
                 f"Preferred tool {requirement.tool} is unavailable and no fallback is declared."
             )
 
+    warnings.extend(knowledge_eval.warnings)
+    blocking_conditions.extend(knowledge_eval.blocking_conditions)
+
     missing_preferred_with_fallback = any(
         (not check.available) and (not check.blocking) and bool(check.fallback)
         for check in checks
@@ -705,25 +991,40 @@ def build_plan_tool_preflight(
         for check in checks
     )
     guidance = (
-        "Install or enable the missing required specialized tools, or revise the plan before execution."
+        "Install or enable the missing required specialized tools, or revise the plan before execution. Do not invent results or placeholder artifacts for unavailable required tools."
         if blocking_missing
         else (
-            "Proceed using declared fallback paths for unavailable preferred tools."
+            "Proceed using declared fallback paths for unavailable preferred tools. If the fallback cannot produce the required evidence, report the gap instead of inventing outputs."
             if missing_preferred_with_fallback
             else (
-                "Optional specialized tools are unavailable; continue only if the plan can genuinely proceed without them."
+                "Optional specialized tools are unavailable; continue only if the plan can genuinely proceed without them. Otherwise report the gap instead of fabricating outputs."
                 if missing_preferred_without_fallback
                 else "All declared specialized tools are available through local or configured capabilities."
             )
         )
     )
+    if not has_tool_requirements:
+        guidance = (
+            knowledge_eval.guidance
+            if knowledge_eval.has_issues
+            else (
+                "Explicit knowledge dependencies are runtime-active."
+                if knowledge_deps and knowledge_gate != "off"
+                else "No machine-checkable specialized tool requirements declared."
+            )
+        )
+    elif knowledge_eval.guidance and knowledge_eval.has_issues:
+        guidance = f"{guidance} {knowledge_eval.guidance}"
     return PlanToolPreflightResult(
         plan_path=str(resolved_path),
         validation_passed=True,
         valid=True,
-        passed=not blocking_missing,
+        passed=not blocking_missing and not bool(knowledge_eval.blocking_conditions),
+        knowledge_gate=knowledge_gate,
+        knowledge_deps=knowledge_deps,
         requirements=checks,
         checks=checks,
+        knowledge_dependency_checks=knowledge_eval.checks,
         blocking_conditions=blocking_conditions,
         warnings=warnings,
         guidance=guidance,

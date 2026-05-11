@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.hooks.install_context import resolve_hook_lookup_context
+from gpd.hooks.payload_roots import PayloadRoots
 from gpd.hooks.runtime_lookup import (
     normalize_runtime_hint,
     resolve_runtime_lookup_active_runtime,
     resolve_runtime_lookup_context,
+    resolve_runtime_lookup_context_from_payload_roots,
     resolve_runtime_lookup_dir,
 )
 from tests.hooks.helpers import mark_complete_install as _mark_complete_install
@@ -31,6 +33,25 @@ def test_resolve_runtime_lookup_dir_prefers_same_runtime_nested_install_for_expl
     )
 
     assert resolved == str(workspace)
+
+
+def test_resolve_runtime_lookup_dir_does_not_treat_project_install_as_workspace_install(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    workspace = project_root / "src" / "analysis"
+    workspace.mkdir(parents=True)
+
+    _mark_complete_install(project_root / ".codex", runtime="codex")
+
+    resolved = resolve_runtime_lookup_dir(
+        workspace_dir=str(workspace),
+        project_root=str(project_root),
+        explicit_project_dir=True,
+        active_runtime="codex",
+    )
+
+    assert resolved == str(project_root)
 
 
 def test_resolve_runtime_lookup_dir_ignores_untrusted_project_dir_hint(
@@ -234,6 +255,31 @@ def test_resolve_runtime_lookup_context_falls_back_to_workspace_runtime_when_pro
     assert resolved.active_runtime == "codex"
     assert resolved.lookup_dir == str(workspace)
     assert calls == [str(project_root), str(workspace)]
+
+
+def test_resolve_runtime_lookup_context_from_payload_roots_preserves_optional_target_metadata() -> None:
+    normalized_project = str(Path("/tmp/project").resolve(strict=False))
+    normalized_workspace = str(Path("/tmp/project/src/analysis").resolve(strict=False))
+    normalized_target_path = str(Path("/tmp/project/paper/draft.tex").resolve(strict=False))
+    normalized_target_root = str(Path("/tmp/project/paper").resolve(strict=False))
+    roots = PayloadRoots(
+        workspace_dir=normalized_workspace,
+        project_root=normalized_project,
+        project_dir_present=True,
+        project_dir_trusted=True,
+        target_path=normalized_target_path,
+        target_root=normalized_target_root,
+    )
+
+    resolved = resolve_runtime_lookup_context_from_payload_roots(
+        roots,
+        runtime_resolver=lambda cwd: "codex" if cwd == normalized_project else None,
+    )
+
+    assert resolved.active_runtime == "codex"
+    assert resolved.lookup_dir == normalized_project
+    assert resolved.target_path == normalized_target_path
+    assert resolved.target_root == normalized_target_root
 
 
 def test_resolve_hook_lookup_context_uses_shared_runtime_hint_normalizer(

@@ -168,15 +168,15 @@ def gpd_project(tmp_path: Path) -> Path:
     planning.mkdir()
 
     # Write state files
-    (planning / "state.json").write_text(json.dumps(_STATE_JSON, indent=2))
-    (planning / "STATE.md").write_text(_STATE_MD)
+    (planning / "state.json").write_text(json.dumps(_STATE_JSON, indent=2), encoding="utf-8")
+    (planning / "STATE.md").write_text(_STATE_MD, encoding="utf-8")
 
     # Create phase directory with plans and one summary
     phase_dir = planning / "phases" / "01-setup"
     phase_dir.mkdir(parents=True)
     for i in range(1, 4):
-        (phase_dir / f"plan-{i:02d}.md").write_text(f"# Plan {i}\nDo step {i}.")
-    (phase_dir / "summary-01.md").write_text("# Summary 1\nCompleted step 1.")
+        (phase_dir / f"plan-{i:02d}.md").write_text(f"# Plan {i}\nDo step {i}.", encoding="utf-8")
+    (phase_dir / "summary-01.md").write_text("# Summary 1\nCompleted step 1.", encoding="utf-8")
 
     return tmp_path
 
@@ -446,12 +446,65 @@ class TestSkillsServerIntegration:
         assert "gpd-debug" in names or "gpd-debugger" in names
         assert "gpd-discover" in names
         assert "gpd-peer-review" in names
+        assert "gpd-research-phase" in names
+        assert "gpd-phase-researcher" in names
 
         # Each skill has expected shape
         for skill in result["skills"]:
             assert "name" in skill
             assert "category" in skill
             assert skill["name"].startswith("gpd-")
+
+    def test_list_skills_by_category_keeps_consistency_checker_visible(self):
+        from gpd.mcp.servers.skills_server import list_skills
+
+        result = list_skills(category="verification")
+
+        assert result["count"] > 0
+        names = {skill["name"] for skill in result["skills"]}
+        assert {"gpd-consistency-checker", "gpd-plan-checker", "gpd-verifier"}.issubset(names)
+        assert all(skill["category"] == "verification" for skill in result["skills"])
+
+    def test_list_skills_by_category_keeps_research_vertical_visible(self):
+        from gpd.mcp.servers.skills_server import list_skills
+
+        result = list_skills(category="research")
+
+        assert result["count"] > 0
+        names = {skill["name"] for skill in result["skills"]}
+        assert {
+            "gpd-research-phase",
+            "gpd-phase-researcher",
+            "gpd-project-researcher",
+            "gpd-literature-review",
+            "gpd-literature-reviewer",
+        }.issubset(names)
+        assert all(skill["category"] == "research" for skill in result["skills"])
+
+    def test_debug_command_and_debugger_agent_surfaces_remain_available(self):
+        from gpd.mcp.servers.skills_server import get_skill, list_skills
+
+        result = list_skills()
+        names = {s["name"] for s in result["skills"]}
+        assert {"gpd-debug", "gpd-debugger"}.issubset(names)
+
+        debug_skill = get_skill("gpd-debug")
+        debugger_skill = get_skill("gpd-debugger")
+
+        assert debug_skill["allowed_tools_surface"] == "command.allowed-tools"
+        assert debug_skill["schema_references"] == []
+        assert debug_skill["contract_references"] == []
+        assert debug_skill["schema_documents"] == []
+        assert debug_skill["contract_documents"] == []
+        assert "gpd-debugger" in debug_skill["content"]
+
+        assert debugger_skill["allowed_tools_surface"] == "agent.tools"
+        assert debugger_skill["schema_references"] == []
+        assert debugger_skill["contract_references"] == []
+        assert debugger_skill["schema_documents"] == []
+        assert debugger_skill["contract_documents"] == []
+        assert debugger_skill["transitive_schema_references"] == []
+        assert debugger_skill["transitive_schema_documents"] == []
 
     def test_get_skill_uses_canonical_command_content(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -466,7 +519,9 @@ class TestSkillsServerIntegration:
         assert "gpd-help" in result["content"]
         assert "## Command Requirements" in result["content"]
         assert "Quick Start Extract" in result["content"]
-        assert "## Contextual Help" in result["content"]
+        assert "## Contextual Help" not in result["content"]
+        assert "subject-owned publication root at `GPD/publication/{subject_slug}`" in result["content"]
+        assert "resolved GPD-owned manuscript root" in result["content"]
         assert result["file_count"] == 1
         assert result["allowed_tools_surface"] == "command.allowed-tools"
 
@@ -474,6 +529,7 @@ class TestSkillsServerIntegration:
         from gpd.mcp.servers.skills_server import get_skill
 
         result = get_skill("gpd-peer-review")
+        contract_documents = {Path(entry["path"]).name: entry for entry in result["contract_documents"]}
 
         assert "error" not in result
         assert any(path.endswith("review-ledger-schema.md") for path in result["schema_references"])
@@ -481,24 +537,213 @@ class TestSkillsServerIntegration:
         assert result["review_contract"] is not None
         assert result["review_contract"]["review_mode"] == "publication"
         assert "required_state" not in result["review_contract"]
+        assert result["review_contract"]["required_evidence"] == [
+            "existing manuscript or explicit external artifact target",
+        ]
+        assert result["review_contract"]["blocking_conditions"] == [
+            "missing manuscript or explicit external artifact target",
+            "degraded review integrity",
+            "unsupported physical significance claims",
+            "collapsed novelty or venue fit",
+        ]
+        assert result["review_contract"]["conditional_requirements"][0]["when"] == "project-backed manuscript review"
+        assert any(
+            variant["scope"] == "explicit_artifact"
+            for variant in result["review_contract"].get("scope_variants", [])
+        )
         assert result["review_contract"]["conditional_requirements"] == [
             {
+                "when": "project-backed manuscript review",
+                "required_outputs": [],
+                "required_evidence": [
+                    "phase summaries or milestone digest",
+                    "verification reports",
+                    "manuscript-root bibliography audit",
+                    "manuscript-root artifact manifest",
+                    "manuscript-root reproducibility manifest",
+                    "manuscript-root publication artifacts",
+                ],
+                "blocking_conditions": [
+                    "missing project state",
+                    "missing roadmap",
+                    "missing conventions",
+                    "no research artifacts",
+                ],
+                "preflight_checks": [
+                    "project_state",
+                    "roadmap",
+                    "conventions",
+                    "research_artifacts",
+                    "verification_reports",
+                    "artifact_manifest",
+                    "bibliography_audit",
+                    "bibliography_audit_clean",
+                    "reproducibility_manifest",
+                    "reproducibility_ready",
+                ],
+                "blocking_preflight_checks": [
+                    "project_state",
+                    "roadmap",
+                    "conventions",
+                    "research_artifacts",
+                    "verification_reports",
+                    "artifact_manifest",
+                    "bibliography_audit",
+                    "bibliography_audit_clean",
+                    "reproducibility_manifest",
+                    "reproducibility_ready",
+                ],
+                "stage_artifacts": [],
+            },
+            {
                 "when": "theorem-bearing claims are present",
-                "required_outputs": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+                "required_outputs": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
                 "required_evidence": [],
                 "blocking_conditions": [],
+                "preflight_checks": [],
                 "blocking_preflight_checks": [],
-                "stage_artifacts": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+                "stage_artifacts": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
             }
         ]
-        assert result["context_mode"] == "project-required"
+        assert result["context_mode"] == "project-aware"
         assert result["project_reentry_capable"] is False
         assert "## Review Contract" in result["content"]
+        assert any(
+            fragment in result["content"]
+            for fragment in (
+                "project-managed manuscript lane at `GPD/publication/{subject_slug}/manuscript`",
+                "subject-owned publication root under `GPD/publication/{subject_slug}`",
+                "staged review artifacts on the workflow-owned `GPD/` paths",
+            )
+        )
         assert "review_contract:" in result["content"]
         assert "review-contract:" not in result["content"]
+        assert contract_documents == {}
+        assert any(path.endswith("peer-review-reliability.md") for path in result["contract_references"])
         assert "Treat `content` as the wrapper/context surface." in result["loading_hint"]
-        assert "Load `schema_documents` and `contract_documents` too when present" in result["loading_hint"]
+        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
+        assert "Load `schema_documents` and `contract_documents` too when present" not in result["loading_hint"]
         assert "It already embeds the model-visible `Command Requirements` section." in result["loading_hint"]
+
+    def test_get_skill_check_proof_surfaces_dedicated_proof_redteam_schema_and_contract_docs(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        result = get_skill("gpd-check-proof")
+        direct_paths = {entry["path"] for entry in result["referenced_files"]}
+        schema_documents = {Path(entry["path"]).name: entry for entry in result["schema_documents"]}
+        contract_documents = {Path(entry["path"]).name: entry for entry in result["contract_documents"]}
+
+        assert "error" not in result
+        assert result["reference_count"] == len(direct_paths)
+        assert any(path.endswith("proof-redteam-schema.md") for path in direct_paths)
+        assert any(path.endswith("proof-redteam-protocol.md") for path in direct_paths)
+        assert any(path.endswith("proof-redteam-schema.md") for path in result["schema_references"])
+        assert any(path.endswith("proof-redteam-protocol.md") for path in result["contract_references"])
+        assert schema_documents == {}
+        assert contract_documents == {}
+        assert any(path.endswith("peer-review-panel.md") for path in result["contract_references"])
+        assert "Treat `content` as the wrapper/context surface." in result["loading_hint"]
+        assert "See `referenced_files` for external markdown dependencies." in result["loading_hint"]
+        assert "Load `schema_documents` and `contract_documents` too when present" not in result["loading_hint"]
+
+    def test_get_skill_research_phase_surfaces_staged_loading_sidecar(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        result = get_skill("gpd-research-phase")
+
+        assert "error" not in result
+        assert result["name"] == "gpd-research-phase"
+        assert result["category"] == "research"
+        assert result["staged_loading"]["workflow_id"] == "research-phase"
+        assert result["staged_loading"]["stages"][0]["id"] == "phase_bootstrap"
+        assert result["staged_loading"]["stages"][0]["loaded_authorities"] == [
+            "workflows/research-phase.md",
+            "references/orchestration/model-profile-resolution.md",
+        ]
+        assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"
+
+    def test_get_skill_literature_review_surfaces_command_and_agent_vertical(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        command = get_skill("gpd-literature-review")
+        reviewer = get_skill("gpd-literature-reviewer")
+
+        assert "error" not in command
+        assert "error" not in reviewer
+        assert command["name"] == "gpd-literature-review"
+        assert command["category"] == "research"
+        assert command["allowed_tools_surface"] == "command.allowed-tools"
+        assert command["context_mode"] == "project-aware"
+        assert reviewer["name"] == "gpd-literature-reviewer"
+        assert reviewer["category"] == "research"
+        assert reviewer["allowed_tools_surface"] == "agent.tools"
+        assert "Why subagent" in command["content"]
+        assert "literature-review" in reviewer["content"]
+
+    def test_get_skill_project_researcher_surfaces_one_shot_handoff_contract(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        result = get_skill("gpd-project-researcher")
+
+        assert "error" not in result
+        assert result["name"] == "gpd-project-researcher"
+        assert result["category"] == "research"
+        assert result["allowed_tools_surface"] == "agent.tools"
+        assert result["content_authority"] == "canonical"
+        assert result["structured_metadata_authority"]["content"] == "canonical"
+        assert result["structured_metadata_authority"]["allowed_tools"] == "mirrored"
+        assert result["structured_metadata_authority"]["agent_policy"] == "mirrored"
+        assert "Checkpoint after the initial survey with scope confirmation." in result["content"]
+        assert "gpd_return:" in result["content"]
+        assert "status: completed | checkpoint | blocked | failed" in result["content"]
+        assert "wait for confirmation" not in result["content"]
+        assert "pause here for approval" not in result["content"]
+        assert "ask the user then continue" not in result["content"]
+
+    def test_get_skill_research_synthesizer_and_literature_bootstrap_surfaces_remain_projected(self):
+        from gpd import registry
+        from gpd.mcp.servers.skills_server import get_skill
+
+        summary_contract = {
+            "write_scope": {"mode": "scoped_write", "allowed_paths": ["GPD/literature/SUMMARY.md"]},
+            "expected_artifacts": ["GPD/literature/SUMMARY.md"],
+            "shared_state_policy": "return_only",
+        }
+
+        synthesizer = get_skill("gpd-research-synthesizer")
+        new_project = get_skill("gpd-new-project")
+        new_milestone = get_skill("gpd-new-milestone")
+
+        assert "error" not in synthesizer
+        assert synthesizer["name"] == "gpd-research-synthesizer"
+        assert synthesizer["allowed_tools_surface"] == "agent.tools"
+        assert synthesizer["content_authority"] == "canonical"
+        assert synthesizer["structured_metadata_authority"] == {
+            "content": "canonical",
+            "allowed_tools": "mirrored",
+            "agent_policy": "mirrored",
+        }
+        assert "This agent writes only `GPD/literature/SUMMARY.md`;" in synthesizer["content"]
+        assert "files_written` must list only files actually written in this run." in synthesizer["content"]
+        assert "Use only status names: `completed` | `checkpoint` | `blocked` | `failed`." in synthesizer["content"]
+        assert "gpd_return:" in synthesizer["content"]
+
+        expected_project_spawn_contracts = [dict(contract) for contract in registry.get_command("gpd:new-project").spawn_contracts]
+        expected_project_interactive_spawn_contracts = [
+            dict(contract) for contract in registry.get_command("gpd:new-project").interactive_spawn_contracts
+        ]
+        expected_milestone_spawn_contracts = [
+            dict(contract) for contract in registry.get_command("gpd:new-milestone").spawn_contracts
+        ]
+
+        assert new_project["spawn_contracts"] == expected_project_spawn_contracts
+        assert new_project["interactive_spawn_contracts"] == expected_project_interactive_spawn_contracts
+        assert new_milestone["spawn_contracts"] == expected_milestone_spawn_contracts
+        assert summary_contract in new_project["spawn_contracts"]
+        assert summary_contract in new_milestone["spawn_contracts"]
+        assert new_project["structured_metadata_authority"]["spawn_contracts"] == "mirrored"
+        assert new_project["structured_metadata_authority"]["interactive_spawn_contracts"] == "mirrored"
+        assert new_milestone["structured_metadata_authority"]["spawn_contracts"] == "mirrored"
 
     def test_get_skill_surfaces_template_backed_schema_documents_for_writing_and_resume(self):
         from gpd.mcp.servers.skills_server import get_skill
@@ -512,15 +757,91 @@ class TestSkillsServerIntegration:
         assert "error" not in write_paper
         assert any(path.endswith("figure-tracker.md") for path in write_paper["schema_references"])
         assert any(path.endswith("author-response.md") for path in write_paper["schema_references"])
-        assert "figure-tracker.md" in write_schema_documents
-        assert "author-response.md" in write_schema_documents
-        assert "figure_registry" in write_schema_documents["figure-tracker.md"]["body"]
-        assert "Issue ID" in write_schema_documents["author-response.md"]["body"]
+        assert write_schema_documents == {}
 
         assert "error" not in pause_work
         assert any(path.endswith("continue-here.md") for path in pause_work["schema_references"])
-        assert "continue-here.md" in pause_schema_documents
-        assert "<persistent_state>" in pause_schema_documents["continue-here.md"]["body"]
+        assert pause_schema_documents == {}
+
+    def test_get_skill_surfaces_lightweight_paper_writer_reference_paths_and_transitive_metadata(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        paper_writer = get_skill("gpd-paper-writer")
+        paper_writer_referenced_paths = {entry["path"] for entry in paper_writer["referenced_files"]}
+        paper_writer_transitive_paths = {entry["path"] for entry in paper_writer["transitive_referenced_files"]}
+        paper_writer_template_references = set(paper_writer["template_references"])
+
+        assert "error" not in paper_writer
+        assert paper_writer["reference_count"] == len(paper_writer_referenced_paths)
+        assert paper_writer["transitive_reference_count"] > paper_writer["reference_count"]
+        assert paper_writer_referenced_paths.issuperset(
+            {
+                "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
+                "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md",
+                "@{GPD_INSTALL_DIR}/references/publication/paper-writer-cookbook.md",
+                "@{GPD_INSTALL_DIR}/templates/notation-glossary.md",
+                "@{GPD_INSTALL_DIR}/templates/latex-preamble.md",
+                "@{GPD_INSTALL_DIR}/references/publication/figure-generation-templates.md",
+                "@{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md",
+                "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md",
+                "@{GPD_INSTALL_DIR}/templates/paper/author-response.md",
+                "@{GPD_INSTALL_DIR}/templates/paper/referee-response.md",
+            }
+        )
+        assert paper_writer_template_references == {
+            "@{GPD_INSTALL_DIR}/templates/notation-glossary.md",
+            "@{GPD_INSTALL_DIR}/templates/latex-preamble.md",
+            "@{GPD_INSTALL_DIR}/templates/paper/author-response.md",
+            "@{GPD_INSTALL_DIR}/templates/paper/referee-response.md",
+        }
+        assert paper_writer["schema_references"] == ["@{GPD_INSTALL_DIR}/templates/paper/author-response.md"]
+        assert paper_writer["schema_documents"] == []
+        assert any(path.endswith("verification-core.md") for path in paper_writer_transitive_paths)
+        assert any(path.endswith("publication-response-writer-handoff.md") for path in paper_writer_referenced_paths)
+
+    def test_get_skill_surfaces_referee_reference_paths_and_transitive_metadata(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        referee = get_skill("gpd-referee")
+        referee_referenced_paths = {entry["path"] for entry in referee["referenced_files"]}
+        referee_transitive_paths = {entry["path"] for entry in referee["transitive_referenced_files"]}
+
+        assert "error" not in referee
+        assert referee["reference_count"] == len(referee_referenced_paths)
+        assert referee["transitive_reference_count"] > referee["reference_count"]
+        assert any(path.endswith("peer-review-panel.md") for path in referee["contract_references"])
+        assert any(path.endswith("publication-review-round-artifacts.md") for path in referee_referenced_paths)
+        assert any(path.endswith("publication-response-artifacts.md") for path in referee_referenced_paths)
+        assert any(path.endswith("review-ledger-schema.md") for path in referee["schema_references"])
+        assert any(path.endswith("referee-decision-schema.md") for path in referee["schema_references"])
+        assert any(path.endswith("verification-core.md") for path in referee_transitive_paths)
+
+    def test_get_skill_surfaces_lightweight_bibliographer_reference_paths_and_transitive_metadata(self):
+        from gpd.mcp.servers.skills_server import get_skill
+
+        bibliographer = get_skill("gpd-bibliographer")
+        bibliographer_referenced_paths = {entry["path"] for entry in bibliographer["referenced_files"]}
+        bibliographer_template_references = set(bibliographer["template_references"])
+        bibliographer_transitive_paths = {entry["path"] for entry in bibliographer["transitive_referenced_files"]}
+
+        assert "error" not in bibliographer
+        assert bibliographer["reference_count"] == len(bibliographer_referenced_paths)
+        assert bibliographer["transitive_reference_count"] > bibliographer["reference_count"]
+        assert bibliographer_referenced_paths == {
+            "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
+            "@{GPD_INSTALL_DIR}/references/physics-subfields.md",
+            "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md",
+            "@{GPD_INSTALL_DIR}/templates/notation-glossary.md",
+            "@{GPD_INSTALL_DIR}/references/publication/bibtex-standards.md",
+            "@{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md",
+            "@{GPD_INSTALL_DIR}/references/publication/bibliography-advanced-search.md",
+        }
+        assert bibliographer_template_references == {
+            "@{GPD_INSTALL_DIR}/templates/notation-glossary.md",
+        }
+        assert bibliographer["schema_references"] == []
+        assert bibliographer["schema_documents"] == []
+        assert any(path.endswith("verification-core.md") for path in bibliographer_transitive_paths)
 
     def test_get_skill_index_complete(self):
         from gpd.mcp.servers.skills_server import get_skill_index

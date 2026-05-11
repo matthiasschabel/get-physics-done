@@ -1,4 +1,4 @@
-"""Behavior-focused MCP server regression coverage."""
+"""Behavior-focused MCP server assertions."""
 
 from __future__ import annotations
 
@@ -20,6 +20,13 @@ def test_parse_table_rows_handles_escaped_pipes() -> None:
     rows = _parse_table_rows("| 1 | Foo \\| Bar | Baz |")
 
     assert rows == [["1", "Foo | Bar", "Baz"]]
+
+
+def test_servers_package_exports_arxiv_bridge_metadata() -> None:
+    import gpd.mcp.servers as servers
+
+    assert "arxiv_bridge" in servers.__all__
+    assert servers.arxiv_bridge.__name__ == "gpd.mcp.servers.arxiv_bridge"
 
 
 def test_parse_table_rows_skips_separator_rows() -> None:
@@ -79,6 +86,30 @@ def test_errors_mcp_returns_error_dict_on_store_os_error() -> None:
     assert "cannot read catalog" in result["error"]
 
 
+def test_list_error_classes_rejects_blank_and_unknown_domains_without_loading_store() -> None:
+    from gpd.mcp.servers.errors_mcp import list_error_classes
+
+    with patch("gpd.mcp.servers.errors_mcp._get_store") as mock_store:
+        blank = list_error_classes("   ")
+        unknown = list_error_classes("not-a-domain")
+
+    assert "domain must be a non-empty string" in blank["error"]
+    assert "unknown domain 'not-a-domain'" in unknown["error"]
+    mock_store.assert_not_called()
+
+
+def test_error_domain_metadata_drives_boundary_inference() -> None:
+    from gpd.mcp.servers.errors_mcp import ERROR_DOMAIN_RANGES, KNOWN_ERROR_DOMAINS, _infer_domain_from_id
+
+    assert tuple(ERROR_DOMAIN_RANGES) == KNOWN_ERROR_DOMAINS
+    for domain, (start, end) in ERROR_DOMAIN_RANGES.items():
+        assert _infer_domain_from_id(start) == domain
+        assert _infer_domain_from_id(end) == domain
+
+    assert _infer_domain_from_id(0) == "unknown"
+    assert _infer_domain_from_id(105) == "unknown"
+
+
 def test_error_store_rejects_missing_authoritative_catalog(tmp_path: Path) -> None:
     from gpd.mcp.servers.errors_mcp import ErrorStore
 
@@ -111,6 +142,37 @@ def test_error_store_rejects_duplicate_error_ids(tmp_path: Path) -> None:
     ), patch("gpd.mcp.servers.errors_mcp.TRACEABILITY_FILE", "verification/errors/traceability.md"):
         with pytest.raises(ValueError, match="Duplicate error class id 1"):
             ErrorStore(tmp_path)
+
+
+def test_error_store_rejects_catalog_ids_outside_declared_file_ranges(tmp_path: Path) -> None:
+    from gpd.mcp.servers.errors_mcp import ErrorStore
+
+    errors_dir = tmp_path / "verification" / "errors"
+    errors_dir.mkdir(parents=True)
+    (errors_dir / "catalog.md").write_text(
+        "| # | Error Class | Description | Detection Strategy | Example |\n"
+        "|---|---|---|---|---|\n"
+        "| 2 | Foo | First description | Detect A | Example A |\n",
+        encoding="utf-8",
+    )
+
+    with patch("gpd.mcp.servers.errors_mcp.ERROR_CATALOG_FILES", ["verification/errors/catalog.md"]), patch(
+        "gpd.mcp.servers.errors_mcp.ERROR_CATALOG_FILE_RANGES",
+        (("verification/errors/catalog.md", ((1, 1),)),),
+    ):
+        with pytest.raises(ValueError, match=r"catalog\.md.*1.*out-of-range error class id 2"):
+            ErrorStore(tmp_path)
+
+
+def test_error_catalog_declared_range_helpers_accept_split_ranges() -> None:
+    from gpd.mcp.servers.errors_mcp import _error_id_in_declared_ranges
+
+    ranges = ((52, 81), (102, 104))
+
+    assert _error_id_in_declared_ranges(52, ranges) is True
+    assert _error_id_in_declared_ranges(81, ranges) is True
+    assert _error_id_in_declared_ranges(102, ranges) is True
+    assert _error_id_in_declared_ranges(101, ranges) is False
 
 
 def test_error_store_rejects_duplicate_traceability_rows(tmp_path: Path) -> None:
@@ -538,11 +600,41 @@ def test_pattern_lookup_tolerates_missing_default_library(tmp_path: Path) -> Non
     assert isinstance(result, dict)
 
 
+def test_patterns_server_resolves_env_patterns_root_per_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import gpd.mcp.servers.patterns_server as patterns_server
+    from gpd.core.constants import ENV_PATTERNS_ROOT
+
+    monkeypatch.setattr(patterns_server, "_DEFAULT_PATTERNS_ROOT", None)
+    roots: list[Path | None] = []
+    mock_result = MagicMock()
+    mock_result.count = 0
+    mock_result.patterns = []
+    mock_result.library_exists = False
+
+    def fake_pattern_list(*, domain=None, category=None, root=None):  # type: ignore[no-untyped-def]
+        roots.append(root)
+        return mock_result
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+
+    with patch("gpd.mcp.servers.patterns_server.pattern_list", side_effect=fake_pattern_list):
+        monkeypatch.setenv(ENV_PATTERNS_ROOT, str(first_root))
+        patterns_server.lookup_pattern(domain="qft")
+        monkeypatch.setenv(ENV_PATTERNS_ROOT, str(second_root))
+        patterns_server.lookup_pattern(domain="qft")
+
+    assert roots == [first_root, second_root]
+
+
 def test_absolute_project_dir_schema_matches_current_host_path_semantics() -> None:
     from gpd.mcp.servers import ABSOLUTE_PROJECT_DIR_SCHEMA, resolve_absolute_project_dir
 
     if os.name == "nt":
-        assert ABSOLUTE_PROJECT_DIR_SCHEMA["pattern"] == r"^(?:[A-Za-z]:[\\/]|\\\\)"
+        assert ABSOLUTE_PROJECT_DIR_SCHEMA["pattern"] == r"^(?:[A-Za-z]:[\\/](?:.*)?|\\\\[^\\/]+[\\/][^\\/]+(?:[\\/].*)?)"
     else:
         assert ABSOLUTE_PROJECT_DIR_SCHEMA["pattern"] == r"^/"
         assert resolve_absolute_project_dir(r"C:\repo") is None

@@ -26,8 +26,9 @@ from gpd.cli import app
 from gpd.core.constants import AGENT_ID_FILENAME, ENV_DATA_DIR
 from gpd.core.costs import UsageRecord, _profile_tier_mix, usage_ledger_path
 from gpd.core.recent_projects import record_recent_project
-from gpd.core.resume_surface import RESUME_COMPATIBILITY_ALIAS_FIELDS
+from gpd.core.resume_surface import RESUME_BACKEND_ONLY_FIELDS
 from gpd.core.state import default_state_dict, generate_state_markdown
+from tests.hooks.helpers import clear_runtime_env
 from tests.manuscript_test_support import (
     manuscript_path as canonical_manuscript_path,
 )
@@ -73,7 +74,7 @@ _SECONDARY_PERMISSIONS_DESCRIPTOR = _select_runtime_descriptor(
 
 
 def _assert_no_top_level_resume_aliases(payload: dict[str, object]) -> None:
-    for key in RESUME_COMPATIBILITY_ALIAS_FIELDS:
+    for key in RESUME_BACKEND_ONLY_FIELDS:
         assert key not in payload
 
 
@@ -90,37 +91,11 @@ def slash_command_prefix(monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setattr("gpd.cli.detect_runtime_for_gpd_use", lambda cwd=None: _SLASH_COMMAND_DESCRIPTOR.runtime_name)
     return get_adapter(_SLASH_COMMAND_DESCRIPTOR.runtime_name).runtime_descriptor.public_command_surface_prefix
 
-def _runtime_env_prefixes() -> tuple[str, ...]:
-    prefixes: set[str] = set()
-    for descriptor in _RUNTIME_DESCRIPTORS:
-        for env_var in descriptor.activation_env_vars:
-            prefixes.add(env_var)
-            prefixes.add(env_var.rsplit("_", 1)[0] if "_" in env_var else env_var)
-    return tuple(sorted(prefixes, key=len, reverse=True))
-
-
-_RUNTIME_ENV_PREFIXES = _runtime_env_prefixes()
-
-
-def _runtime_env_vars_to_clear() -> set[str]:
-    env_vars = {"GPD_ACTIVE_RUNTIME", "XDG_CONFIG_HOME", "HOME", "GPD_HOME"}
-    for descriptor in _RUNTIME_DESCRIPTORS:
-        global_config = descriptor.global_config
-        for env_var in (global_config.env_var, global_config.env_dir_var, global_config.env_file_var):
-            if env_var:
-                env_vars.add(env_var)
-    return env_vars
-
-
-_RUNTIME_ENV_VARS_TO_CLEAR = _runtime_env_vars_to_clear()
-
 
 @pytest.fixture(autouse=True)
 def _reset_runtime_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Keep CLI integration tests isolated from prior runtime env overrides."""
-    for key in list(os.environ):
-        if key.startswith(_RUNTIME_ENV_PREFIXES) or key in _RUNTIME_ENV_VARS_TO_CLEAR:
-            monkeypatch.delenv(key, raising=False)
+    clear_runtime_env(monkeypatch, extra_env_vars=("HOME", "GPD_HOME"))
     home_dir = tmp_path / "home"
     home_dir.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("HOME", str(home_dir))
@@ -231,7 +206,9 @@ def test_paper_build_surfaces_reference_bibtex_bridge(tmp_path: Path) -> None:
     payload = json.loads(result.output)
     assert payload["config_path"] == "../paper/PAPER-CONFIG.json"
     assert payload["output_dir"] == "../paper"
-    assert payload["reference_bibtex_bridge"] == [{"reference_id": "lit-ref-einstein-1905", "bibtex_key": "einstein1905"}]
+    assert payload["reference_bibtex_bridge"] == [
+        {"reference_id": "lit-ref-einstein-1905", "bibtex_key": "einstein1905"}
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -261,20 +238,19 @@ def gpd_project(tmp_path: Path) -> Path:
             "custom_conventions": {"my_custom": "value"},
         }
     )
-    (planning / "state.json").write_text(json.dumps(state, indent=2))
-    (planning / "STATE.md").write_text(generate_state_markdown(state))
+    (planning / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+    (planning / "STATE.md").write_text(generate_state_markdown(state), encoding="utf-8")
     (planning / "PROJECT.md").write_text(
-        "# Test Project\n\n## Core Research Question\nWhat is physics?\n"
+        "# Test Project\n\n## Core Research Question\nWhat is physics?\n", encoding="utf-8"
     )
-    (planning / "REQUIREMENTS.md").write_text(
-        "# Requirements\n\n- [ ] **REQ-01**: Do the thing\n"
-    )
+    (planning / "REQUIREMENTS.md").write_text("# Requirements\n\n- [ ] **REQ-01**: Do the thing\n", encoding="utf-8")
     (planning / "ROADMAP.md").write_text(
         "# Roadmap\n\n## Phase 1: Test Phase\nGoal: Test\nRequirements: REQ-01\n"
-        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n"
+        "\n## Phase 2: Phase Two\nGoal: More tests\nRequirements: REQ-01\n",
+        encoding="utf-8",
     )
     (planning / "CONVENTIONS.md").write_text(
-        "# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n"
+        "# Conventions\n\n- Metric: (-,+,+,+)\n- Coordinates: Cartesian\n", encoding="utf-8"
     )
     (planning / "config.json").write_text(
         json.dumps(
@@ -290,15 +266,16 @@ def gpd_project(tmp_path: Path) -> Path:
                     "verifier": True,
                 },
             }
-        )
+        ),
+        encoding="utf-8",
     )
 
     # Phase directories
     p1 = planning / "phases" / "01-test-phase"
     p1.mkdir(parents=True)
-    (p1 / "README.md").write_text("# Phase 1: Test Phase\n")
+    (p1 / "README.md").write_text("# Phase 1: Test Phase\n", encoding="utf-8")
     (p1 / "01-PLAN.md").write_text(
-        "---\nphase: '01'\nplan: '01'\nwave: 1\n---\n\n# Plan A\n\n## Tasks\n\n- Task 1\n"
+        "---\nphase: '01'\nplan: '01'\nwave: 1\n---\n\n# Plan A\n\n## Tasks\n\n- Task 1\n", encoding="utf-8"
     )
     (p1 / "01-SUMMARY.md").write_text(
         '---\nphase: "01"\nplan: "01"\ndepth: "full"\nprovides: ["main-module"]\ncompleted: "2026-03-22"\none-liner: "Set up project"\n'
@@ -309,12 +286,13 @@ def gpd_project(tmp_path: Path) -> Path:
         "methods:\n  added:\n    - finite-element\n"
         "conventions:\n  metric: (-,+,+,+)\n"
         "---\n\n# Summary\n\n**Set up the project.**\n\n"
-        "## Key Results\n\nWe got results.\n\n## Equations Derived\n\nE = mc^2\n"
+        "## Key Results\n\nWe got results.\n\n## Equations Derived\n\nE = mc^2\n",
+        encoding="utf-8",
     )
 
     p2 = planning / "phases" / "02-phase-two"
     p2.mkdir(parents=True)
-    (p2 / "README.md").write_text("# Phase 2: Phase Two\n")
+    (p2 / "README.md").write_text("# Phase 2: Phase Two\n", encoding="utf-8")
 
     return tmp_path
 
@@ -779,7 +757,7 @@ def test_result_persist_derived_bridge_seeds_canonical_continuity_for_later_reco
     assert reloaded["intermediate_results"][0]["id"] == "R-01"
     assert reloaded["intermediate_results"][0]["description"] == "Canonical description"
     assert reloaded["continuation"]["bounded_segment"]["last_result_id"] == "R-01"
-    assert reloaded["session"]["last_result_id"] == "R-01"
+    assert "session" not in reloaded
     assert reloaded["continuation"]["handoff"]["last_result_id"] == "R-01"
 
     record_session_result = runner.invoke(
@@ -803,7 +781,7 @@ def test_result_persist_derived_bridge_seeds_canonical_continuity_for_later_reco
     assert record_session_payload["recorded"] is True
 
     reread = json.loads(state_path.read_text(encoding="utf-8"))
-    assert reread["session"]["last_result_id"] == "R-01"
+    assert "session" not in reread
     assert reread["continuation"]["handoff"]["last_result_id"] == "R-01"
     current_execution = json.loads((planning / "observability" / "current-execution.json").read_text(encoding="utf-8"))
     assert current_execution["last_result_id"] == "R-01"
@@ -1174,7 +1152,7 @@ def test_state_record_session_persists_last_result_id_in_session_and_handoff(gpd
     assert payload["recorded"] is True
 
     state = json.loads((gpd_project / "GPD" / "state.json").read_text(encoding="utf-8"))
-    assert state["session"]["last_result_id"] == "R-bridge-01"
+    assert "session" not in state
     assert state["continuation"]["handoff"]["last_result_id"] == "R-bridge-01"
 
     state_md = (gpd_project / "GPD" / "STATE.md").read_text(encoding="utf-8")
@@ -1226,9 +1204,7 @@ def _invoke(*args: str, expect_ok: bool = True) -> object:
     """Invoke a gpd CLI command and return the CliRunner result."""
     result = runner.invoke(app, list(args), catch_exceptions=False)
     if expect_ok:
-        assert result.exit_code == 0, (
-            f"gpd {' '.join(args)} failed (exit {result.exit_code}):\n{result.output}"
-        )
+        assert result.exit_code == 0, f"gpd {' '.join(args)} failed (exit {result.exit_code}):\n{result.output}"
     return result
 
 
@@ -1370,9 +1346,7 @@ class TestTimestamp:
 
 
 class TestResume:
-    def test_resume_raw_surfaces_ranked_candidates(
-        self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resume_raw_surfaces_ranked_candidates(self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         handoff = gpd_project / "GPD" / "phases" / "01-test-phase" / ".continue-here.md"
         handoff.write_text("resume\n", encoding="utf-8")
         state_path = gpd_project / "GPD" / "state.json"
@@ -1403,7 +1377,7 @@ class TestResume:
         assert parsed["resume_candidates"][0]["origin"] == "canonical_continuation"
         assert parsed["recovery_candidates"][0]["kind"] == "continuity_handoff"
         assert parsed["recovery_candidates"][0]["origin"] == "canonical_continuation"
-        assert "compat_resume_surface" not in parsed
+        assert "resume_surface" not in parsed
 
     def test_resume_raw_surfaces_hydrated_active_resume_result_from_nested_cwd(
         self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -1459,9 +1433,7 @@ class TestResume:
         assert parsed["resume_candidates"][0]["last_result"]["id"] == "R-bridge-01"
         assert parsed["resume_candidates"][0]["last_result"]["description"] == "Benchmark reproduction"
 
-    def test_resume_raw_marks_missing_continuity_handoff_as_canonical_missing_state(
-        self, gpd_project: Path
-    ) -> None:
+    def test_resume_raw_marks_missing_continuity_handoff_as_canonical_missing_state(self, gpd_project: Path) -> None:
         state_path = gpd_project / "GPD" / "state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
         state["position"]["status"] = "Paused"
@@ -1494,13 +1466,15 @@ class TestResume:
         assert parsed["recovery_advice"]["active_resume_origin"] == "canonical_continuation"
         assert parsed["recovery_advice"]["active_resume_pointer"] is None
         assert parsed["recovery_advice"]["missing_continuity_handoff"] is True
-        assert parsed["recovery_advice"]["missing_continuity_handoff_file"] == "GPD/phases/01-test-phase/.continue-here.md"
+        assert (
+            parsed["recovery_advice"]["missing_continuity_handoff_file"] == "GPD/phases/01-test-phase/.continue-here.md"
+        )
         assert parsed["recovery_advice"]["status"] == "missing-handoff"
         assert parsed["recovery_candidates"][0]["kind"] == "continuity_handoff"
         assert parsed["recovery_candidates"][0]["status"] == "missing"
         assert parsed["recovery_candidates"][0]["advisory"] is True
 
-        assert "compat_resume_surface" not in parsed
+        assert "resume_surface" not in parsed
 
     def test_resume_raw_uses_canonical_bounded_segment_without_live_snapshot(
         self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -1546,12 +1520,12 @@ class TestResume:
         assert parsed["recovery_status_label"] == "Bounded segment"
         assert parsed["recovery_advice"]["resume_surface_schema_version"] == 1
         assert parsed["recovery_advice"]["actions"][0]["kind"] == "primary"
-        assert "compat_resume_surface" not in parsed["recovery_advice"]
-        for key in RESUME_COMPATIBILITY_ALIAS_FIELDS:
+        assert "resume_surface" not in parsed["recovery_advice"]
+        for key in RESUME_BACKEND_ONLY_FIELDS:
             assert key not in parsed["recovery_advice"]
         assert parsed["primary_recovery_target"]["kind"] == "bounded_segment"
         assert parsed["primary_recovery_target"]["origin"] == "canonical_continuation"
-        assert "compat_resume_surface" not in parsed
+        assert "resume_surface" not in parsed
 
     def test_resume_raw_prefers_canonical_bounded_segment_over_conflicting_live_snapshot(
         self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch
@@ -1613,7 +1587,7 @@ class TestResume:
         assert parsed["has_live_execution"] is True
         assert parsed["resume_candidates"][0]["resume_file"] == canonical_resume_file
         assert parsed["resume_candidates"][0]["origin"] == "canonical_continuation"
-        assert "compat_resume_surface" not in parsed
+        assert "resume_surface" not in parsed
 
     def test_resume_human_output_surfaces_public_and_backend_commands(self, gpd_project: Path) -> None:
         handoff = gpd_project / "GPD" / "phases" / "01-test-phase" / ".continue-here.md"
@@ -1696,7 +1670,7 @@ class TestResume:
         state_path = gpd_project / "GPD" / "state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
         state["position"]["status"] = "Paused"
-        state["session"]["resume_file"] = "GPD/phases/01-test-phase/.continue-here.md"
+        state["session"] = {"resume_file": "GPD/phases/01-test-phase/.continue-here.md"}
         state_path.write_text(json.dumps(state), encoding="utf-8")
 
         result = _invoke("resume")
@@ -1739,7 +1713,7 @@ class TestResume:
         assert parsed["recovery_status"] == "bounded-segment"
         assert parsed["recovery_status_label"] == "Bounded segment"
         assert parsed["primary_recovery_target"]["kind"] == "bounded_segment"
-        assert "compat_resume_surface" not in parsed
+        assert "resume_surface" not in parsed
 
     def test_resume_human_output_surfaces_auto_selected_recent_bounded_segment(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -1811,7 +1785,9 @@ class TestResume:
         assert alpha_marker in result.output
         assert result.output.index(beta_marker) < result.output.index(alpha_marker)
 
-    def test_resume_recent_surfaces_recent_project_index_errors(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_resume_recent_surfaces_recent_project_index_errors(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         data_dir = tmp_path / "gpd-data"
         monkeypatch.setenv("GPD_DATA_DIR", str(data_dir))
         recent_root = data_dir / "recent-projects"
@@ -1924,8 +1900,12 @@ class TestObserveExecution:
 
 class TestSuggest:
     def test_suggest_raw_from_nested_paused_project_surfaces_public_resume_command(
-        self, gpd_project: Path
+        self, gpd_project: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        fake_home = gpd_project / "fake-home"
+        fake_home.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("gpd.hooks.runtime_detect.Path.home", lambda: fake_home)
+
         state_path = gpd_project / "GPD" / "state.json"
         state = json.loads(state_path.read_text(encoding="utf-8"))
         state["position"]["status"] = "Paused"
@@ -1956,6 +1936,7 @@ class TestSuggest:
         fake_home = workspace / "fake-home"
         fake_home.mkdir(parents=True, exist_ok=True)
         monkeypatch.setattr("gpd.hooks.runtime_detect.Path.home", lambda: fake_home)
+        monkeypatch.setenv("GPD_DATA_DIR", str(workspace / "gpd-data"))
 
         result = _invoke("--raw", "--cwd", str(workspace), "suggest")
         parsed = json.loads(result.output)
@@ -1973,6 +1954,21 @@ class TestSuggest:
         assert parsed["context"]["phase_count"] == 0
         assert parsed["context"]["completed_phases"] == 0
         assert parsed["context"]["missing_conventions"] == []
+
+    def test_suggest_next_raw_alias_uses_suggest_bridge(
+        self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        workspace = tmp_path_factory.mktemp("suggest-next-alias")
+        fake_home = workspace / "fake-home"
+        fake_home.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr("gpd.hooks.runtime_detect.Path.home", lambda: fake_home)
+        monkeypatch.setenv("GPD_DATA_DIR", str(workspace / "gpd-data"))
+
+        result = _invoke("--raw", "--cwd", str(workspace), "suggest-next")
+        parsed = json.loads(result.output)
+
+        assert parsed["top_action"]["action"] == "new-project"
+        assert parsed["top_action"]["command"] == "gpd init new-project"
 
     def test_suggest_raw_prioritizes_resume_over_execute_phase_for_paused_project(
         self, tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
@@ -2029,7 +2025,7 @@ class TestSuggest:
         assert parsed["top_action"] == parsed["suggestions"][0]
         assert parsed["suggestions"][1]["action"] == "execute-phase"
         assert parsed["suggestions"][1]["command"] == "gpd init execute-phase 01"
-        assert parsed["suggestions"][1]["priority"] == 3
+        assert parsed["suggestions"][1]["priority"] == 4
         assert parsed["suggestions"][1]["phase"] == "01"
         assert parsed["context"]["current_phase"] == "01"
         assert parsed["context"]["status"] == "Paused"
@@ -2202,7 +2198,9 @@ class TestObserve:
         parsed = json.loads(result.output)
         assert parsed["category"] == "workflow"
         assert parsed["name"] == "wave-start"
-        observed = json.loads(_invoke("--raw", "observe", "show", "--category", "workflow", "--name", "wave-start").output)
+        observed = json.loads(
+            _invoke("--raw", "observe", "show", "--category", "workflow", "--name", "wave-start").output
+        )
         assert observed["count"] >= 1
         assert any(event.get("data", {}).get("wave") == 1 for event in observed["events"])
 
@@ -2245,7 +2243,9 @@ class TestInitIncludeParsing:
         assert payload["roadmap_content"] is not None
 
     @pytest.mark.parametrize("directory_name", ["agents", "hooks", "command"])
-    def test_init_new_project_scans_user_owned_generic_tool_directories(self, tmp_path: Path, directory_name: str) -> None:
+    def test_init_new_project_scans_user_owned_generic_tool_directories(
+        self, tmp_path: Path, directory_name: str
+    ) -> None:
         research_dir = tmp_path / directory_name
         research_dir.mkdir(parents=True, exist_ok=True)
         (research_dir / "notes.tex").write_text("\\section{Recovered context}\n", encoding="utf-8")
@@ -2264,7 +2264,7 @@ class TestInitIncludeParsing:
         payload = json.loads(result.output)
         assert payload["error"] == (
             "Unknown --include value(s) for gpd init progress: bogus. "
-            "Allowed values: config, project, roadmap, state."
+            "Allowed values: config, project, protocols, references, roadmap, state."
         )
 
     def test_init_resume_is_read_only_and_returns_ranked_candidates(self, gpd_project: Path) -> None:
@@ -2321,7 +2321,7 @@ class TestInitIncludeParsing:
         ]
         assert payload["resume_candidates"][0]["origin"] == "continuation.handoff"
         assert payload["resume_candidates"][1]["origin"] == "interrupted_agent_marker"
-        assert "compat_resume_surface" not in payload
+        assert "resume_surface" not in payload
         assert _target_file_snapshot(planning) == snapshot_before
 
     def test_observe_execution_reports_waiting_without_marking_it_possibly_stalled(self, gpd_project: Path) -> None:
@@ -2458,11 +2458,9 @@ class TestRegressionCheck:
 
     def test_regression_check_phase_scope(self, gpd_project: Path) -> None:
         p2 = gpd_project / "GPD" / "phases" / "02-phase-two"
-        (p2 / "01-PLAN.md").write_text("---\nphase: '02'\n---\n# Plan\n")
+        (p2 / "01-PLAN.md").write_text("---\nphase: '02'\n---\n# Plan\n", encoding="utf-8")
         (p2 / "01-SUMMARY.md").write_text(
-            '---\nphase: "02"\nplan: "01"\n'
-            "conventions:\n  metric: (+,-,-,-)\n"
-            "---\n\n# Summary\n"
+            '---\nphase: "02"\nplan: "01"\nconventions:\n  metric: (+,-,-,-)\n---\n\n# Summary\n', encoding="utf-8"
         )
 
         result = _invoke("--raw", "regression-check", "1")
@@ -2476,11 +2474,9 @@ class TestRegressionCheck:
         p2 = gpd_project / "GPD" / "phases" / "02-phase-two"
 
         # Make phase 2 look completed with a conflicting convention
-        (p2 / "01-PLAN.md").write_text("---\nphase: '02'\n---\n# Plan\n")
+        (p2 / "01-PLAN.md").write_text("---\nphase: '02'\n---\n# Plan\n", encoding="utf-8")
         (p2 / "01-SUMMARY.md").write_text(
-            '---\nphase: "02"\nplan: "01"\n'
-            "conventions:\n  metric: (+,-,-,-)\n"
-            "---\n\n# Summary\n"
+            '---\nphase: "02"\nplan: "01"\nconventions:\n  metric: (+,-,-,-)\n---\n\n# Summary\n', encoding="utf-8"
         )
 
         result = runner.invoke(app, ["--raw", "regression-check"], catch_exceptions=False)
@@ -2506,7 +2502,8 @@ class TestValidateReturn:
             '  status: completed\n  files_written: ["src/main.py"]\n'
             "  issues: []\n"
             '  next_actions: ["/gpd:verify-work 01"]\n'
-            "  duration_seconds: 120\n```\n"
+            "  duration_seconds: 120\n```\n",
+            encoding="utf-8",
         )
         result = _invoke("--raw", "validate-return", str(return_file))
         parsed = json.loads(result.output)
@@ -2516,10 +2513,7 @@ class TestValidateReturn:
     def test_validate_return_missing_fields(self, gpd_project: Path) -> None:
         """A file with missing required fields should fail."""
         return_file = gpd_project / "incomplete_return.md"
-        return_file.write_text(
-            "# Summary\n\n```yaml\ngpd_return:\n"
-            '  status: completed\n```\n'
-        )
+        return_file.write_text("# Summary\n\n```yaml\ngpd_return:\n  status: completed\n```\n", encoding="utf-8")
         result = runner.invoke(
             app,
             ["--raw", "validate-return", str(return_file)],
@@ -2533,7 +2527,7 @@ class TestValidateReturn:
     def test_validate_return_no_block(self, gpd_project: Path) -> None:
         """A file without a gpd_return block should fail."""
         return_file = gpd_project / "no_block.md"
-        return_file.write_text("# Just a regular file\n\nNo return block here.\n")
+        return_file.write_text("# Just a regular file\n\nNo return block here.\n", encoding="utf-8")
         result = runner.invoke(
             app,
             ["--raw", "validate-return", str(return_file)],
@@ -2551,7 +2545,8 @@ class TestValidateReturn:
             "# Summary\n\n```yaml\ngpd_return:\n"
             '  status: banana\n  files_written: ["src/main.py"]\n'
             "  issues: []\n"
-            '  next_actions: ["/gpd:verify-work 01"]\n```\n'
+            '  next_actions: ["/gpd:verify-work 01"]\n```\n',
+            encoding="utf-8",
         )
         result = runner.invoke(
             app,
@@ -2570,12 +2565,154 @@ class TestValidateReturn:
             "# Summary\n\n```yaml\ngpd_return:\n"
             '  status: completed\n  files_written: ["src/main.py"]\n'
             "  issues: []\n"
-            '  next_actions: ["/gpd:verify-work 01"]\n```\n'
+            '  next_actions: ["/gpd:verify-work 01"]\n```\n',
+            encoding="utf-8",
         )
         result = _invoke("--raw", "validate-return", str(return_file))
         parsed = json.loads(result.output)
         assert parsed["passed"] is True
         assert parsed["warning_count"] > 0
+
+    def test_validate_return_nested_payloads_are_preserved(self, gpd_project: Path) -> None:
+        """Nested continuation/state payloads should parse through the CLI path."""
+        return_file = gpd_project / "nested_return.md"
+        return_file.write_text(
+            "# Summary\n\n```yaml\ngpd_return:\n"
+            "  status: checkpoint\n"
+            '  files_written: ["src/main.py"]\n'
+            "  issues: []\n"
+            '  next_actions: ["/gpd:resume-work"]\n'
+            "  state_updates:\n"
+            "    advance_plan: true\n"
+            "    update_progress: true\n"
+            "  continuation_update:\n"
+            "    handoff:\n"
+            "      stopped_at: Completed phase 01\n"
+            "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
+            "    bounded_segment:\n"
+            "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
+            '      phase: "01"\n'
+            '      plan: "01"\n'
+            "      segment_id: seg-01\n"
+            "      segment_status: paused\n"
+            "      checkpoint_reason: segment_boundary\n```\n",
+            encoding="utf-8",
+        )
+        result = _invoke("--raw", "validate-return", str(return_file))
+        parsed = json.loads(result.output)
+        assert parsed["passed"] is True
+        assert parsed["fields"]["state_updates"]["advance_plan"] is True
+        assert parsed["fields"]["state_updates"]["update_progress"] is True
+        assert parsed["fields"]["continuation_update"]["handoff"]["stopped_at"] == "Completed phase 01"
+        assert parsed["fields"]["continuation_update"]["bounded_segment"]["segment_id"] == "seg-01"
+
+    def test_validate_return_rejects_transport_only_execution_segment_in_continuation_update(
+        self, gpd_project: Path
+    ) -> None:
+        """Transport-only execution_segment payloads should fail the durable return contract."""
+        return_file = gpd_project / "bad_transport_return.md"
+        return_file.write_text(
+            "# Summary\n\n```yaml\ngpd_return:\n"
+            "  status: checkpoint\n"
+            '  files_written: ["src/main.py"]\n'
+            "  issues: []\n"
+            '  next_actions: ["/gpd:resume-work"]\n'
+            "  continuation_update:\n"
+            "    execution_segment:\n"
+            "      current_cursor: 3\n```\n",
+            encoding="utf-8",
+        )
+        result = _invoke("--raw", "validate-return", str(return_file), expect_ok=False)
+        assert result.exit_code == 1
+        parsed = json.loads(result.output)
+        assert parsed["passed"] is False
+        assert any("continuation_update" in error and "execution_segment" in error for error in parsed["errors"])
+
+    def test_validate_return_rejects_malformed_nested_payloads(self, gpd_project: Path) -> None:
+        """Wrong scalar/list and mapping/list shapes should fail closed."""
+        return_file = gpd_project / "bad_nested_return.md"
+        return_file.write_text(
+            "# Summary\n\n```yaml\ngpd_return:\n"
+            "  status: blocked\n"
+            "  files_written: []\n"
+            "  issues: []\n"
+            "  next_actions: []\n"
+            "  blockers:\n"
+            "    - waiting on approval\n"
+            "  continuation_update: checkpoint\n```\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(
+            app,
+            ["--raw", "validate-return", str(return_file)],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 1
+        parsed = json.loads(result.output)
+        assert parsed["passed"] is False
+        assert any("continuation_update" in error for error in parsed["errors"])
+
+    def test_apply_return_updates_applies_state_changes(self, gpd_project: Path) -> None:
+        """The CLI should apply supported child-return updates and persist them."""
+        state_path = gpd_project / "GPD" / "STATE.md"
+        before = state_path.read_text(encoding="utf-8")
+        return_file = gpd_project / "apply_return.md"
+        return_file.write_text(
+            "# Summary\n\n```yaml\ngpd_return:\n"
+            "  status: checkpoint\n"
+            '  files_written: ["GPD/STATE.md"]\n'
+            "  issues: []\n"
+            '  next_actions: ["/gpd:resume-work"]\n'
+            "  decisions:\n"
+            "    - summary: Prefer canonical CLI application\n"
+            '      phase: "10"\n'
+            "  blockers:\n"
+            "    - waiting on approval\n"
+            "  contract_updates:\n"
+            "    project_contract: retained\n"
+            "  continuation_update:\n"
+            "    bounded_segment:\n"
+            "      resume_file: GPD/STATE.md\n"
+            "      segment_status: paused\n```\n",
+            encoding="utf-8",
+        )
+
+        result = _invoke("--raw", "apply-return-updates", str(return_file))
+        parsed = json.loads(result.output)
+        assert parsed["passed"] is True
+        assert parsed["status"] == "checkpoint"
+        assert parsed["applied_decisions"] == 1
+        assert parsed["applied_blockers"] == 1
+        assert parsed["applied_continuation_operations"] == ["set_bounded_segment"]
+        assert parsed["contract_updates"] == {"project_contract": "retained"}
+        assert state_path.read_text(encoding="utf-8") != before
+        updated_state = state_path.read_text(encoding="utf-8")
+        assert "Prefer canonical CLI application" in updated_state
+        assert "waiting on approval" in updated_state
+
+    def test_apply_return_updates_rejects_malformed_updates_before_mutation(self, gpd_project: Path) -> None:
+        """Malformed update payloads should fail closed before touching state."""
+        state_path = gpd_project / "GPD" / "STATE.md"
+        before = state_path.read_text(encoding="utf-8")
+        return_file = gpd_project / "bad_apply_return.md"
+        return_file.write_text(
+            "# Summary\n\n```yaml\ngpd_return:\n"
+            "  status: checkpoint\n"
+            '  files_written: ["GPD/STATE.md"]\n'
+            "  issues: []\n"
+            '  next_actions: ["/gpd:resume-work"]\n'
+            "  state_updates:\n"
+            "    unexpected_operation: true\n```\n",
+            encoding="utf-8",
+        )
+
+        result = _invoke("--raw", "apply-return-updates", str(return_file), expect_ok=False)
+        assert result.exit_code == 1
+        parsed = json.loads(result.output)
+        assert parsed["passed"] is False
+        assert parsed["status"] == "failed"
+        assert any("state_updates" in error and "unexpected_operation" in error for error in parsed["errors"])
+        assert state_path.read_text(encoding="utf-8") == before
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2614,7 +2751,7 @@ class TestConfigCommands:
         parsed = json.loads(result.output)
 
         assert parsed["found"] is True
-        assert parsed["value"] == "balanced"
+        assert parsed["value"] == "supervised"
 
     def test_config_set_rejects_unsupported_key(self, gpd_project: Path) -> None:
         result = _invoke("--raw", "config", "set", "new_key", "new_value", expect_ok=False)
@@ -2641,7 +2778,113 @@ class TestConfigCommands:
         config = json.loads((gpd_project / "GPD" / "config.json").read_text(encoding="utf-8"))
         assert config["parallelization"] is False
 
-    def test_config_set_rejects_legacy_autonomy_value(self, gpd_project: Path) -> None:
+    @pytest.mark.parametrize(
+        ("key", "field", "clear_token"),
+        [
+            ("execution.project_usd_budget", "project_usd_budget", "none"),
+            ("execution.session_usd_budget", "session_usd_budget", ""),
+        ],
+    )
+    def test_config_set_nullable_budget_clear_tokens(
+        self,
+        gpd_project: Path,
+        key: str,
+        field: str,
+        clear_token: str,
+    ) -> None:
+        config_path = gpd_project / "GPD" / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["execution"] = {"project_usd_budget": 12.5, "session_usd_budget": 2.25}
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+
+        result = _invoke("--raw", "config", "set", key, clear_token)
+        parsed = json.loads(result.output)
+
+        written = json.loads(config_path.read_text(encoding="utf-8"))
+        assert parsed["canonical_key"] == field
+        assert parsed["value"] is None
+        assert written["execution"][field] is None
+
+    def test_config_set_tier_models_updates_selected_runtime_and_preserves_other_maps(
+        self,
+        gpd_project: Path,
+    ) -> None:
+        descriptor = _RUNTIME_DESCRIPTORS[0]
+        other_descriptor = _RUNTIME_DESCRIPTORS[1]
+        exact_model = "Provider/OpenAI:GPT-5[Reasoning=High]"
+        config_path = gpd_project / "GPD" / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["model_overrides"] = {
+            descriptor.runtime_name: {
+                "tier-1": "old-tier-1",
+                "tier-2": "old-tier-2",
+                "tier-3": "old-tier-3",
+            },
+            other_descriptor.runtime_name: {
+                "tier-1": "other-tier-1",
+                "tier-2": "other-tier-2",
+            },
+        }
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+
+        result = _invoke(
+            "--raw",
+            "config",
+            "set-tier-models",
+            "--runtime",
+            descriptor.display_name,
+            "--tier-1",
+            exact_model,
+            "--tier-2",
+            "none",
+            "--tier-3",
+            "",
+        )
+        parsed = json.loads(result.output)
+
+        written = json.loads(config_path.read_text(encoding="utf-8"))
+        assert parsed["runtime"] == descriptor.runtime_name
+        assert parsed["changed_tiers"] == ["tier-1"]
+        assert parsed["cleared_tiers"] == ["tier-2", "tier-3"]
+        assert parsed["runtime_model_overrides"] == {"tier-1": exact_model}
+        assert written["model_overrides"][descriptor.runtime_name] == {"tier-1": exact_model}
+        assert written["model_overrides"][other_descriptor.runtime_name] == {
+            "tier-1": "other-tier-1",
+            "tier-2": "other-tier-2",
+        }
+
+    def test_config_set_tier_models_clear_removes_only_selected_runtime(
+        self,
+        gpd_project: Path,
+    ) -> None:
+        descriptor = _RUNTIME_DESCRIPTORS[0]
+        other_descriptor = _RUNTIME_DESCRIPTORS[1]
+        config_path = gpd_project / "GPD" / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["model_overrides"] = {
+            descriptor.runtime_name: {"tier-1": "selected-tier-1", "tier-3": "selected-tier-3"},
+            other_descriptor.runtime_name: {"tier-2": "other-tier-2"},
+        }
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+
+        result = _invoke(
+            "--raw",
+            "config",
+            "set-tier-models",
+            "--runtime",
+            descriptor.runtime_name,
+            "--clear",
+        )
+        parsed = json.loads(result.output)
+
+        written = json.loads(config_path.read_text(encoding="utf-8"))
+        assert parsed["cleared"] is True
+        assert parsed["runtime_model_overrides"] is None
+        assert parsed["cleared_tiers"] == ["tier-1", "tier-3"]
+        assert descriptor.runtime_name not in written["model_overrides"]
+        assert written["model_overrides"] == {other_descriptor.runtime_name: {"tier-2": "other-tier-2"}}
+
+    def test_config_set_rejects_stale_autonomy_value(self, gpd_project: Path) -> None:
         result = _invoke("--raw", "config", "set", "autonomy", "guided", expect_ok=False)
 
         parsed = json.loads(result.output)
@@ -2665,8 +2908,8 @@ class TestConfigCommands:
         config_path = gpd_project / "GPD" / "config.json"
         assert config_path.exists()
         config = json.loads(config_path.read_text())
-        assert config["autonomy"] == "balanced"
-        assert config["execution"]["review_cadence"] == "adaptive"
+        assert config["autonomy"] == "supervised"
+        assert config["execution"]["review_cadence"] == "dense"
         assert config["research_mode"] == "balanced"
         assert config["parallelization"] is True
         assert config["workflow"]["plan_checker"] is True
@@ -2677,7 +2920,9 @@ class TestConfigCommands:
     def test_permissions_sync_updates_installed_runtime(self, gpd_project: Path) -> None:
         adapter, target = _install_runtime(gpd_project, _ENV_OVERRIDE_DESCRIPTOR)
 
-        result = _invoke("--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.runtime_name, "--autonomy", "yolo")
+        result = _invoke(
+            "--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.runtime_name, "--autonomy", "yolo"
+        )
         parsed = json.loads(result.output)
         status = adapter.runtime_permissions_status(target, autonomy="yolo")
 
@@ -2737,7 +2982,9 @@ class TestConfigCommands:
     def test_permissions_sync_accepts_display_name_runtime(self, gpd_project: Path) -> None:
         adapter, target = _install_runtime(gpd_project, _ENV_OVERRIDE_DESCRIPTOR)
 
-        result = _invoke("--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.display_name, "--autonomy", "yolo")
+        result = _invoke(
+            "--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.display_name, "--autonomy", "yolo"
+        )
         parsed = json.loads(result.output)
         status = adapter.runtime_permissions_status(target, autonomy="yolo")
 
@@ -2776,7 +3023,9 @@ class TestConfigCommands:
         assert parsed_doctor["target"] == str(target)
         assert runtime_target_check["details"]["target"] == str(target)
 
-        sync_result = _invoke("--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.runtime_name, "--autonomy", "yolo")
+        sync_result = _invoke(
+            "--raw", "permissions", "sync", "--runtime", _ENV_OVERRIDE_DESCRIPTOR.runtime_name, "--autonomy", "yolo"
+        )
         parsed_sync = json.loads(sync_result.output)
         synced_status = adapter.runtime_permissions_status(target, autonomy="yolo")
 
@@ -2961,7 +3210,7 @@ class TestConfigCommands:
         assert f"`{_SECONDARY_PERMISSIONS_DESCRIPTOR.runtime_name}`" in parsed["error"]
         assert _target_file_snapshot(target) == snapshot_before
 
-    def test_config_set_autonomy_attempts_runtime_permission_sync(
+    def test_config_set_autonomy_keeps_runtime_permissions_unchanged(
         self,
         gpd_project: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -2975,9 +3224,8 @@ class TestConfigCommands:
         status = adapter.runtime_permissions_status(target, autonomy="balanced")
 
         assert parsed["value"] == "balanced"
-        assert parsed["runtime_permissions"]["runtime"] == _ENV_OVERRIDE_DESCRIPTOR.runtime_name
-        assert parsed["runtime_permissions"]["sync_applied"] is True
-        assert status["config_aligned"] is True
+        assert parsed["runtime_permissions"] is None
+        assert status["config_aligned"] is False
 
     def test_permissions_sync_prefers_installed_runtime_over_stale_active_runtime(
         self,
@@ -3015,17 +3263,13 @@ class TestJsonCommands:
     def test_json_get(self) -> None:
         """json get should extract a value from stdin JSON."""
         input_json = json.dumps({"name": "physics", "version": 2})
-        result = runner.invoke(
-            app, ["json", "get", ".name"], input=input_json, catch_exceptions=False
-        )
+        result = runner.invoke(app, ["json", "get", ".name"], input=input_json, catch_exceptions=False)
         assert result.exit_code == 0
         assert "physics" in result.output
 
     def test_json_get_nested(self) -> None:
         input_json = json.dumps({"a": {"b": {"c": "deep"}}})
-        result = runner.invoke(
-            app, ["json", "get", ".a.b.c"], input=input_json, catch_exceptions=False
-        )
+        result = runner.invoke(app, ["json", "get", ".a.b.c"], input=input_json, catch_exceptions=False)
         assert result.exit_code == 0
         assert "deep" in result.output
 
@@ -3042,9 +3286,7 @@ class TestJsonCommands:
 
     def test_json_keys(self) -> None:
         input_json = json.dumps({"waves": {"w1": 1, "w2": 2, "w3": 3}})
-        result = runner.invoke(
-            app, ["json", "keys", ".waves"], input=input_json, catch_exceptions=False
-        )
+        result = runner.invoke(app, ["json", "keys", ".waves"], input=input_json, catch_exceptions=False)
         assert result.exit_code == 0
         assert "w1" in result.output
         assert "w2" in result.output
@@ -3052,18 +3294,14 @@ class TestJsonCommands:
 
     def test_json_list(self) -> None:
         input_json = json.dumps({"items": ["alpha", "beta", "gamma"]})
-        result = runner.invoke(
-            app, ["json", "list", ".items"], input=input_json, catch_exceptions=False
-        )
+        result = runner.invoke(app, ["json", "list", ".items"], input=input_json, catch_exceptions=False)
         assert result.exit_code == 0
         assert "alpha" in result.output
         assert "beta" in result.output
         assert "gamma" in result.output
 
     def test_json_pluck(self) -> None:
-        input_json = json.dumps(
-            {"phases": [{"name": "setup"}, {"name": "compute"}, {"name": "verify"}]}
-        )
+        input_json = json.dumps({"phases": [{"name": "setup"}, {"name": "compute"}, {"name": "verify"}]})
         result = runner.invoke(
             app,
             ["json", "pluck", ".phases", "name"],
@@ -3092,8 +3330,8 @@ class TestJsonCommands:
         f1 = gpd_project / "merge1.json"
         f2 = gpd_project / "merge2.json"
         out = gpd_project / "merged.json"
-        f1.write_text(json.dumps({"a": 1, "b": 2}))
-        f2.write_text(json.dumps({"c": 3, "d": 4}))
+        f1.write_text(json.dumps({"a": 1, "b": 2}), encoding="utf-8")
+        f2.write_text(json.dumps({"c": 3, "d": 4}), encoding="utf-8")
         result = _invoke(
             "--raw",
             "json",
@@ -3109,9 +3347,7 @@ class TestJsonCommands:
         assert merged_data == {"a": 1, "b": 2, "c": 3, "d": 4}
 
     def test_json_sum_lengths(self) -> None:
-        input_json = json.dumps(
-            {"items": [1, 2, 3], "tags": ["a", "b"]}
-        )
+        input_json = json.dumps({"items": [1, 2, 3], "tags": ["a", "b"]})
         result = runner.invoke(
             app,
             ["json", "sum-lengths", ".items", ".tags"],
@@ -3133,6 +3369,7 @@ class TestJsonCommands:
 # ═══════════════════════════════════════════════════════════════════════════
 # Extra coverage: summary-extract, resolve-model
 # ═══════════════════════════════════════════════════════════════════════════
+
 
 class TestSummaryExtractCommand:
     def test_summary_extract(self) -> None:

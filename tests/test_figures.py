@@ -107,7 +107,7 @@ class TestNormalization:
     def test_normalize_svg_no_converter(self, tmp_path, monkeypatch):
         src = tmp_path / "input" / "fig.svg"
         src.parent.mkdir()
-        src.write_text("<svg></svg>")
+        src.write_text("<svg></svg>", encoding="utf-8")
 
         out = tmp_path / "output"
 
@@ -130,12 +130,10 @@ class TestNormalization:
         with pytest.raises(RuntimeError, match="SVG conversion requires"):
             normalize_figure(src, out)
 
-    def test_normalize_svg_preserves_cairosvg_failure_when_inkscape_also_missing(
-        self, tmp_path, monkeypatch
-    ):
+    def test_normalize_svg_preserves_cairosvg_failure_when_inkscape_also_missing(self, tmp_path, monkeypatch):
         src = tmp_path / "input" / "fig.svg"
         src.parent.mkdir()
-        src.write_text("<svg></svg>")
+        src.write_text("<svg></svg>", encoding="utf-8")
 
         out = tmp_path / "output"
 
@@ -170,7 +168,7 @@ class TestNormalization:
     def test_normalize_svg_reports_inkscape_stderr_and_cleans_partial_output(self, tmp_path, monkeypatch):
         src = tmp_path / "input" / "fig.svg"
         src.parent.mkdir()
-        src.write_text("<svg></svg>")
+        src.write_text("<svg></svg>", encoding="utf-8")
 
         out = tmp_path / "output"
 
@@ -190,7 +188,7 @@ class TestNormalization:
             export_arg = next(arg for arg in args if arg.startswith("--export-filename="))
             dest = Path(export_arg.split("=", 1)[1])
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text("partial pdf")
+            dest.write_text("partial pdf", encoding="utf-8")
             raise subprocess.CalledProcessError(
                 1,
                 args,
@@ -210,7 +208,7 @@ class TestNormalization:
     def test_normalize_svg_preserves_broken_cairosvg_import_error(self, tmp_path, monkeypatch):
         src = tmp_path / "input" / "fig.svg"
         src.parent.mkdir()
-        src.write_text("<svg></svg>")
+        src.write_text("<svg></svg>", encoding="utf-8")
 
         out = tmp_path / "output"
 
@@ -377,6 +375,25 @@ class TestPrepare:
         assert len(result) == 1
         assert result[0].label == "good"
         assert any("cannot decode raster image" in err for err in errs)
+
+    def test_prepare_figures_rejects_normalized_output_outside_output_dir(self, tmp_path, monkeypatch):
+        input_dir = tmp_path / "input"
+        input_dir.mkdir()
+        source = input_dir / "fig.png"
+        Image.new("RGB", (100, 100), color="green").save(source)
+        escaped = tmp_path / "escaped.png"
+        Image.new("RGB", (100, 100), color="red").save(escaped)
+
+        monkeypatch.setattr("gpd.mcp.paper.figures.normalize_figure", lambda _source, _output_dir: escaped)
+
+        result, errs = prepare_figures(
+            [FigureRef(path=source, caption="Escaped figure", label="escaped")],
+            tmp_path / "output",
+            "prl",
+        )
+
+        assert result == []
+        assert any("normalized output escaped" in err for err in errs)
 
 
 # ---- Exception chaining regression ----

@@ -1,4 +1,4 @@
-"""Prompt-visibility regressions for the review agents."""
+"""Prompt-visibility assertions for the review agents."""
 
 from __future__ import annotations
 
@@ -46,15 +46,15 @@ def test_review_reader_prompt_keeps_shared_contract_visible() -> None:
         review_reader,
         "full `ClaimIndex` and `StageReviewReport` contracts",
     )
-    assert "Stage 1 must also emit `GPD/review/CLAIMS{round_suffix}.json`." in review_reader
+    assert "Stage 1 must also emit `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`." in review_reader
     assert "Capture theorem kind, explicit hypotheses, and free target parameters for theorem-like claims." in review_reader
     assert "Keep `proof_audits` empty in this stage." in review_reader
     assert "Focus `findings` on overclaiming, missing promised deliverables, and claim-structure blockers." in review_reader
 
     expanded = _expanded("gpd-review-reader.md")
-    assert "Peer Review Panel Protocol" in expanded
-    assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:" in expanded
-    assert "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema" in expanded
+    assert "Peer Review Panel Protocol" not in expanded
+    assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:" not in expanded
+    assert "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema" not in expanded
 
 
 def test_review_stage_prompts_keep_only_stage_specific_deltas() -> None:
@@ -110,13 +110,15 @@ def test_review_stage_prompts_keep_only_stage_specific_deltas() -> None:
             assert fragment in text
 
         expanded = _expanded(agent_name)
-        assert "Peer Review Panel Protocol" in expanded
-        assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:" in expanded
-        assert "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema" in expanded
+        assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in expanded
+        assert "Peer Review Panel Protocol" not in expanded
+        assert "Stage 1 `CLAIMS{round_suffix}.json` must follow this compact `ClaimIndex` shape:" not in expanded
+        assert "StageReviewReport`, nested `ReviewFinding`, and nested `ProofAuditRecord` entries use a closed schema" not in expanded
 
 
 def test_peer_review_panel_protocol_surfaces_full_review_enum_vocabularies() -> None:
     protocol = (SPEC_ROOT / "references" / "publication" / "peer-review-panel.md").read_text(encoding="utf-8")
+    review_reader = _read("gpd-review-reader.md")
     expanded = _expanded("gpd-review-reader.md")
     expected_lines = (
         _enum_line("stage_kind", ReviewStageKind),
@@ -132,4 +134,5 @@ def test_peer_review_panel_protocol_surfaces_full_review_enum_vocabularies() -> 
 
     for line in expected_lines:
         assert line in protocol
-        assert line in expanded
+    assert "references/publication/peer-review-panel.md" in review_reader
+    assert "Peer Review Panel Protocol" not in expanded

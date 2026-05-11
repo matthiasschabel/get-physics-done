@@ -1,4 +1,4 @@
-"""Prompt/schema visibility regression for approved-mode project-contract grounding."""
+"""Prompt/schema visibility assertions for approved-mode project-contract grounding."""
 
 from __future__ import annotations
 
@@ -50,6 +50,8 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
     assert "do not paraphrase the schema here; reuse its exact keys, enum values, list/object shapes, ID-linkage rules, and proof-bearing claim requirements" in new_project_text
     assert "do not invent near-miss enum values, extra keys, or scalar shortcuts for list fields" in new_project_text
     assert "fix them to the schema before approval" in new_project_text
+    assert "`context_intake`, `approach_policy`, and `uncertainty_markers` must each stay as objects, not strings or lists." in new_project_text
+    assert "`schema_version` must be the integer `1`, `references[].must_surface` must stay a boolean `true` or `false`, and `context_intake`, `uncertainty_markers`, and `references[]` must stay visible in the approval gate so the contract still reflects the real inputs" in new_project_text
     assert "the contract schema is closed: do not add invented top-level or nested keys" not in new_project_text
     assert "list fields must stay lists even for single-item values" not in new_project_text
     assert "blank or duplicate list entries are invalid after trimming whitespace" not in new_project_text
@@ -64,7 +66,6 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
     for field in (
         "researcher_model",
         "synthesizer_model",
-        "roadmapper_model",
         "commit_docs",
         "autonomy",
         "research_mode",
@@ -81,6 +82,8 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
         "project_contract_validation",
     ):
         assert f"`{field}`" in parse_line
+    assert "POST_SCOPE_INIT=$(gpd --raw init new-project --stage post_scope)" in new_project_text
+    assert "`roadmapper_model`" in new_project_text
     assert "If the init JSON already contains `project_contract`, `project_contract_load_info`, or `project_contract_validation`, preserve that state in the approval gate and continuation decision." in new_project_text
     assert "preserve any init-surfaced `project_contract`, `project_contract_load_info`, and `project_contract_validation` state while deciding whether this is fresh work or a continuation" not in new_project_text
 
@@ -145,11 +148,14 @@ def test_state_schema_surfaces_the_exact_approved_mode_grounding_rule() -> None:
     assert "`must_surface` is a boolean scalar. Use the JSON literals `true` and `false`;" in state_schema_text
     assert "`context_intake` must not be empty." in state_schema_text
     assert '`claims[]` — `{ "id", "statement", "claim_kind", "observables[]", "deliverables[]", "acceptance_tests[]", "references[]", "parameters[]", "hypotheses[]", "quantifiers[]", "conclusion_clauses[]", "proof_deliverables[]" }`' in state_schema_text
-    assert "Treat a claim as proof-bearing whenever any of these is true" in state_schema_text
+    assert "In `ProjectContract` (`project_contract.claims[]` / `ContractClaim`), treat a claim as proof-bearing whenever any of these is true" in state_schema_text
     assert "`claim_kind` is `theorem`, `lemma`, `corollary`, `proposition`, or `claim`" in state_schema_text
+    assert "Do not import the staged peer-review Paper `ClaimRecord` meaning of `claim_kind: claim` here" in state_schema_text
     assert "the statement is theorem-like (`prove/show that`, explicit `for all` / `exists`, or uniqueness language)" in state_schema_text
     assert "any proof field is already populated (`parameters`, `hypotheses`, `quantifiers`, `conclusion_clauses`, or `proof_deliverables`)" in state_schema_text
     assert "`observables[]` references a `proof_obligation` target" in state_schema_text
+    assert "must keep `quantifiers` visible when an explicit quantifier or domain obligation exists" in state_schema_text
+    assert "`claims[].quantifiers[]` is optional for unquantified proof-bearing claims" in state_schema_text
     assert "claims[].proof_deliverables[]" in state_schema_text
     assert "`claims[].parameters[]`, `claims[].hypotheses[]`, and `claims[].conclusion_clauses[]` must each be non-empty." in state_schema_text
     assert "`claims[].acceptance_tests[]` must include at least one proof-specific test kind" in state_schema_text

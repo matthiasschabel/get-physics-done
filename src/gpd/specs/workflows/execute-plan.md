@@ -1,67 +1,58 @@
 <purpose>
 Execute a research plan (`PLAN.md` or `*-PLAN.md`) -- carry out derivations, calculations, simulations, or analysis -- and create the matching outcome summary (`SUMMARY.md` or `*-SUMMARY.md`).
+`execute-phase.md` owns wave-level routing and fanout; this workflow owns the selected plan's local execution semantics, bounded gates, and summary emission.
 </purpose>
 
 <required_reading>
 Load the structured init-state payload first; reopen `STATE.md` only if the payload is missing, stale, or flagged by `state_load_source` / `state_integrity_issues`.
 Read config.json for planning behavior settings.
-
-Read these reference files using the file_read tool:
-- {GPD_INSTALL_DIR}/references/execution/git-integration.md
-- {GPD_INSTALL_DIR}/references/execution/github-lifecycle.md
-- {GPD_INSTALL_DIR}/references/execution/execute-plan-recovery.md
-- {GPD_INSTALL_DIR}/references/execution/execute-plan-validation.md
-- {GPD_INSTALL_DIR}/references/execution/execute-plan-checkpoints.md
-- {GPD_INSTALL_DIR}/references/protocols/reproducibility.md
-- {GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md -- Cross-phase uncertainty propagation protocol (Uncertainty Budget declaration format, verification checks, phase handoff format)
-- {GPD_INSTALL_DIR}/references/execution/executor-index.md -- Maps execution scenarios (QFT, condensed matter, numerical, paper writing, debugging) to the correct domain-specific reference files
-- {GPD_INSTALL_DIR}/templates/calculation-log.md -- Template for CALCULATION_LOG.md (detailed derivation records within a phase)
-- {GPD_INSTALL_DIR}/templates/recovery-plan.md -- Template for RECOVERY.md (structured recovery after plan execution failure)
-
-When following GitHub lifecycle examples, substitute the repository's actual default branch and remote names for `<default-branch>` and `<remote-name>`; those placeholders are not literal branch or remote names.
+Defer execution-reference, checkpoint, recovery, and summary-schema loads until the stage that actually consumes them. When those files are needed, read them with the file_read tool in the relevant stage rather than frontloading them here.
 </required_reading>
 
 <process>
 
 <step name="init_context" priority="first">
-Load execution context (uses `init execute-phase` for full context, including file contents):
+Load the bootstrap execution context using the staged init payload:
 
 ```bash
-INIT=$(gpd --raw init execute-phase "${phase}" --include state,config)
+INIT=$(gpd --raw init execute-phase "${phase}" --stage phase_bootstrap)
 if [ $? -ne 0 ]; then
   echo "ERROR: gpd initialization failed: $INIT"
   exit 1
 fi
 ```
 
-Extract from init JSON: `executor_model`, `commit_docs`, `phase_dir`, `phase_number`, `plans`, `summaries`, `incomplete_plans`, `autonomy`, `review_cadence`, `max_unattended_minutes_per_plan`, `max_unattended_minutes_per_wave`, `checkpoint_after_n_tasks`, `checkpoint_after_first_load_bearing_result`, `checkpoint_before_downstream_dependent_tasks`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, `state_load_source`, `state_integrity_issues`, `convention_lock`, `convention_lock_count`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`, `selected_protocol_bundle_ids`, `protocol_bundle_context`.
+This workflow assumes `execute-phase.md` already selected the plan and wave. It does not re-decide wave routing or specialist selection.
 
-**File contents (from --include):** `state_content`, `config_content`. Access with:
-
-```bash
-STATE_CONTENT=$(echo "$INIT" | gpd json get .state_content --default "")
-CONFIG_CONTENT=$(echo "$INIT" | gpd json get .config_content --default "")
-```
+Extract from bootstrap init JSON: `executor_model`, `verifier_model`, `commit_docs`, `autonomy`, `review_cadence`, `research_mode`, `parallelization`, `max_unattended_minutes_per_plan`, `max_unattended_minutes_per_wave`, `checkpoint_after_n_tasks`, `checkpoint_after_first_load_bearing_result`, `checkpoint_before_downstream_dependent_tasks`, `verifier_enabled`, `branching_strategy`, `branch_name`, `phase_found`, `phase_dir`, `phase_number`, `phase_name`, `phase_slug`, `plans`, `incomplete_plans`, `plan_count`, `incomplete_count`, `state_exists`, `roadmap_exists`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `platform`.
 
 If `GPD/` missing: error.
 </step>
 
-<step name="load_contract_anchor_context">
+<step name="load_phase_classification_context">
+Load the phase-classification payload only when you actually need it:
+
+```bash
+CONTRACT_INIT=$(gpd --raw init execute-phase "${phase}" --stage phase_classification)
+if [ $? -ne 0 ]; then
+  echo "ERROR: staged phase-classification init failed: $CONTRACT_INIT"
+  exit 1
+fi
+```
+
+Extract from init JSON: `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `convention_lock`, `convention_lock_count`, `derived_convention_lock`, `derived_convention_lock_count`, `state_load_source`, `state_integrity_issues`. This is the phase_classification payload.
+
 If `project_contract_load_info.status` starts with `blocked`, STOP and repair the stored contract before executing. Use the surfaced `project_contract_load_info.errors` / `warnings`; do not guess around them from prose-only context.
 
 If `project_contract_validation.valid` is false, STOP and repair the contract before executing. A visible-but-blocked contract is still not an approved execution contract.
 
 Treat `project_contract` as authoritative machine-readable scope only when `project_contract_gate.authoritative` is true. Do not execute from PLAN markdown alone if the contract or active-anchor ledger says a decisive reference, prior output, or forbidden proxy still constrains the work.
 
-Treat `effective_reference_intake` as the structured carry-forward ledger for must-read refs, baselines, prior outputs, user anchors, and context gaps. Use `active_reference_context` and `reference_artifacts_content` to interpret that ledger quickly, not to replace it with prose-only reconstruction.
+Treat `effective_reference_intake` as the structured carry-forward ledger for must-read refs, baselines, prior outputs, user anchors, and context gaps. Use `active_reference_context` to interpret that ledger quickly, not to replace it with prose-only reconstruction.
 </step>
 
 <step name="load_protocol_bundle_context">
-If `selected_protocol_bundle_ids` is non-empty, treat `protocol_bundle_context` as the primary specialized-loading guide for this plan.
-
-- Read the bundle-listed core assets before starting substantive work.
-- Carry bundle estimator policies and decisive artifact guidance into task execution and SUMMARY evidence.
-- If no bundle is selected, fall back to shared protocols plus on-demand routing through the executor index.
+Keep bundle asset reads out of bootstrap. If the plan later needs specialized execution guidance, the wave_planning stage will load the bundle payload and the bundle-listed core assets there instead of here.
 </step>
 
 <step name="verify_conventions">
@@ -96,7 +87,12 @@ ls "${phase_dir}"/SUMMARY.md "${phase_dir}"/*-SUMMARY.md 2>/dev/null | sort
 Find the first plan artifact without a matching summary artifact. Canonical standalone pairing is `PLAN.md` <-> `SUMMARY.md`; numbered plans still pair by shared stem. Decimal phases are still supported for numbered files (`01.1-hotfix/`):
 
 ```bash
-phase=$(echo "$PLAN_PATH" | grep -oE '[0-9]+(\.[0-9]+)?-[0-9]+')
+# The plan filename is {phase}-{plan}-PLAN.md (e.g. 05-02-PLAN.md).
+# Extract phase and plan separately — do NOT collapse both digits into $phase,
+# or the metrics row will read "Phase 05 P02" instead of "Phase 05 P05-02".
+plan_stem=$(basename "$PLAN_PATH" -PLAN.md)
+phase=$(echo "$plan_stem" | grep -oE '^[0-9]+(\.[0-9]+)?')
+plan=$(echo "$plan_stem" | sed -E "s/^${phase}-//")
 # config_content already loaded via --include config in init_context
 ```
 
@@ -141,24 +137,26 @@ Start execution trace for debugging:
 ```bash
 gpd trace start "${phase}" "${plan}" 2>/dev/null || true
 ```
+
+Keep the GitHub lifecycle reference deferred until the plan reaches its checkpoint / closeout handling, but remember that this plan will eventually need `{GPD_INSTALL_DIR}/references/execution/github-lifecycle.md` for branch and remote examples.
 </step>
 
 <step name="resolve_autonomy_mode">
 Read autonomy mode from init JSON to control decision authority throughout execution:
 
 ```bash
-AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default balanced)
+AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default supervised)
 ```
 
 **Checkpoint behavior by mode:**
 
 | Mode | Task Checkpoints | Physics Decision Checkpoints | Verification Failure |
 |------|-----------------|------------------------------|---------------------|
-| **supervised** | After EVERY task plus every required first-result gate | Always | Always stop |
-| **balanced** (default) | Auto-flow between clean tasks, but required bounded gates still run | On physics choices, deviation rules 5-6, convention conflicts, or convergence failure after 3 attempts | Attempt one bounded fix, then stop if unresolved |
+| **supervised** | After EVERY task plus every required first-result gate. Under `review_cadence=dense`, a wave with no deviations may collapse its per-task checkpoints into one "Approve tasks {N..M} as clean pass? `[Y/n/e]`" batch (see "Clean-wave batching under dense" for the full predicate) | Always | Always stop |
+| **balanced** | Auto-flow between clean tasks, but required bounded gates still run | On physics choices, deviation rules 5-6, convention conflicts, or convergence failure after 3 attempts | Attempt one bounded fix, then stop if unresolved |
 | **yolo** | No user prompt on clean passes, but required bounded gates still run | Attempt one alternative before escalating; never skip first-result, skeptical, or pre-fanout gates | Stop only on unrecoverable errors, failed sanity gates, or unresolved skeptical review |
 
-**Invariant:** `autonomy` changes who is asked and when. It does NOT disable first-result sanity checks, bounded execution segments, contract/anchor gates, or physics hard stops.
+**Invariant:** `autonomy` changes who is asked and when. It does NOT disable first-result sanity checks, bounded execution segments, contract/anchor gates, or physics hard stops. Clean-wave batching under dense collapses keystrokes, not gates — any deviation, failed verification, or triggered gate reverts the wave to per-task checkpoints for the remaining tasks.
 
 Task checkpoints are task-level, not every internal algebra line. Model profile and research mode may change depth or task granularity, but they do NOT remove required first-result, skeptical, or pre-fanout gates.
 
@@ -168,9 +166,9 @@ Task checkpoints are task-level, not every internal algebra line. Model profile 
 Read cadence controls from init JSON. Use these to decide whether a plan can run unbounded or must be segmented even without authored checkpoints.
 
 ```bash
-REVIEW_CADENCE=$(echo "$INIT" | gpd json get .review_cadence --default adaptive)
-MAX_UNATTENDED_MINUTES_PER_PLAN=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_plan --default 45)
-CHECKPOINT_AFTER_N_TASKS=$(echo "$INIT" | gpd json get .checkpoint_after_n_tasks --default 3)
+REVIEW_CADENCE=$(echo "$INIT" | gpd json get .review_cadence --default dense)
+MAX_UNATTENDED_MINUTES_PER_PLAN=$(echo "$INIT" | gpd json get .max_unattended_minutes_per_plan --default 15)
+CHECKPOINT_AFTER_N_TASKS=$(echo "$INIT" | gpd json get .checkpoint_after_n_tasks --default 1)
 CHECKPOINT_AFTER_FIRST_RESULT=$(echo "$INIT" | gpd json get .checkpoint_after_first_load_bearing_result --default true)
 CHECKPOINT_BEFORE_DOWNSTREAM=$(echo "$INIT" | gpd json get .checkpoint_before_downstream_dependent_tasks --default true)
 ```
@@ -178,6 +176,7 @@ CHECKPOINT_BEFORE_DOWNSTREAM=$(echo "$INIT" | gpd json get .checkpoint_before_do
 Resolve plan-local bounds using orchestrator tags first, then plan shape:
 
 - if the orchestrator passed `<first_result_gate>true</first_result_gate>`, honor it
+- if `review_cadence=dense`, treat `FIRST_RESULT_GATE_REQUIRED=true` as forced; do not recompute it from per-plan heuristics
 - if the orchestrator passed `<segment_task_cap>N</segment_task_cap>`, honor it
 - otherwise require bounded execution when the plan has no authored checkpoints and `task_count >= CHECKPOINT_AFTER_N_TASKS`
 - also require bounded execution when the uninterrupted segment is likely to exceed `MAX_UNATTENDED_MINUTES_PER_PLAN`, even if the work feels smooth
@@ -203,8 +202,14 @@ Clear transitions are reason-scoped: clearing `first_result` must not silently c
 Create a git checkpoint tag before plan execution. See `execute-plan-checkpoints.md` for full protocol.
 
 ```bash
-CHECKPOINT_TAG="gpd-checkpoint/phase-${phase}-plan-${plan}-$(date +%s)"
-git tag "${CHECKPOINT_TAG}"
+CHECKPOINT_TAG="gpd-checkpoint-phase-${phase}-plan-${plan}-$(date +%s)"
+if git rev-parse --verify "refs/tags/${CHECKPOINT_TAG}" >/dev/null 2>&1; then
+  CHECKPOINT_TAG="${CHECKPOINT_TAG}-$$"
+fi
+if ! git tag "${CHECKPOINT_TAG}"; then
+  echo "ERROR: failed to create checkpoint tag ${CHECKPOINT_TAG}" >&2
+  exit 1
+fi
 ```
 </step>
 
@@ -270,10 +275,10 @@ Pattern B/D only (authored or virtual checkpoints). Skip for A/C.
 
 1. Parse segment map: checkpoint locations and types, then merge in virtual boundaries from `FIRST_RESULT_GATE_REQUIRED`, `SEGMENT_TASK_CAP`, `MAX_UNATTENDED_MINUTES_PER_PLAN`, and context pressure
 2. Per segment:
-   - Subagent route: spawn gpd-executor for assigned tasks only. Prompt: task range, plan path, read full plan for context, execute assigned tasks, track deviations, `<autonomy_mode>{AUTONOMY}</autonomy_mode>`, `<review_cadence>{REVIEW_CADENCE}</review_cadence>`, `<segment_task_cap>{SEGMENT_TASK_CAP}</segment_task_cap>`, `<max_unattended_minutes_per_plan>{MAX_UNATTENDED_MINUTES_PER_PLAN}</max_unattended_minutes_per_plan>`, `<first_result_gate>{FIRST_RESULT_GATE_REQUIRED}</first_result_gate>`, NO SUMMARY/commit, but RETURN `contract_updates` keyed by claim/deliverable/acceptance-test/reference/forbidden-proxy IDs and any `execution_segment` fields needed to keep bounded gates live across continuation. Track via agent protocol.
-   - Treat `execution_segment` as the runtime transport payload for the pause/continue handoff. When the segment is durably recorded, the runtime may mirror that same payload into `continuation.bounded_segment` and append the matching execution-lineage event so later resume logic can resolve the bounded stop without parsing prose. The markdown handoff file and session pointer remain surfaces only, and the derived execution head stays a compatibility projection.
+   - Subagent route: spawn gpd-executor for assigned tasks only. Prompt: task range, plan path, read full plan for context, execute assigned tasks, track deviations, `<autonomy_mode>{AUTONOMY}</autonomy_mode>`, `<review_cadence>{REVIEW_CADENCE}</review_cadence>`, `<segment_task_cap>{SEGMENT_TASK_CAP}</segment_task_cap>`, `<max_unattended_minutes_per_plan>{MAX_UNATTENDED_MINUTES_PER_PLAN}</max_unattended_minutes_per_plan>`, `<first_result_gate>{FIRST_RESULT_GATE_REQUIRED}</first_result_gate>`, NO SUMMARY/commit, but RETURN `contract_updates` keyed by claim/deliverable/acceptance-test/reference/forbidden-proxy IDs and any durable `continuation_update` fields needed to keep bounded gates live across continuation. Track via agent protocol. The runtime transport payload may still carry `execution_segment` for the fresh handoff, but do not put that transport-only shape inside the durable child-return example. When the segment summary is written, the orchestrator applies it through the canonical `gpd apply-return-updates` path rather than interpreting ad hoc validation text.
+   - Treat `execution_segment` as the runtime transport payload for the pause/continue handoff. When the segment is durably recorded, the runtime writes the canonical subset to `continuation.bounded_segment` and appends the matching execution-lineage event so later resume logic can resolve the bounded stop without parsing prose. The markdown handoff file remains a discovery surface only, and the derived execution head reports rebuilt live status.
    - Main route: execute tasks using standard flow (step name="execute")
-3. After ALL segments: aggregate files/deviations/decisions/`contract_updates` -> create SUMMARY.md -> apply returned state updates in main context -> final metadata commit -> self-check:
+3. After ALL segments: aggregate files/deviations/decisions/`contract_updates` -> create SUMMARY.md -> apply returned state updates in main context via `gpd apply-return-updates` -> final metadata commit -> self-check:
 
    - Verify key-files.created exist on disk with `[ -f ]`
    - Check `git log --oneline --grep="{phase}-{plan}"` returns >=1 commit
@@ -298,6 +303,38 @@ ls GPD/phases/*/*SUMMARY.md 2>/dev/null | sort -r | head -2 | tail -1
 > **Platform note:** If `ask_user` is not available, present these options in plain text and wait for the user's freeform response.
 
 If previous SUMMARY has unresolved "Issues Encountered" or "Next Phase Readiness" blockers: ask_user(header="Previous Issues", options: "Proceed anyway" | "Address first" | "Review previous").
+</step>
+
+<step name="load_wave_planning_context">
+Load the wave-planning payload only when the plan is ready to move into segment execution:
+
+```bash
+SEGMENT_INIT=$(gpd --raw init execute-phase "${phase}" --stage wave_planning)
+if [ $? -ne 0 ]; then
+  echo "ERROR: staged wave-planning init failed: $SEGMENT_INIT"
+  exit 1
+fi
+```
+
+Extract from wave_planning init JSON: `selected_protocol_bundle_ids`, `protocol_bundle_context`, `active_reference_context`, `reference_artifacts_content`, `state_load_source`, `state_integrity_issues`, `convention_lock`, `convention_lock_count`, `intermediate_results`, `intermediate_result_count`, `approximations`, `approximation_count`, `propagated_uncertainties`, `propagated_uncertainty_count`, `derived_convention_lock`, `derived_convention_lock_count`, `derived_intermediate_results`, `derived_intermediate_result_count`, `derived_approximations`, `derived_approximation_count`.
+
+If `selected_protocol_bundle_ids` is non-empty, treat `protocol_bundle_context` as the plan-execution specialized-loading guide for this plan. Read any bundle-listed core assets now, not during bootstrap.
+
+Use `reference_artifacts_content` only here, when the segment actually needs to interpret prior outputs, baselines, or unresolved gaps. Stable knowledge docs may be present in that content as reviewed background, but they do not override the contract, conventions, or decisive evidence requirements.
+
+Read these reference files using the file_read tool only now, in the segment-execution stage:
+- {GPD_INSTALL_DIR}/references/execution/git-integration.md
+- {GPD_INSTALL_DIR}/references/execution/github-lifecycle.md
+- {GPD_INSTALL_DIR}/references/execution/execute-plan-recovery.md
+- {GPD_INSTALL_DIR}/references/execution/execute-plan-validation.md
+- {GPD_INSTALL_DIR}/references/execution/execute-plan-checkpoints.md
+- {GPD_INSTALL_DIR}/references/protocols/reproducibility.md
+- {GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md -- Cross-phase uncertainty propagation protocol (Uncertainty Budget declaration format, verification checks, phase handoff format)
+- {GPD_INSTALL_DIR}/references/execution/executor-index.md -- Maps execution scenarios (QFT, condensed matter, numerical, paper writing, debugging) to the correct domain-specific reference files
+- {GPD_INSTALL_DIR}/templates/calculation-log.md -- Template for CALCULATION_LOG.md (detailed derivation records within a phase)
+- {GPD_INSTALL_DIR}/templates/recovery-plan.md -- Template for RECOVERY.md (structured recovery after plan execution failure)
+
+When following GitHub lifecycle examples, substitute the repository's actual default branch and remote names for `<default-branch>` and `<remote-name>`; those placeholders are not literal branch or remote names.
 </step>
 
 <step name="execute">
@@ -372,14 +409,18 @@ Deviations are normal -- handle via deviation rules in `execute-plan-validation.
 
      If the same stop also carried a tangent proposal, keep the optional `tangent_summary` / `tangent_decision` fields on the existing `execution` payload until that review stop is explicitly resolved. Do not auto-branch or create side work from telemetry alone.
 
-     **Supervised mode post-task checkpoint:** If `AUTONOMY="supervised"`, insert a `checkpoint:human-verify` after EVERY completed task. Present the task result with all intermediate values and wait for user approval before proceeding to the next task.
+     **Supervised mode post-task checkpoint:** If `AUTONOMY="supervised"`, insert a `checkpoint:human-verify` after EVERY completed task. Emit the checkpoint return with the task result and all intermediate values; the orchestrator owns presenting it and collecting approval in a fresh continuation before any next task is accepted. Every such `checkpoint:human-verify` uses the `[Y/n/e]` idiom with a one-line summary (see `{GPD_INSTALL_DIR}/references/orchestration/checkpoint-ux-convention.md`).
+
+     **Clean-wave batching under dense:** when `AUTONOMY="supervised"` AND `review_cadence=dense` AND every task in the wave completed with no deviation (no `deviation` trace events, every `verification-complete` event has typed payload `verification.status="passed"` and `verification.issue_count=0`, no `first_result` / `pre_fanout` / `skeptical` gate pending, and the return envelope carries `status="completed"` with empty `issues`), collapse the per-task `checkpoint:human-verify` emissions into one batch "Approve tasks {N..M} as clean pass? `[Y/n/e]`" presented after the last task in the wave. Do not parse prose such as "failure language" to decide batching eligibility. On `Y` / Enter, all batched tasks are accepted at once; on `n`, the batch is rejected and each task's per-task checkpoint is re-presented individually for review; on `e`, the user opens freeform for per-task notes. If ANY task in the wave emits a deviation, fails verification, omits the typed verification outcome, or trips a required gate, the wave immediately reverts to per-task checkpoints for the remaining tasks — no partial batching.
    - `type="checkpoint:*"`: Route by autonomy mode:
-     - **supervised:** STOP -> checkpoint protocol (see `execute-plan-checkpoints.md`) -> wait for user -> continue only after confirmation.
+     - **supervised:** STOP -> checkpoint protocol (see `execute-plan-checkpoints.md`) -> return structured checkpoint state to the orchestrator. The orchestrator presents the checkpoint and resumes only through a fresh continuation.
      - **balanced:** Stop for `checkpoint:decision`, `checkpoint:human-verify`, required first-result gates, any checkpoint tied to deviation rules 5-6 or unresolved convergence failure, and any case where decisive evidence is still missing but the next tasks would assume it. Log routine checkpoint markers and continue when no judgment is needed.
      - **yolo:** Do NOT skip required first-result, bounded-segment, skeptical, or pre-fanout checkpoints. Auto-continue only after the gate is explicitly cleared and the remaining work is genuinely independent of the unresolved decisive comparison. STOP on failed sanity, unresolved skeptical review, anchor-gate failure, or unrecoverable computation error.
 3. Run `<verification>` checks including physics validation (see `execute-plan-validation.md`)
    ```bash
-   gpd observe event verification verification-complete --phase "${phase}" --plan "${plan}" --data "{\"description\":\"${VERIFICATION_RESULT}\"}" 2>/dev/null || true
+   # VERIFICATION_STATUS is a typed outcome, not parsed prose. Use `passed`
+   # only when all required verification checks passed with zero issues.
+   gpd observe event verification verification-complete --phase "${phase}" --plan "${plan}" --data "{\"verification\":{\"status\":\"${VERIFICATION_STATUS}\",\"issue_count\":${VERIFICATION_ISSUE_COUNT:-0}},\"description\":\"${VERIFICATION_RESULT}\"}" 2>/dev/null || true
    gpd trace log assertion --data "{\"description\":\"Verification: ${VERIFICATION_RESULT}\"}" 2>/dev/null || true
    ```
 4. Confirm `<success_criteria>` met
@@ -395,7 +436,7 @@ Context is finite (~80% usable before compression). After completing each task:
 
 Signs of context pressure: re-reading files you already read, losing track of parameter values or sign conventions, derivation steps getting sloppy. A fresh context with saved state outperforms a saturated one.
 
-If pausing mid-plan: commit current work, create `.continue-here.md` with full derivation state, and persist the matching `execution_segment` as `continuation.bounded_segment` if the stop is meant to be resumable. Record the same pause in execution lineage so the execution head can be rebuilt later. Recommend `/clear` + `gpd:resume-work`. See `{GPD_INSTALL_DIR}/references/orchestration/context-budget.md` for budget guidelines. The markdown handoff file and legacy `session` record are discovery surfaces that mirror canonical continuation; `continuation.bounded_segment` is the bounded authority for the pause.
+If pausing mid-plan: commit current work, create `.continue-here.md` with full derivation state, and persist the matching `execution_segment` as `continuation.bounded_segment` if the stop is meant to be resumable. Record the same pause in execution lineage so the execution head can be rebuilt later. Recommend a fresh context reset, then `gpd:resume-work`. See `{GPD_INSTALL_DIR}/references/orchestration/context-budget.md` for budget guidelines. The markdown handoff file and STATE.md Session Continuity rendering are discovery surfaces; `continuation.bounded_segment` is the bounded authority for the pause.
 
 **Auto-checkpoint protocol (autonomy-aware):**
 
@@ -422,9 +463,9 @@ CHECKPOINT
 2. If above 75% (or 85% in yolo mode): Proactively trigger pause protocol:
    - Commit all current work
    - Create `.continue-here.md` with full derivation state and a bounded execution segment summary
-   - Update STATE.md as a projected continuation pointer
-  - **supervised/balanced:** Suggest `/clear` + `gpd:resume-work`
-   - **yolo:** Prepare the bounded resume handoff automatically and continue only if the runtime can spawn the continuation with explicit segment state; otherwise suggest `/clear` + `gpd:resume-work`
+   - Update STATE.md's Session Continuity block from canonical continuation
+  - **supervised/balanced:** Suggest a fresh context reset, then `gpd:resume-work`
+   - **yolo:** Prepare the bounded resume handoff automatically and continue only if the runtime can spawn the continuation with explicit segment state; otherwise suggest a fresh context reset, then `gpd:resume-work`
 
 Also stop when either bound is hit, even if context looks healthy:
 
@@ -548,9 +589,21 @@ fi
 </step>
 
 <step name="create_summary">
+Load the aggregate-and-verify payload only when the plan is ready to write `SUMMARY.md`:
+
+```bash
+SUMMARY_INIT=$(gpd --raw init execute-phase "${phase}" --stage aggregate_and_verify)
+if [ $? -ne 0 ]; then
+  echo "ERROR: staged aggregate-and-verify init failed: $SUMMARY_INIT"
+  exit 1
+fi
+```
+
+Extract from aggregate-and-verify init JSON: `summaries`, `reference_artifact_files`, `reference_artifacts_content`, `selected_protocol_bundle_ids`, `protocol_bundle_context`, `current_execution`, `has_live_execution`, `execution_review_pending`, `execution_pre_fanout_review_pending`, `execution_skeptical_requestioning_required`, `execution_downstream_locked`, `execution_blocked`, `execution_resumable`, `execution_paused_at`, `current_execution_resume_file`, `handoff_resume_file`, `recorded_handoff_resume_file`, `missing_handoff_resume_file`, `execution_resume_file`, `execution_resume_file_source`, `resume_state`, `project_contract`, `project_contract_gate`, `project_contract_validation`, `project_contract_load_info`, `contract_intake`, `effective_reference_intake`, `active_reference_context`, `state_load_source`, `state_integrity_issues`.
+
 Create `${phase}-${plan}-SUMMARY.md` at `${phase_dir}/`. Use `{GPD_INSTALL_DIR}/templates/summary.md`.
 
-Note: DERIVATION-STATE.md is updated by gpd:pause-work as the projected pause handoff record. On natural completion (no pause), key equations and results are captured in SUMMARY.md instead. If you want cumulative derivation state across sessions, run gpd:pause-work before ending.
+Note: DERIVATION-STATE.md is updated by gpd:pause-work as the pause handoff record. On natural completion (no pause), key equations and results are captured in SUMMARY.md instead. If you want cumulative derivation state across sessions, run gpd:pause-work before ending.
 
 If the selected plan artifact is the standalone `PLAN.md`, write the canonical standalone summary as `SUMMARY.md`. Where this workflow shows numbered examples like `${phase}-${plan}-SUMMARY.md`, substitute the standalone `SUMMARY.md` filename instead.
 
@@ -561,7 +614,7 @@ If the selected plan artifact is the standalone `PLAN.md`, write the canonical s
 - `contract_results` keyed by claim IDs, deliverable IDs, acceptance test IDs, reference IDs, and forbidden proxy IDs
 - `comparison_verdicts` for decisive internal/external comparisons that were required or attempted; if the comparison is still open, emit `verdict: inconclusive` or `verdict: tension` instead of omitting the entry
 
-Immediately before writing frontmatter, re-open `@{GPD_INSTALL_DIR}/templates/contract-results-schema.md` and apply it literally. Do not rely on memory or on paraphrased summary rules.
+Immediately before writing frontmatter, re-open `{GPD_INSTALL_DIR}/templates/contract-results-schema.md` and apply it literally. Do not rely on memory or on paraphrased summary rules.
 
 `contract_results` is authoritative. Do not reintroduce ad hoc summary-side success criteria that are absent from the PLAN contract.
 Before treating the summary as complete, run `gpd validate summary-contract ${phase_dir}/${phase}-${plan}-SUMMARY.md` and fix any contract-linkage or verdict-ledger errors.
@@ -585,7 +638,7 @@ Autonomy mode (`supervised` / `balanced` / `yolo`) and profile may change cadenc
 </step>
 
 <step name="update_current_position">
-**Do NOT write STATE.md directly.** Return state updates in the `gpd_return` envelope so the orchestrator (execute-phase.md) can apply them sequentially after each executor finishes. This prevents parallel write conflicts.
+**Do NOT write STATE.md directly.** Return state updates in the `gpd_return` envelope so the orchestrator (execute-phase.md) can apply them sequentially after each executor finishes via `gpd apply-return-updates`. This prevents parallel write conflicts.
 
 Include these fields in your return envelope:
 
@@ -607,20 +660,16 @@ gpd_return:
     contract_completion_status: complete | partial | blocked
 ```
 
-**Exception:** If executing in Pattern C (main context, no subagent), you ARE the orchestrator — apply state updates directly:
+**Exception:** If executing in Pattern C (main context, no subagent), you ARE the orchestrator — apply state updates directly by invoking the same canonical applicator on the summary file:
 
 ```bash
-gpd state advance
-gpd state update-progress
-gpd state record-metric \
-  --phase "${phase}" --plan "${plan}" --duration "${DURATION}" \
-  --tasks "${TASK_COUNT}" --files "${FILE_COUNT}"
+gpd apply-return-updates "${SUMMARY_FILE}"
 ```
 
 </step>
 
 <step name="extract_decisions_and_issues">
-From SUMMARY: Extract decisions and blockers. Include them in the `gpd_return` envelope:
+From SUMMARY: Extract decisions and blockers. Include them in the `gpd_return` envelope; the orchestrator applies them through `gpd apply-return-updates`:
 
 ```yaml
 gpd_return:
@@ -632,40 +681,35 @@ gpd_return:
     - text: "Blocker description"
 ```
 
-**Exception:** If executing in Pattern C (main context, no subagent), apply directly:
+**Exception:** If executing in Pattern C (main context, no subagent), apply directly through the same applicator:
 
 ```bash
-gpd state add-decision \
-  --phase "${phase}" --summary "${DECISION_TEXT}" --rationale "${RATIONALE}"
-gpd state add-blocker --text "Blocker description"
+gpd apply-return-updates "${SUMMARY_FILE}"
 ```
 
 </step>
 
 <step name="update_continuation">
-Include continuation update in the `gpd_return` envelope:
+Include continuation update in the `gpd_return` envelope so `gpd apply-return-updates` can retire the completed bounded segment and persist the canonical continuation handoff:
 
 ```yaml
 gpd_return:
   continuation_update:
     handoff:
-      recorded_at: "[current ISO timestamp]"
-      recorded_by: "execute-plan"
       stopped_at: "Completed ${phase}-${plan}-PLAN.md"
       resume_file: null
     bounded_segment: null
 ```
 
-**Exception:** If executing in Pattern C (main context, no subagent), apply directly:
+`gpd apply-return-updates` records handoff timestamp/provenance; do not include `recorded_at` or `recorded_by` in child returns.
+
+**Exception:** If executing in Pattern C (main context, no subagent), apply directly through the same applicator:
 
 ```bash
-gpd state record-session \
-  --stopped-at "Completed ${phase}-${plan}-PLAN.md" \
-  --resume-file "—"
-gpd observe event session continuity-updated --phase "${phase}" --plan "${plan}" --data "{\"stopped_at\":\"Completed ${phase}-${plan}-PLAN.md\",\"resume_file\":\"—\"}" 2>/dev/null || true
+gpd apply-return-updates "${SUMMARY_FILE}"
 ```
 
-This continuation update is the authoritative completion cleanup boundary. It retires any stale `continuation.bounded_segment` that still points at the completed work and clears the canonical handoff pointer for this plan. The matching execution-lineage record remains as history even after the bounded stop is retired. `session` and STATE.md are projection surfaces that should reflect this update after persistence, not independent authorities.
+This continuation update is the authoritative completion cleanup boundary. It retires any stale `continuation.bounded_segment` that still points at the completed work and clears the canonical handoff pointer for this plan. The matching execution-lineage record remains as history even after the bounded stop is retired. STATE.md should reflect this update after persistence, but it is not an independent authority.
 
 Keep STATE.md under 150 lines.
 </step>
@@ -730,11 +774,11 @@ ls -1 "${phase_dir}"/SUMMARY.md "${phase_dir}"/*-SUMMARY.md 2>/dev/null | wc -l
 
 | Condition                                  | Route                 | Action                                                                                                                                                  |
 | ------------------------------------------ | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| summaries < plans                          | **A: More plans**     | Find next PLAN without SUMMARY. **balanced/yolo:** auto-continue to next plan when no blockers remain. **supervised:** show next plan + completion summary, wait for explicit "proceed" before continuing. STOP here. |
+| summaries < plans                          | **A: More plans**     | Find next PLAN without SUMMARY. **balanced/yolo:** auto-continue to next plan when no blockers remain. **supervised:** show next plan + completion summary, then end with `## > Next Up`: primary `gpd:execute-phase {phase}`, plus `gpd:suggest-next`. STOP here. |
 | summaries = plans, current < highest phase | **B: Phase done**     | Show completion, suggest `gpd:plan-phase {Z+1}` + `gpd:verify-work {Z}` + `gpd:discuss-phase {Z+1}`                                                  |
 | summaries = plans, current = highest phase | **C: Milestone done** | Show banner, suggest `gpd:complete-milestone` + `gpd:verify-work` + `gpd:add-phase`                                                                  |
 
-All routes: `/clear` first for fresh context.
+All routes: start a fresh context window first.
 </step>
 
 </process>
@@ -751,7 +795,7 @@ When plan execution fails, see `execute-plan-recovery.md` for the full recovery 
 - Limiting cases checked where specified
 - SUMMARY.md created with substantive content including key results
 - Contract-backed plans emit contract_results and comparison_verdicts when applicable
-- STATE.md updated (position, decisions, issues, session)
+- STATE.md updated (position, decisions, issues, Session Continuity rendering)
 - ROADMAP.md updated
 - Validation events documented
 - Checkpoint tag cleaned up on success (retained on failure)

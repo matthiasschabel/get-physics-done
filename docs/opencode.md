@@ -74,6 +74,8 @@ Suggested order for beginners: `/gpd-help`, `/gpd-start`, `/gpd-tour`, then
 either `/gpd-new-project --minimal`, `/gpd-map-research`, or
 `/gpd-resume-work`.
 
+GPD is designed to favor scientific rigor and critical thinking. Treat preferred answers as hypotheses to test, and if a citation, artifact, or run result is missing, keep that gap explicit instead of inventing it.
+
 ## Return to work
 
 - Use `/gpd-resume-work` when this folder already has GPD state and you want to

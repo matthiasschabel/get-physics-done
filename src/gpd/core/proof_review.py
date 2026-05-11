@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass
@@ -11,10 +12,19 @@ from pathlib import Path
 from pydantic import ValidationError as PydanticValidationError
 
 from gpd.contracts import PROOF_AUDIT_REVIEWER, statement_looks_theorem_like
+from gpd.core.artifact_text import ArtifactTextError, load_artifact_text_surface
+from gpd.core.constants import (
+    PLANNING_DIR_NAME,
+    PUBLICATION_DIR_NAME,
+    PUBLICATION_MANUSCRIPT_DIR_NAME,
+    ProjectLayout,
+)
 from gpd.core.frontmatter import FrontmatterParseError, extract_frontmatter
-from gpd.core.manuscript_artifacts import resolve_current_manuscript_entrypoint
+from gpd.core.manuscript_artifacts import resolve_current_manuscript_entrypoint, resolve_explicit_publication_subject
+from gpd.core.publication_review_paths import resolve_review_manuscript_path, review_artifact_round
 from gpd.core.referee_policy import validate_stage_review_artifact_alignment
 from gpd.core.reproducibility import compute_sha256
+from gpd.core.utils import normalize_ascii_slug
 from gpd.mcp.paper.review_artifacts import read_claim_index, read_stage_review_report
 
 __all__ = [
@@ -24,8 +34,11 @@ __all__ = [
     "manuscript_has_theorem_bearing_language",
     "manuscript_has_theorem_bearing_review_anchor",
     "manuscript_requires_theorem_bearing_review",
+    "publication_lineage_mode",
+    "publication_lineage_roots",
     "manuscript_proof_review_manifest_path",
     "phase_proof_review_manifest_path",
+    "publication_subject_slug",
     "resolve_manuscript_proof_review_status",
     "resolve_phase_proof_review_status",
 ]
@@ -52,16 +65,28 @@ _PHASE_PROOF_AFFECTING_EXTENSIONS = frozenset(
 )
 _MANUSCRIPT_PROOF_AFFECTING_EXTENSIONS = frozenset(
     {
-        ".tex",
+        ".csv",
+        ".docx",
         ".md",
+        ".pdf",
+        ".eps",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".svg",
+        ".tex",
+        ".tsv",
         ".bib",
         ".bst",
         ".sty",
         ".cls",
         ".txt",
+        ".xlsx",
+        ".xlsm",
     }
 )
 _STAGE_MATH_FILENAME_RE = re.compile(r"^STAGE-math(?P<round_suffix>-R(?P<round>\d+))?\.json$")
+_CLAIMS_FILENAME_RE = re.compile(r"^CLAIMS(?P<round_suffix>-R(?P<round>\d+))?\.json$")
 _THEOREM_STYLE_MANUSCRIPT_RE = re.compile(
     r"(\\begin\{(?:theorem|lemma|corollary|proposition|claim|proof)\})"
     r"|(\\newtheorem\{)"
@@ -75,6 +100,7 @@ _PROOF_REDTEAM_REQUIRED_QUANTIFIER_STATUS_VALUES = frozenset({"matched", "narrow
 _PROOF_REDTEAM_REQUIRED_COUNTEREXAMPLE_STATUS_VALUES = frozenset(
     {"none_found", "counterexample_found", "not_attempted", "narrowed_claim"}
 )
+_PROJECT_LOCAL_MANUSCRIPT_ROOT_NAMES = frozenset({"paper", "manuscript", "draft"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,10 +164,98 @@ def phase_proof_review_manifest_path(verification_path: Path) -> Path:
     return verification_path.with_name(MANUSCRIPT_PROOF_REVIEW_MANIFEST_NAME)
 
 
-def manuscript_proof_review_manifest_path(manuscript_entrypoint: Path) -> Path:
-    """Return the manuscript-local proof-review manifest path."""
+def manuscript_proof_review_manifest_path(
+    manuscript_entrypoint: Path,
+    *,
+    project_root: Path | None = None,
+) -> Path:
+    """Return the canonical proof-review manifest path for one manuscript subject."""
 
-    return manuscript_entrypoint.parent / MANUSCRIPT_PROOF_REVIEW_MANIFEST_NAME
+    if project_root is None or _uses_project_local_manuscript_manifest(project_root, manuscript_entrypoint):
+        return manuscript_entrypoint.parent / MANUSCRIPT_PROOF_REVIEW_MANIFEST_NAME
+    return _managed_publication_proof_review_manifest_path(project_root, manuscript_entrypoint)
+
+
+def _uses_project_local_manuscript_manifest(project_root: Path, manuscript_entrypoint: Path) -> bool:
+    """Return whether one manuscript subject should keep its proof manifest beside the manuscript."""
+
+    try:
+        relative = manuscript_entrypoint.resolve(strict=False).relative_to(project_root.resolve(strict=False))
+    except ValueError:
+        return False
+    return bool(relative.parts) and relative.parts[0] in _PROJECT_LOCAL_MANUSCRIPT_ROOT_NAMES
+
+
+def _managed_publication_proof_review_manifest_path(project_root: Path, manuscript_entrypoint: Path) -> Path:
+    """Return the managed proof-review manifest path for one publication subject."""
+
+    layout = ProjectLayout(project_root)
+    return (
+        layout.publication_proof_review_dir(publication_subject_slug(project_root, manuscript_entrypoint))
+        / MANUSCRIPT_PROOF_REVIEW_MANIFEST_NAME
+    )
+
+
+def _is_project_managed_publication_lane(relative: Path | None) -> bool:
+    return (
+        relative is not None
+        and len(relative.parts) >= 4
+        and relative.parts[0] == PLANNING_DIR_NAME
+        and relative.parts[1] == PUBLICATION_DIR_NAME
+        and relative.parts[3] == PUBLICATION_MANUSCRIPT_DIR_NAME
+    )
+
+
+def publication_lineage_mode(project_root: Path, manuscript_entrypoint: Path) -> str:
+    """Return whether review/response lineage stays global or becomes subject-owned."""
+
+    try:
+        relative = manuscript_entrypoint.resolve(strict=False).relative_to(project_root.resolve(strict=False))
+    except ValueError:
+        relative = None
+    if relative is not None and relative.parts and relative.parts[0] in _PROJECT_LOCAL_MANUSCRIPT_ROOT_NAMES:
+        return "global_gpd"
+    if _is_project_managed_publication_lane(relative):
+        return "subject_owned"
+    return "subject_owned"
+
+
+def _uses_global_publication_lineage(project_root: Path, manuscript_entrypoint: Path) -> bool:
+    """Return whether review/response lineage should remain on the global GPD roots."""
+
+    return publication_lineage_mode(project_root, manuscript_entrypoint) == "global_gpd"
+
+
+def publication_lineage_roots(project_root: Path, manuscript_entrypoint: Path) -> tuple[Path, Path]:
+    """Return the publication root and review root for one manuscript subject."""
+
+    layout = ProjectLayout(project_root)
+    if _uses_global_publication_lineage(project_root, manuscript_entrypoint):
+        publication_root = layout.gpd
+    else:
+        subject_slug = publication_subject_slug(project_root, manuscript_entrypoint)
+        publication_root = layout.publication_subject_dir(subject_slug)
+        return publication_root, layout.publication_review_dir(subject_slug)
+    return publication_root, layout.review_dir
+
+
+def publication_subject_slug(project_root: Path, manuscript_entrypoint: Path) -> str:
+    """Return the managed publication subject slug for one resolved manuscript subject."""
+
+    resolved_root = project_root.resolve(strict=False)
+    resolved_entrypoint = manuscript_entrypoint.resolve(strict=False)
+    try:
+        relative = resolved_entrypoint.relative_to(resolved_root)
+    except ValueError:
+        relative = None
+    if _is_project_managed_publication_lane(relative):
+        return relative.parts[2]
+    label = relative.as_posix() if relative is not None else resolved_entrypoint.as_posix()
+    slug_source = label[: -len(resolved_entrypoint.suffix)] if resolved_entrypoint.suffix else label
+    slug = normalize_ascii_slug(slug_source.replace("/", "-")) or "manuscript"
+    slug = slug[:48].rstrip("-") or "manuscript"
+    digest = hashlib.sha256(label.encode("utf-8")).hexdigest()[:12]
+    return f"{slug}-{digest}"
 
 
 def manuscript_has_theorem_bearing_review_anchor(
@@ -167,11 +281,11 @@ def manuscript_has_theorem_bearing_claim_inventory(
     if entrypoint is None:
         return False
 
-    review_dir = project_root / "GPD" / "review"
+    _publication_root, review_dir = publication_lineage_roots(project_root, entrypoint)
     if not review_dir.exists():
         return False
 
-    resolved_manuscript = _resolve_review_manuscript_path(project_root, entrypoint.as_posix())
+    resolved_manuscript = resolve_review_manuscript_path(project_root, entrypoint.as_posix())
     matches: list[tuple[int, int, bool]] = []
     for path in sorted(review_dir.glob("CLAIMS*.json")):
         match = _claim_round_details(path)
@@ -180,9 +294,9 @@ def manuscript_has_theorem_bearing_claim_inventory(
         round_number, _round_suffix = match
         try:
             claim_index = read_claim_index(path)
-        except (OSError, json.JSONDecodeError, PydanticValidationError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, PydanticValidationError):
             continue
-        if _resolve_review_manuscript_path(project_root, claim_index.manuscript_path) != resolved_manuscript:
+        if resolve_review_manuscript_path(project_root, claim_index.manuscript_path) != resolved_manuscript:
             continue
         matches.append(
             (
@@ -209,17 +323,18 @@ def manuscript_has_theorem_bearing_language(
         return False
 
     manuscript_paths: list[Path] = [entrypoint]
-    for candidate in sorted(entrypoint.parent.rglob("*")):
-        if candidate == entrypoint or not candidate.is_file():
-            continue
-        if candidate.suffix.lower() not in {".tex", ".md"}:
-            continue
-        manuscript_paths.append(candidate)
+    if entrypoint.suffix.lower() in {".tex", ".md"}:
+        for candidate in sorted(entrypoint.parent.rglob("*")):
+            if candidate == entrypoint or not candidate.is_file():
+                continue
+            if candidate.suffix.lower() not in {".tex", ".md"}:
+                continue
+            manuscript_paths.append(candidate)
 
     for manuscript_path in manuscript_paths:
         try:
-            content = manuscript_path.read_text(encoding="utf-8")
-        except OSError:
+            content = load_artifact_text_surface(manuscript_path).text
+        except ArtifactTextError:
             continue
         if _THEOREM_STYLE_MANUSCRIPT_RE.search(content):
             return True
@@ -245,7 +360,7 @@ def manuscript_requires_theorem_bearing_review(
 def _resolve_review_artifacts(project_root: Path, artifact_paths: tuple[str, ...]) -> tuple[Path, ...]:
     """Resolve review artifact paths against the project root."""
 
-    return tuple(_resolve_review_manuscript_path(project_root, path) for path in artifact_paths if path.strip())
+    return tuple(resolve_review_manuscript_path(project_root, path) for path in artifact_paths if path.strip())
 
 
 def resolve_phase_proof_review_status(
@@ -304,8 +419,9 @@ def resolve_manuscript_proof_review_status(
 
     review_anchor = _latest_matching_math_review_anchor(project_root, entrypoint)
     actual_manuscript_sha256 = compute_sha256(entrypoint)
-    watched_files = _collect_manuscript_watched_files(entrypoint.parent)
-    manifest_path = manuscript_proof_review_manifest_path(entrypoint)
+    manuscript_watch_root = _resolved_manuscript_watch_root(project_root, entrypoint)
+    watched_files = _collect_manuscript_watched_files(manuscript_watch_root)
+    manifest_path = manuscript_proof_review_manifest_path(entrypoint, project_root=project_root)
     if review_anchor is None:
         return ProofReviewStatus(
             scope="manuscript",
@@ -344,7 +460,8 @@ def resolve_manuscript_proof_review_status(
         _resolve_review_artifacts(project_root, review_anchor.proof_artifact_paths),
     )
     if review_anchor.proof_bearing:
-        proof_redteam_path = project_root / "GPD" / "review" / f"PROOF-REDTEAM{review_anchor.round_suffix}.md"
+        _publication_root, review_dir = publication_lineage_roots(project_root, entrypoint)
+        proof_redteam_path = review_dir / f"PROOF-REDTEAM{review_anchor.round_suffix}.md"
         watched_files = _with_extra_watched_files(watched_files, proof_redteam_path)
         if not proof_redteam_path.exists():
             return ProofReviewStatus(
@@ -418,7 +535,7 @@ def _resolve_status(
         try:
             manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
             manifest_records = _manifest_records(manifest_payload, scope=scope)
-        except (OSError, json.JSONDecodeError, ValueError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             return ProofReviewStatus(
                 scope=scope,
                 state="invalid_manifest",
@@ -431,7 +548,9 @@ def _resolve_status(
 
         expected_hashes = manifest_records["hashes"]
         changed_labels = sorted(
-            path for path in expected_hashes.keys() & current_hashes.keys() if expected_hashes[path] != current_hashes[path]
+            path
+            for path in expected_hashes.keys() & current_hashes.keys()
+            if expected_hashes[path] != current_hashes[path]
         )
         missing_labels = sorted(path for path in expected_hashes.keys() - current_hashes.keys())
         unexpected_labels = sorted(path for path in current_hashes.keys() - expected_hashes.keys())
@@ -590,6 +709,11 @@ def _collect_manuscript_watched_files(manuscript_root: Path) -> tuple[Path, ...]
     return tuple(files)
 
 
+def _resolved_manuscript_watch_root(project_root: Path, manuscript_entrypoint: Path) -> Path:
+    subject = resolve_explicit_publication_subject(project_root, manuscript_entrypoint, allow_markdown=True)
+    return subject.artifact_base or subject.manuscript_root or manuscript_entrypoint.parent
+
+
 def _with_extra_watched_files(*groups: tuple[Path, ...] | Path) -> tuple[Path, ...]:
     seen: set[Path] = set()
     ordered: list[Path] = []
@@ -607,12 +731,12 @@ def _with_extra_watched_files(*groups: tuple[Path, ...] | Path) -> tuple[Path, .
 
 
 def _latest_matching_math_review_anchor(project_root: Path, manuscript_entrypoint: Path) -> _MathReviewAnchor | None:
-    review_dir = project_root / "GPD" / "review"
+    _publication_root, review_dir = publication_lineage_roots(project_root, manuscript_entrypoint)
     if not review_dir.exists():
         return None
 
     matches: list[tuple[int, int, _MathReviewAnchor]] = []
-    resolved_manuscript = _resolve_review_manuscript_path(project_root, manuscript_entrypoint.as_posix())
+    resolved_manuscript = resolve_review_manuscript_path(project_root, manuscript_entrypoint.as_posix())
     expected_manuscript_path = _relative_path(project_root, manuscript_entrypoint)
     for path in sorted(review_dir.glob("STAGE-math*.json")):
         round_details = _math_review_round_details(path)
@@ -627,11 +751,11 @@ def _latest_matching_math_review_anchor(project_root: Path, manuscript_entrypoin
         claim_index_matches_current = False
         try:
             claim_index = read_claim_index(claim_index_path)
-        except (OSError, json.JSONDecodeError, PydanticValidationError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, PydanticValidationError) as exc:
             validation_errors.append(f"{claim_index_path.name} could not be loaded: {exc}")
         else:
             claim_index_matches_current = (
-                _resolve_review_manuscript_path(project_root, claim_index.manuscript_path) == resolved_manuscript
+                resolve_review_manuscript_path(project_root, claim_index.manuscript_path) == resolved_manuscript
             )
             if claim_index_matches_current:
                 theorem_claim_ids = sorted(claim.claim_id for claim in claim_index.claims if claim.theorem_bearing)
@@ -647,7 +771,7 @@ def _latest_matching_math_review_anchor(project_root: Path, manuscript_entrypoin
 
         try:
             report = read_stage_review_report(path)
-        except (OSError, json.JSONDecodeError, PydanticValidationError) as exc:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, PydanticValidationError) as exc:
             if not claim_index_matches_current:
                 continue
             validation_errors.append(f"{path.name} could not be loaded: {exc}")
@@ -668,7 +792,9 @@ def _latest_matching_math_review_anchor(project_root: Path, manuscript_entrypoin
                 )
             )
             continue
-        report_matches_current = _resolve_review_manuscript_path(project_root, report.manuscript_path) == resolved_manuscript
+        report_matches_current = (
+            resolve_review_manuscript_path(project_root, report.manuscript_path) == resolved_manuscript
+        )
         if not report_matches_current and not claim_index_matches_current:
             continue
         if claim_index is not None:
@@ -678,6 +804,7 @@ def _latest_matching_math_review_anchor(project_root: Path, manuscript_entrypoin
                     artifact_path=path,
                     claim_index=claim_index,
                     expected_manuscript_path=expected_manuscript_path,
+                    expected_manuscript_label="active manuscript",
                 )
             )
             if theorem_claim_ids:
@@ -714,23 +841,11 @@ def _latest_matching_math_review_anchor(project_root: Path, manuscript_entrypoin
 
 
 def _math_review_round_details(path: Path) -> tuple[int, str] | None:
-    match = _STAGE_MATH_FILENAME_RE.fullmatch(path.name)
-    if match is None:
-        return None
-    round_text = match.group("round")
-    round_number = int(round_text) if round_text else 1
-    return round_number, match.group("round_suffix") or ""
+    return review_artifact_round(path, pattern=_STAGE_MATH_FILENAME_RE)
 
 
 def _claim_round_details(path: Path) -> tuple[int, str] | None:
-    if path.name == "CLAIMS.json":
-        return 1, ""
-    if path.name.startswith("CLAIMS-R") and path.name.endswith(".json"):
-        round_text = path.name[len("CLAIMS-R") : -len(".json")]
-        if round_text.isdigit():
-            round_number = int(round_text)
-            return round_number, f"-R{round_number}"
-    return None
+    return review_artifact_round(path, pattern=_CLAIMS_FILENAME_RE)
 
 
 def _read_proof_redteam_status(
@@ -745,7 +860,7 @@ def _read_proof_redteam_status(
 ) -> tuple[str | None, str | None]:
     try:
         meta, body = extract_frontmatter(path.read_text(encoding="utf-8"))
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         return None, str(exc)
     except FrontmatterParseError as exc:
         return None, str(exc)
@@ -777,7 +892,7 @@ def _read_proof_redteam_status(
         return None, "top-level frontmatter `proof_artifact_paths` must be a non-empty list of strings"
     normalized_proof_artifact_paths = tuple(dict.fromkeys(item.strip() for item in proof_artifact_paths))
     for proof_artifact_path in normalized_proof_artifact_paths:
-        resolved_proof_artifact_path = _resolve_review_manuscript_path(project_root, proof_artifact_path)
+        resolved_proof_artifact_path = resolve_review_manuscript_path(project_root, proof_artifact_path)
         if not resolved_proof_artifact_path.exists() or not resolved_proof_artifact_path.is_file():
             return None, f"proof_artifact_paths entry does not resolve to a readable file: {proof_artifact_path}"
     if expected_proof_artifact_paths:
@@ -793,8 +908,8 @@ def _read_proof_redteam_status(
         raw_manuscript_path = meta.get("manuscript_path")
         if not isinstance(raw_manuscript_path, str) or not raw_manuscript_path.strip():
             return None, "top-level frontmatter `manuscript_path` is missing"
-        resolved_artifact_path = _resolve_review_manuscript_path(project_root, raw_manuscript_path.strip())
-        resolved_expected_path = _resolve_review_manuscript_path(project_root, expected_manuscript_path)
+        resolved_artifact_path = resolve_review_manuscript_path(project_root, raw_manuscript_path.strip())
+        resolved_expected_path = resolve_review_manuscript_path(project_root, expected_manuscript_path)
         if resolved_artifact_path != resolved_expected_path:
             return None, "top-level frontmatter `manuscript_path` does not match the active manuscript"
 
@@ -851,7 +966,11 @@ def _read_proof_redteam_status(
         return None, "proof-redteam Adversarial Probe must record both probe type and result"
 
     verdict_body = _section_body(body, "## Verdict")
-    if "Scope status:" not in verdict_body or "Quantifier status:" not in verdict_body or "Counterexample status:" not in verdict_body:
+    if (
+        "Scope status:" not in verdict_body
+        or "Quantifier status:" not in verdict_body
+        or "Counterexample status:" not in verdict_body
+    ):
         return None, "proof-redteam Verdict must include scope, quantifier, and counterexample status lines"
 
     if status == "passed":
@@ -879,7 +998,9 @@ def _read_proof_redteam_status(
     return status, None
 
 
-def _read_proof_redteam_structured_audit(meta: dict[str, object]) -> tuple[_ProofRedteamStructuredAudit | None, str | None]:
+def _read_proof_redteam_structured_audit(
+    meta: dict[str, object],
+) -> tuple[_ProofRedteamStructuredAudit | None, str | None]:
     missing_parameter_symbols, error = _read_proof_redteam_string_list(meta, "missing_parameter_symbols")
     if error is not None:
         return None, error
@@ -889,7 +1010,9 @@ def _read_proof_redteam_structured_audit(meta: dict[str, object]) -> tuple[_Proo
     coverage_gaps, error = _read_proof_redteam_string_list(meta, "coverage_gaps")
     if error is not None:
         return None, error
-    scope_status, error = _read_proof_redteam_status_value(meta, "scope_status", _PROOF_REDTEAM_REQUIRED_SCOPE_STATUS_VALUES)
+    scope_status, error = _read_proof_redteam_status_value(
+        meta, "scope_status", _PROOF_REDTEAM_REQUIRED_SCOPE_STATUS_VALUES
+    )
     if error is not None:
         return None, error
     quantifier_status, error = _read_proof_redteam_status_value(
@@ -983,13 +1106,6 @@ def _section_has_substantive_content(body: str, heading: str) -> bool:
         if line.startswith("-"):
             return True
     return pipe_lines >= 2
-
-
-def _resolve_review_manuscript_path(project_root: Path, manuscript_path: str) -> Path:
-    artifact_path = Path(manuscript_path).expanduser()
-    if not artifact_path.is_absolute():
-        artifact_path = project_root / artifact_path
-    return artifact_path.resolve(strict=False)
 
 
 def _relative_path(project_root: Path, path: Path | None) -> str | None:

@@ -20,10 +20,10 @@ import time
 from enum import StrEnum
 from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 
+from gpd.core.commands import cmd_validate_return
 from gpd.core.config import GPDProjectConfig, load_config
 from gpd.core.constants import (
     DECISION_THRESHOLD,
@@ -31,39 +31,42 @@ from gpd.core.constants import (
     MIN_PYTHON_MINOR,
     OPTIONAL_PLANNING_FILES,
     PLANNING_DIR_NAME,
+    PROJECT_FILENAME,
     RECOMMENDED_PYTHON_VERSION,
     REQUIRED_PLANNING_DIRS,
     REQUIRED_PLANNING_FILES,
-    REQUIRED_RETURN_FIELDS,
     REQUIRED_SPECS_SUBDIRS,
+    ROADMAP_FILENAME,
+    STATE_JSON_BACKUP_FILENAME,
     STATE_LINES_TARGET,
     UNCOMMITTED_FILES_THRESHOLD,
-    VALID_RETURN_STATUSES,
     ProjectLayout,
 )
 from gpd.core.contract_validation import validate_project_contract
 from gpd.core.conventions import KNOWN_CONVENTIONS, is_bogus_value
 from gpd.core.errors import GPDError, ValidationError
 from gpd.core.frontmatter import FrontmatterParseError, extract_frontmatter, validate_frontmatter
+from gpd.core.knowledge_migration import discover_knowledge_migration
+from gpd.core.knowledge_runtime import discover_knowledge_docs
 from gpd.core.observability import gpd_span
 from gpd.core.public_surface_contract import (
     local_cli_doctor_global_command,
     local_cli_doctor_local_command,
     local_cli_permissions_sync_command,
 )
+from gpd.core.root_resolution import resolve_project_root
 from gpd.core.runtime_command_surfaces import format_active_runtime_command
 from gpd.core.state import (
     peek_state_json,
     save_state_json,
     state_validate,
 )
-from gpd.core.storage_paths import ProjectStorageLayout
+from gpd.core.storage_paths import ManagedOutputPolicy, ProjectStorageLayout
 from gpd.core.utils import (
     atomic_write,
     phase_normalize,
     phase_sort_key,
     safe_read_file,
-    strict_parse_int,
 )
 from gpd.core.workflow_presets import resolve_workflow_preset_readiness
 from gpd.hooks.install_metadata import InstallTargetAssessment, assess_install_target
@@ -118,6 +121,22 @@ class HealthReport(BaseModel):
     fixes_applied: list[str] = Field(default_factory=list)
 
 
+class RuntimeTargetAssessment(BaseModel):
+    """Typed runtime target metadata derived from install assessment."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    config_dir: str
+    expected_runtime: str | None = None
+    state: str
+    manifest_state: str
+    manifest_runtime: str | None = None
+    has_managed_markers: bool = False
+    missing_install_artifacts: list[str] = Field(default_factory=list)
+    readiness_state: str = "blocked"
+    readiness_message: str = ""
+
+
 # All thresholds, file lists, and return validation constants imported from constants.py
 
 
@@ -157,16 +176,80 @@ def check_environment() -> HealthCheck:
     return HealthCheck(status=status, label="Environment", details=details, issues=issues)
 
 
+_ROOT_MIGRATABLE_FILES = frozenset({ROADMAP_FILENAME, PROJECT_FILENAME})
+_LEGACY_GPD_DIR_NAME = ".gpd"
+
+
+def _legacy_gpd_project_markers(cwd: Path) -> list[str]:
+    """Return project-state markers found in repo-local legacy ``.gpd/``."""
+
+    legacy_dir = cwd / _LEGACY_GPD_DIR_NAME
+    if not legacy_dir.is_dir():
+        return []
+
+    markers: list[str] = []
+    for name in (*REQUIRED_PLANNING_FILES, STATE_JSON_BACKUP_FILENAME):
+        if (legacy_dir / name).exists():
+            markers.append(f"{_LEGACY_GPD_DIR_NAME}/{name}")
+    for name in REQUIRED_PLANNING_DIRS:
+        if (legacy_dir / name).is_dir():
+            markers.append(f"{_LEGACY_GPD_DIR_NAME}/{name}/")
+    return markers
+
+
+def _planning_files_diverge(canonical_path: Path, root_path: Path) -> bool | None:
+    """Return whether two planning files differ, or ``None`` when either cannot be read."""
+
+    canonical_content = safe_read_file(canonical_path)
+    root_content = safe_read_file(root_path)
+    if canonical_content is None or root_content is None:
+        return None
+    return canonical_content != root_content
+
+
 def check_project_structure(cwd: Path) -> HealthCheck:
     """Check that required GPD/ files and directories exist."""
-    layout = ProjectLayout(cwd)
+    project_root = resolve_project_root(cwd, require_layout=True) or cwd.expanduser().resolve(strict=False)
+    layout = ProjectLayout(project_root)
     issues: list[str] = []
+    warnings: list[str] = []
     details: dict[str, object] = {}
+
+    legacy_markers = _legacy_gpd_project_markers(project_root)
+    if legacy_markers:
+        details["legacy_gpd_project_markers"] = legacy_markers
+        warnings.append(
+            f"Legacy {_LEGACY_GPD_DIR_NAME}/ contains project markers "
+            f"({', '.join(legacy_markers)}). Canonical project state lives in {PLANNING_DIR_NAME}/; "
+            "move or remove the legacy files."
+        )
 
     for name in REQUIRED_PLANNING_FILES:
         full = layout.gpd / name
+        root_path = layout.root / name
         if full.exists():
             details[name] = "present"
+            if name in _ROOT_MIGRATABLE_FILES and root_path.exists():
+                if _planning_files_diverge(full, root_path) is True:
+                    divergent_files = details.setdefault("divergent_root_planning_files", [])
+                    if isinstance(divergent_files, list):
+                        divergent_files.append(name)
+                    warnings.append(
+                        f"{name} exists at both project root and {PLANNING_DIR_NAME}/ but contents differ. "
+                        f"{PLANNING_DIR_NAME}/{name} is canonical; reconcile or remove ./{name}."
+                    )
+                else:
+                    warnings.append(
+                        f"{name} exists at both project root and {PLANNING_DIR_NAME}/ "
+                        f"— the root copy is unused. Consider removing ./{name}."
+                    )
+        elif name in _ROOT_MIGRATABLE_FILES and root_path.exists():
+            details[name] = "present (at project root)"
+            warnings.append(
+                f"{name} found at project root but not in {PLANNING_DIR_NAME}/. "
+                f"Run any GPD command from the project root to auto-migrate, "
+                f"or copy it manually to {PLANNING_DIR_NAME}/{name}."
+            )
         else:
             details[name] = "missing"
             issues.append(f"Required file missing: {PLANNING_DIR_NAME}/{name}")
@@ -183,18 +266,118 @@ def check_project_structure(cwd: Path) -> HealthCheck:
         full = layout.gpd / name
         details[name] = "present" if full.exists() else "absent"
 
-    status = CheckStatus.FAIL if issues else CheckStatus.OK
-    return HealthCheck(status=status, label="Project Structure", details=details, issues=issues)
+    status = CheckStatus.FAIL if issues else (CheckStatus.WARN if warnings else CheckStatus.OK)
+    return HealthCheck(status=status, label="Project Structure", details=details, issues=issues, warnings=warnings)
 
 
-def check_storage_paths(cwd: Path) -> HealthCheck:
+def check_knowledge_inventory(cwd: Path) -> HealthCheck:
+    """Summarize knowledge-doc inventory, freshness, and supersession health."""
+    from gpd.core.tool_preflight import build_plan_tool_preflight
+
+    layout = ProjectLayout(cwd)
+    knowledge_dir = layout.knowledge_dir
+    discovery = discover_knowledge_docs(cwd)
+    migration_inventory = discover_knowledge_migration(cwd)
+    by_id = discovery.by_id()
+
+    stable_records = [record for record in discovery.records if record.status == "stable"]
+    active_records = [record for record in discovery.records if record.runtime_active]
+    stale_review_records = [
+        record for record in stable_records if record.review_fresh is False or record.runtime_active is False
+    ]
+    broken_supersession_records = [
+        record for record in discovery.records if record.status == "superseded" and record.superseded_by not in by_id
+    ]
+    plans_with_knowledge_deps: list[str] = []
+    plan_knowledge_issue_files: list[str] = []
+    plan_knowledge_dependency_issue_count = 0
+    plan_knowledge_blocker_count = 0
+    plan_knowledge_warning_count = 0
+    plan_dependency_warnings: list[str] = []
+
+    if layout.phases_dir.is_dir():
+        phase_dirs = sorted(
+            (d for d in layout.phases_dir.iterdir() if d.is_dir()), key=lambda d: phase_sort_key(d.name)
+        )
+        for phase_dir in phase_dirs:
+            plan_files = sorted(
+                (f for f in phase_dir.iterdir() if f.is_file() and layout.is_plan_file(f.name)), key=lambda f: f.name
+            )
+            for plan_path in plan_files:
+                preflight = build_plan_tool_preflight(plan_path)
+                if not preflight.knowledge_deps and preflight.knowledge_gate == "off":
+                    continue
+
+                rel_plan_path = plan_path.relative_to(cwd.resolve(strict=False)).as_posix()
+                plans_with_knowledge_deps.append(rel_plan_path)
+                non_ok_checks = [check for check in preflight.knowledge_dependency_checks if check.status != "ok"]
+                if not non_ok_checks:
+                    continue
+
+                plan_knowledge_issue_files.append(rel_plan_path)
+                for check in non_ok_checks:
+                    plan_knowledge_dependency_issue_count += 1
+                    if check.blocking:
+                        plan_knowledge_blocker_count += 1
+                    else:
+                        plan_knowledge_warning_count += 1
+                    plan_dependency_warnings.append(f"{rel_plan_path}: {check.detail}")
+
+    details: dict[str, object] = {
+        "knowledge_dir_present": knowledge_dir.is_dir(),
+        "knowledge_doc_count": len(discovery.records),
+        "stable_knowledge_doc_count": len(stable_records),
+        "runtime_active_count": len(active_records),
+        "status_counts": discovery.status_counts(),
+        "discovery_warning_count": len(discovery.warnings),
+        "migration_doc_count": len(migration_inventory.records),
+        "migration_classification_counts": migration_inventory.classification_counts(),
+        "migration_warning_count": len(migration_inventory.warnings),
+        "stale_review_count": len(stale_review_records),
+        "stale_review_files": [record.path for record in stale_review_records],
+        "missing_supersession_target_count": len(broken_supersession_records),
+        "missing_supersession_target_files": [
+            f"{record.path} -> {record.superseded_by}" for record in broken_supersession_records
+        ],
+        "plans_with_knowledge_deps_count": len(plans_with_knowledge_deps),
+        "plans_with_knowledge_deps": plans_with_knowledge_deps,
+        "plan_knowledge_dependency_issue_count": plan_knowledge_dependency_issue_count,
+        "plan_knowledge_warning_count": plan_knowledge_warning_count,
+        "plan_knowledge_blocker_count": plan_knowledge_blocker_count,
+        "plan_knowledge_issue_files": plan_knowledge_issue_files,
+    }
+    if not knowledge_dir.is_dir():
+        details["reason"] = "no_knowledge_dir"
+
+    warnings: list[str] = list(discovery.warnings)
+    warnings.extend(migration_inventory.warnings)
+    if stale_review_records:
+        stale_paths = ", ".join(record.path for record in stale_review_records)
+        warnings.append(f"{len(stale_review_records)} stable knowledge doc(s) have stale reviews: {stale_paths}")
+    if broken_supersession_records:
+        broken_refs = ", ".join(f"{record.path} -> {record.superseded_by}" for record in broken_supersession_records)
+        warnings.append(
+            f"{len(broken_supersession_records)} superseded knowledge doc(s) point to missing targets: {broken_refs}"
+        )
+    warnings.extend(plan_dependency_warnings)
+
+    status = CheckStatus.WARN if warnings else CheckStatus.OK
+    return HealthCheck(status=status, label="Knowledge Inventory", details=details, warnings=warnings)
+
+
+def check_storage_paths(
+    cwd: Path,
+    *,
+    managed_output_policies: tuple[ManagedOutputPolicy, ...] = (),
+) -> HealthCheck:
     """Warn on suspicious storage-policy violations without blocking the project."""
     layout = ProjectStorageLayout(cwd)
-    warnings = list(layout.audit_storage_warnings())
+    warnings = list(layout.audit_storage_warnings(managed_output_policies=managed_output_policies))
     details: dict[str, object] = {
         "project_root": str(layout.root),
         "internal_root": str(layout.internal_root),
         "temporary_project_root": layout.project_root_is_temporary(),
+        "managed_output_policy_count": len(managed_output_policies),
         "warning_count": len(warnings),
     }
     status = CheckStatus.WARN if warnings else CheckStatus.OK
@@ -227,17 +410,28 @@ def _render_contract_cli_command(
     return " ".join(shlex.quote(part) for part in rendered)
 
 
-def _peek_normalized_state_for_health(cwd: Path) -> tuple[dict[str, object] | None, str | None]:
+def _resolve_health_project_root(cwd: Path) -> Path:
+    """Return the root health checks should use for project-scoped state files."""
+    return resolve_project_root(cwd, require_layout=True) or cwd.expanduser().resolve(strict=False)
+
+
+def _peek_normalized_state_for_health(
+    cwd: Path,
+    *,
+    project_root: Path | None = None,
+) -> tuple[dict[str, object] | None, str | None]:
     """Load normalized state for inspection without mutating on-disk files.
 
     Health checks need visibility into structurally parseable blocked
     ``project_contract`` payloads so approval blockers are reported as failures
     instead of being hidden by draft-scoping normalization.
     """
+    project_root = project_root or _resolve_health_project_root(cwd)
     state_obj, _integrity_issues, state_source = peek_state_json(
-        cwd,
+        project_root,
         recover_intent=False,
         surface_blocked_project_contract=True,
+        acquire_lock=False,
     )
     if not isinstance(state_obj, dict):
         return None, state_source
@@ -249,16 +443,17 @@ def check_state_validity(cwd: Path) -> HealthCheck:
 
     Delegates core validation to :func:`state_validate` and wraps the result.
     """
-    result = state_validate(cwd, recover_intent=False)
+    project_root = _resolve_health_project_root(cwd)
+    result = state_validate(project_root, recover_intent=False, acquire_lock=False)
     issues = list(result.issues)
     warnings = list(result.warnings)
 
-    state_obj, state_source = _peek_normalized_state_for_health(cwd)
+    state_obj, state_source = _peek_normalized_state_for_health(project_root, project_root=project_root)
     if isinstance(state_obj, dict) and state_obj.get("project_contract") is not None:
         approval_validation = validate_project_contract(
             state_obj["project_contract"],
             mode="approved",
-            project_root=cwd,
+            project_root=project_root,
         )
         if not approval_validation.valid:
             for error in approval_validation.errors:
@@ -276,7 +471,7 @@ def check_state_validity(cwd: Path) -> HealthCheck:
             if not re.match(r"^\d{2,}(\.\d+)*$", phase):
                 warnings.append(f'phase ID format: "{phase}" -- expected zero-padded')
 
-    layout = ProjectLayout(cwd)
+    layout = ProjectLayout(project_root)
     details: dict[str, object] = {
         "has_json": layout.state_json.exists(),
         "has_md": layout.state_md.exists(),
@@ -298,7 +493,7 @@ def check_compaction_needed(cwd: Path) -> HealthCheck:
             details={"reason": "no_state_file"},
         )
 
-    line_count = len(content.split("\n"))
+    line_count = len(content.splitlines())
 
     # Count decisions
     dec_match = re.search(
@@ -547,26 +742,45 @@ def check_plan_frontmatter(cwd: Path) -> HealthCheck:
     return HealthCheck(status=status, label="Plan Frontmatter", details=details, issues=issues, warnings=warnings)
 
 
-def check_latest_return(cwd: Path) -> HealthCheck:
-    """Validate the gpd_return YAML block in the most recent SUMMARY file."""
+def _latest_summary_file(cwd: Path) -> tuple[Path, str] | None:
+    """Return the newest SUMMARY file using deterministic tie-breaking."""
+
     layout = ProjectLayout(cwd)
     phases_dir = layout.phases_dir
+    candidates: list[tuple[int, str, Path]] = []
+
+    if not phases_dir.is_dir():
+        return None
+
+    for phase_dir in sorted(
+        (entry for entry in phases_dir.iterdir() if entry.is_dir()),
+        key=lambda entry: (phase_sort_key(entry.name), entry.name),
+    ):
+        for summary in sorted(
+            (entry for entry in phase_dir.iterdir() if entry.is_file() and layout.is_summary_file(entry.name)),
+            key=lambda entry: entry.name,
+        ):
+            try:
+                stat = summary.stat()
+            except OSError:
+                continue
+            mtime_ns = getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))
+            candidates.append((mtime_ns, tuple(phase_sort_key(phase_dir.name)), phase_dir.name, summary.name, summary))
+
+    if not candidates:
+        return None
+
+    _mtime_ns, _phase_key, phase_name, summary_filename, summary_path = max(candidates, key=lambda item: item[:4])
+    return summary_path, f"{phase_name}/{summary_filename}"
+
+
+def check_latest_return(cwd: Path) -> HealthCheck:
+    """Validate the gpd_return YAML block in the most recent SUMMARY file."""
     warnings: list[str] = []
     issues: list[str] = []
     details: dict[str, object] = {}
 
-    # Find most recent SUMMARY file
-    latest: tuple[float, Path, str] | None = None
-    if phases_dir.is_dir():
-        for phase_dir in phases_dir.iterdir():
-            if not phase_dir.is_dir():
-                continue
-            for f in phase_dir.iterdir():
-                if f.is_file() and layout.is_summary_file(f.name):
-                    mtime = f.stat().st_mtime
-                    if latest is None or mtime > latest[0]:
-                        latest = (mtime, f, f"{phase_dir.name}/{f.name}")
-
+    latest = _latest_summary_file(cwd)
     if latest is None:
         return HealthCheck(
             status=CheckStatus.OK,
@@ -574,45 +788,32 @@ def check_latest_return(cwd: Path) -> HealthCheck:
             details={"reason": "no_summaries"},
         )
 
-    _, summary_path, summary_name = latest
+    summary_path, summary_name = latest
     details["file"] = summary_name
-
-    content = safe_read_file(summary_path)
-    if content is None:
-        issues.append(f"{summary_name}: cannot read file")
-        return HealthCheck(status=CheckStatus.FAIL, label="Latest Return Envelope", details=details, issues=issues)
-
-    return_match = re.search(r"```ya?ml\s*\n(\s*gpd_return:\s*\n[\s\S]*?)```", content)
-    if not return_match:
-        warnings.append(f"{summary_name}: no gpd_return YAML block")
-        return HealthCheck(
-            status=CheckStatus.WARN,
-            label="Latest Return Envelope",
-            details=details,
-            warnings=warnings,
-        )
+    details["summary_path"] = str(summary_path)
 
     try:
-        parsed = yaml.safe_load(return_match.group(1))
-    except yaml.YAMLError as e:
-        issues.append(f"{summary_name}: gpd_return YAML parse error: {e}")
+        validation = cmd_validate_return(summary_path)
+    except ValidationError as exc:
+        issues.append(f"{summary_name}: {exc}")
         return HealthCheck(status=CheckStatus.FAIL, label="Latest Return Envelope", details=details, issues=issues)
 
-    raw = parsed.get("gpd_return") if isinstance(parsed, dict) else None
-    fields = raw if isinstance(raw, dict) else {}
-    details["fields_found"] = list(fields.keys())
-
-    for field_name in REQUIRED_RETURN_FIELDS:
-        if field_name not in fields or fields[field_name] is None:
-            issues.append(f"{summary_name}: missing required field '{field_name}' in gpd_return")
-
-    if fields.get("status") and str(fields["status"]).lower() not in VALID_RETURN_STATUSES:
-        issues.append(f"{summary_name}: invalid status '{fields['status']}'")
-
-    for numeric_field in ("tasks_completed", "tasks_total"):
-        val = fields.get(numeric_field)
-        if val is not None and strict_parse_int(val, None) is None:
-            issues.append(f"{summary_name}: {numeric_field} not a number")
+    details["fields_found"] = sorted(validation.fields.keys())
+    details["validator_warning_count"] = validation.warning_count
+    if validation.passed:
+        warnings.extend(
+            f"{summary_name}: {warning}"
+            for warning in validation.warnings
+            if not warning.startswith("Recommended field missing:")
+        )
+    else:
+        issues.extend(f"{summary_name}: {error}" for error in validation.errors)
+        warnings.extend(
+            f"{summary_name}: {warning}"
+            for warning in validation.warnings
+            if not warning.startswith("Recommended field missing:")
+        )
+    details["warning_count"] = len(warnings)
 
     status = CheckStatus.FAIL if issues else (CheckStatus.WARN if warnings else CheckStatus.OK)
     return HealthCheck(status=status, label="Latest Return Envelope", details=details, issues=issues, warnings=warnings)
@@ -660,7 +861,12 @@ def check_checkpoint_tags(cwd: Path) -> HealthCheck:
 
     try:
         result = subprocess.run(
-            ["git", "tag", "-l", "gpd-checkpoint/*"],
+            [
+                "git",
+                "for-each-ref",
+                "--format=%(refname:short)%00%(creatordate:unix)",
+                "refs/tags/gpd-checkpoint-*",
+            ],
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -672,41 +878,164 @@ def check_checkpoint_tags(cwd: Path) -> HealthCheck:
             warnings.append(message)
             return HealthCheck(status=CheckStatus.WARN, label="Checkpoint Tags", details=details, warnings=warnings)
 
-        tags = [line.strip() for line in result.stdout.splitlines() if line.strip()]
-        details["tag_count"] = len(tags)
-
         now = int(time.time())
+        tags: list[str] = []
         stale_tags: list[str] = []
-        for tag in tags:
-            tag_result = subprocess.run(
-                ["git", "log", "-1", "--format=%ct", tag],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if tag_result.returncode != 0:
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            tag, separator, created_at_text = line.partition("\x00")
+            tag = tag.strip()
+            if not tag:
+                continue
+            tags.append(tag)
+            if not separator:
                 warnings.append(f"Unable to inspect checkpoint tag {tag}")
                 continue
             try:
-                created_at = int(tag_result.stdout.strip())
+                created_at = int(created_at_text.strip())
             except ValueError:
                 warnings.append(f"Invalid timestamp for checkpoint tag {tag}")
                 continue
             if now - created_at >= STALE_CHECKPOINT_TAG_MAX_AGE_SECONDS:
                 stale_tags.append(tag)
 
+        details["tag_count"] = len(tags)
         details["stale_tags"] = stale_tags
         if stale_tags:
-            warnings.append(
-                f"{len(stale_tags)} checkpoint tag(s) older than {STALE_CHECKPOINT_TAG_MAX_AGE_DAYS} days"
-            )
+            warnings.append(f"{len(stale_tags)} checkpoint tag(s) older than {STALE_CHECKPOINT_TAG_MAX_AGE_DAYS} days")
     except (FileNotFoundError, subprocess.TimeoutExpired):
         details["repo_detected"] = False
         warnings.append("git tag check failed")
 
     status = CheckStatus.WARN if warnings else CheckStatus.OK
     return HealthCheck(status=status, label="Checkpoint Tags", details=details, warnings=warnings)
+
+
+# Minimum length for a provides/description string to participate in substring
+# matching.  Strings shorter than this are silently skipped to prevent trivial
+# single-character or two-character values (like "E" or "ds") from matching
+# virtually every result description.
+_MIN_PROVIDES_LENGTH = 3
+
+
+def check_result_consistency(cwd: Path) -> HealthCheck:
+    """Cross-validate state.json intermediate_results against SUMMARY provides.
+
+    Compares the two parallel result registries — ``intermediate_results`` in
+    ``state.json`` (written by ``gpd result add``) and ``provides`` frontmatter
+    in SUMMARY files (written by executor agents) — and warns on mismatches.
+
+    Conservative matching: an ``IntermediateResult.description`` is considered
+    matched if it appears as an exact case-insensitive substring of any SUMMARY
+    ``provides`` value, or vice-versa.  Strings shorter than
+    ``_MIN_PROVIDES_LENGTH`` are excluded from substring matching to avoid
+    trivial false positives.
+    """
+    from gpd.core.query import collect_summaries, resolve_field
+    from gpd.core.results import result_list
+
+    warnings: list[str] = []
+    details: dict[str, object] = {}
+
+    # 1. Load state.json intermediate_results
+    state_obj, _state_source = _peek_normalized_state_for_health(cwd)
+    if state_obj is None:
+        return HealthCheck(
+            status=CheckStatus.OK,
+            label="Result Consistency",
+            details={"reason": "no_state"},
+        )
+
+    # Wrap result_list in try/except — malformed state.json records would
+    # raise PydanticValidationError and crash the entire health-check run.
+    try:
+        results = result_list(state_obj)
+    except PydanticValidationError as exc:
+        return HealthCheck(
+            status=CheckStatus.WARN,
+            label="Result Consistency",
+            details={"error": "malformed_state_results"},
+            warnings=[f"Cannot parse intermediate_results from state.json: {exc}"],
+        )
+    details["state_result_count"] = len(results)
+
+    # 2. Collect SUMMARY provides across all phases
+    summaries = collect_summaries(cwd)
+    all_provides: list[str] = []
+    for entry in summaries:
+        provides_values = resolve_field(entry.frontmatter, "provides")
+        for pv in provides_values:
+            if isinstance(pv, str):
+                # Guard: skip empty / whitespace-only provides strings.
+                # In Python, "" in "any string" is True, which would
+                # silently suppress all mismatch warnings.
+                if not pv.strip():
+                    continue
+                all_provides.append(pv)
+            elif isinstance(pv, dict):
+                # Structured provides: extract "name" or "provides" keys
+                for key in ("name", "provides"):
+                    val = pv.get(key)
+                    if isinstance(val, str) and val.strip():
+                        all_provides.append(val)
+
+    details["summary_provides_count"] = len(all_provides)
+    provides_lower = [p.lower() for p in all_provides]
+
+    # 3. Compare: state results with no corresponding SUMMARY provides
+    state_only: list[str] = []
+    for result in results:
+        desc = result.description
+        if not desc:
+            continue
+        desc_lower = desc.lower()
+        matched = any(
+            (desc_lower in prov or prov in desc_lower)
+            if len(prov) >= _MIN_PROVIDES_LENGTH and len(desc_lower) >= _MIN_PROVIDES_LENGTH
+            else prov == desc_lower
+            for prov in provides_lower
+        )
+        if not matched:
+            state_only.append(f"{result.id}: {desc}")
+
+    # 4. Compare: SUMMARY provides with no corresponding state result
+    result_descriptions_lower = [(r.description or "").lower() for r in results if r.description]
+    summary_only: list[str] = []
+    for provides_text in all_provides:
+        prov_lower = provides_text.lower()
+        matched = any(
+            (prov_lower in desc or desc in prov_lower)
+            if len(prov_lower) >= _MIN_PROVIDES_LENGTH and len(desc) >= _MIN_PROVIDES_LENGTH
+            else prov_lower == desc
+            for desc in result_descriptions_lower
+        )
+        if not matched:
+            summary_only.append(provides_text)
+
+    details["state_only_count"] = len(state_only)
+    details["summary_only_count"] = len(summary_only)
+
+    if state_only:
+        warnings.append(
+            f"{len(state_only)} state.json result(s) with no matching SUMMARY provides: "
+            + "; ".join(state_only[:5])
+            + (" ..." if len(state_only) > 5 else "")
+        )
+    if summary_only:
+        warnings.append(
+            f"{len(summary_only)} SUMMARY provides with no matching state.json result: "
+            + "; ".join(summary_only[:5])
+            + (" ..." if len(summary_only) > 5 else "")
+        )
+
+    status = CheckStatus.WARN if warnings else CheckStatus.OK
+    return HealthCheck(
+        status=status,
+        label="Result Consistency",
+        details=details,
+        warnings=warnings,
+    )
 
 
 # ─── Auto-Fix ────────────────────────────────────────────────────────────────
@@ -732,7 +1061,17 @@ def _apply_fixes(
     state_check = next((c for c in checks if c.label == "State Validity"), None)
     if state_check and state_check.status != CheckStatus.OK:
         restored_state, _restored_issues, state_source = peek_state_json(cwd)
-        if restored_state is not None and state_source in {"state.json.bak", "STATE.md"}:
+        if restored_state is not None and state_source == "state.json" and not layout.state_md.exists():
+            try:
+                save_state_json(cwd, restored_state)
+                fixes.append("Regenerated STATE.md from state.json")
+                state_check.details["state_source"] = state_source
+                refreshed_labels.update(
+                    {"Project Structure", "State Validity", "State Compaction", "Convention Lock"}
+                )
+            except OSError as e:
+                fixes.append(f"Failed to restore STATE.md: {e}")
+        elif restored_state is not None and state_source in {"state.json.bak", "STATE.md"}:
             try:
                 save_state_json(cwd, restored_state)
                 if state_source == "state.json.bak":
@@ -750,8 +1089,7 @@ def _apply_fixes(
     # Fix 2: Create config.json if missing or malformed
     config_check = next((c for c in checks if c.label == "Config"), None)
     if config_check and (
-        any("not found" in w for w in config_check.warnings)
-        or any("parse error" in i for i in config_check.issues)
+        any("not found" in w for w in config_check.warnings) or any("parse error" in i for i in config_check.issues)
     ):
         config_path = layout.config_json
         try:
@@ -774,6 +1112,7 @@ def _apply_fixes(
             config_path.parent.mkdir(parents=True, exist_ok=True)
             if config_path.exists():
                 import shutil
+
                 shutil.copy2(config_path, config_path.with_suffix(".json.bak"))
             atomic_write(config_path, json.dumps(config_dict, indent=2) + "\n")
             fixes.append("Created default config.json")
@@ -826,6 +1165,7 @@ def _apply_fixes(
 _ALL_CHECKS: list[tuple[str, object]] = [
     ("environment", check_environment),
     ("project_structure", check_project_structure),
+    ("knowledge_inventory", check_knowledge_inventory),
     ("storage_paths", check_storage_paths),
     ("state_validity", check_state_validity),
     ("compaction", check_compaction_needed),
@@ -837,6 +1177,7 @@ _ALL_CHECKS: list[tuple[str, object]] = [
     ("config", check_config),
     ("checkpoint_tags", check_checkpoint_tags),
     ("git_status", check_git_status),
+    ("result_consistency", check_result_consistency),
 ]
 
 
@@ -844,10 +1185,11 @@ def run_health(cwd: Path, *, fix: bool = False) -> HealthReport:
     """Run all health checks and return a full report.
 
     Args:
-        cwd: Project root directory.
+        cwd: Project root or nested workspace directory.
         fix: If True, attempt auto-fixes for common issues.
     """
     with gpd_span("health.run", **{"gpd.health.fix": fix}):
+        project_root = _resolve_health_project_root(cwd)
         checks: list[HealthCheck] = []
 
         for name, check_fn in _ALL_CHECKS:
@@ -855,16 +1197,17 @@ def run_health(cwd: Path, *, fix: bool = False) -> HealthReport:
                 if name == "environment":
                     checks.append(check_fn())  # type: ignore[operator]
                 else:
-                    checks.append(check_fn(cwd))  # type: ignore[operator]
+                    checks.append(check_fn(project_root))  # type: ignore[operator]
 
         fixes: list[str] = []
         if fix:
-            fixes, refreshed_labels = _apply_fixes(cwd, checks, return_refreshed_labels=True)
+            fixes, refreshed_labels = _apply_fixes(project_root, checks, return_refreshed_labels=True)
             if refreshed_labels:
                 refreshed_checks: list[HealthCheck] = []
                 check_labels = {
                     "environment": "Environment",
                     "project_structure": "Project Structure",
+                    "knowledge_inventory": "Knowledge Inventory",
                     "storage_paths": "Storage-Path Policy",
                     "state_validity": "State Validity",
                     "compaction": "State Compaction",
@@ -876,6 +1219,7 @@ def run_health(cwd: Path, *, fix: bool = False) -> HealthReport:
                     "config": "Config",
                     "checkpoint_tags": "Checkpoint Tags",
                     "git_status": "Git Status",
+                    "result_consistency": "Result Consistency",
                 }
                 for name, check_fn in _ALL_CHECKS:
                     label = check_labels[name]
@@ -886,7 +1230,7 @@ def run_health(cwd: Path, *, fix: bool = False) -> HealthReport:
                         if name == "environment":
                             refreshed_checks.append(check_fn())  # type: ignore[operator]
                         else:
-                            refreshed_checks.append(check_fn(cwd))  # type: ignore[operator]
+                            refreshed_checks.append(check_fn(project_root))  # type: ignore[operator]
                 checks = refreshed_checks
 
         ok_count = sum(1 for c in checks if c.status == CheckStatus.OK)
@@ -1022,6 +1366,7 @@ class DoctorReport(BaseModel):
     runtime: str | None = None
     install_scope: str | None = None
     target: str | None = None
+    target_assessment: RuntimeTargetAssessment | None = None
     live_executable_probes: bool = False
     summary: HealthSummary
     checks: list[HealthCheck] = Field(default_factory=list)
@@ -1073,27 +1418,32 @@ def _permissions_capability_fallback_payload(
     contract_source: str,
     contract_error: str | None = None,
 ) -> dict[str, object]:
+    from gpd.adapters.runtime_catalog import RuntimeCapabilityPolicy
+
     payload: dict[str, object] = {
         "contract_source": contract_source,
+        **_runtime_capability_policy_payload(RuntimeCapabilityPolicy()),
         "permissions_surface": "adapter-defined",
         "permission_surface_kind": "unknown",
-        "prompt_free_mode_value": None,
-        "supports_runtime_permission_sync": False,
-        "supports_prompt_free_mode": False,
-        "prompt_free_requires_relaunch": False,
         "statusline_surface": "unknown",
         "statusline_config_surface": "unknown",
         "notify_surface": "unknown",
         "notify_config_surface": "unknown",
         "telemetry_source": "unknown",
         "telemetry_completeness": "unknown",
-        "supports_usage_tokens": False,
-        "supports_cost_usd": False,
-        "supports_context_meter": False,
+        "child_artifact_persistence_reliability": "unknown",
+        "continuation_surface": "unknown",
+        "checkpoint_stop_semantics": "unknown",
     }
     if contract_error is not None:
         payload["contract_error"] = contract_error
     return payload
+
+
+def _runtime_capability_policy_payload(capabilities: object) -> dict[str, object]:
+    """Serialize the complete runtime capability contract into public payload fields."""
+
+    return {field.name: getattr(capabilities, field.name) for field in dataclasses.fields(capabilities)}
 
 
 def _permissions_capability_payload(runtime_name: object) -> dict[str, object]:
@@ -1113,21 +1463,7 @@ def _permissions_capability_payload(runtime_name: object) -> dict[str, object]:
         else:
             return {
                 "contract_source": "runtime-catalog",
-                "permissions_surface": capabilities.permissions_surface,
-                "permission_surface_kind": capabilities.permission_surface_kind,
-                "prompt_free_mode_value": capabilities.prompt_free_mode_value,
-                "supports_runtime_permission_sync": capabilities.supports_runtime_permission_sync,
-                "supports_prompt_free_mode": capabilities.supports_prompt_free_mode,
-                "prompt_free_requires_relaunch": capabilities.prompt_free_requires_relaunch,
-                "statusline_surface": capabilities.statusline_surface,
-                "statusline_config_surface": capabilities.statusline_config_surface,
-                "notify_surface": capabilities.notify_surface,
-                "notify_config_surface": capabilities.notify_config_surface,
-                "telemetry_source": capabilities.telemetry_source,
-                "telemetry_completeness": capabilities.telemetry_completeness,
-                "supports_usage_tokens": capabilities.supports_usage_tokens,
-                "supports_cost_usd": capabilities.supports_cost_usd,
-                "supports_context_meter": capabilities.supports_context_meter,
+                **_runtime_capability_policy_payload(capabilities),
             }
     return _permissions_capability_fallback_payload(contract_source="generic-fallback")
 
@@ -1246,18 +1582,20 @@ def normalize_permissions_readiness_payload(
             readiness_message = "Runtime permissions are ready for unattended use."
         elif bool(normalized.get("requires_relaunch", False)):
             readiness = "relaunch-required"
-            readiness_message = "Runtime permissions are aligned, but the runtime must be relaunched before unattended use."
+            readiness_message = (
+                "Runtime permissions are aligned, but the runtime must be relaunched before unattended use."
+            )
         elif more_permissive_than_requested:
             readiness = "not-ready"
-            readiness_message = (
-                "Runtime permissions are more permissive than the requested autonomy, so unattended readiness is not confirmed."
-            )
+            readiness_message = "Runtime permissions are more permissive than the requested autonomy, so unattended readiness is not confirmed."
         elif "config_aligned" in normalized:
             readiness = "not-ready"
             readiness_message = "Runtime permissions are not ready for unattended use under the requested autonomy."
         else:
             readiness = "unresolved"
-            readiness_message = str(normalized.get("message") or "Runtime permissions are not ready for unattended use.")
+            readiness_message = str(
+                normalized.get("message") or "Runtime permissions are not ready for unattended use."
+            )
 
         next_step = normalized.get("next_step")
         if not isinstance(next_step, str) or not next_step.strip():
@@ -1332,7 +1670,9 @@ def _doctor_check_python_runtime() -> HealthCheck:
     }
 
     if sys.version_info < (MIN_PYTHON_MAJOR, MIN_PYTHON_MINOR):
-        issues.append(f"Python {sys.version_info.major}.{sys.version_info.minor} < {MIN_PYTHON_MAJOR}.{MIN_PYTHON_MINOR}")
+        issues.append(
+            f"Python {sys.version_info.major}.{sys.version_info.minor} < {MIN_PYTHON_MAJOR}.{MIN_PYTHON_MINOR}"
+        )
     elif sys.version_info < RECOMMENDED_PYTHON_VERSION:
         warnings.append(f"Python >= {RECOMMENDED_PYTHON_VERSION[0]}.{RECOMMENDED_PYTHON_VERSION[1]} recommended")
 
@@ -1368,7 +1708,7 @@ def _doctor_check_package_imports() -> HealthCheck:
 
 
 _DOCTOR_LIVE_EXECUTABLE_PROBE_TIMEOUT_SECONDS = 5
-_DOCTOR_LIVE_EXECUTABLE_OPTIONAL_COMMANDS = ("pdflatex", "bibtex", "latexmk", "kpsewhich", "wolframscript")
+_DOCTOR_LIVE_EXECUTABLE_OPTIONAL_COMMANDS = ("tectonic", "pdflatex", "bibtex", "latexmk", "kpsewhich", "wolframscript")
 
 
 def _doctor_run_executable_probe(argv: list[str], *, timeout_seconds: int) -> dict[str, object]:
@@ -1450,10 +1790,11 @@ def _doctor_check_live_executable_probes() -> HealthCheck:
         resolved = _doctor_which(executable)
         if resolved is None:
             skipped.append(executable)
+            skipped_command = [executable, "-v"] if executable == "pdftotext" else [executable, "--version"]
             probe_results.append(
                 {
                     "label": executable,
-                    "command": [executable, "--version"],
+                    "command": skipped_command,
                     "status": "skipped",
                     "reason": "not found on PATH",
                 }
@@ -1461,7 +1802,8 @@ def _doctor_check_live_executable_probes() -> HealthCheck:
             warnings.append(f"{executable} not found on PATH")
             continue
 
-        probe = _doctor_run_executable_probe([resolved, "--version"], timeout_seconds=_DOCTOR_LIVE_EXECUTABLE_PROBE_TIMEOUT_SECONDS)
+        probe_args = [resolved, "-v"] if executable == "pdftotext" else [resolved, "--version"]
+        probe = _doctor_run_executable_probe(probe_args, timeout_seconds=_DOCTOR_LIVE_EXECUTABLE_PROBE_TIMEOUT_SECONDS)
         probe["label"] = executable
         probe["resolved_path"] = resolved
         probe_results.append(probe)
@@ -1544,19 +1886,56 @@ def _doctor_active_runtime_settings_command(*, cwd: Path | None = None) -> str:
 
 def _doctor_runtime_install_issue(assessment: InstallTargetAssessment, runtime: str | None) -> str | None:
     """Return a user-facing issue for a non-ready install assessment."""
-    if assessment.state == "owned_incomplete":
-        missing = ", ".join(f"`{item}`" for item in assessment.missing_install_artifacts) or "required install artifacts"
-        return f"{assessment.config_dir} has an incomplete GPD install; missing artifacts: {missing}."
-    if assessment.state == "foreign_runtime":
-        owner = f"`{assessment.manifest_runtime}`" if assessment.manifest_runtime else "another runtime"
-        runtime_label = f"`{runtime}`" if runtime else "the selected runtime"
-        return f"{assessment.config_dir} belongs to {owner}, not {runtime_label}."
-    if assessment.state == "untrusted_manifest":
-        return f"{assessment.config_dir} has an untrusted GPD manifest and cannot be treated as a ready install target."
-    return None
+    if assessment.readiness_state == "ready":
+        return None
+    return assessment.readiness_message(runtime)
 
 
-def _doctor_check_runtime_target(target_dir: Path, *, runtime: str | None = None) -> HealthCheck:
+def _doctor_runtime_target_assessment(
+    assessment: InstallTargetAssessment,
+    *,
+    runtime: str | None,
+) -> RuntimeTargetAssessment:
+    """Convert the install assessment into typed runtime-target metadata."""
+    return RuntimeTargetAssessment(
+        config_dir=str(assessment.config_dir),
+        expected_runtime=assessment.expected_runtime,
+        state=assessment.state,
+        manifest_state=assessment.manifest_state,
+        manifest_runtime=assessment.manifest_runtime,
+        has_managed_markers=assessment.has_managed_markers,
+        missing_install_artifacts=list(assessment.missing_install_artifacts),
+        readiness_state=assessment.readiness_state,
+        readiness_message=assessment.readiness_message(runtime),
+    )
+
+
+def _doctor_runtime_target_details(
+    assessment: InstallTargetAssessment,
+    *,
+    runtime: str | None,
+) -> dict[str, object]:
+    """Return the structured details payload for the runtime config target."""
+    target_assessment = _doctor_runtime_target_assessment(assessment, runtime=runtime)
+    return {
+        "target": str(assessment.config_dir),
+        "install_state": assessment.state,
+        "target_readiness_state": target_assessment.readiness_state,
+        "target_readiness_message": target_assessment.readiness_message,
+        "target_assessment": target_assessment.model_dump(mode="python"),
+        "manifest_state": assessment.manifest_state,
+        "manifest_runtime": assessment.manifest_runtime,
+        "has_managed_markers": assessment.has_managed_markers,
+        "missing_install_artifacts": list(assessment.missing_install_artifacts),
+    }
+
+
+def _doctor_check_runtime_target(
+    target_dir: Path,
+    *,
+    runtime: str | None = None,
+    assessment: InstallTargetAssessment | None = None,
+) -> HealthCheck:
     """Verify the selected install target can be created or written."""
     resolved = target_dir.expanduser().resolve(strict=False)
     details: dict[str, object] = {
@@ -1582,16 +1961,8 @@ def _doctor_check_runtime_target(target_dir: Path, *, runtime: str | None = None
     elif not resolved.exists():
         warnings.append(f"{resolved} does not exist yet; GPD will create it during install.")
 
-    assessment = assess_install_target(resolved, expected_runtime=runtime)
-    details.update(
-        {
-            "install_state": assessment.state,
-            "manifest_state": assessment.manifest_state,
-            "manifest_runtime": assessment.manifest_runtime,
-            "has_managed_markers": assessment.has_managed_markers,
-            "missing_install_artifacts": list(assessment.missing_install_artifacts),
-        }
-    )
+    assessment = assessment or assess_install_target(resolved, expected_runtime=runtime)
+    details.update(_doctor_runtime_target_details(assessment, runtime=runtime))
 
     install_issue = _doctor_runtime_install_issue(assessment, runtime)
     if install_issue is not None:
@@ -1660,11 +2031,13 @@ def _doctor_check_latex_toolchain() -> HealthCheck:
                 "bibtex_available": None,
                 "bibliography_support_available": False,
                 "kpsewhich_available": None,
+                "pdftotext_available": None,
                 "readiness_state": "blocked",
                 "message": "Could not load LaTeX detection helpers.",
                 "warnings": [f"Could not load LaTeX detection helpers: {exc}"],
                 "paper_build_ready": False,
                 "arxiv_submission_ready": False,
+                "pdf_review_ready": False,
                 "missing_components": [],
             },
             warnings=[f"Could not load LaTeX detection helpers: {exc}"],
@@ -1687,7 +2060,9 @@ def _doctor_check_latex_toolchain() -> HealthCheck:
     if compiler_available and not kpsewhich_available:
         missing_components.append("kpsewhich")
 
-    warnings = list(capability_details.get("warnings", [])) if isinstance(capability_details.get("warnings"), list) else []
+    warnings = (
+        list(capability_details.get("warnings", [])) if isinstance(capability_details.get("warnings"), list) else []
+    )
     if compiler_available and missing_components:
         missing_text = ", ".join(f"`{component}`" for component in missing_components)
         warnings.append(
@@ -1745,6 +2120,13 @@ def _doctor_check_workflow_presets(*, latex_check: HealthCheck, base_ready: bool
             "Publication / manuscript and full research presets are degraded without arxiv-submission support: "
             "`paper-build` remains usable, but `arxiv-submission` stays blocked until TeX resource checks pass."
         )
+    elif not bool(capability_details.get("pdf_review_ready", False)):
+        warnings.append(
+            "Publication / manuscript and full research presets are degraded without pypdf: "
+            "`write-paper`, `paper-build`, and `arxiv-submission` remain usable, and `peer-review` still accepts "
+            "TeX/Markdown/TXT/CSV/TSV plus built-in DOCX/XLSX intake, but PDF-backed `peer-review` intake requires "
+            "pypdf (`pip install 'get-physics-done[paper]'`) or a nearby `.txt` companion file."
+        )
 
     status = CheckStatus.OK if details["degraded"] == 0 and details["blocked"] == 0 else CheckStatus.WARN
     return HealthCheck(
@@ -1768,9 +2150,7 @@ def resolve_doctor_runtime_readiness(
     normalized_runtime = _doctor_normalize_runtime(runtime)
     normalized_scope_input = install_scope.lower() if isinstance(install_scope, str) else None
     if normalized_scope_input not in {None, "local", "global"}:
-        raise ValidationError(
-            f"Unsupported install_scope {install_scope!r}; expected 'local' or 'global'."
-        )
+        raise ValidationError(f"Unsupported install_scope {install_scope!r}; expected 'local' or 'global'.")
 
     adapter = get_adapter(normalized_runtime)
     workspace_root = cwd or Path.cwd()
@@ -1898,7 +2278,9 @@ def build_unattended_readiness_result(
         target = str(target_dir) if target_dir is not None else getattr(doctor_report, "target", None)
 
     resolved_autonomy = normalized_permissions.get("autonomy")
-    autonomy_value = str(resolved_autonomy) if isinstance(resolved_autonomy, str) and resolved_autonomy else (autonomy or "")
+    autonomy_value = (
+        str(resolved_autonomy) if isinstance(resolved_autonomy, str) and resolved_autonomy else (autonomy or "")
+    )
     passed = permissions_ready and not blocker_messages
     return UnattendedReadinessResult(
         runtime=runtime,
@@ -2025,6 +2407,7 @@ def run_doctor(
         resolved_target_str: str | None = None
         normalized_scope: str | None = None
         normalized_runtime: str | None = None
+        target_assessment: RuntimeTargetAssessment | None = None
         if runtime is not None:
             runtime_context = resolve_doctor_runtime_readiness(
                 runtime,
@@ -2036,8 +2419,19 @@ def run_doctor(
             normalized_scope = runtime_context.install_scope
             resolved_target = runtime_context.target
             resolved_target_str = str(resolved_target)
+            install_target_assessment = assess_install_target(resolved_target, expected_runtime=normalized_runtime)
+            target_assessment = _doctor_runtime_target_assessment(
+                install_target_assessment,
+                runtime=normalized_runtime,
+            )
             checks.append(_doctor_check_runtime_launcher(normalized_runtime))
-            checks.append(_doctor_check_runtime_target(resolved_target, runtime=normalized_runtime))
+            checks.append(
+                _doctor_check_runtime_target(
+                    resolved_target,
+                    runtime=normalized_runtime,
+                    assessment=install_target_assessment,
+                )
+            )
             checks.append(_doctor_check_bootstrap_network_access())
             checks.append(
                 _doctor_check_provider_auth(
@@ -2067,6 +2461,7 @@ def run_doctor(
             runtime=normalized_runtime,
             install_scope=normalized_scope,
             target=resolved_target_str,
+            target_assessment=target_assessment,
             live_executable_probes=live_executable_probes,
             summary=HealthSummary(ok=ok_count, warn=warn_count, fail=fail_count, total=len(checks)),
             checks=checks,
@@ -2080,6 +2475,7 @@ __all__ = [
     "HealthCheck",
     "HealthReport",
     "HealthSummary",
+    "RuntimeTargetAssessment",
     "annotate_permissions_payload",
     "normalize_permissions_readiness_payload",
     "UnattendedReadinessCheck",
@@ -2099,6 +2495,7 @@ __all__ = [
     "check_orphans",
     "check_plan_frontmatter",
     "check_project_structure",
+    "check_result_consistency",
     "check_roadmap_consistency",
     "check_state_validity",
     "check_storage_paths",

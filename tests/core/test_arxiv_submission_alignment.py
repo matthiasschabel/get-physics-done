@@ -1,34 +1,427 @@
-"""Regression checks for arxiv submission prompt/workflow alignment."""
+"""Assertions for arxiv submission prompt/workflow alignment."""
 
 from __future__ import annotations
 
+import json
+import tarfile
 from pathlib import Path
+
+from typer.testing import CliRunner
+
+from gpd.cli import app
+from gpd.core.arxiv_package import ARXIV_TARBALL_NAME, validate_arxiv_package
+from gpd.core.workflow_staging import resolve_workflow_stage_manifest_path, validate_workflow_stage_manifest_payload
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
+runner = CliRunner()
+
+
+def _check_by_name(result: object, name: str) -> object:
+    return next(check for check in result.checks if check.name == name)
+
+
+def _make_arxiv_submission_fixture(
+    tmp_path: Path,
+    *,
+    files: dict[str, str],
+    subject_slug: str = "paper",
+) -> Path:
+    submission_dir = tmp_path / "GPD" / "publication" / subject_slug / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    for rel_path, content in files.items():
+        target = submission_dir / rel_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    return submission_dir
+
+
+def _validate_paper_arxiv_submission(tmp_path: Path):
+    return validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="paper",
+        manuscript_entrypoint="paper/main.tex",
+    )
 
 
 def test_arxiv_submission_command_declares_manuscript_root_gates_without_first_match_discovery() -> None:
     command = (COMMANDS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
 
+    assert "context_mode: project-aware" in command
+    assert "command-policy:" in command
+    assert "allow_external_subjects: false" in command
+    assert "allow_interactive_without_subject: false" in command
+    assert "bootstrap_allowed: false" in command
+    assert "default_output_subtree: GPD/publication/{subject_slug}/arxiv" in command
+    assert "GPD/publication/*/manuscript/*.tex" in command
     assert "manuscript-root artifact manifest" in command
     assert "manuscript-root bibliography audit" in command
+    assert "Follow the included arxiv-submission workflow exactly." in command
     assert "artifact_manifest" in command
     assert "bibliography_audit" in command
     assert "bibliography_audit_clean" in command
-    assert "resolve only from `paper/`, `manuscript/`, or `draft/` manuscript roots" in command
-    assert 'find paper manuscript draft -maxdepth 1 -name "*.tex"' not in command
+    assert (
+        "Paper target: $ARGUMENTS (optional manuscript root or `.tex` entrypoint; "
+        "when omitted, the workflow resolves the active GPD-owned manuscript root)."
+    ) in command
+    assert (
+        "Explicit manuscript subjects must stay under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/{subject_slug}/manuscript/`."
+        in command
+    )
+    assert "do not switch to standalone interactive intake or arbitrary external directories" in command
+    assert "scope_variants:" not in command
+    assert "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md" not in command
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md" not in command
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md" not in command
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" not in command
 
 
 def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_without_globbing() -> None:
     workflow = (WORKFLOWS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
 
-    assert "manuscript-root artifact gates" in workflow
+    assert "gpd --raw init arxiv-submission --stage bootstrap" in workflow
+    assert 'gpd --raw init arxiv-submission --stage bootstrap -- "$ARGUMENTS"' in workflow
+    assert 'gpd --raw init arxiv-submission --stage manuscript_preflight -- "$ARGUMENTS"' in workflow
+    assert 'gpd --raw init arxiv-submission --stage review_gate -- "$ARGUMENTS"' in workflow
+    assert 'gpd --raw init arxiv-submission --stage package -- "$ARGUMENTS"' in workflow
+    assert 'gpd --raw init arxiv-submission --stage finalize -- "$ARGUMENTS"' in workflow
+    assert "metadata-only" not in workflow
+    assert "Use the shared publication bootstrap reference as the source of truth" in workflow
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" in workflow
+    assert "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md" in workflow
+    assert "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md" not in workflow
+    assert "staged `peer-review-reliability.md` reference" in workflow
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md" not in workflow
+    assert "@{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md" not in workflow
     assert "ARTIFACT-MANIFEST.json" in workflow
     assert "BIBLIOGRAPHY-AUDIT.json" in workflow
     assert "bibliography_audit_clean" in workflow
     assert "gpd paper-build" in workflow
     assert "STOP and require an explicit manuscript path or a repaired manuscript-root state" in workflow
     assert "Do not fall back to `find` or arbitrary wildcard matching outside the documented default roots." in workflow
+    assert (
+        "it must match that resolved entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`."
+        in workflow
+    )
+    assert (
+        "Do not accept arbitrary external directories or standalone `.tex` entrypoints outside those supported roots."
+        in workflow
+    )
+    assert 'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"' in workflow
+    assert 'PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"' in workflow
+    assert (
+        'gpd --raw validate arxiv-package --materialize --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"'
+        in workflow
+    )
+    assert "reruns strict `arxiv-submission` review preflight" in workflow
+    assert "the executable arXiv package validator must pass" in workflow
+    assert "latest-response discovery" in workflow
+    assert "latest response artifacts already reached" not in workflow
+    assert (
+        "Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself."
+        in workflow
+    )
+    assert "must not persist `PROOF-REVIEW-MANIFEST.json` beside the manuscript root" in workflow
+    assert "failed `response_freshness` check" in workflow
+    assert "checkpoint as `response_gate`" in workflow
+    assert "Even for an explicit external manuscript subject" not in workflow
     assert 'ls "${DIR}"/*.tex' not in workflow
+
+
+def test_arxiv_submission_stage_manifest_path_is_resolved_and_loadable() -> None:
+    manifest_path = resolve_workflow_stage_manifest_path("arxiv-submission")
+
+    assert manifest_path == WORKFLOWS_DIR / "arxiv-submission-stage-manifest.json"
+    assert manifest_path.exists()
+
+    manifest = validate_workflow_stage_manifest_payload(
+        json.loads(manifest_path.read_text(encoding="utf-8")),
+        expected_workflow_id="arxiv-submission",
+    )
+
+    assert manifest.prompt_usage == "staged_init"
+    assert manifest.stage_ids() == (
+        "bootstrap",
+        "manuscript_preflight",
+        "review_gate",
+        "package",
+        "finalize",
+    )
+    for stage_id in manifest.stage_ids():
+        assert "arxiv_submission_argument_input" in manifest.stage(stage_id).required_init_fields
+    assert "references/publication/publication-bootstrap-preflight.md" in manifest.stage("bootstrap").loaded_authorities
+    assert "managed publication output root state" in manifest.stage("bootstrap").produced_state
+    assert (
+        "references/publication/publication-review-round-artifacts.md"
+        in manifest.stage("review_gate").loaded_authorities
+    )
+    assert "references/publication/peer-review-reliability.md" in manifest.stage("review_gate").loaded_authorities
+    assert (
+        "references/publication/publication-response-writer-handoff.md"
+        not in manifest.stage("review_gate").loaded_authorities
+    )
+    assert manifest.stage("package").writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
+    assert manifest.stage("finalize").writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
+
+
+def test_arxiv_submission_staged_init_marks_external_target_invalid(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "GPD").mkdir()
+    (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n\nSubmission target.\n", encoding="utf-8")
+    external_dir = tmp_path / "external-paper"
+    external_dir.mkdir()
+    (external_dir / "main.tex").write_text(
+        "\\documentclass{article}\\begin{document}External draft.\\end{document}\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "init",
+            "arxiv-submission",
+            "--stage",
+            "bootstrap",
+            "--",
+            "external-paper/main.tex",
+        ],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["manuscript_resolution_status"] == "invalid"
+    assert "explicit manuscript target must stay under" in payload["manuscript_resolution_detail"]
+    assert payload["manuscript_root"] is None
+    assert payload["manuscript_entrypoint"] is None
+    assert payload["publication_subject_slug"] is None
+    assert payload["selected_publication_root"] is None
+    assert payload["selected_review_root"] is None
+
+
+def test_arxiv_package_validator_detects_citations_in_included_tex_files(tmp_path: Path) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "main.tex": "\\documentclass{article}\\begin{document}\\input{section}\\end{document}\n",
+            "section.tex": "The result follows prior work \\cite{known-result}.\n",
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert tex_check.passed is False
+    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+
+
+def test_arxiv_package_validator_fails_tex_ready_when_root_entrypoint_is_not_packaged_tex(
+    tmp_path: Path,
+) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "unrelated.tex": "\\documentclass{article}\\begin{document}Unrelated.\\end{document}\n",
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    entrypoint_check = _check_by_name(result, "submission_entrypoint_at_root")
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert entrypoint_check.passed is False
+    assert tex_check.passed is False
+    assert "main.tex is not a packaged root-level TeX entrypoint" in tex_check.detail
+
+
+def test_arxiv_package_validator_rejects_unreferenced_bib_source_material(tmp_path: Path) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "main.tex": (
+                "\\documentclass{article}\\begin{document}\n"
+                "Citation \\cite{known-result}.\\bibliographystyle{plain}\\bibliography{refs}\n"
+                "\\end{document}\n"
+            ),
+            "stale.bib": "@article{known-result,title={Known Result}}\n",
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert tex_check.passed is False
+    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+
+
+def test_arxiv_package_validator_rejects_bibliography_only_in_unreachable_tex(tmp_path: Path) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "main.tex": "\\documentclass{article}\\begin{document}Citation \\cite{known-result}.\\end{document}\n",
+            "unused.tex": "\\begin{thebibliography}{1}\n\\bibitem{known-result} Known Result.\n\\end{thebibliography}\n",
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert tex_check.passed is False
+    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+
+
+def test_arxiv_package_validator_accepts_included_tex_bibliography_material(tmp_path: Path) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "main.tex": "\\documentclass{article}\\begin{document}\\input{section}\\end{document}\n",
+            "section.tex": (
+                "The result follows prior work \\cite{known-result}.\n"
+                "\\begin{thebibliography}{1}\n"
+                "\\bibitem{known-result} Known Result.\n"
+                "\\end{thebibliography}\n"
+            ),
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    assert _check_by_name(result, "submission_tex_ready").passed is True
+
+
+def test_arxiv_package_validator_accepts_packaged_bib_source_material(tmp_path: Path) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "main.tex": (
+                "\\documentclass{article}\\begin{document}\n"
+                "Citation \\cite{known-result}.\\bibliographystyle{plain}\\bibliography{refs}\n"
+                "\\end{document}\n"
+            ),
+            "refs.bib": "@article{known-result,title={Known Result}}\n",
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    assert _check_by_name(result, "submission_tree_excludes_auxiliary_files").passed is True
+    assert _check_by_name(result, "submission_tex_ready").passed is True
+
+
+def test_arxiv_package_validator_accepts_root_jobname_bbl_for_bibtex_bibliography(
+    tmp_path: Path,
+) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "main.tex": (
+                "\\documentclass{article}\\begin{document}\n"
+                "Citation \\cite{known-result}.\\bibliographystyle{plain}\\bibliography{refs}\n"
+                "\\end{document}\n"
+            ),
+            "main.bbl": "\\begin{thebibliography}{1}\\bibitem{known-result} Known Result.\\end{thebibliography}\n",
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    assert _check_by_name(result, "submission_tex_ready").passed is True
+
+
+def test_arxiv_package_validator_rejects_bibliography_target_bbl_without_root_jobname_bbl(
+    tmp_path: Path,
+) -> None:
+    _make_arxiv_submission_fixture(
+        tmp_path,
+        files={
+            "main.tex": (
+                "\\documentclass{article}\\begin{document}\n"
+                "Citation \\cite{known-result}.\\bibliographystyle{plain}\\bibliography{refs}\n"
+                "\\end{document}\n"
+            ),
+            "refs.bbl": "\\begin{thebibliography}{1}\\bibitem{known-result} Known Result.\\end{thebibliography}\n",
+        },
+    )
+
+    result = _validate_paper_arxiv_submission(tmp_path)
+
+    tex_check = _check_by_name(result, "submission_tex_ready")
+    assert tex_check.passed is False
+    assert "citation commands but no packaged .bib, packaged .bbl, or inlined bibliography material" in tex_check.detail
+
+
+def test_arxiv_package_materialize_refuses_submission_tree_outside_managed_root(tmp_path: Path) -> None:
+    outside_submission_dir = tmp_path / "outside-submission"
+    outside_submission_dir.mkdir()
+    (outside_submission_dir / "main.tex").write_text(
+        "\\documentclass{article}\\begin{document}Ready.\\end{document}\n",
+        encoding="utf-8",
+    )
+    tarball = tmp_path / "GPD" / "publication" / "paper" / "arxiv" / ARXIV_TARBALL_NAME
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="paper",
+        manuscript_entrypoint="paper/main.tex",
+        submission_dir=outside_submission_dir,
+        tarball=tarball,
+        materialize=True,
+    )
+
+    assert result.materialized is False
+    assert not tarball.exists()
+    assert _check_by_name(result, "submission_dir_under_managed_arxiv_root").passed is False
+    assert _check_by_name(result, "tarball_materialized").passed is False
+
+
+def test_arxiv_package_validator_rejects_unsafe_publication_subject_slug(tmp_path: Path) -> None:
+    submission_dir = tmp_path / "GPD" / "escape" / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    (submission_dir / "main.tex").write_text(
+        "\\documentclass{article}\\begin{document}Ready.\\end{document}\n",
+        encoding="utf-8",
+    )
+    tarball = tmp_path / "GPD" / "escape" / "arxiv" / ARXIV_TARBALL_NAME
+    with tarfile.open(tarball, "w:gz") as archive:
+        archive.add(submission_dir / "main.tex", arcname="main.tex", recursive=False)
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="../escape",
+        manuscript_entrypoint="paper/main.tex",
+        submission_dir=submission_dir,
+        tarball=tarball,
+    )
+
+    check = _check_by_name(result, "managed_arxiv_root")
+    assert check.passed is False
+    assert "publication subject slug" in check.detail
+
+
+def test_arxiv_package_materialize_refuses_invalid_in_tree_subject_slug(tmp_path: Path) -> None:
+    submission_dir = tmp_path / "GPD" / "publication" / "bad slug" / "arxiv" / "submission"
+    submission_dir.mkdir(parents=True)
+    (submission_dir / "main.tex").write_text(
+        "\\documentclass{article}\\begin{document}Ready.\\end{document}\n",
+        encoding="utf-8",
+    )
+    tarball = tmp_path / "GPD" / "publication" / "bad slug" / "arxiv" / ARXIV_TARBALL_NAME
+
+    result = validate_arxiv_package(
+        project_root=tmp_path,
+        subject_slug="bad slug",
+        manuscript_entrypoint="paper/main.tex",
+        submission_dir=submission_dir,
+        tarball=tarball,
+        materialize=True,
+    )
+
+    assert result.materialized is False
+    assert not tarball.exists()
+    assert _check_by_name(result, "managed_arxiv_root").passed is False
+    assert _check_by_name(result, "tarball_materialized").passed is False

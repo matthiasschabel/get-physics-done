@@ -327,6 +327,8 @@ def test_execute_phase_closeout_names_readiness_before_safe_local_transition() -
     assert closeout.index(readiness) < closeout.index(transition)
     assert "The completion helper owns the roadmap/state transition and rechecks lifecycle readiness" in closeout
     assert "Primary local transition" in closeout
+    assert "shared renderer shape" in closeout
+    assert "Secondary runtime:" in closeout
 
 
 def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> None:
@@ -344,6 +346,7 @@ def test_execute_phase_owned_stop_examples_use_stage_stop_and_one_primary() -> N
     assert "stage_stop.next_runtime_command" in consistency_check
     assert "stage: closeout" in closeout
     assert 'next_runtime_command: "gpd:complete-milestone"' in closeout
+    assert "**Also available:**" not in closeout
 
     for block in _next_up_blocks(checkpoint + "\n" + verification_handoff + "\n" + consistency_check + "\n" + closeout):
         assert block.count("Primary:") == 1

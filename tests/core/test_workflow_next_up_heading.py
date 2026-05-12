@@ -154,3 +154,15 @@ def test_stage_stop_owned_next_up_primary_lines_are_command_only() -> None:
                 offenders.append(f"{path.relative_to(REPO_ROOT)}:{line_number}:{error}")
 
     assert offenders == []
+
+
+def test_suggest_next_single_result_uses_shared_renderer_shape() -> None:
+    text = (COMMANDS_DIR / "suggest-next.md").read_text(encoding="utf-8")
+
+    assert "typed `NextCommand` decision" in text
+    assert "shared renderer shape" in text
+    assert "Primary: `{command}`" in text
+    assert "Primary local transition:" in text
+    assert "**After this completes:**" in text
+    assert "**{command}**" not in text
+    assert "Do not use a separate bold-only command block." in text

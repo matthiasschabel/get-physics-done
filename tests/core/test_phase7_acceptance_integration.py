@@ -14,8 +14,12 @@ from tests.helpers.phase7_live_like import REQUIRED_JIT_ROW_IDS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-_PHASE7_TRACKED_LOC_CAP = 2_200
-_PHASE7_ROW_ID_RE = re.compile(r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|P6-(?:PLAN|EXEC|COMP|RES)-JIT-[0-9]{2})$")
+_PHASE7_TRACKED_LOC_CAP = 2_450
+_PHASE7_ROW_ID_RE = re.compile(
+    r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|"
+    r"P6-(?:PLAN|EXEC|COMP|RES)-JIT-[0-9]{2}|"
+    r"P7-NEXTUP-JIT-[0-9]{2})$"
+)
 _PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 _PHASE7_REQUIRED_BASE_ROW_IDS = (
@@ -137,6 +141,8 @@ def _phase7_row_key(row_id: str) -> str:
         return "-".join(row_id.split("-", 3)[:3])
     if row_id.startswith("P6-"):
         return row_id
+    if row_id.startswith("P7-"):
+        return row_id
     return row_id.split("-", 1)[0]
 
 
@@ -150,6 +156,16 @@ def _phase7_behavior_row_ids(rows: tuple[dict[str, object], ...]) -> set[str]:
 
 def _physical_line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
+
+
+def _is_metric_bound(value: object) -> bool:
+    if type(value) is int:
+        return value >= 0
+    if not isinstance(value, dict):
+        return False
+    if not value or set(value) - {"exact", "min", "max"}:
+        return False
+    return all(type(bound) is int and bound >= 0 for bound in value.values())
 
 
 def _explicit_denylist_line_numbers(path: Path) -> set[int]:
@@ -231,7 +247,7 @@ def test_phase7_behavior_canary_rows_are_class_only_and_aligned_to_phase4_scorer
         assert isinstance(metric_bounds, dict)
         assert metric_bounds
         assert set(metric_bounds) <= _PHASE7_PLANNED_BEHAVIOR_COUNT_KEYS
-        assert all(type(bound) is int and bound >= 0 for bound in metric_bounds.values())
+        assert all(_is_metric_bound(bound) for bound in metric_bounds.values())
 
         phase4_ref = row["phase4_behavior_ref"]
         assert isinstance(phase4_ref, str)

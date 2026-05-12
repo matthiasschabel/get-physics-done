@@ -9,6 +9,7 @@ from gpd.core.command_run_hints import (
     KIND_RUNTIME_COMMAND_LABEL,
     NEXT_COMMAND_OWNER_DISPLAY_ONLY,
     NEXT_COMMAND_OWNER_LOCAL_FINALIZER,
+    NEXT_COMMAND_OWNER_LOCAL_HELPER,
     NEXT_COMMAND_OWNER_LOCAL_READONLY,
     NEXT_COMMAND_OWNER_LOCAL_TRANSITION,
     NEXT_COMMAND_OWNER_RUNTIME,
@@ -16,7 +17,6 @@ from gpd.core.command_run_hints import (
 )
 
 NEXT_UP_HEADING = "## > Next Up"
-NEXT_COMMAND_OWNER_LOCAL_HELPER = "local_helper"
 
 _SHELL_CONTROL_TOKENS = ("\n", "\r", ";", "|", "&", "<", ">", "`", "$(")
 _FORBIDDEN_VISIBLE_COMMAND_FRAGMENTS = (

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from tests.helpers.persona_trace import (
@@ -52,7 +52,16 @@ REQUIRED_P6_JIT_ROW_IDS = frozenset(
         "P6-RES-JIT-05",
     }
 )
-REQUIRED_JIT_ROW_IDS = REQUIRED_LP_JIT_ROW_IDS | REQUIRED_P6_JIT_ROW_IDS
+REQUIRED_P7_NEXTUP_JIT_ROW_IDS = frozenset(
+    {
+        "P7-NEXTUP-JIT-01",
+        "P7-NEXTUP-JIT-02",
+        "P7-NEXTUP-JIT-03",
+        "P7-NEXTUP-JIT-04",
+        "P7-NEXTUP-JIT-05",
+    }
+)
+REQUIRED_JIT_ROW_IDS = REQUIRED_LP_JIT_ROW_IDS | REQUIRED_P6_JIT_ROW_IDS | REQUIRED_P7_NEXTUP_JIT_ROW_IDS
 LP_JIT_ROW_IDS = tuple(f"LP-JIT-{index:02d}" for index in range(1, 9))
 
 _PREFIX_CASES = {
@@ -91,6 +100,7 @@ class Phase7LiveLikeRow:
     prompt_variant_class: str = "class_only"
     behavior_case: str = ""
     phase4_behavior_ref: str = ""
+    behavior_metric_bounds: Mapping[str, object] = field(default_factory=dict)
     schema_version: str = "phase7.live_persona_matrix.v1"
 
 
@@ -130,7 +140,9 @@ class _BehaviorOutcome:
     next_action_class: str
     accepted: bool = False
     ready: bool | None = None
+    read_only: bool | None = True
     mutated: bool = False
+    mutation_allowed: bool = False
     state_status_class: str | None = "unchanged"
     commands: tuple[str, ...] = ()
 
@@ -162,8 +174,48 @@ _BEHAVIOR_CASES = {
     "p6_res_phase_gap_closer": ("planning", "p6_res_phase_gap_closer", "phase_research_handoff_only", "routed_no_write", "concrete_command", ("research_phase_handoff", "single_research_artifact")),
     "p6_res_contract_blocked_diagnostic": ("planning", "p6_res_contract_blocked_diagnostic", "planning_authority_blocked", "blocked_no_mutation", "concrete_command", ("project_contract_blocked", "no_downstream_spawn")),
     "p6_res_publication_gap_handles": ("planning", "p6_res_publication_gap_handles", "publication_gap_handles_first", "routed_no_write", "concrete_command", ("publication_gap", "reference_handles")),
+    "p7_nextup_wrong_verify_command_correction": ("execution", "p7_nextup_wrong_verify_command_correction", "invalid_verify_command_surface", "corrected_runtime_route", "runtime_verify_work", ("invalid_verify_command_surface", "verify_work_correction")),
+    "p7_nextup_blocked_closeout_missing_verification": ("completion", "p7_nextup_blocked_closeout_missing_verification", "verification_missing", "blocked_no_mutation", "runtime_verify_work", ("canonical_verification_missing", "closeout_blocked")),
+    "p7_nextup_blocked_closeout_nonpassing_verification": ("completion", "p7_nextup_blocked_closeout_nonpassing_verification", "verification_non_passing", "blocked_no_mutation", "runtime_verify_work", ("verification_non_passing", "closeout_blocked")),
+    "p7_nextup_ready_closeout_local_transition": ("completion", "p7_nextup_ready_closeout_local_transition", "closeout_readiness_read_only", "ready_closeout", "local_phase_complete", ("phase_closeout_readiness", "local_transition")),
+    "p7_nextup_public_render_no_raw_reload": ("completion", "p7_nextup_public_render_no_raw_reload", "public_next_up_no_raw_reload", "routed_no_write", "runtime_verify_work", ("no_raw_reload", "command_hint")),
 }
 # fmt: on
+
+_P7_NEXTUP_CLASSES = {
+    "p7_nextup_wrong_verify_command_correction": {
+        "structural_verify_phase_class": "structural_verify_phase_display_only",
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_blocked_closeout_missing_verification": {
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_blocked_closeout_nonpassing_verification": {
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_ready_closeout_local_transition": {
+        "primary_owner_class": "local_transition",
+        "primary_action_class": "phase_complete",
+        "after_this_completes_owner_class": "runtime",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_public_render_no_raw_reload": {
+        "display_only_filter_class": "display_only_filtered",
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
+}
 
 
 def load_phase7_live_like_rows(
@@ -201,15 +253,22 @@ def score_phase7_live_like_row(
     *,
     trace_override: FakePersonaTrace | None = None,
     behavior_outcome_override: _BehaviorOutcome | None = None,
+    source_text_override: str | None = None,
 ) -> Phase7LiveLikeScore:
     case = _case_for_row(row)
     trace = trace_override or build_phase7_live_like_trace(row)
     behavior_row, outcome = _phase4_inputs(row, case)
     if behavior_outcome_override is not None:
         outcome = behavior_outcome_override
-    counts, classes = _trace_metrics(trace, case)
-    behavior_score = _score_behavior(behavior_row, outcome, trace)
-    failures = _hard_budget_failures(behavior_score, counts, classes, case)
+    counts, classes = _trace_metrics(trace, case, rendered_text=source_text_override)
+    classes.update(_P7_NEXTUP_CLASSES.get(case, {}))
+    behavior_score = _score_behavior(
+        behavior_row,
+        outcome,
+        trace,
+        source_text=source_text_override,
+    )
+    failures = _hard_budget_failures(behavior_score, counts, classes, row, case)
     return Phase7LiveLikeScore(row, trace, behavior_score, counts, classes, failures)
 
 
@@ -233,6 +292,7 @@ def _row_from_mapping(row: Mapping[str, object], schema_version: str) -> Phase7L
         prompt_variant_class=str(row.get("prompt_variant_class", "class_only")),
         behavior_case=str(row.get("behavior_case") or row.get("phase7_live_like_case") or ""),
         phase4_behavior_ref=str(row.get("phase4_behavior_ref", "")),
+        behavior_metric_bounds=dict(row.get("behavior_metric_bounds", {})),
         schema_version=schema_version,
     )
 
@@ -275,9 +335,11 @@ def _score_behavior(
     row: _BehaviorRow,
     outcome: _BehaviorOutcome,
     trace: FakePersonaTrace,
+    *,
+    source_text: str | None = None,
 ) -> BehaviorScore:
     try:
-        return score_behavior_metrics(row, outcome, event=trace)
+        return score_behavior_metrics(row, outcome, event=trace, source_text=source_text)
     except TypeError as exc:
         if "_duplicate_question_bucket_count" not in str(exc):
             raise
@@ -362,25 +424,38 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
         "p6_res_phase_gap_closer": (turn(0, "research_handoff_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "research_gap_closure", "concrete_command", "research_handoff", content_hydration_class="content_loaded")),
         "p6_res_contract_blocked_diagnostic": (turn(0, "contract_blocked_diagnostic", "concrete_command", "contract_diagnostic"),),
         "p6_res_publication_gap_handles": (turn(0, "publication_gap_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "publication_gap_research", "concrete_command", "publication_gap", content_hydration_class="content_loaded")),
+        "p7_nextup_wrong_verify_command_correction": (turn(0, "verify_work_command_correction", "runtime_verify_work", "verification_route"),),
+        "p7_nextup_blocked_closeout_missing_verification": (turn(0, "missing_verification_gate", "runtime_verify_work", "verification_gate"),),
+        "p7_nextup_blocked_closeout_nonpassing_verification": (turn(0, "nonpassing_verification_gate", "runtime_verify_work", "verification_gate"),),
+        "p7_nextup_ready_closeout_local_transition": (turn(0, "clean_closeout", "concrete_command", "closeout_ready"),),
+        "p7_nextup_public_render_no_raw_reload": (turn(0, "public_next_up_render", "runtime_verify_work", "verification_route"),),
     }[case]
     # fmt: on
 
 
-def _trace_metrics(trace: FakePersonaTrace, case: str) -> tuple[dict[str, int], dict[str, str]]:
+def _trace_metrics(
+    trace: FakePersonaTrace,
+    case: str,
+    *,
+    rendered_text: str | None = None,
+) -> tuple[dict[str, int], dict[str, str]]:
     physics = physics_progress_count(trace)
     schema = schema_surface_count(trace)
     shared_artifact_class = artifact_handle_first_class(trace)
+    rendered_raw_reload_count = _rendered_raw_reload_leakage_count(rendered_text)
     counts = {
         "conversation_turn_count": conversation_turn_count(trace),
         "physics_progress_count": physics,
         "schema_surface_count": schema,
-        "raw_reload_leakage_count": raw_reload_leakage_count(trace),
+        "raw_reload_leakage_count": raw_reload_leakage_count(trace) + rendered_raw_reload_count,
         "content_hydration_before_selection_count": content_hydration_before_selection_count(trace),
     }
     classes = {
         "artifact_handle_first_class": _phase7_artifact_handle_first_class(shared_artifact_class),
         "stop_integrity_class": stop_integrity_class(trace),
         "physics_to_schema_ratio_class": "balanced" if schema <= physics + 1 else "schema_heavy",
+        "rendered_public_raw_reload_class": "raw_reload_leaked" if rendered_raw_reload_count else "no_raw_reload",
+        "rendered_public_structural_verify_class": _rendered_structural_verify_class(rendered_text),
     }
     if case == "clean_stop" and classes["stop_integrity_class"] == "not_applicable":
         classes["stop_integrity_class"] = "ambiguous_stop"
@@ -397,14 +472,37 @@ def _phase7_artifact_handle_first_class(shared_class: str) -> str:
     return "not_applicable"
 
 
+def _rendered_raw_reload_leakage_count(rendered_text: str | None) -> int:
+    if not rendered_text:
+        return 0
+    lowered = rendered_text.lower()
+    count = 0
+    if "gpd --raw init" in lowered or "--raw init" in lowered:
+        count += 1
+    if "gpd --raw stage field-access" in lowered or "--raw stage field-access" in lowered:
+        count += 1
+    return count
+
+
+def _rendered_structural_verify_class(rendered_text: str | None) -> str:
+    if not rendered_text:
+        return "not_applicable"
+    lowered = rendered_text.lower()
+    if "gpd verify phase" in lowered or "gpd:verify-phase" in lowered:
+        return "structural_verify_phase_leaked"
+    return "no_structural_verify_phase"
+
+
 def _hard_budget_failures(
     behavior_score: BehaviorScore,
     phase7_counts: Mapping[str, int],
     phase7_classes: Mapping[str, str],
+    row: Phase7LiveLikeRow,
     case: str,
 ) -> tuple[str, ...]:
     failures = [key for key in _HARD_ZERO_BEHAVIOR_KEYS if behavior_score.metric_counts[key] != 0]
     failures.extend(key for key in _HARD_ZERO_PHASE7_KEYS if phase7_counts[key] != 0)
+    failures.extend(_row_metric_bound_failures(row.behavior_metric_bounds, behavior_score, phase7_counts))
     handle_first_cases = {
         "handles_before_content",
         "p6_res_reference_handle_first",
@@ -418,7 +516,58 @@ def _hard_budget_failures(
         failures.append("stop_integrity_class")
     if phase7_classes["physics_to_schema_ratio_class"] == "schema_heavy":
         failures.append("physics_to_schema_ratio_class")
+    return tuple(dict.fromkeys(failures))
+
+
+def _row_metric_bound_failures(
+    bounds: Mapping[str, object],
+    behavior_score: BehaviorScore,
+    phase7_counts: Mapping[str, int],
+) -> tuple[str, ...]:
+    failures: list[str] = []
+    for metric_key, raw_bound in bounds.items():
+        bound = _metric_bound(raw_bound)
+        observed_counts: list[int] = []
+        if metric_key in behavior_score.metric_counts:
+            observed_counts.append(int(behavior_score.metric_counts[metric_key]))
+        if metric_key in phase7_counts:
+            observed_counts.append(int(phase7_counts[metric_key]))
+        if not observed_counts:
+            failures.append(metric_key)
+            continue
+        if any(not _metric_bound_allows(bound, observed) for observed in observed_counts):
+            failures.append(metric_key)
     return tuple(failures)
+
+
+def _metric_bound(raw_bound: object) -> dict[str, int | None]:
+    if isinstance(raw_bound, Mapping):
+        return {
+            "exact": _optional_int(raw_bound.get("exact")),
+            "min": _optional_int(raw_bound.get("min")),
+            "max": _optional_int(raw_bound.get("max")),
+        }
+    count = int(raw_bound)
+    if count == 0:
+        return {"exact": 0, "min": None, "max": None}
+    return {"exact": None, "min": count, "max": None}
+
+
+def _optional_int(value: object) -> int | None:
+    return None if value is None else int(value)
+
+
+def _metric_bound_allows(bound: Mapping[str, int | None], observed: int) -> bool:
+    exact = bound.get("exact")
+    minimum = bound.get("min")
+    maximum = bound.get("max")
+    if exact is not None and observed != exact:
+        return False
+    if minimum is not None and observed < minimum:
+        return False
+    if maximum is not None and observed > maximum:
+        return False
+    return True
 
 
 def _str_tuple(value: object) -> tuple[str, ...]:

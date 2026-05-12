@@ -20,6 +20,7 @@ from tests.helpers.phase4_persona.user_steering import (
 from tests.helpers.phase7_live_like import (
     REQUIRED_BASE_ROW_PREFIXES,
     REQUIRED_JIT_ROW_IDS,
+    REQUIRED_P7_NEXTUP_JIT_ROW_IDS,
     load_phase7_live_like_rows,
     score_phase7_live_like_rows,
 )
@@ -31,6 +32,7 @@ STOP_BEHAVIOR_ROW_IDS = frozenset({"P4-USER-02", "P4-USER-03"})
 EXPECTED_UNSUPPORTED_COMPLETION_DETECTION_ROW_IDS = frozenset({"P4-EXEC-13", "P4-EXEC-14"})
 PHASE7_HANDLE_FIRST_ROW_IDS = frozenset({"LP-JIT-04", "P6-RES-JIT-02", "P6-RES-JIT-03", "P6-RES-JIT-05"})
 PHASE7_STOP_ROW_IDS = frozenset({"LP-JIT-06", "P6-EXEC-JIT-03"})
+PHASE7_RUNTIME_NEXTUP_ROW_IDS = REQUIRED_P7_NEXTUP_JIT_ROW_IDS - {"P7-NEXTUP-JIT-04"}
 
 HARD_ZERO_METRIC_KEYS = (
     "invalid_command_suggestion_count",
@@ -142,6 +144,17 @@ def _assert_phase7_score_hard_budgets(wrapped_score: object) -> None:
         assert classes["artifact_handle_first_class"] == "handle_first"
     if wrapped_score.row.row_id in PHASE7_STOP_ROW_IDS:
         assert classes["stop_integrity_class"] == "stopped_cleanly"
+    if wrapped_score.row.row_id in PHASE7_RUNTIME_NEXTUP_ROW_IDS:
+        assert wrapped_score.behavior_score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
+        assert classes["primary_owner_class"] == "runtime"
+        assert classes["stage_stop_runtime_class"] == "runtime"
+        assert classes["rendered_public_raw_reload_class"] == "no_raw_reload"
+        assert classes["rendered_public_structural_verify_class"] == "no_structural_verify_phase"
+    if wrapped_score.row.row_id == "P7-NEXTUP-JIT-04":
+        assert wrapped_score.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
+        assert classes["primary_owner_class"] == "local_transition"
+        assert classes["after_this_completes_owner_class"] == "runtime"
+        assert classes["stage_stop_runtime_class"] == "runtime"
 
 
 def _phase7_fixture_rows() -> tuple[dict[str, object], ...]:

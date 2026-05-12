@@ -6,12 +6,14 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.command_labels import runtime_public_command_prefixes
 from gpd.core.command_run_hints import (
     KIND_LOCAL_CLI_FINALIZER_COMMAND,
+    KIND_LOCAL_CLI_HELPER_COMMAND,
     KIND_LOCAL_CLI_TRANSITION_COMMAND,
     KIND_LOCAL_CLI_VALIDATION_COMMAND,
     KIND_RUNTIME_COMMAND_LABEL,
     KIND_UNKNOWN_DISPLAY_ONLY,
     NEXT_COMMAND_OWNER_DISPLAY_ONLY,
     NEXT_COMMAND_OWNER_LOCAL_FINALIZER,
+    NEXT_COMMAND_OWNER_LOCAL_HELPER,
     NEXT_COMMAND_OWNER_LOCAL_READONLY,
     NEXT_COMMAND_OWNER_LOCAL_TRANSITION,
     NEXT_COMMAND_OWNER_RUNTIME,
@@ -203,9 +205,15 @@ def test_local_validation_family_commands_remain_display_copy_safe() -> None:
     assert "display_copy_safe" in hint["notes"]
 
 
-def test_representative_local_finalizer_command_is_display_copy_safe() -> None:
-    command = "gpd verification-report finalize --plan GPD/PLAN.md"
-
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gpd verification-report finalize --plan GPD/PLAN.md",
+        "gpd proof-redteam finalize --phase 02",
+        "gpd apply-return-updates --phase 02",
+    ],
+)
+def test_local_finalizer_commands_are_display_copy_safe(command: str) -> None:
     hint = build_command_run_hint(command=command, source="test")
 
     assert hint is not None
@@ -221,19 +229,86 @@ def test_representative_local_finalizer_command_is_display_copy_safe() -> None:
     assert next_command.kind == KIND_LOCAL_CLI_FINALIZER_COMMAND
 
 
-def test_local_transition_command_has_distinct_owner() -> None:
-    command = "gpd phase complete 02"
-
-    next_command = classify_next_command(command=command, action="closeout", phase="02")
-    phase_complete_command = classify_next_command(command=command, action="phase-complete", phase="02")
-    hint = build_command_run_hint(command=command, source="test", action="closeout", phase="02")
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gpd phase complete 02",
+        "gpd state record-verification --phase 02",
+    ],
+)
+def test_local_transition_commands_have_distinct_owner(command: str) -> None:
+    next_command = classify_next_command(command=command, action="phase-complete", phase="02")
+    hint = build_command_run_hint(command=command, source="test", action="phase-complete", phase="02")
 
     assert next_command is not None
     assert next_command.owner == NEXT_COMMAND_OWNER_LOCAL_TRANSITION
     assert next_command.kind == KIND_LOCAL_CLI_TRANSITION_COMMAND
-    assert phase_complete_command is not None
-    assert phase_complete_command.action == "phase-complete"
-    assert phase_complete_command.owner == NEXT_COMMAND_OWNER_LOCAL_TRANSITION
     assert hint is not None
     assert hint["kind"] == KIND_LOCAL_CLI_TRANSITION_COMMAND
     assert hint["requires_user_initiated_runtime_command"] is False
+
+
+def test_checkpoint_cleanup_command_is_local_helper() -> None:
+    command = "gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout"
+
+    hint = build_command_run_hint(command=command, source="test")
+
+    assert hint is not None
+    assert hint["kind"] == KIND_LOCAL_CLI_HELPER_COMMAND
+    assert hint["execution"] == "not_executed"
+    assert hint["requires_user_initiated_runtime_command"] is False
+    assert hint["fresh_context_recommended"] is False
+    assert "display_copy_safe" in hint["notes"]
+
+    next_command = classify_next_command(command=command)
+    assert next_command is not None
+    assert next_command.owner == NEXT_COMMAND_OWNER_LOCAL_HELPER
+    assert next_command.kind == KIND_LOCAL_CLI_HELPER_COMMAND
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gpd phase closeout-readiness 02 --require-verification",
+        "gpd --raw phase closeout-readiness --phase 02 --require-verification",
+    ],
+)
+def test_phase_closeout_readiness_command_is_local_readonly(command: str) -> None:
+    next_command = classify_next_command(command=command, action="closeout-readiness", phase="02")
+    hint = build_command_run_hint(command=command, source="test", action="closeout-readiness", phase="02")
+
+    assert next_command is not None
+    assert next_command.owner == NEXT_COMMAND_OWNER_LOCAL_READONLY
+    assert next_command.kind == KIND_LOCAL_CLI_VALIDATION_COMMAND
+    assert hint is not None
+    assert hint["kind"] == KIND_LOCAL_CLI_VALIDATION_COMMAND
+    assert hint["requires_user_initiated_runtime_command"] is False
+
+
+@pytest.mark.parametrize(
+    ("command", "expected_note"),
+    [
+        ("gpd --raw init verify-work 02 --stage session_router", "raw_staged_init_display_only"),
+        ("--raw init verify-work 02 --stage session_router", "raw_staged_init_display_only"),
+        (
+            "gpd --raw stage field-access verify-work --stage session_router --style instruction",
+            "raw_stage_field_access_display_only",
+        ),
+        (
+            "--raw stage field-access verify-work --stage session_router --style instruction",
+            "raw_stage_field_access_display_only",
+        ),
+    ],
+)
+def test_raw_loader_commands_are_explicitly_display_only(command: str, expected_note: str) -> None:
+    next_command = classify_next_command(command=command, action="verify-work", phase="02")
+    hint = build_command_run_hint(command=command, source="test", action="verify-work", phase="02")
+
+    assert next_command is not None
+    assert next_command.owner == NEXT_COMMAND_OWNER_DISPLAY_ONLY
+    assert next_command.kind == KIND_UNKNOWN_DISPLAY_ONLY
+    assert expected_note in next_command.notes
+    assert hint is not None
+    assert hint["kind"] == KIND_UNKNOWN_DISPLAY_ONLY
+    assert hint["requires_user_initiated_runtime_command"] is False
+    assert expected_note in hint["notes"]

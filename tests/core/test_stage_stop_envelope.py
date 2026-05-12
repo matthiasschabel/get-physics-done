@@ -121,6 +121,8 @@ def test_stage_stop_envelope_reference_defines_contract() -> None:
     required_fragments = [
         "stage_stop:",
         "next_runtime_command",
+        "NextCommand",
+        "render_next_up_block",
         "exactly one public `gpd:` runtime command",
         "gpd:suggest-next",
         "raw-init boundary",
@@ -129,6 +131,10 @@ def test_stage_stop_envelope_reference_defines_contract() -> None:
         "owner labels",
         "local_transition",
         "local_helper",
+        "local_finalizer",
+        "non-runtime stage-stop owner",
+        "Secondary runtime:",
+        "Secondary local helper:",
     ]
     missing = [fragment for fragment in required_fragments if fragment.lower() not in lowered]
     assert missing == []

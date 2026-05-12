@@ -199,6 +199,7 @@ class _PhaseLifecycleSuggestion:
     reason: str
     command: str
     phase: str
+    next_command: NextCommand | None = None
 
 
 # ─── Internal Helpers ─────────────────────────────────────────────────────────
@@ -408,6 +409,260 @@ def _command_label_from_value(value: object) -> str | None:
     return None
 
 
+def _mapping_from_value(value: object) -> dict[str, object] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, NextCommand):
+        return value.as_dict()
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(mode="json")
+        except TypeError:
+            dumped = model_dump()
+        if isinstance(dumped, dict):
+            return dumped
+    as_dict = getattr(value, "as_dict", None)
+    if callable(as_dict):
+        dumped = as_dict()
+        if isinstance(dumped, dict):
+            return dumped
+    return None
+
+
+def _payload_value(value: object, *names: str) -> object | None:
+    mapping = _mapping_from_value(value)
+    if mapping is not None:
+        for name in names:
+            if name in mapping:
+                return mapping[name]
+        return None
+    for name in names:
+        nested = getattr(value, name, None)
+        if nested is not None:
+            return nested
+    return None
+
+
+def _payload_text(value: object, *names: str) -> str | None:
+    nested = _payload_value(value, *names)
+    if nested is None:
+        return None
+    text = str(nested).strip()
+    return text or None
+
+
+def _payload_bool(
+    value: object,
+    name: str,
+    *,
+    default: bool,
+) -> bool:
+    nested = _payload_value(value, name)
+    if nested is None:
+        return default
+    return bool(nested)
+
+
+def _payload_int(value: object, name: str, *, default: int) -> int:
+    nested = _payload_value(value, name)
+    if nested is None:
+        return default
+    try:
+        return int(nested)
+    except (TypeError, ValueError):
+        return default
+
+
+def _payload_notes(value: object) -> tuple[str, ...]:
+    raw_notes = _payload_value(value, "notes")
+    if not isinstance(raw_notes, (list, tuple)):
+        return ()
+    return tuple(str(note) for note in raw_notes if str(note).strip())
+
+
+def _normalize_lifecycle_owner(owner: object, *, kind: object | None = None) -> str | None:
+    raw_owner = str(owner or "").strip().lower().replace("-", "_")
+    if raw_owner == "local_helper":
+        return "local_readonly"
+    if raw_owner in {"runtime", "local_readonly", "local_finalizer", "local_transition", "display_only"}:
+        return raw_owner
+
+    raw_kind = str(kind or "").strip().lower()
+    if raw_kind == "runtime_command_label":
+        return "runtime"
+    if raw_kind == "local_cli_transition_command":
+        return "local_transition"
+    if raw_kind == "local_cli_finalizer_command":
+        return "local_finalizer"
+    if raw_kind == "local_cli_validation_command":
+        return "local_readonly"
+    if raw_kind == "unknown_display_only":
+        return "display_only"
+    return None
+
+
+def _is_typed_lifecycle_command_payload(value: object) -> bool:
+    if isinstance(value, NextCommand):
+        return True
+    mapping = _mapping_from_value(value)
+    if mapping is None:
+        return False
+    return any(key in mapping for key in ("owner", "kind", "next_command", "label", "command", "action"))
+
+
+def _lifecycle_primary_command_payload(decision: object) -> object | None:
+    for key in ("primary_next_command", "next_command", "typed_next_command"):
+        candidate = _lifecycle_value(decision, key)
+        if _is_typed_lifecycle_command_payload(candidate):
+            return candidate
+
+    next_up = _lifecycle_value(decision, "next_up")
+    next_up_mapping = _mapping_from_value(next_up)
+    if next_up_mapping is None:
+        return None
+
+    for key in ("primary_next_command", "next_command", "typed_next_command", "primary_command", "primary"):
+        candidate = next_up_mapping.get(key)
+        if _is_typed_lifecycle_command_payload(candidate) and not isinstance(candidate, str):
+            return candidate
+
+    commands = next_up_mapping.get("commands")
+    if not isinstance(commands, list):
+        return None
+
+    first_typed: object | None = None
+    for candidate in commands:
+        if not _is_typed_lifecycle_command_payload(candidate):
+            continue
+        if first_typed is None:
+            first_typed = candidate
+        if _payload_text(candidate, "role") == "primary":
+            return candidate
+    return first_typed
+
+
+_PHASE_RUNTIME_ACTIONS = frozenset({"verify-work", "execute-phase", "plan-phase", "discuss-phase"})
+
+
+def _lifecycle_runtime_command_label(
+    *,
+    action: str | None,
+    phase: str | None,
+    fallback_command: str | None,
+    format_command,
+) -> str | None:
+    if not action:
+        return fallback_command
+    try:
+        base_command = format_command(action)
+    except Exception:
+        logger.debug("suggest: active runtime command formatting failed for lifecycle payload", exc_info=True)
+        base_command = None
+    if base_command is None:
+        base_command = canonical_command_label(action)
+    if action in _PHASE_RUNTIME_ACTIONS and phase:
+        return f"{base_command} {phase}"
+    return base_command
+
+
+def _next_command_from_lifecycle_payload(
+    payload: object,
+    *,
+    fallback_action: str | None,
+    fallback_phase: str | None,
+    fallback_reason: str | None,
+    format_command,
+) -> NextCommand | None:
+    if payload is None:
+        return None
+
+    if isinstance(payload, NextCommand):
+        action = _normalize_lifecycle_action(payload.action, None) or fallback_action
+        phase = payload.phase or fallback_phase
+        label = payload.label
+        if payload.owner == "runtime":
+            label = (
+                _lifecycle_runtime_command_label(
+                    action=action,
+                    phase=phase,
+                    fallback_command=label,
+                    format_command=format_command,
+                )
+                or label
+            )
+        return NextCommand(
+            label=label,
+            action=action,
+            owner=payload.owner,
+            phase=phase,
+            reason=payload.reason or fallback_reason,
+            kind=payload.kind,
+            requires_user_initiated_runtime_command=payload.requires_user_initiated_runtime_command,
+            fresh_context_recommended=payload.fresh_context_recommended,
+            notes=payload.notes,
+            schema_version=payload.schema_version,
+            execution=payload.execution,
+        )
+
+    mapping = _mapping_from_value(payload)
+    if mapping is None:
+        return None
+
+    nested = mapping.get("next_command")
+    if nested is not None and nested is not payload:
+        nested_next_command = _next_command_from_lifecycle_payload(
+            nested,
+            fallback_action=fallback_action,
+            fallback_phase=fallback_phase,
+            fallback_reason=fallback_reason,
+            format_command=format_command,
+        )
+        if nested_next_command is not None:
+            return nested_next_command
+
+    owner = _normalize_lifecycle_owner(mapping.get("owner"), kind=mapping.get("kind"))
+    kind = _payload_text(mapping, "kind")
+    if owner is None or kind is None:
+        return None
+
+    action = _normalize_lifecycle_action(_payload_value(mapping, "action"), None) or fallback_action
+    phase = _payload_text(mapping, "phase") or fallback_phase
+    label = _command_label_from_value(mapping)
+    if owner == "runtime":
+        label = _lifecycle_runtime_command_label(
+            action=action,
+            phase=phase,
+            fallback_command=label,
+            format_command=format_command,
+        )
+    if label is None:
+        return None
+
+    reason = _payload_text(mapping, "reason") or fallback_reason
+    return NextCommand(
+        label=label,
+        action=action,
+        owner=owner,
+        phase=phase,
+        reason=reason,
+        kind=kind,
+        requires_user_initiated_runtime_command=_payload_bool(
+            mapping,
+            "requires_user_initiated_runtime_command",
+            default=owner == "runtime",
+        ),
+        fresh_context_recommended=_payload_bool(
+            mapping,
+            "fresh_context_recommended",
+            default=owner == "runtime",
+        ),
+        notes=_payload_notes(mapping),
+        schema_version=_payload_int(mapping, "schema_version", default=1),
+        execution=_payload_text(mapping, "execution") or "not_executed",
+    )
+
+
 def _normalize_lifecycle_action(action: object, status: object | None = None) -> str | None:
     raw = str(action or "").strip().lower().replace("_", "-").replace(" ", "-")
     aliases = {
@@ -469,8 +724,11 @@ def _coerce_shared_phase_lifecycle_suggestion(
         return None
 
     status = _lifecycle_value(decision, "status", "state", "decision", "lifecycle_state")
+    primary_payload = _lifecycle_primary_command_payload(decision)
+    primary_payload_action = _payload_value(primary_payload, "action") if primary_payload is not None else None
     action = _normalize_lifecycle_action(
-        _lifecycle_value(decision, "action", "next_action", "recommended_action", "primary_action"),
+        _lifecycle_value(decision, "action", "next_action", "recommended_action", "primary_action")
+        or primary_payload_action,
         status,
     )
     if action is None:
@@ -515,12 +773,25 @@ def _coerce_shared_phase_lifecycle_suggestion(
         else:
             reason = f"Phase {phase_number} lifecycle gate blocks downstream suggestions"
 
+    next_command = _next_command_from_lifecycle_payload(
+        primary_payload,
+        fallback_action=action,
+        fallback_phase=phase_number,
+        fallback_reason=reason,
+        format_command=format_command,
+    )
+    if next_command is not None:
+        command = next_command.command
+        if next_command.action:
+            action = next_command.action
+
     return _PhaseLifecycleSuggestion(
         action=action,
         priority=priority,
         reason=reason,
         command=command,
         phase=phase_number,
+        next_command=next_command,
     )
 
 
@@ -616,7 +887,24 @@ def _blocked_closeout_lifecycle_suggestion(
     primary_action = primary_entry.get("action") if isinstance(primary_entry, dict) else None
     action = str(primary_action or "phase-closeout-blocked")
 
-    if action == "verify-work":
+    blockers = getattr(readiness, "blockers", [])
+    blocker_preview = "; ".join(str(blocker) for blocker in blockers[:2]) if isinstance(blockers, list) else ""
+    reason = f"Phase {phase_number} closeout is blocked"
+    if blocker_preview:
+        reason += f": {blocker_preview}"
+
+    next_command = _next_command_from_lifecycle_payload(
+        primary_entry,
+        fallback_action=action,
+        fallback_phase=phase_number,
+        fallback_reason=reason,
+        format_command=format_command,
+    )
+    if next_command is not None:
+        command = next_command.command
+        if next_command.action:
+            action = next_command.action
+    elif action == "verify-work":
         command = f"{format_command('verify-work')} {phase_number}"
     elif action == "resume-work":
         command = format_command("resume-work")
@@ -628,18 +916,13 @@ def _blocked_closeout_lifecycle_suggestion(
             command = _command_label_from_value(next_up.get("primary"))
         command = command or f"gpd phase complete {phase_number}"
 
-    blockers = getattr(readiness, "blockers", [])
-    blocker_preview = "; ".join(str(blocker) for blocker in blockers[:2]) if isinstance(blockers, list) else ""
-    reason = f"Phase {phase_number} closeout is blocked"
-    if blocker_preview:
-        reason += f": {blocker_preview}"
-
     return _PhaseLifecycleSuggestion(
         action=action,
         priority=2,
         reason=reason,
         command=command,
         phase=phase_number,
+        next_command=next_command,
     )
 
 
@@ -1328,6 +1611,7 @@ def suggest_next(cwd: Path, *, limit: int = 5) -> SuggestResult:
                 command=lifecycle_suggestion.command,
                 reason=lifecycle_suggestion.reason,
                 phase=lifecycle_suggestion.phase,
+                next_command=lifecycle_suggestion.next_command,
             )
         )
 

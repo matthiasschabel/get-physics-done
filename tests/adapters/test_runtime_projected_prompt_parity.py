@@ -115,6 +115,15 @@ VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES = (
     "/gpd-verify-work",
     "gpd-verify-work",
 )
+PUBLIC_NEXT_UP_PROJECTION_RUNTIMES = ("claude-code", "gemini", "codex")
+PUBLIC_NEXT_UP_FORBIDDEN_PROJECTION_FRAGMENTS = (
+    "gpd --raw init",
+    "--raw init",
+    "gpd --raw stage field-access",
+    "--raw stage field-access",
+    "gpd verify phase",
+    "gpd:verify-phase",
+)
 
 
 def _read(path: Path) -> str:
@@ -459,6 +468,38 @@ def _project_command_for_runtime(command_name: str, runtime: str, target_dir: Pa
         workflow_target_dir=target_dir,
         command_name=command_name,
     )
+
+
+def _extract_next_up_snippet(text: str) -> str:
+    lines = text.splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == "## > Next Up")
+    except StopIteration as exc:
+        raise AssertionError("projected surface is missing a public Next Up block") from exc
+
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        if lines[index].startswith("## ") and lines[index].strip() != "## > Next Up":
+            end = index
+            break
+    return "\n".join(lines[start:end])
+
+
+def _extract_stage_stop_snippet(text: str) -> str:
+    lines = text.splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == "stage_stop:")
+    except StopIteration as exc:
+        raise AssertionError("projected surface is missing a stage_stop snippet") from exc
+
+    collected: list[str] = []
+    for line in lines[start:]:
+        if collected and not line.strip():
+            break
+        if collected and line[:1] not in {" ", "\t"}:
+            break
+        collected.append(line)
+    return "\n".join(collected)
 
 
 def _standalone_install_dir_include_lines(text: str) -> tuple[str, ...]:
@@ -890,6 +931,66 @@ def test_verify_work_sources_keep_canonical_command_labels_before_projection() -
 
     for forbidden in VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES:
         assert forbidden not in source_text
+
+
+@pytest.mark.parametrize("runtime", PUBLIC_NEXT_UP_PROJECTION_RUNTIMES)
+def test_runtime_projected_public_next_up_and_stage_stop_rewrite_canonical_runtime_labels(
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "Internal staged loading remains shell-only, not a public route:\n"
+        "\n"
+        "```bash\n"
+        'gpd --raw init verify-work "$PHASE" --stage gap_repair\n'
+        "```\n"
+        "\n"
+        "## > Next Up\n"
+        "\n"
+        "Primary: `gpd:verify-work 02`\n"
+        "\n"
+        "Public stage-stop envelope:\n"
+        "\n"
+        "stage_stop:\n"
+        "  status: blocked\n"
+        '  next_runtime_command: "gpd:verify-work 02"\n'
+        "  also_available:\n"
+        '    - "gpd:resume-work"\n'
+        '    - "gpd:suggest-next"\n'
+    )
+
+    projected = _project_fixture_command(source, runtime, target_dir)
+    next_up = _extract_next_up_snippet(projected)
+    stage_stop = _extract_stage_stop_snippet(projected)
+    expected_verify_work = get_adapter(runtime).format_command("verify-work")
+    expected_resume_work = get_adapter(runtime).format_command("resume-work")
+    expected_suggest_next = get_adapter(runtime).format_command("suggest-next")
+
+    assert f"Primary: `{expected_verify_work} 02`" in next_up
+    assert f'next_runtime_command: "{expected_verify_work} 02"' in stage_stop
+    assert f'"{expected_resume_work}"' in stage_stop
+    assert f'"{expected_suggest_next}"' in stage_stop
+    if runtime == "codex":
+        assert "$gpd-verify-work 02" in next_up
+        assert "$gpd-verify-work 02" in stage_stop
+        assert "/gpd:verify-work" not in next_up + stage_stop
+    else:
+        assert "/gpd:verify-work 02" in next_up
+        assert "/gpd:verify-work 02" in stage_stop
+        assert "$gpd-verify-work" not in next_up + stage_stop
+    assert "`gpd:verify-work 02`" not in next_up
+    assert '"gpd:verify-work 02"' not in stage_stop
+    for snippet in (next_up, stage_stop):
+        for forbidden in PUBLIC_NEXT_UP_FORBIDDEN_PROJECTION_FRAGMENTS:
+            assert forbidden not in snippet
 
 
 @pytest.mark.parametrize("runtime", RUNTIMES)

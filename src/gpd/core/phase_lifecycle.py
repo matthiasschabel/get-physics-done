@@ -8,8 +8,24 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from gpd.core.command_run_hints import build_command_run_hint
+from gpd.command_labels import canonical_command_label
+from gpd.core.command_run_hints import (
+    KIND_LOCAL_CLI_HELPER_COMMAND,
+    KIND_RUNTIME_COMMAND_LABEL,
+    KIND_UNKNOWN_DISPLAY_ONLY,
+    NEXT_COMMAND_OWNER_LOCAL_HELPER,
+    NEXT_COMMAND_OWNER_LOCAL_READONLY,
+    NEXT_COMMAND_OWNER_LOCAL_TRANSITION,
+    NEXT_COMMAND_OWNER_RUNTIME,
+    NextCommand,
+    build_command_run_hint,
+    classify_next_command,
+)
 from gpd.core.constants import ProjectLayout
+from gpd.core.next_command_rendering import (
+    RenderedNextUpBlock,
+    render_next_up_block,
+)
 from gpd.core.phases import PhaseAmbiguityError, find_phase, roadmap_analyze
 from gpd.core.state import load_state_json_readonly
 from gpd.core.utils import (
@@ -19,6 +35,8 @@ from gpd.core.utils import (
     phase_normalize,
 )
 from gpd.core.verification_status import read_verification_status, verification_path_for_phase
+
+_NEXT_UP_HINT_SOURCE = "phase-closeout-readiness"
 
 _PROOF_REQUIRED_RE = re.compile(
     r"\b("
@@ -31,9 +49,9 @@ _PROOF_REQUIRED_RE = re.compile(
     re.IGNORECASE,
 )
 
-OWNER_RUNTIME = "runtime"
-OWNER_LOCAL_TRANSITION = "local_transition"
-OWNER_LOCAL_HELPER = "local_helper"
+OWNER_RUNTIME = NEXT_COMMAND_OWNER_RUNTIME
+OWNER_LOCAL_TRANSITION = NEXT_COMMAND_OWNER_LOCAL_TRANSITION
+OWNER_LOCAL_HELPER = NEXT_COMMAND_OWNER_LOCAL_HELPER
 ROLE_PRIMARY = "primary"
 ROLE_SECONDARY = "secondary"
 
@@ -211,6 +229,37 @@ def _with_ordered_notes(notes: object, *extra_notes: str) -> list[str]:
     return values
 
 
+def _with_role(payload: dict[str, object], *, role: str | None, owner: str | None = None) -> dict[str, object]:
+    result = dict(payload)
+    if owner is not None:
+        result["owner"] = owner
+        result["notes"] = _with_ordered_notes(result.get("notes"), owner)
+    if role is not None:
+        result["role"] = role
+        result["notes"] = _with_ordered_notes(result.get("notes"), f"{role}_next_up")
+    if result.get("owner") in {OWNER_LOCAL_TRANSITION, OWNER_LOCAL_HELPER, NEXT_COMMAND_OWNER_LOCAL_READONLY}:
+        result["requires_user_initiated_runtime_command"] = False
+        result["fresh_context_recommended"] = False
+        result["notes"] = _with_ordered_notes(result.get("notes"), "display_copy_safe")
+    return result
+
+
+def _typed_command_payload(next_command: NextCommand, *, role: str | None = None) -> dict[str, object]:
+    return _with_role(next_command.as_dict(), role=role)
+
+
+def _hint_from_next_command(
+    next_command: NextCommand | None,
+    *,
+    role: str | None = None,
+    owner: str | None = None,
+) -> dict[str, object] | None:
+    if next_command is None:
+        return None
+    payload = next_command.as_run_hint(source=_NEXT_UP_HINT_SOURCE)
+    return _with_role(payload, role=role, owner=owner)
+
+
 def _hint(
     command: str | None,
     *,
@@ -219,7 +268,7 @@ def _hint(
     owner: str | None = None,
     role: str | None = None,
 ) -> dict[str, object] | None:
-    hint = build_command_run_hint(command=command, source="phase-closeout-readiness", action=action, phase=phase)
+    hint = build_command_run_hint(command=command, source=_NEXT_UP_HINT_SOURCE, action=action, phase=phase)
     if hint is not None:
         payload = dict(hint)
     elif not command:
@@ -248,6 +297,100 @@ def _hint(
     return payload
 
 
+def _runtime_command_label(action: str, *, phase: str | None = None) -> str:
+    label = canonical_command_label(action)
+    return f"{label} {phase}" if phase else label
+
+
+def _runtime_next_command(*, action: str, phase: str | None = None, reason: str | None = None) -> NextCommand:
+    label = _runtime_command_label(action, phase=phase)
+    classified = classify_next_command(command=label, action=action, phase=phase, reason=reason)
+    if classified is not None and classified.owner == OWNER_RUNTIME and classified.kind == KIND_RUNTIME_COMMAND_LABEL:
+        return classified
+    return NextCommand(
+        label=label,
+        action=action,
+        owner=OWNER_RUNTIME,
+        phase=phase,
+        reason=reason,
+        kind=KIND_RUNTIME_COMMAND_LABEL,
+        requires_user_initiated_runtime_command=True,
+        fresh_context_recommended=True,
+        notes=("user_initiated_runtime_command_required",),
+    )
+
+
+def _local_transition_next_command(*, command: str, action: str, phase: str) -> NextCommand:
+    classified = classify_next_command(command=command, action=action, phase=phase)
+    if classified is not None and classified.owner == OWNER_LOCAL_TRANSITION:
+        return classified
+    return NextCommand(
+        label=command,
+        action=action,
+        owner=OWNER_LOCAL_TRANSITION,
+        phase=phase,
+        kind=KIND_UNKNOWN_DISPLAY_ONLY,
+        notes=("display_copy_safe", "not_executed"),
+    )
+
+
+def _cleanup_next_command(*, command: str, phase: str) -> NextCommand:
+    classified = classify_next_command(command=command, action="checkpoint-cleanup", phase=phase)
+    if classified is not None and classified.owner == OWNER_LOCAL_HELPER:
+        return classified
+    return NextCommand(
+        label=command,
+        action="checkpoint-cleanup",
+        owner=OWNER_LOCAL_HELPER,
+        phase=phase,
+        kind=KIND_LOCAL_CLI_HELPER_COMMAND,
+        notes=("display_copy_safe", "not_executed"),
+    )
+
+
+def _rendered_payload_fields(rendered: RenderedNextUpBlock) -> dict[str, object]:
+    return {
+        "rendered_markdown": rendered.markdown,
+        "stage_stop_next_runtime_command": rendered.stage_stop_next_runtime_command,
+        "stage_stop_also_available": list(rendered.stage_stop_also_available),
+    }
+
+
+def _blocked_next_command(*, phase: str, blockers: list[str], blocked_action: str | None) -> NextCommand:
+    if blocked_action is None:
+        if any("bounded segment" in blocker for blocker in blockers):
+            blocked_action = "resume-work"
+        elif any(
+            "verification" in blocker or "proof-redteam" in blocker or "proof-bearing" in blocker
+            for blocker in blockers
+        ):
+            blocked_action = "verify-work"
+        else:
+            blocked_action = "execute-phase"
+    if blocked_action == "resume-work":
+        return _runtime_next_command(action="resume-work")
+    if blocked_action == "verify-work":
+        return _runtime_next_command(action="verify-work", phase=phase)
+    return _runtime_next_command(action="execute-phase", phase=phase)
+
+
+def _closeout_blocked_action(
+    *,
+    all_plans_complete: bool,
+    active_segment: bool,
+    blockers: list[str],
+) -> str | None:
+    if not all_plans_complete:
+        return "execute-phase"
+    if active_segment:
+        return "resume-work"
+    if any(
+        "verification" in blocker or "proof-redteam" in blocker or "proof-bearing" in blocker for blocker in blockers
+    ):
+        return "verify-work"
+    return None
+
+
 def _next_up_payload(
     *,
     phase: str,
@@ -255,24 +398,26 @@ def _next_up_payload(
     closeout_command: str | None,
     cleanup_command: str | None,
     blockers: list[str],
+    blocked_action: str | None = None,
 ) -> dict[str, object]:
     if ready and closeout_command is not None:
-        primary_hint = _hint(
-            closeout_command,
-            action="phase-complete",
-            phase=phase,
-            owner=OWNER_LOCAL_TRANSITION,
-            role=ROLE_PRIMARY,
+        primary_command = _local_transition_next_command(command=closeout_command, action="phase-complete", phase=phase)
+        after_this_completes = _runtime_next_command(
+            action="suggest-next",
+            reason="choose the next safe workflow route after the local phase transition completes",
         )
-        secondary_commands: list[dict[str, object]] = []
+        secondary_next_commands: list[NextCommand] = []
         if cleanup_command is not None:
-            cleanup_hint = _hint(
-                cleanup_command,
-                action="checkpoint-cleanup",
-                phase=phase,
-                owner=OWNER_LOCAL_HELPER,
-                role=ROLE_SECONDARY,
-            )
+            secondary_next_commands.append(_cleanup_next_command(command=cleanup_command, phase=phase))
+        rendered = render_next_up_block(
+            primary=primary_command,
+            after_this_completes=after_this_completes,
+            secondary=secondary_next_commands,
+        )
+        primary_hint = _hint_from_next_command(primary_command, role=ROLE_PRIMARY, owner=OWNER_LOCAL_TRANSITION)
+        secondary_commands: list[dict[str, object]] = []
+        for secondary_command in secondary_next_commands:
+            cleanup_hint = _hint_from_next_command(secondary_command, role=ROLE_SECONDARY, owner=OWNER_LOCAL_HELPER)
             if cleanup_hint is not None:
                 secondary_commands.append(cleanup_hint)
         commands = [hint for hint in (primary_hint, *secondary_commands) if hint is not None]
@@ -283,27 +428,28 @@ def _next_up_payload(
             "primary_label": "Primary local transition",
             "secondary": secondary_commands,
             "commands": commands,
+            "primary_command": _typed_command_payload(primary_command, role=ROLE_PRIMARY),
+            "after_this_completes": _typed_command_payload(after_this_completes),
+            "secondary_commands": [
+                _typed_command_payload(command, role=ROLE_SECONDARY) for command in secondary_next_commands
+            ],
+            **_rendered_payload_fields(rendered),
         }
 
-    if any(
-        "verification" in blocker or "proof-redteam" in blocker or "proof-bearing" in blocker for blocker in blockers
-    ):
-        primary = f"gpd:verify-work {phase}"
-        action = "verify-work"
-    elif any("bounded segment" in blocker for blocker in blockers):
-        primary = "gpd:resume-work"
-        action = "resume-work"
-    else:
-        primary = f"gpd:execute-phase {phase}"
-        action = "execute-phase"
+    primary_command = _blocked_next_command(phase=phase, blockers=blockers, blocked_action=blocked_action)
+    rendered = render_next_up_block(primary=primary_command)
+    primary = primary_command.command
 
     return {
         "status": "blocked",
         "primary": primary,
         "primary_owner": OWNER_RUNTIME,
         "primary_label": "Primary",
-        "commands": [_hint(primary, action=action, phase=phase, owner=OWNER_RUNTIME, role=ROLE_PRIMARY)],
+        "commands": [_hint_from_next_command(primary_command, role=ROLE_PRIMARY, owner=OWNER_RUNTIME)],
+        "primary_command": _typed_command_payload(primary_command, role=ROLE_PRIMARY),
+        "secondary_commands": [],
         "blockers": blockers,
+        **_rendered_payload_fields(rendered),
     }
 
 
@@ -366,18 +512,23 @@ def _closed_next_up(
     milestone_complete: bool,
 ) -> tuple[dict[str, object], str | None, str | None, str | None]:
     if milestone_complete or next_phase is None:
-        primary = "gpd:audit-milestone"
         action = "audit-milestone"
+        primary_command = _runtime_next_command(action=action)
     else:
-        primary = f"gpd:plan-phase {next_phase}"
         action = "plan-phase"
+        primary_command = _runtime_next_command(action=action, phase=next_phase)
+    rendered = render_next_up_block(primary=primary_command)
+    primary = primary_command.command
 
     next_up = {
         "status": "closed",
         "primary": primary,
         "primary_owner": OWNER_RUNTIME,
         "primary_label": "Primary",
-        "commands": [_hint(primary, action=action, phase=phase, owner=OWNER_RUNTIME, role=ROLE_PRIMARY)],
+        "commands": [_hint_from_next_command(primary_command, role=ROLE_PRIMARY, owner=OWNER_RUNTIME)],
+        "primary_command": _typed_command_payload(primary_command, role=ROLE_PRIMARY),
+        "secondary_commands": [],
+        **_rendered_payload_fields(rendered),
     }
     return next_up, action, OWNER_RUNTIME, primary
 
@@ -409,6 +560,9 @@ def _decision_from_closeout(
             OWNER_RUNTIME,
             f"gpd:execute-phase {closeout.phase}",
         )
+
+    if closeout.active_bounded_segment:
+        return "blocked_closeout", closeout.next_up, "resume-work", OWNER_RUNTIME, "gpd:resume-work"
 
     if any("verification" in blocker for blocker in closeout.blockers):
         return "needs_verification", closeout.next_up, "verify-work", OWNER_RUNTIME, f"gpd:verify-work {closeout.phase}"
@@ -608,6 +762,11 @@ def phase_lifecycle_decision(
         closeout_command=closeout_command,
         cleanup_command=cleanup_command,
         blockers=blockers,
+        blocked_action=_closeout_blocked_action(
+            all_plans_complete=all_plans_complete,
+            active_segment=active_segment,
+            blockers=blockers,
+        ),
     )
     if phase_closed:
         next_up, _closed_action, _closed_owner, _closed_command = _closed_next_up(

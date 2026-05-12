@@ -3,7 +3,7 @@ Close the phase only after execution, verification, gap re-verification if neede
 </purpose>
 
 <stage_boundary>
-This stage owns readiness-gated completion, post-closeout helper checkpoint cleanup, and final next-command rendering. It does not spawn verifiers, close gaps, run consistency checks, or decide scientific status.
+This stage owns readiness-gated completion, post-closeout helper checkpoint cleanup, and renderer-ready next-command selection. The code-owned `NextCommand` taxonomy and shared renderer own the public next-up shape. This stage does not spawn verifiers, close gaps, run consistency checks, or decide scientific status.
 </stage_boundary>
 
 <process>
@@ -46,7 +46,7 @@ Readiness next-action ownership:
 - Blocked closeout keeps a public runtime primary, such as `gpd:verify-work ${phase_number}`, `gpd:resume-work`, or `gpd:execute-phase ${phase_number}`.
 - Ready closeout labels `gpd phase complete "${phase_number}"` as `Primary local transition`, not a runtime workflow.
 - Prompt-visible ready closeout names the read-only readiness helper before the safe mutation: `gpd --raw phase closeout-readiness {PHASE_NUMBER} --require-verification`, then `gpd phase complete {PHASE_NUMBER}`.
-- Use `closeout_command_hint` for the local transition and `cleanup_command_hint` only as a secondary local helper.
+- Use the typed next-command owner taxonomy: `closeout_command_hint` is the local transition and `cleanup_command_hint` is only a secondary local helper.
 - Checkpoint cleanup is a secondary local helper. It never competes with the primary transition and never appears in `stage_stop.next_runtime_command` or `stage_stop.also_available`.
 </step>
 
@@ -72,9 +72,9 @@ If cleanup exits nonzero, print the helper JSON and stop. Preserve tags for bloc
 </step>
 
 <step name="offer_next">
-Never end with only "ready to plan/continue" prose. After successful closeout, choose one matching variant, choose exactly one primary command, populate `stage_stop.next_runtime_command`, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print raw staged-init or field-access commands in the final answer.
+Never end with only "ready to plan/continue" prose. After successful closeout, choose one matching variant, choose exactly one primary `NextCommand`, populate `stage_stop.next_runtime_command` from the shared renderer projection, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print raw staged-init or field-access commands in the final answer.
 
-Render the variants below from the refreshed closeout payload without reading `references/ui/ui-brand.md` or `references/orchestration/continuous-execution.md` on the normal path. Load the `next_up_rendering_recovery` conditional authority pack only if the fixed `stage_stop` / `## > Next Up` variants cannot be rendered from the closeout payload.
+Render the variants below from the refreshed closeout payload using the shared renderer shape (`Primary:`, `Primary local transition:`, `**After this completes:**`, and `Secondary ...` lines) without reading `references/ui/ui-brand.md` or `references/orchestration/continuous-execution.md` on the normal path. Load the `next_up_rendering_recovery` conditional authority pack only if the fixed `stage_stop` / `## > Next Up` variants cannot be rendered from the closeout payload.
 
 If the next phase has no context, choose `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:discuss-phase {X+1}` and list `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}` / `gpd:plan-phase {X+1}` as the direct-plan alternative. If the next phase already has context, choose `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`. Always list `gpd:suggest-next` as the recovery/confirmation command.
 
@@ -96,15 +96,9 @@ stage_stop:
 
 ## > Next Up
 
-**Phase {PHASE_NUMBER_PLUS_ONE}: {Name}** -- {Goal}
-
 Primary: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`
-
-**Also available:**
-- `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}` -- plan directly if context is already clear
-- `gpd:suggest-next` -- confirm the next action
-
-<sub>Start a fresh context window, then run the primary command above.</sub>
+Secondary runtime: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`
+Secondary runtime: `gpd:suggest-next`
 
 If the next phase already has context:
 
@@ -124,15 +118,9 @@ stage_stop:
 
 ## > Next Up
 
-**Phase {PHASE_NUMBER_PLUS_ONE}: {Name}** -- {Goal}
-
 Primary: `gpd:plan-phase {PHASE_NUMBER_PLUS_ONE}`
-
-**Also available:**
-- `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}` -- revise context first
-- `gpd:suggest-next` -- confirm the next action
-
-<sub>Start a fresh context window, then run the primary command above.</sub>
+Secondary runtime: `gpd:discuss-phase {PHASE_NUMBER_PLUS_ONE}`
+Secondary runtime: `gpd:suggest-next`
 
 If the milestone is complete:
 
@@ -151,16 +139,8 @@ stage_stop:
 
 ## > Next Up
 
-MILESTONE COMPLETE!
-
-All {N} phases executed.
-
 Primary: `gpd:complete-milestone`
-
-**Also available:**
-- `gpd:suggest-next` -- confirm the next action
-
-<sub>Start a fresh context window, then run the primary command above.</sub>
+Secondary runtime: `gpd:suggest-next`
 </step>
 
 </process>

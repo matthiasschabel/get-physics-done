@@ -827,9 +827,69 @@ def test_complete_unverified_suggests_verify(tmp_path: Path) -> None:
     assert verify.next_command.label == verify.command
     assert verify.next_command.action == "verify-work"
     assert verify.next_command.owner == "runtime"
+    assert verify.next_command.kind == "runtime_command_label"
     assert verify.next_command.phase == "01"
     assert verify.next_command.fresh_context_recommended is True
     assert verify.next_command.reason == verify.reason
+
+
+@pytest.mark.parametrize("runtime", _RUNTIME_NAMES)
+def test_typed_lifecycle_runtime_verify_work_uses_active_runtime_command_class(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: str,
+) -> None:
+    """Lifecycle-owned command metadata should drive class while suggest owns active runtime labels."""
+    adapter = get_adapter(runtime)
+    seed_complete_runtime_install(tmp_path / adapter.local_config_dir_name, runtime=runtime)
+    root = _setup_project(tmp_path)
+    _create_roadmap(root)
+    _create_phase(root, "01-setup", plans=1, summaries=1)
+
+    def _typed_decision(cwd: Path, phase: str, *, require_verification: bool = True) -> dict[str, object]:
+        del cwd, require_verification
+        return {
+            "decision": "needs_verification",
+            "blocks_downstream": True,
+            "phase": phase,
+            "primary_action": "verify-work",
+            "reason": "typed lifecycle verify route",
+            "next_up": {
+                "status": "blocked",
+                "primary": "gpd verify phase 01",
+                "commands": [
+                    {
+                        "schema_version": 1,
+                        "source": "phase-closeout-readiness",
+                        "kind": "runtime_command_label",
+                        "command": "gpd verify phase 01",
+                        "action": "verify-work",
+                        "phase": phase,
+                        "owner": "runtime",
+                        "execution": "not_executed",
+                        "requires_user_initiated_runtime_command": True,
+                        "fresh_context_recommended": True,
+                        "notes": ["primary_next_up"],
+                        "role": "primary",
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr("gpd.core.phase_lifecycle.phase_lifecycle_decision", _typed_decision)
+
+    result = suggest_next(root)
+
+    verify = next(s for s in result.suggestions if s.action == "verify-work")
+    assert verify.command == f"{adapter.format_command('verify-work')} 01"
+    assert "gpd verify phase" not in verify.command
+    assert verify.next_command is not None
+    assert verify.next_command.label == verify.command
+    assert verify.next_command.owner == "runtime"
+    assert verify.next_command.kind == "runtime_command_label"
+    assert verify.next_command.action == "verify-work"
+    assert verify.next_command.phase == "01"
+    assert verify.next_command.requires_user_initiated_runtime_command is True
 
 
 def test_complete_unverified_runtime_install_exposes_next_command_decision(tmp_path: Path) -> None:
@@ -849,6 +909,8 @@ def test_complete_unverified_runtime_install_exposes_next_command_decision(tmp_p
     assert verify.next_command.label == verify.command
     assert verify.next_command.action == "verify-work"
     assert verify.next_command.owner == "runtime"
+    assert verify.next_command.kind == "runtime_command_label"
+    assert verify.next_command.phase == "01"
     assert verify.next_command.reason == verify.reason
 
 
@@ -893,6 +955,9 @@ def test_passed_verification_not_closed_suggests_local_phase_transition(tmp_path
     assert transition.command == "gpd phase complete 01"
     assert transition.next_command is not None
     assert transition.next_command.owner == "local_transition"
+    assert transition.next_command.kind == "local_cli_transition_command"
+    assert transition.next_command.action == "phase-complete"
+    assert transition.next_command.phase == "01"
     assert transition.next_command.requires_user_initiated_runtime_command is False
     assert (root / "GPD" / "ROADMAP.md").read_text(encoding="utf-8") == before_roadmap
 

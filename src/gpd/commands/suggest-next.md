@@ -36,7 +36,7 @@ fi
 ## Step 2: Parse and present
 
 Parse the JSON output. It contains:
-- `suggestions`: Array of `{priority, action, command, reason, phase?}` sorted by priority (1=highest)
+- `suggestions`: Array of `{priority, action, command, reason, phase?, next_command?}` sorted by priority (1=highest). When present, `next_command` is the typed `NextCommand` decision for the shared renderer.
 - `total_suggestions`: Total number of recommendations before limiting
 - `suggestion_count`: Number of recommendations returned after applying `limit`
 - `top_action`: The first recommendation or `null`
@@ -62,11 +62,15 @@ If there's only one suggestion, present it as the clear next step:
 ```
 ## > Next Up
 
-**{command}**
-{reason}
-
-<sub>Start a fresh context window, then run `{command}`. If you still need to rediscover the project first, do that in your normal terminal with `gpd resume` for the current workspace or `gpd resume --recent` for a different project before reopening the runtime.</sub>
+Primary: `{command}`
+Note: {reason}
 ```
+
+Use the shared renderer shape for this single-recommendation block. If
+`next_command.owner` is `local_transition`, use `Primary local transition:`
+instead of `Primary:` and include `**After this completes:**` with
+`gpd:suggest-next` unless the CLI output provides a more specific public runtime
+route. Do not use a separate bold-only command block.
 
 If there are blockers, highlight them before suggestions:
 

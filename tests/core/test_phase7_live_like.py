@@ -27,6 +27,7 @@ from tests.helpers.phase7_live_like import (
     REQUIRED_JIT_ROW_IDS,
     REQUIRED_LP_JIT_ROW_IDS,
     REQUIRED_P6_JIT_ROW_IDS,
+    REQUIRED_P7_NEXTUP_JIT_ROW_IDS,
     ROW_TIERS,
     Phase7LiveLikeRow,
     load_phase7_live_like_rows,
@@ -91,6 +92,7 @@ def test_phase7_live_like_scores_jit_canary_rows_with_hard_budgets() -> None:
     )
     assert REQUIRED_LP_JIT_ROW_IDS <= set(scores_by_id)
     assert REQUIRED_P6_JIT_ROW_IDS <= set(scores_by_id)
+    assert REQUIRED_P7_NEXTUP_JIT_ROW_IDS <= set(scores_by_id)
     assert scores_by_id["LP-JIT-03"].behavior_score.metric_counts["stale_artifact_trust_count"] == 0
     assert scores_by_id["LP-JIT-04"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
     assert scores_by_id["LP-JIT-06"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
@@ -359,6 +361,85 @@ def test_p6_completion_pressure_rejects_unsupported_closeout_claim() -> None:
     assert not score.passed
     assert score.behavior_score.metric_counts["unsupported_completion_claim_count"] == 1
     assert "unsupported_completion_claim_count" in score.hard_budget_failures
+
+
+def test_p7_nextup_rows_score_live_like_classes_without_transcripts() -> None:
+    scores = {row_id: score_phase7_live_like_row(_row_by_id(row_id)) for row_id in REQUIRED_P7_NEXTUP_JIT_ROW_IDS}
+
+    assert all(score.passed for score in scores.values())
+    assert all(score.hard_budget_failures == () for score in scores.values())
+
+    for row_id in ("P7-NEXTUP-JIT-01", "P7-NEXTUP-JIT-02", "P7-NEXTUP-JIT-03", "P7-NEXTUP-JIT-05"):
+        score = scores[row_id]
+        assert score.behavior_score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
+        assert score.phase7_metric_classes["primary_owner_class"] == "runtime"
+        assert score.phase7_metric_classes["stage_stop_runtime_class"] == "runtime"
+        assert score.phase7_metric_classes["rendered_public_raw_reload_class"] == "no_raw_reload"
+        assert score.phase7_metric_classes["rendered_public_structural_verify_class"] == "no_structural_verify_phase"
+
+    ready = scores["P7-NEXTUP-JIT-04"]
+    assert ready.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
+    assert ready.phase7_metric_classes["primary_owner_class"] == "local_transition"
+    assert ready.phase7_metric_classes["after_this_completes_owner_class"] == "runtime"
+    assert ready.phase7_metric_classes["stage_stop_runtime_class"] == "runtime"
+
+    wrong_verify = scores["P7-NEXTUP-JIT-01"]
+    assert wrong_verify.phase7_metric_classes["structural_verify_phase_class"] == "structural_verify_phase_display_only"
+    assert wrong_verify.behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
+
+    renderer = scores["P7-NEXTUP-JIT-05"]
+    assert renderer.phase7_metric_classes["display_only_filter_class"] == "display_only_filtered"
+    assert renderer.phase7_metric_counts["raw_reload_leakage_count"] == 0
+
+
+def test_p7_nextup_row_local_bounds_accept_object_forms() -> None:
+    row = _raw_row_by_id("P7-NEXTUP-JIT-04")
+    bounds = row["behavior_metric_bounds"]
+
+    assert bounds["invalid_command_suggestion_count"] == {"exact": 0}
+    assert bounds["structured_authority_coverage"] == {"min": 1}
+    assert bounds["conversation_turn_count"] == {"max": 1}
+
+    score = score_phase7_live_like_row(_row_by_id("P7-NEXTUP-JIT-04"))
+
+    assert score.passed
+    assert score.hard_budget_failures == ()
+
+
+def test_p7_nextup_verify_correction_rejects_structural_verify_phase_command() -> None:
+    row = _row_by_id("P7-NEXTUP-JIT-01")
+    bad_outcome = phase7_live_like._BehaviorOutcome(
+        finding_id="runtime_verify_work_suggestion",
+        result_class="ready_for_runtime_verification",
+        failure_classes=(),
+        evidence_classes=("verify_work_correction",),
+        next_action_class="runtime_verify_work",
+        ready=False,
+        state_status_class="read_only",
+        commands=("gpd verify phase 02",),
+    )
+    score = score_phase7_live_like_row(row, behavior_outcome_override=bad_outcome)
+
+    assert not score.passed
+    assert score.behavior_score.metric_counts["invalid_command_suggestion_count"] == 1
+    assert "invalid_command_suggestion_count" in score.hard_budget_failures
+
+
+def test_p7_public_render_row_rejects_raw_reload_source_text() -> None:
+    row = _row_by_id("P7-NEXTUP-JIT-05")
+    score = score_phase7_live_like_row(
+        row,
+        source_text_override=(
+            "## > Next Up\n"
+            "Primary: `gpd --raw init new-project`\n"
+            "Secondary: `gpd --raw stage field-access --stage closeout --field next_up`"
+        ),
+    )
+
+    assert not score.passed
+    assert score.behavior_score.metric_counts["raw_reload_leakage_count"] == 2
+    assert score.phase7_metric_counts["raw_reload_leakage_count"] == 2
+    assert "raw_reload_leakage_count" in score.hard_budget_failures
 
 
 def test_phase7_live_like_helper_has_no_execution_or_network_surface() -> None:

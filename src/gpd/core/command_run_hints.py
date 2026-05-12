@@ -16,12 +16,14 @@ NEXT_COMMAND_SURFACE_CONTEXT_ACTIVE_RUNTIME = "active_runtime"
 
 NEXT_COMMAND_OWNER_RUNTIME = "runtime"
 NEXT_COMMAND_OWNER_LOCAL_READONLY = "local_readonly"
+NEXT_COMMAND_OWNER_LOCAL_HELPER = "local_helper"
 NEXT_COMMAND_OWNER_LOCAL_FINALIZER = "local_finalizer"
 NEXT_COMMAND_OWNER_LOCAL_TRANSITION = "local_transition"
 NEXT_COMMAND_OWNER_DISPLAY_ONLY = "display_only"
 
 KIND_RUNTIME_COMMAND_LABEL = "runtime_command_label"
 KIND_LOCAL_CLI_VALIDATION_COMMAND = "local_cli_validation_command"
+KIND_LOCAL_CLI_HELPER_COMMAND = "local_cli_helper_command"
 KIND_LOCAL_CLI_FINALIZER_COMMAND = "local_cli_finalizer_command"
 KIND_LOCAL_CLI_TRANSITION_COMMAND = "local_cli_transition_command"
 KIND_UNKNOWN_DISPLAY_ONLY = "unknown_display_only"
@@ -31,6 +33,7 @@ _SHELL_CONTROL_TOKENS = ("\n", "\r", ";", "|", "&", "<", ">", "`", "$(")
 NextCommandOwner = Literal[
     "runtime",
     "local_readonly",
+    "local_helper",
     "local_finalizer",
     "local_transition",
     "display_only",
@@ -171,7 +174,16 @@ def _local_cli_run_hint_rules() -> tuple[_LocalCliRunHintRule, ...]:
         _LocalCliRunHintRule(
             kind=KIND_LOCAL_CLI_VALIDATION_COMMAND,
             owner=NEXT_COMMAND_OWNER_LOCAL_READONLY,
-            command_roots=_contract_local_validation_command_roots(),
+            command_roots=(
+                *_contract_local_validation_command_roots(),
+                "gpd phase closeout-readiness",
+                "gpd --raw phase closeout-readiness",
+            ),
+        ),
+        _LocalCliRunHintRule(
+            kind=KIND_LOCAL_CLI_HELPER_COMMAND,
+            owner=NEXT_COMMAND_OWNER_LOCAL_HELPER,
+            command_roots=("gpd --raw phase checkpoint cleanup",),
         ),
         _LocalCliRunHintRule(
             kind=KIND_LOCAL_CLI_FINALIZER_COMMAND,
@@ -237,6 +249,15 @@ def _starts_with_command_prefix(command: str, prefixes: tuple[str, ...]) -> bool
     return False
 
 
+def _raw_loader_display_only_notes(command: str) -> tuple[str, ...] | None:
+    lowered = command.lower()
+    if lowered.startswith("gpd --raw init") or lowered.startswith("--raw init"):
+        return ("raw_staged_init_display_only", "display_only")
+    if lowered.startswith("gpd --raw stage field-access") or lowered.startswith("--raw stage field-access"):
+        return ("raw_stage_field_access_display_only", "display_only")
+    return None
+
+
 def _display_only_next_command(
     *,
     command: str,
@@ -278,6 +299,15 @@ def classify_next_command(
             phase=phase,
             reason=reason,
             notes=("shell_control_tokens_present", "display_only"),
+        )
+
+    if (raw_loader_notes := _raw_loader_display_only_notes(normalized_command)) is not None:
+        return _display_only_next_command(
+            command=normalized_command,
+            action=action,
+            phase=phase,
+            reason=reason,
+            notes=raw_loader_notes,
         )
 
     parsed = parse_command_label(normalized_command)
@@ -365,6 +395,7 @@ def build_command_run_hint(
 __all__ = [
     "COMMAND_RUN_HINT_EXECUTION",
     "COMMAND_RUN_HINT_SCHEMA_VERSION",
+    "KIND_LOCAL_CLI_HELPER_COMMAND",
     "KIND_LOCAL_CLI_TRANSITION_COMMAND",
     "KIND_LOCAL_CLI_FINALIZER_COMMAND",
     "KIND_LOCAL_CLI_VALIDATION_COMMAND",
@@ -372,6 +403,7 @@ __all__ = [
     "KIND_UNKNOWN_DISPLAY_ONLY",
     "NEXT_COMMAND_OWNER_DISPLAY_ONLY",
     "NEXT_COMMAND_OWNER_LOCAL_FINALIZER",
+    "NEXT_COMMAND_OWNER_LOCAL_HELPER",
     "NEXT_COMMAND_OWNER_LOCAL_READONLY",
     "NEXT_COMMAND_OWNER_LOCAL_TRANSITION",
     "NEXT_COMMAND_OWNER_RUNTIME",

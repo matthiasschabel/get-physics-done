@@ -3,8 +3,10 @@ from __future__ import annotations
 import pytest
 
 from gpd.core.command_run_hints import (
+    KIND_RUNTIME_COMMAND_LABEL,
     NEXT_COMMAND_OWNER_DISPLAY_ONLY,
     NEXT_COMMAND_OWNER_LOCAL_FINALIZER,
+    NEXT_COMMAND_OWNER_LOCAL_HELPER,
     NEXT_COMMAND_OWNER_LOCAL_READONLY,
     NEXT_COMMAND_OWNER_RUNTIME,
     NEXT_COMMAND_SURFACE_CONTEXT_ACTIVE_RUNTIME,
@@ -43,7 +45,9 @@ def test_local_transition_primary_renders_after_runtime_route_and_secondary_comm
     primary = _classified("gpd phase complete 02", action="phase-complete", phase="02")
     after = _classified("gpd:plan-phase 03", action="plan-phase", phase="03")
     runtime_secondary = _classified("gpd:suggest-next", action="suggest-next")
-    local_helper = _classified("gpd validate verification-contract GPD/verification.md")
+    local_helper = _classified(
+        "gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout"
+    )
     local_finalizer = _classified("gpd verification-report finalize --plan GPD/PLAN.md")
     display_only = NextCommand(
         label="Closeout evidence has already been checked.",
@@ -63,7 +67,10 @@ def test_local_transition_primary_renders_after_runtime_route_and_secondary_comm
         "Primary local transition: `gpd phase complete 02`",
         "**After this completes:** `gpd:plan-phase 03`",
         "Secondary runtime: `gpd:suggest-next`",
-        "Secondary local helper: `gpd validate verification-contract GPD/verification.md`",
+        (
+            "Secondary local helper: "
+            "`gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout`"
+        ),
         "Secondary local finalizer: `gpd verification-report finalize --plan GPD/PLAN.md`",
         "Note: Closeout evidence has already been checked.",
     ]
@@ -79,11 +86,16 @@ def test_local_transition_primary_requires_after_runtime_route() -> None:
 
 
 def test_local_helpers_and_finalizers_are_not_stage_stop_next_runtime_commands() -> None:
-    local_helper = _classified("gpd validate verification-contract GPD/verification.md")
+    local_readonly = _classified("gpd phase closeout-readiness 02 --require-verification")
+    local_helper = _classified(
+        "gpd --raw phase checkpoint cleanup --phase 02 --namespace phase --policy successful-closeout"
+    )
     local_finalizer = _classified("gpd verification-report finalize --plan GPD/PLAN.md")
 
-    assert local_helper.owner == NEXT_COMMAND_OWNER_LOCAL_READONLY
+    assert local_readonly.owner == NEXT_COMMAND_OWNER_LOCAL_READONLY
+    assert local_helper.owner == NEXT_COMMAND_OWNER_LOCAL_HELPER
     assert local_finalizer.owner == NEXT_COMMAND_OWNER_LOCAL_FINALIZER
+    assert stage_stop_next_runtime_command(local_readonly) is None
     assert stage_stop_next_runtime_command(local_helper) is None
     assert stage_stop_next_runtime_command(local_finalizer) is None
 
@@ -114,6 +126,19 @@ def test_forbidden_display_only_primary_is_rejected() -> None:
     primary = _classified("gpd --raw init new-project")
 
     with pytest.raises(NextCommandRenderingError, match="unsupported primary"):
+        render_next_up_block(primary=primary)
+
+
+def test_raw_loader_label_is_rejected_even_with_misleading_runtime_owner() -> None:
+    primary = NextCommand(
+        label="gpd --raw init verify-work 02 --stage session_router",
+        action="verify-work",
+        owner=NEXT_COMMAND_OWNER_RUNTIME,
+        phase="02",
+        kind=KIND_RUNTIME_COMMAND_LABEL,
+    )
+
+    with pytest.raises(NextCommandRenderingError, match="forbidden command fragment"):
         render_next_up_block(primary=primary)
 
 

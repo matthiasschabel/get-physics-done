@@ -145,7 +145,9 @@ Use the exact command for your runtime:
 Use the generated recovery ladder when you are returning later:
 
 <!-- gpd-public-surface:recovery-note:start -->
-Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation. `state.json.continuation` is the durable authority. Canonical continuation fields define the public resume vocabulary. Fresh context resets are for context management, not as a recovery step; then run gpd resume in your normal terminal only when workspace rediscovery is needed.
+
+Resume vocabulary fields: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, `resume_candidates`.
 <!-- gpd-public-surface:recovery-note:end -->
 
 ## Official docs

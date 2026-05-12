@@ -161,10 +161,18 @@ def render_post_start_settings_note(context: PublicSurfaceRenderContext | None =
 
 
 def render_recovery_note(context: PublicSurfaceRenderContext | None = None) -> str:
-    return _context(context).contract.recovery_ladder.render_note(
+    ctx = _context(context)
+    recovery = ctx.contract.recovery_ladder.render_note(
         resume_work_phrase=_code("resume-work"),
         suggest_next_phrase=_code("suggest-next"),
         pause_work_phrase=_code("pause-work"),
+    )
+    resume = ctx.contract.resume_authority
+    return (
+        f"{recovery} {resume.durable_authority_phrase}. {resume.public_vocabulary_intro}. "
+        f"Fresh context resets are for context management, not as a recovery step; then run "
+        f"{ctx.contract.recovery_ladder.local_snapshot_command} in your normal terminal only when workspace "
+        f"rediscovery is needed.\n\nResume vocabulary fields: {resume.render_public_field_list()}."
     )
 
 

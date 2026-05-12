@@ -154,15 +154,15 @@ def test_removed_planner_includes_are_late_loaded_by_path_not_body() -> None:
 
     assert "@{GPD_INSTALL_DIR}" not in conventions
     assert "Every plan must establish or inherit conventions before task decomposition." in conventions
-    assert "Load `{GPD_INSTALL_DIR}/references/planning/planner-conventions.md` when conventions are missing" in conventions
+    assert (
+        "Load `{GPD_INSTALL_DIR}/references/planning/planner-conventions.md` when conventions are missing"
+        in conventions
+    )
     assert "convention_lock" in conventions
 
     assert "@{GPD_INSTALL_DIR}" not in approximations
     assert "identify active approximations, expansion parameters, neglected terms" in approximations
-    assert (
-        "Load `{GPD_INSTALL_DIR}/references/planning/planner-approximations.md` when selecting"
-        in approximations
-    )
+    assert "Load `{GPD_INSTALL_DIR}/references/planning/planner-approximations.md` when selecting" in approximations
     assert "`name`, `parameter`, `validity`, `breaks_when`, and `check`" in approximations
 
 
@@ -206,7 +206,7 @@ def test_planner_policy_detail_lives_in_jit_modules_not_base_prompt() -> None:
 
     for detailed_marker in (
         "### Planning Decision Matrix",
-        "### Explore Mode (`research_mode: \"explore\"`)",
+        '### Explore Mode (`research_mode: "explore"`)',
         "Example outcome in explore mode when alternatives remain live",
         "Gap-specific fields to insert into the canonical `phase-prompt.md` template",
         "Triage decision matrix",
@@ -292,3 +292,30 @@ def test_planner_delegates_checkpoint_examples_to_canonical_reference() -> None:
     assert '<task type="checkpoint:decision"' not in checkpoint_section
     assert "Bad -- Checkpointing every derivation step" not in checkpoint_section
     assert "Good -- Single verification at logical boundary" not in checkpoint_section
+
+
+def test_planner_optional_heuristics_and_checker_examples_live_in_late_refs() -> None:
+    planner = _read_planner_prompt()
+    scope = (PLANNING_REFERENCES_DIR / "planner-scope-examples.md").read_text(encoding="utf-8")
+    procedure = (PLANNING_REFERENCES_DIR / "planner-execution-procedure.md").read_text(encoding="utf-8")
+    gap_revision = (PLANNING_REFERENCES_DIR / "planner-gap-and-revision-policy.md").read_text(encoding="utf-8")
+
+    assert "references/planning/planner-scope-examples.md" in planner
+    assert "references/planning/planner-execution-procedure.md" in planner
+    assert "references/planning/planner-gap-and-revision-policy.md" in planner
+
+    for moved_marker in (
+        "Dynamic Difficulty Escalation",
+        "Depth Escalation Suggested",
+        "Example escalation message",
+        "Gap-Specific Contract Fields",
+        "Checker Feedback Examples",
+    ):
+        assert moved_marker not in planner
+
+    assert "Execution Time Heuristics" in scope
+    assert "Dynamic Difficulty Escalation" in scope
+    assert "User Decision Fidelity" in procedure
+    assert "Completion Checklists" in procedure
+    assert "Checker Feedback Examples" in gap_revision
+    assert "Convention mismatch between imported reference and lock" in gap_revision

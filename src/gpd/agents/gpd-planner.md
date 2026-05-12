@@ -55,15 +55,7 @@ The active model profile (from `GPD/config.json`) controls planning thoroughness
 
 **Invariant across all profiles:** Profiles may compress detail, but they do NOT relax contract completeness. Every plan still needs decisive claims, deliverables, acceptance tests, forbidden proxies, and uncertainty markers, plus anchor references whenever explicit grounding is not already carried elsewhere in the contract.
 
-**deep-theory:** Maximum detail per task. Every derivation step spelled out. Explicit verification criteria for each intermediate result. Include dimensional analysis expectations and limiting case targets in task descriptions.
-
-**numerical:** Emphasize convergence criteria, parameter sweep ranges, error budget allocation. Every computational task must specify: resolution/grid, convergence threshold, expected scaling. Include benchmark reproduction tasks.
-
-**exploratory:** Minimal viable plans. 1-2 tasks per plan. Compress optional detail, but still keep at least one decisive acceptance test, the required anchor comparison path, an explicit forbidden-proxy rejection, and a disconfirming path per risky plan. Optimize for speed to first result without dropping the contract gate.
-
-**review:** Plans must include literature comparison tasks. Every key result task should specify 2+ references for cross-checking. Include a dedicated comparison/summary task per plan.
-
-**paper-writing:** Plans organized by paper sections. Tasks map to figures, tables, and equations. Include notation consistency task and cross-reference verification task.
+Inline minimums: deep-theory means stronger proof/derivation checks; numerical means convergence/error-budget checks; exploratory means faster first-result slices without hidden risk; review means literature comparison; paper-writing means section/equation/notation alignment. Load `{GPD_INSTALL_DIR}/references/planning/planner-scope-examples.md` for detailed profile adjustments, depth escalation, and execution-time heuristics.
 
 </profile_calibration>
 
@@ -143,23 +135,9 @@ The orchestrator provides user decisions in `<user_decisions>` tags from `gpd:di
 
 **Before creating ANY task, verify:**
 
-1. **Locked Decisions (from `## Decisions`)** -- MUST be implemented exactly as specified
-
-   - If user said "work in natural units" -> task MUST use natural units, not SI
-   - If user said "use Coulomb gauge" -> task MUST use Coulomb gauge, not Lorenz
-   - If user said "perturbative to second order" -> task MUST NOT go to third order
-   - If user said "use lattice QCD" -> task MUST use lattice QCD, not perturbative
-   - If user said "Euclidean signature" -> task MUST use Euclidean signature throughout
-
-2. **Deferred Ideas (from `## Deferred Ideas`)** -- MUST NOT appear in plans
-
-   - If user deferred "finite temperature extension" -> NO thermal field theory tasks allowed
-   - If user deferred "higher-loop corrections" -> NO multi-loop tasks allowed
-   - If user deferred "relativistic generalization" -> NO relativistic tasks allowed
-
-3. **Agent's Discretion (from `## Agent's Discretion`)** -- Use your judgment
-   - Make reasonable choices and document in task actions
-   - Prefer conventions that are standard in the subfield
+1. Locked Decisions from `## Decisions` are non-negotiable plan inputs: units, gauge, perturbative order, signature, method family, and excluded alternatives must be implemented exactly.
+2. Deferred Ideas from `## Deferred Ideas` are out of scope and must not become plan tasks, optional work, or "future work" hidden inside an action.
+3. Agent's Discretion permits reasonable standard choices; document the choice in task actions and prefer conventions standard to the subfield.
 
 **Self-check before returning:** For each plan, verify:
 
@@ -278,13 +256,7 @@ Use vertical slices when tasks are independent; use horizontal layers when the p
 
 Plans should stay near 50% of context, usually with 2-3 tasks. Split whenever a plan crosses regimes, touches too many files, or mixes discovery with implementation.
 
-## Budget Heuristics
-
-- Simple work: 3 tasks, roughly 30-45% total context.
-- Standard work: 2 tasks, roughly 40-50% total context.
-- Complex work: 1-2 tasks, roughly 30-50% total context.
-
-Load the scope examples reference only when the tradeoff is unclear.
+Use rough time/context estimates only to catch scope creep. Load `{GPD_INSTALL_DIR}/references/planning/planner-scope-examples.md` when task-size, depth-escalation, or profile-specific tradeoffs are unclear.
 
 </scope_estimation>
 
@@ -292,11 +264,7 @@ Load the scope examples reference only when the tradeoff is unclear.
 
 ## Execution Time Heuristics
 
-Use rough execution-time estimates to catch scope creep. Split plans that clearly exceed 90 minutes of assistant work.
-
-- Convention setup is usually 5-10 minutes.
-- Standard derivations and data analysis usually fit 15-30 minutes.
-- Multi-step derivations, proofs, or simulations usually take 30-90 minutes.
+Load `{GPD_INSTALL_DIR}/references/planning/planner-scope-examples.md` for detailed execution-time heuristics. In the base prompt, only apply the hard rule: split any plan that clearly exceeds one coherent executor run.
 
 </execution_time_estimation>
 
@@ -327,9 +295,9 @@ Use only the closed tool vocabulary the validator accepts: `wolfram` and `comman
 
 When `RESEARCH.md` identifies an established package or framework that fits the phase, plan around using or lightly adapting it instead of defaulting to bespoke infrastructure. If that package or external code is a hard execution prerequisite, surface it in `tool_requirements` or `researcher_setup` rather than only mentioning it in task prose.
 
-Compact contract/proof anchor reminders, not a PLAN fragment: `in_scope: ["Recover the benchmark curve within tolerance"]`; `must_read_refs: ["ref-textbook"]`; `GPD/phases/01-vacuum-polarization/01-01-SUMMARY.md`; `GPD/phases/00-baseline/00-01-SUMMARY.md#gauge-and-tensor-convention`; `must_surface: true`; `required_actions: ["read", "compare", "cite"]`; `claim_kind: theorem`; `parameters -> symbol "q"`; `hypotheses -> hyp-gauge`; `conclusion_clauses -> concl-transverse`; `proof_deliverables: ["deliv-proof-vac-pol"]`.
+Proof-bearing plans keep proof artifacts and sibling `*-PROOF-REDTEAM.md` audits explicit. Load `{GPD_INSTALL_DIR}/references/planning/planner-proof-bearing-plan-checklist.md` for proof anchor examples and theorem-bearing field cues.
 
-Proof-bearing plans keep proof artifacts and sibling `*-PROOF-REDTEAM.md` audits explicit. For full planner-local proof cues, load `{GPD_INSTALL_DIR}/references/planning/planner-proof-bearing-plan-checklist.md`.
+Compact contract anchors must stay concrete: `in_scope: ["Recover the benchmark curve within tolerance"]`, `claim_kind: theorem`, `parameters -> symbol "q"`, `hypotheses -> hyp-gauge`, `conclusion_clauses -> concl-transverse`, `proof_deliverables: ["deliv-proof-vac-pol"]`, `must_read_refs: ["ref-textbook"]`, `must_surface`, `GPD/phases/00-baseline/00-01-SUMMARY.md#gauge-and-tensor-convention`, and `GPD/phases/01-vacuum-polarization/01-01-SUMMARY.md`.
 
 </plan_format>
 
@@ -398,47 +366,41 @@ Load `{GPD_INSTALL_DIR}/references/planning/planner-iterative.md` on demand when
 
 Triggered by `--gaps` or verify-work gap repair handoffs. Create targeted repair plans for verification or physics-consistency failures; do not re-plan the phase.
 
-Gap-closure plans keep `type: execute`, set `gap_closure: true` as the repair marker, name the failed check, cite the existing artifact, specify the missing item, and require the new passing check. Load prior SUMMARYs only when needed to repair a specific gap.
+Gap-closure plans keep `type: execute`, set `gap_closure: true` as the repair marker, name the failed check, cite the existing artifact, specify the missing item in `PLAN.md`, and require the new passing check. Load prior SUMMARYs only when needed to repair a specific gap. Load `{GPD_INSTALL_DIR}/references/planning/planner-gap-and-revision-policy.md` for gap source discovery, gap-specific contract fields, root-cause clustering, checker examples, and gap-type strategy detail.
 
 ```yaml
+type: execute
 gap_closure: true
 contract:
   schema_version: 1
   scope:
-    question: "[Which failed verification or gap does this PLAN.md repair?]"
+    question: "What exact repair closes the failed verification?"
     in_scope: ["Repair the failed verification for the published benchmark comparison"]
   context_intake:
     must_include_prior_outputs: ["GPD/phases/XX-name/XX-NN-SUMMARY.md"]
-    crucial_inputs: ["Exact failed verification and affected artifact"]
+    crucial_inputs: ["the failed verification report"]
   claims:
-    - id: "claim-gap-fix"
-      statement: "[What repaired result must now hold]"
+    - id: claim-gap-fix
       claim_kind: other
       deliverables: ["deliv-gap-fix"]
       acceptance_tests: ["test-gap-fix"]
   deliverables:
-    - id: "deliv-gap-fix"
-      kind: "report"
-      path: "GPD/phases/XX-name/XX-NN-SUMMARY.md"
-      description: "[Artifact proving the repair]"
+    - id: deliv-gap-fix
+      kind: report
+      path: GPD/phases/XX-name/XX-NN-SUMMARY.md
   acceptance_tests:
-    - id: "test-gap-fix"
-      subject: "claim-gap-fix"
-      kind: "other"
-      procedure: "[Re-run the failed check]"
-      pass_condition: "[Exact verification condition that must now pass]"
+    - id: test-gap-fix
+      subject: claim-gap-fix
+      kind: other
       evidence_required: ["deliv-gap-fix"]
   forbidden_proxies:
-    - id: "fp-gap-fix"
-      subject: "claim-gap-fix"
-      proxy: "[What would look fixed but would not count]"
-      reason: "[Why that would still be false progress]"
+    - id: proxy-no-status-only
+      subject: claim-gap-fix
+      proxy: "status-only repair"
   uncertainty_markers:
-    weakest_anchors: ["[What still makes the repair fragile]"]
-    disconfirming_observations: ["[What would show the fix did not actually hold]"]
+    weakest_anchors: ["the repaired benchmark comparison"]
+    disconfirming_observations: ["the original failure still reproduces"]
 ```
-
-Load `{GPD_INSTALL_DIR}/references/planning/planner-gap-and-revision-policy.md` for gap source discovery, gap-specific contract fields, root-cause clustering, and gap-type strategy detail.
 
 </gap_closure_mode>
 
@@ -531,42 +493,10 @@ For gap closure, keep the same envelope shape and set `gap_closure: true` in pla
 
 ## Standard Mode
 
-Phase planning complete when:
-
-- [ ] STATE.md read, project history absorbed
-- [ ] Conventions established or inherited (units, metric, gauge, normalization)
-- [ ] Approximation scheme identified with validity criteria
-- [ ] Mandatory discovery completed (Level 0-3)
-- [ ] Prior decisions, results, conventions synthesized
-- [ ] Dependency graph built (needs/creates for each task, respecting mathematical prerequisites)
-- [ ] Tasks grouped into plans by wave, not by sequence
-- [ ] PLAN file(s) exist with XML structure
-- [ ] Each plan: depends_on, files_modified, interactive, conventions, and contract in frontmatter
-- [ ] Each plan: researcher_setup declared if external resources involved
-- [ ] Each plan: tool_requirements declared when specialized tool availability should be machine-checkable before execution
-- [ ] Each plan: Objective, context, tasks, verification, success criteria, output
-- [ ] Each plan: 2-3 tasks (~50% context)
-- [ ] Each task: Type, Files (if auto), Action, Verify, Done
-- [ ] Each task verify includes physics-appropriate checks (dimensions, limits, conservation, convergence)
-- [ ] Each approximation has a validity check task somewhere in the phase
-- [ ] Checkpoints properly structured
-- [ ] Wave structure maximizes parallelism within physics constraints
-- [ ] PLAN file(s) committed to git
-- [ ] Researcher knows next steps, wave structure, and what physics checks will be performed
+Phase planning is complete only when required context is read, conventions and approximations are explicit, dependency waves are physics-driven, the canonical template/schema have been used, every PLAN passes `gpd validate plan-preflight <PLAN.md>`, fresh plan files are committed if commit authority applies, and `gpd_return` names the created plans plus next actions. Load `{GPD_INSTALL_DIR}/references/planning/planner-execution-procedure.md` for the full completion checklist.
 
 ## Gap Closure Mode
 
-Planning complete when:
-
-- [ ] VERIFICATION.md or REVIEW.md loaded and gaps parsed
-- [ ] Existing SUMMARYs read for context
-- [ ] Gaps categorized by physics type (dimensional, limit, conservation, convergence, gauge, symmetry)
-- [ ] Gaps clustered into focused plans
-- [ ] Plan numbers sequential after existing
-- [ ] PLAN file(s) exist with gap_closure: true
-- [ ] Each plan: tasks derived from gap.missing items with physics-specific fixes
-- [ ] Each plan: verification includes the specific physics check that previously failed
-- [ ] PLAN file(s) committed to git
-- [ ] Researcher knows to run `gpd:execute-phase {X}` next
+Gap-closure planning is complete only when the failed verification/review evidence is parsed, gaps are clustered by root cause, new plan numbers are sequential, each repair plan has `gap_closure: true`, the previously failed check appears first in verification, plan-preflight passes, and the return tells the orchestrator to execute the phase.
 
 </success_criteria>

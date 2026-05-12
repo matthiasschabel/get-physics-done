@@ -11,6 +11,13 @@ Defer execution-reference, checkpoint, recovery, and summary-schema loads until 
 
 <process>
 
+<step name="tangent_control">
+If execution produces a bounded stop for possible side work, return it in the
+same execution payload as a new event family with `tangent_summary` and
+`tangent_decision`. Use the existing `execution` payload shape. Do not
+auto-branch or start side work from telemetry alone.
+</step>
+
 <step name="init_context" priority="first">
 Load the bootstrap execution context using the staged init payload:
 
@@ -210,11 +217,11 @@ Read checkpoint declarations from the selected PLAN and merge virtual boundaries
 
 **Pattern A:** spawn one `gpd-executor` for the selected plan, all tasks, SUMMARY, completion commit, and a structured return envelope. The child must load conventions, rerun plan preflight before substantive execution, follow `execute-plan-validation.md`, and receive `<autonomy_mode>{AUTONOMY}</autonomy_mode>`, `<review_cadence>{REVIEW_CADENCE}</review_cadence>`, and `<bounded_execution>false</bounded_execution>` only for genuinely low-risk short plans.
 
-**If the executor agent fails to spawn or returns an error (Pattern A):** Pattern A child artifact gate requires a fresh summary, declared deliverables, valid child `gpd_return`, non-failing self-check/validation markers, and `gpd apply-return-updates` for durable updates. Check `git log --oneline -3` only for partial evidence. Commits or output files do not prove success without the gate. If the return envelope is missing or invalid, keep the child handoff incomplete and offer: 1) Retry executor, 2) Pattern C main-context execution with its own return, 3) Abort. Mark tracking failed with details.
+**Pattern A failure:** load `execute-plan-recovery.md` child handoff recovery. Commits or output files do not prove success without the gate. If the return envelope is missing or invalid, keep the child handoff incomplete and retry, use explicit Pattern C main-context fallback, or abort.
 
 **Pattern B:** Execute segment-by-segment. Non-interactive segments spawn a child for assigned tasks only (no SUMMARY/commit). Checkpoints remain in the main context. After all segments: aggregate, create SUMMARY, apply return updates, and commit.
 
-**If a segment executor fails to spawn or returns an error (Pattern B):** Pattern B/D child artifact gate requires fresh segment outputs, aggregator summary, valid typed return data, aggregator gate, non-failing self-check/validation markers, and final-summary return updates. Treat output files as partial evidence. If the envelope is missing or invalid, retry or use explicit main-context fallback; otherwise offer skip/continue as an incomplete segment. Record the failure in agent tracking.
+**Pattern B/D failure:** load `execute-plan-recovery.md` child handoff recovery. Segment outputs and git commits are partial evidence only until the fresh artifact gate, typed return, and applicator pass succeed.
 
 **Pattern C:** Execute in main using standard flow (step name="execute").
 
@@ -290,7 +297,7 @@ If `selected_protocol_bundle_ids` is non-empty, treat `protocol_bundle_load_mani
 
 Use `reference_artifacts_content` only here, when the segment actually needs to interpret prior outputs, baselines, or unresolved gaps. Stable knowledge docs may be present in that content as reviewed background, but they do not override the contract, conventions, or decisive evidence requirements.
 
-Read these references using the file_read tool only when their topic is active in segment execution: {GPD_INSTALL_DIR}/references/execution/git-integration.md, {GPD_INSTALL_DIR}/references/execution/github-lifecycle.md, {GPD_INSTALL_DIR}/references/execution/execute-plan-recovery.md, {GPD_INSTALL_DIR}/references/execution/execute-plan-validation.md, {GPD_INSTALL_DIR}/references/execution/execute-plan-checkpoints.md, {GPD_INSTALL_DIR}/references/execution/executor-task-checkpoints.md, {GPD_INSTALL_DIR}/references/execution/executor-completion.md, {GPD_INSTALL_DIR}/references/execution/executor-index.md, {GPD_INSTALL_DIR}/references/protocols/reproducibility.md, {GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md, {GPD_INSTALL_DIR}/references/orchestration/context-budget.md, {GPD_INSTALL_DIR}/references/orchestration/checkpoints.md, {GPD_INSTALL_DIR}/templates/summary.md, {GPD_INSTALL_DIR}/templates/calculation-log.md, {GPD_INSTALL_DIR}/templates/recovery-plan.md.
+Use `{GPD_INSTALL_DIR}/references/execution/executor-index.md` as the topic-to-reference map and load only the row needed for active segment work. High-risk exceptions stay explicit: `execute-plan-recovery.md`, `execute-plan-validation.md`, `execute-plan-checkpoints.md`, `{GPD_INSTALL_DIR}/references/orchestration/context-budget.md`, `{GPD_INSTALL_DIR}/references/orchestration/checkpoints.md`, `{GPD_INSTALL_DIR}/templates/summary.md`, and `{GPD_INSTALL_DIR}/templates/recovery-plan.md`.
 
 When following GitHub lifecycle examples, substitute the repository's actual default branch and remote names for `<default-branch>` and `<remote-name>`; those placeholders are not literal branch or remote names.
 </step>
@@ -301,22 +308,11 @@ Deviations are normal -- handle via deviation rules in `execute-plan-validation.
 1. Read @context files from prompt
 2. Per task:
    - `type="auto"`: Execute derivation/calculation/simulation. Verify done criteria including dimensional checks. Commit using `executor-task-checkpoints.md`. Track hashes for SUMMARY.
-     **Required first-result sanity gate:** At the earliest of (a) first quantitative result, (b) first derived core equation, (c) first produced artifact, (d) first benchmark-style comparison, or (e) two completed auto tasks, stop and check:
-     - which claim, deliverable, or acceptance test would this result unlock if it held up?
-     - is this a load-bearing result or only a proxy?
-     - did one quick sanity/benchmark/convention check already pass?
-     - which decisive comparison, benchmark anchor, or user-visible acceptance-test result is still missing?
-     - if decisive evidence is still missing, what is the disconfirming observation that would most quickly break the current framing?
-
-     Record gate-enter and gate-clear events through the execution observability stream using `execution.checkpoint_reason` values `first_result`, `skeptical_requestioning`, and `pre_fanout`. Required first-result fields are `review_cadence`, `first_result_ready`, `first_result_gate_pending`, and `current_task`. If the same bounded stop surfaces a tangent, keep optional `tangent_summary` / `tangent_decision` fields on the same execution payload. Do not auto-branch or create a new event family; keep tangent telemetry on the existing `execution` payload, because telemetry alone never creates side work.
-
-     If the first result is proxy-only, benchmark-thin, or otherwise lacks the decisive evidence the contract still owes, strengthen the same stop into skeptical review with `skeptical_requestioning_required`, `skeptical_requestioning_summary`, `weakest_unchecked_anchor`, `disconfirming_observation`, and `downstream_locked`. Resolve it with an explicit `skeptical_requestioning` clear; a first-result clear does not retire skeptical state.
-
-     Before any downstream dependent tasks or fanout continue, emit a pre-fanout lock and gate whenever later work would rely on this result as if decisive evidence already existed. The pre-fanout payload carries `pre_fanout_review_pending`, `downstream_locked`, and `last_result_label`. Only after review is accepted should execution record both the reason-scoped `pre_fanout` gate clear and the matching fanout unlock; neither transition implies the other. A `pre_fanout` clear must not wipe skeptical fields implicitly.
+     **Required first-result sanity gate:** At the earliest of first quantitative result, derived core equation, produced artifact, benchmark-style comparison, or two completed auto tasks, stop and ask whether this result is load-bearing, proxy-only, already sanity-checked, still missing decisive evidence, or vulnerable to a disconfirming observation. Load `execute-plan-checkpoints.md` for the full first-result, skeptical re-questioning, and pre-fanout payload protocol. Keep reason-scoped clears: `first_result`, `skeptical_requestioning`, and `pre_fanout` do not clear each other.
 
      **Supervised mode post-task checkpoint:** If `AUTONOMY="supervised"`, insert a `checkpoint:human-verify` after EVERY completed task. Emit the checkpoint return with the task result and all intermediate values; the orchestrator owns presentation and approval through the checkpoint protocol before any next task is accepted. Every such `checkpoint:human-verify` uses the `[Y/n/e]` idiom with a one-line summary (see `{GPD_INSTALL_DIR}/references/orchestration/checkpoint-ux-convention.md`).
 
-     **Clean-wave batching under dense:** when `AUTONOMY="supervised"` AND `review_cadence=dense` AND every task in the wave completed with no deviation (no `deviation` trace events, every `verification-complete` event has typed payload `verification.status="passed"` and `verification.issue_count=0`, no `first_result` / `pre_fanout` / `skeptical` gate pending, and the return envelope carries `status="completed"` with empty `issues`), collapse the per-task `checkpoint:human-verify` emissions into one batch "Approve tasks {N..M} as clean pass? `[Y/n/e]`" presented after the last task in the wave. Do not parse prose such as "failure language" to decide batching eligibility. On `Y` / Enter, all batched tasks are accepted at once; on `n`, the batch is rejected and each task's per-task checkpoint is re-presented individually for review; on `e`, the user opens freeform for per-task notes. If ANY task in the wave emits a deviation, fails verification, omits the typed verification outcome, or trips a required gate, the wave immediately reverts to per-task checkpoints for the remaining tasks — no partial batching.
+     **Clean-wave batching under dense:** allowed only when supervised+dense, no deviations, every verification event has typed payload `verification.status="passed"` and `verification.issue_count=0`, no required gate is pending, and the return envelope has `status="completed"` with empty `issues`. Do not parse prose such as "failure language" to decide batching eligibility. If any task emits a deviation, fails verification, omits the typed verification outcome, or trips a required gate, revert to per-task checkpoints. See `execute-plan-checkpoints.md` for `[Y/n/e]` batch behavior.
    - `type="checkpoint:*"`: Route by autonomy mode:
      - **supervised:** STOP -> checkpoint protocol (see `execute-plan-checkpoints.md`) -> return structured checkpoint state to the orchestrator. The orchestrator presents the checkpoint and continues only through that protocol.
      - **balanced:** Stop for `checkpoint:decision`, `checkpoint:human-verify`, required first-result gates, any checkpoint tied to deviation rules 5-6 or unresolved convergence failure, and any case where decisive evidence is still missing but the next tasks would assume it. Log routine checkpoint markers and continue when no judgment is needed.
@@ -437,17 +433,14 @@ gpd_return:
     record_metric:
       phase: "${phase}"
       plan: "${plan}"
-      duration: "${DURATION}"
-      tasks: "${TASK_COUNT}"
-      files: "${FILE_COUNT}"
   contract_updates:
     plan_contract_ref: "GPD/phases/${phase_dir_name}/${phase}-${plan}-PLAN.md#/contract"
     contract_results:
-      claim:mass-gap-estimate:
+      claim:example:
         status: satisfied
         evidence: "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md#key-results"
     comparison_verdicts:
-      - subject_id: "acceptance-test:mass-gap-benchmark"
+      - subject_id: "acceptance-test:example"
         verdict: inconclusive
         evidence: "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md#validation-events"
     contract_completion_status: partial
@@ -470,15 +463,14 @@ gpd_return:
   files_written:
     - "GPD/phases/${phase_dir_name}/${phase}-${plan}-SUMMARY.md"
   issues:
-    - "Blocker description"
+    - "Blocker"
   next_actions:
-    - "Resolve blocker before continuing downstream execution."
+    - "Resolve before downstream execution."
   decisions:
     - phase: "${phase}"
       summary: "${DECISION_TEXT}"
-      rationale: "${RATIONALE}"
   blockers:
-    - text: "Blocker description"
+    - text: "Blocker"
 ```
 
 **Exception:** Pattern C applies directly through the same applicator:
@@ -502,7 +494,6 @@ gpd_return:
   continuation_update:
     handoff:
       stopped_at: "Completed ${phase}-${plan}-PLAN.md"
-      resume_file: null
     bounded_segment: null
 ```
 

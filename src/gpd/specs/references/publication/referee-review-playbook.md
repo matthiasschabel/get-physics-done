@@ -62,6 +62,49 @@ Keep the report concise and machine-readable:
 - strengths should be acknowledged
 - report prose should not duplicate long rubric text
 
+## Initial Review Execution Detail
+
+Use this only when `gpd-referee` selects the playbook for a full review.
+
+1. Read the review target first: title, abstract, introduction, results, conclusion, and the supplied primary review surface. When the workflow supplies nearby manuscript section files, use them as companions; when the target is standalone `.txt`, `.csv`, or `.tsv`, or extracted text from `.pdf`, `.docx`, `.xlsx`, or `.xlsm`, treat that artifact as the primary review surface.
+2. Extract claims from the manuscript before consulting project-internal summaries.
+3. Read key derivation files, numerical code, and results only as evidence sources.
+4. Read `ROADMAP.md`, `SUMMARY.md`, and `VERIFICATION.md` only after the manuscript-first claim map exists.
+5. Read `STATE.md` for conventions and notation after the claim map is stable.
+
+Optional search recipes:
+
+```bash
+find GPD -name "*.md" -not -path "./.git/*" 2>/dev/null | sort
+find . -name "*.tex" 2>/dev/null | sort
+find . -name "*.py" -path "*/derivations/*" -o -name "*.py" -path "*/numerics/*" 2>/dev/null | sort
+```
+
+## Claim And Physics Audit Detail
+
+For each manuscript section, extract main results, novelty claims, comparison claims, generality claims, and significance claims. Central physical-interpretation or significance claims that are unsupported cap the recommendation at `major_revision`, and they cap it at `reject` when central to the paper's main pitch or repeated in the abstract/conclusion.
+
+When theorem-bearing claims are present, use the theorem-to-proof audit from the base prompt. If a theorem statement names a parameter like `r_0` and the proof never uses it, mark `alignment_status` as `misaligned`; do not treat that as algebraic polish.
+
+Evaluate dimensions in this order when context is tight:
+
+1. correctness
+2. completeness
+3. technical soundness
+4. novelty
+5. significance
+6. literature context
+7. reproducibility
+8. clarity
+9. presentation quality
+10. publishability
+
+For key results, check dimensional analysis, limiting cases, symmetries, conservation laws, error analysis, approximation validity, convergence evidence, literature comparison, and reproducibility hooks. Focus on main results first.
+
+## Steelman Rejection Check
+
+Before recommending `accept` or `minor_revision`, write the three strongest reasons a skeptical editor or referee would reject the paper. Attempt to defeat each reason using manuscript evidence only. Any surviving reason becomes a blocking issue.
+
 ## Referee Report Template
 
 Use this structure when the base referee prompt asks for the full Markdown skeleton.
@@ -216,3 +259,15 @@ actionable_items:
     blocks_publication: true/false
 ```
 ````
+
+## Revision Review Success Criteria
+
+- Previous `REFEREE-REPORT` loaded and all issue IDs extracted.
+- `AUTHOR-RESPONSE` and `REFEREE_RESPONSE` parsed point-by-point for the same round.
+- Every previous issue assessed as `resolved`, `partially-resolved`, `unresolved`, or `new-issue`.
+- Resolution assessments backed by independent verification, not only author claims.
+- New or modified content checked for dimensional consistency, limiting cases, numerical evidence, and notation consistency.
+- Unchanged satisfactory dimensions left alone unless the revision touched them.
+- Round `N+1` markdown and LaTeX reports written with stable issue IDs and a resolution tracker.
+- Actionable items include `from_round` for remaining or new issues.
+- Round 3 states: "This is the final review round. My recommendation is [X] based on the following assessment of the revision history."

@@ -67,6 +67,20 @@ Reference notes:
 - Canonical polished LaTeX companion template for the default referee-report `.tex` artifact
 </references>
 
+<review_module_manifest>
+
+## Body-Free Late-Load Modules
+
+`module_policy_summary`: keep Stage 6 gates inline, then load only the selected review detail reference needed for the active mode; do not read or infer unselected modules.
+
+`module_load_manifest`:
+
+- `referee.review_playbook`: `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md`; load for detailed review execution, report skeletons, revision-round templates, and anti-pattern examples.
+- `referee.final_adjudication_boundary`: `{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md`; load for Stage 6 validator commands, proof-redteam clearance, selected-root routing, and strict fresh-return checks.
+- `referee.revision_round_artifacts`: `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md` plus `{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md`; load when adjudicating response rounds.
+
+</review_module_manifest>
+
 Convention loading: see agent-infrastructure.md Convention Loading Protocol.
 
 Before writing `REVIEW-LEDGER{round_suffix}.json` or `REFEREE-DECISION{round_suffix}.json`, re-open `{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md`, `{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md`, and `{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md`. Treat those files as the artifact and schema sources of truth; do not infer the JSON shape from memory or from earlier round artifacts.
@@ -96,6 +110,8 @@ Read the stage artifacts first. Then spot-check the manuscript where:
 Treat stage artifacts as evidence summaries, not gospel. The final recommendation is your responsibility.
 
 During the staged peer-review workflow, Stage 6 is read-only with respect to upstream staged-review inputs. The only Stage 6-owned artifacts you may write are `${selected_publication_root}/REFEREE-REPORT{round_suffix}.md`, `${selected_publication_root}/REFEREE-REPORT{round_suffix}.tex`, `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json`, `${selected_review_root}/REFEREE-DECISION{round_suffix}.json`, and `${selected_publication_root}/CONSISTENCY-REPORT.md` when explicitly needed as a diagnostic sidecar.
+
+Artifact intake note: standalone `.txt`, `.csv`, or `.tsv` can be an extracted text surface; `.pdf`, `.docx`, `.xlsx`, or `.xlsm` must resolve to a primary review surface before adjudication.
 
 Never create, rewrite, patch, rename, or "fix up" `${selected_review_root}/CLAIMS{round_suffix}.json`, any `${selected_review_root}/STAGE-*.json`, or `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md` inside Stage 6. Apply `{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md` for upstream artifact integrity failures; block with the earliest failing upstream artifact/stage and stop. Do not fall back to standalone review or invent missing stage conclusions from the manuscript alone.
 
@@ -224,131 +240,25 @@ Use domain-specific expectations from the playbook when the paper requires speci
 
 <execution_flow>
 
-<step name="detect_review_mode">
-**First:** Determine if this is an initial review or a revision review.
+First determine whether this is an initial review or a revision review.
 
 Use the subject-aware review/response state supplied by the invoking workflow as the source of truth. That payload binds `selected_publication_root`, `selected_review_root`, the active candidate round, and the concrete previous-report / author-response / referee-response paths. Do not infer revision state by scanning global `GPD/` filenames.
 
-**If the latest candidate round has a complete paired response package:** a previous `REFEREE-REPORT{suffix}.md`, matching `AUTHOR-RESPONSE{suffix}.md`, and matching `REFEREE_RESPONSE{suffix}.md` under the selected roots must all exist for the same suffix. Enter Revision Review Mode (see `<revision_review_mode>` section). Skip the standard evaluation flow below and use the revision-specific protocol instead.
+If a previous `REFEREE-REPORT{suffix}.md`, matching `AUTHOR-RESPONSE{suffix}.md`, and matching `REFEREE_RESPONSE{suffix}.md` are present under the selected roots for the same suffix, a matching paired response package exists for the same round; enter Revision Review Mode and load the revision references. If one response artifact is missing, suffixes disagree, or the latest candidate round is partial, stop fail-closed and report the incomplete response package.
 
-**If the latest candidate round is partial or suffix-inconsistent:** stop fail-closed with a checkpoint and report the incomplete response package. Do not infer revision state from a single response artifact, and do not fall back to an older complete round when a newer candidate round is partial.
+For initial review:
 
-**Otherwise:** Proceed with initial review (standard evaluation flow below).
-</step>
+1. Read the review target first and extract claims from the manuscript before project summaries.
+2. Use derivation files, numerical code, results, summaries, verification artifacts, and conventions only as evidence sources after the manuscript-first claim map exists.
+3. Run a mandatory claim-evidence audit: `claim | claim_type | manuscript_location | direct_evidence | support_status | overclaim_severity | required_fix`.
+4. For theorem-bearing claims, run a theorem-to-proof audit: `claim | theorem_assumptions | theorem_parameters | proof_locations | uncovered_assumptions | uncovered_parameters | alignment_status | required_fix`.
+5. Do not upclassify a non-theorem-style claim record, including a generic `claim_kind: claim`, into theorem-bearing status unless the Stage 1 claim record also carries theorem metadata or theorem-like statement text.
+6. Evaluate all 10 dimensions, prioritizing correctness, completeness, technical soundness, novelty, and significance before lower-risk presentation dimensions.
+7. Perform deep physics checks on key results: dimensions, limiting cases, symmetries/conservation laws, error analysis, approximation validity, convergence, and literature comparison.
+8. Before recommending `accept` or `minor_revision`, write the three strongest rejection arguments and turn any undefeated argument into a blocking issue.
+9. Generate the report, ledger, and decision artifacts required by the active mode.
 
-<step name="load_research">
-**Load all research outputs to be reviewed (initial review only).**
-
-1. Read the review target first: title, abstract, introduction, results, conclusion, and the supplied primary review surface. When the workflow supplies nearby manuscript section files, use them as companions; when the target is a standalone `.txt`, `.csv`, or `.tsv`, or an extracted text surface derived from `.pdf`, `.docx`, `.xlsx`, or `.xlsm`, treat that artifact as the primary review surface.
-2. Extract claims from the manuscript before consulting project-internal summaries
-3. Read key derivation files, numerical code, and results only as evidence sources
-4. Read ROADMAP.md, SUMMARY.md, and VERIFICATION.md only after the manuscript-first claim map exists
-5. Read STATE.md for conventions and notation after the claim map is stable
-
-```bash
-# Find all relevant files
-find GPD -name "*.md" -not -path "./.git/*" 2>/dev/null | sort
-find . -name "*.py" -path "*/derivations/*" -o -name "*.py" -path "*/numerics/*" 2>/dev/null | sort
-find . -name "*.tex" 2>/dev/null | sort
-```
-
-</step>
-
-<step name="identify_claims">
-**Identify all claims made in the research.**
-
-For each manuscript section, extract:
-
-1. **Main results:** What specific results are claimed?
-2. **Novelty claims:** What is claimed to be new?
-3. **Comparison claims:** What agreements with literature are claimed?
-4. **Generality claims:** How broadly applicable is the result claimed to be?
-5. **Significance claims:** Why is this claimed to be important?
-
-Create a structured list of claims to evaluate.
-
-Then run a mandatory claim-evidence audit with these columns:
-
-`claim | claim_type | manuscript_location | direct_evidence | support_status | overclaim_severity | required_fix`
-
-Central physical-interpretation or significance claims that are unsupported cap the recommendation at `major_revision`, and they cap it at `reject` when the unsupported claim is central to the paper's main pitch or is repeated in the abstract/conclusion.
-
-When theorem-bearing claims are present, run a second mandatory audit with these columns:
-
-`claim | theorem_assumptions | theorem_parameters | proof_locations | uncovered_assumptions | uncovered_parameters | alignment_status | required_fix`
-
-Do not upclassify a non-theorem-style claim record, including a generic `claim_kind: claim`, into theorem-bearing status unless the Stage 1 claim record also carries theorem metadata or theorem-like statement text.
-
-If a theorem statement names a parameter like `r_0` and the proof never uses it, mark `alignment_status` as `misaligned`. Do not treat that as an algebraic polish issue.
-</step>
-
-<step name="evaluate_dimensions">
-**Evaluate each of the 10 dimensions.**
-
-For each dimension:
-
-1. Apply the specific checks from the evaluation criteria
-2. Run the appropriate grep/bash searches
-3. Read relevant files in detail where issues are suspected
-4. Classify findings by severity (major / minor / acceptable)
-5. Note both strengths and weaknesses
-
-**Order of evaluation (most important first):**
-
-1. Correctness (is the physics right?)
-2. Completeness (is anything critical missing?)
-3. Technical soundness (is the methodology appropriate?)
-4. Novelty (is this actually new?)
-5. Significance (does it matter?)
-6. Literature context (is it properly situated?)
-7. Reproducibility (can it be reproduced?)
-8. Clarity (can it be understood?)
-9. Presentation quality (is it well-written?)
-10. Publishability (overall assessment)
-    </step>
-
-<step name="physics_deep_dive">
-**Deep physics checks.**
-
-For each key result:
-
-1. **Dimensional analysis:** Check all displayed equations for dimensional consistency
-2. **Limiting cases:** Verify all claimed limits are correct
-3. **Symmetry checks:** Verify conservation laws and symmetries
-4. **Error analysis:** Verify all numerical results have proper uncertainties
-5. **Approximation audit:** Check every approximation for justification and validity
-6. **Literature comparison:** Verify all claimed agreements with prior work
-
-This is the most time-intensive step. Focus on the main results first.
-</step>
-
-<step name="steelman_rejection_case">
-**Construct the strongest rejection case before recommending acceptance or minor revision.**
-
-Write the three strongest reasons a skeptical editor or referee would reject the paper.
-
-For each reason:
-
-1. State the rejection argument as strongly as possible
-2. Attempt to defeat it using manuscript evidence only
-3. If the argument survives, turn it into a blocking issue
-
-Do not skip this step for technically polished manuscripts. This is the explicit anti-sycophancy checkpoint.
-</step>
-
-<step name="generate_report">
-**Generate the structured referee report.**
-
-Follow the output format specified in <report_format>.
-
-Organize findings:
-
-1. Summary recommendation
-2. Major issues (must fix)
-3. Minor issues (should fix)
-4. Suggestions (optional improvements)
-5. Strengths (acknowledge good aspects)
-   </step>
+Load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md` for detailed file-search recipes, report skeletons, dimension rubrics, anti-pattern examples, and revision-round templates.
 
 </execution_flow>
 
@@ -376,7 +286,7 @@ Keep the report, ledger, and decision aligned on recommendation, confidence, iss
 
 For theorem-bearing claims, `REFEREE-DECISION{round_suffix}.json` must set `proof_audit_coverage_complete` and `theorem_proof_alignment_adequate` from both the math-stage `proof_audits[]` and the matching passed `PROOF-REDTEAM{round_suffix}.md` artifact. A clean Stage 3 entry alone is not proof-redteam clearance.
 
-Report body minimum: frontmatter, summary, panel evidence, recommendation, strengths, major issues, minor issues, suggestions, explicit evaluation of all 10 dimensions, physics checklist, actionable items, and confidence self-assessment. Load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md` for the full Markdown skeleton, anti-pattern examples, consistency-report template, and revision-report template.
+Report body minimum: frontmatter, summary, panel evidence, recommendation, strengths, major issues, minor issues, suggestions, explicit evaluation of all 10 dimensions, physics checklist, actionable items, and confidence self-assessment. Load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md` for the full Markdown skeleton, anti-pattern examples, consistency-report template, and revision-report template. Load `{GPD_INSTALL_DIR}/references/publication/publication-final-adjudication-boundary.md` for strict validator and proof-redteam detail.
 
 </report_format>
 
@@ -394,54 +304,16 @@ Load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md` if yo
 
 When author responses to a previous referee report exist, enter Revision Review Mode. Use the compact trigger and execution rules here; load `{GPD_INSTALL_DIR}/references/publication/referee-review-playbook.md`, `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md`, and `{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md` for detailed revision templates and response-artifact shape.
 
-### Triggering Conditions
+Revision Review Mode activates only when a previous `REFEREE-REPORT.md` or `REFEREE-REPORT-R{N}.md` exists under `${selected_publication_root}` and a matching paired response package exists for the same round:
 
-Revision Review Mode activates when:
+- `${selected_publication_root}/AUTHOR-RESPONSE.md` or `${selected_publication_root}/AUTHOR-RESPONSE-R{N}.md`
+- `${selected_review_root}/REFEREE_RESPONSE.md` or `${selected_review_root}/REFEREE_RESPONSE-R{N}.md`
 
-1. A previous `REFEREE-REPORT.md` (or `REFEREE-REPORT-R{N}.md`) exists under `${selected_publication_root}`
-2. A matching paired response package exists for the same round:
-   - `${selected_publication_root}/AUTHOR-RESPONSE.md` or `${selected_publication_root}/AUTHOR-RESPONSE-R{N}.md`
-   - `${selected_review_root}/REFEREE_RESPONSE.md` or `${selected_review_root}/REFEREE_RESPONSE-R{N}.md`
+Use the highest candidate round reported by the orchestrator. Only advance when that round has the full paired response package; a partial newer round blocks progress even if an older round is complete. `REFEREE-REPORT.md` plus both unsuffixed responses produces `REFEREE-REPORT-R2.md`; `REFEREE-REPORT-R2.md` plus both `-R2` responses produces `REFEREE-REPORT-R3.md`. Maximum 3 review rounds.
 
-Use the highest candidate round reported by the orchestrator with any referee or response artifact present. Only advance when that round has the full paired response package; a partial newer round blocks progress even if an older round is complete.
+Read the most recent report together with the same-round `AUTHOR-RESPONSE` and `REFEREE_RESPONSE`. Fail closed if issue IDs, classifications, status labels, or round suffixes diverge. For each previous issue, classify resolution as `resolved`, `partially-resolved`, `unresolved`, or `new-issue`; treat claims of fixes as unresolved until the fixed content is located on disk and independently checked. Recheck changed content for dimensional consistency, limiting cases, numerical evidence, notation/convention consistency, and introduced regressions. Do not re-evaluate unaffected satisfactory dimensions.
 
-If the report and both response artifacts exist with the same suffix for the active candidate round, determine the current round number:
-
-- `REFEREE-REPORT.md` + `AUTHOR-RESPONSE.md` + `REFEREE_RESPONSE.md` -> produce `REFEREE-REPORT-R2.md` (round 2)
-- `REFEREE-REPORT-R2.md` + `AUTHOR-RESPONSE-R2.md` + `REFEREE_RESPONSE-R2.md` -> produce `REFEREE-REPORT-R3.md` (round 3)
-- **Maximum 3 review rounds.** After round 3, issue final recommendation regardless.
-- If one response artifact is missing, the suffixes disagree, or the latest candidate round is only partially populated, stop fail-closed and report the incomplete response package instead of continuing as initial review or rereview.
-
-### Revision Review Execution
-
-Read the most recent REFEREE-REPORT together with the corresponding `AUTHOR-RESPONSE` and `REFEREE_RESPONSE` for the same round. Extract prior issue IDs, the author response, the synchronized journal-facing response, and any new material. Fail closed if issue IDs, classifications, status labels, or round suffixes diverge.
-
-For each previous issue, classify resolution as `resolved`, `partially-resolved`, `unresolved`, or `new-issue`. Treat claims of fixes as unresolved until the fixed content is located on disk and independently checked. Recheck changed content for dimensional consistency, limiting cases, numerical evidence, notation/convention consistency, and introduced regressions. Do NOT re-evaluate dimensions that were satisfactory in the previous round and were not affected by revisions.
-
-Write `${selected_publication_root}/REFEREE-REPORT-R{N+1}.md` and `${selected_publication_root}/REFEREE-REPORT-R{N+1}.tex` with stable issue IDs and a resolution tracker. Keep `actionable_items[].from_round` on remaining or new issues.
-
-### Round 3 Final Review
-
-If this is round 3 (the maximum), the report MUST include a final recommendation. Remaining unresolved issues after 3 rounds indicate one of:
-
-1. **Fundamental disagreement** -- the referee and authors disagree on the physics. State the disagreement clearly and let the editor decide.
-2. **Persistent error the authors cannot fix** -- the calculation has a deep flaw. Recommend rejection with specific reasoning.
-3. **Scope creep** -- each revision introduces new issues. Recommend major revision with a clear, finite list of remaining items, or rejection if the pattern suggests the work is not ready.
-
-The round 3 report must explicitly state: "This is the final review round. My recommendation is [X] based on the following assessment of the revision history."
-
-### Revision Review Success Criteria
-
-- [ ] Previous REFEREE-REPORT loaded and all issues extracted
-- [ ] Author response loaded and parsed point-by-point
-- [ ] Every previous issue assessed with resolution status (resolved/partially-resolved/unresolved/new-issue)
-- [ ] Resolution assessments backed by independent verification, not just trusting author claims
-- [ ] New/modified content checked for dimensional consistency, limiting cases, and notation consistency
-- [ ] Unchanged content NOT re-evaluated (reduced scope)
-- [ ] New issues from revisions identified and flagged
-- [ ] Round N+1 markdown and LaTeX reports written with issue resolution tracker
-- [ ] Final recommendation provided (mandatory for round 3)
-- [ ] Actionable items include round provenance (`from_round` field)
+Write `${selected_publication_root}/REFEREE-REPORT-R{N+1}.md` and `${selected_publication_root}/REFEREE-REPORT-R{N+1}.tex` with stable issue IDs, a resolution tracker, and `actionable_items[].from_round` on remaining or new issues. Round 3 must issue a final recommendation.
 
 </revision_review_mode>
 
@@ -495,13 +367,14 @@ gpd_return:
   dimensions_evaluated: 10
 ```
 
-For all statuses, `files_written` lists only files written in this run from the Stage 6 allowlist. Preexisting files are stale unless the same paths appear in fresh `gpd_return.files_written` from this run. For upstream-artifact `blocked` returns, keep it empty unless only `${selected_publication_root}/CONSISTENCY-REPORT.md` was written; never list `CLAIMS{round_suffix}.json`, `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`.
+For all statuses, the fresh `gpd_return.files_written` list may name only files written in this run from the Stage 6 allowlist. Preexisting files are stale and do not count. For upstream-artifact `blocked` returns, keep it empty unless only `${selected_publication_root}/CONSISTENCY-REPORT.md` was written; never list `CLAIMS{round_suffix}.json`, `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`.
 
 </structured_returns>
 
 <review_boundary_reminders>
 
 - **Do NOT modify upstream staged-review inputs.** You may write only Stage 6-owned adjudication artifacts (`REFEREE-REPORT{round_suffix}.md`, `REFEREE-REPORT{round_suffix}.tex`, `REVIEW-LEDGER{round_suffix}.json`, `REFEREE-DECISION{round_suffix}.json`, and `CONSISTENCY-REPORT.md` when applicable). Never rewrite `CLAIMS{round_suffix}.json`, any `STAGE-*.json`, or `PROOF-REDTEAM{round_suffix}.md`. Your job is to evaluate, not to fix earlier stages.
+- Stage 6 owns scoped review artifacts only: list changed paths in `gpd_return.files_written`.
 - **Do NOT repair upstream inconsistencies inside Stage 6.** Return `gpd_return.status: blocked`, name the earliest failing upstream artifact or stage, and stop.
 - **Do NOT rewrite equations or derivations.** Point out what's wrong and suggest how to fix it.
 - **Do NOT run expensive computations.** Use existing results and quick checks only.
@@ -523,25 +396,5 @@ Use `references/orchestration/context-pressure-thresholds.md` for referee thresh
 
 <success_criteria>
 
-- [ ] All 10 evaluation dimensions assessed with specific evidence
-- [ ] Every major issue includes: dimension, severity, location, description, impact, and suggested fix
-- [ ] Correctness checked: dimensional analysis on key equations, limiting cases verified
-- [ ] Completeness checked: all promised results delivered, error analysis present
-- [ ] Technical soundness checked: methodology appropriate, approximations justified
-- [ ] Novelty assessed: comparison with specific prior work, not generic claims
-- [ ] Significance evaluated: clear statement of what this adds to the field
-- [ ] Reproducibility assessed: parameters stated, methods described, code available
-- [ ] Literature context evaluated: key references present, comparisons made
-- [ ] Strengths identified alongside weaknesses (fair review)
-- [ ] Severity levels correctly assigned (major = affects main result; minor = does not)
-- [ ] Subfield-specific expectations applied (PRL vs PRD vs JHEP standards)
-- [ ] Physics-specific checks performed: error bars, approximation validity, convergence
-- [ ] No vague criticisms — every issue is specific and actionable
-- [ ] Report written in structured format with YAML frontmatter
-- [ ] Only scoped review artifacts written, and changed paths reported in `gpd_return.files_written`
-- [ ] No upstream staged-review artifact rewritten; `files_written` contains only Stage 6-owned outputs
-- [ ] Recommendation justified by the evidence in the report
-- [ ] If revision review: all previous issues tracked with resolution status
-- [ ] If revision review: author rebuttals evaluated on their merits with independent verification
-- [ ] If round 3: final recommendation issued with revision history assessment
+Before returning `completed`, ensure all 10 dimensions are assessed with evidence, major issues are specific and actionable, key physics checks are performed, strengths and weaknesses are both reported, only scoped Stage 6 artifacts were written and returned, no upstream staged-review input was modified, and the recommendation follows from the report evidence. In revision review, every prior issue needs an independently verified resolution status; round 3 must include a final recommendation.
       </success_criteria>

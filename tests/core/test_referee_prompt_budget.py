@@ -40,9 +40,15 @@ def test_gpd_referee_prompt_keeps_publication_path_mentions_without_eager_schema
     assert "templates/paper/referee-decision-schema.md" in referee
     assert "templates/paper/referee-report.tex" in referee
     assert "full Markdown skeleton" in referee
+    assert "referee.review_playbook" in referee
+    assert "referee.final_adjudication_boundary" in referee
+    assert "Initial Review Execution Detail" in playbook
+    assert "Claim And Physics Audit Detail" in playbook
+    assert "Revision Review Success Criteria" in playbook
     assert "Referee Report Template" in playbook
     assert "Anti-Pattern Examples" in playbook
     assert "Revision Report Template" in playbook
+    assert "find GPD -name" not in referee
     assert "Referee Report Template" not in referee
     assert "Anti-Pattern Examples" not in referee
     assert "Revision Report Template" not in referee

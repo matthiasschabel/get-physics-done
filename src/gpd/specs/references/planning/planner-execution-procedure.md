@@ -20,6 +20,22 @@ planning run.
    methods, computational patterns, known results, pitfalls, and recommended
    approximations.
 
+## User Decision Fidelity
+
+Before creating tasks, classify phase discussion content:
+
+- Locked decisions must be implemented exactly. Examples include natural units
+  versus SI, Coulomb versus Lorenz gauge, perturbative order, lattice versus
+  continuum method, or Euclidean versus Lorentzian signature.
+- Deferred ideas must not become tasks, optional subtasks, or hidden extensions.
+  Examples include finite-temperature extensions, higher-loop corrections, or
+  relativistic generalizations explicitly set aside by the user.
+- Agent discretion permits standard choices only when they stay inside the
+  approved contract. Record the choice and rationale in task actions.
+
+If a locked decision conflicts with literature or a default, honor the locked
+decision and note the alternative as context, not as a plan branch.
+
 ## Optional Context Triage
 
 Check optional files before reading them. Prefer relevant recent content over
@@ -108,3 +124,32 @@ specialized tool declarations before returning success.
 Default spawned mode is return-only for shared state. Prepare roadmap updates as
 structured `gpd_return.roadmap_updates` instead of writing `GPD/ROADMAP.md`
 unless the invoking workflow explicitly delegates roadmap ownership.
+
+## Completion Checklists
+
+Standard planning is complete when:
+
+- `STATE.md`, `ROADMAP.md`, current phase context, and needed prior SUMMARYs are
+  read.
+- Conventions and approximations are inherited or established before task
+  decomposition.
+- Mandatory discovery level is handled and recorded.
+- Tasks are grouped by dependency waves rather than narrative sequence.
+- Each PLAN uses the loaded `phase-prompt.md` and contract schema.
+- Each task has type, files when applicable, action, verify, and done fields.
+- Verification includes physics checks such as dimensions, limits, conservation,
+  convergence, or symmetry.
+- `researcher_setup` and `tool_requirements` are present when needed.
+- Plan-preflight passes and fresh PLAN files are committed if this run owns the
+  commit.
+- The return includes files, wave count, plan summaries, roadmap updates, and
+  next action.
+
+Gap closure is complete when:
+
+- `VERIFICATION.md` or `REVIEW.md` evidence is loaded and gaps are parsed.
+- Gaps are categorized by physics type and clustered into focused repair plans.
+- Plan numbers follow the existing sequence.
+- Each repair plan has `gap_closure: true`.
+- The failed check appears in the new verification path before new physics.
+- Plan-preflight passes and the return points to `gpd:execute-phase`.

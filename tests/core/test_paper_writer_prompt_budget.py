@@ -10,11 +10,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
+REFERENCES_DIR = SOURCE_ROOT / "specs" / "references" / "publication"
 
 
 def test_gpd_paper_writer_prompt_stays_within_expected_budget_and_keeps_contract_paths_lightweight() -> None:
     path = AGENTS_DIR / "gpd-paper-writer.md"
     source = path.read_text(encoding="utf-8")
+    cookbook = (REFERENCES_DIR / "paper-writer-cookbook.md").read_text(encoding="utf-8")
+    handoff = (REFERENCES_DIR / "publication-response-writer-handoff.md").read_text(encoding="utf-8")
     metrics = measure_prompt_surface(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
     expanded = expanded_prompt_text(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
 
@@ -29,6 +32,12 @@ def test_gpd_paper_writer_prompt_stays_within_expected_budget_and_keeps_contract
     assert "{GPD_INSTALL_DIR}/references/publication/paper-writer-cookbook.md" in source
     assert "{GPD_INSTALL_DIR}/references/publication/figure-generation-templates.md" in source
     assert "{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md" in source
+    assert "paper_writer.handoff_audit" in source
+    assert "Response-pair handoff" in source
+    assert "Research-To-Paper Handoff Detail" in cookbook
+    assert "Confidence-To-Language Mapping" in cookbook
+    assert "Response Pair Detail" in handoff
+    assert "ls GPD/phases/*-*/*-SUMMARY.md" not in source
     assert "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md" not in source
     assert "@{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md" not in source
     assert "@{GPD_INSTALL_DIR}/templates/notation-glossary.md" not in source

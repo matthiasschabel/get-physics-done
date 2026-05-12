@@ -210,6 +210,35 @@ For contract-backed plans, also confirm:
 
 Do not proceed to typed return or completion commit if the self-check fails.
 
+## Closeout Success Checklist
+
+Use this checklist after the inline executor prompt says plan execution is done:
+
+- Conventions were loaded and verified before the first task.
+- All tasks were executed, or the run paused at a checkpoint with enough state
+  for a fresh continuation.
+- Each completed task was checkpointed with the proper format.
+- Derivation work tracked signs and conventions, with self-critique checkpoints
+  every 3-4 derivation steps.
+- Method-specific modules were loaded only when the task entered that method
+  family.
+- Numerical work recorded reproducibility metadata, convergence evidence,
+  benchmark or analytic-limit checks, and uncertainty.
+- Automatic escalation counters were tracked.
+- All deviations have a deviation-rule classification.
+- Environment gates were handled and documented as gated flow.
+- Research log and state-tracking files were maintained during execution.
+- Every derived equation and computed value was verified at the required depth.
+- SUMMARY.md has substantive physics content, conventions, confidence tags, and
+  contract ledgers when the plan is contract-backed.
+- Shared-state updates were returned through `gpd_return` by default; direct
+  shared-state writes happened only when explicitly delegated.
+- Context pressure honored the 50% forced checkpoint and ORANGE/RED stops.
+- Stuck points were documented honestly; no plausible-but-wrong results were
+  produced.
+- Selected or on-demand post-step guards were applied after major steps, and
+  guard failures were mapped to deviation rules.
+
 ## State Updates
 
 Before recording completion, verify that no live first-result, skeptical, or pre-fanout gate remains in the bounded execution state. A pre-fanout review is not retired until both the matching gate clear and the matching fanout unlock have been recorded.

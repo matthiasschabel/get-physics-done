@@ -68,11 +68,18 @@ def test_basic_contract_renderers_emit_canonical_public_surface() -> None:
         f"- {item}" for item in contract.beginner_onboarding.caveats
     ]
     assert render_post_start_settings_note(context) == contract.post_start_settings.render_note()
-    assert render_recovery_note(context) == contract.recovery_ladder.render_note(
-        resume_work_phrase="`resume-work`",
-        suggest_next_phrase="`suggest-next`",
-        pause_work_phrase="`pause-work`",
+    recovery_note = render_recovery_note(context)
+    assert recovery_note.startswith(
+        contract.recovery_ladder.render_note(
+            resume_work_phrase="`resume-work`",
+            suggest_next_phrase="`suggest-next`",
+            pause_work_phrase="`pause-work`",
+        )
     )
+    assert contract.resume_authority.durable_authority_phrase in recovery_note
+    assert contract.resume_authority.public_vocabulary_intro in recovery_note
+    for field in contract.resume_authority.public_fields:
+        assert f"`{field}`" in recovery_note
 
 
 def test_terminal_and_local_cli_bridge_text_derive_from_runtime_and_contract_data() -> None:

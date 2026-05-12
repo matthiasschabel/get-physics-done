@@ -61,3 +61,7 @@ The strict decision validator must remain the guardrail for blank `manuscript_pa
 For theorem-bearing review, same-round `${selected_review_root}/PROOF-REDTEAM{round_suffix}.md` is mandatory. It must be authored and validated as `gpd-check-proof`, bind to the active manuscript snapshot and round, cover the relevant proof claim IDs and proof artifact paths, report `status: passed`, and support the `REFEREE-DECISION{round_suffix}.json` fields `proof_audit_coverage_complete` and `theorem_proof_alignment_adequate`.
 
 Stage-review validation alone is not proof-redteam clearance. Missing or invalid proof-redteam evidence is a blocking stage-integrity failure, not a Stage 6 repair opportunity.
+
+## Final Report And Decision Alignment
+
+Align markdown report, ledger, and decision on recommendation, confidence, issue IDs, blocking issues, and counts. Artifacts are the source of truth.

@@ -31,3 +31,11 @@ Use this pack when a workflow or agent spawns `gpd-paper-writer` to draft a resp
 - For explicit manuscript subjects, both files must carry response frontmatter with `round` and `manuscript_path` matching the active review round; stale same-round files without a binding do not complete the handoff.
 - Do not treat prose-only status messages as proof of completion.
 - Keep the hard gate visible at the spawn site, but do not duplicate the full response prose there when this reference is loaded.
+
+## Response Pair Detail
+
+Use workflow-supplied paths as authority: report, ledger, decision, author response, referee response, selected roots, and round suffix. `referee_report_path` owns `REF-*` IDs; ledger/decision artifacts calibrate blocking status, recommendation floor, and counts.
+
+`author_response_path` is the internal tracker; `referee_response_path` is the synchronized journal-facing sibling. Keep IDs, classifications, status labels, blocking-item coverage, and new-calculation tracking aligned. Use `fixed` only after the manuscript edit exists; keep `needs-calculation` explicit when work remains.
+
+If the workflow requests a short editor letter in addition to `referee_response_path`, the letter may compress tone and wording, but it does not replace the full paired response contract.

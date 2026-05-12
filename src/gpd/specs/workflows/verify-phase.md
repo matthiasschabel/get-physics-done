@@ -47,20 +47,8 @@ suffices.
 </core_principle>
 
 <required_reading>
-Do not raw-include the verification reference library at workflow load. Load
-only at the consuming step:
-
-- `{GPD_INSTALL_DIR}/references/verification/core/verification-quick-reference.md` -> default checklist for which checks to run.
-- `{GPD_INSTALL_DIR}/references/verification/core/verification-core.md` -> universal decisive checks, external-oracle requirement, artifact Level 3 evidence.
-- `{GPD_INSTALL_DIR}/references/verification/core/verification-numerical.md` -> convergence, statistics, numerical stability, benchmark comparisons.
-- `{GPD_INSTALL_DIR}/references/verification/core/computational-verification-templates.md` -> copy-paste oracle templates when code is needed.
-- `{GPD_INSTALL_DIR}/references/verification/core/verification-child-return-contract.md` -> checkpoint, artifact-gate, and `gpd_return.files_written` semantics.
-- `{GPD_INSTALL_DIR}/references/verification/verification-status-authority.md` -> target and top-level status vocabulary.
-- `{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md` -> context include/exclude choices.
-- `{GPD_INSTALL_DIR}/references/protocols/error-propagation-protocol.md` -> uncertainty or propagation targets.
-- `verification_report_skeleton_bridge` / `gpd verification-report skeleton --write --body-file ... --validate contract` -> gap-only helper path.
-- `verification_report_finalizer_bridge` / `gpd verification-report finalize --patch ... --body-file ... --validate contract` -> typed final outcome helper path.
-- `{GPD_INSTALL_DIR}/templates/verification-report.md` and `{GPD_INSTALL_DIR}/templates/contract-results-schema.md` -> authority references only when helper/validator errors require them.
+Do not raw-include the verification library at workflow load. Load references only at the consuming step:
+quick checklist (`verification-quick-reference.md`), universal checks (`verification-core.md`), numerical checks (`verification-numerical.md`), executable oracle templates (`computational-verification-templates.md`), child-return/artifact gate (`verification-child-return-contract.md`), status vocabulary (`verification-status-authority.md`), independence rules (`verification-independence.md`), and uncertainty protocol (`error-propagation-protocol.md`). Use `verification_report_skeleton_bridge` for gap-only reports and `verification_report_finalizer_bridge` for typed outcomes; open templates only when helper/validator errors require them.
 </required_reading>
 
 <process>
@@ -76,16 +64,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Extract from init JSON: `phase_found`, `phase_dir`, `phase_number`,
-`phase_name`, `has_plans`, `plan_count`, `project_contract`,
-`project_contract_validation`, `project_contract_load_info`,
-`project_contract_gate`, `contract_intake`, `effective_reference_intake`,
-`active_reference_context`, `reference_artifacts_content`,
-`selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`,
-`protocol_bundle_context`, `protocol_bundle_verifier_extensions`,
-`phase_proof_review_status`, `derived_manuscript_proof_review_status`,
-`verification_report_skeleton_bridge`, and
-`verification_report_finalizer_bridge`.
+Extract from init JSON: phase identity/inventory (`phase_found`, `phase_dir`, `phase_number`, `phase_name`, `has_plans`, `plan_count`), contract fields (`project_contract`, validation/load/gate info, `contract_intake`), reference/bundle carry-forward (`effective_reference_intake`, `active_reference_context`, `reference_artifacts_content`, selected bundle IDs, load manifest, context, verifier extensions), proof-review status, and the verification report skeleton/finalizer bridges.
 
 If `phase_found` is false:
 
@@ -156,17 +135,10 @@ Treat these as separate obligations:
   experiment, cross-method, or baseline checks; use `inconclusive` or `tension`
   honestly when evidence does not justify `pass`.
 
-Before finalizing checks, run the contract-check loop when project-local anchors
-or prior-output paths matter:
+When project-local anchors or prior-output paths matter, run `suggest_contract_checks(contract, project_dir=...)`, fold applicable returned checks into the plan, build each request from its template with the required/any-of fields and supported bindings, keep `project_dir` as the absolute project root, and execute `run_contract_check(request=..., project_dir=...)`.
 
-1. Call `suggest_contract_checks(contract, project_dir=...)`.
-2. Fold returned checks into the plan unless clearly inapplicable.
-3. For each returned check, start from `request_template`, satisfy
-   `required_request_fields` and `schema_required_request_fields`, satisfy one
-   full alternative from `schema_required_request_anyof_fields`, use only
-   `supported_binding_fields` inside `request.binding`, and keep `project_dir`
-   as the top-level absolute project root argument.
-4. Execute `run_contract_check(request=..., project_dir=...)`.
+Schema/helper field names that must remain visible when helper errors are repaired: `request_template`, `required_request_fields`, `supported_binding_fields`, `schema_required_request_fields`, and `schema_required_request_anyof_fields`.
+Reference paths stay staged, not raw-included: `{GPD_INSTALL_DIR}/references/verification/meta/verification-independence.md` and `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`.
 
 If no frontmatter contract exists, derive a contract-like target set from the
 phase goal: claims, deliverables, acceptance tests, required comparisons, and
@@ -213,42 +185,31 @@ Resolve the proof critic and run one repair handoff:
 CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)
 ```
 
-Runtime delegation rule: this is a single-turn handoff. Follow the shared
-verification child-return contract: the spawned agent checkpoints and returns
-if it needs user input; the original run does not wait inside the same task.
-Never trust return text alone.
+Runtime delegation is a single-turn handoff: the spawned agent checkpoints and returns if user input is needed; this run does not wait inside the same task. Load `proof-redteam-workflow-gate.md` for the scoped spawn contract, helper commands (`gpd proof-redteam skeleton`, `gpd validate proof-redteam`), allowed path `${phase_dir}/${phase_number}-PROOF-REDTEAM.md`, and repair prompt. Never trust return text alone; after return, re-open the artifact and require `status: passed`.
 
 ```
 task(
   subagent_type="gpd-check-proof",
   model="{check_proof_model}",
   readonly=false,
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-check-proof.md for your role and instructions.
-Use `gpd proof-redteam skeleton` for helper-owned proof-redteam frontmatter and `gpd validate proof-redteam` before reporting completion. Use {GPD_INSTALL_DIR}/templates/proof-redteam-schema.md and {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-protocol.md as authority references when helper/validator errors require them.
-
-Operate in proof-redteam repair mode with a fresh context and follow the shared verification child-return contract.
-
-Write to:
-- `${phase_dir}/${phase_number}-PROOF-REDTEAM.md`
+  prompt="Proof-redteam repair handoff. Load {GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md for the `request_template`, helper commands, and validation gate.
 
 <spawn_contract>
 write_scope:
   mode: scoped_write
   allowed_paths:
-    - ${phase_dir}/${phase_number}-PROOF-REDTEAM.md
+    - \"${phase_dir}/${phase_number}-PROOF-REDTEAM.md\"
 expected_artifacts:
-  - ${phase_dir}/${phase_number}-PROOF-REDTEAM.md
+  - \"${phase_dir}/${phase_number}-PROOF-REDTEAM.md\"
 shared_state_policy: return_only
 </spawn_contract>
 
-Read the proof-bearing plan or claim artifacts, the relevant PLAN contract slice, and any current verification artifact before repairing the audit.
-Return through the typed proof-redteam handoff contract.",
-  description="Repair proof redteam artifact for phase {phase_number}"
+Read the phase PLAN, SUMMARY, verification draft, theorem inventory, and proof artifacts. Write only the proof-redteam artifact, return once, and do not mutate shared state.",
+  description="Proof redteam repair for phase ${phase_number}"
 )
 ```
 
-After return, re-open `${phase_dir}/${phase_number}-PROOF-REDTEAM.md` from disk
-and confirm the artifact exists and reports `status: passed` before continuing.
+Do not raw-include the verification reference library at workflow load. Stage proof-redteam and verification references only when their gate is active.
 </step>
 
 <step name="verify_contract_targets">
@@ -285,13 +246,7 @@ collapses to a special case remains `PARTIAL` or `FAILED`.
 </step>
 
 <step name="run_decisive_scientific_checks">
-Load `{GPD_INSTALL_DIR}/references/verification/core/verification-quick-reference.md`
-to select checks. Load `{GPD_INSTALL_DIR}/references/verification/core/verification-core.md`
-for universal physics checks. Load
-`{GPD_INSTALL_DIR}/references/verification/core/verification-numerical.md` for
-numerical, simulation, statistical, or benchmark-heavy targets. Load
-`{GPD_INSTALL_DIR}/references/verification/core/computational-verification-templates.md`
-only when an executable oracle template is needed.
+Load `verification-quick-reference.md` to select checks and target-type evidence minimums, `verification-core.md` for universal physics checks, `verification-numerical.md` for numerical/simulation/statistical/benchmark-heavy targets, and `computational-verification-templates.md` only when an executable oracle template is needed.
 
 Every decisive target needs evidence that breaks the LLM self-consistency loop:
 executed code, CAS output, numeric output, algebraic simplification output, or a
@@ -299,18 +254,6 @@ proof-redteam adversarial probe. Include the code/output/verdict transcript in
 the report body. If execution is unavailable, route to `expert_needed` or
 `human_needed` and explain what prevented execution; do not mark the target
 verified.
-
-Minimum scientific evidence by target type:
-
-- Analytical derivation: dimensional trace, at least one independently computed
-  limiting case, and an independent cross-check or benchmark.
-- Numerical result: executed run, convergence or stability evidence, uncertainty
-  handling, and comparison to an analytical limit or benchmark when available.
-- Simulation: conservation/statistical checks plus convergence or finite-size
-  analysis where relevant.
-- Reference target: concrete completed action and comparison evidence, not a
-  citation alone.
-- Forbidden proxy: explicit rejection that the proxy was not used as success evidence.
 
 Record each check with inputs, expected result, actual output, verdict, contract
 IDs, and any uncertainty or benchmark threshold.
@@ -373,9 +316,7 @@ Set the report path:
 REPORT_PATH="$phase_dir/${phase_number}-VERIFICATION.md"
 ```
 
-Write body-only evidence first. The body owns goal achievement narrative,
-contract target evidence, artifact table, computational transcripts, proof gate
-evidence, requirement/boundary checks, expert/human needs, gaps, and fix plans.
+Write body-only evidence first: goal narrative, contract evidence, artifact table, computation transcripts, proof gate evidence, requirements/boundaries, expert/human needs, gaps, and fix plans.
 
 Use `verification_report_skeleton_bridge` only for conservative gap reports:
 `gpd verification-report skeleton PLAN.md --write --output "$REPORT_PATH" --force --body-file BODY.md --validate contract`.
@@ -383,55 +324,31 @@ Use `verification_report_skeleton_bridge` only for conservative gap reports:
 Use `verification_report_finalizer_bridge` for typed final outcomes:
 `gpd verification-report finalize PLAN.md --patch PATCH.json --body-file BODY.md --output "$REPORT_PATH" --validate contract --force`.
 
-The skeleton bridge is gap-only. The finalizer bridge handles `passed`,
-`gaps_found`, `expert_needed`, and `human_needed`. The helper owns frontmatter
-shape, `plan_contract_ref`, `contract_results`, `comparison_verdicts`,
-`suggested_contract_checks`, and validation. Do not hand-author or reflow full
-YAML/frontmatter.
+The skeleton bridge is gap-only. The finalizer bridge handles `passed`, `gaps_found`, `expert_needed`, and `human_needed`. The helper owns frontmatter shape, `plan_contract_ref`, `contract_results`, `comparison_verdicts`, `suggested_contract_checks`, and validation. Do not hand-author or reflow full YAML/frontmatter.
 
-If the verifier identifies a decisive check omitted by the contract, keep body
-evidence explicit and let the helper/validator-owned
-`suggested_contract_checks` ledger carry it. Do not mark the parent target
-`VERIFIED` until the missing decisive check is resolved or explicitly re-scoped.
+If the verifier identifies a decisive check omitted by the contract, keep body evidence explicit and let the helper/validator-owned `suggested_contract_checks` ledger carry it. Do not mark the parent target `VERIFIED` until the check is resolved or explicitly re-scoped.
 </step>
 
 <step name="oracle_gate_check">
-Before returning, verify that the canonical report exists, is named in
-`gpd_return.files_written`, passes the verification-contract validator, and
-contains an executed oracle transcript.
+Before returning, verify that the canonical report exists, is named in `gpd_return.files_written`, passes the verification-contract validator, and contains an executed oracle transcript.
 
 ```bash
 VERIFICATION_FILE="${phase_dir}/${phase_number}-VERIFICATION.md"
 gpd validate verification-contract "${VERIFICATION_FILE}"
 ```
 
-If the file is missing, absent from `gpd_return.files_written`, or fails
-`gpd validate verification-contract "${VERIFICATION_FILE}"`, the verification is
-incomplete. The validator enforces the computational oracle evidence gate, so a
-report with no executed code/output/verdict block cannot pass. Go back and run
-a decisive check or route to `expert_needed` / `human_needed` instead of
-claiming success.
+If the file is missing, absent from `gpd_return.files_written`, or fails validation, the verification is incomplete. The validator enforces the computational oracle evidence gate, so a report with no executed code/output/verdict block cannot pass. Run a decisive check or route to `expert_needed` / `human_needed` instead of claiming success.
 </step>
 
 <step name="return_to_orchestrator">
-Route on `gpd_return.status`, not on headings. If the run reports `completed`,
-accept it only after `VERIFICATION.md` exists on disk, is named in
-`gpd_return.files_written`, and passes `gpd validate verification-contract
-"${phase_dir}/${phase_number}-VERIFICATION.md"`. For proof-bearing phases, the
-sibling `*-PROOF-REDTEAM.md` must also exist and report `status: passed` before
-the phase can be treated as verified.
+Route on `gpd_return.status`, not on headings. Accept `completed` only after `VERIFICATION.md` exists, is named in `gpd_return.files_written`, and passes `gpd validate verification-contract "${phase_dir}/${phase_number}-VERIFICATION.md"`. For proof-bearing phases, the sibling `*-PROOF-REDTEAM.md` must also exist and report `status: passed`.
 
-If the run reports `checkpoint`, present the checkpoint and start a fresh
-continuation after user input. If it reports `blocked` or `failed`, keep the
-session fail-closed and surface validator errors and missing artifacts.
+`checkpoint` presents the checkpoint and starts a fresh continuation after user input. `blocked` or `failed` keeps the session fail-closed and surfaces validator errors and missing artifacts.
 
 Return status (`passed` | `gaps_found` | `expert_needed` | `human_needed`),
 score (N/M contract targets), and report path.
 
-If `gaps_found`, list gaps with contract IDs, computation evidence, comparison
-verdict failures or forbidden-proxy violations, and recommended fix plan names.
-If `expert_needed` or `human_needed`, list the open items and why computational
-verification was insufficient.
+If `gaps_found`, list gaps with contract IDs, computation evidence, comparison verdict failures or forbidden-proxy violations, and recommended fix plan names. If `expert_needed` or `human_needed`, list open items and why computation was insufficient.
 
 Orchestrator routes: `passed` -> update_roadmap; `gaps_found` -> create/execute
 fixes then re-verify; `expert_needed` -> present to researcher/expert review;

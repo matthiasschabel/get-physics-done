@@ -24,8 +24,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
-BASELINE_EXPANDED_LINE_COUNT = 617
-BASELINE_EXPANDED_CHAR_COUNT = 31_977
+BASELINE_EXPANDED_LINE_COUNT = 412
+BASELINE_EXPANDED_CHAR_COUNT = 24_089
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
 
@@ -61,8 +61,22 @@ def test_gpd_research_synthesizer_prompt_stays_within_expected_budget_and_keeps_
             "{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
         ),
         machine_exact(
+            "research synthesizer lazy synthesis guidance path",
+            "{GPD_INSTALL_DIR}/references/research/research-synthesis-guidance.md",
+        ),
+        machine_exact(
             "research synthesizer avoids eager shared protocol include",
             "@{GPD_INSTALL_DIR}/references/shared/shared-protocols.md",
+            mode=FragmentMode.ABSENT,
+        ),
+        machine_exact(
+            "research synthesizer avoids eager synthesis guidance include",
+            "@{GPD_INSTALL_DIR}/references/research/research-synthesis-guidance.md",
+            mode=FragmentMode.ABSENT,
+        ),
+        machine_exact(
+            "research synthesizer avoids inline expanded closeout skeleton",
+            "## SYNTHESIS COMPLETE",
             mode=FragmentMode.ABSENT,
         ),
         semantic_anchor(

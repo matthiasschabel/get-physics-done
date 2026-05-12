@@ -95,3 +95,20 @@ Triggered by `<revision_context>`. This is targeted update mode.
 
 Do not rewrite whole plans for minor issues, add unnecessary tasks, break valid
 dependencies, or change conventions mid-stream.
+
+## Checker Feedback Examples
+
+Use these examples to classify checker findings without bloating the base
+planner prompt:
+
+| Checker finding | Revision class | Plan response |
+| --- | --- | --- |
+| Missing dimensional check on one derived formula | Targeted fix | Add a verification task tied to the existing deliverable |
+| Several sign errors with unclear source | Diagnostic revision | Add a root-cause task before changing formulas |
+| Contract claim lacks any deliverable | Structural revision | Return checkpoint before reshaping the plan contract |
+| Existing result is valid but needs one benchmark | Supplementary calculation | Add a bounded benchmark task and preserve prior work |
+| Convention mismatch between imported reference and lock | Targeted or diagnostic | Convert the source formula; do not change project conventions to fit the error |
+
+Return examples should stay typed and compact: list changed plans, issue IDs,
+classification, files written, validation command, and next action. Do not
+paste the full checker report back into `PLAN.md`.

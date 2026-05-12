@@ -79,6 +79,38 @@ def test_executor_base_stays_under_phase6_raw_line_budget_and_names_jit_modules(
         assert f"references/execution/{module_name}" in executor
 
 
+def test_executor_module_load_manifest_is_body_free_late_load_metadata() -> None:
+    executor = _read_executor_prompt()
+    manifest = _between(executor, "<module_load_manifest>", "</module_load_manifest>")
+
+    assert "module_load_manifest" in manifest
+    assert "body-free" in manifest
+    assert "Never load every" in manifest
+    assert "executor reference" in manifest
+    assert "@{GPD_INSTALL_DIR}" not in manifest
+    for module_id, module_path in (
+        ("executor.derivation_checkpoints", "references/execution/executor-derivation-checkpoints.md"),
+        ("executor.numerical_protocol", "references/execution/executor-numerical-protocol.md"),
+        ("executor.tool_preflight", "references/execution/executor-tool-preflight.md"),
+        (
+            "executor.protocol_bundle_execution",
+            "references/execution/executor-protocol-bundle-execution.md",
+        ),
+        ("executor.completion", "references/execution/executor-completion.md"),
+        ("executor.guard_index", "references/execution/guards/README.md"),
+        ("executor.guard_core", "references/execution/guards/core-computation-guards.md"),
+        ("executor.guard_domain", "references/execution/guards/domain-post-step-guards.md"),
+        ("executor.guard_final", "references/execution/guards/final-verification-guards.md"),
+    ):
+        assert module_id in manifest
+        assert module_path in manifest
+
+    assert "% IDENTITY_CLAIM:" not in manifest
+    assert "External Tool Failure Table" not in manifest
+    assert "Final Self-Check" not in manifest
+    assert "```yaml" not in manifest
+
+
 def test_executor_jit_modules_hold_extracted_execution_detail() -> None:
     executor = _read_executor_prompt()
     derivation = _read_execution_reference("executor-derivation-checkpoints.md")

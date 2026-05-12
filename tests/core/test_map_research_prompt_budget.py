@@ -42,7 +42,7 @@ def test_map_research_command_prompt_budget_stays_close_to_the_bootstrap_surface
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
-    assert "subagent_type=\"gpd-research-mapper\"" not in expanded_command
+    assert 'subagent_type="gpd-research-mapper"' not in expanded_command
     assert "references/orchestration/runtime-delegation-note.md" not in expanded_command
 
 
@@ -56,3 +56,17 @@ def test_research_mapper_uses_one_canonical_mapping_complete_template() -> None:
     assert "[Optional: staleness of other research-map docs.]" in source
     assert "report staleness in the canonical confirmation" in source
     assert "flag it in the canonical confirmation" in source
+
+
+def test_research_mapper_defers_template_guidance_and_examples_to_reference() -> None:
+    source = (AGENTS_DIR / "gpd-research-mapper.md").read_text(encoding="utf-8")
+    guidance = (
+        REPO_ROOT / "src" / "gpd" / "specs" / "references" / "templates" / "research-mapper" / "MAPPING-GUIDANCE.md"
+    )
+    guidance_text = guidance.read_text(encoding="utf-8")
+
+    assert "{GPD_INSTALL_DIR}/references/templates/research-mapper/MAPPING-GUIDANCE.md" in source
+    assert "Step 1: Read the model definition" not in source
+    assert "Minimum section structures:" in guidance_text
+    assert "## Worked Example" in guidance_text
+    assert "## Broken Template Fallback" in guidance_text

@@ -806,6 +806,30 @@ def _render_command_detail_block(
     return "\n".join(lines).strip()
 
 
+def _render_root_command_detail_block(
+    registry_command: str,
+    *,
+    public_prefix: str,
+) -> str:
+    """Render a terse root-help command detail without metadata expansion."""
+
+    command = get_command(registry_command)
+    signature = _apply_public_prefix(_display_signature_for_command(command.name), public_prefix=public_prefix)
+    lines = [f"**`{signature}`**", command.description.strip()]
+
+    examples = tuple(
+        _apply_public_prefix(example, public_prefix=public_prefix) for example in _usage_examples_for(command.name)
+    )
+    if examples:
+        lines.append("Usage: " + "; ".join(f"`{example}`" for example in examples))
+
+    notes = _COMMAND_DETAIL_NOTES.get(command.name, ())
+    if notes:
+        lines.append("Notes: " + " ".join(notes))
+
+    return "\n".join(lines).strip()
+
+
 def _apply_public_prefix(text: str, *, public_prefix: str) -> str:
     if public_prefix == "gpd:":
         return text
@@ -857,7 +881,8 @@ def _detailed_reference_intro_lines(*, public_prefix: str) -> list[str]:
         _apply_public_prefix(
             (
                 "Project-aware technical-analysis lane: `gpd:derive-equation`, `gpd:dimensional-analysis`, "
-                "`gpd:limiting-cases`, `gpd:numerical-convergence`, `gpd:sensitivity-analysis`, `GPD/analysis/`. "
+                "`gpd:limiting-cases`, `gpd:numerical-convergence`, `gpd:sensitivity-analysis`, "
+                "`GPD/analysis/`, and `GPD/sweeps/`. "
                 "`gpd:graph` and `gpd:error-propagation` are separate commands and are not part of this relaxed "
                 "current-workspace lane."
             ),
@@ -894,11 +919,9 @@ def render_root_detailed_command_reference_markdown(*, public_prefix: str = "gpd
         lines.extend(
             (
                 "",
-                _render_command_detail_block(
+                _render_root_command_detail_block(
                     command_name,
-                    include_group_heading=False,
                     public_prefix=public_prefix,
-                    include_metadata=False,
                 ),
             )
         )
@@ -976,7 +999,7 @@ def render_quick_start_markdown(*, public_prefix: str = "gpd:") -> str:
         4. `{_apply_public_prefix("gpd:progress", public_prefix=public_prefix)}` - See the broader project snapshot
         5. `{_apply_public_prefix("gpd:suggest-next", public_prefix=public_prefix)}` - Get the fastest next action
         6. `{local_observe_execution}` - Read-only progress / waiting state snapshot, conservative `possibly stalled` wording, and the next read-only checks from your normal terminal
-        7. `{local_cost}` - Review recorded machine-local usage / cost from your normal terminal
+        7. `{local_cost}` - Review recorded local telemetry usage / cost from your normal terminal
 
         **Post-startup settings**
         1. `{_apply_public_prefix("gpd:settings", public_prefix=public_prefix)}` - Change autonomy, permissions, and broader runtime preferences after your first successful start or later

@@ -29,8 +29,8 @@ PATH_PREFIX = "/runtime/"
 
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
-PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 460_000
-PHASE5_MAX_AGENT_EXPANDED_CHARS = 46_000
+PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 405_000
+PHASE5_MAX_AGENT_EXPANDED_CHARS = 39_000
 PHASE5_MIN_ROLE_KIT_AGENT_COUNT = 12
 
 AGENT_BASELINES = {
@@ -38,19 +38,19 @@ AGENT_BASELINES = {
     "gpd-check-proof": (81, 6_231),
     "gpd-consistency-checker": (69, 4_112),
     "gpd-debugger": (245, 9_482),
-    "gpd-executor": (676, 42_243),
+    "gpd-executor": (643, 37_143),
     "gpd-experiment-designer": (631, 35_363),
     "gpd-explainer": (241, 9_508),
     "gpd-literature-reviewer": (395, 14_820),
-    "gpd-notation-coordinator": (637, 36_159),
-    "gpd-paper-writer": (598, 34_030),
+    "gpd-notation-coordinator": (350, 23_208),
+    "gpd-paper-writer": (433, 26_715),
     "gpd-phase-researcher": (370, 15_315),
     "gpd-plan-checker": (401, 21_540),
-    "gpd-planner": (570, 32_479),
+    "gpd-planner": (502, 29_581),
     "gpd-project-researcher": (274, 12_605),
-    "gpd-referee": (547, 35_781),
-    "gpd-research-mapper": (706, 35_904),
-    "gpd-research-synthesizer": (617, 31_977),
+    "gpd-referee": (397, 29_593),
+    "gpd-research-mapper": (355, 18_717),
+    "gpd-research-synthesizer": (412, 24_089),
     "gpd-review-literature": (53, 2_591),
     "gpd-review-math": (54, 3_343),
     "gpd-review-physics": (53, 2_604),
@@ -81,16 +81,16 @@ MODE_TABLE_ALLOWLIST = {
     "gpd-project-researcher",
 }
 WORST_AGENT_HARD_CAPS = {
-    "gpd-executor": (697, 43_600),
+    "gpd-executor": (663, 38_200),
     "gpd-experiment-designer": (651, 36_450),
-    "gpd-notation-coordinator": (657, 37_250),
-    "gpd-paper-writer": (618, 35_100),
+    "gpd-notation-coordinator": (370, 24_300),
+    "gpd-paper-writer": (453, 27_800),
     "gpd-plan-checker": (421, 22_200),
-    "gpd-planner": (590, 33_500),
+    "gpd-planner": (522, 30_600),
     "gpd-project-researcher": (294, 13_700),
-    "gpd-referee": (567, 36_900),
-    "gpd-research-mapper": (728, 37_000),
-    "gpd-research-synthesizer": (637, 33_000),
+    "gpd-referee": (417, 30_600),
+    "gpd-research-mapper": (375, 19_800),
+    "gpd-research-synthesizer": (432, 25_100),
     "gpd-roadmapper": (710, 34_500),
     "gpd-verifier": (394, 26_700),
 }

@@ -51,6 +51,23 @@ def test_referee_routes_on_status_and_shows_base_return_fields_first() -> None:
     )
 
 
+def test_referee_late_loads_optional_review_protocol_detail() -> None:
+    source = _read_agent("gpd-referee.md")
+    playbook = (REFERENCES_DIR / "publication" / "referee-review-playbook.md").read_text(encoding="utf-8")
+    boundary = (REFERENCES_DIR / "publication" / "publication-final-adjudication-boundary.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "module_policy_summary" in source
+    assert "referee.review_playbook" in source
+    assert "referee.final_adjudication_boundary" in source
+    assert "Initial Review Execution Detail" in playbook
+    assert "Revision Review Success Criteria" in playbook
+    assert "Final Report And Decision Alignment" in boundary
+    assert "find GPD -name" not in source
+    assert "Previous `REFEREE-REPORT` loaded and all issue IDs extracted." not in source
+
+
 def test_project_researcher_uses_presentation_only_heading_mapping_and_base_fields_first() -> None:
     source = _read_agent("gpd-project-researcher.md")
 

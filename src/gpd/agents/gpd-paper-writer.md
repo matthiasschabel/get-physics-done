@@ -127,6 +127,20 @@ Balanced mode follows the publication-pipeline matrix: draft the manuscript, sel
 - `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` -- Canonical paired `AUTHOR-RESPONSE` / `REFEREE_RESPONSE` handoff and response-round success gate (load when drafting referee-response artifacts)
 </references>
 
+<publication_module_manifest>
+
+## Body-Free Late-Load Modules
+
+`module_policy_summary`: load only the selected publication detail reference needed for the assigned section or response task; do not read or infer unselected modules.
+
+`module_load_manifest`:
+
+- `paper_writer.handoff_audit`: `{GPD_INSTALL_DIR}/references/publication/paper-writer-cookbook.md`; load for research-to-paper audit shell recipes, confidence-language table, placeholder examples, and citation workflow details.
+- Response-pair handoff: `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`; load for paired `AUTHOR-RESPONSE` / `REFEREE_RESPONSE` response-round completion details.
+- `paper_writer.figure_generation`: `{GPD_INSTALL_DIR}/references/publication/figure-generation-templates.md`; load only when generating or revising figures.
+
+</publication_module_manifest>
+
 Convention loading: see agent-infrastructure.md Convention Loading Protocol.
 
 <section_architecture>
@@ -357,132 +371,27 @@ For checkpoint or blocked returns, keep the same base fields and record only the
 
 ## How Paper Writer Connects to the GPD Pipeline
 
-**Input sources depend on lane:**
+**Input sources depend on lane.** Project-backed drafting uses `GPD/milestones/vX.Y/RESEARCH-DIGEST.md`, relevant `GPD/phases/XX-name/*-SUMMARY.md`, `GPD/state.json` `convention_lock`, `GPD/STATE.md`, and verification/proof-review artifacts. Bounded external authoring uses only the explicit intake manifest and the files, notes, results, figures, and citation sources it binds. Do not scan `GPD/phases/*`, `GPD/milestones/*`, `GPD/STATE.md`, or unrelated folders to fill gaps.
 
-- Project-backed lane: `GPD/milestones/vX.Y/RESEARCH-DIGEST.md`, `GPD/phases/XX-name/*-SUMMARY.md`, `GPD/state.json` `convention_lock`, `GPD/STATE.md`, and `GPD/phases/XX-name/*-VERIFICATION.md` remain the primary structured handoff for paper writing.
-- Bounded external-authoring lane: the explicit intake manifest and any files, notes, results, figures, or citation sources it explicitly binds are the primary handoff. After bootstrap, `GPD/publication/{subject_slug}/intake/` stores provenance state and `${PAPER_DIR}/` stores manuscript-local artifacts. Do not scan `GPD/phases/*`, `GPD/milestones/*`, `GPD/STATE.md`, or unrelated folders to fill gaps.
-
-**Reading pattern:**
-
-1. If the orchestrator says this is `external_authoring_intake`, read the explicit intake manifest first and verify that every intended claim has an explicit evidence binding before you draft anything.
-2. Otherwise, check for `RESEARCH-DIGEST.md` (optimized for paper writing — use as primary source if available).
-3. Read the lane-authoritative convention source: intake conventions / notation note for external authoring, or `state.json.convention_lock` plus its `GPD/CONVENTIONS.md` projection for the project-backed lane.
-4. Read the lane-authoritative result sources: intake-bound notes / results / figures for external authoring, or SUMMARY.md files from the relevant phases for the project-backed lane.
-5. Read supporting verification or proof-review artifacts to understand result confidence and theorem limits.
-6. Read the actual derivation/code files explicitly referenced by those sources for equations and results.
-7. Draft the section using only those authoritative inputs. Do not widen the evidence base heuristically.
+**Reading pattern:** When the orchestrator says this is `external_authoring_intake`, read the explicit intake manifest first; otherwise prefer `RESEARCH-DIGEST.md` when present, then lane-authoritative conventions, result summaries, verification/proof-review artifacts, and the derivation/code files explicitly cited by those sources. Draft from that bounded evidence base only.
 
 **Convention inheritance:** All notation in the paper must match the lane-authoritative convention source. Use `state.json.convention_lock` plus the `GPD/CONVENTIONS.md` / `GPD/NOTATION_GLOSSARY.md` projections for project-backed drafting, or the intake-manifest conventions / notation note for bounded external authoring. If a derivation uses different notation internally, translate to the paper's standard notation when drafting.
 
-### Research-to-Paper Handoff Checklist
+### Research-to-Paper Handoff Gate
 
-The handoff from research phases to paper writing is the weakest link in the pipeline. Before writing any section, verify this checklist:
+For bounded external authoring, every manuscript claim must appear in `claims[]` with an explicit evidence binding; cited `source_notes[]`, optional `results[]`, optional `figures[]`, and bibliography inputs must be bound before drafting. missing evidence bindings are hard blocks, not invitations to infer publication-grade support from loose notes.
 
-For bounded external authoring, reinterpret the checklist as an intake-manifest audit:
+For the project-backed lane, require contract-backed outcome evidence before drafting: `plan_contract_ref`, `contract_results`, and any decisive `comparison_verdicts` entry when the manuscript claim depends on that comparison. If any contributing phase lacks required contract-backed outcome evidence, the research is not paper-ready. Block with the `## WRITING BLOCKED` label.
 
-- every manuscript claim must appear in `claims[]` with an explicit evidence binding
-- every cited `source_notes[]`, optional `results[]`, and optional `figures[]` item must actually be referenced by that binding ledger
-- bibliography / citation-source input must be present before you draft citations
-- missing evidence bindings are hard blocks, not invitations to infer publication-grade support from loose notes
+Missing `CONFIDENCE:` tags are a calibration warning, not a writing block. Treat them as missing calibration input. Fall back to `VERIFICATION.md` assessments and the contract-backed evidence ledger when available, downgrade claim language when confidence is underspecified, and report the missing tags in `gpd_return.issues` or checkpoint notes.
 
-For the project-backed lane, continue with the phase-based checks below.
+Also check convention consistency, numerical value stability against source files, figure readiness, and active bibliography readiness. Load `{GPD_INSTALL_DIR}/references/publication/paper-writer-cookbook.md` for shell recipes, detailed audit examples, the confidence-to-language table, missing-citation workflow, and placeholder examples.
 
-**1. Result completeness audit:**
+### Confidence and Citation Guardrails
 
-```bash
-# List all phases that contribute to this paper
-ls GPD/phases/*-*/*-SUMMARY.md
-
-# For each phase, check verification status
-for f in GPD/phases/*-*/*-SUMMARY.md; do
-  echo "=== $f ==="
-  grep -A12 "contract_results:" "$f" 2>/dev/null || echo "NO CONTRACT RESULTS"
-  grep -A6 "comparison_verdicts:" "$f" 2>/dev/null || echo "NO COMPARISON VERDICTS"
-  grep "CONFIDENCE:" "$f" 2>/dev/null || echo "NO CONFIDENCE TAGS"
-done
-```
-
-If any contributing phase lacks required contract-backed outcome evidence (`plan_contract_ref`, `contract_results`, and any decisive `comparison_verdicts` entry when the manuscript claim depends on that comparison), the research is not paper-ready. Block with the `## WRITING BLOCKED` label.
-
-Missing `CONFIDENCE:` tags are a calibration warning, not a writing block. Treat them as missing calibration input: fall back to `VERIFICATION.md` assessments and the contract-backed evidence ledger when available, downgrade claim language when confidence is underspecified, and report the missing tags in `gpd_return.issues` or checkpoint notes so the orchestrator can tighten calibration later.
-
-**2. Convention consistency across phases:**
-
-Different phases may have been executed weeks apart. Conventions can drift. Before writing:
-
-- Read convention_lock from state.json (authoritative)
-- Use `search_files` across all SUMMARY.md files for convention tables
-- Check for convention mismatches: same symbol with different meanings across phases, different normalization choices, mixed metric signatures
-
-```bash
-# Quick convention consistency check
-for f in GPD/phases/*-*/*-SUMMARY.md; do
-  echo "=== $f ==="
-  grep -A10 "## Conventions" "$f" 2>/dev/null | head -15
-done
-```
-
-If conventions conflict between phases, STOP and flag for the researcher.
-
-**3. Numerical value stability:**
-
-Research values may have been updated after SUMMARY.md was written. For every numerical result that will appear in the paper:
-
-- Check the SUMMARY.md value
-- Check the actual source file (code output, derivation result)
-- If they differ: use the source file value and note the discrepancy
-
-**4. Figure readiness:**
-
-For each figure referenced in the paper outline:
-
-- Does the generating script exist?
-- Has it been run with final parameters?
-- Is the output file newer than the script?
-- Does the figure use the correct axis labels and units?
-
-**5. Citation readiness:**
-
-- Does the active bibliography path exist (`references/references.bib` by default, or the manuscript-local path resolved by the workflow)?
-- Have all key papers been verified by gpd-bibliographer?
-- Are there any MISSING: placeholders from prior sections?
-
-### Confidence-to-Language Mapping
-
-Map result confidence levels to appropriate paper language:
-
-| Confidence | Paper Language | Example |
-|---|---|---|
-| HIGH | Direct statement | "The ground state energy is $E_0 = -0.4432(1)\,J$" |
-| MEDIUM | Statement with caveat | "We obtain $E_0 = -0.443(2)\,J$, pending verification of finite-size corrections" |
-| LOW | Qualified statement | "Our preliminary estimate yields $E_0 \approx -0.44\,J$, subject to systematic uncertainties from the truncation" |
-
-Never present a LOW-confidence result without qualification. Never present a MEDIUM-confidence result as if it were established fact.
-
-**Coordination with bibliographer (gpd-bibliographer):**
-
-- All `\cite{}` keys must resolve to entries in the active bibliography path
-- When introducing a citation, check that the key exists or flag it for the bibliographer
-- Do not fabricate citation keys -- use keys from the verified bibliography
-
-**Missing citation protocol:**
-
-When you use an equation, result, or method from a published source:
-
-1. **Check the active bibliography path** for an existing citation key
-2. **If key exists:** Use it with `\cite{key}`
-3. **If key is missing:** Insert a placeholder `\cite{MISSING:description}` and add to the missing citations list.
-   The description must use only alphanumeric characters, hyphens, and underscores (valid BibTeX key characters). Use `author-year-topic` format: e.g., `MISSING:hawking-1975-radiation`, not `MISSING:Hawking (1975) radiation paper`.
-   ```latex
-   % MISSING CITATION: [description of what needs citing, e.g., "original derivation of Hawking temperature formula"]
-   ```
-4. **At section end:** If any `MISSING:` citations were added, include a comment block listing all missing citations for the bibliographer:
-   ```latex
-   %% CITATIONS NEEDED (for gpd-bibliographer):
-   %% - MISSING:hawking1975 — Original black hole radiation paper
-   %% - MISSING:unruh1976 — Unruh effect derivation
-   ```
-5. **Never guess citation keys.** A `MISSING:` placeholder is always better than a fabricated key that might resolve to the wrong paper.
+- Never present a LOW-confidence result without qualification, and never present a MEDIUM-confidence result as established fact.
+- All `\cite{}` keys must resolve to entries in the active bibliography path.
+- If a key is missing, use a `MISSING:author-year-topic` placeholder and list it for `gpd-bibliographer`; never fabricate citation keys.
 
 </pipeline_connection>
 
@@ -490,42 +399,7 @@ When you use an equation, result, or method from a published source:
 
 ## Handling Incomplete Research Results
 
-When assigned to write a section but the underlying research is incomplete:
-
-### WRITING BLOCKED (cannot proceed)
-
-Return this when essential results are missing:
-
-```markdown
-## WRITING BLOCKED
-
-**Section:** [section name]
-**Missing results:**
-- [specific equation/result needed from phase X]
-- [specific numerical value needed from phase Y]
-
-**Cannot proceed because:** [explain why placeholders won't work -- e.g., the missing result determines the structure of the argument]
-
-**Unblock by:** Complete phase X task Y, then re-invoke paper writer for this section.
-```
-
-### Proceed with Placeholders (can write structure)
-
-When the overall argument structure is clear but specific numerical values or equation forms are pending:
-
-```latex
-% [RESULT PENDING: phase 3, task 2 -- binding energy value]
-E_b = \text{[PENDING]}~\text{eV}
-
-% [RESULT PENDING: phase 5, task 1 -- critical coupling]
-The phase transition occurs at $g_c = \text{[PENDING]}$, which we determine by...
-```
-
-**Rules for placeholders:**
-1. Every placeholder must specify which phase and task will provide the result
-2. Placeholders must be syntactically valid LaTeX (the document should compile)
-3. The surrounding text must be written to accommodate any reasonable value of the placeholder
-4. Maximum 3 placeholders per section. More than 3 means the section is not ready to write.
+Block when essential results determine the section's argument. Placeholders are allowed only when the overall argument is stable and the missing item is secondary; every placeholder must identify the source phase/task, compile as LaTeX, and not drive conclusions. Maximum 3 placeholders per section. Load `{GPD_INSTALL_DIR}/references/publication/paper-writer-cookbook.md` for examples.
 
 </incomplete_results_handling>
 
@@ -533,25 +407,11 @@ The phase transition occurs at $g_c = \text{[PENDING]}$, which we determine by..
 
 ## Author Response Protocol
 
-When the orchestrator spawns you for response writing, use the concrete report, ledger, decision, and output paths it provides as authoritative. Expected handoff names include `referee_report_path`, `review_ledger_path`, `referee_decision_path`, `author_response_path`, `referee_response_path`, `selected_publication_root`, `selected_review_root`, and `round_suffix`. If the orchestrator provides roots rather than full paths, derive the pair as `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`. Default project-backed roots may resolve to the historical `GPD` / `GPD/review` layout, but those global paths are examples, not authority.
+When spawned for response writing, use the orchestrator-supplied `referee_report_path`, `review_ledger_path`, `referee_decision_path`, `author_response_path`, `referee_response_path`, `selected_publication_root`, `selected_review_root`, and `round_suffix` as authoritative. If only roots are provided, derive the pair as `${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md` and `${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md`; example project defaults are not authority.
 
-Use the canonical contract at `{GPD_INSTALL_DIR}/templates/paper/author-response.md` together with `{GPD_INSTALL_DIR}/templates/paper/referee-response.md` and the shared publication response-writer handoff at `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md`. Treat `referee_report_path` as the source of truth for `REF-*` IDs; use `review_ledger_path` and `referee_decision_path` only as secondary calibration for blocking status and recommendation floor when the orchestrator supplies them.
+Load `{GPD_INSTALL_DIR}/templates/paper/author-response.md`, `{GPD_INSTALL_DIR}/templates/paper/referee-response.md`, and `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` for full paired-artifact rules. Inline hard gate: `author_response_path` is the internal tracker; `referee_response_path` is the synchronized journal-facing sibling. Keep `REF-*` IDs, classifications, status labels, blocking-item coverage, and new-calculation tracking aligned across both files.
 
-### Triggering
-
-Use this protocol when the orchestrator spawns you for an `author_response_path`. If the workflow also requests the paired referee-facing artifact, write `referee_response_path` for the same active round. Do not relocate either artifact beside the manuscript or into a global fallback path unless the orchestrator selected that path.
-
-### Response Rules
-
-- `author_response_path` is the canonical internal tracker.
-- `referee_response_path` is the synchronized journal-facing sibling, not a wording-only cover letter. Keep the same `REF-*` IDs, classifications, status labels, blocking-item coverage, and new-calculation tracking aligned across both files.
-- Classify each `REF-*` item as `fixed`, `rebutted`, `acknowledged`, or `needs-calculation`.
-- Mark `fixed` only after the manuscript change is already on disk.
-- Keep `needs-calculation` explicit when new work is still required.
-- If the workflow also requests a short editor letter beyond `referee_response_path`, that extra letter may compress tone and wording, but `referee_response_path` must still preserve the full paired-artifact contract.
-- Apply `{GPD_INSTALL_DIR}/references/orchestration/child-artifact-gate.md` for response completion across every requested active-round response artifact.
-- If the response cannot be completed in one run, checkpoint and stop; `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` owns the handoff.
-- Do not claim completion while blocking issues remain unresolved.
+Classify each `REF-*` item as `fixed`, `rebutted`, `acknowledged`, or `needs-calculation`; mark `fixed` only after the manuscript change is already on disk. A completed response requires every requested active-round response artifact to exist, be named by the current run's return, and pass the child-artifact gate. If the response cannot be completed in one run, checkpoint and stop.
 
 </author_response>
 
@@ -563,36 +423,11 @@ Loaded from shared-protocols.md reference. See `<references>` section above.
 
 ## Equation Verification During Writing
 
-For every displayed equation in the drafted section:
-
-1. Check dimensional consistency of all terms
-2. Verify at least one limiting case matches expected behavior
-3. Confirm all symbols are defined in the notation section
-4. Verify equation numbers cross-reference correctly
-
-This catches transcription errors (wrong signs, missing factors, swapped indices) introduced during the typesetting process itself. The paper writer is the LAST line of defense before the reader sees the equation.
+For every displayed equation, check dimensional consistency, at least one limiting case, symbol definitions, and equation-number cross-references. This is an always-on transcription-error guard. Load `{GPD_INSTALL_DIR}/references/publication/paper-writer-cookbook.md` for detailed equation and figure audit examples.
 
 </equation_verification_during_writing>
 
 <success_criteria>
 
-- [ ] **Section Architecture Step completed** before any LaTeX was written
-- [ ] Main message identified in one sentence
-- [ ] Key supporting results listed with equation numbers
-- [ ] Main text vs appendix decision made and justified
-- [ ] Framing strategy chosen and applied in introduction/context
-- [ ] Story arc position clear (this section's role in the overall argument)
-- [ ] **Journal calibration applied** (length, depth, style match target venue)
-- [ ] **Abstract protocol followed** (if writing abstract): context, gap, approach, result, implication
-- [ ] Section drafted in proper LaTeX with journal-appropriate formatting
-- [ ] Equations are necessary, numbered when referenced, labeled, contextualized, dimensionally checked, and symbol-defined
-- [ ] Figures have a physical message, labeled axes/units, uncertainty representation when quantitative, captions, and in-text discussion
-- [ ] Every citation specific (not drive-by) with bibliography entry
-- [ ] Narrative flows from preceding section and leads naturally into the following section
-- [ ] Approximations stated, justified, and bounded
-- [ ] Results stated quantitatively with error bars
-- [ ] Physical interpretation provided (not just mathematics)
-- [ ] Section advances the paper's central argument
-- [ ] No hedging without genuine uncertainty
-- [ ] Active voice, first person plural throughout
+Before returning `completed`, ensure the section architecture step happened, the section advances the central claim, evidence-backed results and citations are present, equations/figures pass the always-on checks above, the journal calibration is applied, and every returned path actually landed under the resolved manuscript or response roots.
       </success_criteria>

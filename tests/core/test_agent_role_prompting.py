@@ -6,12 +6,16 @@ import re
 from pathlib import Path
 
 from gpd import registry
-from gpd.core.agent_role_kits import get_agent_role_kit
+from gpd.core.agent_role_kits import get_agent_role_kit, role_kit_authority_paths
 from gpd.core.model_visible_text import (
     INTERNAL_AGENT_BOUNDARY_POINTER,
     READ_ONLY_INTERNAL_AGENT_BOUNDARY_POINTER,
 )
-from tests.agent_policy_test_support import assert_agent_role_kit_policy, assert_agent_role_kit_section
+from tests.agent_policy_test_support import (
+    assert_agent_role_kit_policy,
+    assert_agent_role_kit_section,
+    expected_agent_policy_subset,
+)
 from tests.assertion_taxonomy_support import (
     FragmentMode,
     MatchMode,
@@ -95,6 +99,27 @@ def test_phase5_target_agents_delegate_generic_lifecycle_rules_to_role_kits() ->
             if rule in body
         ]
 
+        assert "## Agent Role Kits" not in body, agent_name
+        assert duplicated_rules == [], agent_name
+
+
+def test_all_role_kit_agents_use_generated_policy_and_section() -> None:
+    agent_names = [
+        agent_name for agent_name in sorted(registry.list_agents()) if registry.get_agent(agent_name).role_kits
+    ]
+
+    assert agent_names
+    for agent_name in agent_names:
+        agent = registry.get_agent(agent_name)
+        policy = expected_agent_policy_subset(agent)
+        body = _agent_body(agent_name)
+        duplicated_rules = [
+            rule for role_kit_id in agent.role_kits for rule in get_agent_role_kit(role_kit_id).rules if rule in body
+        ]
+
+        assert policy["role_kits"] == list(agent.role_kits), agent_name
+        assert policy["role_kit_authorities"] == list(role_kit_authority_paths(agent.role_kits)), agent_name
+        assert_agent_role_kit_section(agent, before="## Scientific Rigor Guardrails")
         assert "## Agent Role Kits" not in body, agent_name
         assert duplicated_rules == [], agent_name
 

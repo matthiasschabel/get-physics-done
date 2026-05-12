@@ -23,6 +23,14 @@ REMAINING_TASKS="${TASKS_AFTER_FAILED}"
 
 Classify completion only after expected artifacts exist, the required `gpd_return` envelope validates, and any required `gpd apply-return-updates` pass has succeeded. Commits/files are partial-work evidence, not success proof.
 
+## Child Handoff Recovery
+
+Apply this when a Pattern A, B, or D executor child fails to spawn, crashes, times out, or returns without a valid envelope.
+
+**Pattern A full-plan child gate:** require a fresh summary, declared deliverables, valid child `gpd_return`, non-failing self-check/validation markers, and `gpd apply-return-updates` for durable updates. `git log --oneline -3` is only partial evidence. If the return envelope is missing or invalid, keep the child handoff incomplete and offer: 1) retry executor, 2) Pattern C main-context execution with its own return, 3) abort. Mark tracking failed with details.
+
+**Pattern B/D segment child gate:** require fresh segment outputs, aggregator summary, valid typed return data, aggregator gate, non-failing self-check/validation markers, and final-summary return updates. Treat output files as partial evidence. If the envelope is missing or invalid, retry or use explicit main-context fallback; otherwise offer skip/continue as an incomplete segment. Record the failure in agent tracking.
+
 Present failure report:
 
 ```

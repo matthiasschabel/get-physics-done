@@ -12,22 +12,22 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 51_350, "chars": 2_130_000}
+PROMPT_TOTAL_BUDGET = {"lines": 43_000, "chars": 1_780_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 22_520, "chars": 865_000},
-    "agent": {"lines": 9_280, "chars": 488_800},
-    "workflow": {"lines": 19_595, "chars": 780_000},
+    "command": {"lines": 20_500, "chars": 775_000},
+    "agent": {"lines": 7_500, "chars": 405_000},
+    "workflow": {"lines": 15_300, "chars": 620_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 155_000}
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 140_000}
 # Phase 4 scaffolding guard. Keep first-turn active content flat while Phase 6
 # ratchets the integrated agent aggregate separately.
-STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 125_000}
-STAGE_EAGER_CHAR_BUDGET = 920_000
-STAGE_SELECTED_INIT_FIELD_BUDGET = 2_655
-STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 24
+STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 110_000}
+STAGE_EAGER_CHAR_BUDGET = 885_000
+STAGE_SELECTED_INIT_FIELD_BUDGET = 2_525
+STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 23
 REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 4
-STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 560
-STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 560
+STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 525
+STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 525
 EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_000
 EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 16_000
 PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS = {
@@ -41,10 +41,30 @@ PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS = {
 }
 PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
     ("write-paper", "publication_review"): 11_900,
-    ("peer-review", "panel_stages"): 26_500,
-    ("peer-review", "final_adjudication"): 19_500,
+    ("peer-review", "panel_stages"): 19_000,
+    ("peer-review", "final_adjudication"): 19_300,
+}
+PHASE5_STAGE_CONDITIONAL_CHAR_BUDGETS = {
+    ("write-paper", "publication_review"): 52_500,
+    ("peer-review", "panel_stages"): 20_000,
+    ("peer-review", "final_adjudication"): 9_200,
+}
+PHASE5_STAGE_LAZY_CHAR_BUDGETS = {
+    ("write-paper", "publication_review"): 142_000,
+    ("peer-review", "panel_stages"): 96_000,
+    ("peer-review", "final_adjudication"): 102_000,
 }
 PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET = 5_300
+PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_TARGETS = {
+    "blocked_recovery": 3_300,
+    "convention_lifecycle_closeout": 5_100,
+    "discuss_delegate": 1_100,
+    "gap_route": 3_900,
+    "initialize_discover": 1_400,
+    "phase_route": 1_200,
+    "plan_execute_child_cycle": 5_300,
+    "verification_route": 4_200,
+}
 EXECUTE_PHASE_SPLIT_FAMILY_STAGES = (
     "wave_dispatch",
     "executor_dispatch",
@@ -92,7 +112,7 @@ PHASE4_STAGED_JIT_ADVISORY_BUDGETS = {
     "must_not_eager_load_actionable_violation_count": 0,
     "must_not_eager_load_prior_stage_residue_count": 10,
 }
-SHELL_PARSING_LINE_BUDGET = 400
+SHELL_PARSING_LINE_BUDGET = 365
 SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
     {
         ("workflow", "execute-phase"),
@@ -105,7 +125,7 @@ TARGET_WORKFLOW_SHELL_FENCE_BUDGET = 2
 TARGET_WORKFLOW_SHELL_PARSING_LINE_BUDGET = 3
 NON_REFERENCE_SEMANTIC_DUPLICATE_BUDGETS = {
     "status_handling": 70,
-    "files_written_freshness": 15,
+    "files_written_freshness": 17,
     "stale_artifact_rejection": 25,
     "fresh_continuation": 20,
     "heading_prose_non_authority": 13,
@@ -506,6 +526,36 @@ def test_phase5_publication_stage_eager_budgets_stay_under_caps() -> None:
         )
 
 
+def test_phase5_publication_stage_deferred_budgets_stay_under_caps() -> None:
+    payload = _prompt_surface_payload(("command",), (), False)
+    workflow_ids = {
+        workflow_id
+        for workflow_id, _stage_id in (set(PHASE5_STAGE_CONDITIONAL_CHAR_BUDGETS) | set(PHASE5_STAGE_LAZY_CHAR_BUDGETS))
+    }
+    stage_by_workflow = {
+        workflow_id: _stage_diagnostics_by_id(_workflow_stage_diagnostics(payload, workflow_id))
+        for workflow_id in workflow_ids
+    }
+
+    for (workflow_id, stage_id), char_budget in PHASE5_STAGE_CONDITIONAL_CHAR_BUDGETS.items():
+        stage = stage_by_workflow[workflow_id][stage_id]
+        observed = stage["conditional_char_count"]
+        assert isinstance(observed, int)
+        assert observed <= char_budget, (
+            f"{workflow_id}.{stage_id} conditional char budget exceeded: "
+            f"observed={observed} max={char_budget}; keep Phase 5 cuts from becoming hidden deferred bulk"
+        )
+
+    for (workflow_id, stage_id), char_budget in PHASE5_STAGE_LAZY_CHAR_BUDGETS.items():
+        stage = stage_by_workflow[workflow_id][stage_id]
+        observed = stage["lazy_char_count"]
+        assert isinstance(observed, int)
+        assert observed <= char_budget, (
+            f"{workflow_id}.{stage_id} lazy char budget exceeded: "
+            f"observed={observed} max={char_budget}; keep Phase 5 cuts from becoming hidden deferred bulk"
+        )
+
+
 def test_phase5_autonomous_stages_stay_under_eager_cap() -> None:
     payload = _prompt_surface_payload(("command",), (), False)
     workflow = _workflow_stage_diagnostics(payload, "autonomous")
@@ -516,6 +566,21 @@ def test_phase5_autonomous_stages_stay_under_eager_cap() -> None:
         assert observed < PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET, (
             f"autonomous.{stage_id} eager char budget exceeded: "
             f"observed={observed} max<{PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET}"
+        )
+
+
+def test_phase5_autonomous_stages_stay_under_per_stage_eager_caps() -> None:
+    payload = _prompt_surface_payload(("command",), (), False)
+    workflow = _workflow_stage_diagnostics(payload, "autonomous")
+    stages_by_id = _stage_diagnostics_by_id(workflow)
+
+    assert set(stages_by_id) == set(PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_TARGETS)
+    for stage_id, char_budget in PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_TARGETS.items():
+        observed = stages_by_id[stage_id]["eager_char_count"]
+        assert isinstance(observed, int)
+        assert observed <= char_budget, (
+            f"autonomous.{stage_id} eager char budget exceeded: "
+            f"observed={observed} max={char_budget}; keep autonomous stage bulk localized"
         )
 
 

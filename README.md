@@ -142,7 +142,9 @@ prefix for your runtime from [Supported Runtimes](#supported-runtimes).
 Use the generated recovery ladder for return-to-work cases:
 
 <!-- gpd-public-surface:recovery-note:start -->
-Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation. `state.json.continuation` is the durable authority. Canonical continuation fields define the public resume vocabulary. Fresh context resets are for context management, not as a recovery step; then run gpd resume in your normal terminal only when workspace rediscovery is needed.
+
+Resume vocabulary fields: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, `resume_candidates`.
 <!-- gpd-public-surface:recovery-note:end -->
 
 <details>
@@ -151,7 +153,7 @@ Recovery ladder: use `gpd resume` for the current-workspace read-only recovery s
 Use this when you want to verify install health, unattended readiness, paper-toolchain prerequisites, or local CLI surfaces from your normal terminal. If you want the full beginner path, stay with the onboarding hub and your selected OS/runtime guides.
 
 <!-- gpd-public-surface:local-cli-bridge-summary:start -->
-Use `gpd --help` from your normal terminal for the broader local CLI surface: install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost, presets, and shared Wolfram integration.
+Use `gpd --help` from your normal terminal for the broader local CLI surface: install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost from recorded local telemetry, presets, and shared Wolfram integration.
 
 - `gpd --help`
 - `gpd doctor`
@@ -355,7 +357,9 @@ Publication boundary: `write-paper` supports current-project manuscripts plus on
 Leave / return path:
 
 <!-- gpd-public-surface:recovery-note:start -->
-Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation.
+Recovery ladder: use `gpd resume` for the current-workspace read-only recovery snapshot. If that is the wrong workspace, use `gpd resume --recent` to find the workspace first, then continue inside that workspace with `resume-work`. After resuming, `suggest-next` is the fastest next command. Before stepping away mid-phase, run `pause-work` so that ladder has an explicit handoff to restore, projected from canonical continuation. `state.json.continuation` is the durable authority. Canonical continuation fields define the public resume vocabulary. Fresh context resets are for context management, not as a recovery step; then run gpd resume in your normal terminal only when workspace rediscovery is needed.
+
+Resume vocabulary fields: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, `resume_candidates`.
 <!-- gpd-public-surface:recovery-note:end -->
 
 ### Command Context
@@ -388,7 +392,7 @@ This README is the onboarding and orientation surface, not the complete in-runti
 For normal-terminal local CLI commands:
 
 <!-- gpd-public-surface:local-cli-bridge-summary:start -->
-Use `gpd --help` from your normal terminal for the broader local CLI surface: install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost, presets, and shared Wolfram integration.
+Use `gpd --help` from your normal terminal for the broader local CLI surface: install/readiness checks, typed command validation, permissions, observability, diagnostics, recovery, cost from recorded local telemetry, presets, and shared Wolfram integration.
 
 - `gpd --help`
 - `gpd doctor`

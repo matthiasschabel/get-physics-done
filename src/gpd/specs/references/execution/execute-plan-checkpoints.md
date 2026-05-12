@@ -76,6 +76,22 @@ git log --oneline --grep="(${PHASE}-${PLAN}): ${TASK_NAME}" | head -1
 
 If an exact match exists and the task output is identical, skip the commit with a note: "Task N already committed ({hash}), skipping duplicate."
 
+## First-Result, Skeptical, and Pre-Fanout Gates
+
+Run the first-result sanity gate at the earliest of: first quantitative result, first derived core equation, first produced artifact, first benchmark-style comparison, or two completed auto tasks. Ask what claim/deliverable/acceptance test the result would unlock, whether it is load-bearing or proxy-only, which quick sanity/benchmark/convention check passed, what decisive evidence is still missing, and what disconfirming observation would break the framing.
+
+Record gate-enter and gate-clear events on the existing `execution` payload. First-result fields are `review_cadence`, `first_result_ready`, `first_result_gate_pending`, and `current_task`. If a tangent appears at the same stop, keep optional `tangent_summary` / `tangent_decision` fields on that payload.
+
+If the first result is proxy-only, benchmark-thin, or lacks the decisive evidence the contract still owes, strengthen the same stop into skeptical review with `skeptical_requestioning_required`, `skeptical_requestioning_summary`, `weakest_unchecked_anchor`, `disconfirming_observation`, and `downstream_locked`. Resolve it with an explicit `skeptical_requestioning` clear; a first-result clear does not retire skeptical state.
+
+Before downstream dependent tasks or fanout continue, emit a pre-fanout lock when later work would rely on this result as decisive. The pre-fanout payload carries `pre_fanout_review_pending`, `downstream_locked`, and `last_result_label`. Record both the reason-scoped `pre_fanout` clear and the matching fanout unlock; neither transition implies the other.
+
+## Dense Supervised Clean-Wave Batching
+
+Batch only when `AUTONOMY="supervised"`, `review_cadence=dense`, every task has no deviation trace events, every `verification-complete` event has typed payload `verification.status="passed"` and `verification.issue_count=0`, no first-result / pre-fanout / skeptical gate is pending, and the return envelope has `status="completed"` with empty `issues`.
+
+Do not parse prose such as "failure language" to decide batching eligibility. On `Y` / Enter, all batched tasks are accepted at once; on `n`, re-present each task checkpoint individually; on `e`, open freeform per-task notes. Any deviation, failed verification, missing typed verification outcome, or required gate immediately reverts the wave to per-task checkpoints for remaining tasks.
+
 ## Checkpoint Protocol (During Execution)
 
 On `type="checkpoint:*"`: automate everything possible first. Checkpoints are for verification/decisions only.

@@ -58,6 +58,7 @@ This agent should be spawned in the following situations:
 - `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md` -- Shared infrastructure: data boundary, context pressure, return envelope
 - `{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` -- one-shot checkpoint and fresh-continuation boundary
 - `{GPD_INSTALL_DIR}/references/conventions/subfield-convention-defaults.md` -- Canonical on-demand defaults table for physics subfield conventions
+- `{GPD_INSTALL_DIR}/references/conventions/convention-coordinator-playbook.md` -- On-demand examples, interaction tables, conversion tables, and rollback playbook
 </references>
 
 <convention_establishment>
@@ -72,19 +73,7 @@ When establishing conventions for a new project or phase:
 
 ### Step 1: Gather Recommendations
 
-Read the following sources for convention recommendations (including `subfield-convention-defaults.md` above):
-
-1. **RESEARCH.md:** The phase researcher identifies which conventions are needed and may recommend specific choices
-2. **Standard references** for the subfield:
-   - QFT: Peskin & Schroeder, Weinberg, Schwartz, Srednicki
-   - Condensed matter: Altland & Simons, Mahan, Bruus & Flensberg
-   - GR: Wald, Carroll, Misner-Thorne-Wheeler
-   - Statistical mechanics: Kardar, Goldenfeld, Pathria & Beale
-   - Soft matter: Doi & Edwards, Rubinstein & Colby, Chaikin & Lubensky
-   - AMO: Foot, Metcalf & van der Straten, Sakurai
-   - Mathematical physics: Reed & Simon, Nakahara, Bott & Tu
-3. **Prior phases:** If conventions already exist in CONVENTIONS.md, new conventions must be compatible
-4. **Computational tools:** If the project uses specific software (GROMACS, VASP, Mathematica), check what conventions the software assumes
+Read `RESEARCH.md`, standard references, prior phases, computational-tool assumptions, current `state.json.convention_lock`, and `CONVENTIONS.md` projection. Load `subfield-convention-defaults.md` for defaults and `convention-coordinator-playbook.md` for worked examples.
 
 ### Step 2: Choose Conventions
 
@@ -97,47 +86,17 @@ For each convention category, apply these selection rules:
 
 ### Step 3: Define Test Values
 
-For every convention, define a concrete test value that uniquely identifies the convention:
-
-| Convention | Test | Expected Result |
-|-----------|------|-----------------|
-| Metric signature (-,+,+,+) | On-shell timelike 4-momentum p^mu = (E, **0**) | p^2 = p_mu p^mu = -E^2 |
-| Fourier: f(x) = integral dk/(2pi) f_tilde(k) e^{ikx} | FT[delta(x)] | = 1 |
-| Natural units hbar = c = 1 | Compton wavelength of electron | lambda_C = 1/m_e |
-| Coupling alpha = e^2/(4pi) | Fine structure constant | alpha = 1/137.036 |
-
-These test values are the ground truth for convention compliance checking. The consistency-checker uses them to verify every phase.
+For every convention, define a concrete test value that uniquely identifies it. Test values are the ground truth for convention compliance checking and must be projected into `CONVENTIONS.md`.
 
 ### Step 4: Write CONVENTIONS.md
 
 Use the template at `{GPD_INSTALL_DIR}/templates/conventions.md` as the starting point. Fill in all applicable sections:
 
-- **Spacetime conventions:** Metric signature, coordinate ordering, index notation (Greek vs Latin)
-- **Fourier conventions:** Transform pair definition, delta function normalization, momentum-space measure
-- **Field conventions:** Field normalization, creation/annihilation operators, commutation relations
-- **Coupling conventions:** Definition of coupling constants, relation between g and alpha, loop counting factors
-- **Unit system:** Natural units, SI, CGS, lattice units; which constants are set to 1
-- **Normalization:** State normalization (relativistic vs non-relativistic), spinor normalization, partition function normalization
-- **Statistical mechanics:** Boltzmann constant convention (k_B = 1 or explicit), ensemble definitions
-- **Gauge conventions:** Covariant derivative sign (D = partial + igA vs D = partial - igA), gauge fixing
-- **Thermal field theory:** Imaginary time convention (tau in [0, beta] vs [0, 1/T]), Matsubara frequencies
-- **Discrete symmetries:** Levi-Civita tensor sign (ε^{0123} = ±1), gamma matrix basis (Dirac/Weyl/Majorana)
-- **Algebraic conventions:** Generator normalization (Tr(T^aT^b) = δ^{ab}/2 vs δ^{ab}), creation/annihilation ordering
+Cover applicable spacetime, Fourier, field, coupling, unit, normalization, statistical mechanics, gauge, thermal, discrete-symmetry, and algebraic convention categories. Leave inapplicable sections omitted or explicitly not applicable.
 
 ### Step 5: Dimensional Consistency Verification
 
-After writing CONVENTIONS.md, verify that the chosen conventions produce dimensionally consistent expressions:
-
-1. **Unit system defines the dimension map.** In natural units (ℏ = c = 1): [length] = [time] = [energy]^{-1}, [mass] = [energy]. In SI: all independent. Write the dimension map explicitly in CONVENTIONS.md.
-
-2. **Check each convention's test value has correct dimensions.** For example:
-   - If metric signature gives p² = -E², then [p²] = [E²] = [energy]² ✓
-   - If Fourier measure is dk/(2π), then [∫dk/(2π) e^{ikx}] = [1/length] × [length] = dimensionless ✓
-   - If coupling α = e²/(4π), then [α] = dimensionless ✓ (in natural units where [e²] = 1)
-
-3. **Verify cross-convention dimensional consistency.** The Lagrangian density must have [L] = [energy]^d in d spacetime dimensions (natural units). Check that the kinetic term, mass term, and interaction terms all have the same dimensions given the chosen field normalization, coupling convention, and unit system.
-
-4. **Flag dimensional mismatches immediately** — they indicate an incompatible convention combination before any physics is computed.
+After writing or updating conventions, verify the unit dimension map, test-value dimensions, and cross-convention dimensional consistency. Flag mismatches immediately; they indicate an incompatible convention combination before any physics is computed.
 
 <subfield_convention_defaults>
 
@@ -149,9 +108,9 @@ Operational use:
 
 1. Read `PROJECT.md` and extract the physics subfield.
 2. Load the canonical subfield defaults reference and look up the matching subfield.
-3. Pre-populate `CONVENTIONS.md` with the default choices.
-4. Present to user: "Based on [subfield], I suggest these conventions. Confirm or override each."
-5. For cross-disciplinary projects (e.g., condensed matter + QFT), identify conflicts between default sets and resolve explicitly.
+3. Pre-populate `CONVENTIONS.md` with the default choices, but do not treat defaults as user approval.
+4. In supervised mode, return a checkpoint for confirmation or override before locking anything.
+5. For cross-disciplinary projects, identify conflicts between default sets and resolve explicitly. Load `{GPD_INSTALL_DIR}/references/conventions/convention-coordinator-playbook.md` for examples.
 
 </subfield_convention_defaults>
 
@@ -172,79 +131,13 @@ The executor hits a step requiring a convention choice not present in `state.jso
 
 ### Protocol
 
-**Step 1: Executor flags the need**
+Require a concise convention request with task, category, context, constraints, candidates, and recommendation. Load `{GPD_INSTALL_DIR}/references/conventions/convention-coordinator-playbook.md` for the request template and worked examples.
 
-The executor writes a convention request to the research log:
+Before proposing candidates, verify constraints from existing locks: metric plus Fourier may determine propagator form, coupling may determine loop factors, and unit system constrains dimensional analysis.
 
-```markdown
-### CONVENTION NEEDED
+If the plan is non-interactive, choose the option compatible with existing locks, subfield defaults, and the primary reference; lock it through `gpd convention set`; document rationale; refresh `CONVENTIONS.md`; then continue. If the plan requires checkpoints, return a `checkpoint` with the proposed resolution and stop; the fresh continuation performs the lock and file writes.
 
-**Task:** [current task name]
-**Category:** [e.g., spinor convention, gauge choice, discretization scheme]
-**Context:** [why this convention is needed now — what calculation step requires it]
-**Constraints:** [any cross-convention constraints from existing locked conventions]
-**Candidates:**
-- Option A: [convention] — used by [reference], advantage: [X]
-- Option B: [convention] — used by [reference], advantage: [Y]
-**Recommendation:** [which option and why, given existing project conventions]
-```
-
-**Step 2: Check cross-convention constraints**
-
-Before proposing candidates, verify what existing locked conventions constrain:
-- If metric + Fourier are locked → propagator form may be determined
-- If coupling convention is locked → loop factors are determined
-- If unit system is locked → dimensional analysis constrains the new convention
-
-Use the cross-convention interaction table from `<convention_validation>` to identify constraints.
-
-**Step 3: Resolve**
-
-**If the plan is non-interactive (plan frontmatter `interactive: false`):**
-1. Choose the convention that (a) is compatible with existing locks, (b) follows the canonical subfield default, (c) matches the primary reference being followed
-2. Lock it immediately via `gpd convention set`
-3. Document in the research log with rationale
-4. Continue execution
-
-**If the plan requires checkpoints:**
-1. Return a checkpoint with type `decision` including the convention request and proposed resolution
-2. Apply the continuation boundary for user presentation and the follow-up handoff
-3. Lock the decision via `gpd convention set` in that continuation
-4. Continue execution
-
-**Step 4: Propagate**
-
-After locking a new convention mid-execution:
-1. Update CONVENTIONS.md with the new entry
-2. Add an ASSERT_CONVENTION line to the current derivation file
-3. Verify compatibility with all prior derivation files in the current phase (search_files for ASSERT_CONVENTION headers)
-4. If any prior file in this phase assumed a different choice for this convention → flag as DEVIATION Rule 5
-
-### Worked Example
-
-During a condensed matter calculation, the executor needs a Green's function convention:
-
-```markdown
-### CONVENTION NEEDED
-
-**Task:** 3 — Compute single-particle Green's function
-**Category:** Green's function time-ordering convention
-**Context:** Need to evaluate G(k,ω) for the self-energy calculation. The imaginary-time
-vs real-time convention affects the analytic continuation step.
-**Constraints:**
-- k_B = 1 already locked (stat mech project)
-- Fourier: symmetric convention (1/√N) already locked
-**Candidates:**
-- Option A: Imaginary-time (Matsubara) G(k,τ) = −⟨T_τ c_k(τ) c†_k(0)⟩
-  — Used by Mahan, Bruus & Flensberg. Natural for finite-T calculations.
-- Option B: Real-time retarded G^R(k,ω) = −i θ(t)⟨{c_k(t), c†_k(0)}⟩
-  — Used by Zubarev. Natural for spectral properties and transport.
-**Recommendation:** Option A (Matsubara). Project is finite-temperature;
-  imaginary-time formalism avoids analytic continuation until the final step.
-  Consistent with Bruus & Flensberg (primary reference).
-```
-
-Resolution (non-interactive plan): Lock Matsubara convention, add to `CONVENTIONS.md`, continue.
+After locking a new convention, update `CONVENTIONS.md`, add `ASSERT_CONVENTION` to the current derivation artifact, verify prior same-phase artifacts for compatibility, and flag incompatible prior assumptions as a deviation.
 
 </mid_execution_convention>
 
@@ -256,77 +149,11 @@ At project initialization (before the user sees any convention choices), automat
 
 ### Process
 
-**Step 1: Extract subfield from PROJECT.md**
+Extract the project subfield, map it to `subfield-convention-defaults.md`, identify primary and secondary subfields, and pre-populate a complete suggestion. For cross-disciplinary projects, use the primary default as the base and explicitly flag every secondary conflict before resolution.
 
-```bash
-# Read PROJECT.md and extract physics area
-PHYSICS_AREA=$(grep -i "physics.*area\|subfield\|domain\|branch" GPD/PROJECT.md | head -3)
-```
+Present each category with suggested choice, rationale, conflict status, cross-convention check status, and test value. In supervised or interactive bootstrap mode, return `gpd_return.status: checkpoint` with proposed conventions and unresolved conflicts; do not write `GPD/CONVENTIONS.md` or call `gpd convention set` until the fresh continuation has user approval.
 
-Parse the physics area. Map to one of the subfield categories in the canonical defaults reference. If the project spans multiple subfields, identify the primary and secondary.
-
-**Step 2: Generate convention suggestion**
-
-For the identified subfield(s), pre-populate a complete convention set from the canonical defaults reference. For cross-disciplinary projects:
-
-1. Use the primary subfield's defaults as the base
-2. For categories where the secondary subfield has a different default, flag the conflict:
-   ```markdown
-   **Metric signature:** CONFLICT
-   - Primary (particle physics): (+,−,−,−)
-   - Secondary (GR): (−,+,+,+)
-   - Recommendation: [based on which framework dominates the calculations]
-   ```
-3. Require explicit user resolution for every conflict
-
-**Step 3: Present to user**
-
-Display the auto-suggested conventions with:
-- Each category, the suggested choice, and the rationale
-- Any cross-subfield conflicts highlighted
-- Cross-convention consistency already verified
-- Test values pre-populated from the defaults
-
-**If running in supervised / interactive bootstrap mode:** return `gpd_return.status: checkpoint` with the proposed convention set, rationale, test values, and any unresolved conflicts. Do NOT write `GPD/CONVENTIONS.md` and do NOT call `gpd convention set` yet; the continuation boundary owns confirmation/override handling and follow-up writes.
-
-**Step 4: Lock confirmed conventions**
-
-After user confirmation (possibly with overrides):
-
-```bash
-# Lock each confirmed convention (positional args: <key> <value>)
-for convention in "${CONFIRMED[@]}"; do
-  gpd convention set \
-    "${CATEGORY}" "${VALUE}"
-done
-```
-
-### Example: QFT + GR Project (Hawking Radiation)
-
-PROJECT.md says: "Compute Hawking radiation spectrum using QFT in curved spacetime"
-
-Auto-suggestion:
-
-```markdown
-## Auto-Suggested Conventions for QFT in Curved Spacetime
-
-Primary subfield: QFT. Secondary: GR.
-
-| Category | Suggestion | Source | Conflict? |
-|----------|-----------|--------|-----------|
-| Units | Natural: ℏ = c = G = 1 | GR dominates | Merges both |
-| Metric signature | (−,+,+,+) | GR convention | CONFLICT: QFT uses (+,−,−,−) |
-| Fourier convention | Physics: e^{−iωt} | QFT standard | Compatible |
-| Index convention | Greek spacetime, Latin spatial | Both agree | No conflict |
-| Riemann tensor | MTW sign convention | GR standard | N/A for QFT |
-| Field normalization | Canonical: [φ, π] = iδ³(x−y) | QFT standard | Compatible |
-| State normalization | Non-relativistic in curved BG | Hybrid | Needs discussion |
-
-**Metric conflict resolution:** For QFT in curved spacetime, the GR convention
-(−,+,+,+) is standard (Birrell & Davies, Wald Ch. 14, Parker & Toms).
-Recommend (−,+,+,+). This means the on-shell condition is p² = −m² and
-the propagator form differs from flat-space QFT texts.
-```
+After confirmation, lock each approved convention with `gpd convention set <key> <value>` and refresh `CONVENTIONS.md`. Load `{GPD_INSTALL_DIR}/references/conventions/convention-coordinator-playbook.md` for cross-subfield examples such as QFT plus GR.
 
 </convention_auto_suggestion>
 
@@ -340,54 +167,9 @@ When validating conventions (invoked after convention establishment or during co
 
 ### Internal Consistency Check
 
-Conventions constrain each other. Verify all cross-convention interactions:
+Conventions constrain each other. Verify every locked pair that interacts: metric with propagator, Fourier with mode expansion, covariant-derivative sign with field strength, unit system with action dimension, state normalization with completeness, Levi-Civita sign with gamma-5, generator normalization with Casimirs, and related factor sources. Load `{GPD_INSTALL_DIR}/references/conventions/convention-coordinator-playbook.md` for the extended interaction and numerical-factor tables.
 
-| Convention A | Convention B | Required Relation |
-|-------------|-------------|-------------------|
-| Metric signature (+,-,-,-) | Feynman propagator | i/(k^2 - m^2 + i*epsilon) with k^2 = k_0^2 - **k**^2 |
-| Metric signature (-,+,+,+) | Feynman propagator | -i/(k^2 + m^2 - i*epsilon) with k^2 = -k_0^2 + **k**^2 |
-| Fourier e^{-ikx} | Mode expansion | a(k) multiplies e^{+ikx} (positive freq = annihilation) |
-| Fourier e^{+ikx} | Mode expansion | a(k) multiplies e^{-ikx} |
-| D = partial + igA | Field strength | F_mu_nu = (1/ig)[D_mu, D_nu] = partial_mu A_nu - partial_nu A_mu + ig[A_mu, A_nu] |
-| D = partial - igA | Field strength | F_mu_nu = (-1/ig)[D_mu, D_nu] = partial_mu A_nu - partial_nu A_mu - ig[A_mu, A_nu] |
-| Natural units | Action | S is dimensionless; [Lagrangian density] = [mass]^4 in 4D |
-| Relativistic normalization | Completeness | 1 = integral dk/(2pi)^3 * 1/(2E_k) |k><k| |
-| Non-relativistic normalization | Completeness | 1 = integral dk/(2pi)^3 |k><k| |
-
-For each pair in the project's conventions, verify the required relation holds. If it does not, the conventions are internally inconsistent and must be corrected before any physics is done.
-
-### Extended Convention Interactions (18-Type Coverage)
-
-The table above covers the classical QFT pairs. The full 18-convention system includes additional interactions that must be checked:
-
-| Convention A | Convention B | Required Relation |
-|-------------|-------------|-------------------|
-| Levi-Civita sign ε^{0123} = +1 | Gamma-5 definition | γ^5 = iγ^0γ^1γ^2γ^3 (consistent signs) |
-| Levi-Civita sign ε^{0123} = -1 | Gamma-5 definition | γ^5 = -iγ^0γ^1γ^2γ^3 |
-| Generator normalization Tr(T^aT^b) = δ^{ab}/2 | Coupling definition | Determines relationship between g and structure constants: [T^a, T^b] = if^{abc}T^c |
-| Generator normalization Tr(T^aT^b) = δ^{ab} | Casimir | C_2(fund) = (N^2-1)/(2N) vs (N^2-1)/N depending on normalization |
-| Covariant derivative sign (D = ∂ + igA) | Gauge field strength | F = -i/g [D,D] with consistent signs |
-| Gamma matrix convention (Dirac vs Weyl vs Majorana) | Spinor normalization | ū u = 2m (Dirac) vs ū u = 1 (some Weyl conventions) |
-| Creation/annihilation order (a†a = n̂) | Normal ordering | :a†a: = a†a (number ordering) vs :aa†: = a†a (Wick) |
-| Metric signature | Levi-Civita tensor | ε_{0123} = +√|g| (mostly-minus) vs ε_{0123} = -√|g| (mostly-plus) |
-| State normalization | Creation operator normalization | a†|n⟩ = √(n+1)|n+1⟩ (standard) vs a†|n⟩ = |n+1⟩ (unnormalized) |
-
-When validating, systematically check every pair involving a locked convention against this table. Two locked conventions that interact but whose interaction is not verified is a latent error.
-
-### Numerical Factor Registry
-
-Convention mismatches most commonly manifest as wrong numerical factors. Track these explicitly:
-
-| Factor Source | Typical Error | Convention Pair That Determines It |
-|--------------|---------------|-----------------------------------|
-| 2π vs 1 | Fourier measure dk vs dk/(2π) | Fourier convention + integral normalization |
-| 4π vs 1 | Coupling: α = e²/(4π) vs α = e² | Coupling definition + action normalization |
-| √2 vs 1 | Field normalization: φ = (a + a†)/√(2ω) vs φ = (a + a†) | Field convention + creation/annihilation normalization |
-| i vs -i | Propagator numerator sign | Metric signature + Fourier convention |
-| 2 vs 1 | Spin sum: Σ_s u_s ū_s = (/p + m) vs 2m | Spinor normalization (relativistic vs non-relativistic) |
-| (-1)^n | Riemann tensor sign, Levi-Civita sign | MTW vs Landau-Lifshitz vs Weinberg sign conventions |
-
-**Protocol:** When establishing conventions, populate a "Factor Registry" section in CONVENTIONS.md listing every factor whose value depends on the convention choice. The consistency-checker uses this registry to verify factors in derivations.
+If a required relation does not hold, conventions are internally inconsistent and must be corrected before physics proceeds. Two locked conventions that interact but whose interaction is not verified are a latent error. Populate a "Factor Registry" in `CONVENTIONS.md` for factors such as `2pi`, `4pi`, `sqrt(2)`, propagator `i` signs, spin-sum factors, and Riemann/Levi-Civita signs.
 
 ### Cross-Reference Validation
 
@@ -442,34 +224,10 @@ Invalid reasons:
 ### Change Protocol
 
 1. **Document the decision** in `GPD/DECISIONS.md` with rationale
-2. **Write conversion procedure:**
-
-```markdown
-## Convention Change: CHG-{NNN}
-
-**Phase:** {phase where change takes effect}
-**Category:** {which convention category}
-**Old:** {previous convention with test value}
-**New:** {new convention with test value}
-
-### Conversion Rules
-
-For each quantity affected by this change:
-
-| Quantity | Old Convention | New Convention | Conversion |
-|----------|---------------|----------------|------------|
-| p^2 | p^2 = E^2 - **p**^2 | p^2 = -E^2 + **p**^2 | p^2_new = -p^2_old |
-| Propagator | i/(k^2 - m^2 + iε) | -i/(k^2 + m^2 - iε) | multiply by -1, flip iε |
-| ... | ... | ... | ... |
-
-### Verification
-
-Test value: [concrete numerical check that conversion is correct]
-```
-
-3. **Update CONVENTIONS.md:** Mark old convention as superseded, add new convention with effective phase
-4. **Create conversion table:** Explicit formulas for converting every affected quantity
-5. **Flag all downstream phases:** Any phase that consumes results from before the change point must apply the conversion
+2. **Write conversion procedure:** old value, new value, effective phase, affected quantities, conversion table, and a concrete test value.
+3. **Update the lock and projection:** use `gpd convention set` for the new lock, then mark the old convention as superseded in `CONVENTIONS.md` and add the new convention with effective phase.
+4. **Flag all downstream phases:** Any phase that consumes results from before the change point must apply the conversion.
+5. Load `{GPD_INSTALL_DIR}/references/conventions/convention-coordinator-playbook.md` for conversion table templates and rollback details.
 
 ### Convention Diff
 
@@ -488,22 +246,7 @@ When comparing conventions between two phases or between project and reference:
 
 ### Convention Rollback Protocol
 
-When a convention change is later found to be incorrect:
-
-1. **Identify scope:** `grep -r "[old convention pattern]" GPD/ src/ derivations/`
-2. **Create revert plan:**
-   - List all files using the convention
-   - For each file, specify the exact change needed
-   - Order changes by dependency (upstream first)
-3. **Apply changes** atomically so the orchestrator can commit the full rollback as one scoped change set
-4. **Update CONVENTIONS.md:**
-   - Mark the reverted convention with `REVERTED: [date] [reason]`
-   - Add the replacement convention as a new entry
-   - Do NOT delete the old entry (append-only ledger)
-5. **Re-run consistency checker** to verify the rollback is complete
-6. **Return the rollback files to the orchestrator** for a scoped commit such as `fix(conventions): revert [convention] — [reason]`
-
-**Recovery from partial rollback:** If the rollback fails partway, use the previous orchestrator commit as the rollback target. Compare the last known-good change set and complete the remaining file updates manually.
+When a convention change is later found incorrect, identify the affected scope, create a dependency-ordered revert plan, apply it atomically, mark the old entry as reverted without deleting history, re-run the consistency checker, and return fresh rollback files to the orchestrator. Load the coordinator playbook for detailed rollback examples.
 
 ### When Convention Cannot Be Determined
 
@@ -522,37 +265,7 @@ If no source (PROJECT.md, literature, RESEARCH.md) specifies a convention:
 
 ## Conversion Table Generation
 
-When generating conversion tables between convention systems:
-
-### Metric Signature Conversion (+,-,-,- <-> -,+,+,+)
-
-| Quantity | (+,-,-,-) | (-,+,+,+) | Rule |
-|----------|-----------|-----------|------|
-| eta_mu_nu | diag(+1,-1,-1,-1) | diag(-1,+1,+1,+1) | eta -> -eta |
-| p^2 | E^2 - **p**^2 | -E^2 + **p**^2 | p^2 -> -p^2 |
-| On-shell | p^2 = m^2 | p^2 = -m^2 | Flip sign of mass-shell |
-| Propagator | i/(p^2 - m^2 + iε) | -i/(p^2 + m^2 - iε) | Numerator sign, mass sign, iε sign |
-| gamma matrices | {gamma^mu, gamma^nu} = 2*eta^{mu,nu} | Same relation, different eta | Redefine gamma^0 |
-
-### Fourier Convention Conversion
-
-| Convention | Forward | Inverse | delta normalization | Measure |
-|-----------|---------|---------|---------------------|---------|
-| Physicist (asymmetric) | f_tilde(k) = integral dx f(x) e^{-ikx} | f(x) = integral dk/(2pi) f_tilde(k) e^{ikx} | delta(x) = integral dk/(2pi) e^{ikx} | dk/(2pi) |
-| Mathematician (symmetric) | f_hat(k) = (1/sqrt(2pi)) integral dx f(x) e^{-ikx} | f(x) = (1/sqrt(2pi)) integral dk f_hat(k) e^{ikx} | delta(x) = (1/(2pi)) integral dk e^{ikx} | dk/sqrt(2pi) |
-| Engineer (opposite sign) | F(omega) = integral dt f(t) e^{+i*omega*t} | f(t) = integral d(omega)/(2pi) F(omega) e^{-i*omega*t} | delta(t) = integral d(omega)/(2pi) e^{-i*omega*t} | d(omega)/(2pi) |
-
-**Conversion rule:** When translating between conventions, track factors of 2*pi and signs. A formula from a "mathematician convention" reference used in a "physicist convention" project needs sqrt(2pi) factors adjusted.
-
-### Unit System Conversion
-
-| Quantity | Natural (hbar=c=1) | SI | Conversion |
-|----------|--------------------|----|------------|
-| Length | 1/[Energy] | meters | multiply by hbar*c = 1.97e-16 GeV*m |
-| Time | 1/[Energy] | seconds | multiply by hbar = 6.58e-25 GeV*s |
-| Mass | [Energy] | kg | divide by c^2 = 8.99e16 J/kg |
-| Cross section | 1/[Energy]^2 | m^2 | multiply by (hbar*c)^2 = 3.89e-32 GeV^2*m^2 |
-| Coupling (QED) | alpha = e^2/(4pi) | alpha = e^2/(4pi*epsilon_0*hbar*c) | Same numerical value |
+When generating conversion tables, include old convention, new convention, conversion rule, affected quantity, and test value. Metric signature, Fourier convention, and unit system table templates live in `{GPD_INSTALL_DIR}/references/conventions/convention-coordinator-playbook.md`.
 
 </conversion_tables>
 

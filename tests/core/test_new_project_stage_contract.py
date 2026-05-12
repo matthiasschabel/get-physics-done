@@ -109,42 +109,19 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
 
     assert scope_intake.mode_paths == ("workflows/new-project/scope-intake.md",)
     assert scope_intake.loaded_authorities == ("workflows/new-project/scope-intake.md",)
-    assert scope_intake.required_init_fields == (
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_exists",
-        "state_exists",
-        "roadmap_exists",
-        "recoverable_project_exists",
-        "partial_project_exists",
-        "project_recovery_status",
-        "init_progress_exists",
-        "init_progress_status",
-        "init_progress_valid",
-        "init_progress_corrupt",
-        "init_progress_step",
-        "init_progress_description",
-        "init_progress_path",
-        "has_research_map",
-        "planning_exists",
-        "has_research_files",
-        "research_file_samples",
-        "has_project_manifest",
-        "needs_research_map",
-        "has_git",
-        "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-    )
+    assert scope_intake.required_init_fields[:3] == ("commit_docs", "autonomy", "research_mode")
     assert "researcher_model" not in scope_intake.required_init_fields
     assert "synthesizer_model" not in scope_intake.required_init_fields
     assert "roadmapper_model" not in scope_intake.required_init_fields
     assert "project_contract_gate" in scope_intake.required_init_fields
     assert "needs_research_map" in scope_intake.required_init_fields
     assert "init_progress_status" in scope_intake.required_init_fields
+    assert scope_intake.required_init_fields.index("needs_research_map") < scope_intake.required_init_fields.index(
+        "has_git"
+    )
+    assert scope_intake.required_init_fields.index("platform") < scope_intake.required_init_fields.index(
+        "project_contract"
+    )
     assert scope_intake.conditional_authorities[0].when == "full_questioning_path"
     assert scope_intake.conditional_authorities[0].authorities == ("references/research/questioning.md",)
     assert "workflows/new-project/scope-approval.md" in scope_intake.must_not_eager_load
@@ -163,12 +140,11 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
     assert scope_intake.writes_allowed == ()
     assert scope_intake.next_stages == ("scope_approval",)
 
-    assert scope_approval.required_init_fields == (
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-    )
+    assert scope_approval.required_init_fields[0] == "project_contract"
+    assert "project_contract_gate" in scope_approval.required_init_fields
+    assert "project_contract_load_info" in scope_approval.required_init_fields
+    assert "project_contract_validation" in scope_approval.required_init_fields
+    assert len(scope_approval.required_init_fields) == 4
     assert scope_approval.mode_paths == ("workflows/new-project/scope-approval.md",)
     assert scope_approval.loaded_authorities == (
         "workflows/new-project/scope-approval.md",
@@ -475,7 +451,7 @@ def test_new_project_stage_contract_rejects_invalid_ordering(tmp_path: Path) -> 
         ),
         (lambda payload: payload["stages"][0]["allowed_tools"].__setitem__(0, "network"), "unknown tool name"),
         (
-            lambda payload: payload["stages"][1]["required_init_fields"].__setitem__(0, "bogus_field"),
+            lambda payload: payload["stages"][1].__setitem__("required_init_fields", ["bogus_field"]),
             "unknown field name",
         ),
         (

@@ -52,7 +52,14 @@ def test_new_project_prompt_surface_uses_first_stage_authority_boundary() -> Non
 
 def _new_project_stage(stage_id: str) -> dict:
     payload = json.loads(STAGE_MANIFEST.read_text(encoding="utf-8"))
-    return next(stage for stage in payload["stages"] if stage["id"] == stage_id)
+    stage = dict(next(stage for stage in payload["stages"] if stage["id"] == stage_id))
+    if "required_init_fields" not in stage:
+        groups = payload.get("required_init_field_groups", {})
+        fields: list[str] = []
+        for group_name in stage.get("required_init_field_groups", []):
+            fields.extend(groups.get(group_name, []))
+        stage["required_init_fields"] = list(dict.fromkeys(fields))
+    return stage
 
 
 def _expanded_stage_surface(stage: dict) -> str:

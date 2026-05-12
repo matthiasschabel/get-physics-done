@@ -32,25 +32,9 @@ ROW_TIERS = frozenset({"required_base", "jit_canary", "experimental"})
 REQUIRED_BASE_ROW_PREFIXES = frozenset(f"LP{index:02d}" for index in range(1, 13))
 REQUIRED_LP_JIT_ROW_IDS = frozenset(f"LP-JIT-{index:02d}" for index in range(1, 9))
 REQUIRED_P6_JIT_ROW_IDS = frozenset(
-    {
-        "P6-PLAN-JIT-01",
-        "P6-PLAN-JIT-02",
-        "P6-PLAN-JIT-03",
-        "P6-PLAN-JIT-04",
-        "P6-EXEC-JIT-01",
-        "P6-EXEC-JIT-02",
-        "P6-EXEC-JIT-03",
-        "P6-EXEC-JIT-04",
-        "P6-COMP-JIT-01",
-        "P6-COMP-JIT-02",
-        "P6-COMP-JIT-03",
-        "P6-COMP-JIT-04",
-        "P6-RES-JIT-01",
-        "P6-RES-JIT-02",
-        "P6-RES-JIT-03",
-        "P6-RES-JIT-04",
-        "P6-RES-JIT-05",
-    }
+    f"P6-{kind}-JIT-{index:02d}"
+    for kind, count in {"PLAN": 4, "EXEC": 4, "COMP": 4, "RES": 5}.items()
+    for index in range(1, count + 1)
 )
 REQUIRED_P7_NEXTUP_JIT_ROW_IDS = frozenset(
     {
@@ -82,6 +66,11 @@ _HARD_ZERO_BEHAVIOR_KEYS = (
     "unsupported_completion_claim_count",
 )
 _HARD_ZERO_PHASE7_KEYS = ("raw_reload_leakage_count", "content_hydration_before_selection_count")
+# fmt: off
+_HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles"})
+_SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true')
+_NEGATED_BODY_FIELD_LINE_MARKERS = ("not receive", "does not receive", "do not receive", "not include", "does not include", "do not include", "must not", "never", "absent", "without", "defer", "deferred", "unavailable")
+# fmt: on
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,12 +432,14 @@ def _trace_metrics(
     schema = schema_surface_count(trace)
     shared_artifact_class = artifact_handle_first_class(trace)
     rendered_raw_reload_count = _rendered_raw_reload_leakage_count(rendered_text)
+    rendered_body_leakage_count = _rendered_body_field_before_selection_count(rendered_text, case)
     counts = {
         "conversation_turn_count": conversation_turn_count(trace),
         "physics_progress_count": physics,
         "schema_surface_count": schema,
         "raw_reload_leakage_count": raw_reload_leakage_count(trace) + rendered_raw_reload_count,
-        "content_hydration_before_selection_count": content_hydration_before_selection_count(trace),
+        "content_hydration_before_selection_count": content_hydration_before_selection_count(trace)
+        + rendered_body_leakage_count,
     }
     classes = {
         "artifact_handle_first_class": _phase7_artifact_handle_first_class(shared_artifact_class),
@@ -484,6 +475,16 @@ def _rendered_raw_reload_leakage_count(rendered_text: str | None) -> int:
     return count
 
 
+def _rendered_body_field_before_selection_count(rendered_text: str | None, case: str) -> int:
+    if not rendered_text or case not in _HANDLE_FIRST_CASES:
+        return 0
+    return sum(
+        any(marker in line for marker in _SOURCE_BODY_FIELD_MARKERS)
+        and not any(marker in line for marker in _NEGATED_BODY_FIELD_LINE_MARKERS)
+        for line in rendered_text.lower().splitlines()
+    )
+
+
 def _rendered_structural_verify_class(rendered_text: str | None) -> str:
     if not rendered_text:
         return "not_applicable"
@@ -503,14 +504,8 @@ def _hard_budget_failures(
     failures = [key for key in _HARD_ZERO_BEHAVIOR_KEYS if behavior_score.metric_counts[key] != 0]
     failures.extend(key for key in _HARD_ZERO_PHASE7_KEYS if phase7_counts[key] != 0)
     failures.extend(_row_metric_bound_failures(row.behavior_metric_bounds, behavior_score, phase7_counts))
-    handle_first_cases = {
-        "handles_before_content",
-        "p6_res_reference_handle_first",
-        "p6_res_phase_gap_closer",
-        "p6_res_publication_gap_handles",
-    }
     clean_stop_cases = {"clean_stop", "p6_exec_stop_after_first_result"}
-    if case in handle_first_cases and phase7_classes["artifact_handle_first_class"] != "handle_first":
+    if case in _HANDLE_FIRST_CASES and phase7_classes["artifact_handle_first_class"] != "handle_first":
         failures.append("artifact_handle_first_class")
     if case in clean_stop_cases and phase7_classes["stop_integrity_class"] != "stopped_cleanly":
         failures.append("stop_integrity_class")

@@ -1376,9 +1376,10 @@ review_summary:
         assert payload["staged_loading"]["workflow_id"] == "quick"
         assert payload["staged_loading"]["stage_id"] == "reference_context"
         assert payload["staged_loading"]["loaded_authorities"] == list(stage.loaded_authorities)
-        assert "active_reference_context" in payload
+        assert "active_reference_context" not in payload
         assert "effective_reference_intake" in payload
-        assert "reference_artifacts_content" in payload
+        assert "reference_artifacts_content" not in payload
+        assert "reference_artifact_files" in payload
         assert "derived_manuscript_proof_review_status" in payload
 
     def test_quick_init_stage_task_bootstrap_blocks_without_project_file(self, tmp_path: Path) -> None:

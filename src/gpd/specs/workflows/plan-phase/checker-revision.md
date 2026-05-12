@@ -42,16 +42,7 @@ Checker prompt:
 **Phase Goal:** {goal from ROADMAP}
 
 **Plans to verify:** {plans_content}
-**Requirements:** {requirements_content}
-**Project Contract:** {project_contract}
-**Project Contract Gate:** {project_contract_gate}
-**Project Contract Load Info:** {project_contract_load_info}
-**Project Contract Validation:** {project_contract_validation}
-**Contract Intake:** {contract_intake}
-**Effective Reference Intake:** {effective_reference_intake}
-**Reference Artifact Files:** {reference_artifact_files}
-**Literature Review Files:** {literature_review_files}
-**Research Map Reference Files:** {research_map_reference_files}
+Use `checker_revision.required_init_fields` as the prompt inventory. Include the project contract/gate values, `contract_intake`, `effective_reference_intake`, and the selected reference path handles from that staged payload; do not request rendered reference or artifact body fields.
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
@@ -193,15 +184,14 @@ Before spawning the revision planner, confirm that every `plan_id` in `BLOCKED_P
 
 Revision prompt:
 
-Use `templates/planner-subagent-prompt.md` here as the stage-local planner template and render its `## Revision Template` section.
+Load the `revision_template_rendering` conditional authority pack first. Use `templates/planner-subagent-prompt.md` here as the stage-local planner template and render its `## Revision Template` section.
 
 ```markdown
-Render the template's `## Revision Template` into `revision_prompt` with these bindings:
+Render the template's `## Revision Template` into `revision_prompt` with fresh plan content, checker issues, and these staged bindings. Do not add unselected body fields.
 
 - `{phase_number}` -> {phase_number}
 - `{plans_content}` -> {plans_content}
 - `{structured_issues_from_checker}` -> {structured_issues_from_checker}
-- `{state_content}` -> {state_content}
 - `{project_contract}` -> {project_contract}
 - `{project_contract_gate}` -> {project_contract_gate}
 - `{project_contract_load_info}` -> {project_contract_load_info}

@@ -11,8 +11,8 @@ Do not duplicate verifier policy. Fail closed before delegation if project, road
 **Contract Intake:** {contract_intake}
 **Effective Reference Intake:** {effective_reference_intake}
 
-Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. A visible-but-blocked contract must be repaired before it is used as authoritative verification scope; keep the same contract-critical floor at all times.
-Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_references`, `citation_source_files`, and `citation_source_warnings` are compact routing handles.
+Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. A visible-but-blocked contract must be repaired before it is used as authoritative verification scope.
+Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_references`, `citation_source_files`, and `citation_source_warnings` are compact routing handles, not rendered evidence bodies.
 Do NOT skip contract-critical anchors.
 </shared_contract_floor>
 
@@ -29,10 +29,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Treat `inventory_build.required_init_fields` as source of truth for contract, reference, and protocol fields.
-
-Use `effective_reference_intake`, `active_references`, `citation_source_files`, and `citation_source_warnings` as mandatory handle inputs to verification.
-Treat `effective_reference_intake` as the structured source of carry-forward anchors; handle lists route the verifier to the relevant sources without inlining rendered reference prose.
+Treat `inventory_build.required_init_fields` as source of truth. This stage is handle/status-oriented: use `effective_reference_intake`, `active_references`, `citation_source_files`, and `citation_source_warnings` as mandatory routing inputs without inlining rendered reference prose or artifact bodies.
 
 - If it names a benchmark, prior artifact, or must-read reference, verification must explicitly check it or report why it could not.
 - Stable knowledge docs that appear through handle/status fields are reviewed background synthesis: use them to clarify definitions, assumptions, and caveats only when they agree with stronger sources, and never as decisive evidence on their own.
@@ -63,7 +60,7 @@ Prompt: "First, read {GPD_AGENTS_DIR}/gpd-verifier.md for your role and instruct
 
 Read with `file_read`: `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`, all PLAN/SUMMARY/`*-PROOF-REDTEAM.md` files in `${PHASE_DIR_ABS}/`, `${PROJECT_ROOT}/GPD/STATE.md`, and `${PROJECT_ROOT}/GPD/ROADMAP.md`.
 
-Pass this context: Project contract: {project_contract}; gate: {project_contract_gate}; load info: {project_contract_load_info}; validation: {project_contract_validation}; contract intake: {contract_intake}; effective reference intake: {effective_reference_intake}; active references: {active_references}; citation source files: {citation_source_files}; citation warnings: {citation_source_warnings}; proof freshness: {phase_proof_review_status}.
+Pass the staged contract/gate values, `contract_intake`, `effective_reference_intake`, compact reference handles, and `{phase_proof_review_status}`. Do not pass `active_reference_context`, `protocol_bundle_context`, or `reference_artifacts_content` from this stage.
 
 <selected_protocol_bundle_ids>
 {selected_protocol_bundle_ids}

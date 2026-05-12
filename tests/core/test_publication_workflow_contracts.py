@@ -34,9 +34,7 @@ def _read_write_paper_staged_authorities() -> str:
 
 def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mode_context() -> None:
     workflow = _read_write_paper_staged_authorities()
-    bootstrap_parse_line = next(
-        line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using")
-    )
+    bootstrap_parse_line = next(line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using"))
 
     _assert_all_present(
         bootstrap_parse_line,
@@ -49,7 +47,7 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
     _assert_all_present(
         workflow,
         (
-            "Do not force a routine outline-approval pause in balanced mode.",
+            "If `autonomy=balanced`, treat the outline as a working draft",
             'WRITE_PAPER_ARGUMENTS="${ARGUMENTS:-}"',
             'gpd --raw init write-paper --stage paper_bootstrap -- "$WRITE_PAPER_ARGUMENTS"',
         ),
@@ -64,7 +62,7 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
     _assert_all_present(
         workflow,
         (
-            "explicit `--intake path/to/write-paper-authoring-input.json`",
+            "`--intake path/to/write-paper-authoring-input.json`",
             "For `external_authoring_intake`, use the strict command preflight's managed subject handoff",
             "If `autonomy=supervised`, present the outline for approval before proceeding. "
             "If `autonomy=balanced`, treat the outline as a working draft",
@@ -108,12 +106,12 @@ def test_respond_to_referees_balanced_mode_does_not_force_parse_confirmation() -
             "balanced mode should treat the parse as working context",
             "<autonomy_mode>{AUTONOMY}</autonomy_mode>",
             "<research_mode>{RESEARCH_MODE}</research_mode>",
-            "Treat `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` as the response success gate.",
-            "Use `selected_publication_root` and `selected_review_root` from the target-aware preflight as the response roots.",
+            "Treat `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` as the response\nsuccess gate.",
+            "Use `selected_publication_root` / `selected_review_root`.",
             'id: "respond_to_referees_revision_section"',
             "aggregate_child_gate:",
-            "Confirm the refreshed JSON artifact exists before treating the round as complete.",
-            "If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots",
+            "Confirm the refreshed\nJSON artifact exists before treating the round as complete.",
+            "canonical GPD-authored response artifacts live under the selected publication/review roots",
         ),
     )
     _assert_all_absent(workflow, ("Present the parsed structure for user confirmation:",))
@@ -191,9 +189,11 @@ def test_peer_review_workflow_retires_finished_handoffs_and_clears_transient_sta
     workflow = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
 
     _assert_all_present(workflow, ("{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md",))
-    assert re.search(r"spawned\s+reviewer/proof-auditor/referee lifecycle", workflow)
-    assert re.search(r"checkpoint continuation,[\s\S]{0,80}sequential fallback cleanup", workflow)
-    assert re.search(r"downstream work restarts only from persisted artifacts plus declared\s+carry-forward inputs", workflow)
+    assert "Launching the six-stage review panel" in workflow
+    assert re.search(r"checkpoint continuation,[\s\S]{0,80}sequential fallback", workflow)
+    assert re.search(
+        r"downstream work restarts only from persisted artifacts plus declared\s+carry-forward inputs", workflow
+    )
 
 
 def test_peer_review_workflow_requires_barriers_and_cleanup_before_downstream_stage_spawns() -> None:
@@ -203,11 +203,9 @@ def test_peer_review_workflow_requires_barriers_and_cleanup_before_downstream_st
         r"Run Stage 2, Stage 3, and proof critique in parallel when the runtime supports\s+it; otherwise run literature, math, proof\. Treat them as one barriered wave",
         workflow,
     )
-    assert (
-        re.search(
-            r"Before Stage 4, every launched\s+child must have a typed return, every promised artifact must exist and validate,\s+and downstream work restarts only from persisted artifacts plus declared\s+carry-forward inputs",
-            workflow,
-        )
+    assert re.search(
+        r"Before Stage 4, every launched\s+child must have a typed return, every promised artifact must exist and validate,\s+and downstream work restarts only from persisted artifacts plus declared\s+carry-forward inputs",
+        workflow,
     )
     assert "Retry once from the same persisted inputs; if still\ninvalid, STOP before Stage 5." in workflow
     assert re.search(

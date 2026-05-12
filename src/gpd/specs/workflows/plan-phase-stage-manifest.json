@@ -10,7 +10,6 @@
       "checker_model",
       "research_enabled",
       "plan_checker_enabled",
-      "commit_docs",
       "autonomy",
       "research_mode"
     ],
@@ -47,6 +46,16 @@
       "research_map_reference_files",
       "research_map_reference_count",
       "derived_manuscript_proof_review_status"
+    ],
+    "checker_reference_handles": [
+      "contract_intake",
+      "effective_reference_intake",
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest",
+      "protocol_bundle_verifier_extensions",
+      "reference_artifact_files",
+      "literature_review_files",
+      "research_map_reference_files"
     ],
     "reference_rendered_context": [
       "active_reference_context"
@@ -230,20 +239,27 @@
         "planning_controls",
         "phase_target_context",
         "contract_gate_status",
-        "reference_handle_context"
+        "checker_reference_handles"
       ],
       "required_init_fields": [
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/plan-phase/checker-revision.md",
-        "templates/planner-subagent-prompt.md"
+        "workflows/plan-phase/checker-revision.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "revision_template_rendering",
+          "authorities": [
+            "templates/planner-subagent-prompt.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "references/ui/ui-brand.md",
         "templates/phase-prompt.md",
         "templates/plan-contract-schema.md",
+        "templates/planner-subagent-prompt.md",
         "workflows/plan-phase.md"
       ],
       "allowed_tools": [

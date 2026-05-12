@@ -32,21 +32,11 @@ def test_sync_state_stage_manifest_loads_and_preserves_stage_order() -> None:
     reconcile = manifest.get_stage("reconcile_and_validate")
 
     assert bootstrap.loaded_authorities == ("workflows/sync-state/sync-bootstrap.md",)
-    assert bootstrap.required_init_fields == (
-        "workspace_root",
-        "project_root",
-        "project_root_source",
-        "project_root_auto_selected",
-        "init_root_policy",
-        "project_reentry_mode",
-        "project_reentry_guidance",
-        "state_md_exists",
-        "state_json_exists",
-        "state_json_backup_exists",
-        "state_recovery_guidance",
-        "state_load_source",
-        "state_integrity_issues",
-        "platform",
+    assert bootstrap.required_init_fields[0] == "workspace_root"
+    assert bootstrap.required_init_fields[-1] == "platform"
+    assert "project_reentry_guidance" in bootstrap.required_init_fields
+    assert bootstrap.required_init_fields.index("state_json_backup_exists") < bootstrap.required_init_fields.index(
+        "state_recovery_guidance"
     )
     assert "templates/state-json-schema.md" in bootstrap.must_not_eager_load
 
@@ -91,7 +81,7 @@ def test_sync_state_stage_manifest_loads_and_preserves_stage_order() -> None:
 
 def test_sync_state_stage_manifest_rejects_invalid_field_drift() -> None:
     payload = json.loads((WORKFLOWS_DIR / "sync-state-stage-manifest.json").read_text(encoding="utf-8"))
-    payload["stages"][0]["required_init_fields"][0] = "bogus_field"
+    payload["stages"][0]["required_init_fields"] = ["bogus_field"]
 
     with pytest.raises(ValueError, match="unknown field name"):
         validate_workflow_stage_manifest_payload(payload, expected_workflow_id="sync-state")

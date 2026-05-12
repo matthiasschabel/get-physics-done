@@ -1881,7 +1881,7 @@ def test_write_paper_source_distinguishes_overclaim_pressure_from_bounded_resume
         "unsupported-strengthening pressure",
         "strengthen unsupported theorem, general-proof",
         "submission-readiness claims",
-        "cite whatever is needed",
+        "citation",
         "adversarial overclaim pressure",
         "explicitly asks to narrow, qualify, or repair the claim",
         "Reject before manuscript writes",
@@ -3415,7 +3415,9 @@ def test_workflows_surface_structured_proof_review_statuses() -> None:
     ):
         _mf(text, "derived_manuscript_proof_review_status", context=context)
     _s(verify_phase, "verify-phase proof review semantics", "manuscript-local proof-bearing artifact")
-    _s(write_paper, "write-paper proof review semantics", "proof-review status", "theorem-bearing claim freshness")
+    # fmt: off
+    _s(write_paper, "write-paper proof review semantics", "derived_manuscript_proof_review_status", "theorem-bearing claim freshness")
+    # fmt: on
     _sf(peer_review, "theorem/proof freshness", context="peer-review proof review semantics")
     _s(
         respond_to_referees,
@@ -3617,8 +3619,13 @@ def test_plan_tool_preflight_surfaces_across_planning_and_execution_prompts() ->
         "checker_revision",
     )
     assert plan_phase_manifest.stages[0].loaded_authorities == ("workflows/plan-phase/phase-bootstrap.md",)
-    for stage in (plan_phase_manifest.stages[2], plan_phase_manifest.stages[3]):
-        assert "templates/planner-subagent-prompt.md" in stage.loaded_authorities
+    assert "templates/planner-subagent-prompt.md" in plan_phase_manifest.stage("planner_authoring").loaded_authorities
+    checker_conditionals = {
+        authority
+        for conditional in plan_phase_manifest.stage("checker_revision").conditional_authorities
+        for authority in conditional.authorities
+    }
+    assert "templates/planner-subagent-prompt.md" in checker_conditionals
 
     _sf(
         execute_phase,
@@ -4622,7 +4629,7 @@ def test_peer_review_referee_surface_fail_closed_final_adjudication_contract() -
                 "required staged-review artifact",
                 "missing",
                 "malformed",
-                "wrong round suffix",
+                "wrong-round",
                 "STOP",
                 "final recommendation",
             ),
@@ -5167,8 +5174,7 @@ def test_peer_review_workflow_and_generated_skill_surface_keep_lifecycle_cleanup
     _sf(
         peer_review_workflow,
         "stage-recovery-gate.md",
-        "spawned",
-        "reviewer/proof-auditor/referee lifecycle",
+        "Launching the six-stage review panel",
         "stale-output rejection",
         "declared carry-forward inputs",
         "Apply the `peer_review_stage6_referee` tuple",
@@ -6133,12 +6139,11 @@ def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays
         "{selected_protocol_bundle_ids}",
         "<protocol_bundle_load_manifest>",
         "{protocol_bundle_load_manifest}",
-        "<protocol_bundle_context>",
-        "{protocol_bundle_context}",
         "<protocol_bundle_verifier_extensions>",
         "{protocol_bundle_verifier_extensions}",
         context="quick planner reference protocol bundle placeholders",
     )
+    assert "<protocol_bundle_context>" not in planner_reference_branch.group(1)
 
     executor_reference_branch = re.search(
         r"If the selected planner stage was `reference_context`, pass through the selected reference payload:(.*?)<constraints>",
@@ -6152,12 +6157,11 @@ def test_quick_reference_context_passes_protocol_bundle_fields_but_default_stays
         "{selected_protocol_bundle_ids}",
         "<protocol_bundle_load_manifest>",
         "{protocol_bundle_load_manifest}",
-        "<protocol_bundle_context>",
-        "{protocol_bundle_context}",
         "<protocol_bundle_verifier_extensions>",
         "{protocol_bundle_verifier_extensions}",
         context="quick executor reference protocol bundle placeholders",
     )
+    assert "<protocol_bundle_context>" not in executor_reference_branch.group(1)
 
     default_prefix = quick.split(
         "If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append this selected reference payload:",
@@ -7144,11 +7148,10 @@ def test_verification_and_publication_prompts_keep_decisive_contract_targets_rea
     )
     _sf(
         write_paper,
-        "verification_status",
-        "confidence",
-        "not blockers",
-        "decisive comparisons",
-        "manuscript claim",
+        "contract_results",
+        "comparison_verdicts",
+        "paper-support artifacts",
+        "not as proof",
         "pre_submission_review",
         "reproducibility manifest",
         context="write-paper decisive contract targets",
@@ -7251,7 +7254,8 @@ def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verifica
         "fail_closed_on_state_conflict",
         "Canonical conflict-stop labels",
         "convention check",
-        "route to convention validation",
+        "route failures",
+        "convention validation",
         context="plan-phase lifecycle gate",
     )
 

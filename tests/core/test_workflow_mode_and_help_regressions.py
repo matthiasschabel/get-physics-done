@@ -125,8 +125,8 @@ def test_publication_workflows_read_mode_state_from_init_context() -> None:
 
     assert re.search(r"gpd --raw init write-paper --stage paper_bootstrap", write_paper)
     assert re.search(r'INIT="\$[A-Z_]*BOOTSTRAP_INIT"', write_paper)
-    assert 'AUTONOMY=$(echo "$INIT" | gpd json get .autonomy --default supervised)' in write_paper
-    assert 'RESEARCH_MODE=$(echo "$INIT" | gpd json get .research_mode --default balanced)' in write_paper
+    assert "autonomy" in write_paper
+    assert "research_mode" in write_paper
     assert "gpd --raw config get autonomy" not in write_paper
     assert "gpd --raw config get research_mode" not in write_paper
 

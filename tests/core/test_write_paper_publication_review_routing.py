@@ -61,6 +61,13 @@ def test_publication_review_stage_is_a_compact_router_not_a_panel_owner() -> Non
     )
     assert NON_EAGER_AUTHORITIES.isdisjoint(stage.loaded_authorities)
     assert NON_EAGER_AUTHORITIES.issubset(stage.must_not_eager_load)
+    assert "reference_artifact_files" in stage.required_init_fields
+    assert "protocol_bundle_load_manifest" in stage.required_init_fields
+    assert "derived_manuscript_reference_status" in stage.required_init_fields
+    assert "citation_source_files" in stage.required_init_fields
+    assert "reference_artifacts_content" not in stage.required_init_fields
+    assert "active_reference_context" not in stage.required_init_fields
+    assert "protocol_bundle_context" not in stage.required_init_fields
 
     eager_surface = _publication_review_surface()
     assert len(eager_surface) < PUBLICATION_REVIEW_EAGER_CHAR_BUDGET
@@ -78,6 +85,9 @@ def test_publication_review_prompt_preserves_lane_routing_boundaries() -> None:
     assert "Do not inline those authorities here." in prompt
     assert "Use `gpd-referee` only through the peer-review final-adjudication authority." in prompt
     assert "Load the conditional `response_pair_authoring` authorities only" in prompt
+    assert "reference handles/statuses, citation-source" in prompt
+    assert "protocol load manifests visible" in prompt
+    assert "Read a specific reference or" in prompt
     assert "**External-authoring lane:** do **not** run the embedded staged panel here." in prompt
     assert "route the user to standalone `gpd:peer-review`" in prompt
     assert "do not recommend `gpd:arxiv-submission` directly from this lane." in prompt

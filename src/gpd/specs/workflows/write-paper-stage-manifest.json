@@ -2,9 +2,6 @@
   "schema_version": 1,
   "workflow_id": "write-paper",
   "required_init_field_groups": {
-    "launch_context": [
-      "commit_docs"
-    ],
     "project_root_context": [
       "project_root"
     ],
@@ -16,11 +13,9 @@
       "write_paper_argument_input"
     ],
     "contract_reference_context": [
-      "project_contract",
       "project_contract_gate",
       "project_contract_load_info",
       "project_contract_validation",
-      "contract_intake",
       "effective_reference_intake"
     ],
     "publication_subject_context": [
@@ -117,7 +112,6 @@
         "workflows/write-paper/paper-bootstrap.md"
       ],
       "required_init_field_groups": [
-        "launch_context",
         "project_root_context",
         "workspace_context",
         "contract_reference_context",
@@ -190,7 +184,6 @@
         "workflows/write-paper/outline-scaffold.md"
       ],
       "required_init_field_groups": [
-        "launch_context",
         "project_root_context",
         "workspace_context",
         "contract_reference_context",
@@ -275,7 +268,6 @@
         "workflows/write-paper/authoring.md"
       ],
       "required_init_field_groups": [
-        "launch_context",
         "workspace_context",
         "contract_reference_context",
         "publication_subject_context",
@@ -355,7 +347,6 @@
         "workflows/write-paper/consistency-references.md"
       ],
       "required_init_field_groups": [
-        "launch_context",
         "workspace_context",
         "contract_reference_context",
         "publication_subject_context",
@@ -364,7 +355,7 @@
         "manuscript_package_paths",
         "managed_publication_context",
         "protocol_reference_handles",
-        "reference_artifact_context",
+        "reference_artifact_handles",
         "citation_source_context",
         "derived_research_inventory"
       ],
@@ -437,7 +428,6 @@
         "workflows/write-paper/publication-review-finalization.md"
       ],
       "required_init_field_groups": [
-        "launch_context",
         "workspace_context",
         "contract_reference_context",
         "publication_subject_context",
@@ -446,8 +436,8 @@
         "manuscript_resolution_context",
         "manuscript_package_paths",
         "managed_publication_context",
-        "protocol_reference_context",
-        "reference_artifact_context",
+        "protocol_reference_handles",
+        "reference_artifact_handles",
         "citation_source_context",
         "derived_research_inventory"
       ],

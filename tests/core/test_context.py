@@ -2646,7 +2646,7 @@ class TestInitNewProject:
         assert ctx["publication_bootstrap_root"] == "paper"
         assert ctx["selected_publication_root"] is None
         assert ctx["publication_intake_root"] is None
-        assert ctx["contract_intake"]["must_read_refs"] == ["ref-benchmark"]
+        assert "contract_intake" not in ctx
         assert "ref-benchmark" in ctx["effective_reference_intake"]["must_read_refs"]
 
     def test_write_paper_stage_bootstrap_binds_external_intake_subject(self, tmp_path: Path) -> None:
@@ -2731,7 +2731,7 @@ class TestInitNewProject:
         assert ctx["publication_bootstrap_mode"] == "fresh_project_bootstrap"
         assert ctx["selected_publication_root"] is None
         assert ctx["publication_intake_root"] is None
-        assert ctx["contract_intake"] is None
+        assert "contract_intake" not in ctx
         assert ctx["effective_reference_intake"] == stage_ctx.EMPTY_REFERENCE_INTAKE
 
     def test_write_paper_stage_paper_bootstrap_surfaces_resolved_publication_subject(self, tmp_path: Path) -> None:
@@ -2749,7 +2749,7 @@ class TestInitNewProject:
             manuscript_entrypoint="paper/main.tex",
             artifact_manifest_path="paper/ARTIFACT-MANIFEST.json",
         )
-        assert ctx["contract_intake"]["must_read_refs"] == ["ref-benchmark"]
+        assert "contract_intake" not in ctx
         assert "ref-benchmark" in ctx["effective_reference_intake"]["must_read_refs"]
 
     def test_write_paper_bootstrap_surfaces_managed_publication_lane_without_stage(self, tmp_path: Path) -> None:
@@ -3263,7 +3263,7 @@ class TestInitQuick:
         ):
             assert reference_heavy_field not in ctx
 
-    def test_stage_reference_context_loads_reference_runtime_when_selected(
+    def test_stage_reference_context_loads_reference_handles_when_selected(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -3281,10 +3281,14 @@ class TestInitQuick:
             cwd: Path,
             *,
             include_artifact_content: bool = True,
+            include_active_reference_context: bool = True,
+            include_protocol_context: bool = True,
             **_kwargs: object,
         ) -> dict[str, object]:
             calls.append(cwd)
-            assert include_artifact_content is True
+            assert include_artifact_content is False
+            assert include_active_reference_context is False
+            assert include_protocol_context is False
             return {
                 "project_contract": {"version": 1},
                 "project_contract_gate": {"authoritative": True},
@@ -3295,11 +3299,8 @@ class TestInitQuick:
                 "selected_protocol_bundle_ids": ["core"],
                 "protocol_bundle_count": 1,
                 "protocol_bundle_load_manifest": {"selected_bundle_ids": ["core"], "bundle_count": 1},
-                "protocol_bundle_context": "protocol context",
                 "protocol_bundle_verifier_extensions": ["verifier extensions"],
-                "active_reference_context": "active reference context",
                 "reference_artifact_files": ["GPD/research-map/REFERENCES.md"],
-                "reference_artifacts_content": "reference artifacts",
                 "literature_review_files": ["GPD/literature/SUMMARY.md"],
                 "literature_review_count": 1,
                 "research_map_reference_files": ["GPD/research-map/REFERENCES.md"],
@@ -3319,10 +3320,11 @@ class TestInitQuick:
         assert ctx["selected_protocol_bundle_ids"] == ["core"]
         assert ctx["protocol_bundle_count"] == 1
         assert ctx["protocol_bundle_load_manifest"] == {"selected_bundle_ids": ["core"], "bundle_count": 1}
-        assert ctx["protocol_bundle_context"] == "protocol context"
         assert ctx["protocol_bundle_verifier_extensions"] == ["verifier extensions"]
-        assert ctx["active_reference_context"] == "active reference context"
-        assert ctx["reference_artifacts_content"] == "reference artifacts"
+        assert ctx["reference_artifact_files"] == ["GPD/research-map/REFERENCES.md"]
+        assert "protocol_bundle_context" not in ctx
+        assert "active_reference_context" not in ctx
+        assert "reference_artifacts_content" not in ctx
 
     @pytest.mark.parametrize(
         ("stage_id", "required_fields", "loads_reference_handles"),
@@ -3388,7 +3390,7 @@ class TestInitQuick:
         stage_ctx.assert_stage_omits_heavy_reference_context(ctx)
         assert calls == ([False] if loads_reference_handles else [])
 
-    def test_stage_reference_context_hydrates_artifact_content_when_selected(
+    def test_stage_reference_context_defers_artifact_content_until_body_selection(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -3405,8 +3407,8 @@ class TestInitQuick:
 
         assert ctx["staged_loading"]["stage_id"] == "reference_context"
         assert ctx["reference_artifact_files"] == ["GPD/research-map/REFERENCES.md"]
-        assert ctx["reference_artifacts_content"] == "hydrated reference artifacts"
-        assert calls == [True]
+        assert "reference_artifacts_content" not in ctx
+        assert calls == [False]
 
     def test_stage_validation_failure_names_workflow_stage_and_spec(
         self,
@@ -4057,10 +4059,13 @@ class TestInitVerifyWork:
         ctx = init_verify_work(tmp_path, "1", stage="inventory_build")
 
         assert ctx["staged_loading"]["stage_id"] == "inventory_build"
-        assert ctx["project_contract"]["references"][0]["role"] == "benchmark"
+        assert "project_contract" not in ctx
+        assert ctx["project_contract_gate"]["visible"] is True
+        assert ctx["project_contract_load_info"]["status"] == "blocked_integrity"
         assert "active_reference_context" not in ctx
         assert "active_reference_count" not in ctx
         assert ctx["active_references"][0]["id"] == "ref-benchmark"
+        assert ctx["effective_reference_intake"]["must_read_refs"] == ["ref-benchmark"]
         assert "stat-mech-simulation" in ctx["selected_protocol_bundle_ids"]
         assert ctx["protocol_bundle_count"] == 1
         assert ctx["convention_lock"]["metric_signature"] == "(-,+,+,+)"
@@ -4209,7 +4214,7 @@ class TestInitVerifyWork:
         assert ctx["reference_artifact_files"]
         assert "reference_artifacts_content" not in ctx
 
-    def test_stage_gap_repair_surfaces_reference_artifact_content(self, tmp_path: Path) -> None:
+    def test_stage_gap_repair_surfaces_reference_artifact_handles(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "01-setup")
         _write_project_contract_state(tmp_path)
@@ -4222,8 +4227,8 @@ class TestInitVerifyWork:
 
         assert ctx["staged_loading"]["stage_id"] == "gap_repair"
         assert ctx["reference_artifact_files"]
-        assert isinstance(ctx["reference_artifacts_content"], str)
-        assert "Benchmark" in ctx["reference_artifacts_content"]
+        assert "GPD/literature/benchmark-notes.md" in ctx["reference_artifact_files"]
+        assert "reference_artifacts_content" not in ctx
 
     def test_verify_work_surfaces_derived_stable_knowledge_docs(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)

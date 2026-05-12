@@ -3,7 +3,7 @@ Own the reference-aware quick path after bootstrap selects `reference_context`.
 </purpose>
 
 <stage_boundary>
-Use this authority only when the quick task needs targeted source lookup, active project anchors, reference artifacts, literature/research-map files, or protocol/reference context. Do not read `workflows/quick.md`; it is only the staged-file index.
+Use this authority only when the quick task needs targeted source lookup, active project anchors, reference artifact handles, literature/research-map files, or protocol/reference load manifests. Do not read `workflows/quick.md`; it is only the staged-file index.
 </stage_boundary>
 
 <quick_authorities>
@@ -50,12 +50,16 @@ task(
 If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append this selected reference payload:
 **Contract Intake:** {contract_intake}
 **Effective Reference Intake:** {effective_reference_intake}
-**Active References:** {active_reference_context}
-**Reference Artifacts:** {reference_artifacts_content}
+**Reference Artifact Files:** {reference_artifact_files}
+**Literature Review Files:** {literature_review_files}
+**Literature Review Count:** {literature_review_count}
+**Research Map Reference Files:** {research_map_reference_files}
+**Research Map Reference Count:** {research_map_reference_count}
+**Manuscript Proof Review Status:** {derived_manuscript_proof_review_status}
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_count>{protocol_bundle_count}</protocol_bundle_count>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 </protocol_bundle_handoff>
 
@@ -63,7 +67,8 @@ If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`, append 
 
 <constraints>
 - Create one plan with 1-3 focused tasks.
-- Use the selected reference payload only for the lookup or project-anchor dependency that justified `reference_context`.
+- Use the selected reference handles only for the lookup or project-anchor dependency that justified `reference_context`.
+- Do not treat absent eager reference bodies or rendered protocol/reference contexts as missing evidence; read the exact source path from the handles or load manifest only when the plan depends on its body.
 - If contract load or validation is blocked, return checkpoint instead of drafting from guessed scope.
 - If the task is theorem-style or proof-bearing, return `checkpoint` and route to the full proof-redteam workflow.
 - Target about 30% context usage.
@@ -124,18 +129,23 @@ Project contract validation: {project_contract_validation}
 If the selected planner stage was `reference_context`, pass through the selected reference payload:
 Contract intake: {contract_intake}
 Effective reference intake: {effective_reference_intake}
-Active references: {active_reference_context}
-Reference artifacts: {reference_artifacts_content}
+Reference artifact files: {reference_artifact_files}
+Literature review files: {literature_review_files}
+Literature review count: {literature_review_count}
+Research map reference files: {research_map_reference_files}
+Research map reference count: {research_map_reference_count}
+Manuscript proof review status: {derived_manuscript_proof_review_status}
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
+<protocol_bundle_count>{protocol_bundle_count}</protocol_bundle_count>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 </protocol_bundle_handoff>
 
 <constraints>
 - Execute all plan tasks and write `${QUICK_DIR}/${next_num}-SUMMARY.md`.
 - Do not update ROADMAP.md.
+- Read a reference artifact, literature-review file, research-map file, or protocol bundle source only when the selected plan names the specific handle and the task depends on body text.
 - If proof-bearing work slipped through planning, STOP and return the reroute.
 - Return the executor handoff with status and written files.
 </constraints>

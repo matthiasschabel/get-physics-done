@@ -175,6 +175,30 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
     assert len(_expanded_stage_surface(publication_review)) < PUBLICATION_REVIEW_EAGER_CHAR_BUDGET
 
 
+def test_write_paper_reference_body_hydration_is_limited_to_section_authoring() -> None:
+    manifest = validate_workflow_stage_manifest_payload(
+        json.loads((WORKFLOWS_DIR / "write-paper-stage-manifest.json").read_text(encoding="utf-8")),
+        expected_workflow_id="write-paper",
+    )
+    figure_authoring = manifest.stage("figure_and_section_authoring")
+    consistency = manifest.stage("consistency_and_references")
+    publication_review = manifest.stage("publication_review")
+
+    assert "reference_artifact_files" in figure_authoring.required_init_fields
+    assert "reference_artifacts_content" in figure_authoring.required_init_fields
+    assert "protocol_bundle_context" not in figure_authoring.required_init_fields
+    assert "active_reference_context" not in figure_authoring.required_init_fields
+
+    for stage in (consistency, publication_review):
+        assert "reference_artifact_files" in stage.required_init_fields
+        assert "protocol_bundle_load_manifest" in stage.required_init_fields
+        assert "derived_manuscript_reference_status" in stage.required_init_fields
+        assert "citation_source_files" in stage.required_init_fields
+        assert "reference_artifacts_content" not in stage.required_init_fields
+        assert "protocol_bundle_context" not in stage.required_init_fields
+        assert "active_reference_context" not in stage.required_init_fields
+
+
 def test_write_paper_bootstrap_stage_blocks_before_downstream_prompt_loading() -> None:
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "write-paper-stage-manifest.json").read_text(encoding="utf-8")),

@@ -22,11 +22,12 @@ STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 155_000}
 # Phase 4 scaffolding guard. Keep first-turn active content flat while Phase 6
 # ratchets the integrated agent aggregate separately.
 STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 125_000}
-STAGE_SELECTED_INIT_FIELD_BUDGET = 2_675
-STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 29
-REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 10
-STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 580
-STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 580
+STAGE_EAGER_CHAR_BUDGET = 920_000
+STAGE_SELECTED_INIT_FIELD_BUDGET = 2_655
+STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 24
+REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 4
+STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 560
+STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 560
 EXECUTE_PHASE_FIRST_TURN_CHAR_BUDGET = 6_000
 EXECUTE_PHASE_SPLIT_STAGE_EAGER_CHAR_BUDGET = 16_000
 PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS = {
@@ -39,8 +40,9 @@ PHASE3_TARGET_STAGE_EAGER_CHAR_BUDGETS = {
     ("sync-state", "single_source_recovery"): 1_763,
 }
 PHASE5_STAGE_EAGER_CHAR_BUDGETS = {
-    ("write-paper", "publication_review"): 11_850,
-    ("peer-review", "panel_stages"): 37_500,
+    ("write-paper", "publication_review"): 11_900,
+    ("peer-review", "panel_stages"): 26_500,
+    ("peer-review", "final_adjudication"): 19_500,
 }
 PHASE5_AUTONOMOUS_STAGE_EAGER_CHAR_BUDGET = 5_300
 EXECUTE_PHASE_SPLIT_FAMILY_STAGES = (
@@ -327,6 +329,12 @@ def test_staged_init_field_pressure_totals_do_not_grow_from_phase6_baseline() ->
 
     stage_diagnostics = totals["stage_diagnostics"]
     assert isinstance(stage_diagnostics, dict)
+    stage_eager_chars = _required_stage_diagnostic_count(stage_diagnostics, "stage_eager_char_count")
+    assert stage_eager_chars <= STAGE_EAGER_CHAR_BUDGET, (
+        "stage_diagnostics stage-eager char budget exceeded: "
+        f"observed={stage_eager_chars} max={STAGE_EAGER_CHAR_BUDGET}; "
+        "keep optional stage authorities conditional"
+    )
     budgets = {
         "selected_init_field_count": STAGE_SELECTED_INIT_FIELD_BUDGET,
         "selected_init_content_field_count": STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET,

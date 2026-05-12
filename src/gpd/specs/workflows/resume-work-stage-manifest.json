@@ -1,6 +1,137 @@
 {
   "schema_version": 1,
   "workflow_id": "resume-work",
+  "required_init_field_groups": {
+    "workspace_reentry_context": [
+      "workspace_root",
+      "project_root",
+      "project_root_source",
+      "project_root_auto_selected",
+      "project_reentry_mode",
+      "project_reentry_requires_selection",
+      "project_reentry_selected_candidate",
+      "project_reentry_candidates"
+    ],
+    "workspace_presence_context": [
+      "workspace_state_exists",
+      "workspace_roadmap_exists",
+      "workspace_project_exists",
+      "workspace_planning_exists",
+      "state_exists",
+      "state_json_backup_exists",
+      "roadmap_exists",
+      "project_exists",
+      "planning_exists"
+    ],
+    "state_presence_context": [
+      "state_exists",
+      "roadmap_exists",
+      "project_exists",
+      "planning_exists"
+    ],
+    "interrupted_agent_context": [
+      "has_interrupted_agent",
+      "interrupted_agent_id"
+    ],
+    "runtime_resume_settings": [
+      "commit_docs",
+      "autonomy",
+      "review_cadence",
+      "research_mode"
+    ],
+    "resume_selection_context": [
+      "resume_surface_schema_version",
+      "active_bounded_segment",
+      "derived_execution_head",
+      "derived_execution_head_resume_file",
+      "continuity_handoff_file",
+      "recorded_continuity_handoff_file",
+      "missing_continuity_handoff_file",
+      "has_continuity_handoff",
+      "active_resume_kind",
+      "active_resume_origin",
+      "active_resume_pointer",
+      "active_resume_result",
+      "resume_candidates"
+    ],
+    "machine_session_context": [
+      "current_hostname",
+      "current_platform",
+      "session_hostname",
+      "session_platform",
+      "session_last_date",
+      "session_stopped_at",
+      "machine_change_detected",
+      "machine_change_notice"
+    ],
+    "execution_resume_status": [
+      "execution_review_pending",
+      "execution_pre_fanout_review_pending",
+      "execution_skeptical_requestioning_required",
+      "execution_downstream_locked",
+      "execution_blocked",
+      "execution_resumable",
+      "execution_paused_at"
+    ],
+    "platform_context": [
+      "platform"
+    ],
+    "project_contract_context": [
+      "project_contract",
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation"
+    ],
+    "reference_rendered_context": [
+      "contract_intake",
+      "effective_reference_intake",
+      "active_reference_context"
+    ],
+    "state_integrity_context": [
+      "state_load_source",
+      "state_integrity_issues"
+    ],
+    "state_restore_files": [
+      "state_content",
+      "project_content"
+    ],
+    "derivation_memory_context": [
+      "derived_convention_lock",
+      "derived_convention_lock_count",
+      "derived_intermediate_results",
+      "derived_intermediate_result_count",
+      "derived_approximations",
+      "derived_approximation_count"
+    ],
+    "derivation_files": [
+      "derivation_state_content",
+      "continuity_handoff_content"
+    ],
+    "resume_routing_target": [
+      "active_resume_kind",
+      "active_resume_pointer",
+      "active_resume_result",
+      "resume_candidates"
+    ],
+    "execution_routing_status": [
+      "execution_resumable",
+      "execution_review_pending",
+      "execution_pre_fanout_review_pending",
+      "execution_skeptical_requestioning_required",
+      "execution_downstream_locked",
+      "execution_blocked",
+      "execution_paused_at"
+    ],
+    "contract_gate_routing": [
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation"
+    ],
+    "resume_routing_files": [
+      "roadmap_content",
+      "continuity_handoff_content"
+    ]
+  },
   "stages": [
     {
       "id": "resume_bootstrap",
@@ -9,59 +140,15 @@
       "mode_paths": [
         "workflows/resume-work/resume-bootstrap.md"
       ],
-      "required_init_fields": [
-        "workspace_root",
-        "project_root",
-        "project_root_source",
-        "project_root_auto_selected",
-        "project_reentry_mode",
-        "project_reentry_requires_selection",
-        "project_reentry_selected_candidate",
-        "project_reentry_candidates",
-        "workspace_state_exists",
-        "workspace_roadmap_exists",
-        "workspace_project_exists",
-        "workspace_planning_exists",
-        "state_exists",
-        "state_json_backup_exists",
-        "roadmap_exists",
-        "project_exists",
-        "planning_exists",
-        "has_interrupted_agent",
-        "interrupted_agent_id",
-        "commit_docs",
-        "autonomy",
-        "review_cadence",
-        "research_mode",
-        "resume_surface_schema_version",
-        "active_bounded_segment",
-        "derived_execution_head",
-        "derived_execution_head_resume_file",
-        "continuity_handoff_file",
-        "recorded_continuity_handoff_file",
-        "missing_continuity_handoff_file",
-        "has_continuity_handoff",
-        "active_resume_kind",
-        "active_resume_origin",
-        "active_resume_pointer",
-        "active_resume_result",
-        "resume_candidates",
-        "current_hostname",
-        "current_platform",
-        "session_hostname",
-        "session_platform",
-        "session_last_date",
-        "session_stopped_at",
-        "machine_change_detected",
-        "machine_change_notice",
-        "execution_review_pending",
-        "execution_pre_fanout_review_pending",
-        "execution_skeptical_requestioning_required",
-        "execution_downstream_locked",
-        "execution_blocked",
-        "execution_resumable",
-        "execution_paused_at",
-        "platform"
+      "required_init_field_groups": [
+        "workspace_reentry_context",
+        "workspace_presence_context",
+        "interrupted_agent_context",
+        "runtime_resume_settings",
+        "resume_selection_context",
+        "machine_session_context",
+        "execution_resume_status",
+        "platform_context"
       ],
       "loaded_authorities": [
         "workflows/resume-work/resume-bootstrap.md",
@@ -104,22 +191,12 @@
       "mode_paths": [
         "workflows/resume-work/state-restore.md"
       ],
-      "required_init_fields": [
-        "state_exists",
-        "roadmap_exists",
-        "project_exists",
-        "planning_exists",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "state_load_source",
-        "state_integrity_issues",
-        "state_content",
-        "project_content"
+      "required_init_field_groups": [
+        "state_presence_context",
+        "project_contract_context",
+        "reference_rendered_context",
+        "state_integrity_context",
+        "state_restore_files"
       ],
       "loaded_authorities": [
         "workflows/resume-work/state-restore.md",
@@ -160,15 +237,9 @@
       "mode_paths": [
         "workflows/resume-work/derivation-restore.md"
       ],
-      "required_init_fields": [
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "derivation_state_content",
-        "continuity_handoff_content"
+      "required_init_field_groups": [
+        "derivation_memory_context",
+        "derivation_files"
       ],
       "loaded_authorities": [
         "workflows/resume-work/derivation-restore.md",
@@ -204,27 +275,12 @@
       "mode_paths": [
         "workflows/resume-work/resume-routing.md"
       ],
-      "required_init_fields": [
-        "state_exists",
-        "roadmap_exists",
-        "project_exists",
-        "planning_exists",
-        "active_resume_kind",
-        "active_resume_pointer",
-        "active_resume_result",
-        "resume_candidates",
-        "execution_resumable",
-        "execution_review_pending",
-        "execution_pre_fanout_review_pending",
-        "execution_skeptical_requestioning_required",
-        "execution_downstream_locked",
-        "execution_blocked",
-        "execution_paused_at",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "roadmap_content",
-        "continuity_handoff_content"
+      "required_init_field_groups": [
+        "state_presence_context",
+        "resume_routing_target",
+        "execution_routing_status",
+        "contract_gate_routing",
+        "resume_routing_files"
       ],
       "loaded_authorities": [
         "workflows/resume-work/resume-routing.md",

@@ -5,7 +5,6 @@
     "execution_phase_base": [
       "executor_model",
       "verifier_model",
-      "commit_docs",
       "autonomy",
       "review_cadence",
       "research_mode",
@@ -51,7 +50,6 @@
       "incomplete_count"
     ],
     "contract_gate_status": [
-      "project_contract",
       "project_contract_gate",
       "project_contract_validation",
       "project_contract_load_info"
@@ -110,6 +108,31 @@
       "state_load_source",
       "state_integrity_issues",
       "platform"
+    ],
+    "reference_citation_handles": [
+      "citation_source_files",
+      "citation_source_warnings",
+      "active_references"
+    ],
+    "execution_science_handles": [
+      "convention_lock",
+      "convention_lock_count",
+      "intermediate_results",
+      "intermediate_result_count",
+      "approximations",
+      "approximation_count",
+      "propagated_uncertainties",
+      "propagated_uncertainty_count",
+      "derived_convention_lock",
+      "derived_convention_lock_count",
+      "derived_intermediate_results",
+      "derived_intermediate_result_count",
+      "derived_approximations",
+      "derived_approximation_count"
+    ],
+    "verification_report_bridge_handles": [
+      "verification_report_skeleton_bridge",
+      "verification_report_finalizer_bridge"
     ]
   },
   "stages": [
@@ -283,12 +306,10 @@
         "contract_gate_status",
         "reference_intake_context",
         "reference_artifact_handles",
-        "protocol_bundle_handles"
+        "protocol_bundle_handles",
+        "reference_citation_handles"
       ],
       "required_init_fields": [
-        "citation_source_files",
-        "citation_source_warnings",
-        "active_references",
         "convention_lock",
         "convention_lock_count",
         "derived_convention_lock",
@@ -802,13 +823,23 @@
       ],
       "loaded_authorities": [
         "workflows/execute-phase/checkpoint-resume.md",
-        "templates/continuation-prompt.md",
         "references/orchestration/continuation-format.md",
         "references/orchestration/resume-vocabulary.md",
-        "references/orchestration/state-portability.md",
         "references/orchestration/continuation-boundary.md"
       ],
       "conditional_authorities": [
+        {
+          "when": "continuation_prompt_rendering",
+          "authorities": [
+            "templates/continuation-prompt.md"
+          ]
+        },
+        {
+          "when": "machine_change_or_resume_transport_repair",
+          "authorities": [
+            "references/orchestration/state-portability.md"
+          ]
+        },
         {
           "when": "full_checkpoint_policy",
           "authorities": [
@@ -819,8 +850,10 @@
       "must_not_eager_load": [
         "references/orchestration/checkpoints.md",
         "references/orchestration/agent-infrastructure.md",
+        "references/orchestration/state-portability.md",
         "references/verification/core/verification-core.md",
         "references/execution/github-lifecycle.md",
+        "templates/continuation-prompt.md",
         "templates/contract-results-schema.md",
         "templates/recovery-plan.md",
         "templates/paper/figure-tracker.md",
@@ -866,27 +899,11 @@
         "contract_gate_status",
         "reference_intake_context",
         "reference_artifact_handles",
-        "execution_resume_context"
+        "execution_resume_context",
+        "execution_science_handles",
+        "state_integrity_context"
       ],
-      "required_init_fields": [
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "state_load_source",
-        "state_integrity_issues",
-        "platform"
-      ],
+      "required_init_fields": [],
       "loaded_authorities": [
         "workflows/execute-phase/aggregate-and-verify.md",
         "templates/summary.md",
@@ -969,32 +986,13 @@
         "contract_gate_status",
         "reference_intake_context",
         "reference_artifact_handles",
-        "protocol_bundle_handles"
+        "protocol_bundle_handles",
+        "reference_citation_handles",
+        "execution_science_handles",
+        "verification_report_bridge_handles",
+        "state_integrity_context"
       ],
-      "required_init_fields": [
-        "citation_source_files",
-        "citation_source_warnings",
-        "active_references",
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "verification_report_skeleton_bridge",
-        "verification_report_finalizer_bridge",
-        "state_load_source",
-        "state_integrity_issues",
-        "platform"
-      ],
+      "required_init_fields": [],
       "loaded_authorities": [
         "workflows/execute-phase/verification-handoff.md",
         "references/verification/verification-status-authority.md",
@@ -1073,29 +1071,12 @@
         "contract_gate_status",
         "reference_intake_context",
         "reference_artifact_handles",
-        "execution_resume_context"
+        "execution_resume_context",
+        "execution_science_handles",
+        "verification_report_bridge_handles",
+        "state_integrity_context"
       ],
-      "required_init_fields": [
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "verification_report_skeleton_bridge",
-        "verification_report_finalizer_bridge",
-        "state_load_source",
-        "state_integrity_issues",
-        "platform"
-      ],
+      "required_init_fields": [],
       "loaded_authorities": [
         "workflows/execute-phase/gap-reverification.md",
         "references/verification/verification-status-authority.md",
@@ -1176,29 +1157,12 @@
         "contract_gate_status",
         "reference_intake_context",
         "reference_artifact_handles",
-        "execution_resume_context"
+        "execution_resume_context",
+        "execution_science_handles",
+        "verification_report_bridge_handles",
+        "state_integrity_context"
       ],
-      "required_init_fields": [
-        "convention_lock",
-        "convention_lock_count",
-        "intermediate_results",
-        "intermediate_result_count",
-        "approximations",
-        "approximation_count",
-        "propagated_uncertainties",
-        "propagated_uncertainty_count",
-        "derived_convention_lock",
-        "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "verification_report_skeleton_bridge",
-        "verification_report_finalizer_bridge",
-        "state_load_source",
-        "state_integrity_issues",
-        "platform"
-      ],
+      "required_init_fields": [],
       "loaded_authorities": [
         "workflows/execute-phase/consistency-check.md",
         "references/verification/verification-status-authority.md"

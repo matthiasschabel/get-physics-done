@@ -47,7 +47,10 @@ Load the conditional `response_pair_authoring` authorities only when paired
 response artifacts are actually being drafted.
 
 Use `gpd-referee` only through the peer-review final-adjudication authority. Keep
-the project-contract gate fields and `active_reference_context` visible.
+the project-contract gate fields, reference handles/statuses, citation-source
+context, and protocol load manifests visible. Read a specific reference or
+protocol source file only when a concrete review finding, response issue, or
+routing decision depends on its body.
 
 Read `${selected_review_root}/REFEREE-DECISION{round_suffix}.json` and
 `${selected_review_root}/REVIEW-LEDGER{round_suffix}.json` first when they

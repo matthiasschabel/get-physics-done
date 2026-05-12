@@ -230,7 +230,7 @@ def test_respond_to_referees_response_authoring_stage_retains_response_pair_and_
         "${RESPONSE_REFEREE_PATH}",
     ]
     assert (
-        "fresh child handoff and named in current-run `files_written` / `gpd_return.files_written`" in response_surface
+        "fresh child\nhandoff and named in current-run `files_written` / `gpd_return.files_written`" in response_surface
     )
     assert (
         "gpd validate handoff-artifacts for revised section plus both response artifacts" in revision_gate["validators"]

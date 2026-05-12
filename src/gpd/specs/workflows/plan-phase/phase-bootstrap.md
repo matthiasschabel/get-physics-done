@@ -1,16 +1,18 @@
 <purpose>
-Create executable PLAN.md files for a phase. Default flow: Research if needed -> Plan -> Verify -> Done, using researcher, planner, and checker agents with a max-3 revision loop.
+Create executable PLAN.md files for a phase. First-stage work is only phase
+lookup, contract-gate validation, lifecycle gate, dirty-worktree safety, early
+conflict stops, and routing to the next staged authority.
 </purpose>
 
 <stage_boundary>
-First-stage authority only: phase lookup, contract-gate validation, lifecycle gate, dirty-worktree safety, early conflict stops, and bootstrap routing. Do not load downstream authorities here.
+Do not load downstream plan-phase authorities here. Research, planner authoring,
+checker review, revision templates, and runtime delegation details belong to
+later stages listed in `staged_loading.eager_authorities`.
 </stage_boundary>
 
 <process>
 
 ## 1. Initialize
-
-Bootstrap with only the phase metadata and contract gate:
 
 ```bash
 BOOTSTRAP_INIT=$(gpd --raw init plan-phase "$PHASE" --stage phase_bootstrap)
@@ -22,28 +24,31 @@ fi
 
 Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm manifest-selected bootstrap fields. The staged field-access helper is authoritative; use `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction` after later reloads. Parse only fields in `BOOTSTRAP_INIT.staged_loading.required_init_fields`; bootstrap includes `project_contract_gate` before authoritative contract use.
 
-**Mode-aware behavior:**
-- `autonomy=supervised` (default): Present draft plans for user review before approval or execution; do not weaken the contract gate.
-- `autonomy=balanced`: Pause only if the checker raises issues or planning choices need user judgment.
-- `autonomy=yolo`: Write the plan and proceed.
-- `research_mode=explore`: Always run research. Expand comparison coverage, but do not auto-create git-backed branches or branch-like plans just because alternatives appear.
-- `research_mode=exploit`: Reuse existing research only when it already covers the exact method family, anchors, and decisive evidence path. Otherwise run targeted research and suppress optional tangents unless the user explicitly requests them. Do not volunteer `gpd:branch-hypothesis` by default in exploit mode.
-- `research_mode=balanced` (default): Use the standard research depth for the phase and keep the default contract-checking and comparison coverage unless the phase needs broader or narrower review.
-- `research_mode=adaptive`: Start broad until decisive evidence or an explicit approach lock justifies narrowing.
-- Tangent policy: when multiple viable approaches or optional side questions appear, do NOT silently branch or widen the plan. Use the canonical tangent decision model below; `git.branching_strategy` does not override this rule.
-- All modes still require contract completeness, decisive outputs, required anchors, forbidden-proxy handling, and disconfirming paths before execution starts.
+Mode summary: supervised pauses for user review, balanced pauses only for real
+checker or planning judgment issues, yolo proceeds after hard gates. Research
+mode controls breadth only: explore broadens, exploit suppresses optional
+tangents unless requested, balanced uses standard depth, and adaptive starts
+broad until evidence or an approach lock justifies narrowing. All modes still
+require contract completeness, decisive outputs, required anchors,
+forbidden-proxy handling, and disconfirming paths before execution starts.
 
-**Staged init access rule:** after every `gpd --raw init plan-phase ... --stage <stage_id>` reload, read only `INIT.staged_loading.required_init_fields`, derive stage-local values from that payload, and request explicit `--alias ALIAS=field` bindings for shell snippets that need aliases. Do not reuse shell variables parsed from an older stage.
+After every later `gpd --raw init plan-phase ... --stage <stage_id>` reload,
+read only `INIT.staged_loading.required_init_fields`; do not reuse shell
+variables parsed from an older stage.
 
 ```bash
 REQUESTED_PHASE="${PHASE}"
 INIT="${BOOTSTRAP_INIT}"
-# For the scalar binding below, request the helper-owned shape with:
+# For this scalar binding, the helper-owned shape is:
 # gpd --raw stage field-access plan-phase --stage phase_bootstrap --style shell --payload-var INIT --alias PHASE=phase_number
 PHASE=$(echo "$INIT" | gpd json get .phase_number --default "${REQUESTED_PHASE}")
 ```
 
-**Dirty worktree safety gate:** before phase directory creation, handoffs, fingerprints, alignment, or write-capable reloads, inspect only the project worktree. If it is dirty, halt before planning, show dirty paths, and offer `git status --short`, `gpd commit`, or an explicitly approved project-local cleanup path. `plan-phase` never stashes, resets, cleans, overwrites, or hides user work.
+**Dirty worktree safety gate:** before phase directory creation, handoffs,
+fingerprints, alignment, or write-capable reloads, inspect only the project
+worktree. If it is dirty, halt before planning, show dirty paths, and offer
+`git status --short`, `gpd commit`, or an explicitly approved project-local cleanup path.
+`plan-phase` never stashes, resets, cleans, overwrites, or hides user work.
 
 **If `planning_exists` is false:** Error -- run `gpd:new-project` first.
 
@@ -56,7 +61,9 @@ PHASE=$(echo "$INIT" | gpd json get .phase_number --default "${REQUESTED_PHASE}"
 **If `project_contract_validation.valid` is false:** STOP and checkpoint with the user. Quote the `project_contract_validation.errors` explicitly and repair the contract before planning. Use `contract_gate_stop`.
 
 **If `project_contract_gate.authoritative` is not true:** STOP and checkpoint with the user. Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. Show `project_contract_gate`, load errors/warnings, and validation errors. Use `contract_gate_stop`.
-Run the executable lifecycle authority gate before any research, planning, checker, fingerprint, or alignment step:
+
+Run the executable lifecycle authority gate before any research, planning,
+checker, fingerprint, or alignment step:
 
 ```bash
 LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate plan-phase "${PHASE}")
@@ -67,84 +74,51 @@ fi
 ```
 
 <step name="fail_closed_on_state_conflict" priority="first">
-Before resolving a missing phase, creating `PHASE_DIR`, spawning agents, or writing plans, compare state, roadmap, requirements, phase directories, and conventions. If they disagree about phase/scope, STOP: no new plan, roadmap rewrite, execution, or generic health check. Repair route:
+Before resolving a missing phase, creating `PHASE_DIR`, spawning agents, or
+writing plans, compare state, roadmap, requirements, phase directories, and
+conventions. If they disagree about phase/scope, STOP: no new plan, roadmap
+rewrite, execution, or generic health check. Repair route:
 
 - state/roadmap phase mismatch or missing active phase directory -> `gpd:sync-state`
 - convention-lock or `GPD/CONVENTIONS.md` mismatch -> `gpd:validate-conventions`
 
-Canonical conflict-stop labels: `status: blocked`, `phase_state: contract_conflict`, `plan_authority: blocked`, `execution_state: not_started`, `checkpoint: convention_conflict`, artifacts+writes `none`, `gpd:sync-state`/`gpd:validate-conventions`
+Canonical conflict-stop labels: `status: blocked`, `phase_state:
+contract_conflict`, `plan_authority: blocked`, `execution_state: not_started`,
+`checkpoint: convention_conflict`, artifacts+writes `none`,
+`gpd:sync-state`/`gpd:validate-conventions`
 </step>
 
 ## 1.5 Proof-Obligation Planning Gate
 
-The planner template owns the detailed theorem and proof-redteam policy. The workflow only needs to keep proof-bearing work fail-closed: `--skip-verify` does NOT waive checker review, checker-disabled config does not waive proof review, and any proof-bearing plan set still needs checker review or an equivalent main-context audit before planning is considered complete. Proof-bearing work includes theorem-style claims, `claim`, lemma, corollary, proposition, proof, prove, existence, and uniqueness tasks.
+The planner template owns detailed theorem and proof-redteam policy. Bootstrap
+only keeps proof-bearing work fail-closed: `--skip-verify` does NOT waive checker review;
+any proof-bearing plan set still needs checker review or an equivalent main-context audit
+before planning is complete. Checker-disabled config also does not waive proof review.
 
 ## 2. Parse and Normalize Arguments
 
-Extract from $ARGUMENTS: phase number (integer or decimal like `2.1`), flags (`--research`, `--skip-research`, `--gaps`, `--skip-verify`, `--light`, `--inline-discuss`).
+Extract phase number and flags (`--research`, `--skip-research`, `--gaps`,
+`--skip-verify`, `--light`, `--inline-discuss`). If no phase number was given,
+use bootstrap's `phase_number`; if bootstrap cannot infer one, ask for an
+explicit phase. If `phase_found` is false, validate ROADMAP.md and stop with
+`Error: Phase {PHASE} not found in ROADMAP.md.` when invalid.
 
-### `--inline-discuss` Flag (Combined Discuss + Plan)
+`--inline-discuss` is only a quick gray-area probe for straightforward phases:
+ask 2-3 planning-critical questions, record answers in lightweight CONTEXT.md,
+and continue. Use `gpd:discuss-phase` for complex phases.
 
-When `--inline-discuss` is present, combine discuss-phase and plan-phase for straightforward phases.
+If `context_content` is not null in a later stage-local payload, display:
+`Using phase context from: ${PHASE_DIR}/*-CONTEXT.md`.
 
-**Before step 5 (Handle Research), insert a quick gray-area probe:**
+Hypothesis context is a later-stage constraint: if a structured active
+hypothesis exists, bind `HYPOTHESIS_SLUG`, read
+`GPD/hypotheses/{HYPOTHESIS_SLUG}/HYPOTHESIS.md`, and make researcher, planner,
+checker, and revision prompts serve that investigation rather than the parent
+branch approach.
 
-1. Read the phase goal/description from ROADMAP.md and ask 2-3 planning-critical gray-area questions:
-   - "What formalism/method do you envision for this phase?" (if multiple valid approaches exist)
-   - "Are there any constraints or conventions from prior phases that should carry through?" (if phase has dependencies)
-   - "What precision level is acceptable?" (for numerical/computational phases)
-2. If those questions reveal viable alternatives or side questions, use the canonical tangent decision model below instead of assuming extra plans or branches.
-3. Record the answers and any explicit tangent decision in lightweight CONTEXT.md, then proceed to step 5.
-
-This is not the full discuss-phase flow; use `gpd:discuss-phase` for complex phases.
-
-**If no phase number:** Use the `phase_number` returned by bootstrap; `gpd --raw init plan-phase --stage phase_bootstrap` auto-detects the first roadmap phase whose disk status is `empty`, `no_directory`, `discussed`, or `researched`. If bootstrap cannot infer one, stop and ask for an explicit phase.
-
-**If `phase_found` is false:** Validate that the phase exists in ROADMAP.md. If valid, resolve `PHASE_NAME`, `PHASE_SLUG`, `PADDED_PHASE`, and `PHASE_DIR` from the roadmap before continuing. If invalid, stop with `Error: Phase {PHASE} not found in ROADMAP.md.`
-
-Use these resolved values for all later references to `PHASE_DIR`, `PHASE_SLUG`, and `PADDED_PHASE`.
-
-**Existing artifacts from init:** `has_research`, `has_plans`, `plan_count`.
-
-## 4. Load CONTEXT.md and Hypothesis Context
-
-Use `context_content` from init JSON (already loaded via `--include context`).
-
-**CRITICAL:** Use `context_content` from the later stage-local init -- pass it to researcher, planner, checker, and revision agents when that field is selected.
-
-If `context_content` is not null, display: `Using phase context from: ${PHASE_DIR}/*-CONTEXT.md`
-
-### Hypothesis-Aware Planning
-
-Check the structured active-hypothesis state. If one exists, bind `HYPOTHESIS_SLUG`, read `GPD/hypotheses/{HYPOTHESIS_SLUG}/HYPOTHESIS.md`, and store its contents as `HYPOTHESIS_CONTENT`.
-
-**If an active hypothesis exists:** extract the branch slug, read HYPOTHESIS.md, display `Active hypothesis detected: hypothesis/${HYPOTHESIS_SLUG}`, and treat the hypothesis description, motivation, expected outcome, and success criteria as a **primary constraint** for researcher, planner, checker, and revision prompts:
-
-```markdown
-<hypothesis_constraint>
-This phase is being planned on a HYPOTHESIS BRANCH. The plan must serve
-the hypothesis investigation, not the default approach.
-
-{HYPOTHESIS_CONTENT}
-
-**Planning constraint:** Every plan task must either:
-- Directly test or advance the hypothesis, OR
-- Provide infrastructure required by hypothesis-specific tasks
-
-Do NOT plan tasks that follow the parent branch approach. The parent branch
-already explores that path.
-</hypothesis_constraint>
-```
-
-Append this `<hypothesis_constraint>` block to researcher, planner, checker, and revision prompts.
-
-## 4.5. Convention Verification
-
-**Verify conventions before planning** — plans that depend on conventions from prior phases must use the correct ones:
-
-Run the convention check before planning. If it fails, stop before spawning the researcher or planner, show the check output, and route to convention validation; convention mismatches compound into every planned and executed task.
-
-## 4.6. Tangent Control During Planning
+Run the convention check before spawning researcher or planner. Convention
+mismatches compound into every planned and executed task; route failures to
+convention validation.
 
 Required 4-way tangent decision model:
 
@@ -153,8 +127,11 @@ Required 4-way tangent decision model:
 - Capture and defer -> route through `gpd:add-todo`
 - Stay on the main line -> create plans only for the selected primary approach
 
-The planner template owns the detailed tangent decision model. The workflow only needs to surface an explicit checkpoint when the planner reports multiple viable approaches; do NOT silently branch, widen scope, or create detached side plans here.
+Do NOT silently branch, widen scope, or create detached side plans. When
+multiple viable approaches appear, checkpoint explicitly and let the later
+planner/checker stages apply the detailed tangent model.
 
-Next, reload `gpd --raw init plan-phase "$PHASE" --stage research_routing` and read only that stage's `staged_loading.eager_authorities`.
+Next, reload `gpd --raw init plan-phase "$PHASE" --stage research_routing` and
+read only that stage's `staged_loading.eager_authorities`.
 
 </process>

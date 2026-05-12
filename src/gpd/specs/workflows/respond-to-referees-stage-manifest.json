@@ -5,7 +5,6 @@
     "response_launch_context": [
       "project_exists",
       "state_exists",
-      "commit_docs",
       "autonomy",
       "research_mode",
       "response_intake_input",
@@ -20,15 +19,12 @@
       "project_contract_gate",
       "project_contract_load_info",
       "project_contract_validation",
-      "contract_intake",
       "effective_reference_intake"
     ],
     "response_contract_body_context": [
-      "project_contract",
       "project_contract_gate",
       "project_contract_load_info",
       "project_contract_validation",
-      "contract_intake",
       "effective_reference_intake"
     ],
     "response_protocol_reference_context": [

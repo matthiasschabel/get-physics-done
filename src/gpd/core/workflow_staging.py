@@ -1126,6 +1126,15 @@ _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW = {
     "write-paper": WRITE_PAPER_INIT_FIELDS,
     "execute-phase": EXECUTE_PHASE_INIT_FIELDS,
 }
+_MANIFEST_DERIVED_KNOWN_INIT_FIELD_WORKFLOWS = frozenset(
+    {
+        "literature-review",
+        "new-project",
+        "research-phase",
+        "resume-work",
+        "sync-state",
+    }
+)
 
 _ALLOWED_TOP_LEVEL_KEYS = frozenset(
     {
@@ -1434,6 +1443,8 @@ def known_init_fields_for_workflow(workflow_id: str | None) -> frozenset[str] | 
     if workflow_id is None:
         return None
     normalized_workflow_id = _normalize_workflow_id(workflow_id)
+    if normalized_workflow_id in _MANIFEST_DERIVED_KNOWN_INIT_FIELD_WORKFLOWS:
+        return frozenset(_manifest_expanded_required_init_field_union(normalized_workflow_id))
     return _DEFAULT_KNOWN_INIT_FIELDS_BY_WORKFLOW.get(normalized_workflow_id)
 
 
@@ -1533,6 +1544,80 @@ def _expand_required_init_fields(
         else:
             fields.insert(fields.index("protocol_bundle_context"), "protocol_bundle_load_manifest")
     return tuple(fields)
+
+
+def _read_workflow_stage_manifest_payload(workflow_id: str, *, specs_root: Path | None = None) -> object:
+    path = _workflow_stage_manifest_path(workflow_id, specs_root=specs_root)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Failed to read workflow stage manifest {path}: {exc}") from exc
+
+
+def _expanded_required_init_fields_by_stage_from_payload(
+    raw: object,
+    *,
+    expected_workflow_id: str | None = None,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if not isinstance(raw, dict):
+        raise ValueError("workflow stage manifest must be a JSON object")
+    if expected_workflow_id is not None:
+        workflow_id = _normalize_workflow_id(raw.get("workflow_id"))
+        if workflow_id != expected_workflow_id:
+            raise ValueError(
+                f"workflow stage manifest workflow_id must be {expected_workflow_id!r}, got {workflow_id!r}"
+            )
+
+    stages_raw = raw.get("stages")
+    if not isinstance(stages_raw, list) or not stages_raw:
+        raise ValueError("stages must be a non-empty list")
+
+    groups = _validate_required_init_field_groups(raw.get("required_init_field_groups"))
+    fields_by_stage: list[tuple[str, tuple[str, ...]]] = []
+    for index, raw_stage in enumerate(stages_raw):
+        if not isinstance(raw_stage, dict):
+            raise ValueError(f"stages[{index}] must be a JSON object")
+        if "required_init_fields" not in raw_stage and "required_init_field_groups" not in raw_stage:
+            raise ValueError(f"stages[{index}] is missing required key(s): required_init_fields")
+        stage_id = _require_string(raw_stage.get("id"), label=f"stages[{index}].id")
+        fields_by_stage.append(
+            (
+                stage_id,
+                _expand_required_init_fields(
+                    raw_stage,
+                    index=index,
+                    groups=groups,
+                ),
+            )
+        )
+    return tuple(fields_by_stage)
+
+
+def _stable_required_init_field_union(field_sequences: Iterable[Iterable[str]]) -> tuple[str, ...]:
+    fields: list[str] = []
+    seen: set[str] = set()
+    for sequence in field_sequences:
+        for field_name in sequence:
+            if field_name in seen:
+                continue
+            seen.add(field_name)
+            fields.append(field_name)
+    return tuple(fields)
+
+
+def _manifest_expanded_required_init_field_union(
+    workflow_id: str,
+    *,
+    specs_root: Path | None = None,
+) -> tuple[str, ...]:
+    payload = _read_workflow_stage_manifest_payload(workflow_id, specs_root=specs_root)
+    return _stable_required_init_field_union(
+        fields
+        for _, fields in _expanded_required_init_fields_by_stage_from_payload(
+            payload,
+            expected_workflow_id=workflow_id,
+        )
+    )
 
 
 def _validate_stage(
@@ -1850,6 +1935,25 @@ def load_workflow_stage_manifest_from_path(
     )
 
 
+def expanded_required_init_fields_by_stage(
+    manifest: WorkflowStageManifest,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Return expanded required init fields keyed by stage in manifest order."""
+
+    return tuple((stage.id, stage.required_init_fields) for stage in manifest.stages)
+
+
+def expanded_required_init_fields_for_workflow(
+    workflow_id: str,
+    *,
+    specs_root: Path | None = None,
+) -> tuple[str, ...]:
+    """Return the stable first-seen union of expanded required init fields."""
+
+    manifest = load_workflow_stage_manifest(workflow_id, specs_root=specs_root)
+    return _stable_required_init_field_union(stage.required_init_fields for stage in manifest.stages)
+
+
 def invalidate_workflow_stage_manifest_cache() -> None:
     _load_workflow_stage_manifest_cached.cache_clear()
 
@@ -2001,6 +2105,8 @@ __all__ = [
     "WorkflowStage",
     "WorkflowStageConditionalAuthority",
     "WorkflowStageManifest",
+    "expanded_required_init_fields_by_stage",
+    "expanded_required_init_fields_for_workflow",
     "invalidate_workflow_stage_manifest_cache",
     "load_new_project_stage_contract",
     "load_new_project_stage_contract_from_path",

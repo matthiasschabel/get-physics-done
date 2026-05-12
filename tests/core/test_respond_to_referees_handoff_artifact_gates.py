@@ -122,10 +122,6 @@ def test_respond_to_referees_response_letter_generation_stays_file_backed_and_fr
         in source
     )
     assert (
-        "Those two Markdown artifacts under selected GPD publication/review roots are the\nrequired outputs."
-        in source
+        "Those two Markdown artifacts under selected GPD publication/review roots are the\nrequired outputs." in source
     )
-    assert (
-        "If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots"
-        in source
-    )
+    assert "canonical GPD-authored response artifacts live under the selected publication/review roots" in source

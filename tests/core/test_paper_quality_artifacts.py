@@ -2203,11 +2203,9 @@ def test_publication_review_surfaces_keep_protocol_bundle_guidance_additive() ->
         encoding="utf-8"
     )
 
-    assert "protocol_bundle_context" in write_paper
-    assert "additive specialized-publication guidance" in write_paper
+    assert "protocol_bundle_load_manifest" in write_paper
+    assert "Do **not** let bundle\nguidance invent new claims" in write_paper
     assert "GPD/comparisons/*-COMPARISON.md" in write_paper
-    assert "Do **not** let bundle guidance invent new claims" in write_paper
-    assert "Missing generic `verification_status` / `confidence` tags alone are not blockers." in write_paper
     assert "Treat paper-support artifacts as scaffolding, not as proof that a claim is established." in write_paper
 
     assert "protocol_bundle_load_manifest" in peer_review

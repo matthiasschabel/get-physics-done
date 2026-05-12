@@ -53,8 +53,7 @@ fi
 
 Read `{GPD_INSTALL_DIR}/templates/paper/author-response.md`,
 `{GPD_INSTALL_DIR}/templates/paper/referee-response.md`, and the loaded
-`publication-response-writer-handoff.md`. Create both canonical artifacts for
-the current round:
+`publication-response-writer-handoff.md`. Create both current-round artifacts:
 
 - `${RESPONSE_AUTHOR_PATH}`: internal tracker keyed by `REF-*` issue,
   classification, change location, staged-review outcome, and new-work status.
@@ -65,11 +64,10 @@ Use `selected_publication_root` / `selected_review_root`. Do not write
 report source. Do not duplicate the pair across a subject-owned root and the
 global project root in one run.
 
-Populate both files from the templates with metadata, round binding, issue ids,
-blocking/recommendation-floor context from `REVIEW-LEDGER*.json` or
-`REFEREE-DECISION*.json`, and empty response/change fields for later drafting.
-Use `**Evidence:**` for rebuttals and `**Plan:**` for acknowledged or
-`needs-calculation` responses when needed.
+Populate metadata, round binding, issue ids, recommendation-floor context from
+`REVIEW-LEDGER*.json` or `REFEREE-DECISION*.json`, and empty response/change
+fields. Use `**Evidence:**` for rebuttals and `**Plan:**` for acknowledged or
+`needs-calculation` responses.
 
 ```bash
 PRE_CHECK=$(gpd pre-commit-check --files "${RESPONSE_REFEREE_PATH}" "${RESPONSE_AUTHOR_PATH}" 2>&1) || true
@@ -80,19 +78,20 @@ gpd commit \
   --files "${RESPONSE_REFEREE_PATH}" "${RESPONSE_AUTHOR_PATH}"
 ```
 
-Treat `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` as the response success gate.
-The pair is `current` only when same-round target-bound artifacts
+Treat `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` as the response
+success gate. The pair is `current` only when same-round target-bound artifacts
 bind to the resolved manuscript/round with no material writes
 (`command_execution_state: read_only_inspection`). It is `completed_this_run`
-only when both canonical paths were written/refreshed by this invocation or a
-fresh child handoff and named in current-run `files_written` / `gpd_return.files_written`; stale drafts or one-sided files do not count.
+only when both paths were written/refreshed by this invocation or a fresh child
+handoff and named in current-run `files_written` / `gpd_return.files_written`;
+stale drafts or one-sided files do not count.
 </step>
 
 <step name="draft_responses">
 Use full `reference_artifacts_content` only for comments whose response or
 manuscript edit depends on reference-backed evidence. Routine wording,
-formatting, or already-local manuscript changes should use selected manuscript
-files, latest review artifacts, and reference handles. If init exposes
+formatting, and already-local manuscript changes use selected manuscript files,
+latest review artifacts, and reference handles. If init exposes
 `protocol_bundle_context` and `selected_protocol_bundle_ids`, treat them only as
 additive guidance for benchmark anchors, decisive artifacts, and estimator
 caveats; they do not create new claims or replace the review ledger.
@@ -147,8 +146,8 @@ child_gate:
   failure_route: "continue other sections, then retry failed sections | main-context targeted revision | skip failed sections; checkpoint -> stage-recovery gate and fresh continuation"
 ```
 
-Each revision agent receives the exact comments, current section text,
-planned strategy, relevant comparisons/figure tracker entries, and the minimal
+Each revision agent receives exact comments, current section text, planned
+strategy, relevant comparisons/figure tracker entries, and the minimal
 targeted-edit rule. Mark changed text with `% REVISED: Referee X, Comment Y`.
 If a spawned agent returns `status: checkpoint` or needs user input, apply the
 publication stage-recovery gate and continue only from persisted artifacts after
@@ -174,11 +173,12 @@ pdflatex -interaction=nonstopmode "${MANUSCRIPT_BASENAME}" 2>&1 | tail -5
 ```
 
 Compilation-error fixes do not count as iterations. Each counted iteration
-checks notation, equation/figure references, new citation metadata, missing
-citation markers, touched comparison verdicts/benchmark anchors, and
-bibliography freshness. If bibliography files or citation commands changed,
-refresh `${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` via `gpd paper-build`; use
-`derived_manuscript_reference_status` only as a quick read. Confirm the refreshed JSON artifact exists before treating the round as complete.
+checks notation, equation/figure references, citation metadata/markers, touched
+comparison verdicts/benchmark anchors, and bibliography freshness. If
+bibliography files or citation commands changed, refresh
+`${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json` via `gpd paper-build`; use
+`derived_manuscript_reference_status` only as a quick read. Confirm the refreshed
+JSON artifact exists before treating the round as complete.
 
 If inconsistencies remain and iteration < 3, spawn targeted paper-writers. At
 iteration 3, present the remaining issues and offer to proceed with a note or
@@ -208,9 +208,10 @@ aggregate_child_gate:
 
 Those two Markdown artifacts under selected GPD publication/review roots are the
 required outputs. `${PAPER_DIR}/response-letter.tex` or
-`${PAPER_DIR}/response-letter.md` is optional and only for a journal/user
-submission companion. If the manuscript subject is an explicit external artifact, keep auxiliary response outputs under the selected GPD roots, not beside that
-external manuscript. Subject-owned publication roots follow the same rule.
+`${PAPER_DIR}/response-letter.md` is optional. If the manuscript subject is an
+explicit external artifact, keep auxiliary response outputs under the selected
+GPD roots, not beside that external manuscript. Subject-owned publication roots
+follow the same rule.
 
 If Group C items remain, warn that the response is incomplete until
 `gpd:execute-phase` finishes them. When a project-backed manuscript needs a

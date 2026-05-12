@@ -81,3 +81,11 @@ def test_verify_work_interactive_and_gap_stages_keep_schema_packs_conditional() 
         observed = stage_by_id[stage_id]["eager_char_count"]
         assert isinstance(observed, int)
         assert observed < budget, f"{stage_id} eager chars exceeded deferral cap: observed={observed} max<{budget}"
+
+
+def test_verify_work_gap_repair_keeps_reference_bodies_deferred_to_targeted_reads() -> None:
+    workflow_text = workflow_authority_text(WORKFLOWS_DIR, "verify-work")
+
+    assert "reference artifact handles, not embedded bodies" in workflow_text
+    assert "read or quote a listed artifact file only when a diagnosed gap cites that exact artifact" in workflow_text
+    assert "Do not require rendered `protocol_bundle_context`" in workflow_text

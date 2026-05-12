@@ -599,10 +599,13 @@ def _score_proof_bearing_checker_audit_visibility() -> PlanningReplayOutcome:
     planner_template = PLANNER_TEMPLATE.read_text(encoding="utf-8")
     checker_prompt = PLAN_CHECKER_PROMPT.read_text(encoding="utf-8")
 
-    assert manifest.stage("checker_revision").loaded_authorities == (
-        "workflows/plan-phase/checker-revision.md",
-        "templates/planner-subagent-prompt.md",
-    )
+    checker_stage = manifest.stage("checker_revision")
+    assert checker_stage.loaded_authorities == ("workflows/plan-phase/checker-revision.md",)
+    checker_conditionals = {
+        authority for conditional in checker_stage.conditional_authorities for authority in conditional.authorities
+    }
+    assert "templates/planner-subagent-prompt.md" in checker_conditionals
+    assert "templates/planner-subagent-prompt.md" in checker_stage.must_not_eager_load
     assert "`--skip-verify` does NOT waive checker review" in bootstrap
     assert "any proof-bearing plan set still needs checker review or an equivalent main-context audit" in bootstrap
     assert "proof-bearing plans still need checker review or an equivalent main-context audit" in planner

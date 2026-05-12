@@ -107,7 +107,7 @@ def test_write_paper_workflow_runs_centralized_review_preflight() -> None:
         "write-paper centralized command-context preflight",
         "centralized command-context preflight",
         "write-paper",
-        "before continuing",
+        "stop before",
     )
     assert "publication-bootstrap-preflight.md" in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow

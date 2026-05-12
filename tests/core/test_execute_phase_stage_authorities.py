@@ -122,6 +122,7 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
         assert not HEAVY_AUTHORITIES.intersection(stage.loaded_authorities), stage.id
 
     executor_dispatch = manifest.stage("executor_dispatch")
+    checkpoint_resume = manifest.stage("checkpoint_resume")
     verification_handoff = manifest.stage("verification_handoff")
     aggregate = manifest.stage("aggregate_and_verify")
     closeout = manifest.stage("closeout")
@@ -137,6 +138,8 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
     assert "templates/paper/figure-tracker.md" in conditional_by_stage["aggregate_and_verify"]
     assert "templates/paper/experimental-comparison.md" in conditional_by_stage["aggregate_and_verify"]
     assert "templates/recovery-plan.md" in conditional_by_stage["aggregate_and_verify"]
+    assert "templates/continuation-prompt.md" in conditional_by_stage["checkpoint_resume"]
+    assert "references/orchestration/state-portability.md" in conditional_by_stage["checkpoint_resume"]
     assert "references/execution/github-lifecycle.md" in conditional_by_stage["closeout"]
     assert closeout.loaded_authorities == ("workflows/execute-phase/closeout.md",)
     for authority in (
@@ -149,6 +152,8 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
         assert authority in conditional_by_stage["closeout"]
 
     assert "workflows/execute-plan.md" in executor_dispatch.must_not_eager_load
+    assert "templates/continuation-prompt.md" in checkpoint_resume.must_not_eager_load
+    assert "references/orchestration/state-portability.md" in checkpoint_resume.must_not_eager_load
     assert "workflows/verify-phase.md" in verification_handoff.must_not_eager_load
     assert "references/verification/core/verification-core.md" in verification_handoff.must_not_eager_load
     assert "templates/recovery-plan.md" in aggregate.must_not_eager_load

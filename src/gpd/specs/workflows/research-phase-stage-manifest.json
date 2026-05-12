@@ -10,7 +10,6 @@
         "workflows/research-phase/phase-bootstrap.md"
       ],
       "required_init_fields": [
-        "commit_docs",
         "autonomy",
         "research_mode",
         "phase_found",
@@ -74,7 +73,6 @@
         "workflows/research-phase/research-handoff.md"
       ],
       "required_init_fields": [
-        "commit_docs",
         "autonomy",
         "review_cadence",
         "research_mode",

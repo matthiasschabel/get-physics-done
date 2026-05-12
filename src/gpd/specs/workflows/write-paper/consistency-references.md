@@ -26,10 +26,12 @@ Use `gpd --raw stage field-access write-paper --stage consistency_and_references
 to confirm the manifest-selected consistency/reference fields before reading
 `CONSISTENCY_INIT`.
 
-This stage receives manuscript paths, citation-source context, selected
-reference bodies, and protocol/reference handles. It does not receive planning
-document bodies or rendered protocol/reference context; read a specific planning
-or bundle file only when a consistency finding depends on it.
+This stage receives manuscript paths, citation-source context, reference artifact
+handles, protocol load manifests, and manuscript reference/proof status. It does
+not receive selected reference bodies, planning document bodies, or rendered
+protocol/reference context. Read a specific citation-source, bibliography,
+reference, planning, or bundle file only when a consistency finding depends on
+its body.
 </init>
 
 <consistency_check>

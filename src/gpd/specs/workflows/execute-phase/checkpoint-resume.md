@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$CHECKPOINT_RESUME_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --style instruction` before reading `CHECKPOINT_RESUME_INIT`; do not reuse wave-dispatch fields here.
+Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --style instruction` before reading `CHECKPOINT_RESUME_INIT`; treat that staged field list as the source of truth and do not reuse wave-dispatch fields here.
 
 **Flow:**
 
@@ -63,14 +63,13 @@ Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --styl
    ```
 
 5. User responds: "approved"/"done" | issue description | decision selection
-6. **Spawn continuation agent (NOT resume)** using `{GPD_INSTALL_DIR}/templates/continuation-prompt.md` template:
+6. **Spawn continuation agent (NOT resume).** Load the `continuation_prompt_rendering` conditional authority pack only when rendering `{GPD_INSTALL_DIR}/templates/continuation-prompt.md`; load `machine_change_or_resume_transport_repair` only for machine-change or resume-transport repair.
    - `{completed_tasks_table}`: From checkpoint return
    - `{resume_task_number}` + `{resume_task_name}`: Current task
    - `{user_response}`: What user provided
    - `{resume_instructions}`: Based on checkpoint type (see template for type-specific instructions)
    - `{execution_segment}`: The returned bounded-segment state, including checkpoint cause, current cursor, resume preconditions, downstream-lock status, and any skeptical re-questioning fields that must survive into the continuation
-   - `{selected_protocol_bundle_ids}`: From checkpoint_resume init JSON
-   - `{protocol_bundle_load_manifest}`: From checkpoint_resume init JSON when present
+   - `{selected_protocol_bundle_ids}` / `{protocol_bundle_load_manifest}`: From checkpoint_resume init JSON
    - `{protocol_bundle_verifier_extensions}`: From checkpoint_resume init JSON as the verifier-extension checklist surface
 7. Continuation agent verifies previous commits, continues from resume point
 8. Repeat until plan completes or user stops

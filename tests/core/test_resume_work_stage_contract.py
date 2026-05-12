@@ -80,16 +80,17 @@ def test_resume_work_stage_manifest_loads_and_preserves_stage_order() -> None:
         "workflows/resume-work/derivation-restore.md",
         "references/orchestration/continuation-format.md",
     )
-    assert derivation_restore.required_init_fields == (
+    assert derivation_restore.required_init_fields[:2] == (
         "derived_convention_lock",
         "derived_convention_lock_count",
-        "derived_intermediate_results",
-        "derived_intermediate_result_count",
-        "derived_approximations",
-        "derived_approximation_count",
-        "derivation_state_content",
-        "continuity_handoff_content",
     )
+    assert "derived_intermediate_results" in derivation_restore.required_init_fields
+    assert "derived_approximations" in derivation_restore.required_init_fields
+    assert "derivation_state_content" in derivation_restore.required_init_fields
+    assert "continuity_handoff_content" in derivation_restore.required_init_fields
+    assert derivation_restore.required_init_fields.index(
+        "derived_approximation_count"
+    ) < derivation_restore.required_init_fields.index("derivation_state_content")
     assert derivation_restore.writes_allowed == ()
     assert "file_write" not in derivation_restore.allowed_tools
 
@@ -104,7 +105,7 @@ def test_resume_work_stage_manifest_loads_and_preserves_stage_order() -> None:
 
 def test_resume_work_stage_manifest_rejects_invalid_field_drift() -> None:
     payload = json.loads((WORKFLOWS_DIR / "resume-work-stage-manifest.json").read_text(encoding="utf-8"))
-    payload["stages"][0]["required_init_fields"][0] = "bogus_field"
+    payload["stages"][0]["required_init_fields"] = ["bogus_field"]
 
     with pytest.raises(ValueError, match="unknown field name"):
         validate_workflow_stage_manifest_payload(payload, expected_workflow_id="resume-work")

@@ -6,7 +6,6 @@
       "planner_model",
       "checker_model",
       "verifier_model",
-      "commit_docs",
       "autonomy",
       "research_mode",
       "project_root",
@@ -24,9 +23,6 @@
       "verification_report_status_payload",
       "phase_proof_review_status"
     ],
-    "project_contract_core": [
-      "project_contract"
-    ],
     "contract_gate_status": [
       "project_contract_load_info",
       "project_contract_validation",
@@ -43,6 +39,14 @@
       "protocol_bundle_count",
       "protocol_bundle_load_manifest",
       "protocol_bundle_verifier_extensions"
+    ],
+    "gap_repair_targeted_reference_context": [
+      "contract_intake",
+      "effective_reference_intake",
+      "selected_protocol_bundle_ids",
+      "protocol_bundle_load_manifest",
+      "protocol_bundle_verifier_extensions",
+      "reference_artifact_files"
     ]
   },
   "stages": [
@@ -174,7 +178,6 @@
       ],
       "required_init_field_groups": [
         "phase_target_base",
-        "project_contract_core",
         "contract_gate_status",
         "reference_handle_context",
         "protocol_bundle_handles"
@@ -240,7 +243,6 @@
       ],
       "required_init_field_groups": [
         "phase_target_base",
-        "project_contract_core",
         "contract_gate_status"
       ],
       "required_init_fields": [
@@ -317,19 +319,10 @@
       ],
       "required_init_field_groups": [
         "phase_target_base",
-        "project_contract_core",
-        "contract_gate_status"
+        "contract_gate_status",
+        "gap_repair_targeted_reference_context"
       ],
-      "required_init_fields": [
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_context",
-        "protocol_bundle_verifier_extensions",
-        "reference_artifact_files",
-        "reference_artifacts_content"
-      ],
+      "required_init_fields": [],
       "loaded_authorities": [
         "workflows/verify-work/gap-repair.md"
       ],

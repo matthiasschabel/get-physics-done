@@ -10,7 +10,6 @@
         "workflows/literature-review/review-bootstrap.md"
       ],
       "required_init_fields": [
-        "commit_docs",
         "state_exists",
         "project_exists",
         "roadmap_exists",
@@ -72,7 +71,6 @@
         "workflows/literature-review/scope-locked.md"
       ],
       "required_init_fields": [
-        "commit_docs",
         "state_exists",
         "project_exists",
         "roadmap_exists",
@@ -150,7 +148,6 @@
         "workflows/literature-review/review-handoff.md"
       ],
       "required_init_fields": [
-        "commit_docs",
         "state_exists",
         "project_exists",
         "roadmap_exists",
@@ -244,7 +241,6 @@
         "workflows/literature-review/completion-gate.md"
       ],
       "required_init_fields": [
-        "commit_docs",
         "topic",
         "slug",
         "platform"

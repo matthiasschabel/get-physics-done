@@ -67,7 +67,7 @@ COMMAND_BASELINES = {
     "pause-work": (302, 13_207, 1),
     "peer-review": (297, 14_870, 1),
     "plan-milestone-gaps": (357, 11_407, 1),
-    "plan-phase": (217, 14_263, 1),
+    "plan-phase": (185, 9_426, 1),
     "progress": (612, 20_404, 1),
     "quick": (238, 12_222, 1),
     "reapply-patches": (151, 4_511, 1),
@@ -96,7 +96,7 @@ COMMAND_BASELINES = {
     "update": (269, 7_655, 1),
     "validate-conventions": (269, 10_508, 1),
     "verify-work": (208, 7_483, 1),
-    "write-paper": (417, 18_251, 1),
+    "write-paper": (335, 14_777, 1),
 }
 WORST_COMMAND_HARD_CAPS = {
     "audit-milestone": (540, 21_000),

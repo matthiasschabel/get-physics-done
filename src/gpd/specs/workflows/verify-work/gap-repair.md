@@ -12,7 +12,7 @@ The verifier decides scientific status. This stage only turns diagnosed gaps int
 **Effective Reference Intake:** {effective_reference_intake}
 
 Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. A visible-but-blocked contract must be repaired before it is used as authoritative verification scope; keep the same contract-critical floor at all times.
-Treat `effective_reference_intake` as the structured source of carry-forward anchors; `active_reference_context` is the readable projection, not the source of truth.
+Treat `effective_reference_intake` as the structured source of carry-forward anchors. This stage receives reference artifact handles, not embedded bodies: read or quote a listed artifact file only when a diagnosed gap cites that exact artifact or needs decisive comparison evidence.
 Do NOT skip contract-critical anchors.
 </shared_contract_floor>
 
@@ -24,7 +24,7 @@ Do NOT skip contract-critical anchors.
 Display a compact "Planning fixes" status before spawning.
 
 Spawn `gpd-planner` in `--gaps` mode as a fresh one-shot delegation from the staged gap-repair payload. First read {GPD_AGENTS_DIR}/gpd-planner.md. Use `templates/planner-subagent-prompt.md` for the gap_closure handoff, keeping `tool_requirements`, checker feedback, and hard requirements explicit.
-Bind the template's protocol fields from the gap-repair payload: `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}`. Do not collapse verifier extensions into the rendered context block.
+Bind the template's protocol fields from the gap-repair payload: `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, and `{protocol_bundle_verifier_extensions}`. Do not require rendered `protocol_bundle_context`; use the load manifest and verifier extensions as the targeted repair handles.
 If a diagnosed gap is specifically an uncertainty or error-propagation gap, load the `error_propagation_gap` conditional authority pack before using error-propagation protocol requirements in the planner handoff.
 
 Set `GAP_PLANNER_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")` immediately before spawning.
@@ -105,7 +105,7 @@ If the checker returns a structured `gpd_return`, route on `gpd_return.status` a
 If the checker reports issues, send a fresh planner handoff with checker feedback, then rerun the checker. Each agent turn is one-shot. For `checkpoint` or `blocked`, route from structured `approved_plans`, `blocked_plans`, and `issues`; do not rewrite approved plans.
 First, read {GPD_AGENTS_DIR}/gpd-planner.md for your role and instructions.
 Use `templates/planner-subagent-prompt.md` again for checker-driven gap_closure revisions.
-Again bind `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, `{protocol_bundle_context}`, and `{protocol_bundle_verifier_extensions}` from the staged gap-repair payload so revision planners keep verifier-extension obligations visible.
+Again bind `{selected_protocol_bundle_ids}`, `{protocol_bundle_load_manifest}`, and `{protocol_bundle_verifier_extensions}` from the staged gap-repair payload so revision planners keep verifier-extension obligations visible without loading rendered bundle prose.
 
 If iteration count reaches 3, stop and offer the user:
 

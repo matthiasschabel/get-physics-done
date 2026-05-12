@@ -5,7 +5,6 @@
     "review_target_context": [
       "project_exists",
       "state_exists",
-      "commit_docs",
       "autonomy",
       "research_mode",
       "review_target_input",
@@ -364,13 +363,24 @@
       "loaded_authorities": [
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-panel-playbook.md",
-        "references/publication/stage-recovery-gate.md",
-        "references/verification/core/proof-redteam-workflow-gate.md",
-        "references/verification/core/proof-redteam-protocol.md",
-        "templates/proof-redteam-schema.md"
+        "references/publication/peer-review-panel-playbook.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "panel_child_recovery_needed",
+          "authorities": [
+            "references/publication/stage-recovery-gate.md"
+          ]
+        },
+        {
+          "when": "theorem_bearing_claims_present",
+          "authorities": [
+            "references/verification/core/proof-redteam-workflow-gate.md",
+            "references/verification/core/proof-redteam-protocol.md",
+            "templates/proof-redteam-schema.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/peer-review.md",
         "workflows/peer-review/preflight.md",
@@ -380,13 +390,17 @@
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/stage-recovery-gate.md",
         "references/publication/publication-final-adjudication-boundary.md",
         "references/publication/publication-response-writer-handoff.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/paper-config-schema.md",
         "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
-        "templates/paper/reproducibility-manifest.md"
+        "templates/paper/reproducibility-manifest.md",
+        "templates/proof-redteam-schema.md"
       ],
       "allowed_tools": [
         "ask_user",
@@ -458,12 +472,18 @@
       "loaded_authorities": [
         "workflows/peer-review/final-adjudication.md",
         "references/publication/publication-final-adjudication-boundary.md",
-        "references/publication/peer-review-panel.md",
         "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "upstream_stage_artifact_index_needed",
+          "authorities": [
+            "references/publication/peer-review-panel.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/peer-review.md",
         "workflows/peer-review/preflight.md",
@@ -472,6 +492,7 @@
         "workflows/peer-review/finalize.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
+        "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/peer-review-panel-playbook.md",
         "references/publication/publication-response-writer-handoff.md",

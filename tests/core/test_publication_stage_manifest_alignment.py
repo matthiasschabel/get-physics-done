@@ -55,10 +55,6 @@ PEER_REVIEW_PANEL_REQUIRED_EAGER = frozenset(
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-panel-playbook.md",
-        "references/publication/stage-recovery-gate.md",
-        "references/verification/core/proof-redteam-workflow-gate.md",
-        "references/verification/core/proof-redteam-protocol.md",
-        "templates/proof-redteam-schema.md",
     }
 )
 PEER_REVIEW_PANEL_DEFERRED = frozenset(
@@ -66,6 +62,10 @@ PEER_REVIEW_PANEL_DEFERRED = frozenset(
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-final-adjudication-boundary.md",
         "references/publication/publication-response-writer-handoff.md",
+        "references/publication/stage-recovery-gate.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+        "references/verification/core/proof-redteam-protocol.md",
+        "templates/proof-redteam-schema.md",
     }
 )
 PEER_REVIEW_PANEL_FINAL_ONLY_AUTHORITIES = frozenset(
@@ -78,7 +78,6 @@ PEER_REVIEW_FINAL_ADJUDICATION_REQUIRED_EAGER = frozenset(
     {
         "workflows/peer-review/final-adjudication.md",
         "references/publication/publication-final-adjudication-boundary.md",
-        "references/publication/peer-review-panel.md",
         "references/publication/stage-recovery-gate.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
@@ -189,7 +188,6 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "publication_bootstrap_mode",
         "publication_bootstrap_root",
         "artifact_manifest_path",
-        "contract_intake",
         "effective_reference_intake",
         "publication_subject_slug",
         "publication_lane_kind",
@@ -234,7 +232,6 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "requirements_content",
     }.isdisjoint(consistency.required_init_fields)
     assert {
-        "reference_artifacts_content",
         "citation_source_files",
         "selected_protocol_bundle_ids",
         "protocol_bundle_load_manifest",
@@ -351,6 +348,16 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
     final_loaded = set(final_adjudication.loaded_authorities)
     assert PEER_REVIEW_PANEL_REQUIRED_EAGER <= panel_loaded
     assert PEER_REVIEW_PANEL_DEFERRED <= set(panel_stages.must_not_eager_load)
+    assert _conditional_authorities_by_when(panel_stages) == {
+        "panel_child_recovery_needed": frozenset({"references/publication/stage-recovery-gate.md"}),
+        "theorem_bearing_claims_present": frozenset(
+            {
+                "references/verification/core/proof-redteam-workflow-gate.md",
+                "references/verification/core/proof-redteam-protocol.md",
+                "templates/proof-redteam-schema.md",
+            }
+        ),
+    }
     assert panel_loaded.isdisjoint(PEER_REVIEW_PANEL_FINAL_ONLY_AUTHORITIES)
     assert PEER_REVIEW_FINAL_ADJUDICATION_REQUIRED_EAGER <= final_loaded
     assert final_loaded.isdisjoint(PEER_REVIEW_FINAL_ADJUDICATION_DEFERRED)

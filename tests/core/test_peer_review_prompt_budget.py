@@ -149,14 +149,24 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-panel-playbook.md",
-        "references/publication/stage-recovery-gate.md",
-        "references/verification/core/proof-redteam-workflow-gate.md",
-        "references/verification/core/proof-redteam-protocol.md",
-        "templates/proof-redteam-schema.md",
     )
+    assert _conditional_authorities_by_when(panel_execution) == {
+        "panel_child_recovery_needed": ("references/publication/stage-recovery-gate.md",),
+        "theorem_bearing_claims_present": (
+            "references/verification/core/proof-redteam-workflow-gate.md",
+            "references/verification/core/proof-redteam-protocol.md",
+            "templates/proof-redteam-schema.md",
+        ),
+    }
+    assert "references/publication/stage-recovery-gate.md" in panel_execution.must_not_eager_load
+    assert "references/verification/core/proof-redteam-protocol.md" in panel_execution.must_not_eager_load
     assert "workflows/peer-review/final-adjudication.md" in final_adjudication.loaded_authorities
     assert "references/publication/publication-final-adjudication-boundary.md" in final_adjudication.loaded_authorities
-    assert "references/publication/peer-review-panel.md" in final_adjudication.loaded_authorities
+    assert "references/publication/peer-review-panel.md" not in final_adjudication.loaded_authorities
+    assert _conditional_authorities_by_when(final_adjudication) == {
+        "upstream_stage_artifact_index_needed": ("references/publication/peer-review-panel.md",)
+    }
+    assert "references/publication/peer-review-panel.md" in final_adjudication.must_not_eager_load
     assert "references/publication/peer-review-panel-playbook.md" not in final_adjudication.loaded_authorities
     assert "templates/paper/review-ledger-schema.md" in final_adjudication.loaded_authorities
     assert "templates/paper/referee-decision-schema.md" in final_adjudication.loaded_authorities

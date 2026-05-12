@@ -103,7 +103,7 @@ def assert_stage_uses_reference_handles_only(
 
 
 def assert_empty_reference_intake(payload: Mapping[str, object]) -> None:
-    assert payload["contract_intake"] is None
+    assert payload.get("contract_intake") is None
     assert payload["effective_reference_intake"] == EMPTY_REFERENCE_INTAKE
 
 

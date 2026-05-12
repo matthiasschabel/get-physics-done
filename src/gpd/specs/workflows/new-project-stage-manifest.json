@@ -1,6 +1,54 @@
 {
   "schema_version": 1,
   "workflow_id": "new-project",
+  "required_init_field_groups": {
+    "runtime_mode": [
+      "commit_docs",
+      "autonomy",
+      "research_mode"
+    ],
+    "startup_probe": [
+      "project_exists",
+      "state_exists",
+      "roadmap_exists",
+      "recoverable_project_exists",
+      "partial_project_exists",
+      "project_recovery_status",
+      "init_progress_exists",
+      "init_progress_status",
+      "init_progress_valid",
+      "init_progress_corrupt",
+      "init_progress_step",
+      "init_progress_description",
+      "init_progress_path",
+      "has_research_map",
+      "planning_exists",
+      "has_research_files",
+      "research_file_samples",
+      "has_project_manifest",
+      "needs_research_map"
+    ],
+    "git_platform": [
+      "has_git",
+      "platform"
+    ],
+    "contract_gate_status": [
+      "project_contract",
+      "project_contract_gate",
+      "project_contract_load_info",
+      "project_contract_validation"
+    ],
+    "literature_models": [
+      "researcher_model",
+      "synthesizer_model"
+    ],
+    "roadmap_model": [
+      "roadmapper_model"
+    ],
+    "platform_context": [
+      "platform"
+    ]
+  },
   "stages": [
     {
       "id": "scope_intake",
@@ -9,35 +57,11 @@
       "mode_paths": [
         "workflows/new-project/scope-intake.md"
       ],
-      "required_init_fields": [
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_exists",
-        "state_exists",
-        "roadmap_exists",
-        "recoverable_project_exists",
-        "partial_project_exists",
-        "project_recovery_status",
-        "init_progress_exists",
-        "init_progress_status",
-        "init_progress_valid",
-        "init_progress_corrupt",
-        "init_progress_step",
-        "init_progress_description",
-        "init_progress_path",
-        "has_research_map",
-        "planning_exists",
-        "has_research_files",
-        "research_file_samples",
-        "has_project_manifest",
-        "needs_research_map",
-        "has_git",
-        "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "runtime_mode",
+        "startup_probe",
+        "git_platform",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/scope-intake.md"
@@ -88,11 +112,8 @@
       "mode_paths": [
         "workflows/new-project/scope-approval.md"
       ],
-      "required_init_fields": [
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/scope-approval.md",
@@ -142,16 +163,10 @@
       "mode_paths": [
         "workflows/new-project/minimal-artifacts.md"
       ],
-      "required_init_fields": [
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "has_git",
-        "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "runtime_mode",
+        "git_platform",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/minimal-artifacts.md"
@@ -200,16 +215,10 @@
       "mode_paths": [
         "workflows/new-project/workflow-preferences.md"
       ],
-      "required_init_fields": [
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "has_git",
-        "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "runtime_mode",
+        "git_platform",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/workflow-preferences.md"
@@ -250,16 +259,10 @@
       "mode_paths": [
         "workflows/new-project/project-artifacts.md"
       ],
-      "required_init_fields": [
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "has_git",
-        "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "runtime_mode",
+        "git_platform",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/project-artifacts.md"
@@ -303,16 +306,10 @@
       "mode_paths": [
         "workflows/new-project/literature-survey.md"
       ],
-      "required_init_fields": [
-        "researcher_model",
-        "synthesizer_model",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "literature_models",
+        "runtime_mode",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/literature-survey.md"
@@ -358,14 +355,9 @@
       "mode_paths": [
         "workflows/new-project/requirements-authoring.md"
       ],
-      "required_init_fields": [
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "runtime_mode",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/requirements-authoring.md"
@@ -406,15 +398,10 @@
       "mode_paths": [
         "workflows/new-project/roadmap-authoring.md"
       ],
-      "required_init_fields": [
-        "roadmapper_model",
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "roadmap_model",
+        "runtime_mode",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/roadmap-authoring.md"
@@ -459,14 +446,9 @@
       "mode_paths": [
         "workflows/new-project/conventions-handoff.md"
       ],
-      "required_init_fields": [
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "runtime_mode",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/conventions-handoff.md"
@@ -509,15 +491,10 @@
       "mode_paths": [
         "workflows/new-project/completion.md"
       ],
-      "required_init_fields": [
-        "commit_docs",
-        "autonomy",
-        "research_mode",
-        "platform",
-        "project_contract",
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation"
+      "required_init_field_groups": [
+        "runtime_mode",
+        "platform_context",
+        "contract_gate_status"
       ],
       "loaded_authorities": [
         "workflows/new-project/completion.md"

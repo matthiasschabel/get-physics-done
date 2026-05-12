@@ -570,7 +570,11 @@ _EXECUTE_PHASE_TASK_OVERLAY_POLICY_SUMMARY = (
     "Selected executor.bounded_segment for execute-phase executor_dispatch bounded fanout; "
     "selected entries stay metadata-only."
 )
-_STAGED_REFERENCE_SUMMARY_FIELDS = frozenset(
+# Staged reference fields are split by hydration cost. Handle/status fields expose
+# ids, counts, paths, statuses, and load manifests; they must not render long
+# prose context or read artifact bodies unless the active stage selects those
+# body/rendered fields explicitly.
+_STAGED_REFERENCE_CONTRACT_HANDLE_STATUS_FIELDS = frozenset(
     {
         "contract_intake",
         "effective_reference_intake",
@@ -578,15 +582,47 @@ _STAGED_REFERENCE_SUMMARY_FIELDS = frozenset(
         "protocol_bundle_count",
         "protocol_bundle_load_manifest",
         "protocol_bundle_verifier_extensions",
-        "protocol_bundle_context",
-        "active_reference_context",
         "active_references",
         "active_reference_count",
     }
 )
 _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS = frozenset({"protocol_bundle_context", "active_reference_context"})
-_STAGED_FULL_REFERENCE_RUNTIME_FIELDS = _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS - _STAGED_REFERENCE_SUMMARY_FIELDS
-_STAGED_REFERENCE_ARTIFACT_CONTENT_FIELDS = frozenset({"reference_artifacts_content"})
+_STAGED_REFERENCE_ARTIFACT_HANDLE_STATUS_FIELDS = frozenset(
+    {
+        "derived_active_references",
+        "derived_active_reference_count",
+        "derived_knowledge_docs",
+        "derived_knowledge_doc_count",
+        "knowledge_doc_warnings",
+        "citation_source_files",
+        "citation_source_count",
+        "citation_source_warnings",
+        "derived_citation_sources",
+        "derived_citation_source_count",
+        "derived_manuscript_reference_status",
+        "derived_manuscript_reference_status_count",
+        "knowledge_doc_files",
+        "knowledge_doc_count",
+        "stable_knowledge_doc_files",
+        "stable_knowledge_doc_count",
+        "knowledge_doc_status_counts",
+        "reference_artifact_files",
+        "literature_review_files",
+        "literature_review_count",
+        "research_map_reference_files",
+        "research_map_reference_count",
+        "derived_manuscript_proof_review_status",
+    }
+)
+_STAGED_REFERENCE_HANDLE_STATUS_FIELDS = (
+    _STAGED_REFERENCE_CONTRACT_HANDLE_STATUS_FIELDS | _STAGED_REFERENCE_ARTIFACT_HANDLE_STATUS_FIELDS
+)
+_STAGED_REFERENCE_BODY_FIELDS = frozenset({"reference_artifacts_content"})
+_STAGED_REFERENCE_SUMMARY_FIELDS = (
+    _STAGED_REFERENCE_CONTRACT_HANDLE_STATUS_FIELDS | _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS
+)
+_STAGED_FULL_REFERENCE_RUNTIME_FIELDS = _STAGED_REFERENCE_ARTIFACT_HANDLE_STATUS_FIELDS | _STAGED_REFERENCE_BODY_FIELDS
+_STAGED_REFERENCE_ARTIFACT_CONTENT_FIELDS = _STAGED_REFERENCE_BODY_FIELDS
 _RESEARCH_PHASE_FILE_CONTENT_FIELDS = frozenset({"state_content", "config_content", "roadmap_content"})
 _PLAN_PHASE_PLANNING_FILE_CONTEXT_PATHS = {
     "state_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
@@ -2074,20 +2110,24 @@ def _build_staged_reference_runtime_context(
     persist_manuscript_proof_review_manifest: bool = False,
 ) -> dict[str, object]:
     """Build the smallest reference context tier needed by a staged init payload."""
-    if not reference_fields:
+    selected_reference_fields = frozenset(reference_fields)
+    if not selected_reference_fields:
         return {}
-    rendered_context_fields = reference_fields & _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS
+    rendered_context_fields = selected_reference_fields & _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS
     include_protocol_context = "protocol_bundle_context" in rendered_context_fields
     include_active_reference_context = "active_reference_context" in rendered_context_fields
-    if reference_fields <= _STAGED_REFERENCE_SUMMARY_FIELDS:
+    include_artifact_content = bool(selected_reference_fields & _STAGED_REFERENCE_BODY_FIELDS)
+    if selected_reference_fields <= _STAGED_REFERENCE_SUMMARY_FIELDS:
         return _build_contract_reference_runtime_context(
             cwd,
             include_protocol_context=include_protocol_context,
             include_active_reference_context=include_active_reference_context,
         )
+    # Artifact handle/status fields require artifact discovery and structured
+    # status ingestion, but body/rendered hydration remains opt-in per field.
     return _build_reference_runtime_context(
         cwd,
-        include_artifact_content=bool(reference_fields & _STAGED_REFERENCE_ARTIFACT_CONTENT_FIELDS),
+        include_artifact_content=include_artifact_content,
         include_protocol_context=include_protocol_context,
         include_active_reference_context=include_active_reference_context,
         persist_manuscript_proof_review_manifest=persist_manuscript_proof_review_manifest,

@@ -80,8 +80,13 @@ def test_peer_review_panel_contract_is_compact_index_and_playbook_is_lazy_rubric
     final_adjudication = manifest.stage("final_adjudication")
     assert "references/publication/peer-review-panel.md" in panel_stage.loaded_authorities
     assert "references/publication/peer-review-panel-playbook.md" in panel_stage.loaded_authorities
+    assert "references/publication/stage-recovery-gate.md" not in panel_stage.loaded_authorities
+    assert "references/verification/core/proof-redteam-protocol.md" not in panel_stage.loaded_authorities
     assert "references/publication/peer-review-panel-playbook.md" not in final_adjudication.loaded_authorities
     assert "references/publication/peer-review-panel-playbook.md" in final_adjudication.must_not_eager_load
+    assert "references/publication/peer-review-panel.md" not in final_adjudication.loaded_authorities
+    assert "references/publication/peer-review-panel.md" in final_adjudication.must_not_eager_load
+    assert final_adjudication.conditional_authorities[0].authorities == ("references/publication/peer-review-panel.md",)
 
 
 def test_peer_review_stage_files_do_not_raw_include_manifest_loaded_authorities() -> None:

@@ -158,17 +158,20 @@ def test_reference_content_stages_select_handles_before_content() -> None:
 
 def test_handle_only_reference_stage_inventory_keeps_content_deferred() -> None:
     handle_only_stages = (
+        ("quick", "reference_context"),
         ("literature-review", "scope_locked"),
         ("peer-review", "artifact_discovery"),
         ("peer-review", "panel_stages"),
         ("peer-review", "final_adjudication"),
         ("respond-to-referees", "revision_planning"),
         ("verify-work", "interactive_validation"),
+        ("write-paper", "consistency_and_references"),
+        ("write-paper", "publication_review"),
     )
     content_stages = (
         ("literature-review", "review_handoff"),
         ("respond-to-referees", "response_authoring"),
-        ("verify-work", "gap_repair"),
+        ("write-paper", "figure_and_section_authoring"),
     )
 
     for workflow_id, stage_id in handle_only_stages:
@@ -291,6 +294,19 @@ def test_p6_research_handle_row_rejects_content_before_handle_regression() -> No
     assert not score.passed
     assert score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 1
     assert score.behavior_score.metric_classes["artifact_handle_first_class"] == "content_before_handle"
+    assert "content_hydration_before_selection_count" in score.hard_budget_failures
+
+
+def test_handle_first_source_text_rejects_body_fields_before_selection() -> None:
+    row = _row_by_id("P6-RES-JIT-02")
+    source = (
+        "Reference artifacts: {reference_artifacts_content}\n"
+        "<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>\n"
+        "Rendered active references: {active_reference_context}"
+    )
+    score = score_phase7_live_like_row(row, source_text_override=source)
+    assert not score.passed
+    assert score.phase7_metric_counts["content_hydration_before_selection_count"] > 0
     assert "content_hydration_before_selection_count" in score.hard_budget_failures
 
 

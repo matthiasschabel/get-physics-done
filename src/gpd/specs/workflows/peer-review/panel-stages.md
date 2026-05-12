@@ -7,14 +7,14 @@ same-round proof-redteam review, and stage-artifact validation.
 Panel stages start only after bootstrap, preflight, and artifact discovery have
 resolved target and round state. Each stage runs in a fresh subagent context and
 writes a compact artifact. Apply
-`{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` for spawned
-reviewer/proof-auditor/referee lifecycle, checkpoint continuation, stale-output
-rejection, retry freshness, and sequential fallback cleanup.
+`{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` before any
+checkpoint continuation, retry, stale-output rejection, or sequential fallback.
 
 The manifest loads `references/publication/peer-review-panel.md` for the machine
 contract and `references/publication/peer-review-panel-playbook.md` for Stage 1-5
-reviewer guidance. Bundle guidance enters as handles only:
-`selected_protocol_bundle_ids` and `protocol_bundle_load_manifest`.
+reviewer guidance. Recovery/proof authorities are conditional. Bundle guidance
+enters as handles only: `selected_protocol_bundle_ids` and
+`protocol_bundle_load_manifest`.
 Reader-visible claims, surfaced evidence, `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`,
 `GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are first-class.
 Read reference files by handle only when targeted evidence is needed; do not
@@ -90,9 +90,9 @@ Stage 1 reads the whole manuscript once and writes
 `${REVIEW_ROOT}/CLAIMS{round_suffix}.json` and
 `${REVIEW_ROOT}/STAGE-reader{round_suffix}.json`. Spawn
 `gpd-review-reader` with selected manuscript path/hash, journal when known,
-round number/suffix, `PUBLICATION_ROOT`, and `REVIEW_ROOT`. The reader must
-preserve exact `manuscript_path`, `manuscript_sha256`, claim ids,
-theorem-like claim kind, theorem assumptions, and theorem parameters.
+round number/suffix, `PUBLICATION_ROOT`, and `REVIEW_ROOT`; preserve exact
+`manuscript_path`, `manuscript_sha256`, claim ids, theorem-like claim kind,
+theorem assumptions, and theorem parameters.
 
 ```bash
 gpd validate review-claim-index ${REVIEW_ROOT}/CLAIMS{round_suffix}.json
@@ -118,8 +118,8 @@ artifact/reproducibility manifests, and proof artifacts when present. It writes
 
 When theorem-bearing claims are present, run `gpd-check-proof` as the auxiliary
 proof critique, writing `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`. The
-manifest-loaded proof-redteam workflow gate, protocol, and schema authorities
-own same-round theorem binding, frontmatter, status handling, and validation.
+conditional proof-redteam workflow gate, protocol, and schema authorities own
+same-round theorem binding, frontmatter, status handling, and validation.
 
 Conditional proof prompt:
 

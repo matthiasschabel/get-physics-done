@@ -8,10 +8,9 @@ Stage 6 reads prior stage artifacts and spot-checks the manuscript. It may write
 only Stage 6-owned adjudication artifacts for this round and must never modify or
 list upstream staged-review artifacts in `gpd_return.files_written`.
 
-The manifest loads the compact panel contract, Stage 6 boundary,
-stage-recovery gate, review-ledger schema, and referee-decision schema. Use those
-authorities for read-only upstream policy, retry classification, same-round proof
-clearance, and final artifact validation.
+The manifest loads the Stage 6 boundary, stage-recovery gate, review-ledger
+schema, and referee-decision schema. The compact panel contract is conditional
+when the upstream stage artifact index needs lookup.
 </stage_boundary>
 
 <final_adjudication>
@@ -25,11 +24,11 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Spawn `gpd-referee` over persisted artifacts only. It must read selected
-manuscript path/hash, `${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, all
+Spawn `gpd-referee` over persisted artifacts only: selected manuscript path/hash,
+`${REVIEW_ROOT}/CLAIMS{round_suffix}.json`, all
 `${REVIEW_ROOT}/STAGE-*{round_suffix}.json`, proof-redteam artifact when active,
-and target-aware `latest_referee_report_md` / `latest_author_response` when this
-is a revision round.
+and target-aware `latest_referee_report_md` / `latest_author_response` for
+revision rounds.
 
 Stage 6 writes:
 
@@ -58,14 +57,14 @@ child_gate:
   failure_route: "stage-recovery-gate -> retry Stage 6-owned artifacts | fail back upstream"
 ```
 
-Return through `peer_review_stage6_referee`. Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree.
+Return through `peer_review_stage6_referee`. Do not trust the referee's success
+text until that typed return, the on-disk files, and the validators all agree.
 </final_adjudication>
 
 <adjudication_rules>
-If any required staged-review artifact is missing, malformed, or uses the wrong
-round suffix, STOP before final recommendation and fail back to the earliest
-failing upstream stage. Do not repair upstream stage artifacts inside final
-adjudication.
+If any required staged-review artifact is missing, malformed, or wrong-round,
+STOP before final recommendation and fail back to the earliest failing upstream
+stage. Do not repair upstream stage artifacts inside final adjudication.
 
 For proof-bearing claims, a missing, malformed, wrong-round, wrong-root, or
 non-passing same-round `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` artifact
@@ -74,11 +73,11 @@ blocks any favorable recommendation. Recommendation floor: `major_revision` or
 evidence but not a substitute for same-round proof-redteam clearance plus strict
 referee-decision validation.
 
-Use `publication-final-adjudication-boundary.md` for upstream read-only input
-policy, strict decision validation, same-round proof-redteam clearance, and fresh
-`gpd_return.files_written` enforcement. Locally keep `manuscript_path` non-empty
-and identical across ledger, decision, and staged-review artifacts for this
-round; set every strict `REFEREE-DECISION{round_suffix}.json` policy field.
+Use `publication-final-adjudication-boundary.md` for upstream read-only policy,
+strict decision validation, same-round proof-redteam clearance, and fresh
+`gpd_return.files_written` enforcement. Keep `manuscript_path` non-empty and
+identical across ledger, decision, and staged-review artifacts for this round;
+set every strict `REFEREE-DECISION{round_suffix}.json` policy field.
 
 Writable scope is limited to Stage 6-owned report `.md`/`.tex`, ledger,
 decision, and optional consistency report. Do not modify

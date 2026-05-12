@@ -62,6 +62,14 @@ _SPAWN_API_NAMES = frozenset(
         "subprocess.run",
     }
 )
+_PROVIDER_OR_NETWORK_IMPORT_ROOTS = frozenset(
+    {"aiohttp", "anthropic", "google", "httpx", "openai", "requests", "socket", "urllib", "websocket"}
+)
+_SHADOW_LIVE_PERSONA_POLICY_PYTHON_PATHS = (
+    REPO_ROOT / "tests" / "helpers" / "phase7_live_like.py",
+    REPO_ROOT / "tests" / "helpers" / "persona_summary.py",
+)
+_SHADOW_LIVE_PERSONA_POLICY_DOC_PATHS = (REPO_ROOT / "docs" / "dev" / "phase7-live-persona-canary.md",)
 
 
 def _workflow_string_values(value: object, *, path: str = "$") -> Iterator[tuple[str, str]]:
@@ -209,6 +217,15 @@ def _import_aliases(tree: ast.AST) -> dict[str, str]:
     return aliases
 
 
+def _imported_module_roots(tree: ast.AST) -> Iterator[str]:
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                yield alias.name.split(".", 1)[0]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            yield node.module.split(".", 1)[0]
+
+
 def _call_name(func: ast.expr, aliases: Mapping[str, str]) -> str | None:
     if isinstance(func, ast.Name):
         return aliases.get(func.id)
@@ -242,6 +259,37 @@ def _provider_command_in_shell_string(command: str) -> str | None:
         if provider_command is not None:
             return provider_command
     return None
+
+
+def test_shadow_live_persona_policy_surfaces_do_not_define_provider_runners() -> None:
+    failures: list[str] = []
+
+    for path in _SHADOW_LIVE_PERSONA_POLICY_PYTHON_PATHS:
+        relative = path.relative_to(REPO_ROOT)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for root in sorted(set(_imported_module_roots(tree)) & _PROVIDER_OR_NETWORK_IMPORT_ROOTS):
+            failures.append(f"{relative}: imports provider/network module {root!r}")
+
+        aliases = _import_aliases(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            call_name = _call_name(node.func, aliases)
+            if call_name in _SPAWN_API_NAMES:
+                failures.append(f"{relative}:{node.lineno}: uses process-spawn API {call_name}")
+
+    for path in _SHADOW_LIVE_PERSONA_POLICY_DOC_PATHS:
+        relative = path.relative_to(REPO_ROOT)
+        for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            provider_command = _provider_command_in_shell_string(line)
+            if provider_command is not None:
+                failures.append(f"{relative}:{line_no}: documents provider launch command {provider_command!r}")
+
+    assert failures == [], (
+        "Phase 6 shadow-live persona policy surfaces must stay manual-only and must not define "
+        "a provider runner, provider SDK/network import, process spawn, or provider command line:\n"
+        + "\n".join(failures)
+    )
 
 
 def _spawn_call_provider_command(call: ast.Call, call_name: str) -> str | None:

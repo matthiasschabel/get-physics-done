@@ -414,6 +414,169 @@ def test_fake_persona_trace_counts_progress_schema_turns_and_event_maps() -> Non
     assert merged.metric_count_maps["event_class_counts"]["phase_scoped"] == 2
 
 
+def test_format_thrash_schema_first_without_progress_is_clunky() -> None:
+    trace = FakePersonaTrace(
+        row_id="SYN_TRACE_FORMAT_THRASH",
+        persona_class="schema_averse_researcher",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="contract_check",
+                action_class="format_contract",
+                schema_surface_class="yaml_return_requested",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="contract_check",
+                action_class="format_contract",
+                schema_surface_class="return_envelope_requested",
+            ),
+        ),
+    )
+
+    score = score_behavior_metrics(
+        SyntheticRow(expected_next_action_class="retry_child_return"),
+        SyntheticOutcome(
+            finding_id="schema_surface_only",
+            result_class="blocked",
+            next_action_class="retry_child_return",
+            evidence_classes=("workflow_stage_manifest",),
+        ),
+        event=trace,
+    )
+
+    _assert_metric_counts(
+        score,
+        {
+            "schema_surface_count": 2,
+            "physics_progress_count": 0,
+            "conversation_turn_count": 2,
+        },
+    )
+    _assert_metric_classes(
+        score,
+        {
+            "first_useful_action_class": "missing",
+            "physics_to_schema_ratio_class": "schema_dominant",
+            "smoothness_class": "clunky",
+        },
+    )
+    assert score.passed is False
+
+
+def test_single_schema_repair_followed_by_useful_action_remains_acceptable() -> None:
+    trace = FakePersonaTrace(
+        row_id="SYN_TRACE_SINGLE_REPAIR",
+        persona_class="executor",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="return_repair",
+                action_class="format_repair",
+                schema_surface_class="return_envelope_repair",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="phase_scoping",
+                action_class="runtime_command",
+                physics_progress_class="phase_scoped",
+            ),
+        ),
+    )
+
+    score = score_behavior_metrics(
+        SyntheticRow(expected_next_action_class="runtime_verify_work"),
+        SyntheticOutcome(
+            finding_id="return_missing",
+            result_class="progress_recorded",
+            failure_classes=("return_missing",),
+            next_action_class="runtime_verify_work",
+            evidence_classes=("workflow_stage_manifest",),
+            commands=(_runtime_command("verify-work", "02"),),
+        ),
+        event=trace,
+    )
+
+    _assert_metric_counts(
+        score,
+        {
+            "schema_repair_loop_count": 1,
+            "schema_surface_count": 1,
+            "physics_progress_count": 1,
+            "conversation_turn_count": 2,
+        },
+    )
+    _assert_metric_classes(
+        score,
+        {
+            "schema_wrestling_class": "minor",
+            "first_useful_action_class": "delayed",
+            "physics_to_schema_ratio_class": "balanced",
+            "smoothness_class": "acceptable",
+        },
+    )
+    assert score.passed is True
+
+
+def test_format_thrash_repeated_questions_use_existing_duplicate_counter() -> None:
+    trace = FakePersonaTrace(
+        row_id="SYN_TRACE_DUPLICATE_QUESTION_FORMAT",
+        persona_class="planner",
+        prompt_variant_class="provider_free_canary",
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="alignment_check",
+                action_class="ask_user",
+                question_bucket_class="ask_user_alignment",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="alignment_check",
+                action_class="ask_user",
+                question_bucket_class="ask_user_alignment",
+            ),
+            FakePersonaTurn(
+                turn_index=2,
+                speaker_class="assistant",
+                intent_class="phase_scoping",
+                action_class="runtime_command",
+                physics_progress_class="phase_scoped",
+            ),
+        ),
+    )
+
+    score = score_behavior_metrics(
+        SyntheticRow(expected_next_action_class="gpd_execute_phase"),
+        SyntheticOutcome(
+            finding_id="duplicate_alignment_question",
+            result_class="progress_recorded",
+            next_action_class="gpd_execute_phase",
+            evidence_classes=("workflow_stage_manifest",),
+        ),
+        event=trace,
+    )
+
+    assert score.metric_count_maps["question_bucket_counts"] == {"ask_user_alignment": 2}
+    _assert_metric_counts(score, {"duplicate_question_bucket_count": 1, "physics_progress_count": 1})
+    _assert_metric_classes(
+        score,
+        {
+            "first_useful_action_class": "delayed",
+            "physics_to_schema_ratio_class": "progress_dominant",
+            "smoothness_class": "clunky",
+        },
+    )
+
+
 def test_fake_persona_trace_question_buckets_remain_class_only() -> None:
     trace = FakePersonaTrace(
         row_id="SYN_TRACE_QUESTION",

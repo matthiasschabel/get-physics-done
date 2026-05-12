@@ -83,6 +83,11 @@ DEFAULT_RAW_VALUE_PATTERNS = MappingProxyType(
         ),
         "parent_traversal": re.compile(r"(?:^|[/\\])\.\.(?:[/\\]|$)"),
         "provider_secret_env_name": _secret_env_name_pattern(),
+        "secret_material": re.compile(
+            r"\b(?:api[_ -]?key|auth[_ -]?token|oauth[_ -]?token|access[_ -]?token|"
+            r"client[_ -]?secret|secret(?:[_ -]?(?:key|token|value|material))?)\b",
+            re.IGNORECASE,
+        ),
         "token_like": re.compile(
             r"(?:\bBearer\s+[A-Za-z0-9._-]{8,}|sk-[A-Za-z0-9]{12,}|"
             r"ghp_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{20,}|"
@@ -102,11 +107,14 @@ DEFAULT_RAW_VALUE_PATTERNS = MappingProxyType(
             r"provider_output\.txt|provider_reply\.txt)\b",
             re.IGNORECASE,
         ),
-        "raw_stream_or_capture": re.compile(r"\b(?:stdout|stderr|argv|env)\b", re.IGNORECASE),
+        "raw_stream_or_capture": re.compile(
+            r"(?<![A-Za-z0-9])(?:stdout|stderr|argv|env)(?![A-Za-z0-9])", re.IGNORECASE
+        ),
         "provider_prompt_or_reply": re.compile(
-            r"\b(?:raw[_ -]?prompt|provider prompt|raw provider reply|provider reply|"
-            r"provider[_-](?:prompt|reply|output)|final answer text|assistant replied|"
-            r"prompt text|prompt:|transcript excerpt)\b",
+            r"\b(?:raw[_ -]?prompt|provider[_ -]?prompt|prompt(?:[_ -]?text)?|prompt:|"
+            r"raw provider reply|provider reply|provider[_-](?:prompt|reply|output)|"
+            r"assistant[_ -]?reply|assistant replied|model[_ -]?reply|"
+            r"final answer text|transcript excerpt)\b",
             re.IGNORECASE,
         ),
     }
@@ -175,6 +183,7 @@ _PHASE7_SAFE_LITERAL_KEYS = _COMMON_SAFE_LITERAL_KEYS | frozenset(
     {
         "content_hydration_before_selection_count",
         "conversation_turn_count",
+        "ci_provider_launch_allowed",
         "invalid_command_suggestion_count",
         "release_publish_provider_launch_allowed",
         "manual_provider_launch_allowed",
@@ -213,6 +222,7 @@ def phase7_live_canary_policy() -> PersonaSummaryPolicy:
             "raw_artifact_retention_class": "operator_local_ignored_tmp",
             "public_artifact_class": "sanitized_class_only_summary",
             "provider_launch_source_class": "manual_operator",
+            "ci_provider_launch_allowed": False,
             "release_publish_provider_launch_allowed": False,
             "nightly_status_class": "deferred",
         },
@@ -473,6 +483,7 @@ _PHASE7_LIVE_CANARY_SUMMARY: dict[str, object] = {
     "raw_artifact_retention_class": "operator_local_ignored_tmp",
     "public_artifact_class": "sanitized_class_only_summary",
     "provider_launch_source_class": "manual_operator",
+    "ci_provider_launch_allowed": False,
     "release_publish_provider_launch_allowed": False,
     "nightly_status_class": "deferred",
     "nightly_allowed_triggers": ["workflow_dispatch", "schedule"],
@@ -489,6 +500,8 @@ _PHASE7_LIVE_CANARY_SUMMARY: dict[str, object] = {
             "runtime_class": "runtime_catalog_member",
             "persona_class": "zero_coder_recovery",
             "workflow_class": "read_only_setup_recovery",
+            "observation_mode_class": "shadow_live_persona",
+            "capture_policy_class": "classes_and_counts_only",
             "launch_policy_class": "manual_opt_in",
             "write_class": "no_write",
             "result_class": "blocked",

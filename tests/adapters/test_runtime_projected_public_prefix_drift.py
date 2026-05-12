@@ -8,6 +8,7 @@ import gpd.adapters.base as base_module
 import gpd.adapters.claude_code as claude_module
 import gpd.adapters.codex as codex_module
 import gpd.adapters.gemini as gemini_module
+import gpd.adapters.opencode as opencode_module
 from gpd.adapters.runtime_catalog import get_runtime_descriptor
 
 
@@ -114,3 +115,28 @@ Do not rewrite gpd:not-a-command or /tmp/gpd:help.
     assert "/gpd:settings" not in projected
     assert "gpd:not-a-command" in projected
     assert "/tmp/gpd:help" in projected
+
+
+def test_opencode_projection_uses_descriptor_public_prefix_for_command_references(monkeypatch) -> None:
+    descriptor = _descriptor_with_public_prefix("opencode", "/public-")
+    monkeypatch.setattr(opencode_module, "get_runtime_descriptor", lambda runtime: descriptor)
+    monkeypatch.setattr(base_module, "get_runtime_descriptor", lambda runtime: descriptor)
+
+    projected = opencode_module.OpenCodeAdapter().project_markdown_surface(
+        """---
+description: Prefix drift probe
+---
+Treat `gpd:` as the canonical command family.
+Use gpd:help and /gpd:settings when discussing runtime commands.
+""",
+        surface_kind="command",
+        path_prefix="",
+        command_name="prefix-drift-probe",
+        bridge_command="python -m gpd",
+    )
+
+    assert "`/public-`" in projected
+    assert "/public-help" in projected
+    assert "/public-settings" in projected
+    assert "gpd-help" not in projected
+    assert "/gpd-settings" not in projected

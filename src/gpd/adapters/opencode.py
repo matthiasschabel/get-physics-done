@@ -45,7 +45,7 @@ from gpd.adapters.install_utils import (
 )
 from gpd.adapters.runtime_catalog import get_manifest_metadata_list_policy_key, get_runtime_descriptor
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
-from gpd.command_labels import validated_public_command_prefix
+from gpd.command_labels import rewrite_runtime_command_surfaces_to_public, validated_public_command_prefix
 from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
@@ -92,8 +92,6 @@ _COLOR_NAME_TO_HEX: dict[str, str] = {
 }
 
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$")
-_GPD_SLASH_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9/_.-])/gpd:(?P<command>[A-Za-z][A-Za-z0-9-]*)\b")
-_GPD_BARE_COMMAND_RE = re.compile(r"(?<![A-Za-z0-9_./$-])gpd:([a-z0-9-]+)\b")
 _OPENCODE_PERMISSION_DECISIONS = frozenset({"allow", "ask", "deny"})
 _OPENCODE_YOLO_PERMISSION = "allow"
 _GPD_OPENCODE_COMMAND_MARKER = "<!-- Managed by Get Physics Done (GPD). -->"
@@ -181,8 +179,7 @@ def convert_claude_to_opencode_frontmatter(content: str, path_prefix: str | None
     converted = convert_tool_references_in_body(converted, _TOOL_REFERENCE_MAP)
     public_prefix = validated_public_command_prefix(get_runtime_descriptor("opencode"))
     converted = converted.replace("`gpd:`", f"`{public_prefix}`")
-    converted = _GPD_SLASH_COMMAND_RE.sub(r"/gpd-\g<command>", converted)
-    converted = _GPD_BARE_COMMAND_RE.sub(r"gpd-\1", converted)
+    converted = rewrite_runtime_command_surfaces_to_public(converted, public_prefix=public_prefix)
 
     preamble, frontmatter, separator, body = split_markdown_frontmatter(converted)
     if not frontmatter:
@@ -965,10 +962,9 @@ class OpenCodeAdapter(RuntimeAdapter):
         return _render_opencode_command_markdown(content, path_prefix=path_prefix, bridge_command=bridge_command)
 
     def translate_shared_command_references(self, content: str) -> str:
-        result = content.replace("/gpd:", self.public_command_surface_prefix)
-        result = result.replace("`gpd:`", f"`{self.public_command_surface_prefix}`")
-        result = _GPD_BARE_COMMAND_RE.sub(r"gpd-\1", result)
-        return result
+        public_prefix = self.public_command_surface_prefix
+        content = content.replace("`gpd:`", f"`{public_prefix}`")
+        return rewrite_runtime_command_surfaces_to_public(content, public_prefix=public_prefix)
 
     def get_commit_attribution(self, *, explicit_config_dir: str | None = None) -> str | None:
         """OpenCode opts out when `disable_ai_attribution` is enabled."""

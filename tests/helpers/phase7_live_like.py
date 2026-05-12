@@ -7,6 +7,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from gpd.adapters import get_adapter
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors, normalize_runtime_name
+from gpd.command_labels import (
+    CANONICAL_COMMAND_PREFIX,
+    CANONICAL_SKILL_PREFIX,
+    parse_command_label,
+    runtime_command_surface_is_path_like_context,
+    runtime_command_surface_pattern,
+    validated_public_command_prefix,
+)
 from tests.helpers.persona_trace import (
     FakePersonaTrace,
     FakePersonaTurn,
@@ -69,11 +79,19 @@ _HARD_ZERO_BEHAVIOR_KEYS = (
     "unexpected_write_count",
     "unsupported_completion_claim_count",
 )
-_HARD_ZERO_PHASE7_KEYS = ("raw_reload_leakage_count", "content_hydration_before_selection_count")
+_HARD_ZERO_PHASE7_KEYS = (
+    "raw_reload_leakage_count",
+    "content_hydration_before_selection_count",
+    "wrong_runtime_prefix_count",
+    "missing_runtime_command_label_count",
+)
 # fmt: off
 _HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles", "p7_erg_reference_handle_first"})
 _SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true')
 _NEGATED_BODY_FIELD_LINE_MARKERS = ("not receive", "does not receive", "do not receive", "not include", "does not include", "do not include", "must not", "never", "absent", "without", "defer", "deferred", "unavailable")
+_RUNTIME_RENDERING_CASES = frozenset({"p7_nextup_wrong_verify_command_correction", "p7_nextup_blocked_closeout_missing_verification", "p7_nextup_blocked_closeout_nonpassing_verification", "p7_nextup_ready_closeout_local_transition", "p7_nextup_public_render_no_raw_reload"})
+_RUNTIME_COMMAND_RENDERING_ACTIONS = ("verify-work", "resume-work", "suggest-next")
+_CANONICAL_RUNTIME_PREFIXES = (CANONICAL_COMMAND_PREFIX, CANONICAL_SKILL_PREFIX)
 # fmt: on
 
 
@@ -109,6 +127,13 @@ class Phase7LiveLikeScore:
     @property
     def passed(self) -> bool:
         return self.behavior_score.passed and not self.hard_budget_failures
+
+
+@dataclass(frozen=True, slots=True)
+class Phase7RuntimeCommandRenderingScore:
+    runtime: str
+    metric_counts: Mapping[str, int]
+    metric_classes: Mapping[str, str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,13 +278,19 @@ def score_phase7_live_like_row(
     trace_override: FakePersonaTrace | None = None,
     behavior_outcome_override: _BehaviorOutcome | None = None,
     source_text_override: str | None = None,
+    runtime_rendering_text_overrides: Mapping[str, str] | None = None,
 ) -> Phase7LiveLikeScore:
     case = _case_for_row(row)
     trace = trace_override or build_phase7_live_like_trace(row)
     behavior_row, outcome = _phase4_inputs(row, case)
     if behavior_outcome_override is not None:
         outcome = behavior_outcome_override
-    counts, classes = _trace_metrics(trace, case, rendered_text=source_text_override)
+    runtime_scores = _runtime_rendering_scores_for_case(
+        row,
+        case,
+        rendered_text_overrides=runtime_rendering_text_overrides,
+    )
+    counts, classes = _trace_metrics(trace, case, rendered_text=source_text_override, runtime_scores=runtime_scores)
     classes.update(_P7_NEXTUP_CLASSES.get(case, {}))
     behavior_score = _score_behavior(
         behavior_row,
@@ -274,6 +305,54 @@ def score_phase7_live_like_row(
 
 def score_phase7_live_like_rows(rows: Sequence[Phase7LiveLikeRow]) -> tuple[Phase7LiveLikeScore, ...]:
     return tuple(score_phase7_live_like_row(row) for row in rows if row.row_tier == "jit_canary")
+
+
+def phase7_runtime_scope(row: Phase7LiveLikeRow) -> tuple[str, ...]:
+    runtimes = _supported_runtime_names() if "all_supported" in row.runtime_scope else row.runtime_scope
+    normalized: list[str] = []
+    for runtime in runtimes:
+        runtime_name = normalize_runtime_name(runtime)
+        if runtime_name is None:
+            raise AssertionError(f"{row.row_id} has unsupported runtime scope {runtime!r}")
+        if runtime_name not in normalized:
+            normalized.append(runtime_name)
+    return tuple(normalized)
+
+
+def score_phase7_runtime_command_rendering(
+    row: Phase7LiveLikeRow,
+    runtime: str,
+    *,
+    rendered_text_override: str | None = None,
+) -> Phase7RuntimeCommandRenderingScore:
+    runtime_name = _normalize_supported_runtime(runtime)
+    rendered_text = rendered_text_override or _render_runtime_command_surface(runtime_name)
+    missing_count = _missing_runtime_command_label_count(rendered_text, runtime_name)
+    wrong_count = _wrong_runtime_prefix_count(rendered_text, runtime_name)
+    counts = {
+        "missing_runtime_command_label_count": missing_count,
+        "wrong_runtime_prefix_count": wrong_count,
+    }
+    classes = {
+        "runtime_command_rendering_class": _runtime_command_rendering_class(missing_count, wrong_count),
+    }
+    return Phase7RuntimeCommandRenderingScore(runtime_name, counts, classes)
+
+
+def score_phase7_runtime_command_renderings(
+    row: Phase7LiveLikeRow,
+    *,
+    rendered_text_overrides: Mapping[str, str] | None = None,
+) -> tuple[Phase7RuntimeCommandRenderingScore, ...]:
+    overrides = rendered_text_overrides or {}
+    return tuple(
+        score_phase7_runtime_command_rendering(
+            row,
+            runtime,
+            rendered_text_override=overrides.get(runtime),
+        )
+        for runtime in phase7_runtime_scope(row)
+    )
 
 
 def _row_from_mapping(row: Mapping[str, object], schema_version: str) -> Phase7LiveLikeRow:
@@ -444,12 +523,15 @@ def _trace_metrics(
     case: str,
     *,
     rendered_text: str | None = None,
+    runtime_scores: Sequence[Phase7RuntimeCommandRenderingScore] = (),
 ) -> tuple[dict[str, int], dict[str, str]]:
     physics = physics_progress_count(trace)
     schema = schema_surface_count(trace)
     shared_artifact_class = artifact_handle_first_class(trace)
     rendered_raw_reload_count = _rendered_raw_reload_leakage_count(rendered_text)
     rendered_body_leakage_count = _rendered_body_field_before_selection_count(rendered_text, case)
+    wrong_runtime_count = sum(score.metric_counts["wrong_runtime_prefix_count"] for score in runtime_scores)
+    missing_runtime_count = sum(score.metric_counts["missing_runtime_command_label_count"] for score in runtime_scores)
     counts = {
         "conversation_turn_count": conversation_turn_count(trace),
         "physics_progress_count": physics,
@@ -457,6 +539,8 @@ def _trace_metrics(
         "raw_reload_leakage_count": raw_reload_leakage_count(trace) + rendered_raw_reload_count,
         "content_hydration_before_selection_count": content_hydration_before_selection_count(trace)
         + rendered_body_leakage_count,
+        "wrong_runtime_prefix_count": wrong_runtime_count,
+        "missing_runtime_command_label_count": missing_runtime_count,
     }
     classes = {
         "artifact_handle_first_class": _phase7_artifact_handle_first_class(shared_artifact_class),
@@ -464,6 +548,7 @@ def _trace_metrics(
         "physics_to_schema_ratio_class": physics_to_schema_ratio_class(trace),
         "rendered_public_raw_reload_class": "raw_reload_leaked" if rendered_raw_reload_count else "no_raw_reload",
         "rendered_public_structural_verify_class": _rendered_structural_verify_class(rendered_text),
+        "runtime_command_rendering_class": _aggregate_runtime_command_rendering_class(runtime_scores),
     }
     if case == "clean_stop" and classes["stop_integrity_class"] == "not_applicable":
         classes["stop_integrity_class"] = "ambiguous_stop"
@@ -538,6 +623,11 @@ def _runtime_route_class(behavior_score: BehaviorScore, phase7_classes: Mapping[
         return "invalid_runtime_route"
     if phase7_classes.get("rendered_public_structural_verify_class") == "structural_verify_phase_leaked":
         return "structural_display_only"
+    if phase7_classes.get("runtime_command_rendering_class") in {
+        "missing_runtime_command_label",
+        "wrong_runtime_prefix",
+    }:
+        return "invalid_runtime_route"
     next_up_class = behavior_score.metric_classes["next_up_specificity_class"]
     if next_up_class in {"runtime_verify_work", "concrete_command", "bounded_resume"}:
         return "active_runtime"
@@ -564,7 +654,12 @@ def _ergonomic_score_class(
     )
     if any(behavior_score.metric_counts[key] > 0 for key in hard_red_behavior_counts):
         return "red"
-    if phase7_counts["raw_reload_leakage_count"] or phase7_counts["content_hydration_before_selection_count"]:
+    if (
+        phase7_counts["raw_reload_leakage_count"]
+        or phase7_counts["content_hydration_before_selection_count"]
+        or phase7_counts["wrong_runtime_prefix_count"]
+        or phase7_counts["missing_runtime_command_label_count"]
+    ):
         return "red"
     if behavior_score.metric_classes["smoothness_class"] in {"regressed", "clunky"}:
         return "red"
@@ -624,6 +719,100 @@ def _rendered_structural_verify_class(rendered_text: str | None) -> str:
     if "gpd verify phase" in lowered or "gpd:verify-phase" in lowered:
         return "structural_verify_phase_leaked"
     return "no_structural_verify_phase"
+
+
+def _runtime_rendering_scores_for_case(
+    row: Phase7LiveLikeRow,
+    case: str,
+    *,
+    rendered_text_overrides: Mapping[str, str] | None = None,
+) -> tuple[Phase7RuntimeCommandRenderingScore, ...]:
+    if case not in _RUNTIME_RENDERING_CASES:
+        return ()
+    return score_phase7_runtime_command_renderings(row, rendered_text_overrides=rendered_text_overrides)
+
+
+def _supported_runtime_names() -> tuple[str, ...]:
+    return tuple(descriptor.runtime_name for descriptor in iter_runtime_descriptors())
+
+
+def _normalize_supported_runtime(runtime: str) -> str:
+    runtime_name = normalize_runtime_name(runtime)
+    if runtime_name not in _supported_runtime_names():
+        raise AssertionError(f"unsupported runtime {runtime!r}")
+    return runtime_name
+
+
+def _render_runtime_command_surface(runtime: str) -> str:
+    adapter = get_adapter(runtime)
+    verify_work = adapter.format_command("verify-work")
+    resume_work = adapter.format_command("resume-work")
+    suggest_next = adapter.format_command("suggest-next")
+    return (
+        "## > Next Up\n\n"
+        f"Primary: `{verify_work} 02`\n\n"
+        "stage_stop:\n"
+        f'  next_runtime_command: "{verify_work} 02"\n'
+        "  also_available:\n"
+        f'    - "{resume_work}"\n'
+        f'    - "{suggest_next}"\n'
+    )
+
+
+def _missing_runtime_command_label_count(rendered_text: str, runtime: str) -> int:
+    adapter = get_adapter(runtime)
+    expected_labels = (
+        f"{adapter.format_command('verify-work')} 02",
+        adapter.format_command("resume-work"),
+        adapter.format_command("suggest-next"),
+    )
+    return sum(label not in rendered_text for label in expected_labels)
+
+
+def _wrong_runtime_prefix_count(rendered_text: str, runtime: str) -> int:
+    active_prefix = validated_public_command_prefix(get_adapter(runtime).runtime_descriptor)
+    wrong_prefixes = _wrong_runtime_prefixes(active_prefix)
+    count = 0
+    for match in runtime_command_surface_pattern().finditer(rendered_text):
+        if runtime_command_surface_is_path_like_context(rendered_text, match):
+            continue
+        label = parse_command_label(match.group(0))
+        if label.slug in _RUNTIME_COMMAND_RENDERING_ACTIONS and label.prefix in wrong_prefixes:
+            count += 1
+    return count
+
+
+def _wrong_runtime_prefixes(active_prefix: str) -> tuple[str, ...]:
+    prefixes: list[str] = []
+    for descriptor in iter_runtime_descriptors():
+        prefix = validated_public_command_prefix(descriptor)
+        if prefix != active_prefix and prefix not in prefixes:
+            prefixes.append(prefix)
+    for prefix in _CANONICAL_RUNTIME_PREFIXES:
+        if prefix != active_prefix and prefix not in prefixes:
+            prefixes.append(prefix)
+    return tuple(prefixes)
+
+
+def _runtime_command_rendering_class(missing_count: int, wrong_count: int) -> str:
+    if wrong_count:
+        return "wrong_runtime_prefix"
+    if missing_count:
+        return "missing_runtime_command_label"
+    return "active_runtime_only"
+
+
+def _aggregate_runtime_command_rendering_class(
+    runtime_scores: Sequence[Phase7RuntimeCommandRenderingScore],
+) -> str:
+    if not runtime_scores:
+        return "not_applicable"
+    classes = {score.metric_classes["runtime_command_rendering_class"] for score in runtime_scores}
+    if "wrong_runtime_prefix" in classes:
+        return "wrong_runtime_prefix"
+    if "missing_runtime_command_label" in classes:
+        return "missing_runtime_command_label"
+    return "active_runtime_only"
 
 
 def _hard_budget_failures(

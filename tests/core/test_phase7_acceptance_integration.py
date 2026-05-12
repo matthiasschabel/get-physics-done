@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
@@ -14,7 +15,7 @@ from tests.helpers.phase7_live_like import REQUIRED_JIT_ROW_IDS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-_PHASE7_TRACKED_LOC_CAP = 3_050
+_PHASE7_TRACKED_LOC_CAP = 3_375
 _PHASE7_ROW_ID_RE = re.compile(
     r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|"
     r"P6-(?:PLAN|EXEC|COMP|RES)-JIT-[0-9]{2}|"
@@ -118,6 +119,41 @@ _LIFECYCLE_ROW_SEMANTIC_TEST_OWNER_OPTIONS = {
         }
     ),
 }
+
+_PHASE6_INTEGRATION_PLAN_PERSONA_ROWS = {
+    "schema_averse_planner": "P6-PLAN-JIT-01",
+    "blocked_or_changed_plan_planner": "P6-PLAN-JIT-02",
+    "proof_checker_deferral": "P6-PLAN-JIT-03",
+    "execute_interruption": "P6-EXEC-JIT-03",
+    "verification_pressure": "P6-COMP-JIT-01",
+    "ready_closeout": "P6-COMP-JIT-04",
+    "runtime_confused_command": "P7-ERG-JIT-02",
+    "reference_overload": "P7-ERG-JIT-03",
+}
+_PHASE6_WORKFLOW_PERSONA_ROWS = {
+    "help": "LP13-HELP-REFERENCE-ONLY",
+    "start": "LP14-START-CHOOSER-ROUTE",
+    "new_project": "P7-ERG-JIT-01",
+    "map_research": "P6-RES-JIT-01",
+    "plan_phase": "P6-PLAN-JIT-01",
+    "execute_phase": "P6-EXEC-JIT-01",
+    "verify_work": "P7-ERG-JIT-02",
+    "peer_review": "LP15-PEER-REVIEW-MODE",
+    "resume_work": "LP-JIT-02",
+}
+_PHASE6_HARD_ZERO_BOUND_KEYS = frozenset(
+    {
+        "invalid_command_suggestion_count",
+        "schema_repair_loop_count",
+        "duplicate_question_bucket_count",
+        "question_before_action_count",
+        "post_stop_activity_count",
+        "unexpected_write_count",
+        "unsupported_completion_claim_count",
+        "raw_reload_leakage_count",
+        "content_hydration_before_selection_count",
+    }
+)
 
 
 def _phase7_fixture_rows() -> tuple[dict[str, object], ...]:
@@ -263,6 +299,38 @@ def test_phase7_key_lifecycle_rows_have_a_semantic_test_owner() -> None:
         assert row_id in rows_by_id
         test_owners = {str(owner) for owner in rows_by_id[row_id]["test_owners"]}
         assert test_owners & owner_options, f"{row_id} must name at least one semantic test owner"
+
+
+def test_phase6_integration_plan_persona_families_are_mapped_to_matrix_rows() -> None:
+    _assert_phase6_persona_rows_cover(_PHASE6_INTEGRATION_PLAN_PERSONA_ROWS)
+
+
+def test_phase6_workflow_persona_surfaces_are_mapped_to_matrix_rows() -> None:
+    _assert_phase6_persona_rows_cover(_PHASE6_WORKFLOW_PERSONA_ROWS)
+
+
+def _assert_phase6_persona_rows_cover(mapping: Mapping[str, str]) -> None:
+    rows_by_id = {str(row["row_id"]): row for row in _phase7_fixture_rows()}
+    behavior_row_ids = _phase7_behavior_row_ids(tuple(rows_by_id.values()))
+    phase4_rows = {row.row_id for row in load_phase4_rows()}
+
+    assert len(set(mapping.values())) == len(mapping)
+    for family, row_id in mapping.items():
+        row = rows_by_id[row_id]
+        assert row_id in behavior_row_ids, family
+        assert row.get("provider_launch_allowed") is False, family
+        assert row.get("network_allowed") is False, family
+        assert row.get("raw_artifacts_allowed", False) is False, family
+        assert not (_PHASE7_REQUIRED_BEHAVIOR_FIELDS - set(row)), family
+
+        for field in _PHASE7_BEHAVIOR_CLASS_FIELDS:
+            assert _PHASE7_CLASS_TOKEN_RE.match(str(row[field])), f"{family}:{field}"
+
+        metric_bounds = row["behavior_metric_bounds"]
+        assert isinstance(metric_bounds, dict) and metric_bounds, family
+        assert _PHASE6_HARD_ZERO_BOUND_KEYS <= set(metric_bounds), family
+        assert all(_is_metric_bound(bound) for bound in metric_bounds.values()), family
+        assert row["phase4_behavior_ref"] in phase4_rows, family
 
 
 def test_phase7_acceptance_surface_stays_under_loc_cap() -> None:

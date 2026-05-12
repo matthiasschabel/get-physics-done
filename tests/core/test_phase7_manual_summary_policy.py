@@ -43,6 +43,7 @@ def test_phase7_manual_live_canary_runbook_documents_the_policy_shape() -> None:
     for required_fragment in (
         "Manual live is opt-in",
         "Raw artifacts stay ignored/operator-local",
+        "Phase 6 shadow-live rows",
         "sanitized class-only summary",
         "Release and publish jobs must not launch provider CLIs",
         "Nightly is deferred",
@@ -68,6 +69,7 @@ def test_phase7_manual_public_summary_shape_is_class_only_and_opt_in() -> None:
         "env",
         "auth_path",
         "account_id",
+        "provider_prompt",
         "provider_reply",
         "provider_output",
         "transcript_path",
@@ -101,8 +103,15 @@ def test_phase7_manual_public_summary_rejects_raw_public_keys(raw_key: str) -> N
     [
         "Prompt text: run the whole phase and tell me the answer",
         "raw prompt: run the whole phase and tell me the answer",
+        "provider_prompt: run this exact input",
         "raw provider reply: the derivation is complete",
+        "assistant_reply",
+        "model_reply",
         "provider_reply:accepted",
+        "provider_stdout",
+        "provider_stderr",
+        "provider_argv",
+        "provider_env",
         "stdout",
         "stderr",
         "argv",
@@ -118,6 +127,9 @@ def test_phase7_manual_public_summary_rejects_raw_public_keys(raw_key: str) -> N
         "researcher@example.com",
         "0123456789abcdef0123456789abcdef01234567",
         "OPENAI_API_KEY",
+        "api_key",
+        "client_secret",
+        "secret",
         "Bearer sk-test-secret",
         "ghp_0123456789abcdef0123456789abcdef",
         "a" * 48,
@@ -228,6 +240,7 @@ def test_phase7_manual_public_summary_rejects_failing_redaction_scan() -> None:
     ("field_name", "field_value"),
     [
         ("release_publish_provider_launch_allowed", True),
+        ("ci_provider_launch_allowed", True),
         ("nightly_status_class", "enabled"),
         ("nightly_allowed_triggers", ["pull_request"]),
         ("public_artifact_class", "raw_transcript"),
@@ -265,6 +278,18 @@ def test_phase7_manual_public_summary_rejects_provider_command_lines(command_lin
 
 def test_phase7_raw_live_artifacts_remain_operator_local_under_ignored_tmp() -> None:
     gitignore_lines = {line.strip() for line in _read(GITIGNORE_PATH).splitlines()}
+    runbook = _read(RUNBOOK_PATH)
 
     assert "tmp/" in gitignore_lines
     assert VALID_PUBLIC_SUMMARY["raw_artifact_retention_class"] == "operator_local_ignored_tmp"
+    assert "repo-local `tmp/`" in runbook
+    assert "inside ignored" in runbook
+    assert "`tmp/` paths" in runbook
+
+
+def test_phase7_manual_summary_fixture_marks_shadow_live_observations_class_only() -> None:
+    row = _first_row(VALID_PUBLIC_SUMMARY)
+
+    assert row["observation_mode_class"] == "shadow_live_persona"
+    assert row["capture_policy_class"] == "classes_and_counts_only"
+    assert VALID_PUBLIC_SUMMARY["ci_provider_launch_allowed"] is False

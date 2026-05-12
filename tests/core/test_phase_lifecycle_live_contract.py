@@ -12,6 +12,7 @@ from gpd.adapters import get_adapter
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.cli import app
 from gpd.core.commands import cmd_apply_return_updates
+from gpd.core.phase_lifecycle import phase_lifecycle_decision
 from gpd.core.state import default_state_dict, generate_state_markdown
 from gpd.core.suggest import suggest_next
 from tests.runtime_install_helpers import seed_complete_runtime_install
@@ -153,6 +154,19 @@ def _assert_closeout_surfaces_unchanged(snapshot: dict[Path, str | None]) -> Non
     for path, before in snapshot.items():
         after = path.read_text(encoding="utf-8") if path.exists() else None
         assert after == before
+
+
+def _invoke_apply_return(tmp_path: Path, report: str):
+    return RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "apply-return-updates",
+            report,
+        ],
+    )
 
 
 def test_apply_return_updates_completes_last_plan_from_ready_to_execute_state(tmp_path: Path) -> None:
@@ -357,6 +371,67 @@ def test_apply_return_updates_rejects_multiple_gpd_returns_without_mutating_stat
     assert state_path.read_text(encoding="utf-8") == before_state
 
 
+def test_malformed_child_return_retry_then_stop_chain_preserves_state_bytes(tmp_path: Path) -> None:
+    phase_dir = _write_phase_project(tmp_path, status="Ready to execute")
+    state_path = tmp_path / "GPD" / "state.json"
+    state_md_path = tmp_path / "GPD" / "STATE.md"
+    initial_state = state_path.read_bytes()
+    initial_state_md = state_md_path.read_bytes()
+    initial_surfaces = _snapshot_closeout_surfaces(tmp_path)
+
+    retry_report = phase_dir / "FIRST-BAD-RETURN.md"
+    retry_report.write_text("# Child Report\n\nFinished the work but omitted the return block.\n", encoding="utf-8")
+
+    retry_result = _invoke_apply_return(tmp_path, "GPD/phases/02-analysis/FIRST-BAD-RETURN.md")
+
+    assert retry_result.exit_code == 1
+    retry_payload = json.loads(retry_result.output)
+    assert retry_payload["passed"] is False
+    assert retry_payload["mutated"] is False
+    assert retry_payload["primary_failure_class"] == "return_missing"
+    assert retry_payload["failure_classes"] == ["return_missing"]
+    assert retry_payload["failures"][0]["repairable"] is True
+    assert state_path.read_bytes() == initial_state
+    assert state_md_path.read_bytes() == initial_state_md
+    _assert_closeout_surfaces_unchanged(initial_surfaces)
+
+    stop_report = phase_dir / "SECOND-BAD-RETURN.md"
+    stop_report.write_text(
+        "# Ambiguous Child Report\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: completed\n"
+        "  files_written: [GPD/phases/02-analysis/02-02-SUMMARY.md]\n"
+        "  issues: []\n"
+        "  next_actions: [gpd:verify-work 02]\n"
+        "```\n\n"
+        "```yaml\n"
+        "gpd_return:\n"
+        "  status: blocked\n"
+        "  files_written: []\n"
+        "  issues: [ambiguous duplicate return]\n"
+        "  next_actions: [gpd:resume-work]\n"
+        "```\n",
+        encoding="utf-8",
+    )
+
+    stop_result = _invoke_apply_return(tmp_path, "GPD/phases/02-analysis/SECOND-BAD-RETURN.md")
+
+    assert stop_result.exit_code == 1
+    stop_payload = json.loads(stop_result.output)
+    assert stop_payload["passed"] is False
+    assert stop_payload["mutated"] is False
+    assert stop_payload["primary_failure_class"] == "return_malformed_blocking"
+    assert stop_payload["failure_classes"] == ["return_malformed_blocking"]
+    assert stop_payload["failures"][0]["code"] == "ambiguous_multiple_returns"
+    assert stop_payload["failures"][0]["repairable"] is False
+    assert stop_payload["applied_state_operations"] == []
+    assert state_path.read_bytes() == initial_state
+    assert state_md_path.read_bytes() == initial_state_md
+    assert not (tmp_path / "GPD" / "phase-checkpoints").exists()
+    _assert_closeout_surfaces_unchanged(initial_surfaces)
+
+
 def test_apply_return_updates_rejects_intermediate_plan_direct_phase_completion_without_mutation(
     tmp_path: Path,
 ) -> None:
@@ -483,11 +558,60 @@ def test_record_verification_maps_non_passing_report_to_blocked_and_keeps_state_
     assert state["position"]["status"] != "Verified"
     assert "**Status:** Blocked" in markdown
 
+    decision = phase_lifecycle_decision(tmp_path, "02")
+    assert decision.state_status == "Blocked"
+    assert decision.decision == "needs_verification"
+    assert decision.closeout_ready is False
+    assert decision.primary_action == "verify-work"
+    assert decision.primary_owner == "runtime"
+    assert decision.primary_command == "gpd:verify-work 02"
+    assert decision.next_up["primary_command"]["action"] == "verify-work"
+    assert decision.next_up["primary_command"]["owner"] == "runtime"
+    assert decision.next_up["stage_stop_next_runtime_command"] == "gpd:verify-work 02"
+    assert decision.closeout_readiness.closeout_command is None
+
     validation = RUNNER.invoke(app, ["--raw", "--cwd", str(tmp_path), "state", "validate"])
     assert validation.exit_code == 0, validation.output
     validation_payload = json.loads(validation.output)
     assert validation_payload["valid"] is True
     assert validation_payload["integrity_status"] == "healthy"
+
+
+@pytest.mark.parametrize("initial_status", ["Ready to execute", "Planning", "Complete"])
+def test_record_verification_invalid_status_transition_preserves_state_bytes(
+    tmp_path: Path,
+    initial_status: str,
+) -> None:
+    phase_dir = _write_phase_project(tmp_path, status=initial_status)
+    verification_report = phase_dir / "02-VERIFICATION.md"
+    _write_passed_verification(verification_report)
+    state_path = tmp_path / "GPD" / "state.json"
+    state_md_path = tmp_path / "GPD" / "STATE.md"
+    before_state = state_path.read_bytes()
+    before_state_md = state_md_path.read_bytes()
+    before_report = verification_report.read_bytes()
+
+    result = RUNNER.invoke(
+        app,
+        [
+            "--raw",
+            "--cwd",
+            str(tmp_path),
+            "state",
+            "record-verification",
+            "--phase",
+            "02",
+        ],
+    )
+
+    assert result.exit_code == 1
+    payload = json.loads(result.output)
+    assert payload["recorded"] is False
+    assert payload["previous_status"] == initial_status
+    assert "state_record_verification requires Status" in payload["error"]
+    assert state_path.read_bytes() == before_state
+    assert state_md_path.read_bytes() == before_state_md
+    assert verification_report.read_bytes() == before_report
 
 
 @pytest.mark.parametrize("initial_status", ["verifying", "Phase complete \u2014 ready for verification"])
@@ -628,6 +752,7 @@ def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tm
     assert record_payload["recorded"] is True
     assert record_payload["status"] == "Verified"
 
+    before_readiness = _snapshot_closeout_surfaces(tmp_path)
     readiness_result = RUNNER.invoke(
         app,
         [
@@ -651,6 +776,17 @@ def test_full_lifecycle_chain_checks_closeout_readiness_before_phase_complete(tm
     assert readiness_payload["closeout_command"] == "gpd phase complete 02"
     state = json.loads((tmp_path / "GPD" / "state.json").read_text(encoding="utf-8"))
     assert state["position"]["status"] == "Verified"
+    _assert_closeout_surfaces_unchanged(before_readiness)
+
+    decision = phase_lifecycle_decision(tmp_path, "02")
+    assert decision.decision == "ready_for_closeout"
+    assert decision.closeout_ready is True
+    assert decision.primary_action == "phase-complete"
+    assert decision.primary_owner == "local_transition"
+    assert decision.primary_command == "gpd phase complete 02"
+    assert decision.next_up["primary_command"]["owner"] == "local_transition"
+    assert decision.next_up["after_this_completes"]["owner"] == "runtime"
+    assert decision.next_up["after_this_completes"]["command"] == "gpd:suggest-next"
 
     complete_result = RUNNER.invoke(
         app,

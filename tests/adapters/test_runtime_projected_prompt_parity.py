@@ -115,7 +115,7 @@ VERIFY_WORK_FORBIDDEN_SOURCE_COMMAND_PREFIXES = (
     "/gpd-verify-work",
     "gpd-verify-work",
 )
-PUBLIC_NEXT_UP_PROJECTION_RUNTIMES = ("claude-code", "gemini", "codex")
+PUBLIC_NEXT_UP_PROJECTION_RUNTIMES = RUNTIMES
 PUBLIC_NEXT_UP_FORBIDDEN_PROJECTION_FRAGMENTS = (
     "gpd --raw init",
     "--raw init",
@@ -500,6 +500,23 @@ def _extract_stage_stop_snippet(text: str) -> str:
             break
         collected.append(line)
     return "\n".join(collected)
+
+
+def _expected_runtime_command_label(runtime: str, command_name: str, suffix: str = "") -> str:
+    label = get_adapter(runtime).format_command(command_name)
+    public_prefix = get_runtime_descriptor(runtime).public_command_surface_prefix
+
+    assert label.startswith(public_prefix)
+    return f"{label}{suffix}"
+
+
+def _wrong_runtime_command_labels(runtime: str, command_name: str) -> tuple[str, ...]:
+    active_label = _expected_runtime_command_label(runtime, command_name)
+    return tuple(
+        label
+        for other_runtime in RUNTIMES
+        if (label := get_adapter(other_runtime).format_command(command_name)) != active_label
+    )
 
 
 def _standalone_install_dir_include_lines(text: str) -> tuple[str, ...]:
@@ -970,22 +987,18 @@ def test_runtime_projected_public_next_up_and_stage_stop_rewrite_canonical_runti
     projected = _project_fixture_command(source, runtime, target_dir)
     next_up = _extract_next_up_snippet(projected)
     stage_stop = _extract_stage_stop_snippet(projected)
-    expected_verify_work = get_adapter(runtime).format_command("verify-work")
-    expected_resume_work = get_adapter(runtime).format_command("resume-work")
-    expected_suggest_next = get_adapter(runtime).format_command("suggest-next")
+    projected_public_surface = next_up + "\n" + stage_stop
+    expected_verify_work = _expected_runtime_command_label(runtime, "verify-work", " 02")
+    expected_resume_work = _expected_runtime_command_label(runtime, "resume-work")
+    expected_suggest_next = _expected_runtime_command_label(runtime, "suggest-next")
 
-    assert f"Primary: `{expected_verify_work} 02`" in next_up
-    assert f'next_runtime_command: "{expected_verify_work} 02"' in stage_stop
-    assert f'"{expected_resume_work}"' in stage_stop
-    assert f'"{expected_suggest_next}"' in stage_stop
-    if runtime == "codex":
-        assert "$gpd-verify-work 02" in next_up
-        assert "$gpd-verify-work 02" in stage_stop
-        assert "/gpd:verify-work" not in next_up + stage_stop
-    else:
-        assert "/gpd:verify-work 02" in next_up
-        assert "/gpd:verify-work 02" in stage_stop
-        assert "$gpd-verify-work" not in next_up + stage_stop
+    assert expected_verify_work in next_up
+    assert expected_verify_work in stage_stop
+    assert expected_resume_work in stage_stop
+    assert expected_suggest_next in stage_stop
+    for command_name in ("verify-work", "resume-work", "suggest-next"):
+        for forbidden_label in _wrong_runtime_command_labels(runtime, command_name):
+            assert forbidden_label not in projected_public_surface
     assert "`gpd:verify-work 02`" not in next_up
     assert '"gpd:verify-work 02"' not in stage_stop
     for snippet in (next_up, stage_stop):

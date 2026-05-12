@@ -8,6 +8,8 @@ import re
 from dataclasses import fields
 from pathlib import Path
 
+from gpd.adapters import get_adapter
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core.context import init_literature_review
 from gpd.core.staged_init_assembly import (
     StagedInitAssemblyContext,
@@ -387,6 +389,8 @@ def test_p7_nextup_rows_score_live_like_classes_without_transcripts() -> None:
 
     assert all(score.passed for score in scores.values())
     assert all(score.hard_budget_failures == () for score in scores.values())
+    assert all(score.phase7_metric_counts["wrong_runtime_prefix_count"] == 0 for score in scores.values())
+    assert all(score.phase7_metric_counts["missing_runtime_command_label_count"] == 0 for score in scores.values())
 
     for row_id in ("P7-NEXTUP-JIT-01", "P7-NEXTUP-JIT-02", "P7-NEXTUP-JIT-03", "P7-NEXTUP-JIT-05"):
         score = scores[row_id]
@@ -395,6 +399,7 @@ def test_p7_nextup_rows_score_live_like_classes_without_transcripts() -> None:
         assert score.phase7_metric_classes["stage_stop_runtime_class"] == "runtime"
         assert score.phase7_metric_classes["rendered_public_raw_reload_class"] == "no_raw_reload"
         assert score.phase7_metric_classes["rendered_public_structural_verify_class"] == "no_structural_verify_phase"
+        assert score.phase7_metric_classes["runtime_command_rendering_class"] == "active_runtime_only"
 
     ready = scores["P7-NEXTUP-JIT-04"]
     assert ready.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
@@ -459,6 +464,52 @@ def test_p7_public_render_row_rejects_raw_reload_source_text() -> None:
     assert score.behavior_score.metric_counts["raw_reload_leakage_count"] == 2
     assert score.phase7_metric_counts["raw_reload_leakage_count"] == 2
     assert "raw_reload_leakage_count" in score.hard_budget_failures
+
+
+def test_p7_runtime_command_rendering_accepts_active_runtime_labels_for_distinct_slash_runtime() -> None:
+    row = _row_by_id("P7-NEXTUP-JIT-05")
+    runtime_scores = phase7_live_like.score_phase7_runtime_command_renderings(row)
+    runtimes = {score.runtime for score in runtime_scores}
+
+    assert runtimes == set(phase7_live_like.phase7_runtime_scope(row))
+    assert _unique_slash_public_prefix_runtime_names() <= runtimes
+    for score in runtime_scores:
+        assert score.metric_counts["wrong_runtime_prefix_count"] == 0, score.runtime
+        assert score.metric_counts["missing_runtime_command_label_count"] == 0, score.runtime
+        assert score.metric_classes["runtime_command_rendering_class"] == "active_runtime_only", score.runtime
+
+    wrapped = score_phase7_live_like_row(row)
+    assert wrapped.passed
+    assert wrapped.phase7_metric_counts["wrong_runtime_prefix_count"] == 0
+    assert wrapped.phase7_metric_counts["missing_runtime_command_label_count"] == 0
+    assert wrapped.phase7_metric_classes["runtime_command_rendering_class"] == "active_runtime_only"
+
+
+def test_p7_runtime_command_rendering_rejects_wrong_runtime_labels_for_distinct_slash_runtime() -> None:
+    row = _row_by_id("P7-NEXTUP-JIT-05")
+    runtimes = phase7_live_like.phase7_runtime_scope(row)
+
+    assert _unique_slash_public_prefix_runtime_names() <= set(runtimes)
+    for runtime in runtimes:
+        rendered_text = _runtime_surface_with_wrong_label(runtime, runtimes)
+        rendering = phase7_live_like.score_phase7_runtime_command_rendering(
+            row,
+            runtime,
+            rendered_text_override=rendered_text,
+        )
+        wrapped = score_phase7_live_like_row(
+            row,
+            runtime_rendering_text_overrides={runtime: rendered_text},
+        )
+
+        assert rendering.metric_counts["missing_runtime_command_label_count"] == 0, runtime
+        assert rendering.metric_counts["wrong_runtime_prefix_count"] > 0, runtime
+        assert rendering.metric_classes["runtime_command_rendering_class"] == "wrong_runtime_prefix", runtime
+        assert not wrapped.passed, runtime
+        assert wrapped.phase7_metric_counts["wrong_runtime_prefix_count"] > 0, runtime
+        assert wrapped.phase7_metric_classes["runtime_command_rendering_class"] == "wrong_runtime_prefix", runtime
+        assert wrapped.phase7_metric_classes["runtime_route_class"] == "invalid_runtime_route", runtime
+        assert "wrong_runtime_prefix_count" in wrapped.hard_budget_failures, runtime
 
 
 def test_p7_ergonomic_rows_score_quick_useful_work() -> None:
@@ -632,6 +683,40 @@ def _row_by_id(row_id: str) -> Phase7LiveLikeRow:
 def _raw_row_by_id(row_id: str) -> dict[str, object]:
     payload = json.loads(PHASE7_LIVE_PERSONA_MATRIX_PATH.read_text(encoding="utf-8"))
     return next(row for row in payload["rows"] if row["row_id"] == row_id)
+
+
+def _runtime_surface_with_wrong_label(runtime: str, runtimes: tuple[str, ...]) -> str:
+    active_adapter = get_adapter(runtime)
+    wrong_adapter = next(
+        get_adapter(candidate)
+        for candidate in runtimes
+        if get_adapter(candidate).public_command_surface_prefix != active_adapter.public_command_surface_prefix
+    )
+    verify_work = active_adapter.format_command("verify-work")
+    resume_work = active_adapter.format_command("resume-work")
+    suggest_next = active_adapter.format_command("suggest-next")
+    wrong_verify_work = wrong_adapter.format_command("verify-work")
+    return (
+        "## > Next Up\n\n"
+        f"Primary: `{verify_work} 02`\n"
+        f"Secondary: `{wrong_verify_work} 02`\n\n"
+        "stage_stop:\n"
+        f'  next_runtime_command: "{verify_work} 02"\n'
+        "  also_available:\n"
+        f'    - "{resume_work}"\n'
+        f'    - "{suggest_next}"\n'
+    )
+
+
+def _unique_slash_public_prefix_runtime_names() -> set[str]:
+    descriptors = tuple(iter_runtime_descriptors())
+    prefixes = [descriptor.public_command_surface_prefix for descriptor in descriptors]
+    return {
+        descriptor.runtime_name
+        for descriptor in descriptors
+        if descriptor.public_command_surface_prefix.startswith("/")
+        and prefixes.count(descriptor.public_command_surface_prefix) == 1
+    }
 
 
 def _assert_fixture_values_are_provider_free(row: dict[str, object]) -> None:

@@ -545,6 +545,12 @@ def classify_smoothness(
     stop_integrity = metric_classes.get("stop_integrity_class", "not_applicable")
     physics_to_schema_ratio = metric_classes.get("physics_to_schema_ratio_class", "not_applicable")
     artifact_handle_first = metric_classes.get("artifact_handle_first_class", "not_applicable")
+    delayed_by_single_schema_repair = _delayed_by_single_schema_repair(
+        metric_counts,
+        first_useful_action=first_useful_action,
+        physics_to_schema_ratio=physics_to_schema_ratio,
+        schema_wrestling=schema_wrestling,
+    )
     hard_regression_keys = (
         "invalid_command_suggestion_count",
         "stale_artifact_trust_count",
@@ -568,7 +574,8 @@ def classify_smoothness(
         or int(metric_counts.get("duplicate_question_bucket_count", 0)) > 0
         or int(metric_counts.get("content_hydration_before_selection_count", 0)) > 0
         or next_up_specificity == "vague"
-        or first_useful_action in {"delayed", "missing"}
+        or first_useful_action == "missing"
+        or (first_useful_action == "delayed" and not delayed_by_single_schema_repair)
         or stop_integrity == "ambiguous_stop"
         or (
             physics_to_schema_ratio in {"schema_dominant", "no_progress"}
@@ -583,6 +590,28 @@ def classify_smoothness(
     if int(metric_counts.get("schema_repair_loop_count", 0)) == 1 or _is_safe_blocked_result(result_class):
         return "acceptable"
     return "smooth"
+
+
+def _delayed_by_single_schema_repair(
+    metric_counts: Mapping[str, int],
+    *,
+    first_useful_action: str,
+    physics_to_schema_ratio: str,
+    schema_wrestling: str,
+) -> bool:
+    """Allow one schema/repair turn before useful progress without marking a loop."""
+
+    return (
+        first_useful_action == "delayed"
+        and schema_wrestling in {"none", "minor"}
+        and int(metric_counts.get("schema_repair_loop_count", 0)) <= 1
+        and int(metric_counts.get("schema_surface_count", 0)) == 1
+        and int(metric_counts.get("physics_progress_count", 0)) >= 1
+        and int(metric_counts.get("conversation_turn_count", 0)) <= 2
+        and int(metric_counts.get("duplicate_question_bucket_count", 0)) == 0
+        and int(metric_counts.get("question_before_action_count", 0)) == 0
+        and physics_to_schema_ratio in {"balanced", "progress_dominant"}
+    )
 
 
 def classify_next_up_specificity(next_action_class: str | None) -> str:

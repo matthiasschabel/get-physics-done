@@ -25,6 +25,18 @@ shared afterward.
   optionally `schedule` only, protected credentials, strict budgets, and
   sanitized summary artifacts only.
 
+## Phase 6 Shadow-Live Scope
+
+Phase 6 shadow-live rows reuse this manual policy. They may observe a manually
+approved provider run, but repo code stays provider-free: no pull request, push,
+release, publish, or test job launches a provider CLI, and this runbook does
+not define a live provider runner.
+
+Public review material is collapsed to class tokens and counts before it leaves
+the operator machine. Raw prompts, provider replies, stdout/stderr, argv/env,
+secrets, command lines, provider account data, and absolute or local paths stay
+only inside the ignored repo-local `tmp/` root.
+
 ## Manual Sequence
 
 1. Choose the minimal 10-12 row persona matrix. Run read-only tri-runtime rows
@@ -51,15 +63,17 @@ fields:
 - `raw_artifact_retention_class`: `operator_local_ignored_tmp`
 - `public_artifact_class`: `sanitized_class_only_summary`
 - `provider_launch_source_class`: `manual_operator`
+- `ci_provider_launch_allowed`: `false`
 - `release_publish_provider_launch_allowed`: `false`
 - `nightly_status_class`: `deferred`
 - `nightly_allowed_triggers`: `workflow_dispatch`, `schedule`
 
 Rows may include `row_id`, runtime/persona/workflow classes, write/result/next
-step classes, redaction status class, finding classes, and event class counts.
-Do not include prompt text, final answer text, stdout/stderr, transcripts,
-argv/env values, auth paths, account data, absolute paths, hashes, or provider
-session identifiers.
+step classes, shadow-live observation classes, capture-policy classes,
+redaction status class, finding classes, and event class counts. Do not include
+prompt text, final answer text, provider prompt/reply text, stdout/stderr,
+transcripts, argv/env values, secrets, auth paths, account data, absolute
+paths, hashes, or provider session identifiers.
 
 Policy tests validate this shape through `tests.helpers.persona_summary`, which
 also shares the class-only negative cases with the Phase 4 live-smoke summary

@@ -90,8 +90,15 @@ def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix
     "raw_value",
     [
         "raw prompt: run this exact provider input",
+        "provider_prompt: launch with this exact input",
         "raw provider reply: the derivation is complete",
+        "assistant_reply",
+        "model-reply",
         "provider_output: final answer text",
+        "provider_stdout",
+        "provider_stderr",
+        "provider_argv",
+        "provider_env",
         "transcript excerpt from provider",
         "stdout",
         "stderr",
@@ -105,6 +112,9 @@ def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix
         "researcher@example.com",
         "0123456789abcdef0123456789abcdef01234567",
         "OPENAI_API_KEY",
+        "api_key",
+        "client_secret",
+        "secret",
         "Bearer sk-testsecret1234567890",
         "github_pat_0123456789abcdef0123456789abcdef",
         "a" * 48,
@@ -220,6 +230,7 @@ def test_persona_summary_policy_rejects_failing_redaction_scan() -> None:
         ("schema_version", "phase7.live-persona-canary-summary.v0"),
         ("execution_mode_class", "automatic"),
         ("trigger_class", "pull_request"),
+        ("ci_provider_launch_allowed", True),
         ("release_publish_provider_launch_allowed", True),
         ("nightly_allowed_triggers", ["pull_request"]),
     ],
@@ -261,6 +272,24 @@ def test_make_summary_helpers_return_independent_copies() -> None:
     _first_row(first)["result_class"] = "changed"
 
     assert _first_row(second)["result_class"] == "blocked"
+
+
+def test_phase7_summary_policy_accepts_shadow_live_class_count_observation_fields() -> None:
+    summary = make_phase7_live_canary_summary()
+    row = _first_row(summary)
+    row.update(
+        {
+            "shadow_live_mode_class": "manual_observation_only",
+            "artifact_policy_class": "operator_ignored_tmp",
+            "summary_policy_class": "classes_and_counts_only",
+            "shadow_live_event_counts": {"manual_row_observed": 1, "redaction_pass": 1},
+        }
+    )
+
+    result = validate_persona_summary(summary, phase7_live_canary_policy())
+
+    assert result.valid is True
+    assert result.findings == ()
 
 
 def test_phase7_summary_policy_accepts_ergonomic_class_counts() -> None:

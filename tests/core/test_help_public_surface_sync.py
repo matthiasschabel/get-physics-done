@@ -218,3 +218,23 @@ def test_help_surface_marker_script_is_idempotent() -> None:
     assert check_help_surface_text(workflow_help) == ()
     assert check_help_surface_text(detail_reference, path=_help_detail_reference_path()) == ()
     assert replace_help_surface_text(workflow_help) == workflow_help
+
+
+def test_help_detail_reference_inventory_detects_missing_and_duplicate_marker() -> None:
+    detail_reference = _read_help_detail_reference()
+    start_marker, end_marker = help_surface_markers("detailed-command-reference")
+    start = detail_reference.index(start_marker)
+    end = detail_reference.index(end_marker, start) + len(end_marker)
+    detail_region = detail_reference[start:end]
+    missing_reference = detail_reference[:start] + detail_reference[end:]
+    detail_path = _help_detail_reference_path()
+
+    missing = check_help_surface_text(missing_reference, path=detail_path)
+    assert len(missing) == 1
+    assert "help surface marker inventory mismatch" in missing[0].diff
+    assert "missing 1 expected marker(s) for 'detailed-command-reference'" in missing[0].diff
+
+    duplicate = check_help_surface_text(detail_reference + "\n" + detail_region, path=detail_path)
+    assert len(duplicate) == 1
+    assert "found 2 marker(s) for 'detailed-command-reference', expected 1" in duplicate[0].diff
+    assert "duplicate marker for 'detailed-command-reference' is not allowed" in duplicate[0].diff

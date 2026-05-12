@@ -20,6 +20,7 @@ from gpd.core.help_renderer import (
 from scripts.generated_region_support import (
     GeneratedRegionDiff,
     GeneratedRegionSpec,
+    check_region_inventory,
     marker_pair,
     render_region,
     replace_regions,
@@ -89,13 +90,17 @@ def _renderers_for_path(path: Path | None) -> dict[str, Callable[[], str]]:
     return _ROOT_HELP_BLOCK_RENDERERS
 
 
-def _replace_help_surface_regions_in_text(text: str, *, path: Path | None = None) -> tuple[str, tuple[str, ...]]:
-    block_renderers = _renderers_for_path(path)
-    region_spec = GeneratedRegionSpec(
+def _region_spec_for_renderers(block_renderers: dict[str, Callable[[], str]]) -> GeneratedRegionSpec:
+    return GeneratedRegionSpec(
         marker_prefix=MARKER_PREFIX,
         known_block_ids=lambda: tuple(block_renderers),
         block_label="help surface block",
     )
+
+
+def _replace_help_surface_regions_in_text(text: str, *, path: Path | None = None) -> tuple[str, tuple[str, ...]]:
+    block_renderers = _renderers_for_path(path)
+    region_spec = _region_spec_for_renderers(block_renderers)
     return replace_regions(
         text,
         spec=region_spec,
@@ -112,20 +117,15 @@ def replace_help_surface_text(text: str) -> str:
 def check_help_surface_text(text: str, *, path: Path | None = None) -> tuple[HelpSurfaceDiff, ...]:
     updated, block_ids = _replace_help_surface_regions_in_text(text, path=path)
     block_renderers = _renderers_for_path(path)
-    missing_blocks = tuple(block_id for block_id in block_renderers if block_id not in block_ids)
-    if missing_blocks:
-        label = path.as_posix() if path is not None else "<text>"
-        return (
-            HelpSurfaceDiff(
-                path=path,
-                block_id=", ".join(missing_blocks),
-                diff=(
-                    f"{label}: missing expected help surface marker(s): "
-                    + ", ".join(repr(block_id) for block_id in missing_blocks)
-                    + "\n"
-                ),
-            ),
-        )
+    inventory_diffs = check_region_inventory(
+        block_ids,
+        spec=_region_spec_for_renderers(block_renderers),
+        required_blocks=tuple(block_renderers),
+        path=path,
+        label="help surface marker inventory",
+    )
+    if inventory_diffs:
+        return inventory_diffs
     if updated == text:
         return ()
     return (

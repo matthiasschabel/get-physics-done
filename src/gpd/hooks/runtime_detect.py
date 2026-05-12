@@ -29,9 +29,9 @@ from gpd.adapters.runtime_catalog import (
 )
 from gpd.core.constants import ENV_DATA_DIR, ENV_GPD_ACTIVE_RUNTIME, HOME_DATA_DIR_NAME, TODOS_DIR_NAME
 from gpd.hooks.install_metadata import (
+    InstallTargetAssessment,
     assess_install_target,
-    install_scope_from_manifest,
-    load_install_manifest_runtime_status,
+    load_install_manifest_snapshot,
 )
 
 RUNTIME_UNKNOWN = "unknown"
@@ -75,6 +75,8 @@ class EffectiveRuntimeResolution:
 class RuntimeInstallTarget:
     config_dir: Path
     install_scope: str
+    runtime: str | None = None
+    explicit_target: bool | None = None
 
 
 def _source_for_install_scope(install_scope: str | None, *, fallback: str) -> str:
@@ -161,11 +163,10 @@ def _local_runtime_dirs_for_lookup(
     if not local_dirs:
         return ()
     first_dir = local_dirs[0]
-    first_dir_has_install = _has_gpd_install(first_dir, expected_runtime=runtime)
-    first_dir_has_local_install = _has_gpd_install_for_scope(
-        first_dir,
-        SCOPE_LOCAL,
-        expected_runtime=runtime,
+    first_dir_assessment = _complete_install_assessment(first_dir, expected_runtime=runtime)
+    first_dir_has_install = first_dir_assessment is not None
+    first_dir_has_local_install = (
+        first_dir_assessment is not None and first_dir_assessment.manifest_scope == SCOPE_LOCAL
     )
     leading_dirs = (first_dir,) if not first_dir_has_install or first_dir_has_local_install else ()
     return (
@@ -180,8 +181,8 @@ def _local_runtime_dirs_for_lookup(
 
 def _manifest_runtime_status(config_dir: Path) -> tuple[str, str | None]:
     """Return the manifest parse state and normalized runtime when available."""
-    manifest_state, _manifest, runtime = load_install_manifest_runtime_status(config_dir)
-    return manifest_state, runtime
+    manifest = load_install_manifest_snapshot(config_dir)
+    return manifest.runtime_state, manifest.runtime
 
 
 def _runtime_from_manifest_or_path(config_dir: Path) -> str | None:
@@ -203,7 +204,7 @@ def _has_gpd_install(
     expected_runtime: str | None = None,
 ) -> bool:
     """Return True when *config_dir* has stable markers of a GPD install."""
-    return assess_install_target(config_dir, expected_runtime=expected_runtime).state == "owned_complete"
+    return _complete_install_assessment(config_dir, expected_runtime=expected_runtime) is not None
 
 
 def _has_gpd_install_for_scope(
@@ -213,10 +214,51 @@ def _has_gpd_install_for_scope(
     expected_runtime: str | None = None,
 ) -> bool:
     """Return True when *config_dir* is a complete install for the requested scope."""
-    if not _has_gpd_install(config_dir, expected_runtime=expected_runtime):
-        return False
-    manifest_scope = install_scope_from_manifest(config_dir)
-    return manifest_scope == expected_scope
+    return (
+        _complete_install_assessment_for_scope(
+            config_dir,
+            expected_scope,
+            expected_runtime=expected_runtime,
+        )
+        is not None
+    )
+
+
+def _complete_install_assessment(
+    config_dir: Path,
+    *,
+    expected_runtime: str | None = None,
+) -> InstallTargetAssessment | None:
+    """Return a complete-install assessment for *config_dir*, if one exists."""
+    assessment = assess_install_target(config_dir, expected_runtime=expected_runtime)
+    return assessment if assessment.state == "owned_complete" else None
+
+
+def _complete_install_assessment_for_scope(
+    config_dir: Path,
+    expected_scope: str,
+    *,
+    expected_runtime: str | None = None,
+) -> InstallTargetAssessment | None:
+    """Return a complete-install assessment when the manifest proves *expected_scope*."""
+    assessment = _complete_install_assessment(config_dir, expected_runtime=expected_runtime)
+    if assessment is None or assessment.manifest_scope != expected_scope:
+        return None
+    return assessment
+
+
+def _install_target_from_assessment(
+    assessment: InstallTargetAssessment,
+    *,
+    fallback_scope: str,
+) -> RuntimeInstallTarget:
+    """Project a complete install assessment into the public install-target shape."""
+    return RuntimeInstallTarget(
+        config_dir=assessment.config_dir,
+        install_scope=assessment.manifest_scope or fallback_scope,
+        runtime=assessment.manifest_runtime,
+        explicit_target=assessment.manifest_explicit_target,
+    )
 
 
 def _runtime_dir_has_gpd_install(
@@ -276,25 +318,19 @@ def _detect_runtime_install_target(
     resolved_cwd = cwd or Path.cwd()
     resolved_home = home or Path.home()
     for local_dir in _local_runtime_dirs(runtime, resolved_cwd, home=resolved_home):
-        if _has_gpd_install_for_scope(local_dir, SCOPE_LOCAL, expected_runtime=runtime):
-            return RuntimeInstallTarget(
-                config_dir=local_dir,
-                install_scope=install_scope_from_manifest(local_dir) or SCOPE_LOCAL,
-            )
+        assessment = _complete_install_assessment_for_scope(local_dir, SCOPE_LOCAL, expected_runtime=runtime)
+        if assessment is not None:
+            return _install_target_from_assessment(assessment, fallback_scope=SCOPE_LOCAL)
 
     for env_dir in _env_override_runtime_dirs(runtime, home=resolved_home):
-        if _has_gpd_install(env_dir, expected_runtime=runtime):
-            return RuntimeInstallTarget(
-                config_dir=env_dir,
-                install_scope=install_scope_from_manifest(env_dir) or SCOPE_GLOBAL,
-            )
+        assessment = _complete_install_assessment(env_dir, expected_runtime=runtime)
+        if assessment is not None:
+            return _install_target_from_assessment(assessment, fallback_scope=SCOPE_GLOBAL)
 
     for global_dir in _global_runtime_dirs(runtime, home=resolved_home):
-        if _has_gpd_install_for_scope(global_dir, SCOPE_GLOBAL, expected_runtime=runtime):
-            return RuntimeInstallTarget(
-                config_dir=global_dir,
-                install_scope=install_scope_from_manifest(global_dir) or SCOPE_GLOBAL,
-            )
+        assessment = _complete_install_assessment_for_scope(global_dir, SCOPE_GLOBAL, expected_runtime=runtime)
+        if assessment is not None:
+            return _install_target_from_assessment(assessment, fallback_scope=SCOPE_GLOBAL)
 
     return None
 
@@ -352,8 +388,9 @@ def resolve_effective_runtime(
 
         for runtime in ordered_runtimes:
             for local_dir in _local_runtime_dirs(runtime, resolved_cwd, home=resolved_home):
-                if _has_gpd_install_for_scope(local_dir, SCOPE_LOCAL, expected_runtime=runtime):
-                    install_scope = install_scope_from_manifest(local_dir) or SCOPE_LOCAL
+                assessment = _complete_install_assessment_for_scope(local_dir, SCOPE_LOCAL, expected_runtime=runtime)
+                if assessment is not None:
+                    install_scope = assessment.manifest_scope or SCOPE_LOCAL
                     return EffectiveRuntimeResolution(
                         runtime=runtime,
                         source=_source_for_install_scope(install_scope, fallback=SOURCE_LOCAL),
@@ -363,8 +400,9 @@ def resolve_effective_runtime(
 
         for runtime in ordered_runtimes:
             for env_dir in _env_override_runtime_dirs(runtime, home=resolved_home):
-                if _has_gpd_install(env_dir, expected_runtime=runtime):
-                    install_scope = install_scope_from_manifest(env_dir) or SCOPE_GLOBAL
+                assessment = _complete_install_assessment(env_dir, expected_runtime=runtime)
+                if assessment is not None:
+                    install_scope = assessment.manifest_scope or SCOPE_GLOBAL
                     return EffectiveRuntimeResolution(
                         runtime=runtime,
                         source=_source_for_install_scope(install_scope, fallback=SOURCE_GLOBAL),
@@ -374,8 +412,9 @@ def resolve_effective_runtime(
 
         for runtime in ordered_runtimes:
             for global_dir in _global_runtime_dirs(runtime, home=resolved_home):
-                if _has_gpd_install_for_scope(global_dir, SCOPE_GLOBAL, expected_runtime=runtime):
-                    install_scope = install_scope_from_manifest(global_dir) or SCOPE_GLOBAL
+                assessment = _complete_install_assessment_for_scope(global_dir, SCOPE_GLOBAL, expected_runtime=runtime)
+                if assessment is not None:
+                    install_scope = assessment.manifest_scope or SCOPE_GLOBAL
                     return EffectiveRuntimeResolution(
                         runtime=runtime,
                         source=_source_for_install_scope(install_scope, fallback=SOURCE_GLOBAL),
@@ -728,11 +767,11 @@ def should_consider_update_cache_candidate(
         return True
 
     candidate_config_dir = candidate.path.parent.parent
-    manifest_state, manifest_runtime = _manifest_runtime_status(candidate_config_dir)
-    if manifest_state == "ok":
-        if manifest_runtime != runtime:
+    manifest = load_install_manifest_snapshot(candidate_config_dir)
+    if manifest.runtime_state == "ok":
+        if manifest.runtime != runtime:
             return False
-    elif manifest_state != "missing":
+    elif manifest.runtime_state != "missing":
         return False
 
     install_target = _detect_runtime_install_target(runtime, cwd=cwd, home=home)
@@ -741,9 +780,10 @@ def should_consider_update_cache_candidate(
             return False
         return candidate.scope in (None, install_target.install_scope)
 
-    if manifest_state == "missing":
+    if manifest.runtime_state == "missing":
         return False
-    if not _has_gpd_install(candidate_config_dir, expected_runtime=runtime):
+    assessment = assess_install_target(candidate_config_dir, expected_runtime=runtime, manifest=manifest)
+    if assessment.state != "owned_complete":
         return False
 
     normalized_active_runtime = normalize_runtime_name(active_installed_runtime) or active_installed_runtime
@@ -772,11 +812,11 @@ def should_consider_todo_candidate(
         return True
 
     candidate_config_dir = candidate.path.parent
-    manifest_state, manifest_runtime = _manifest_runtime_status(candidate_config_dir)
-    if manifest_state == "ok":
-        if manifest_runtime != runtime:
+    manifest = load_install_manifest_snapshot(candidate_config_dir)
+    if manifest.runtime_state == "ok":
+        if manifest.runtime != runtime:
             return False
-    elif manifest_state != "missing":
+    elif manifest.runtime_state != "missing":
         return False
 
     install_target = _detect_runtime_install_target(runtime, cwd=cwd, home=home)
@@ -785,9 +825,10 @@ def should_consider_todo_candidate(
             return False
         return candidate.scope in (None, install_target.install_scope)
 
-    if manifest_state == "missing":
+    if manifest.runtime_state == "missing":
         return False
-    if not _has_gpd_install(candidate_config_dir, expected_runtime=runtime):
+    assessment = assess_install_target(candidate_config_dir, expected_runtime=runtime, manifest=manifest)
+    if assessment.state != "owned_complete":
         return False
 
     normalized_active_runtime = normalize_runtime_name(active_installed_runtime) or active_installed_runtime

@@ -7,12 +7,17 @@ import json
 import re
 import subprocess
 import sys
-from collections import Counter
 from dataclasses import dataclass
 from functools import cache, lru_cache
 from pathlib import Path
 
-from scripts.generated_region_support import GeneratedRegionSpec, marker_pair, render_region, replace_regions
+from scripts.generated_region_support import (
+    GeneratedRegionSpec,
+    check_region_inventory,
+    marker_pair,
+    render_region,
+    replace_regions,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 GRAPH_PATH = REPO_ROOT / "tests" / "README.md"
@@ -371,13 +376,13 @@ def sync_readme_text(readme_text: str, contract: dict[str, object], repo_root: P
         render_body=lambda block_id: _render_repo_graph_region_body(block_id, contract, repo_root),
         path=GRAPH_PATH,
     )
-    block_counts = Counter(block_ids)
-    missing_block_ids = tuple(block_id for block_id in REPO_GRAPH_BLOCK_IDS if block_counts[block_id] == 0)
-    duplicate_block_ids = tuple(block_id for block_id, count in block_counts.items() if count > 1)
-    if missing_block_ids:
-        missing = ", ".join(repr(block_id) for block_id in missing_block_ids)
-        raise ValueError(f"Missing repo graph generated marker(s): {missing}")
-    if duplicate_block_ids:
-        duplicate = ", ".join(repr(block_id) for block_id in duplicate_block_ids)
-        raise ValueError(f"Duplicate repo graph generated marker(s): {duplicate}")
+    inventory_diffs = check_region_inventory(
+        block_ids,
+        spec=REPO_GRAPH_REGION_SPEC,
+        required_blocks=REPO_GRAPH_BLOCK_IDS,
+        path=GRAPH_PATH,
+        label="repo graph marker inventory",
+    )
+    if inventory_diffs:
+        raise ValueError(inventory_diffs[0].diff.strip())
     return synced

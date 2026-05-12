@@ -22,8 +22,8 @@ from gpd.core.public_surface_renderer import (
 from scripts.generated_region_support import (
     GeneratedRegionDiff,
     GeneratedRegionSpec,
+    check_region_inventory,
     marker_pair,
-    marker_start_counts,
     render_region,
     replace_regions,
     unified_diff_text,
@@ -41,13 +41,9 @@ class PublicSurfaceTarget:
     allowed_duplicate_blocks: tuple[str, ...] = ()
 
 
-def _known_block_ids() -> frozenset[str]:
-    return frozenset(public_surface_block_ids())
-
-
 _PUBLIC_REGION_SPEC = GeneratedRegionSpec(
     marker_prefix=MARKER_PREFIX,
-    known_block_ids=_known_block_ids,
+    known_block_ids=lambda: frozenset(public_surface_block_ids()),
     block_label="public surface generated block",
     invalid_block_id_message="Generated public surface block ids must be kebab-case: {block_id!r}",
 )
@@ -135,42 +131,13 @@ def check_generated_region_inventory(
 ) -> tuple[GeneratedRegionDiff, ...]:
     """Check that a default target still carries its declared generated regions."""
 
-    known_block_ids = _known_block_ids()
-    required_counts: dict[str, int] = {}
-    for block_id in required_blocks:
-        if block_id not in known_block_ids:
-            raise ValueError(f"Unknown required public surface block {block_id!r}")
-        required_counts[block_id] = required_counts.get(block_id, 0) + 1
-
-    actual_counts = marker_start_counts(text, spec=_PUBLIC_REGION_SPEC)
-
-    allowed_duplicates = set(allowed_duplicate_blocks)
-    problems: list[str] = []
-    for block_id, expected_count in required_counts.items():
-        actual_count = actual_counts.get(block_id, 0)
-        if actual_count < expected_count:
-            problems.append(f"missing {expected_count - actual_count} expected marker(s) for {block_id!r}")
-        if actual_count > expected_count:
-            problems.append(f"found {actual_count} marker(s) for {block_id!r}, expected {expected_count}")
-
-    for block_id, actual_count in sorted(actual_counts.items()):
-        if block_id not in known_block_ids:
-            continue
-        if block_id not in required_counts:
-            problems.append(f"unexpected marker for {block_id!r}")
-        if actual_count > 1 and block_id not in allowed_duplicates:
-            problems.append(f"duplicate marker for {block_id!r} is not allowed")
-
-    if not problems:
-        return ()
-
-    label = path.as_posix() if path is not None else "<text>"
-    return (
-        GeneratedRegionDiff(
-            path=path,
-            block_id=", ".join(dict.fromkeys(required_blocks)),
-            diff=f"{label}: public surface marker inventory mismatch:\n- " + "\n- ".join(problems) + "\n",
-        ),
+    return check_region_inventory(
+        text,
+        spec=_PUBLIC_REGION_SPEC,
+        required_blocks=required_blocks,
+        allowed_duplicate_blocks=allowed_duplicate_blocks,
+        path=path,
+        label="public surface marker inventory",
     )
 
 

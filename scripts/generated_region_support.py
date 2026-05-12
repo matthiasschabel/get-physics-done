@@ -90,6 +90,57 @@ def marker_start_counts(text: str, *, spec: GeneratedRegionSpec) -> dict[str, in
     return dict(Counter(match.group("block_id") for match in start_marker_re.finditer(text)))
 
 
+def check_region_inventory(
+    marker_source: str | Sequence[str],
+    *,
+    spec: GeneratedRegionSpec,
+    required_blocks: Sequence[str],
+    allowed_duplicate_blocks: Sequence[str] = (),
+    path: Path | None = None,
+    label: str | None = None,
+) -> tuple[GeneratedRegionDiff, ...]:
+    known_block_ids = frozenset(spec.known_block_ids())
+    required_block_ids = tuple(required_blocks)
+    allowed_duplicates = frozenset(allowed_duplicate_blocks)
+    for block_id in required_block_ids:
+        if block_id not in known_block_ids:
+            raise ValueError(f"Unknown required {spec.block_label} {block_id!r}")
+
+    required_counts = Counter(required_block_ids)
+    actual_counts = Counter(
+        marker_start_counts(marker_source, spec=spec) if isinstance(marker_source, str) else marker_source
+    )
+    problems: list[str] = []
+    for block_id, expected_count in required_counts.items():
+        actual_count = actual_counts.get(block_id, 0)
+        if actual_count < expected_count:
+            problems.append(f"missing {expected_count - actual_count} expected marker(s) for {block_id!r}")
+        if actual_count > expected_count:
+            problems.append(f"found {actual_count} marker(s) for {block_id!r}, expected {expected_count}")
+
+    for block_id, actual_count in sorted(actual_counts.items()):
+        if block_id not in known_block_ids:
+            continue
+        if block_id not in required_counts:
+            problems.append(f"unexpected marker for {block_id!r}")
+        if actual_count > 1 and block_id not in allowed_duplicates:
+            problems.append(f"duplicate marker for {block_id!r} is not allowed")
+
+    if not problems:
+        return ()
+
+    path_label = path.as_posix() if path is not None else "<text>"
+    return (
+        GeneratedRegionDiff(
+            path=path,
+            block_id=", ".join(dict.fromkeys(required_block_ids)) or "generated-regions",
+            diff=f"{path_label}: {label or f'{spec.block_label} inventory'} mismatch:\n- "
+            + "\n- ".join(problems)
+            + "\n",
+        ),
+    )
+
+
 def unified_diff_text(expected: str, actual: str, *, path: Path | None, block_id: str) -> str:
     label = path.as_posix() if path is not None else "<text>"
     return "".join(

@@ -7,6 +7,7 @@ import pytest
 from scripts.generated_region_support import (
     GeneratedRegionDiff,
     GeneratedRegionSpec,
+    check_region_inventory,
     marker_pair,
     marker_start_counts,
     render_region,
@@ -73,6 +74,67 @@ def test_replace_regions_preserves_order_and_reports_replaced_block_ids() -> Non
         "after\n"
     )
     assert marker_start_counts(updated, spec=spec) == {"alpha": 1, "beta": 1}
+
+
+def test_marker_inventory_reports_missing_unexpected_and_duplicate_markers() -> None:
+    spec = GeneratedRegionSpec(
+        marker_prefix="gpd-test",
+        known_block_ids=lambda: ("alpha", "beta", "delta"),
+        block_label="test generated block",
+    )
+    text = "\n".join(
+        (
+            render_region(spec, "alpha", "body"),
+            render_region(spec, "alpha", "body"),
+            render_region(spec, "beta", "body"),
+            render_region(spec, "gamma", "body"),
+        )
+    )
+
+    diffs = check_region_inventory(
+        text,
+        spec=spec,
+        required_blocks=("alpha", "delta"),
+        path=Path("target.md"),
+        label="test marker inventory",
+    )
+
+    assert len(diffs) == 1
+    assert diffs[0].path == Path("target.md")
+    assert diffs[0].block_id == "alpha, delta"
+    assert "target.md: test marker inventory mismatch:" in diffs[0].diff
+    assert "missing 1 expected marker(s) for 'delta'" in diffs[0].diff
+    assert "found 2 marker(s) for 'alpha', expected 1" in diffs[0].diff
+    assert "duplicate marker for 'alpha' is not allowed" in diffs[0].diff
+    assert "unexpected marker for 'beta'" in diffs[0].diff
+
+
+def test_marker_inventory_allows_expected_duplicate_markers() -> None:
+    spec = _region_spec()
+    text = "\n".join((render_region(spec, "alpha", "first"), render_region(spec, "alpha", "second")))
+
+    assert (
+        check_region_inventory(
+            text,
+            spec=spec,
+            required_blocks=("alpha", "alpha"),
+            allowed_duplicate_blocks=("alpha",),
+        )
+        == ()
+    )
+
+
+def test_region_block_inventory_accepts_replace_region_block_ids() -> None:
+    spec = _region_spec()
+
+    assert check_region_inventory(("alpha", "beta"), spec=spec, required_blocks=("alpha", "beta")) == ()
+
+    diffs = check_region_inventory(("alpha",), spec=spec, required_blocks=("alpha", "beta"))
+    assert len(diffs) == 1
+    assert "missing 1 expected marker(s) for 'beta'" in diffs[0].diff
+
+    with pytest.raises(ValueError, match="Unknown required test generated block 'missing'"):
+        check_region_inventory(("alpha",), spec=spec, required_blocks=("alpha", "missing"))
 
 
 def test_replace_regions_fails_closed_for_malformed_marker_ranges() -> None:

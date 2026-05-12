@@ -35,7 +35,7 @@ from rich.text import Text
 
 from gpd.adapters.base import INSTALL_ROLLBACK_RESULT_KEY as _INSTALL_RESULT_ROLLBACK_KEY
 from gpd.adapters.runtime_catalog import list_runtime_names, normalize_runtime_name
-from gpd.command_labels import canonical_command_label, parse_command_label, validated_public_command_prefix
+from gpd.command_labels import canonical_command_label, validated_public_command_prefix
 from gpd.core.artifact_command_payloads import (
     call_proof_redteam_finalizer as _call_proof_redteam_finalizer,
 )
@@ -79,44 +79,60 @@ from gpd.core.cli_args import (
     split_root_global_cli_options as _split_root_global_cli_options,
 )
 from gpd.core.command_arguments import (
-    _PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES,
-    _has_simple_positional_inputs,
-    _has_write_paper_external_authoring_intake,
-    _split_command_arguments,
+    _PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES as _CORE_PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES,
 )
 from gpd.core.command_preflight import (
-    _command_context_publication_roots,
-    _command_managed_output_context_root,
-    _command_managed_output_root,
+    CommandContextPreflightResult,
+    CommandRuntimeSurfaceMetadata,
     _publication_subject_preflight_policy,
     _review_preflight_publication_routing,
+    command_label_lookup_and_arguments,
+)
+from gpd.core.command_preflight import (
+    _command_managed_output_context_root as _core_command_managed_output_context_root,
+)
+from gpd.core.command_preflight import (
+    _command_managed_output_root as _core_command_managed_output_root,
+)
+from gpd.core.command_preflight import (
+    build_command_context_preflight as _core_build_command_context_preflight,
+)
+from gpd.core.command_preflight import (
+    command_preflight_cwd as _core_command_preflight_cwd,
+)
+from gpd.core.command_preflight import (
+    command_supports_project_reentry as _core_command_supports_project_reentry,
+)
+from gpd.core.command_preflight import (
+    resolve_registry_command as _core_resolve_registry_command,
 )
 from gpd.core.command_subjects import (
     ResolvedCommandSubject,
     _build_resolved_command_subject,
-    _command_allows_external_manuscript_targets,
-    _command_allows_interactive_subject_intake,
     _command_allows_manuscript_bootstrap,
-    _command_context_manuscript_check,
     _command_effective_context_mode,
-    _command_effective_project_reentry_mode,
-    _command_explicit_input_labels_from_policy,
     _command_explicit_manuscript_argument,
     _command_explicit_manuscript_subject_uses_supported_roots,
     _command_explicit_manuscript_suffixes,
-    _command_has_typed_subject_policy,
-    _command_interactive_subject_detail,
     _command_referee_report_arguments,
-    _command_required_file_patterns,
-    _command_required_files_override_detail,
-    _command_required_files_present,
     _command_requires_compiled_manuscript,
-    _command_requires_manuscript_context,
     _command_supports_explicit_manuscript_subject,
     _resolve_review_knowledge_target,
     _resolve_review_preflight_manuscript,
     _resolve_subject_path,
     _supported_manuscript_root_for_target,
+)
+from gpd.core.command_subjects import (
+    _command_context_manuscript_check as _core_command_context_manuscript_check,
+)
+from gpd.core.command_subjects import (
+    _command_explicit_input_labels_from_policy as _core_command_explicit_input_labels_from_policy,
+)
+from gpd.core.command_subjects import (
+    _command_has_typed_subject_policy as _core_command_has_typed_subject_policy,
+)
+from gpd.core.command_subjects import (
+    _command_required_files_override_detail as _core_command_required_files_override_detail,
 )
 from gpd.core.constants import (
     CONFIG_FILENAME,
@@ -136,7 +152,6 @@ from gpd.core.onboarding_surfaces import (
     beginner_onboarding_hub_url,
 )
 from gpd.core.peer_review_mode import (
-    PEER_REVIEW_INVALID_SUBJECT_MODE,
     PEER_REVIEW_PROJECT_BACKED_MODE,
     PeerReviewModeResolution,
     resolve_peer_review_mode_details,
@@ -251,6 +266,7 @@ logger = logging.getLogger(__name__)
 # Global state threaded through typer context
 _raw: bool = False
 _cwd: Path = Path(".")
+_PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES = _CORE_PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES
 
 
 def _emit_raw_json(data: object, *, err: bool = False) -> None:
@@ -485,34 +501,6 @@ def _workspace_locked_cwd(cwd: Path | None = None) -> Path:
     return resolved if resolved is not None else workspace_cwd
 
 
-def _command_preflight_cwd(
-    command: object,
-    *,
-    cwd: Path | None = None,
-    arguments: str | None = None,
-) -> Path:
-    """Resolve the authoritative preflight root for one command."""
-    workspace_cwd = (cwd or _get_cwd()).expanduser().resolve(strict=False)
-    effective_context_mode = _command_effective_context_mode(command)
-    if effective_context_mode == "global":
-        return workspace_cwd
-    if effective_context_mode == "projectless":
-        return _read_only_project_scoped_cwd(workspace_cwd)
-
-    if _command_supports_project_reentry(command):
-        reentry_policy = _command_effective_project_reentry_mode(command).casefold()
-        if reentry_policy in {
-            "current-workspace",
-            "current_workspace",
-            "current-workspace-only",
-            "current_workspace_only",
-        }:
-            return _read_only_project_scoped_cwd(workspace_cwd)
-        return _status_command_cwd(workspace_cwd)
-
-    return _read_only_project_scoped_cwd(workspace_cwd)
-
-
 def _split_global_cli_options(argv: list[str]) -> tuple[list[str], list[str]]:
     """Partition root-global CLI options from the rest of the argv stream."""
     return _split_root_global_cli_options(argv)
@@ -677,38 +665,6 @@ class ReviewPreflightResult:
     selected_review_root: str | None = None
     manuscript_root: str | None = None
     manuscript_entrypoint: str | None = None
-
-
-@dataclasses.dataclass(frozen=True)
-class CommandContextCheck:
-    """One executable context check for a command."""
-
-    name: str
-    passed: bool
-    blocking: bool
-    detail: str
-
-
-@dataclasses.dataclass(frozen=True)
-class CommandContextPreflightResult:
-    """Summary of whether a command can run in the current workspace context."""
-
-    command: str
-    context_mode: str
-    passed: bool
-    project_exists: bool
-    explicit_inputs: list[str]
-    guidance: str
-    checks: list[CommandContextCheck]
-    resolved_mode: str = ""
-    mode_reason: str = ""
-    validated_surface: str = "public_runtime_command_surface"
-    public_runtime_command_prefix: str = ""
-    local_cli_equivalence_guaranteed: bool = False
-    dispatch_note: str = ""
-    resolved_subject: ResolvedCommandSubject | None = None
-    selected_publication_root: str | None = None
-    selected_review_root: str | None = None
 
 
 def _format_runtime_list(runtime_names: list[str]) -> str:
@@ -7634,66 +7590,6 @@ def _reject_internal_paper_config_location(config_file: Path, *, project_root: P
     )
 
 
-def _progress_reconcile_requested(command: object, arguments: str | None) -> bool:
-    """Return whether this invocation is the runtime progress reconciliation mode."""
-    return str(getattr(command, "name", "") or "") == "gpd:progress" and "--reconcile" in _split_command_arguments(
-        arguments
-    )
-
-
-def _progress_reconcile_confirmation_check(command: object) -> tuple[bool, str]:
-    """Return the executable confirmation contract for ``gpd:progress --reconcile``."""
-    allowed_tools = set(getattr(command, "allowed_tools", []) or [])
-    if "ask_user" in allowed_tools:
-        return True, "ask_user is available before progress reconciliation writes state"
-    return (
-        False,
-        "progress --reconcile requires ask_user or an explicit typed-confirmation contract before state writes",
-    )
-
-
-def _runtime_command_argument_check(command: object, arguments: str | None) -> tuple[bool, str] | None:
-    """Return a blocking runtime-argument check when an invocation uses a local-only option."""
-    if str(getattr(command, "name", "") or "") != "gpd:progress":
-        return None
-
-    local_watch_flags = {"--watch", "-w"}
-    supplied_flags = [token for token in _split_command_arguments(arguments) if token in local_watch_flags]
-    if not supplied_flags:
-        return None
-
-    supplied = ", ".join(supplied_flags)
-    return (
-        False,
-        f"{supplied} is local CLI only for runtime progress; use `gpd progress json --watch` from a terminal.",
-    )
-
-
-def _build_project_aware_guidance(explicit_inputs: list[str], *, init_command: str) -> str:
-    """Render the standardized project-aware guidance string."""
-    init_guidance = (
-        f"initialize a project with `{init_command}` in the runtime surface or `gpd init new-project` in the local CLI"
-    )
-    if not explicit_inputs:
-        return f"Either provide explicit inputs for this command, or {init_guidance}."
-    if len(explicit_inputs) == 1:
-        requirement_text = explicit_inputs[0]
-    elif len(explicit_inputs) == 2:
-        requirement_text = f"{explicit_inputs[0]} and {explicit_inputs[1]}"
-    else:
-        requirement_text = ", ".join(explicit_inputs[:-1]) + f", and {explicit_inputs[-1]}"
-    return f"Either provide {requirement_text} explicitly, or {init_guidance}."
-
-
-def _build_recoverable_workspace_guidance(*, init_command: str) -> str:
-    """Render the standardized recovery guidance string for project-required commands."""
-    return (
-        "This command requires a recoverable GPD workspace. "
-        f"Open the right project, use `{local_cli_resume_recent_command()}` to rediscover it, or "
-        f"initialize a new project with `{init_command}` in the runtime surface or `gpd init new-project` in the local CLI."
-    )
-
-
 def detect_runtime_for_gpd_use(*, cwd: Path | None = None, home: Path | None = None) -> str | None:
     """Resolve the installed-surface runtime via the hook-owned detector."""
     from gpd.hooks.runtime_detect import detect_runtime_for_gpd_use as _detect_runtime_for_gpd_use
@@ -7772,34 +7668,88 @@ def _canonical_command_name(command_name: str) -> str:
     return canonical_command_label(command_name)
 
 
-def _command_label_lookup_and_arguments(command_name: str, arguments: str | None = None) -> tuple[str, str | None]:
-    """Return the base lookup label plus command-label inline args merged with explicit args."""
-
-    parsed = parse_command_label(command_name)
-    merged_arguments = " ".join(part for part in (parsed.inline_args, arguments or "") if part)
-    return parsed.command or command_name.strip(), merged_arguments or None
-
-
 def _command_supports_project_reentry(command: object) -> bool:
     """Return whether one registry command can recover a project root before execution."""
-    project_reentry_mode = _command_effective_project_reentry_mode(command).casefold()
-    return project_reentry_mode not in {"", "disallowed", "false", "none"}
+    return _core_command_supports_project_reentry(command)
+
+
+def _command_managed_output_root(
+    command: object,
+    *,
+    project_root: Path,
+    resolved_subject: ResolvedCommandSubject | None = None,
+) -> Path | None:
+    """Compatibility wrapper for the core managed-output root helper."""
+    return _core_command_managed_output_root(
+        command,
+        project_root=project_root,
+        resolved_subject=resolved_subject,
+    )
+
+
+def _command_managed_output_context_root(
+    *,
+    workspace_root: Path,
+    context_root: Path,
+    project_exists: bool,
+) -> Path:
+    """Compatibility wrapper for the core managed-output context-root helper."""
+    return _core_command_managed_output_context_root(
+        workspace_root=workspace_root,
+        context_root=context_root,
+        project_exists=project_exists,
+    )
+
+
+def _command_required_files_override_detail(
+    project_root: Path,
+    command: object,
+    arguments: str | None,
+    *,
+    workspace_cwd: Path | None = None,
+    resolved_subject: ResolvedCommandSubject | None = None,
+) -> str | None:
+    """Compatibility wrapper for the core explicit manuscript required-file detail."""
+    return _core_command_required_files_override_detail(
+        project_root,
+        command,
+        arguments,
+        workspace_cwd=workspace_cwd,
+        resolved_subject=resolved_subject,
+    )
+
+
+def _command_context_manuscript_check(
+    project_root: Path,
+    command: object,
+    arguments: str | None,
+    *,
+    workspace_cwd: Path | None = None,
+    resolved_subject: ResolvedCommandSubject | None = None,
+) -> tuple[bool, str] | None:
+    """Compatibility wrapper for the core manuscript-context preflight check."""
+    return _core_command_context_manuscript_check(
+        project_root,
+        command,
+        arguments,
+        workspace_cwd=workspace_cwd,
+        resolved_subject=resolved_subject,
+    )
+
+
+def _command_has_typed_subject_policy(command: object) -> bool:
+    """Compatibility wrapper for the core typed-subject policy predicate."""
+    return _core_command_has_typed_subject_policy(command)
+
+
+def _command_explicit_input_labels_from_policy(command: object) -> list[str]:
+    """Compatibility wrapper for core explicit-input policy labels."""
+    return _core_command_explicit_input_labels_from_policy(command)
 
 
 def _resolve_registry_command(command_name: str) -> tuple[object, str]:
     """Resolve a command name through the registry and preserve its public name."""
-    from gpd import registry as content_registry
-
-    try:
-        command = content_registry.get_command(command_name)
-    except KeyError as exc:
-        requested_name = _canonical_command_name(command_name)
-        known_commands = content_registry.list_commands()
-        preview = ", ".join(f"gpd:{name}" for name in known_commands[:8])
-        if len(known_commands) > 8:
-            preview += ", ..."
-        raise GPDError(f"Unknown GPD command: {requested_name}. Known commands include: {preview}") from exc
-    return command, _canonical_command_name(command_name)
+    return _core_resolve_registry_command(command_name)
 
 
 def _path_is_within_supported_manuscript_root(project_root: Path, target: Path) -> bool:
@@ -7861,688 +7811,20 @@ def _build_command_context_preflight(
     *,
     arguments: str | None = None,
 ) -> CommandContextPreflightResult:
-    """Evaluate whether a command can run in the current workspace context."""
-    from gpd.core.constants import ProjectLayout
-
     cwd = _get_cwd()
-    command_name, arguments = _command_label_lookup_and_arguments(command_name, arguments)
-    command, public_command_name = _resolve_registry_command(command_name)
-    context_cwd = _command_preflight_cwd(command, cwd=cwd, arguments=arguments)
-    layout = ProjectLayout(context_cwd)
-    project_exists = layout.project_md.exists()
-    dispatch_note = _runtime_surface_dispatch_note(cwd=cwd)
-    init_command = _active_runtime_new_project_command(cwd=cwd)
-    effective_context_mode = _command_effective_context_mode(command)
-
-    checks: list[CommandContextCheck] = []
-
-    def add_check(name: str, passed: bool, detail: str, *, blocking: bool = True) -> None:
-        checks.append(CommandContextCheck(name=name, passed=passed, detail=detail, blocking=blocking))
-
-    add_check("context_mode", True, f"context_mode={effective_context_mode}", blocking=False)
-    runtime_argument_check = _runtime_command_argument_check(command, arguments)
-    if runtime_argument_check is not None:
-        runtime_arguments_passed, runtime_arguments_detail = runtime_argument_check
-        add_check(
-            "runtime_arguments",
-            runtime_arguments_passed,
-            runtime_arguments_detail,
-            blocking=True,
-        )
-        if not runtime_arguments_passed:
-            return CommandContextPreflightResult(
-                command=public_command_name,
-                context_mode=effective_context_mode,
-                passed=False,
-                project_exists=project_exists,
-                explicit_inputs=[],
-                guidance=runtime_arguments_detail,
-                checks=checks,
-                validated_surface=_validated_runtime_surface(cwd=cwd),
-                public_runtime_command_prefix=_active_runtime_command_prefix(cwd=cwd) or "",
-                dispatch_note=dispatch_note,
-            )
-
-    if effective_context_mode == "global":
-        add_check("project_context", True, "command runs without project context", blocking=False)
-        return CommandContextPreflightResult(
-            command=public_command_name,
-            context_mode=effective_context_mode,
-            passed=True,
-            project_exists=project_exists,
-            explicit_inputs=[],
-            guidance="",
-            checks=checks,
-            validated_surface=_validated_runtime_surface(cwd=cwd),
-            public_runtime_command_prefix=_active_runtime_command_prefix(cwd=cwd) or "",
-            dispatch_note=dispatch_note,
-        )
-
-    if effective_context_mode == "projectless":
-        add_check(
-            "project_context",
-            True,
-            ("initialized project detected" if project_exists else "no initialized project required"),
-            blocking=False,
-        )
-        return CommandContextPreflightResult(
-            command=public_command_name,
-            context_mode=effective_context_mode,
-            passed=True,
-            project_exists=project_exists,
-            explicit_inputs=[],
-            guidance="",
-            checks=checks,
-            validated_surface=_validated_runtime_surface(cwd=cwd),
-            public_runtime_command_prefix=_active_runtime_command_prefix(cwd=cwd) or "",
-            dispatch_note=dispatch_note,
-        )
-
-    if effective_context_mode == "project-required":
-        required_file_patterns = _command_required_file_patterns(command)
-        if _command_supports_project_reentry(command):
-            reentry_policy = _command_effective_project_reentry_mode(command).casefold()
-            current_workspace_reentry_only = reentry_policy in {
-                "current-workspace",
-                "current_workspace",
-                "current-workspace-only",
-                "current_workspace_only",
-            }
-            reentry = _status_command_reentry(cwd)
-            current_workspace_candidate = next(
-                (
-                    candidate
-                    for candidate in reentry.candidates
-                    if candidate.source == "current_workspace" and candidate.recoverable
-                ),
-                None,
-            )
-            selected_candidate = current_workspace_candidate or (
-                None if current_workspace_reentry_only else reentry.selected_candidate
-            )
-            if selected_candidate is not None:
-                selected_root = Path(selected_candidate.project_root).expanduser().resolve(strict=False)
-                selected_root_source = selected_candidate.source
-            elif current_workspace_reentry_only:
-                selected_root = context_cwd
-                selected_root_source = "workspace"
-            else:
-                selected_root = reentry.resolved_project_root or context_cwd
-                selected_root_source = reentry.source or "workspace"
-            selected_root_auto_selected = (
-                current_workspace_candidate is None and not current_workspace_reentry_only and reentry.auto_selected
-            )
-            selected_root_requires_user_selection = (
-                current_workspace_candidate is None
-                and not current_workspace_reentry_only
-                and reentry.requires_user_selection
-            )
-            selected_reentry_mode = (
-                "current-workspace"
-                if current_workspace_candidate is not None or current_workspace_reentry_only
-                else reentry.mode
-            )
-            resume_work_requires_reopened_workspace = (
-                public_command_name == "gpd:resume-work"
-                and selected_root_auto_selected
-                and selected_root_source == "recent_project"
-            )
-            layout = ProjectLayout(selected_root)
-            state_exists, roadmap_exists, project_exists = recoverable_project_context(selected_root)
-            resolved_subject = _build_resolved_command_subject(
-                selected_root,
-                command,
-                arguments,
-                workspace_cwd=cwd,
-                project_root_source=selected_root_source,
-                project_root_auto_selected=selected_root_auto_selected,
-                reentry_mode=selected_reentry_mode,
-            )
-            explicit_inputs = _command_explicit_input_labels_from_policy(command)
-            if not explicit_inputs:
-                explicit_inputs = (
-                    [command.argument_hint.strip()] if command.argument_hint.strip() else ["explicit command inputs"]
-                )
-            subject_required = _command_has_typed_subject_policy(command)
-            subject_context_ready = resolved_subject is not None and resolved_subject.status in {
-                "resolved",
-                "bootstrap",
-            }
-            if subject_required:
-                add_check(
-                    "explicit_inputs",
-                    subject_context_ready,
-                    (
-                        resolved_subject.detail
-                        if resolved_subject is not None
-                        else f"missing explicit standalone inputs ({', '.join(explicit_inputs)})"
-                    ),
-                    blocking=True,
-                )
-            if current_workspace_candidate is not None:
-                add_check(
-                    "project_reentry",
-                    True,
-                    "current workspace or ancestor project root is recoverable",
-                    blocking=False,
-                )
-            elif current_workspace_reentry_only:
-                add_check(
-                    "project_reentry",
-                    False,
-                    "no recoverable current-workspace project target found",
-                    blocking=False,
-                )
-            elif resume_work_requires_reopened_workspace:
-                add_check(
-                    "project_reentry",
-                    False,
-                    (
-                        "unique recoverable recent project found, but resume-work will not switch runtime "
-                        "workspaces silently"
-                    ),
-                    blocking=False,
-                )
-            elif reentry.auto_selected and reentry.project_root:
-                add_check(
-                    "project_reentry",
-                    True,
-                    f"auto-selected recoverable recent project {_format_display_path(reentry.project_root)}",
-                    blocking=False,
-                )
-            elif reentry.requires_user_selection:
-                add_check(
-                    "project_reentry",
-                    False,
-                    "multiple recoverable recent projects are available; explicit selection required",
-                    blocking=False,
-                )
-            elif reentry.has_current_workspace_candidate:
-                add_check(
-                    "project_reentry",
-                    True,
-                    "current workspace or ancestor project root is recoverable",
-                    blocking=False,
-                )
-            else:
-                add_check(
-                    "project_reentry",
-                    False,
-                    "no recoverable current-workspace or uniquely recoverable recent-project target found",
-                    blocking=False,
-                )
-            add_check(
-                "state_exists",
-                state_exists,
-                (
-                    "recoverable state present"
-                    if state_exists
-                    else f"missing {_format_display_path(layout.state_json)} and {_format_display_path(layout.state_md)}"
-                ),
-                blocking=False,
-            )
-            add_check(
-                "roadmap_exists",
-                roadmap_exists,
-                (
-                    f"{_format_display_path(layout.roadmap)} present"
-                    if roadmap_exists
-                    else f"missing {_format_display_path(layout.roadmap)}"
-                ),
-                blocking=False,
-            )
-            add_check(
-                "project_exists",
-                project_exists,
-                (
-                    f"{_format_display_path(layout.project_md)} present"
-                    if project_exists
-                    else f"missing {_format_display_path(layout.project_md)}"
-                ),
-                blocking=False,
-            )
-            required_files_present = True
-            matched_patterns: list[str] = []
-            missing_patterns: list[str] = []
-            manuscript_context_passed = True
-            manuscript_context_detail = ""
-            if required_file_patterns:
-                required_files_present, matched_patterns, missing_patterns = _command_required_files_present(
-                    selected_root,
-                    command,
-                )
-                override_detail = None
-                if not required_files_present:
-                    override_detail = _command_required_files_override_detail(
-                        selected_root,
-                        command,
-                        arguments,
-                        workspace_cwd=cwd,
-                        resolved_subject=resolved_subject,
-                    )
-                    if override_detail is not None:
-                        required_files_present = True
-                        matched_patterns = [override_detail]
-                        missing_patterns = []
-                add_check(
-                    "required_files",
-                    required_files_present,
-                    (
-                        override_detail
-                        if required_files_present and override_detail is not None
-                        else "matching required files present: " + ", ".join(matched_patterns)
-                        if required_files_present
-                        else "missing required files or unmatched patterns: " + ", ".join(missing_patterns)
-                    ),
-                    blocking=False,
-                )
-            manuscript_context = _command_context_manuscript_check(
-                selected_root,
-                command,
-                arguments,
-                workspace_cwd=cwd,
-                resolved_subject=resolved_subject,
-            )
-            if manuscript_context is not None:
-                manuscript_context_passed, manuscript_context_detail = manuscript_context
-                add_check(
-                    "manuscript",
-                    manuscript_context_passed,
-                    manuscript_context_detail,
-                    blocking=False,
-                )
-            reconcile_confirmation_passed = True
-            if _progress_reconcile_requested(command, arguments):
-                reconcile_confirmation_passed, reconcile_confirmation_detail = _progress_reconcile_confirmation_check(
-                    command
-                )
-                add_check(
-                    "reconcile_confirmation",
-                    reconcile_confirmation_passed,
-                    reconcile_confirmation_detail,
-                    blocking=True,
-                )
-            recoverable = (
-                (state_exists or roadmap_exists or project_exists)
-                and required_files_present
-                and manuscript_context_passed
-                and reconcile_confirmation_passed
-                and (not subject_required or subject_context_ready)
-                and not selected_root_requires_user_selection
-                and not resume_work_requires_reopened_workspace
-            )
-            guidance = (
-                ""
-                if recoverable
-                else (
-                    "This command found multiple recoverable recent GPD projects and will not switch silently. "
-                    f"Use `{local_cli_resume_recent_command()}` to pick the right project explicitly, then reopen it in the runtime."
-                    if selected_root_requires_user_selection
-                    else (
-                        "This command found a unique recoverable recent GPD project, but resume-work will not "
-                        "continue from an unrelated runtime workspace. "
-                        f"Use `{local_cli_resume_recent_command()}` to verify the target, then open that project "
-                        "folder in the runtime and rerun resume-work."
-                        if resume_work_requires_reopened_workspace
-                        else (
-                            _build_recoverable_workspace_guidance(init_command=init_command)
-                            if not (state_exists or roadmap_exists or project_exists)
-                            else (
-                                resolved_subject.detail
-                                if resolved_subject is not None
-                                else f"Either provide {', '.join(explicit_inputs)} explicitly."
-                            )
-                            if subject_required and not subject_context_ready
-                            else manuscript_context_detail
-                            if not manuscript_context_passed
-                            else "This command requires one of the declared required files: "
-                            + ", ".join(required_file_patterns)
-                        )
-                    )
-                )
-            )
-            return CommandContextPreflightResult(
-                command=public_command_name,
-                context_mode=effective_context_mode,
-                passed=recoverable,
-                project_exists=project_exists,
-                explicit_inputs=[],
-                guidance=guidance,
-                checks=checks,
-                validated_surface=_validated_runtime_surface(cwd=cwd),
-                public_runtime_command_prefix=_active_runtime_command_prefix(cwd=cwd) or "",
-                dispatch_note=dispatch_note,
-                resolved_subject=resolved_subject,
-                selected_publication_root=_command_context_publication_roots(
-                    selected_root,
-                    command,
-                    resolved_subject,
-                )[0],
-                selected_review_root=_command_context_publication_roots(
-                    selected_root,
-                    command,
-                    resolved_subject,
-                )[1],
-            )
-        add_check(
-            "project_exists",
-            project_exists,
-            (
-                f"{_format_display_path(layout.project_md)} present"
-                if project_exists
-                else f"missing {_format_display_path(layout.project_md)}"
-            ),
-        )
-        required_file_patterns = _command_required_file_patterns(command)
-        resolved_subject = _build_resolved_command_subject(
-            context_cwd,
-            command,
-            arguments,
-            workspace_cwd=cwd,
-            project_root_source="workspace",
-            project_root_auto_selected=False,
-            reentry_mode="current-workspace" if project_exists else None,
-        )
-        explicit_inputs = _command_explicit_input_labels_from_policy(command)
-        if not explicit_inputs:
-            explicit_inputs = (
-                [command.argument_hint.strip()] if command.argument_hint.strip() else ["explicit command inputs"]
-            )
-        subject_required = _command_has_typed_subject_policy(command)
-        subject_context_ready = resolved_subject is not None and resolved_subject.status in {"resolved", "bootstrap"}
-        if subject_required:
-            add_check(
-                "explicit_inputs",
-                subject_context_ready,
-                (
-                    resolved_subject.detail
-                    if resolved_subject is not None
-                    else f"missing explicit standalone inputs ({', '.join(explicit_inputs)})"
-                ),
-            )
-        manuscript_context = _command_context_manuscript_check(
-            context_cwd,
-            command,
-            arguments,
-            workspace_cwd=cwd,
-            resolved_subject=resolved_subject,
-        )
-        if required_file_patterns:
-            required_files_present, matched_patterns, missing_patterns = _command_required_files_present(
-                context_cwd,
-                command,
-            )
-            override_detail = None
-            if not required_files_present:
-                override_detail = _command_required_files_override_detail(
-                    context_cwd,
-                    command,
-                    arguments,
-                    workspace_cwd=cwd,
-                    resolved_subject=resolved_subject,
-                )
-                if override_detail is not None:
-                    required_files_present = True
-                    matched_patterns = [override_detail]
-                    missing_patterns = []
-            add_check(
-                "required_files",
-                required_files_present,
-                (
-                    override_detail
-                    if required_files_present and override_detail is not None
-                    else "matching required files present: " + ", ".join(matched_patterns)
-                    if required_files_present
-                    else "missing required files or unmatched patterns: " + ", ".join(missing_patterns)
-                ),
-            )
-        else:
-            required_files_present = True
-        manuscript_context_passed = True
-        manuscript_context_detail = ""
-        if manuscript_context is not None:
-            manuscript_context_passed, manuscript_context_detail = manuscript_context
-            add_check(
-                "manuscript",
-                manuscript_context_passed,
-                manuscript_context_detail,
-            )
-        reconcile_confirmation_passed = True
-        if _progress_reconcile_requested(command, arguments):
-            reconcile_confirmation_passed, reconcile_confirmation_detail = _progress_reconcile_confirmation_check(
-                command
-            )
-            add_check(
-                "reconcile_confirmation",
-                reconcile_confirmation_passed,
-                reconcile_confirmation_detail,
-            )
-        passed = (
-            project_exists
-            and required_files_present
-            and manuscript_context_passed
-            and reconcile_confirmation_passed
-            and (not subject_required or subject_context_ready)
-        )
-        guidance = (
-            ""
-            if passed
-            else (
-                "This command requires an initialized GPD project."
-                if not project_exists
-                else (
-                    resolved_subject.detail
-                    if resolved_subject is not None
-                    else f"Either provide {', '.join(explicit_inputs)} explicitly."
-                )
-                if subject_required and not subject_context_ready
-                else manuscript_context_detail
-                if not manuscript_context_passed
-                else "This command requires one of the declared required files: " + ", ".join(required_file_patterns)
-            )
-        )
-        return CommandContextPreflightResult(
-            command=public_command_name,
-            context_mode=effective_context_mode,
-            passed=passed,
-            project_exists=project_exists,
-            explicit_inputs=[],
-            guidance=guidance,
-            checks=checks,
-            validated_surface=_validated_runtime_surface(cwd=cwd),
-            public_runtime_command_prefix=_active_runtime_command_prefix(cwd=cwd) or "",
-            dispatch_note=dispatch_note,
-            resolved_subject=resolved_subject,
-            selected_publication_root=_command_context_publication_roots(
-                context_cwd,
-                command,
-                resolved_subject,
-            )[0],
-            selected_review_root=_command_context_publication_roots(
-                context_cwd,
-                command,
-                resolved_subject,
-            )[1],
-        )
-
-    explicit_inputs = _command_explicit_input_labels_from_policy(command)
-    if not explicit_inputs:
-        explicit_inputs = (
-            [command.argument_hint.strip()] if command.argument_hint.strip() else ["explicit command inputs"]
-        )
-    predicate = _PROJECT_AWARE_EXPLICIT_INPUT_PREDICATES.get(
-        str(getattr(command, "name", "") or ""),
-        _has_simple_positional_inputs,
-    )
-    resolved_subject = _build_resolved_command_subject(
-        context_cwd,
-        command,
-        arguments,
-        workspace_cwd=cwd,
-        project_root_source="workspace" if project_exists else None,
-        project_root_auto_selected=False,
-        reentry_mode="current-workspace" if project_exists else None,
-    )
-    resolved_mode = ""
-    mode_reason = ""
-    explicit_inputs_detail = "explicit standalone inputs detected"
-    peer_review_has_explicit_target = command.name == "gpd:peer-review" and _has_simple_positional_inputs(arguments)
-    external_publication_subject_disallowed = (
-        _command_requires_manuscript_context(command)
-        and not _command_allows_external_manuscript_targets(command)
-        and resolved_subject is not None
-        and resolved_subject.explicit_input
-        and resolved_subject.ownership_mode == "external_artifact"
-        and resolved_subject.status in {"resolved", "bootstrap"}
-    )
-    invalid_explicit_publication_subject = (
-        _command_requires_manuscript_context(command)
-        and not _command_allows_external_manuscript_targets(command)
-        and resolved_subject is not None
-        and resolved_subject.explicit_input
-        and (external_publication_subject_disallowed or resolved_subject.status not in {"resolved", "bootstrap"})
-    )
-    invalid_explicit_publication_subject_detail = (
-        "explicit manuscript target must resolve inside an initialized GPD project for this command"
-        if external_publication_subject_disallowed
-        else resolved_subject.detail
-        if invalid_explicit_publication_subject and resolved_subject is not None
-        else ""
-    )
-    if resolved_subject is not None and not _command_requires_manuscript_context(command):
-        explicit_inputs_ok = resolved_subject.status == "resolved"
-        interactive_intake_allowed = resolved_subject.status == "interactive"
-    else:
-        explicit_inputs_ok = predicate(arguments)
-        if invalid_explicit_publication_subject:
-            explicit_inputs_ok = False
-        if str(getattr(command, "name", "") or "") == "gpd:write-paper" and _has_write_paper_external_authoring_intake(
-            arguments
-        ):
-            explicit_inputs_ok = bool(
-                resolved_subject is not None
-                and resolved_subject.ownership_mode == "external_authoring_intake"
-                and resolved_subject.status in {"resolved", "bootstrap"}
-            )
-        if command.name == "gpd:peer-review":
-            peer_review_mode = _peer_review_mode_resolution(context_cwd, arguments, workspace_cwd=cwd)
-            resolved_mode = peer_review_mode.resolved_mode
-            mode_reason = peer_review_mode.mode_reason
-            if peer_review_has_explicit_target:
-                explicit_inputs_ok = peer_review_mode.resolved_mode != PEER_REVIEW_INVALID_SUBJECT_MODE
-                explicit_inputs_detail = (
-                    peer_review_mode.resolution_detail
-                    if explicit_inputs_ok
-                    else f"invalid explicit review target: {peer_review_mode.mode_reason}"
-                )
-        interactive_intake_allowed = (
-            _command_allows_interactive_subject_intake(command)
-            and not explicit_inputs_ok
-            and not _has_simple_positional_inputs(arguments)
-        )
-    subject_required = _command_has_typed_subject_policy(command)
-    subject_context_ready = resolved_subject is not None and resolved_subject.status in {"resolved", "bootstrap"}
-    project_context_satisfies = project_exists and (
-        not invalid_explicit_publication_subject
-        and (not subject_required or explicit_inputs_ok or interactive_intake_allowed or subject_context_ready)
-    )
-    add_check(
-        "project_exists",
-        project_exists,
-        (
-            f"{_format_display_path(layout.project_md)} present"
-            if project_exists
-            else f"missing {_format_display_path(layout.project_md)}"
-        ),
-        blocking=False,
-    )
-    add_check(
-        "explicit_inputs",
-        explicit_inputs_ok or interactive_intake_allowed,
-        (
-            "validated external authoring intake manifest"
-            if (
-                explicit_inputs_ok
-                and str(getattr(command, "name", "") or "") == "gpd:write-paper"
-                and _has_write_paper_external_authoring_intake(arguments)
-            )
-            else "explicit standalone inputs detected"
-            if explicit_inputs_ok
-            else invalid_explicit_publication_subject_detail
-            if (
-                invalid_explicit_publication_subject
-                or str(getattr(command, "name", "") or "") == "gpd:write-paper"
-                and _has_write_paper_external_authoring_intake(arguments)
-                and resolved_subject is not None
-                and resolved_subject.ownership_mode == "external_authoring_intake"
-            )
-            else explicit_inputs_detail
-            if explicit_inputs_ok or (command.name == "gpd:peer-review" and peer_review_has_explicit_target)
-            else (
-                _command_interactive_subject_detail(command, explicit_inputs)
-                if interactive_intake_allowed
-                else f"missing explicit standalone inputs ({', '.join(explicit_inputs)})"
-            )
-        ),
-        blocking=(
-            peer_review_has_explicit_target
-            if command.name == "gpd:peer-review"
-            else invalid_explicit_publication_subject or (not project_exists and not interactive_intake_allowed)
-        ),
-    )
-    managed_output_context_root = _command_managed_output_context_root(
-        workspace_root=cwd,
-        context_root=context_cwd,
-        project_exists=project_exists,
-    )
-    managed_output_root = _command_managed_output_root(
-        command,
-        project_root=managed_output_context_root,
-        resolved_subject=resolved_subject,
-    )
-    if managed_output_root is not None:
-        add_check(
-            "managed_output_root",
-            True,
-            f"GPD-authored outputs resolve under {_format_display_path(managed_output_root)}",
-            blocking=False,
-        )
-    passed = project_context_satisfies or explicit_inputs_ok or interactive_intake_allowed
-    guidance = (
-        ""
-        if passed
-        else (
-            invalid_explicit_publication_subject_detail
-            if invalid_explicit_publication_subject
-            else _build_project_aware_guidance(explicit_inputs, init_command=init_command)
-        )
-    )
-    if command.name == "gpd:peer-review" and peer_review_has_explicit_target and not explicit_inputs_ok:
-        guidance = explicit_inputs_detail
-    return CommandContextPreflightResult(
-        command=public_command_name,
-        context_mode=effective_context_mode,
-        passed=passed,
-        project_exists=project_exists,
-        explicit_inputs=explicit_inputs,
-        guidance=guidance,
-        checks=checks,
-        resolved_mode=resolved_mode,
-        mode_reason=mode_reason,
+    runtime_surface = CommandRuntimeSurfaceMetadata(
         validated_surface=_validated_runtime_surface(cwd=cwd),
         public_runtime_command_prefix=_active_runtime_command_prefix(cwd=cwd) or "",
-        dispatch_note=dispatch_note,
-        resolved_subject=resolved_subject,
-        selected_publication_root=_command_context_publication_roots(
-            managed_output_context_root,
-            command,
-            resolved_subject,
-        )[0],
-        selected_review_root=_command_context_publication_roots(
-            managed_output_context_root,
-            command,
-            resolved_subject,
-        )[1],
+        init_command=_active_runtime_new_project_command(cwd=cwd),
+        dispatch_note=_runtime_surface_dispatch_note(cwd=cwd),
+    )
+    return _core_build_command_context_preflight(
+        command_name,
+        cwd=cwd,
+        arguments=arguments,
+        command_resolver=_resolve_registry_command,
+        project_reentry_resolver=_status_command_reentry,
+        runtime_surface_metadata=runtime_surface,
     )
 
 
@@ -8559,9 +7841,13 @@ def _build_review_preflight(
     from gpd.core.state import state_validate
 
     cwd = _get_cwd()
-    command_name, subject = _command_label_lookup_and_arguments(command_name, subject)
+    command_name, subject = command_label_lookup_and_arguments(command_name, subject)
     command, public_command_name = _resolve_registry_command(command_name)
-    project_cwd = _command_preflight_cwd(command, cwd=cwd, arguments=subject)
+    project_cwd = _core_command_preflight_cwd(
+        command,
+        cwd=cwd,
+        project_reentry_resolver=_status_command_reentry,
+    )
     layout = ProjectLayout(project_cwd)
     contract = command.review_contract
     if contract is None:

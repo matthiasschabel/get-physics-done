@@ -147,6 +147,124 @@ from gpd.core.root_resolution import (
     resolve_project_roots,
     resolve_state_json_root,
 )
+from gpd.core.staged_context_fields import (
+    ARXIV_SUBMISSION_BOOTSTRAP_FIELDS,
+    ARXIV_SUBMISSION_SNAPSHOT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    EXECUTE_PHASE_CONTRACT_GATE_FIELDS as _EXECUTE_PHASE_CONTRACT_GATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS as _EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS as _EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS as _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    EXECUTE_PHASE_STATE_MEMORY_FIELDS as _EXECUTE_PHASE_STATE_MEMORY_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    EXECUTE_PHASE_STRUCTURED_STATE_FIELDS as _EXECUTE_PHASE_STRUCTURED_STATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    EXECUTE_PHASE_TASK_OVERLAY_FIELDS as _EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    NEW_MILESTONE_FILE_CONTENT_FIELDS as _NEW_MILESTONE_FILE_CONTENT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS as _NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    PEER_REVIEW_REFERENCE_RUNTIME_FIELDS as _PEER_REVIEW_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    PLAN_PHASE_CONTRACT_GATE_FIELDS as _PLAN_PHASE_CONTRACT_GATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    PLAN_PHASE_FILE_CONTENT_FIELDS as _PLAN_PHASE_FILE_CONTENT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    PLAN_PHASE_REFERENCE_RUNTIME_FIELDS as _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    PLAN_PHASE_STATE_MEMORY_FIELDS as _PLAN_PHASE_STATE_MEMORY_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    PLAN_PHASE_STRUCTURED_STATE_FIELDS as _PLAN_PHASE_STRUCTURED_STATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    PROJECT_CONTRACT_GATE_FIELDS as _PROJECT_CONTRACT_GATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    QUICK_CONTRACT_GATE_FIELDS as _QUICK_CONTRACT_GATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    QUICK_REFERENCE_RUNTIME_FIELDS as _QUICK_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    RESEARCH_PHASE_FILE_CONTENT_FIELDS as _RESEARCH_PHASE_FILE_CONTENT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    RESUME_FILE_CONTENT_FIELDS as _RESUME_FILE_CONTENT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    RESUME_REFERENCE_RUNTIME_FIELDS as _RESUME_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    STAGED_FULL_REFERENCE_RUNTIME_FIELDS as _STAGED_FULL_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    STAGED_REFERENCE_BODY_FIELDS as _STAGED_REFERENCE_BODY_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS as _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    STAGED_REFERENCE_SUMMARY_FIELDS as _STAGED_REFERENCE_SUMMARY_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    STATE_MEMORY_FIELDS as _STATE_MEMORY_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    STRUCTURED_STATE_FIELDS as _STRUCTURED_STATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    SYNC_STATE_FILE_CONTENT_FIELDS as _SYNC_STATE_FILE_CONTENT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    SYNC_STATE_STRUCTURED_STATE_FIELDS as _SYNC_STATE_STRUCTURED_STATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    VERIFY_WORK_CONTRACT_GATE_FIELDS as _VERIFY_WORK_CONTRACT_GATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    VERIFY_WORK_REFERENCE_RUNTIME_FIELDS as _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    VERIFY_WORK_SCHEMA_BRIDGE_FIELDS as _VERIFY_WORK_SCHEMA_BRIDGE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    VERIFY_WORK_STATE_MEMORY_FIELDS as _VERIFY_WORK_STATE_MEMORY_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    VERIFY_WORK_STRUCTURED_STATE_FIELDS as _VERIFY_WORK_STRUCTURED_STATE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS as _WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    WRITE_PAPER_FILE_CONTENT_FIELDS as _WRITE_PAPER_FILE_CONTENT_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS as _WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS,
+)
+from gpd.core.staged_context_fields import (
+    WRITE_PAPER_REFERENCE_RUNTIME_FIELDS as _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS,
+)
 from gpd.core.staged_init_assembly import (
     assemble_staged_init_payload as _assemble_staged_init_payload,
 )
@@ -164,19 +282,7 @@ from gpd.core.utils import safe_read_file as _safe_read_file
 from gpd.core.utils import safe_read_file_truncated as _safe_read_file_truncated
 from gpd.core.verification_status import read_verification_status
 from gpd.core.workflow_staging import (
-    ARXIV_SUBMISSION_BOOTSTRAP_FIELDS,
-    ARXIV_SUBMISSION_SNAPSHOT_FIELDS,
-    PEER_REVIEW_INIT_FIELDS,
-    load_arxiv_submission_stage_contract,
-)
-from gpd.core.workflow_staging import (
     AUTONOMOUS_INIT_FIELDS as _AUTONOMOUS_INIT_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS as _EXECUTE_PHASE_SCHEMA_BRIDGE_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    EXECUTE_PHASE_TASK_OVERLAY_FIELDS as _EXECUTE_PHASE_TASK_OVERLAY_FIELDS,
 )
 from gpd.core.workflow_staging import (
     LITERATURE_REVIEW_INIT_FIELDS as _LITERATURE_REVIEW_INIT_FIELDS,
@@ -188,55 +294,23 @@ from gpd.core.workflow_staging import (
     NEW_MILESTONE_INIT_FIELDS as _NEW_MILESTONE_INIT_FIELDS,
 )
 from gpd.core.workflow_staging import (
-    PLAN_PHASE_CONTRACT_GATE_FIELDS as _PLAN_PHASE_CONTRACT_GATE_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    PLAN_PHASE_FILE_CONTENT_FIELDS as _PLAN_PHASE_FILE_CONTENT_FIELDS,
+    PEER_REVIEW_INIT_FIELDS,
+    load_arxiv_submission_stage_contract,
 )
 from gpd.core.workflow_staging import (
     PLAN_PHASE_INIT_FIELDS as _PLAN_PHASE_INIT_FIELDS,
 )
 from gpd.core.workflow_staging import (
-    PLAN_PHASE_REFERENCE_RUNTIME_FIELDS as _PLAN_PHASE_REFERENCE_RUNTIME_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    PLAN_PHASE_STATE_MEMORY_FIELDS as _PLAN_PHASE_STATE_MEMORY_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    PLAN_PHASE_STRUCTURED_STATE_FIELDS as _PLAN_PHASE_STRUCTURED_STATE_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    QUICK_CONTRACT_GATE_FIELDS as _QUICK_CONTRACT_GATE_FIELDS,
-)
-from gpd.core.workflow_staging import (
     QUICK_INIT_FIELDS as _QUICK_INIT_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    QUICK_REFERENCE_RUNTIME_FIELDS as _QUICK_REFERENCE_RUNTIME_FIELDS,
 )
 from gpd.core.workflow_staging import (
     RESEARCH_PHASE_INIT_FIELDS as _RESEARCH_PHASE_INIT_FIELDS,
 )
 from gpd.core.workflow_staging import (
-    VERIFY_WORK_CONTRACT_GATE_FIELDS as _VERIFY_WORK_CONTRACT_GATE_FIELDS,
-)
-from gpd.core.workflow_staging import (
     VERIFY_WORK_INIT_FIELDS as _VERIFY_WORK_INIT_FIELDS,
 )
 from gpd.core.workflow_staging import (
-    VERIFY_WORK_REFERENCE_RUNTIME_FIELDS as _VERIFY_WORK_REFERENCE_RUNTIME_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    VERIFY_WORK_SCHEMA_BRIDGE_FIELDS as _VERIFY_WORK_SCHEMA_BRIDGE_FIELDS,
-)
-from gpd.core.workflow_staging import (
     VERIFY_WORK_STAGE_ALLOWED_TOOLS as _VERIFY_WORK_STAGE_ALLOWED_TOOLS,
-)
-from gpd.core.workflow_staging import (
-    VERIFY_WORK_STATE_MEMORY_FIELDS as _VERIFY_WORK_STATE_MEMORY_FIELDS,
-)
-from gpd.core.workflow_staging import (
-    VERIFY_WORK_STRUCTURED_STATE_FIELDS as _VERIFY_WORK_STRUCTURED_STATE_FIELDS,
 )
 from gpd.core.workflow_staging import (
     WRITE_PAPER_INIT_FIELDS as _WRITE_PAPER_INIT_FIELDS,
@@ -364,23 +438,6 @@ _QUICK_STAGE_ALLOWED_TOOLS = frozenset(
         "task",
     }
 )
-_PROJECT_CONTRACT_GATE_FIELDS = _PLAN_PHASE_CONTRACT_GATE_FIELDS
-_STRUCTURED_STATE_FIELDS = _PLAN_PHASE_STRUCTURED_STATE_FIELDS
-_STATE_MEMORY_FIELDS = _PLAN_PHASE_STATE_MEMORY_FIELDS
-_RESUME_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        "contract_intake",
-        "effective_reference_intake",
-        "active_reference_context",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-    }
-)
-_RESUME_FILE_CONTENT_FIELDS = frozenset(
-    {"state_content", "project_content", "roadmap_content", "derivation_state_content", "continuity_handoff_content"}
-)
-_SYNC_STATE_FILE_CONTENT_FIELDS = frozenset({"state_md_content", "state_json_content", "state_json_backup_content"})
-_SYNC_STATE_STRUCTURED_STATE_FIELDS = frozenset({"state_load_source", "state_integrity_issues"})
 _WRITE_PAPER_STAGE_ALLOWED_TOOLS = frozenset(
     {
         "ask_user",
@@ -394,64 +451,6 @@ _WRITE_PAPER_STAGE_ALLOWED_TOOLS = frozenset(
         "web_search",
     }
 )
-_WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS = frozenset(
-    {
-        "active_reference_context",
-        "contract_intake",
-        "derived_manuscript_proof_review_status",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "effective_reference_intake",
-        "protocol_bundle_context",
-        "protocol_bundle_load_manifest",
-        "selected_protocol_bundle_ids",
-    }
-)
-_WRITE_PAPER_PUBLICATION_BOOTSTRAP_FIELDS = frozenset(
-    {
-        "publication_subject",
-        "publication_subject_status",
-        "publication_subject_source",
-        "publication_subject_detail",
-        "publication_subject_slug",
-        "publication_lane_kind",
-        "publication_lane_owner",
-        "publication_artifact_base",
-        "selected_publication_root",
-        "selected_review_root",
-        "publication_intake_root",
-        "manuscript_resolution_status",
-        "manuscript_resolution_detail",
-        "manuscript_root",
-        "manuscript_entrypoint",
-        "artifact_manifest_path",
-        "bibliography_audit_path",
-        "reproducibility_manifest_path",
-        "managed_publication_root",
-        "managed_manuscript_root",
-        "publication_bootstrap",
-        "publication_bootstrap_mode",
-        "publication_bootstrap_root",
-        "publication_bootstrap_detail",
-    }
-)
-_WRITE_PAPER_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        *_WRITE_PAPER_BOOTSTRAP_REFERENCE_FIELDS,
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-    }
-)
-_WRITE_PAPER_FILE_CONTENT_FIELDS = frozenset({"state_content", "roadmap_content", "requirements_content"})
 _PEER_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
     {
         "ask_user",
@@ -464,7 +463,6 @@ _PEER_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
         "web_search",
     }
 )
-_PEER_REVIEW_REFERENCE_RUNTIME_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS | _WRITE_PAPER_REFERENCE_RUNTIME_FIELDS
 _NEW_MILESTONE_STAGE_ALLOWED_TOOLS = frozenset(
     {
         "ask_user",
@@ -474,156 +472,12 @@ _NEW_MILESTONE_STAGE_ALLOWED_TOOLS = frozenset(
         "task",
     }
 )
-_NEW_MILESTONE_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        "active_reference_context",
-        "contract_intake",
-        "effective_reference_intake",
-        "literature_review_count",
-        "literature_review_files",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "research_map_reference_count",
-        "research_map_reference_files",
-    }
-)
-_NEW_MILESTONE_FILE_CONTENT_FIELDS = frozenset(
-    {"project_content", "state_content", "milestones_content", "requirements_content", "roadmap_content"}
-)
-_EXECUTE_PHASE_CONTRACT_GATE_FIELDS = _PROJECT_CONTRACT_GATE_FIELDS
-_EXECUTE_PHASE_REFERENCE_RUNTIME_FIELDS = frozenset(
-    {
-        "contract_intake",
-        "effective_reference_intake",
-        "derived_active_references",
-        "derived_active_reference_count",
-        "derived_knowledge_docs",
-        "derived_knowledge_doc_count",
-        "knowledge_doc_warnings",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_load_manifest",
-        "protocol_bundle_verifier_extensions",
-        "protocol_bundle_context",
-        "active_reference_context",
-        "active_references",
-        "active_reference_count",
-        "knowledge_doc_files",
-        "knowledge_doc_count",
-        "stable_knowledge_doc_files",
-        "stable_knowledge_doc_count",
-        "knowledge_doc_status_counts",
-        "reference_artifact_files",
-        "reference_artifacts_content",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_manuscript_proof_review_status",
-    }
-)
-_EXECUTE_PHASE_STRUCTURED_STATE_FIELDS = _STRUCTURED_STATE_FIELDS
-_EXECUTE_PHASE_STATE_MEMORY_FIELDS = _STATE_MEMORY_FIELDS
-_EXECUTE_PHASE_EXECUTION_RUNTIME_FIELDS = frozenset(
-    {
-        "current_execution",
-        "has_live_execution",
-        "execution_review_pending",
-        "execution_pre_fanout_review_pending",
-        "execution_skeptical_requestioning_required",
-        "execution_downstream_locked",
-        "execution_blocked",
-        "execution_resumable",
-        "execution_paused_at",
-        "current_execution_resume_file",
-        "handoff_resume_file",
-        "recorded_handoff_resume_file",
-        "missing_handoff_resume_file",
-        "execution_resume_file",
-        "execution_resume_file_source",
-        "resume_projection",
-        "current_hostname",
-        "current_platform",
-        "session_hostname",
-        "session_platform",
-        "session_last_date",
-        "session_stopped_at",
-        "machine_change_detected",
-        "machine_change_notice",
-        "derived_execution_head",
-        "continuity_handoff_file",
-        "recorded_continuity_handoff_file",
-        "missing_continuity_handoff_file",
-        "has_continuity_handoff",
-    }
-)
 _EXECUTE_PHASE_EXECUTOR_TASK_OVERLAY_IDS = ("executor.bounded_segment",)
 _EXECUTE_PHASE_TASK_OVERLAY_SELECTION_SOURCE = "execute-phase.executor_dispatch"
 _EXECUTE_PHASE_TASK_OVERLAY_POLICY_SUMMARY = (
     "Selected executor.bounded_segment for execute-phase executor_dispatch bounded fanout; "
     "selected entries stay metadata-only."
 )
-# Staged reference fields are split by hydration cost. Handle/status fields expose
-# ids, counts, paths, statuses, and load manifests; they must not render long
-# prose context or read artifact bodies unless the active stage selects those
-# body/rendered fields explicitly.
-_STAGED_REFERENCE_CONTRACT_HANDLE_STATUS_FIELDS = frozenset(
-    {
-        "contract_intake",
-        "effective_reference_intake",
-        "selected_protocol_bundle_ids",
-        "protocol_bundle_count",
-        "protocol_bundle_load_manifest",
-        "protocol_bundle_verifier_extensions",
-        "active_references",
-        "active_reference_count",
-    }
-)
-_STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS = frozenset({"protocol_bundle_context", "active_reference_context"})
-_STAGED_REFERENCE_ARTIFACT_HANDLE_STATUS_FIELDS = frozenset(
-    {
-        "derived_active_references",
-        "derived_active_reference_count",
-        "derived_knowledge_docs",
-        "derived_knowledge_doc_count",
-        "knowledge_doc_warnings",
-        "citation_source_files",
-        "citation_source_count",
-        "citation_source_warnings",
-        "derived_citation_sources",
-        "derived_citation_source_count",
-        "derived_manuscript_reference_status",
-        "derived_manuscript_reference_status_count",
-        "knowledge_doc_files",
-        "knowledge_doc_count",
-        "stable_knowledge_doc_files",
-        "stable_knowledge_doc_count",
-        "knowledge_doc_status_counts",
-        "reference_artifact_files",
-        "literature_review_files",
-        "literature_review_count",
-        "research_map_reference_files",
-        "research_map_reference_count",
-        "derived_manuscript_proof_review_status",
-    }
-)
-_STAGED_REFERENCE_HANDLE_STATUS_FIELDS = (
-    _STAGED_REFERENCE_CONTRACT_HANDLE_STATUS_FIELDS | _STAGED_REFERENCE_ARTIFACT_HANDLE_STATUS_FIELDS
-)
-_STAGED_REFERENCE_BODY_FIELDS = frozenset({"reference_artifacts_content"})
-_STAGED_REFERENCE_SUMMARY_FIELDS = (
-    _STAGED_REFERENCE_CONTRACT_HANDLE_STATUS_FIELDS | _STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS
-)
-_STAGED_FULL_REFERENCE_RUNTIME_FIELDS = _STAGED_REFERENCE_ARTIFACT_HANDLE_STATUS_FIELDS | _STAGED_REFERENCE_BODY_FIELDS
-_STAGED_REFERENCE_ARTIFACT_CONTENT_FIELDS = _STAGED_REFERENCE_BODY_FIELDS
-_RESEARCH_PHASE_FILE_CONTENT_FIELDS = frozenset({"state_content", "config_content", "roadmap_content"})
 _PLAN_PHASE_PLANNING_FILE_CONTEXT_PATHS = {
     "state_content": f"{PLANNING_DIR_NAME}/{STATE_MD_FILENAME}",
     "roadmap_content": f"{PLANNING_DIR_NAME}/{ROADMAP_FILENAME}",

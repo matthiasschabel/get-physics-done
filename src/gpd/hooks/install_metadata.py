@@ -83,6 +83,10 @@ class InstallTargetAssessment:
     manifest_runtime: str | None
     has_managed_markers: bool
     missing_install_artifacts: tuple[str, ...] = ()
+    manifest_scope_state: str = "missing"
+    manifest_scope: str | None = None
+    manifest_explicit_target_state: str = "missing"
+    manifest_explicit_target: bool | None = None
 
     @property
     def readiness_state(self) -> str:
@@ -132,6 +136,39 @@ class ManagedInstallSurface:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class InstallManifestSnapshot:
+    """Parsed install-manifest identity facts for a runtime config directory."""
+
+    config_dir: Path
+    parse_state: str
+    payload: dict[str, object]
+    runtime_state: str
+    runtime: str | None
+    scope_state: str
+    install_scope: str | None
+    explicit_target_state: str
+    explicit_target: bool | None
+
+    @property
+    def manifest_path(self) -> Path:
+        """Return the manifest path represented by this snapshot."""
+        return self.config_dir / MANIFEST_NAME
+
+    @property
+    def exists_as_object(self) -> bool:
+        """Return whether the manifest exists and parsed as a JSON object."""
+        return self.parse_state == "ok"
+
+    def matches_candidate(self, *, runtime: str | None = None, scope: str | None = None) -> bool:
+        """Return whether this snapshot proves the requested runtime and scope facts."""
+        if runtime is not None and (self.runtime_state != "ok" or self.runtime != runtime):
+            return False
+        if scope is not None and (self.scope_state != "ok" or self.install_scope != scope):
+            return False
+        return True
+
+
 def inspect_managed_install_surface(config_dir: Path, *, runtime: str | None = None) -> ManagedInstallSurface:
     """Return the managed install surfaces currently materialized in *config_dir*."""
     policy = get_managed_install_surface_policy(runtime)
@@ -149,14 +186,7 @@ def config_dir_has_managed_install_markers(config_dir: Path, *, runtime: str | N
     return inspect_managed_install_surface(config_dir, runtime=runtime).has_managed_markers
 
 
-def load_install_manifest_state(config_dir: Path) -> tuple[str, dict[str, object]]:
-    """Return the manifest parse state and payload for *config_dir*.
-
-    The state is one of ``missing``, ``corrupt``, ``invalid``, or ``ok``.
-    ``ok`` means the manifest parsed as a mapping; the payload is the parsed
-    dict in that case and ``{}`` otherwise.
-    """
-
+def _load_install_manifest_payload(config_dir: Path) -> tuple[str, dict[str, object]]:
     manifest_path = config_dir / MANIFEST_NAME
     try:
         raw = manifest_path.read_text(encoding="utf-8")
@@ -175,68 +205,116 @@ def load_install_manifest_state(config_dir: Path) -> tuple[str, dict[str, object
     return "ok", payload
 
 
-def load_install_manifest_runtime_status(config_dir: Path) -> tuple[str, dict[str, object], str | None]:
-    """Return the manifest parse state, payload, and runtime id when available."""
-
-    state, payload = load_install_manifest_state(config_dir)
-    if state != "ok":
-        return state, payload, None
-
+def _classify_manifest_runtime(payload: dict[str, object]) -> tuple[str, str | None]:
     if "runtime" not in payload:
-        return "missing_runtime", payload, None
+        return "missing_runtime", None
 
     runtime = payload.get("runtime")
     if not isinstance(runtime, str):
-        return "malformed_runtime", payload, None
+        return "malformed_runtime", None
 
     normalized_runtime = runtime.strip()
     if not normalized_runtime:
-        return "malformed_runtime", payload, None
+        return "malformed_runtime", None
 
     canonical_runtime = _canonical_manifest_runtime_name(normalized_runtime)
     if canonical_runtime is not None:
-        return "ok", payload, canonical_runtime
+        return "ok", canonical_runtime
 
     unsupported_runtime = _unsupported_manifest_runtime_name(normalized_runtime)
     if unsupported_runtime is not None:
-        return "unsupported_runtime", payload, unsupported_runtime
-    return "malformed_runtime", payload, None
+        return "unsupported_runtime", unsupported_runtime
+    return "malformed_runtime", None
+
+
+def _classify_manifest_scope(payload: dict[str, object]) -> tuple[str, str | None]:
+    if "install_scope" not in payload:
+        return "missing_install_scope", None
+
+    scope = payload.get("install_scope")
+    if not isinstance(scope, str):
+        return "malformed_install_scope", None
+
+    normalized_scope = scope.strip()
+    if normalized_scope not in {"local", "global"}:
+        return "malformed_install_scope", None
+    return "ok", normalized_scope
+
+
+def _classify_manifest_explicit_target(payload: dict[str, object]) -> tuple[str, bool | None]:
+    if "explicit_target" not in payload:
+        return "missing_explicit_target", None
+
+    explicit_target = payload.get("explicit_target")
+    if not isinstance(explicit_target, bool):
+        return "malformed_explicit_target", None
+    return "ok", explicit_target
+
+
+def load_install_manifest_snapshot(config_dir: Path) -> InstallManifestSnapshot:
+    """Return the parsed manifest payload and derived identity facts for *config_dir*."""
+
+    parse_state, payload = _load_install_manifest_payload(config_dir)
+    if parse_state != "ok":
+        return InstallManifestSnapshot(
+            config_dir=config_dir,
+            parse_state=parse_state,
+            payload=payload,
+            runtime_state=parse_state,
+            runtime=None,
+            scope_state=parse_state,
+            install_scope=None,
+            explicit_target_state=parse_state,
+            explicit_target=None,
+        )
+
+    runtime_state, runtime = _classify_manifest_runtime(payload)
+    scope_state, install_scope = _classify_manifest_scope(payload)
+    explicit_target_state, explicit_target = _classify_manifest_explicit_target(payload)
+    return InstallManifestSnapshot(
+        config_dir=config_dir,
+        parse_state=parse_state,
+        payload=payload,
+        runtime_state=runtime_state,
+        runtime=runtime,
+        scope_state=scope_state,
+        install_scope=install_scope,
+        explicit_target_state=explicit_target_state,
+        explicit_target=explicit_target,
+    )
+
+
+def load_install_manifest_state(config_dir: Path) -> tuple[str, dict[str, object]]:
+    """Return the manifest parse state and payload for *config_dir*.
+
+    The state is one of ``missing``, ``corrupt``, ``invalid``, or ``ok``.
+    ``ok`` means the manifest parsed as a mapping; the payload is the parsed
+    dict in that case and ``{}`` otherwise.
+    """
+
+    snapshot = load_install_manifest_snapshot(config_dir)
+    return snapshot.parse_state, snapshot.payload
+
+
+def load_install_manifest_runtime_status(config_dir: Path) -> tuple[str, dict[str, object], str | None]:
+    """Return the manifest parse state, payload, and runtime id when available."""
+
+    snapshot = load_install_manifest_snapshot(config_dir)
+    return snapshot.runtime_state, snapshot.payload, snapshot.runtime
 
 
 def load_install_manifest_scope_status(config_dir: Path) -> tuple[str, dict[str, object], str | None]:
     """Return the manifest parse state, payload, and canonical install scope when available."""
 
-    state, payload = load_install_manifest_state(config_dir)
-    if state != "ok":
-        return state, payload, None
-
-    if "install_scope" not in payload:
-        return "missing_install_scope", payload, None
-
-    scope = payload.get("install_scope")
-    if not isinstance(scope, str):
-        return "malformed_install_scope", payload, None
-
-    normalized_scope = scope.strip()
-    if normalized_scope not in {"local", "global"}:
-        return "malformed_install_scope", payload, None
-    return "ok", payload, normalized_scope
+    snapshot = load_install_manifest_snapshot(config_dir)
+    return snapshot.scope_state, snapshot.payload, snapshot.install_scope
 
 
 def load_install_manifest_explicit_target_status(config_dir: Path) -> tuple[str, dict[str, object], bool | None]:
     """Return the manifest parse state, payload, and explicit-target flag when available."""
 
-    state, payload = load_install_manifest_state(config_dir)
-    if state != "ok":
-        return state, payload, None
-
-    if "explicit_target" not in payload:
-        return "missing_explicit_target", payload, None
-
-    explicit_target = payload.get("explicit_target")
-    if not isinstance(explicit_target, bool):
-        return "malformed_explicit_target", payload, None
-    return "ok", payload, explicit_target
+    snapshot = load_install_manifest_snapshot(config_dir)
+    return snapshot.explicit_target_state, snapshot.payload, snapshot.explicit_target
 
 
 def _safe_manifest_path_segment(value: object) -> str | None:
@@ -343,6 +421,7 @@ def assess_install_target(
     config_dir: Path,
     *,
     expected_runtime: str | None = None,
+    manifest: InstallManifestSnapshot | None = None,
 ) -> InstallTargetAssessment:
     """Classify the GPD install state for *config_dir*.
 
@@ -357,50 +436,67 @@ def assess_install_target(
     """
 
     resolved = config_dir.expanduser().resolve(strict=False)
-    manifest_state, _payload, manifest_runtime = load_install_manifest_runtime_status(resolved)
-    manifest_scope_state, _scope_payload, _manifest_scope = load_install_manifest_scope_status(resolved)
+    if manifest is None:
+        manifest = load_install_manifest_snapshot(resolved)
+    elif manifest.config_dir.expanduser().resolve(strict=False) != resolved:
+        raise ValueError("install manifest snapshot config_dir does not match assessed config_dir")
+
+    manifest_state = manifest.runtime_state
+    manifest_runtime = manifest.runtime
+    manifest_scope_state = manifest.scope_state
     has_managed_markers = config_dir_has_managed_install_markers(resolved)
     missing_install_artifacts: tuple[str, ...] = ()
 
+    def _assessment(
+        *,
+        state: str,
+        manifest_state: str,
+        has_managed_markers: bool,
+        missing_install_artifacts: tuple[str, ...] = (),
+    ) -> InstallTargetAssessment:
+        return InstallTargetAssessment(
+            config_dir=resolved,
+            expected_runtime=expected_runtime,
+            state=state,
+            manifest_state=manifest_state,
+            manifest_runtime=manifest_runtime,
+            has_managed_markers=has_managed_markers,
+            missing_install_artifacts=missing_install_artifacts,
+            manifest_scope_state=manifest.scope_state,
+            manifest_scope=manifest.install_scope,
+            manifest_explicit_target_state=manifest.explicit_target_state,
+            manifest_explicit_target=manifest.explicit_target,
+        )
+
     if manifest_state == "ok" and manifest_runtime is not None:
         if expected_runtime is not None and manifest_runtime != expected_runtime:
-            return InstallTargetAssessment(
-                config_dir=resolved,
-                expected_runtime=expected_runtime,
+            return _assessment(
                 state="foreign_runtime",
                 manifest_state=manifest_state,
-                manifest_runtime=manifest_runtime,
                 has_managed_markers=True,
             )
         if manifest_scope_state != "ok":
-            return InstallTargetAssessment(
-                config_dir=resolved,
-                expected_runtime=expected_runtime,
+            return _assessment(
                 state="untrusted_manifest",
                 manifest_state=manifest_scope_state,
-                manifest_runtime=manifest_runtime,
                 has_managed_markers=True,
             )
-        explicit_target_state, _explicit_target_payload, _explicit_target = (
-            load_install_manifest_explicit_target_status(resolved)
-        )
+        explicit_target_state = manifest.explicit_target_state
         if explicit_target_state in {"missing_explicit_target", "malformed_explicit_target"}:
-            return InstallTargetAssessment(
-                config_dir=resolved,
-                expected_runtime=expected_runtime,
+            return _assessment(
                 state="untrusted_manifest",
                 manifest_state=explicit_target_state,
-                manifest_runtime=manifest_runtime,
                 has_managed_markers=True,
             )
-        path_metadata_state = _manifest_path_metadata_state(_payload, config_dir=resolved, runtime=manifest_runtime)
+        path_metadata_state = _manifest_path_metadata_state(
+            manifest.payload,
+            config_dir=resolved,
+            runtime=manifest_runtime,
+        )
         if path_metadata_state != "ok":
-            return InstallTargetAssessment(
-                config_dir=resolved,
-                expected_runtime=expected_runtime,
+            return _assessment(
                 state="untrusted_manifest",
                 manifest_state=path_metadata_state,
-                manifest_runtime=manifest_runtime,
                 has_managed_markers=True,
             )
         try:
@@ -410,24 +506,18 @@ def assess_install_target(
         else:
             missing_install_artifacts = adapter.missing_install_artifacts(resolved)
             state = "owned_complete" if not missing_install_artifacts else "owned_incomplete"
-        return InstallTargetAssessment(
-            config_dir=resolved,
-            expected_runtime=expected_runtime,
+        return _assessment(
             state=state,
             manifest_state=manifest_state,
-            manifest_runtime=manifest_runtime,
             has_managed_markers=True,
             missing_install_artifacts=missing_install_artifacts,
         )
 
     if manifest_state == "unsupported_runtime" and manifest_runtime is not None:
         state = "foreign_runtime" if expected_runtime is not None else "unsupported_runtime"
-        return InstallTargetAssessment(
-            config_dir=resolved,
-            expected_runtime=expected_runtime,
+        return _assessment(
             state=state,
             manifest_state=manifest_state,
-            manifest_runtime=manifest_runtime,
             has_managed_markers=True,
         )
 
@@ -436,12 +526,9 @@ def assess_install_target(
     else:
         state = "untrusted_manifest"
 
-    return InstallTargetAssessment(
-        config_dir=resolved,
-        expected_runtime=expected_runtime,
+    return _assessment(
         state=state,
         manifest_state=manifest_state,
-        manifest_runtime=manifest_runtime,
         has_managed_markers=has_managed_markers,
     )
 
@@ -449,14 +536,14 @@ def assess_install_target(
 def install_scope_from_manifest(config_dir: Path) -> str | None:
     """Return the persisted install scope for *config_dir*."""
 
-    state, _payload, scope = load_install_manifest_scope_status(config_dir)
-    return scope if state == "ok" else None
+    manifest = load_install_manifest_snapshot(config_dir)
+    return manifest.install_scope if manifest.scope_state == "ok" else None
 
 
 def _manifest_runtime(config_dir: Path) -> str | None:
     """Return the authoritative runtime declared in *config_dir*'s manifest."""
-    manifest_state, _payload, runtime = load_install_manifest_runtime_status(config_dir)
-    return runtime if manifest_state == "ok" else None
+    manifest = load_install_manifest_snapshot(config_dir)
+    return manifest.runtime if manifest.runtime_state == "ok" else None
 
 
 def installed_runtime(config_dir: Path) -> str | None:
@@ -472,31 +559,28 @@ def config_dir_has_complete_install(config_dir: Path) -> bool:
 def installed_update_command(config_dir: Path) -> str | None:
     """Return the bootstrap update command for the install in *config_dir*."""
 
-    manifest_state, manifest, runtime = load_install_manifest_runtime_status(config_dir)
-    if manifest_state != "ok" or runtime is None:
+    manifest = load_install_manifest_snapshot(config_dir)
+    if manifest.runtime_state != "ok" or manifest.runtime is None:
         return None
 
-    scope = manifest.get("install_scope")
-    if scope not in {"local", "global"}:
+    scope = manifest.payload.get("install_scope")
+    if not isinstance(scope, str) or scope not in {"local", "global"}:
         return None
 
-    explicit_target_state, _explicit_target_manifest, explicit_target = load_install_manifest_explicit_target_status(
-        config_dir
-    )
-    if explicit_target_state != "ok" or explicit_target is None:
+    if manifest.explicit_target_state != "ok" or manifest.explicit_target is None:
         # Fail closed for manifests that do not prove whether the
         # install was explicitly targeted. Update-command synthesis is only
         # trusted when the manifest carries the authoritative flag.
         return None
 
     try:
-        get_adapter(runtime)
+        get_adapter(manifest.runtime)
     except KeyError:
         return None
 
     return build_runtime_install_repair_command(
-        runtime,
+        manifest.runtime,
         install_scope=scope,
         target_dir=config_dir,
-        explicit_target=explicit_target,
+        explicit_target=manifest.explicit_target,
     )

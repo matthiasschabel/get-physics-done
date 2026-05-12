@@ -13,7 +13,7 @@ from gpd.adapters.install_utils import CACHE_DIR_NAME, GPD_INSTALL_DIR_NAME, UPD
 from gpd.adapters.runtime_catalog import get_shared_install_metadata
 from gpd.core.constants import ENV_GPD_DEBUG
 from gpd.hooks.install_context import should_prefer_self_owned_install
-from gpd.hooks.install_metadata import config_dir_has_complete_install, load_install_manifest_state
+from gpd.hooks.install_metadata import assess_install_target, load_install_manifest_snapshot
 
 _SHARED_INSTALL_METADATA = get_shared_install_metadata()
 SECONDS_PER_HOUR = 3600
@@ -106,7 +106,7 @@ def _version_files() -> list[Path]:
     version_files: list[Path] = []
     for install_dir in get_gpd_install_dirs(prefer_active=True):
         config_dir = install_dir.parent
-        if not config_dir_has_complete_install(config_dir):
+        if assess_install_target(config_dir).state != "owned_complete":
             _debug(f"Skipping non-authoritative VERSION file candidate {install_dir / 'VERSION'}")
             continue
         version_files.append(install_dir / "VERSION")
@@ -115,10 +115,10 @@ def _version_files() -> list[Path]:
 
 def _read_manifest_version(config_dir: Path) -> str | None:
     """Return the install manifest's version when it is present and usable."""
-    manifest_state, manifest = load_install_manifest_state(config_dir)
-    if manifest_state != "ok":
+    manifest = load_install_manifest_snapshot(config_dir)
+    if not manifest.exists_as_object:
         return None
-    version = manifest.get("version")
+    version = manifest.payload.get("version")
     if not isinstance(version, str):
         return None
     version = version.strip()

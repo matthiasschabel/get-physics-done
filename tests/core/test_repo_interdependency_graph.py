@@ -7,6 +7,8 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from gpd.registry import LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS
 from scripts.generated_region_support import marker_start_counts
 from scripts.repo_graph_contract import (
@@ -294,6 +296,20 @@ def test_graph_readme_generated_blocks_match_contract() -> None:
 
     assert marker_start_counts(graph_text, spec=REPO_GRAPH_REGION_SPEC) == dict.fromkeys(REPO_GRAPH_BLOCK_IDS, 1)
     assert sync_readme_text(graph_text, contract) == graph_text
+
+
+def test_graph_readme_inventory_rejects_missing_and_duplicate_generated_blocks() -> None:
+    contract = load_contract()
+    graph_text = read_graph_text()
+    start = graph_text.index(GENERATED_ON_START)
+    end = graph_text.index(GENERATED_ON_END, start) + len(GENERATED_ON_END)
+    generated_on_region = graph_text[start:end]
+
+    with pytest.raises(ValueError, match="missing 1 expected marker\\(s\\) for 'generated-on'"):
+        sync_readme_text(graph_text[:start] + graph_text[end:], contract)
+
+    with pytest.raises(ValueError, match="duplicate marker for 'generated-on' is not allowed"):
+        sync_readme_text(graph_text + "\n" + generated_on_region, contract)
 
 
 def test_graph_check_detects_stale_generated_contract_without_mutation(tmp_path: Path) -> None:

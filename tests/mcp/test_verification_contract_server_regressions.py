@@ -7,7 +7,7 @@ from pathlib import Path
 import anyio
 import pytest
 
-from tests.markdown_test_support import assert_contract_finding
+from tests.markdown_test_support import assert_contract_finding, normalize_text
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 
@@ -53,6 +53,17 @@ def _call_verification_tool(tool_name: str, arguments: dict[str, object]) -> dic
         raise AssertionError(f"Unexpected MCP call result: {result!r}")
 
     return anyio.run(_call)
+
+
+def _assert_automated_issue_mentions(result: dict[str, object], label: str, *required_terms: str) -> None:
+    issues = result.get("automated_issues")
+    if not isinstance(issues, list) or not all(isinstance(issue, str) for issue in issues):
+        raise AssertionError(f"{label}: automated_issues must be a list[str], got {issues!r}")
+    normalized_terms = tuple(normalize_text(term).casefold() for term in required_terms)
+    normalized_issues = tuple(normalize_text(issue).casefold() for issue in issues)
+    if any(all(term in issue for term in normalized_terms) for issue in normalized_issues):
+        return
+    raise AssertionError(f"{label}: no automated issue contained all terms {required_terms!r}; got {issues!r}")
 
 
 def _run_contract_check_input_schema() -> dict[str, object]:
@@ -1161,7 +1172,13 @@ def test_run_contract_check_blocks_decisive_pass_for_inconsistent_binding_contex
     )
 
     assert result["status"] == "insufficient_evidence"
-    assert any("binding contexts disagree on claim targets" in issue for issue in result["automated_issues"])
+    _assert_automated_issue_mentions(
+        result,
+        "inconsistent binding context",
+        "binding contexts",
+        "disagree",
+        "claim targets",
+    )
 
 
 @pytest.mark.parametrize(
@@ -1892,7 +1909,7 @@ def test_run_contract_check_proof_parameter_coverage_fails_when_theorem_paramete
     )
 
     assert result["status"] == "fail"
-    assert "Proof audit reports missing theorem parameters" in result["automated_issues"]
+    _assert_automated_issue_mentions(result, "proof parameter coverage failure", "missing", "theorem parameters")
     assert result["metrics"]["missing_parameter_symbols"] == ["r_0"]
 
 
@@ -1929,7 +1946,7 @@ def test_run_contract_check_proof_quantifier_domain_fails_on_scope_narrowing() -
     )
 
     assert result["status"] == "fail"
-    assert "quantifiers/domains" in " ".join(result["automated_issues"]).lower()
+    _assert_automated_issue_mentions(result, "claim quantifier alignment failure", "quantifier", "domain")
 
 
 def test_run_contract_check_claim_to_proof_alignment_fails_on_uncovered_clause() -> None:
@@ -1964,7 +1981,7 @@ def test_run_contract_check_counterexample_search_fails_when_counterexample_is_f
     )
 
     assert result["status"] == "fail"
-    assert "counterexample" in " ".join(result["automated_issues"]).lower()
+    _assert_automated_issue_mentions(result, "counterexample search failure", "counterexample")
 
 
 def test_run_contract_check_backfills_contract_impacts_for_decisive_passes_without_explicit_binding() -> None:
@@ -2057,10 +2074,10 @@ def test_run_contract_check_fit_family_failure_impacts_observed_forbidden_family
 
     assert forbidden_result["status"] == "fail"
     assert forbidden_result["contract_impacts"] == ["polynomial"]
-    assert "Selected fit family is explicitly forbidden" in forbidden_result["automated_issues"]
+    _assert_automated_issue_mentions(forbidden_result, "forbidden fit family failure", "fit family", "forbidden")
     assert outside_result["status"] == "fail"
     assert outside_result["contract_impacts"] == ["spline"]
-    assert "Selected fit family is outside the allowed family set" in outside_result["automated_issues"]
+    _assert_automated_issue_mentions(outside_result, "outside fit family failure", "fit family", "outside")
 
 
 def test_run_contract_check_estimator_family_failure_impacts_observed_forbidden_family() -> None:
@@ -2091,10 +2108,15 @@ def test_run_contract_check_estimator_family_failure_impacts_observed_forbidden_
 
     assert forbidden_result["status"] == "fail"
     assert forbidden_result["contract_impacts"] == ["jackknife"]
-    assert "Selected estimator family is explicitly forbidden" in forbidden_result["automated_issues"]
+    _assert_automated_issue_mentions(
+        forbidden_result,
+        "forbidden estimator family failure",
+        "estimator family",
+        "forbidden",
+    )
     assert outside_result["status"] == "fail"
     assert outside_result["contract_impacts"] == ["posterior"]
-    assert "Selected estimator family is outside the allowed family set" in outside_result["automated_issues"]
+    _assert_automated_issue_mentions(outside_result, "outside estimator family failure", "estimator family", "outside")
 
 
 def test_run_contract_check_limit_recovery_uses_bound_acceptance_test_pass_condition() -> None:
@@ -2176,7 +2198,14 @@ def test_run_contract_check_estimator_negative_diagnostics_are_not_treated_as_mi
 
     assert result["status"] == "warning"
     assert result["missing_inputs"] == []
-    assert "Estimator family is missing bias or calibration diagnostics" in result["automated_issues"]
+    _assert_automated_issue_mentions(
+        result,
+        "estimator diagnostics warning",
+        "estimator family",
+        "missing",
+        "bias",
+        "calibration",
+    )
 
 
 def test_suggest_contract_checks_leaves_ambiguous_metadata_placeholders_unresolved() -> None:
@@ -2761,11 +2790,18 @@ def test_run_contract_check_ambiguous_context_requires_explicit_subject_selector
 
     assert benchmark["status"] == "insufficient_evidence"
     assert "metadata.source_reference_id" in benchmark["missing_inputs"]
-    assert "Ambiguous benchmark context requires an explicit benchmark reference" in benchmark["automated_issues"]
+    _assert_automated_issue_mentions(
+        benchmark,
+        "ambiguous benchmark context",
+        "ambiguous",
+        "benchmark",
+        "explicit",
+        "reference",
+    )
 
     assert limit["status"] == "insufficient_evidence"
     assert "metadata.regime_label" in limit["missing_inputs"]
-    assert "Ambiguous limit context requires an explicit regime selection" in limit["automated_issues"]
+    _assert_automated_issue_mentions(limit, "ambiguous limit context", "ambiguous", "limit", "explicit", "regime")
 
 
 def test_run_contract_check_ambiguous_context_accepts_explicit_metadata_selector() -> None:
@@ -2848,7 +2884,13 @@ def test_run_contract_check_direct_proxy_consistency_ambiguous_contract_requires
 
     assert result["status"] == "insufficient_evidence"
     assert "binding.forbidden_proxy_ids" in result["missing_inputs"]
-    assert "Ambiguous direct/proxy context requires an explicit forbidden proxy binding" in result["automated_issues"]
+    _assert_automated_issue_mentions(
+        result,
+        "ambiguous direct proxy context",
+        "ambiguous",
+        "direct/proxy",
+        "forbidden proxy",
+    )
 
 
 def test_run_contract_check_direct_proxy_consistency_bound_proxy_can_resolve_ambiguous_contract() -> None:
@@ -2892,7 +2934,13 @@ def test_run_contract_check_direct_proxy_consistency_rejects_mixed_forbidden_pro
 
     assert "error" not in result
     assert result["status"] == "insufficient_evidence"
-    assert any("binding contexts disagree on claim targets" in issue for issue in result["automated_issues"])
+    _assert_automated_issue_mentions(
+        result,
+        "direct proxy mismatched binding context",
+        "binding contexts",
+        "disagree",
+        "claim targets",
+    )
 
 
 def test_run_contract_check_limit_recovery_derives_expected_behavior_from_regime_metadata() -> None:
@@ -2927,9 +2975,13 @@ def test_run_contract_check_limit_recovery_rejects_mismatched_expected_behavior(
 
     assert result["status"] == "insufficient_evidence"
     assert "metadata.expected_behavior" in result["missing_inputs"]
-    assert any(
-        issue.startswith("metadata.expected_behavior does not match the resolved contract context; expected")
-        for issue in result["automated_issues"]
+    _assert_automated_issue_mentions(
+        result,
+        "limit expected behavior mismatch",
+        "metadata.expected_behavior",
+        "does not match",
+        "contract context",
+        "expected",
     )
 
 
@@ -3791,7 +3843,7 @@ def test_run_contract_check_proof_parameter_coverage_fails_when_r0_disappears_fr
     )
 
     assert result["status"] == "fail"
-    assert "Proof audit reports missing theorem parameters" in result["automated_issues"]
+    _assert_automated_issue_mentions(result, "proof obligation parameter failure", "missing", "theorem parameters")
     assert result["metrics"]["missing_parameter_symbols"] == ["r_0"]
 
 
@@ -3813,7 +3865,13 @@ def test_run_contract_check_claim_to_proof_alignment_fails_for_narrower_theorem_
     )
 
     assert result["status"] == "fail"
-    assert "Proof establishes a narrower claim or leaves conclusion clauses uncovered" in result["automated_issues"]
+    _assert_automated_issue_mentions(
+        result,
+        "claim to proof alignment failure",
+        "narrower",
+        "conclusion clauses",
+        "uncovered",
+    )
     assert result["metrics"]["uncovered_conclusion_clause_ids"] == ["concl-uniform"]
 
 

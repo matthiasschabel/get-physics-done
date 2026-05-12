@@ -6,6 +6,8 @@ from pathlib import Path
 
 from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_dict
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_concept
+from tests.lifecycle_contract_test_support import artifact_paths, child_gate_from_text
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -13,6 +15,25 @@ COMMAND_PATH = REPO_ROOT / "src/gpd/commands/verify-work.md"
 WORKFLOW_PATH = REPO_ROOT / "src/gpd/specs/workflows/verify-work.md"
 WORKFLOW_STAGE_DIR = REPO_ROOT / "src/gpd/specs/workflows/verify-work"
 SESSION_ROUTER_AUTHORITY = "workflows/verify-work/session-router.md"
+
+
+def _assert_semantic_contract(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            label,
+            required=required or None,
+            forbidden=forbidden or None,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            context=label,
+        ),
+    )
 
 
 def _verify_work_stage_diagnostic() -> tuple[dict[str, object], dict[str, object]]:
@@ -87,13 +108,16 @@ def test_verify_work_command_wrapper_stays_thin_and_delegates_policy_to_workflow
 
     assert "@{GPD_INSTALL_DIR}/workflows/verify-work/session-router.md" in text
     assert "@{GPD_INSTALL_DIR}/workflows/verify-work.md" not in text
-    assert (
-        "The staged workflow authorities own the detailed check taxonomy; this wrapper only bootstraps the canonical verification surface and delegates the physics checks."
-        in text
+    _assert_semantic_contract(
+        text,
+        "verify-work command wrapper stays thin",
+        required=("staged workflow authorities", "detailed check taxonomy", "wrapper", "delegates"),
+        forbidden=(
+            "One check at a time, plain text responses, no interrogation.",
+            "Physics verification is not binary:",
+        ),
     )
     assert "Severity Classification" not in text
-    assert "One check at a time, plain text responses, no interrogation." not in text
-    assert "Physics verification is not binary:" not in text
     assert "For deeper focused analysis" not in text
 
 
@@ -110,8 +134,12 @@ def test_verify_work_workflow_loads_staged_init_payloads_on_demand() -> None:
     assert 'PROJECT_ROOT=$(echo "$SESSION_ROUTER_INIT" | gpd json get .project_root)' in text
     assert 'PHASE_DIR_ABS=$(echo "$SESSION_ROUTER_INIT" | gpd json get .phase_dir_abs --default "")' in text
     assert 'VERIFY_FLAG_TEXT="${VERIFY_FLAGS[*]}"' in text
-    assert "Verification flags from the normalized parser: $VERIFY_FLAG_TEXT" in text
-    assert "Verification flags from the invoking wrapper: $ARGUMENTS" not in text
+    _assert_semantic_contract(
+        text,
+        "verify-work routes normalized flags",
+        required=("verification flags", "normalized parser", "VERIFY_FLAG_TEXT"),
+        forbidden=("verification flags from the invoking wrapper",),
+    )
     assert 'PHASE_BOOTSTRAP_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage phase_bootstrap)' in text
     assert 'INVENTORY_BUILD_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage inventory_build)' in text
     assert (
@@ -120,15 +148,28 @@ def test_verify_work_workflow_loads_staged_init_payloads_on_demand() -> None:
     )
     assert 'GAP_REPAIR_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage gap_repair)' in text
     assert 'INIT=$(gpd --raw init verify-work "${PHASE_ARG}")' not in text
-    assert "Do not assume reference ledgers, protocol bundles, or report schemas are loaded here" in text
-    assert "**If non-empty `${PHASE_ARG}` is not found:**" in text
-    assert "Wait for user response; load phase-only stages only after `PHASE_ARG` is set." in text
+    _assert_semantic_contract(
+        text,
+        "verify-work stages load phase payloads on demand",
+        required=(
+            "reference ledgers",
+            "protocol bundles",
+            "report schemas",
+            "non-empty `${PHASE_ARG}`",
+            "user response",
+            "phase-only stages",
+        ),
+    )
 
 
 def test_verify_work_root_is_stage_index_not_active_authority() -> None:
     text = WORKFLOW_PATH.read_text(encoding="utf-8")
 
-    assert "Compatibility index for the staged `verify-work` workflow." in text
+    _assert_semantic_contract(
+        text,
+        "verify-work root is only a staged index",
+        required=("compatibility index", "staged", "verify-work", "workflow"),
+    )
     assert "workflows/verify-work/session-router.md" in text
     assert "workflows/verify-work/gap-repair.md" in text
     assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" not in text
@@ -143,29 +184,46 @@ def test_verify_work_stage_authorities_are_lazy_by_stage() -> None:
     interactive_validation = (WORKFLOW_STAGE_DIR / "interactive-validation.md").read_text(encoding="utf-8")
     gap_repair = (WORKFLOW_STAGE_DIR / "gap-repair.md").read_text(encoding="utf-8")
 
-    assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" not in session_router
-    assert "verification_report_skeleton_bridge" not in session_router
-    assert "verification_report_finalizer_bridge" not in session_router
-    assert "GAP_REPAIR_INIT" not in session_router
-    assert "templates/planner-subagent-prompt.md" not in session_router
-    assert "verify_work_gap_planner" not in session_router
+    _assert_semantic_contract(
+        session_router,
+        "session router excludes phase-local authorities",
+        forbidden=(
+            "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md",
+            "verification_report_skeleton_bridge",
+            "verification_report_finalizer_bridge",
+            "GAP_REPAIR_INIT",
+            "templates/planner-subagent-prompt.md",
+            "verify_work_gap_planner",
+        ),
+    )
 
     assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" in phase_bootstrap
-    assert "Use `proof_redteam_finalizer_bridge` as the helper-owned passed-audit bridge." in phase_bootstrap
-    assert "verification_report_skeleton_bridge" not in phase_bootstrap
-    assert "verify_work_gap_planner" not in phase_bootstrap
+    _assert_semantic_contract(
+        phase_bootstrap,
+        "phase bootstrap owns proof-redteam finalizer only",
+        required=("proof_redteam_finalizer_bridge", "helper-owned", "passed-audit bridge"),
+        forbidden=("verification_report_skeleton_bridge", "verify_work_gap_planner"),
+    )
 
-    assert "verification_report_skeleton_bridge" in inventory_build
-    assert "verification_report_finalizer_bridge" in inventory_build
-    assert 'id: "verify_work_verifier_report"' in inventory_build
-    assert "GAP_REPAIR_INIT" not in inventory_build
-    assert "verify_work_gap_planner" not in inventory_build
+    verifier_gate = child_gate_from_text(inventory_build, "verify_work_verifier_report")
+    assert artifact_paths(verifier_gate) == ("${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md",)
+    _assert_semantic_contract(
+        inventory_build,
+        "inventory build owns verifier report bridges",
+        required=("verification_report_skeleton_bridge", "verification_report_finalizer_bridge"),
+        forbidden=("GAP_REPAIR_INIT", "verify_work_gap_planner"),
+    )
 
     assert "GAP_REPAIR_INIT=$(gpd --raw init verify-work" in interactive_validation
-    assert "verify_work_gap_planner" not in interactive_validation
+    _assert_semantic_contract(
+        interactive_validation,
+        "interactive validation excludes gap planner",
+        forbidden=("verify_work_gap_planner",),
+    )
 
     assert "templates/planner-subagent-prompt.md" in gap_repair
-    assert 'id: "verify_work_gap_planner"' in gap_repair
+    gap_planner_gate = child_gate_from_text(gap_repair, "verify_work_gap_planner")
+    assert gap_planner_gate.role == "gpd-planner"
 
 
 def test_verify_work_manifest_eager_authorities_follow_stage_boundaries() -> None:

@@ -5,8 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
+from tests.lifecycle_contract_test_support import artifact_paths, child_gate_from_text
 from tests.lifecycle_contract_test_support import (
     assert_forbidden_lifecycle_prose as _assert_absent,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_machine_contract as _assert_machine,
 )
 from tests.lifecycle_contract_test_support import (
     assert_semantic_contract as _assert_semantic,
@@ -47,26 +51,39 @@ def _expanded_peer_review_stage_text(*names: str) -> str:
     return expand_at_includes(_peer_review_stage_text(*names), SPECS_DIR, "/runtime/")
 
 
+def _execute_phase_stage_text(name: str) -> str:
+    return (WORKFLOWS_DIR / "execute-phase" / name).read_text(encoding="utf-8")
+
+
 def test_plan_and_execute_phase_require_proof_redteam_gates() -> None:
     plan_phase = _read("plan-phase.md")
     execute_phase = _read("execute-phase.md")
 
-    assert "## 1.5 Proof-Obligation Planning Gate" in plan_phase
-    assert "`--skip-verify` does NOT waive checker review" in plan_phase
-    assert "{plan_id}-PROOF-REDTEAM.md" in plan_phase
+    _assert_machine(
+        plan_phase,
+        "plan-phase proof redteam planning gate tokens",
+        "## 1.5 Proof-Obligation Planning Gate",
+        "`--skip-verify`",
+        "{plan_id}-PROOF-REDTEAM.md",
+    )
 
-    assert '<step name="detect_proof_obligation_work">' in execute_phase
-    assert PROOF_GATE_REF in execute_phase
-    assert "Disabled generic verifier, sparse cadence, `autonomy=yolo`, or \"skip verification\"" in execute_phase
-    assert "sibling `{plan_id}-PROOF-REDTEAM.md` artifact before wave success can be claimed" in execute_phase
-    assert "`gpd-check-proof` is the canonical owner" in execute_phase
-    assert 'subagent_type="gpd-check-proof"' in execute_phase
+    _assert_machine(
+        execute_phase,
+        "execute-phase proof redteam gate machine tokens",
+        '<step name="detect_proof_obligation_work">',
+        PROOF_GATE_REF,
+        "autonomy=yolo",
+        "{plan_id}-PROOF-REDTEAM.md",
+        "`gpd-check-proof`",
+        'subagent_type="gpd-check-proof"',
+    )
     _assert_semantic(
         execute_phase,
-        "execute-phase proof-bearing work still runs proof verification",
-        "executed plan",
+        "execute-phase proof bypass settings do not waive proof verification",
         "proof-bearing",
+        "generic post-execution verifier is disabled",
         "proof verification still runs",
+        "fail-closed gate before wave success",
     )
 
 
@@ -89,7 +106,7 @@ def test_verification_workflows_fail_closed_on_missing_proof_coverage() -> None:
         "theorem-to-proof audit",
         "adversarial special-case",
     )
-    assert '<step name="proof_obligation_gate">' in verify_phase
+    _assert_machine(verify_phase, "verify-phase proof obligation gate marker", '<step name="proof_obligation_gate">')
     _assert_semantic(
         verify_phase,
         "verify-phase missing proof coverage is blocking and repair is one-shot",
@@ -114,21 +131,55 @@ def test_verification_workflows_fail_closed_on_missing_proof_coverage() -> None:
         "canonical `*-PROOF-REDTEAM.md` artifact",
         "missing/stale/malformed/not `passed`",
     )
-    assert "CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)" in verify_work
-    assert 'task(\n  subagent_type="gpd-check-proof"' in verify_work
+    _assert_machine(
+        verify_work,
+        "verify-work proof critic handoff tokens",
+        "CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)",
+        'task(\n  subagent_type="gpd-check-proof"',
+    )
     _assert_semantic(verify_work, "verify-work proof floor remains mandatory", "additional mandatory floor applies")
 
-    assert '<step name="proof_obligation_screen">' in derive_equation
-    assert "DERIVATION-{slug}-PROOF-REDTEAM.md" in derive_equation
-    assert "gpd-check-proof" in derive_equation
-    assert "CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)" in derive_equation
-    assert 'task(\n  subagent_type="gpd-check-proof"' in derive_equation
+    _assert_machine(
+        derive_equation,
+        "derive-equation proof critic handoff tokens",
+        '<step name="proof_obligation_screen">',
+        "DERIVATION-{slug}-PROOF-REDTEAM.md",
+        "gpd-check-proof",
+        "CHECK_PROOF_MODEL=$(gpd resolve-model gpd-check-proof)",
+        'task(\n  subagent_type="gpd-check-proof"',
+    )
     _assert_semantic(
         derive_equation,
         "derive-equation proof-bearing derivations fail closed",
         "Proof-bearing derivations",
         "fail closed",
     )
+
+
+def test_execute_phase_proof_critic_child_gate_preserves_local_machine_contract() -> None:
+    proof_dispatch = _execute_phase_stage_text("proof-critic-dispatch.md")
+    gate = child_gate_from_text(proof_dispatch, "proof_critic_wave_audit")
+    failure_route = {failure.value: route for failure, route in gate.failure_route.items()}
+
+    _assert_machine(proof_dispatch, "proof critic source return profile token", 'return_profile: "proof_redteam"')
+    assert gate.role == "gpd-check-proof"
+    assert gate.required_status == "completed"
+    assert artifact_paths(gate) == ("{phase_dir}/{plan_id}-PROOF-REDTEAM.md",)
+    assert gate.allowed_roots == ("{phase_dir}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$PROOF_HANDOFF_STARTED_AT"
+    assert gate.write_allowlist == ("{phase_dir}/{plan_id}-PROOF-REDTEAM.md",)
+    assert gate.status_route["checkpoint"] == "checkpoint_resume"
+    assert gate.status_route["blocked"] == "wave_failure_menu"
+    assert gate.status_route["failed"] == "wave_failure_menu"
+    assert failure_route["return_missing"] == "repair_prompt_once"
+    assert failure_route["artifact_path_repairable"] == "repair_path_once"
+    assert failure_route["applicator_failed"] == "wave_failure_menu"
+    assert any(
+        "gpd validate proof-redteam {phase_dir}/{plan_id}-PROOF-REDTEAM.md" in validator
+        for validator in gate.validators
+    )
+    assert any("--require-files-written" in validator for validator in gate.validators)
 
 
 def test_proof_redteam_handoffs_delegate_checkpoint_semantics_to_shared_contracts() -> None:
@@ -142,9 +193,14 @@ def test_proof_redteam_handoffs_delegate_checkpoint_semantics_to_shared_contract
         *REPEATED_PROOF_CHECKPOINT_LINES,
     )
 
-    assert combined.count("proof-redteam protocol's one-shot return semantics") == 3
-    assert combined.count("typed proof-redteam handoff contract") == 2
-    assert "shared verification child-return contract" in combined
+    _assert_semantic(
+        combined,
+        "proof-redteam handoffs use shared child return semantics",
+        "proof-redteam protocol",
+        "one-shot return semantics",
+        "typed proof-redteam handoff contract",
+        "shared verification child-return contract",
+    )
 
 
 def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
@@ -164,8 +220,13 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
         "blocked pending the full proof-redteam workflow",
     )
 
-    assert "proof obligations are covered by passed proof-redteam artifacts" in write_paper
-    assert "claim/proof scope does not exceed passed proof-redteam artifacts" in write_paper
+    _assert_semantic(
+        write_paper,
+        "write-paper proof support gate requires passed proof-redteam artifacts",
+        "proof obligations",
+        "passed proof-redteam artifacts",
+        "claim/proof scope",
+    )
     _assert_semantic(
         write_paper,
         "write-paper cannot smooth beyond proof-redteam scope",
@@ -176,42 +237,86 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
         "passed proof-redteam scope",
     )
 
-    assert "<proof_bearing_routing>" in peer_review
+    _assert_machine(peer_review, "peer review proof-bearing routing marker", "<proof_bearing_routing>")
     assert PROOF_GATE_PATH not in peer_review_raw
-    assert "references/verification/core/proof-redteam-workflow-gate.md" in (
-        WORKFLOWS_DIR / "peer-review-stage-manifest.json"
-    ).read_text(encoding="utf-8")
-    assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in peer_review
-    assert "gpd-check-proof" in peer_review
-    assert "Run Stage 2, Stage 3, and proof critique in parallel" in peer_review
-    assert "Treat them as one barriered wave" in peer_review
-    assert "Before Stage 4, every launched\nchild must have a typed return" in peer_review
-    assert "expect a sibling `GPD/review/PROOF-REDTEAM{round_suffix}.md` artifact" not in peer_review
-    assert "Recommendation floor: `major_revision` or\n`reject`." in peer_review
+    _assert_machine(
+        (WORKFLOWS_DIR / "peer-review-stage-manifest.json").read_text(encoding="utf-8"),
+        "peer review manifest proof gate reference",
+        "references/verification/core/proof-redteam-workflow-gate.md",
+    )
+    _assert_machine(
+        peer_review,
+        "peer review proof-redteam artifact and role tokens",
+        "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+        "gpd-check-proof",
+        "major_revision",
+        "reject",
+    )
+    _assert_semantic(
+        peer_review,
+        "peer review stage 2/3/proof wave barriers before stage 4",
+        "Stage 2",
+        "Stage 3",
+        "proof critique",
+        "parallel",
+        "barriered wave",
+        "Before Stage 4",
+        "typed return",
+    )
+    _assert_absent(
+        peer_review,
+        "peer review no stale hard-coded review-root proof sibling",
+        "expect a sibling `GPD/review/PROOF-REDTEAM{round_suffix}.md` artifact",
+    )
 
-    assert "this does NOT disable mandatory proof red-teaming" in settings
-    assert "Sparse cadence does not waive proof red-teaming" in settings
+    _assert_machine(
+        settings,
+        "settings proof-redteam config tokens",
+        "workflow.verifier=false",
+        "execution.review_cadence",
+        "autonomy=yolo",
+    )
+    _assert_semantic(
+        settings,
+        "settings cannot waive proof-redteam",
+        "does NOT disable mandatory proof red-teaming",
+        "Sparse cadence",
+        "does not waive proof red-teaming",
+    )
 
 
 def test_peer_review_final_decision_guardrail_requires_same_round_proof_redteam() -> None:
     peer_review = _expanded_peer_review_stage_text("panel-stages.md", "final-adjudication.md")
     reliability = (SPECS_DIR / "references/publication/peer-review-reliability.md").read_text(encoding="utf-8")
 
-    assert (
-        "wrong-round, wrong-root, or\nnon-passing same-round `${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md` artifact\n"
-        "blocks any favorable recommendation" in peer_review
-    )
-    assert "not a substitute for same-round proof-redteam clearance" in peer_review
-    assert "aligned `proof_audits[]`" in peer_review
-    assert "necessary review\nevidence but not a substitute for same-round proof-redteam clearance" in peer_review
-    assert (
+    _assert_machine(
+        peer_review,
+        "peer review final decision artifacts validators and proof fields",
+        "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+        "aligned `proof_audits[]`",
         "gpd validate referee-decision ${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json --strict "
-        "--ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json" in peer_review
+        "--ledger ${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
     )
-    assert "this strict final-decision validator is the favorable\ndecision guardrail" in peer_review
-
-    assert "same selected review root as the round artifacts" in reliability
-    assert "stage-review validation alone does not clear same-round proof-redteam policy" in reliability
+    _assert_semantic(
+        peer_review,
+        "peer review final decision blocks favorable recommendations without same-round proof clearance",
+        "wrong-round",
+        "wrong-root",
+        "non-passing same-round",
+        "blocks any favorable recommendation",
+        "not a substitute",
+        "same-round proof-redteam clearance",
+        "strict final-decision validator",
+        "favorable decision guardrail",
+    )
+    _assert_semantic(
+        reliability,
+        "peer review reliability requires selected root and strict final-decision proof clearance",
+        "same selected review root",
+        "stage-review validation alone",
+        "does not clear",
+        "same-round proof-redteam policy",
+    )
 
 
 def test_proof_obligation_detection_distinguishes_generic_manuscript_claims() -> None:
@@ -219,17 +324,33 @@ def test_proof_obligation_detection_distinguishes_generic_manuscript_claims() ->
     quick = _read("quick.md")
     peer_review = _expanded_peer_review_stage_text("artifact-discovery.md")
 
-    assert (
-        "ProjectContract` vocabulary such as `claim_kind: theorem | lemma | corollary | proposition | claim`"
-        in proof_gate
+    _assert_machine(
+        proof_gate,
+        "proof gate schema tokens for claim classification",
+        "ProjectContract",
+        "claim_kind: theorem | lemma | corollary | proposition | claim",
     )
-    assert "A generic manuscript claim" in proof_gate
-    assert "the bare word `claim` is not proof-bearing by itself" in proof_gate
-    assert (
-        "Require theorem/proof/formal metadata before routing generic manuscript claims through proof-redteam."
-        in proof_gate
+    _assert_semantic(
+        proof_gate,
+        "proof gate distinguishes generic claims from proof-bearing metadata",
+        "generic manuscript claim",
+        "bare word `claim`",
+        "not proof-bearing by itself",
+        "Require theorem/proof/formal metadata",
     )
 
-    assert "ProjectContract `claim_kind: claim`" in quick
-    assert 'A generic manuscript or task "claim" is not enough by itself.' in quick
-    assert "Paper `ClaimRecord.claim_kind: claim`" in peer_review
+    _assert_machine(
+        "\n".join((quick, peer_review)),
+        "quick and peer-review claim classification field tokens",
+        "ProjectContract `claim_kind: claim`",
+        "Paper `ClaimRecord.claim_kind: claim`",
+    )
+    _assert_semantic(
+        quick,
+        "quick reroute distinguishes generic claims from proof obligations",
+        "generic manuscript or task",
+        "claim",
+        "not enough by itself",
+        "formal proof target",
+        "proof_obligation",
+    )

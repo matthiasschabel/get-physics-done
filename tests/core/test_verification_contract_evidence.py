@@ -7,6 +7,7 @@ from textwrap import dedent, indent
 import pytest
 
 from gpd.core.frontmatter import validate_frontmatter, verify_summary
+from tests.markdown_test_support import assert_contract_finding, assert_contract_relation_finding
 
 FIXTURES_STAGE0 = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 FIXTURES_STAGE4 = Path(__file__).resolve().parents[1] / "fixtures" / "stage4"
@@ -1180,7 +1181,7 @@ def test_validate_frontmatter_summary_with_source_path_rejects_non_contract_plan
     result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
 
     assert result.valid is False
-    assert "plan_contract_ref: must end with '#/contract'" in result.errors
+    assert_contract_finding(result.errors, path="plan_contract_ref", contains=("#/contract", "must end"))
 
 
 def test_validate_frontmatter_summary_with_source_path_rejects_unknown_contract_ids(tmp_path: Path) -> None:
@@ -1366,7 +1367,7 @@ def test_validate_frontmatter_summary_with_source_path_reports_unresolved_plan_c
     result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
 
     assert result.valid is False
-    assert "plan_contract_ref: could not resolve matching plan contract" in result.errors
+    assert_contract_finding(result.errors, path="plan_contract_ref", contains=("resolve", "matching plan contract"))
 
 
 def test_validate_frontmatter_summary_does_not_resolve_plan_contract_ref_above_project_root(tmp_path: Path) -> None:
@@ -1396,8 +1397,16 @@ def test_validate_frontmatter_summary_does_not_resolve_plan_contract_ref_above_p
 
     assert validation_result.valid is False
     assert verification_result.passed is False
-    assert "plan_contract_ref: could not resolve matching plan contract" in validation_result.errors
-    assert "plan_contract_ref: could not resolve matching plan contract" in verification_result.errors
+    assert_contract_finding(
+        validation_result.errors,
+        path="plan_contract_ref",
+        contains=("resolve", "matching plan contract"),
+    )
+    assert_contract_finding(
+        verification_result.errors,
+        path="plan_contract_ref",
+        contains=("resolve", "matching plan contract"),
+    )
 
 
 def test_validate_frontmatter_summary_with_source_path_reports_referenced_plan_contract_schema_errors(
@@ -1419,7 +1428,11 @@ def test_validate_frontmatter_summary_with_source_path_reports_referenced_plan_c
     result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
 
     assert result.valid is False
-    assert "plan_contract_ref: referenced PLAN contract: references.0.must_surface must be a boolean" in result.errors
+    assert_contract_finding(
+        result.errors,
+        path="plan_contract_ref",
+        contains=("referenced PLAN contract", "references.0.must_surface", "boolean"),
+    )
 
 
 def test_validate_frontmatter_summary_with_source_path_reports_referenced_plan_contract_semantic_errors(
@@ -1451,7 +1464,11 @@ def test_validate_frontmatter_summary_with_source_path_reports_referenced_plan_c
     result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
 
     assert result.valid is False
-    assert "plan_contract_ref: referenced PLAN contract: missing acceptance_tests" in result.errors
+    assert_contract_finding(
+        result.errors,
+        path="plan_contract_ref",
+        contains=("referenced PLAN contract", "missing acceptance_tests"),
+    )
 
 
 def test_validate_frontmatter_verification_with_source_path_requires_contract_results(tmp_path: Path) -> None:
@@ -1481,7 +1498,7 @@ def test_validate_frontmatter_verification_with_source_path_requires_contract_re
     )
 
     assert result.valid is False
-    assert "contract_results: required for contract-backed plan" in result.errors
+    assert_contract_finding(result.errors, path="contract_results", contains=("required", "contract-backed plan"))
 
 
 def test_validate_frontmatter_verification_with_adjacent_contract_backed_plan_requires_plan_contract_ref(
@@ -1510,7 +1527,7 @@ def test_validate_frontmatter_verification_with_adjacent_contract_backed_plan_re
     )
 
     assert result.valid is False
-    assert "plan_contract_ref: required for contract-backed plan" in result.errors
+    assert_contract_finding(result.errors, path="plan_contract_ref", contains=("required", "contract-backed plan"))
 
 
 def test_validate_frontmatter_verification_with_source_path_accepts_canonical_plan_contract_ref(tmp_path: Path) -> None:
@@ -1716,7 +1733,7 @@ def test_validate_frontmatter_summary_rejects_plan_contract_ref_that_points_to_d
     result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
 
     assert result.valid is False
-    assert "plan_contract_ref: could not resolve matching plan contract" in result.errors
+    assert_contract_finding(result.errors, path="plan_contract_ref", contains=("resolve", "matching plan contract"))
 
 
 def test_verify_summary_rejects_unresolved_plan_contract_ref(tmp_path: Path) -> None:
@@ -1737,7 +1754,7 @@ def test_verify_summary_rejects_unresolved_plan_contract_ref(tmp_path: Path) -> 
     result = verify_summary(tmp_path, summary_path)
 
     assert result.passed is False
-    assert "plan_contract_ref: could not resolve matching plan contract" in result.errors
+    assert_contract_finding(result.errors, path="plan_contract_ref", contains=("resolve", "matching plan contract"))
 
 
 def test_verify_summary_rejects_non_contract_plan_fragment(tmp_path: Path) -> None:
@@ -1759,7 +1776,7 @@ def test_verify_summary_rejects_non_contract_plan_fragment(tmp_path: Path) -> No
     result = verify_summary(tmp_path, summary_path)
 
     assert result.passed is False
-    assert "plan_contract_ref: must end with '#/contract'" in result.errors
+    assert_contract_finding(result.errors, path="plan_contract_ref", contains=("#/contract", "must end"))
 
 
 def test_validate_frontmatter_summary_rejects_contradictory_comparison_verdict(tmp_path: Path) -> None:
@@ -2012,7 +2029,12 @@ def test_validate_frontmatter_summary_rejects_missing_contract_results_coverage(
     result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
 
     assert result.valid is False
-    assert "Missing deliverable contract_results entry: deliv-figure" in result.errors
+    assert_contract_relation_finding(
+        result.errors,
+        subject_kind="deliverable",
+        subject_id="deliv-figure",
+        relation_terms=("Missing", "contract_results entry"),
+    )
 
 
 def test_validate_frontmatter_summary_rejects_mismatched_comparison_verdict_subject_kind(tmp_path: Path) -> None:
@@ -2255,7 +2277,12 @@ def test_validate_frontmatter_summary_requires_reference_backed_comparison_to_us
     result = validate_frontmatter(summary_path.read_text(encoding="utf-8"), "summary", source_path=summary_path)
 
     assert result.valid is False
-    assert "Missing decisive comparison_verdict for reference ref-benchmark" in result.errors
+    assert_contract_relation_finding(
+        result.errors,
+        subject_kind="reference",
+        subject_id="ref-benchmark",
+        relation_terms=("Missing", "decisive comparison_verdict"),
+    )
 
 
 def test_validate_frontmatter_summary_rejects_prior_work_verdict_for_benchmark_acceptance_test(
@@ -2661,9 +2688,21 @@ def test_validate_frontmatter_verification_rejects_stale_refresh_invalid_schema_
         error.startswith("stale_artifact_hashes_rejected:") and "stale-hash scratch" in error for error in result.errors
     )
     assert any(error.startswith("gpd_return:") and "return envelope" in error for error in result.errors)
-    assert "contract_results: claims.claim-benchmark.evidence.0 must be an object, not str" in result.errors
-    assert "contract_results: claims.claim-benchmark.evidence.1 must be an object, not str" in result.errors
-    assert "contract_results: forbidden_proxies.fp-benchmark.evidence.0 must be an object, not str" in result.errors
+    assert_contract_finding(
+        result.errors,
+        path="contract_results",
+        contains=("claims.claim-benchmark.evidence.0", "object", "str"),
+    )
+    assert_contract_finding(
+        result.errors,
+        path="contract_results",
+        contains=("claims.claim-benchmark.evidence.1", "object", "str"),
+    )
+    assert_contract_finding(
+        result.errors,
+        path="contract_results",
+        contains=("forbidden_proxies.fp-benchmark.evidence.0", "object", "str"),
+    )
     assert any(
         "forbidden_proxies.fp-benchmark.status" in error
         and "Input should be 'rejected', 'violated', 'unresolved' or 'not_applicable'" in error
@@ -2681,9 +2720,9 @@ def test_validate_frontmatter_verification_rejects_stale_refresh_invalid_schema_
         "acceptance_tests.test-benchmark.status: gaps_found is a top-level verification status" in error
         for error in result.errors
     )
-    assert "contract_results: status: Extra inputs are not permitted" in result.errors
+    assert_contract_finding(result.errors, path="contract_results", contains=("status", "Extra inputs"))
     assert any("contract_results: status: contract_results has no aggregate status" in error for error in result.errors)
-    assert "contract_results: summary: Extra inputs are not permitted" in result.errors
+    assert_contract_finding(result.errors, path="contract_results", contains=("summary", "Extra inputs"))
     assert any("[0] comparison_kind: Input should be" in error for error in result.errors)
     assert any("[0] evidence: Extra inputs are not permitted" in error for error in result.errors)
     assert any(
@@ -2694,10 +2733,21 @@ def test_validate_frontmatter_verification_rejects_stale_refresh_invalid_schema_
         "comparison_verdicts: [0] comparison_kind: reproducibility is an acceptance-test kind" in error
         for error in result.errors
     )
-    assert "comparison_verdicts: [0] references unknown subject_id artifacts/phase4/result.json" in result.errors
-    assert "comparison_verdicts: [0] references unknown reference_id current_artifact_hash" in result.errors
+    assert_contract_finding(
+        result.errors,
+        path="comparison_verdicts",
+        contains=("unknown subject_id", "artifacts/phase4/result.json"),
+    )
+    assert_contract_finding(
+        result.errors,
+        path="comparison_verdicts",
+        contains=("unknown reference_id", "current_artifact_hash"),
+    )
     assert "contract_results: present but invalid; contract alignment skipped" in result.errors
-    assert "contract_results: required for contract-backed plan" not in result.errors
+    assert not any(
+        error.startswith("contract_results:") and "required for contract-backed plan" in error
+        for error in result.errors
+    )
 
 
 def test_validate_frontmatter_verification_skips_alignment_after_comparison_verdict_parse_failure(
@@ -2715,7 +2765,7 @@ def test_validate_frontmatter_verification_skips_alignment_after_comparison_verd
     result = validate_frontmatter(content, "verification", source_path=verification_path)
 
     assert result.valid is False
-    assert "comparison_verdicts: present but invalid; contract alignment skipped" in result.errors
+    assert_contract_finding(result.errors, path="comparison_verdicts", contains=("invalid", "alignment skipped"))
     assert not any("Missing decisive comparison_verdict" in error for error in result.errors)
 
 

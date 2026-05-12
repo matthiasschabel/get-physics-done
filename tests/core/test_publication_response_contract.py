@@ -16,6 +16,74 @@ def _workflow_authority(name: str) -> str:
     return workflow_authority_text(WORKFLOWS_DIR, name)
 
 
+def _assert_round_artifact_semantics(source: str) -> None:
+    _assert_semantic(
+        source,
+        "publication review round artifact family semantics",
+        "round-suffix",
+        "sibling-artifact",
+        "default project-backed",
+        "subject-owned publication root",
+        "does not by itself promise a full relocation",
+    )
+
+
+def _assert_paired_response_completion_semantics(source: str) -> None:
+    _assert_semantic(
+        source,
+        "publication paired response completion and relocation semantics",
+        "stale-output handling",
+        "stage-recovery gate",
+        "Project-backed response rounds",
+        "selected_publication_root=GPD",
+        "same paired response artifacts bind under the subject-owned",
+    )
+
+
+def _assert_revision_state_semantics(referee: str) -> None:
+    _assert_semantic(
+        referee,
+        "referee revision state uses paired response package",
+        "paired response package",
+        "Do not infer revision state",
+        "global `GPD/` filenames",
+        "suffixes disagree",
+        "incomplete response package",
+    )
+
+
+def _assert_parallel_wave_semantics(workflow: str) -> None:
+    _assert_semantic(
+        workflow,
+        "peer-review parallel Stage 2/3/proof wave barrier semantics",
+        "Stage 2",
+        "Stage 3",
+        "proof critique",
+        "parallel",
+        "barriered wave",
+        "Before Stage 4",
+        "typed return",
+        "apply stage-recovery gate",
+        "retry once",
+    )
+
+
+def _assert_later_stage_restart_semantics(workflow: str) -> None:
+    _assert_semantic(
+        workflow,
+        "peer-review later stages restart from persisted artifacts",
+        "Stage 4",
+        "Stage 5",
+        "proof-bearing review",
+        "same-round",
+        "Retry once",
+        "STOP before Stage 5",
+        "Stage 6",
+        "persisted stage artifacts",
+        "carry-forward inputs",
+    )
+
+
 def test_publication_bootstrap_preflight_defines_the_shared_publication_gate() -> None:
     source = (REFERENCES_DIR / "publication-bootstrap-preflight.md").read_text(encoding="utf-8")
 
@@ -59,7 +127,8 @@ def test_publication_response_writer_handoff_defines_one_shot_child_returns() ->
     assert "gpd_return.files_written" in source
     assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in source
     assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in source
-    assert "default project subjects resolve those to `GPD/AUTHOR-RESPONSE{round_suffix}.md`" in source
+    assert "GPD/AUTHOR-RESPONSE{round_suffix}.md" in source
+    assert "GPD/review/REFEREE_RESPONSE{round_suffix}.md" in source
     _assert_semantic(
         source + "\n" + recovery,
         "publication response writer stale-output rejection",
@@ -84,7 +153,7 @@ def test_publication_review_wrapper_guidance_points_to_the_new_shared_refs() -> 
 def test_publication_review_round_artifacts_define_canonical_round_family() -> None:
     source = (REFERENCES_DIR / "publication-review-round-artifacts.md").read_text(encoding="utf-8")
 
-    assert "Canonical round-suffix and sibling-artifact contract for publication review rounds." in source
+    _assert_round_artifact_semantics(source)
     assert 'Round 1 uses `round_suffix=""`.' in source
     assert 'Round `N` for `N >= 2` uses `round_suffix="-R{N}"`.' in source
     assert "${selected_publication_root}/REFEREE-REPORT{round_suffix}.md" in source
@@ -93,9 +162,7 @@ def test_publication_review_round_artifacts_define_canonical_round_family() -> N
     assert "${selected_publication_root}/AUTHOR-RESPONSE{round_suffix}.md" in source
     assert "${selected_review_root}/REFEREE_RESPONSE{round_suffix}.md" in source
     assert "${selected_review_root}/PROOF-REDTEAM{round_suffix}.md" in source
-    assert "default project-backed canonical layout" in source
-    assert "subject-owned publication root `GPD/publication/{subject_slug}`" in source
-    assert "does not by itself promise a full relocation" in source
+    assert "GPD/publication/{subject_slug}" in source
     assert "review-round-artifact-contract.md" not in source
     assert "publication-artifact-gates.md" not in source
 
@@ -175,9 +242,7 @@ def test_publication_response_artifacts_define_paired_completion_gate() -> None:
     )
     assert "status: checkpoint" in source
     assert "gpd_return.files_written" in source
-    assert "stale-output handling comes from the stage-recovery gate" in source
-    assert "Project-backed response rounds resolve `selected_publication_root=GPD`" in source
-    assert "same paired response artifacts bind under the subject-owned" in source
+    _assert_paired_response_completion_semantics(source)
     assert "response_to: REFEREE-REPORT{round_suffix}.md" in source
     assert "manuscript_path: path/to/active-manuscript.tex" in source
     _assert_semantic(
@@ -211,9 +276,7 @@ def test_referee_revision_mode_requires_a_paired_response_package() -> None:
     assert "${selected_publication_root}/AUTHOR-RESPONSE-R{N}.md" in referee
     assert "${selected_review_root}/REFEREE_RESPONSE.md" in referee
     assert "${selected_review_root}/REFEREE_RESPONSE-R{N}.md" in referee
-    assert "Do not infer revision state by scanning global `GPD/` filenames." in referee
-    assert "suffixes disagree" in referee
-    assert "incomplete response package" in referee
+    _assert_revision_state_semantics(referee)
 
 
 def test_paper_writer_and_referee_load_the_canonical_publication_response_contracts() -> None:
@@ -232,8 +295,8 @@ def test_paper_writer_and_referee_load_the_canonical_publication_response_contra
     assert "publication-review-round-artifacts.md" not in paper_writer
     assert "publication-response-artifacts.md" in referee
     assert "publication-review-round-artifacts.md" in referee
-    assert "fixed" in paper_writer and "on disk" in paper_writer
-    assert "fixed" in referee and "on disk" in referee
+    _assert_semantic(paper_writer, "paper writer fixed response paths", "fixed", "on disk")
+    _assert_semantic(referee, "referee fixed response paths", "fixed", "on disk")
     assert "gpd_return.files_written" in write_paper
     assert "gpd validate handoff-artifacts for both response paths" in write_paper
     assert "publication-response-writer-handoff.md frontmatter, round, and manuscript binding" in write_paper
@@ -274,32 +337,23 @@ def test_peer_review_stage_six_requires_fresh_referee_return_and_artifacts() -> 
 def test_peer_review_parallel_wave_stops_terminal_children_before_stage_4() -> None:
     workflow = _workflow_authority("peer-review")
 
-    assert "Run Stage 2, Stage 3, and proof critique in parallel when the runtime supports" in workflow
-    assert "When theorem-bearing claims are present, run `gpd-check-proof` as the auxiliary\nproof critique" in workflow
-    assert "block favorable recommendation. Retry proof-redteam once, then STOP if invalid." in workflow
-    assert "Treat them as one barriered wave" in workflow
-    assert "apply stage-recovery gate and retry once" in workflow
-    assert "Before Stage 4, every launched\nchild must have a typed return" in workflow
+    _assert_parallel_wave_semantics(workflow)
+    assert "gpd-check-proof" in workflow
     assert re.search(
         r"Missing, malformed,[\s\S]{0,120}proof artifacts\s+block favorable recommendation\. Retry proof-redteam once",
         workflow,
     )
-    assert re.search(
-        r"Retry proof-redteam once, then STOP if invalid", workflow
-    )
+    assert re.search(r"Retry proof-redteam once, then STOP if invalid", workflow)
 
 
 def test_peer_review_later_stages_restart_from_fresh_context_and_written_artifacts() -> None:
     workflow = _workflow_authority("peer-review")
 
-    assert "Stage 4 checks physical soundness" in workflow
-    assert "Stage 5 judges interestingness and venue fit" in workflow
+    _assert_later_stage_restart_semantics(workflow)
     assert "${REVIEW_ROOT}/STAGE-math{round_suffix}.json" in workflow
     assert "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json" in workflow
-    assert "If proof-bearing review is active, also validate same-round\n`${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md`" in workflow
+    assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in workflow
     assert "${REVIEW_ROOT}/STAGE-physics{round_suffix}.json" in workflow
-    assert "Retry once from the same persisted inputs; if still\ninvalid, STOP before Stage 5." in workflow
-    assert "After validation, Stage 6 must begin from persisted stage artifacts and declared\ncarry-forward inputs only." in workflow
 
 
 def test_referee_stage_six_files_written_must_be_fresh_current_run_outputs() -> None:

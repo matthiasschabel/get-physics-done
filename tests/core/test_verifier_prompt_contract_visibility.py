@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Literal, get_args, get_origin
 
 from gpd.adapters.install_utils import expand_at_includes
+from gpd.contracts import (
+    CONTRACT_REFERENCE_ACTION_VALUES,
+    ComparisonVerdict,
+    ContractProofAudit,
+    SuggestedContractCheck,
+)
 from gpd.core.frontmatter import extract_frontmatter, validate_frontmatter
 from gpd.core.strict_yaml import load_strict_yaml
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_concept
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -88,6 +96,35 @@ def _assert_contains_all(text: str, fragments: tuple[str, ...]) -> None:
 def _assert_not_contains_any(text: str, fragments: tuple[str, ...]) -> None:
     present = [fragment for fragment in fragments if fragment in text]
     assert present == []
+
+
+def _assert_semantic_contract(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            label,
+            required=required or None,
+            forbidden=forbidden or None,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            context=label,
+        ),
+    )
+
+
+def _literal_values(annotation: object) -> tuple[str, ...]:
+    origin = get_origin(annotation)
+    if origin is Literal:
+        return tuple(arg for arg in get_args(annotation) if isinstance(arg, str))
+    values: list[str] = []
+    for arg in get_args(annotation):
+        values.extend(_literal_values(arg))
+    return tuple(values)
 
 
 def _parse_yaml_fence_containing(text: str, marker: str) -> object:
@@ -239,34 +276,64 @@ def test_verifier_prompt_surfaces_validator_enforced_contract_ledger_rules() -> 
     assert verdict["subject_role"] == "decisive"
     assert verdict["comparison_kind"] == "benchmark"
     assert verdict["verdict"] == "pass"
-    assert (
-        "`contract_results` is keyed to `plan_contract_ref`; project-only IDs belong in body" in contract_results_schema
+    _assert_semantic_contract(
+        contract_results_schema,
+        "contract results are keyed to plan contract",
+        required=("contract_results", "plan_contract_ref", "project-only IDs", "body"),
     )
     assert "never `kind`, `path`, `source`, `summary`, `actual_output`, or `command`" in contract_results_schema
-    assert (
-        "Every declared claim, deliverable, acceptance test, reference, and forbidden proxy ID from the referenced "
-        "PLAN contract must appear in the matching section."
-    ) in contract_results_schema
-    assert "`uncertainty_markers` must remain explicit in contract-backed outputs" in contract_results_schema
-    assert (
-        "Only `subject_role: decisive` satisfies a required decisive comparison or participates in pass/fail "
-        "consistency checks against `contract_results`."
-    ) in contract_results_schema
-    assert (
-        "When a reference-backed decisive comparison is required, use `comparison_kind: benchmark`, `prior_work`, "
-        "`experiment`, `baseline`, or `cross_method`. `comparison_kind: other` does not satisfy that requirement."
-    ) in contract_results_schema
-    assert (
-        "Each `suggested_contract_checks` entry may only use these keys: `check`, `reason`, `suggested_subject_kind`, `suggested_subject_id`, and `evidence_path`."
-        in contract_results_schema
+    _assert_semantic_contract(
+        contract_results_schema,
+        "contract results schema preserves complete contract coverage",
+        required=(
+            "every declared claim",
+            "deliverable",
+            "acceptance test",
+            "reference",
+            "forbidden proxy",
+            "matching section",
+            "uncertainty_markers",
+            "contract-backed outputs",
+        ),
     )
+    comparison_kind_values = _literal_values(ComparisonVerdict.model_fields["comparison_kind"].annotation)
+    for comparison_kind in comparison_kind_values:
+        assert comparison_kind in contract_results_schema
+    _assert_semantic_contract(
+        contract_results_schema,
+        "decisive comparison rules stay schema visible",
+        required=(
+            "subject_role: decisive",
+            "required decisive comparison",
+            "pass/fail consistency",
+            "comparison_kind: other",
+            "does not satisfy",
+        ),
+    )
+    assert SuggestedContractCheck.model_config["extra"] == "forbid"
+    assert set(SuggestedContractCheck.model_fields) == {
+        "check",
+        "reason",
+        "suggested_subject_kind",
+        "suggested_subject_id",
+        "evidence_path",
+    }
+    for field_name in SuggestedContractCheck.model_fields:
+        assert f"`{field_name}`" in contract_results_schema
     assert (
         "Copy the `check_key` returned by `suggest_contract_checks(contract)` into the frontmatter `check` field"
         in contract_results_schema
     )
-    assert (
-        "If you bind a `suggested_contract_checks` entry to a known contract target, `suggested_subject_kind` and `suggested_subject_id` must appear together; otherwise omit both."
-        in contract_results_schema
+    _assert_semantic_contract(
+        contract_results_schema,
+        "suggested contract check target binding is paired",
+        required=(
+            "suggested_contract_checks",
+            "known contract target",
+            "suggested_subject_kind",
+            "suggested_subject_id",
+            "together",
+        ),
     )
     _assert_contains_all(
         verifier,
@@ -332,11 +399,16 @@ def test_verifier_prompt_keeps_passed_verification_frontmatter_helper_owned() ->
 
 def test_verifier_prompt_keeps_reference_actions_within_the_canonical_enum() -> None:
     verifier = _read_verifier_prompt()
+    reference_action_line = _paragraph_containing(verifier, "Verify the required action")
+    visible_actions = set(re.findall(r"`([^`]+)`", reference_action_line))
 
-    assert "Verify the required action (`read`, `compare`, `cite`, etc.) was actually completed" in verifier
-    assert (
-        "Verify the required action (`read`, `compare`, `cite`, `reproduce`, etc.) was actually completed"
-        not in verifier
+    assert {"read", "compare", "cite"} <= visible_actions
+    assert visible_actions <= set(CONTRACT_REFERENCE_ACTION_VALUES)
+    _assert_semantic_contract(
+        reference_action_line,
+        "reference actions stay in canonical enum",
+        required=("required action", "actually completed"),
+        forbidden=("reproduce",),
     )
 
 
@@ -477,7 +549,11 @@ def test_verifier_prompt_uses_canonical_include_for_worked_examples() -> None:
     )
     assert "## Physics Stub Detection Patterns" not in verifier
     assert "verification-status-authority.md" in verifier
-    assert "all supporting artifacts exist, are substantive, and pass decisive checks" in status_authority
+    _assert_semantic_contract(
+        status_authority,
+        "passed status requires substantive decisive artifact checks",
+        required=("supporting artifacts", "substantive", "decisive checks"),
+    )
 
 
 def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review_gate() -> None:
@@ -496,31 +572,38 @@ def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review
         _paragraph_containing(verifier, "Schema guard:"),
         ("proof-audit linkage", "status vocabularies", "ID linkage", "stale-audit handling"),
     )
-    assert (
-        "Every named theorem parameter or hypothesis is used or explicitly discharged; no theorem symbol may disappear without explanation"
-        not in verifier
+    _assert_semantic_contract(
+        verifier,
+        "staged peer-review theorem prose stays out of verifier prompt",
+        forbidden=(
+            "Every named theorem parameter or hypothesis is used or explicitly discharged",
+            "no theorem symbol may disappear",
+        ),
     )
-    assert (
-        "For `contract_results`, use the referenced `ProjectContract` (`project_contract.claims[]` / `ContractClaim`) semantics"
-        in contract_results_schema
+    _assert_semantic_contract(
+        contract_results_schema,
+        "verification proof audit follows project contract semantics",
+        required=(
+            "ProjectContract",
+            "ContractClaim",
+            "proof_audit.quantifier_status",
+            "unquantified proof-bearing claims",
+            "proof_deliverables",
+            "proof-redteam artifact",
+            "proof-specific acceptance test",
+            "do not substitute",
+            "Paper `ClaimRecord`",
+        ),
     )
-    assert "Do not substitute the staged peer-review Paper `ClaimRecord` rule here" in contract_results_schema
-    assert (
-        "A quantified proof-bearing claim must keep `proof_audit.quantifier_status` explicit" in contract_results_schema
-    )
-    assert "unquantified proof-bearing claims do not need a non-empty quantifier list" in contract_results_schema
-    assert (
-        "`proof_artifact_path`, `proof_artifact_sha256`, `audit_artifact_path`, `audit_artifact_sha256`, `claim_statement_sha256`"
-        in contract_results_schema
-    )
-    assert (
-        "`proof_audit.proof_artifact_path` must match a declared `proof_deliverables` path" in contract_results_schema
-    )
-    assert "`proof_audit.audit_artifact_path` must point to a proof-redteam artifact" in contract_results_schema
-    assert (
-        "every declared proof-specific acceptance test in `claims[].acceptance_tests[]` passing"
-        in contract_results_schema
-    )
+    for field_name in (
+        "proof_artifact_path",
+        "proof_artifact_sha256",
+        "audit_artifact_path",
+        "audit_artifact_sha256",
+        "claim_statement_sha256",
+    ):
+        assert field_name in ContractProofAudit.model_fields
+        assert f"`{field_name}`" in contract_results_schema or f"`proof_audit.{field_name}`" in contract_results_schema
     _assert_contains_all(
         report_surface,
         (
@@ -554,7 +637,11 @@ def test_verifier_prompt_surfaces_missing_parameter_proof_audit_and_stale_review
         "collect one more benchmark point before marking the claim as passed"
     )
     assert "verification-status-authority.md" in verifier
-    assert "proof-bearing work has passed proof-redteam artifacts" in status_authority
+    _assert_semantic_contract(
+        status_authority,
+        "verification status requires passed proof-redteam artifacts",
+        required=("proof-bearing work", "passed", "proof-redteam artifacts"),
+    )
     assert "all artifacts pass levels 1-3" not in verifier
 
 
@@ -631,12 +718,12 @@ def test_verify_work_template_keeps_session_overlay_after_verifier_output() -> N
             "verification_report_skeleton_bridge",
             "skeleton bridge only for conservative gap reports",
             "gpd verification-report finalize",
-            "Do not hand-author frontmatter",
+            "Verification-report YAML",
             "transcripts",
             "hashes",
             "oracle details",
             "prose-only evidence",
-            "`gpd_return`",
+            "runtime return envelopes",
             "in YAML",
             "do not wrapper-repair the canonical report",
         ),
@@ -651,12 +738,22 @@ def test_verify_work_template_keeps_session_overlay_after_verifier_output() -> N
             "Do not relax verifier fail-closed results",
         ),
     )
-    assert (
-        "Stable knowledge docs that appear through handle/status fields are reviewed background synthesis: use them to clarify definitions, "
-        "assumptions, and caveats only when they agree with stronger sources, and never as decisive evidence on their own."
-        in verify_work
+    _assert_semantic_contract(
+        verify_work,
+        "verify-work keeps background synthesis non-decisive",
+        required=("stable knowledge docs", "reviewed background synthesis", "stronger sources", "decisive evidence"),
     )
-    assert "Update the session overlay only. The canonical verifier verdict remains verifier-owned." in verify_work
-    assert "canonical verifier report content remains owned by `gpd-verifier`" in verify_work
-    assert "Every child handoff is one-shot" in verify_work
+    _assert_semantic_contract(
+        verify_work,
+        "verify-work overlay and child handoff ownership",
+        required=(
+            "session overlay",
+            "canonical verifier verdict",
+            "verifier-owned",
+            "canonical verifier report content",
+            "gpd-verifier",
+            "child handoff",
+            "one-shot",
+        ),
+    )
     assert "research_mode=balanced" not in verify_work

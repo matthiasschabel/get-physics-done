@@ -39,6 +39,8 @@ from tests.agent_policy_test_support import (
     assert_agent_role_kit_section,
     assert_role_kit_section_in_prompt,
 )
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+from tests.markdown_test_support import extract_markdown_section, parse_yaml_fences, require_mapping
 
 NEW_PROJECT_COMMAND_PATH = Path(__file__).resolve().parents[1] / "src" / "gpd" / "commands" / "new-project.md"
 RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT = {
@@ -46,6 +48,14 @@ RESEARCH_SYNTHESIZER_SUMMARY_CONTRACT = {
     "expected_artifacts": ["GPD/literature/SUMMARY.md"],
     "shared_state_policy": "return_only",
 }
+
+
+def _model_visible_yaml_payload(text: str, heading: str, *, context: str) -> dict[str, object]:
+    section = extract_markdown_section(text, f"## {heading}", context=context)
+    fences = parse_yaml_fences(section, info="yaml", context=f"{context} {heading}")
+    assert len(fences) == 1
+    data = require_mapping(fences[0].data, context=f"{context} {heading} YAML")
+    return {str(key): value for key, value in data.items()}
 
 
 def _write_review_contract_command(tmp_path: Path, file_name: str, review_contract_body: str) -> Path:
@@ -223,15 +233,15 @@ class TestParseAgentFile:
         assert agent.shared_state_authority == "direct"
         assert agent.color == "blue"
         assert agent.system_prompt.startswith("## Agent Requirements\n")
-        assert "Agent YAML rules. Use this YAML." in agent.system_prompt
-        assert "Closed schema; no extra keys." in agent.system_prompt
         assert agent_visibility_note() in agent.system_prompt
-        assert "commit_authority: orchestrator" in agent.system_prompt
-        assert "surface: public" in agent.system_prompt
-        assert "role_family: worker" in agent.system_prompt
-        assert "artifact_write_authority: scoped_write" in agent.system_prompt
-        assert "shared_state_authority: direct" in agent.system_prompt
-        assert "tools:\n- file_read\n- file_write" in agent.system_prompt
+        assert _model_visible_yaml_payload(agent.system_prompt, "Agent Requirements", context="agent prompt") == {
+            "commit_authority": "orchestrator",
+            "surface": "public",
+            "role_family": "worker",
+            "artifact_write_authority": "scoped_write",
+            "shared_state_authority": "direct",
+            "tools": ["file_read", "file_write"],
+        }
         assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.endswith("System prompt.")
         assert agent.source == "agents"
@@ -457,8 +467,13 @@ class TestParseAgentFile:
         f.write_text("---\nname: nobody\n---\n", encoding="utf-8")
         agent = _parse_agent_file(f, source="agents")
         assert agent.system_prompt.startswith("## Agent Requirements\n")
-        assert "Agent YAML rules. Use this YAML." in agent.system_prompt
-        assert "commit_authority:" in agent.system_prompt
+        assert agent_visibility_note() in agent.system_prompt
+        assert (
+            _model_visible_yaml_payload(agent.system_prompt, "Agent Requirements", context="empty agent prompt")[
+                "commit_authority"
+            ]
+            == "orchestrator"
+        )
         assert skeptical_rigor_guardrails_section() in agent.system_prompt
         assert agent.system_prompt.rstrip().endswith("disconfirming check still needed.")
 
@@ -729,11 +744,21 @@ class TestParseCommandFile:
             ),
         )
         assert cmd.content.startswith("## Command Requirements\n\n")
-        assert "Closed schema; no extra keys." in cmd.content
-        assert "Strict booleans only" in cmd.content
         assert command_visibility_note() in cmd.content
-        assert "GPD/ROADMAP.md" in cmd.content
-        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in cmd.content
+        assert _model_visible_yaml_payload(cmd.content, "Command Requirements", context="full command") == {
+            "context_mode": "project-required",
+            "project_reentry_capable": False,
+            "allowed_tools": ["file_read", "shell"],
+            "requires": {"files": ["GPD/ROADMAP.md"]},
+            COMMAND_POLICY_PROMPT_WRAPPER_KEY: {
+                "schema_version": 1,
+                "supporting_context_policy": {
+                    "project_context_mode": "project-required",
+                    "project_reentry_mode": "disallowed",
+                    "required_file_patterns": ["GPD/ROADMAP.md"],
+                },
+            },
+        }
         assert skeptical_rigor_guardrails_section() in cmd.content
         assert cmd.content.endswith("Command body.")
 
@@ -764,8 +789,11 @@ class TestParseCommandFile:
         cmd = _parse_command_file(f, source="commands")
 
         assert cmd.content.startswith("## Command Requirements\n\n")
-        assert "Closed schema; no extra keys." in cmd.content
-        assert "Strict booleans only" in cmd.content
+        assert command_visibility_note() in cmd.content
+        requirements = _model_visible_yaml_payload(cmd.content, "Command Requirements", context="review command")
+        assert requirements["context_mode"] == "project-required"
+        assert requirements["requires"] == {"files": ["GPD/ROADMAP.md"]}
+        assert COMMAND_POLICY_PROMPT_WRAPPER_KEY in requirements
         assert cmd.content.index("## Review Contract") > cmd.content.index("## Command Requirements")
         assert cmd.content.endswith("Body.")
 
@@ -856,9 +884,14 @@ class TestParseCommandFile:
             command_name="gpd:plan-phase",
         )
 
-        assert "agent: gpd-planner" in rendered
-        assert "context_mode: project-required" in rendered
-        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in rendered
+        requirements = _model_visible_yaml_payload(
+            rendered,
+            "Command Requirements",
+            context="rendered command requirements",
+        )
+        assert requirements["agent"] == "gpd-planner"
+        assert requirements["context_mode"] == "project-required"
+        assert COMMAND_POLICY_PROMPT_WRAPPER_KEY in requirements
 
     def test_render_command_visibility_sections_comment_only_frontmatter_keeps_default_constraints(self) -> None:
         rendered = render_command_visibility_sections_from_frontmatter(
@@ -929,10 +962,31 @@ class TestParseCommandFile:
                 default_output_subtree="GPD/review",
             ),
         )
-        assert "context_mode: project-aware" in cmd.content
-        assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in cmd.content
-        assert "subject_kind: publication" in cmd.content
-        assert "default_output_subtree: GPD/review" in cmd.content
+        requirements = _model_visible_yaml_payload(
+            cmd.content,
+            "Command Requirements",
+            context="command policy command",
+        )
+        assert requirements["context_mode"] == "project-aware"
+        assert requirements[COMMAND_POLICY_PROMPT_WRAPPER_KEY] == {
+            "schema_version": 1,
+            "subject_policy": {
+                "subject_kind": "publication",
+                "resolution_mode": "explicit_or_project_manuscript",
+                "explicit_input_kinds": ["manuscript_path"],
+                "allow_external_subjects": True,
+            },
+            "supporting_context_policy": {
+                "project_context_mode": "project-aware",
+                "project_reentry_mode": "disallowed",
+                "required_file_patterns": ["PROJECT.md"],
+            },
+            "output_policy": {
+                "output_mode": "managed",
+                "managed_root_kind": "gpd_managed_durable",
+                "default_output_subtree": "GPD/review",
+            },
+        }
 
     def test_command_policy_rejects_prompt_wrapper_alias_in_frontmatter(self, tmp_path: Path) -> None:
         f = tmp_path / "write-paper.md"
@@ -2184,7 +2238,6 @@ class TestRegistryPromptIncludeInlining:
             "skeleton bridge only for conservative gap reports",
             "gpd verification-report finalize",
             "Do not hand-author frontmatter",
-            "transcripts, hashes, oracle details, prose-only evidence, or `gpd_return` in YAML",
             "do not wrapper-repair the canonical report",
             "do not route to gaps unless a schema-valid gap report exists",
         )
@@ -2195,6 +2248,29 @@ class TestRegistryPromptIncludeInlining:
         for fragment in durable_fragments:
             assert fragment not in skill.content
             assert fragment in inventory_stage
+        assert_prompt_contracts(
+            inventory_stage,
+            *semantic_concept(
+                "fallback report YAML isolation",
+                required=(
+                    "Verification-report YAML",
+                    "skeleton/finalizer helpers",
+                    "transcripts",
+                    "hashes",
+                    "oracle details",
+                    "prose-only evidence",
+                    "gpd_return",
+                    "out of YAML",
+                ),
+            ),
+        )
+        assert_prompt_contracts(
+            skill.content,
+            *semantic_concept(
+                "fallback report YAML isolation stays deferred",
+                forbidden=("Verification-report YAML", "skeleton/finalizer helpers", "prose-only evidence"),
+            ),
+        )
 
     def test_project_researcher_system_prompt_keeps_one_shot_checkpoint_contract_visible(self) -> None:
         agent = registry.get_skill("gpd-project-researcher")
@@ -3759,8 +3835,13 @@ def test_planner_skill_defers_late_planning_materials_into_on_demand_references(
     assert separator == "On-demand references:"
     assert "{GPD_INSTALL_DIR}/templates/phase-prompt.md" in bootstrap
     assert "{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" in bootstrap
-    assert "use `file_read` to load `{GPD_INSTALL_DIR}/templates/phase-prompt.md`" in bootstrap
-    assert "do not reconstruct the schema from memory" in bootstrap
+    assert_prompt_contracts(
+        bootstrap,
+        *semantic_concept(
+            "planner deferred schema loading",
+            required=("file_read", "load", "schema", "memory"),
+        ),
+    )
     assert "Phase Plan Prompt Template" not in bootstrap
     assert "PLAN Contract Schema" not in bootstrap
     assert "Notation and Convention Tracking" not in bootstrap

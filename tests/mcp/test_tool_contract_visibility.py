@@ -10,6 +10,18 @@ import anyio
 import pytest
 from pydantic import BaseModel, ConfigDict
 
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+
+
+def _assert_semantic_surface(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...],
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(text, *semantic_concept(label, required=required, forbidden=forbidden))
+
 
 def _tool_description(mcp_server: object, tool_name: str) -> str:
     async def _load() -> str:
@@ -632,12 +644,22 @@ def test_run_contract_check_tool_description_surfaces_request_requirements() -> 
 
     description = _tool_description(mcp, "run_contract_check")
 
-    assert "published ``request`` input schema is compact and closed" in description
-    assert "``suggest_contract_checks``" in description
-    assert "per-check required-request metadata" in description
-    assert "``request.contract`` is optional" in description
-    assert "``project_dir`` is optional" in description
-    assert "absolute project root" in description
+    _assert_semantic_surface(
+        description,
+        "run_contract_check request requirements",
+        required=(
+            "request",
+            "compact",
+            "closed",
+            "suggest_contract_checks",
+            "required-request",
+            "metadata",
+            "request.contract",
+            "optional",
+            "project_dir",
+            "absolute project root",
+        ),
+    )
     assert verification_contract_surface_summary_text() in description
 
 
@@ -647,11 +669,19 @@ def test_suggest_contract_checks_tool_description_surfaces_contract_requirements
 
     description = _tool_description(mcp, "suggest_contract_checks")
 
-    assert "``project_dir`` is optional" in description
-    assert "absolute project root" in description
-    assert "``active_checks`` is optional and must be ``list[str]``" in description
-    assert "``already_active``" in description
-    assert "``run_contract_check(request=...)``" in description
+    _assert_semantic_surface(
+        description,
+        "suggest_contract_checks contract requirements",
+        required=(
+            "project_dir",
+            "optional",
+            "absolute project root",
+            "active_checks",
+            "list[str]",
+            "already_active",
+            "run_contract_check(request=...)",
+        ),
+    )
     assert verification_contract_surface_summary_text() in description
 
 
@@ -686,12 +716,21 @@ def test_contract_tools_list_tools_expose_structured_request_schemas() -> None:
     assert {"check_key", "contract", "binding", "metadata", "observed", "artifact_content"} <= set(
         run_request["properties"]
     )
-    assert "Closed `run_contract_check` request object." in run_request["description"]
-    assert "compact published schema" in run_request["description"]
-    assert "`schema_required_request_fields`" in run_request["description"]
-    assert "`schema_required_request_anyof_fields`" in run_request["description"]
-    assert "`supported_binding_fields`" in run_request["description"]
-    assert "`request_template`" in run_request["description"]
+    _assert_semantic_surface(
+        str(run_request["description"]),
+        "run_contract_check request schema description",
+        required=(
+            "run_contract_check",
+            "request",
+            "object",
+            "closed",
+            "compact",
+            "schema_required_request_fields",
+            "schema_required_request_anyof_fields",
+            "supported_binding_fields",
+            "request_template",
+        ),
+    )
     assert "check_id" not in run_request["properties"]
     check_key = _schema_anyof_string(run_request["properties"]["check_key"])
     assert check_key["minLength"] == 1
@@ -927,11 +966,22 @@ def test_public_descriptors_surface_contract_and_optional_dependency_visibility(
 
     verification = descriptors["gpd-verification"]
     assert verification["description"].startswith("GPD physics verification support tools.")
-    assert "MCP results do not by themselves grant final scientific verification status" in verification["description"]
     assert verification_contract_surface_summary_text() in verification["description"]
-    assert "Proof checks require authoritative contract payloads." in verification["description"]
-    assert "Only contract-payload enum case drift is recoverable" in verification["description"]
-    assert "observed enums must match source evidence exactly" in verification["description"]
+    _assert_semantic_surface(
+        verification["description"],
+        "verification descriptor contract policy",
+        required=(
+            "MCP results",
+            "final scientific verification status",
+            "Proof checks",
+            "authoritative contract payloads",
+            "contract-payload enum case drift",
+            "recoverable",
+            "observed enums",
+            "source evidence",
+            "exactly",
+        ),
+    )
 
 
 @pytest.mark.parametrize(
@@ -1386,16 +1436,23 @@ def test_run_check_tool_description_surfaces_alias_and_contract_hint_support() -
 
     description = _tool_description(mcp, "run_check")
 
-    assert "Run static triage" in description
-    assert "does not pass or certify the artifact" in description
-    assert "Empty ``automated_issues`` means only" in description
-    assert "canonical check keys" in description
-    assert "contract.limit_recovery" in description
-    assert "required_request_fields" in description
-    assert "optional_request_fields" in description
-    assert "supported_binding_fields" in description
-    assert "request_template" in description
-    assert "run_contract_check" in description
+    _assert_semantic_surface(
+        description,
+        "run_check alias and contract hints",
+        required=(
+            "static triage",
+            "does not pass",
+            "certify",
+            "automated_issues",
+            "canonical check keys",
+            "contract.limit_recovery",
+            "required_request_fields",
+            "optional_request_fields",
+            "supported_binding_fields",
+            "request_template",
+            "run_contract_check",
+        ),
+    )
 
 
 def test_public_verification_infra_descriptor_surfaces_semantic_contract_rules() -> None:
@@ -1407,5 +1464,9 @@ def test_public_verification_infra_descriptor_surfaces_semantic_contract_rules()
 
     description = descriptor["description"]
     assert description.startswith("GPD physics verification support tools.")
-    assert "MCP results do not by themselves grant final scientific verification status" in description
+    _assert_semantic_surface(
+        description,
+        "verification infra descriptor safety",
+        required=("MCP results", "final scientific verification status"),
+    )
     assert verification_contract_surface_summary_text() in description

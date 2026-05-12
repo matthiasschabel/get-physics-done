@@ -77,7 +77,7 @@ Pass this context: Project contract: {project_contract}; gate: {project_contract
 {protocol_bundle_verifier_extensions}
 </protocol_bundle_verifier_extensions>
 
-Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. Use `protocol_bundle_verifier_extensions` as primary bundle-extension surface. Keep decisive comparison gaps legible at the claim / acceptance-test / reference level. If user input is required, return `gpd_return.status: checkpoint` and stop.
+Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. Use `protocol_bundle_verifier_extensions` as primary bundle-extension surface. Keep decisive comparison gaps legible at the claim / acceptance-test / reference level. If user input is required, return checkpoint state and stop.
 Schema finalization is bounded: validator pass returns; after the second validator failure total, including the initial failure and one repair rerun, return `gpd_return.status: blocked` with latest errors. Stop after two schema-only repair failures.
 
 <spawn_contract>
@@ -118,7 +118,7 @@ child_gate:
     failed: "non-green stop with validator errors"
 ```
 
-If runtime delegation is unavailable, fallback execution is still `gpd-verifier` work: read both report bridges, create bridge-valid body-only evidence, use the skeleton bridge only for conservative gap reports, and use `gpd verification-report finalize` for passed, `human_needed`, `expert_needed`, or typed non-gap outcomes. Do not hand-author frontmatter or put transcripts, hashes, oracle details, prose-only evidence, or `gpd_return` in YAML. Then run `sync_verifier_output`; on validation failure, stop non-green and do not wrapper-repair the canonical report.
+If runtime delegation is unavailable, fallback execution is still `gpd-verifier` work: read both report bridges, create bridge-valid body-only evidence, use the skeleton bridge only for conservative gap reports, and use `gpd verification-report finalize` for passed, `human_needed`, `expert_needed`, or typed non-gap outcomes. Do not hand-author frontmatter. Verification-report YAML must come from the skeleton/finalizer helpers; keep transcripts, hashes, oracle details, prose-only evidence, and `gpd_return` runtime return envelopes out of YAML, not in YAML. Then run `sync_verifier_output`; on validation failure, stop non-green and do not wrapper-repair the canonical report.
 </step>
 
 <step name="sync_verifier_output">

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from gpd import registry
 from gpd.adapters.install_utils import expand_at_includes
+from tests.lifecycle_contract_test_support import assert_machine_contract, assert_semantic_contract
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -24,55 +25,124 @@ def test_validate_conventions_seam_is_one_shot_and_artifact_gated_before_notatio
     workflow = _read_workflow("validate-conventions.md")
     expanded_workflow = expand_at_includes(workflow, REPO_ROOT / "src/gpd", "/runtime/")
 
-    assert "Spawn a fresh subagent for the task below." in expanded_workflow
-    assert "This is a one-shot handoff:" in expanded_workflow
-    assert "Do not make the child wait in place." in expanded_workflow
-    assert "Child artifact gate: apply `references/orchestration/child-artifact-gate.md`" in expanded_workflow
-    assert "Always pass `readonly=false` for file-producing agents." in expanded_workflow
-    assert "Thin wrapper around `gpd-consistency-checker` for convention validation." in workflow
-    assert "Spawn `gpd-consistency-checker` once and let it own convention policy." in workflow
-    assert "Runtime delegation rule: this is a one-shot handoff." in workflow
+    assert_semantic_contract(
+        expanded_workflow,
+        "expanded validate-conventions delegation note",
+        "fresh subagent",
+        "one-shot handoff",
+        "child wait",
+        "child-artifact-gate.md",
+        "readonly=false",
+    )
+    assert_semantic_contract(
+        workflow,
+        "validate-conventions wrapper delegates policy to checker",
+        "thin wrapper",
+        "gpd-consistency-checker",
+        "convention validation",
+        "own convention policy",
+    )
+    assert_semantic_contract(
+        workflow,
+        "validate-conventions runtime delegation is one-shot",
+        "runtime delegation",
+        "one-shot",
+        "checker",
+        "checkpoint",
+        "included delegation note",
+    )
     assert workflow.count('subagent_type="gpd-consistency-checker"') == 1
     assert workflow.count('subagent_type="gpd-notation-coordinator"') == 0
     assert "gpd-notation-coordinator" in workflow
-    assert "Route only on the canonical `gpd_return.status`:" in workflow
-    assert "Do not route on checker-local text markers or headings." in workflow
-    assert (
-        "If the checker's `next_actions` call for notation repair, spawn `gpd-notation-coordinator` with the checker report and the same scope."
-        in workflow
+    assert_semantic_contract(
+        workflow,
+        "validate-conventions routes only on checker status",
+        "route",
+        "gpd_return.status",
+        "completed",
+        "checkpoint",
+        "blocked",
+        "failed",
     )
-    assert "Keep that handoff thin: the coordinator owns the repair policy, not this workflow." in workflow
-    assert (
-        "If the checker returns `gpd_return.status: completed`, accept success only after verifying that:" in workflow
+    assert_semantic_contract(
+        workflow,
+        "validate-conventions ignores checker-local headings",
+        "checker-local",
+        "headings",
+        "presentation only",
     )
-    assert "The same path appears in `gpd_return.files_written`." in workflow
+    assert_semantic_contract(
+        workflow,
+        "validate-conventions notation repair handoff stays thin",
+        "next_actions",
+        "notation repair",
+        "gpd-notation-coordinator",
+        "same scope",
+        "coordinator owns",
+    )
+    assert_machine_contract(
+        workflow,
+        "validate-conventions completion artifact gate fields",
+        "gpd_return.status: completed",
+        "gpd_return.files_written",
+    )
 
 
 def test_consistency_checker_and_notation_coordinator_keep_ownership_boundaries_separate() -> None:
     checker = _read_agent("gpd-consistency-checker")
     notation = _read_agent("gpd-notation-coordinator")
 
-    assert (
-        "Scope boundary: `gpd-verifier` owns within-phase correctness. You own between-phase consistency only."
-        in checker
+    assert_semantic_contract(
+        checker,
+        "consistency checker owns between-phase consistency only",
+        "gpd-verifier",
+        "within-phase correctness",
+        "between-phase consistency",
     )
-    assert "status: completed" in checker
-    assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in checker
-    assert (
-        "Use `status: checkpoint` only when missing inputs or context pressure prevent a trustworthy check." in checker
+    assert_machine_contract(
+        checker,
+        "consistency checker return authority and artifact fields",
+        "status: completed",
+        "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md",
+        "shared_state_authority: return_only",
     )
-    assert "Use `status: blocked` only for hard inconsistencies that need escalation." in checker
-    assert "Use `status: failed` only when the scope could not be validated." in checker
-    assert "shared_state_authority: return_only" in checker
-    assert "Do not claim ownership of code fixes, commits, convention-authoring, or pattern-library updates." in checker
-
-    assert "shared_state_authority: direct" in notation
-    assert (
-        "This agent OWNS CONVENTIONS.md — it is the only agent that creates, modifies, or extends the conventions file."
-        in notation
+    assert_semantic_contract(
+        checker,
+        "consistency checker status meanings",
+        "status: checkpoint",
+        "missing inputs",
+        "status: blocked",
+        "hard inconsistencies",
+        "status: failed",
+        "scope could not be validated",
     )
-    assert (
-        "the gpd-consistency-checker DETECTS convention violations but delegates resolution to this agent" in notation
+    assert_semantic_contract(
+        checker,
+        "consistency checker does not own fixes or convention authoring",
+        "do not claim ownership",
+        "code fixes",
+        "commits",
+        "convention-authoring",
+    )
+    assert_machine_contract(
+        notation, "notation coordinator direct shared-state authority", "shared_state_authority: direct"
+    )
+    assert_semantic_contract(
+        notation,
+        "notation coordinator owns conventions file writes",
+        "OWNS CONVENTIONS.md",
+        "only agent",
+        "creates",
+        "modifies",
+        "extends",
+    )
+    assert_semantic_contract(
+        notation,
+        "checker detects and delegates convention resolution",
+        "gpd-consistency-checker",
+        "DETECTS",
+        "convention violations",
+        "delegates resolution",
     )
     assert "Authority: use the frontmatter-derived Agent Requirements block" not in checker
     assert "shared_state_authority: return_only" in registry.get_agent("gpd-consistency-checker").system_prompt
@@ -84,10 +154,28 @@ def test_audit_milestone_consumes_checker_reports_without_spawning_notation_reso
 
     assert workflow.count('subagent_type="gpd-consistency-checker"') == 1
     assert "gpd-notation-coordinator" not in workflow
-    assert (
-        'Consistency checker\'s report (notation conflicts, parameter mismatches, broken reasoning chains) — or note "skipped" if agent failed'
-        in workflow
+    assert_semantic_contract(
+        workflow,
+        "audit milestone surfaces checker report or skipped marker",
+        "consistency checker",
+        "report",
+        "parameter mismatches",
+        "skipped",
+        "agent failed",
     )
-    assert "If the consistency checker agent fails to spawn or returns an error:" in workflow
-    assert "status: completed" in checker
-    assert "Human-readable headings in the report are presentation only; route on `gpd_return.status`." in checker
+    assert_semantic_contract(
+        workflow,
+        "audit milestone checker spawn failure remains skip path",
+        "consistency checker agent",
+        "fails to spawn",
+        "skipped",
+        "gpd:validate-conventions",
+    )
+    assert_machine_contract(checker, "consistency checker completed status anchor", "status: completed")
+    assert_semantic_contract(
+        checker,
+        "consistency checker headings are presentation only",
+        "headings",
+        "presentation only",
+        "gpd_return.status",
+    )

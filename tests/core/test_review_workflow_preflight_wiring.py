@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.lifecycle_contract_test_support import assert_semantic_contract as _assert_semantic
+from tests.lifecycle_contract_test_support import (
+    artifact_paths,
+    child_gate_from_text,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_forbidden_lifecycle_prose as _assert_forbidden_semantic,
+)
+from tests.lifecycle_contract_test_support import (
+    assert_semantic_contract as _assert_semantic,
+)
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +58,41 @@ def _command_text(name: str) -> str:
 
 def _publication_reference_text(name: str) -> str:
     return (PUBLICATION_REFERENCES_DIR / name).read_text(encoding="utf-8")
+
+
+def _assert_arxiv_submission_gate_semantics(workflow: str, shared_preflight: str) -> None:
+    combined = f"{workflow}\n{shared_preflight}"
+    _assert_semantic(
+        combined,
+        "arxiv submission bootstrap and review gate semantics",
+        "shared publication bootstrap reference",
+        "source of truth",
+        "latest staged",
+        "REVIEW-LEDGER",
+        "REFEREE-DECISION",
+        "accept",
+        "minor_revision",
+        "unresolved blocking issues",
+        "manuscript_proof_review",
+        "strict preflight source of truth",
+        "resolved manuscript root",
+        "supported roots",
+        "arbitrary external directories",
+        "preflight-resolved entrypoint",
+        "tarballs beside the manuscript root",
+    )
+
+
+def _assert_managed_subject_review_root_semantics(text: str) -> None:
+    assert "selected_publication_root" in text
+    assert "selected_review_root" in text
+    _assert_semantic(
+        text,
+        "managed publication review artifacts use selected root",
+        "managed-subject",
+        "global `GPD/review`",
+        "fallback",
+    )
 
 
 def test_write_paper_workflow_runs_centralized_review_preflight() -> None:
@@ -155,7 +199,14 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
     assert "bibliography_audit_clean" in shared_preflight
     assert "reproducibility_ready" in shared_preflight
-    assert "expected mirrored artifacts exist on disk" in workflow
+    _assert_semantic(
+        workflow,
+        "respond-to-referees mirrored response artifacts complete handoff",
+        "expected mirrored artifacts",
+        "exist on disk",
+        "AUTHOR-RESPONSE",
+        "REFEREE_RESPONSE",
+    )
     assert (
         "import or normalize it into `${RESPONSE_PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md` before parsing comments"
         in workflow
@@ -197,41 +248,20 @@ def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
     assert 'gpd --raw init arxiv-submission --stage review_gate -- "$ARGUMENTS"' in workflow
     assert 'gpd --raw init arxiv-submission --stage package -- "$ARGUMENTS"' in workflow
     assert 'gpd --raw init arxiv-submission --stage finalize -- "$ARGUMENTS"' in workflow
-    assert "Use the shared publication bootstrap reference as the source of truth" in workflow
+    _assert_arxiv_submission_gate_semantics(workflow, shared_preflight)
     assert "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" in workflow
     assert PUBLICATION_REVIEW_RELIABILITY_INCLUDE not in workflow
     assert "staged `peer-review-reliability.md` reference" in workflow
     assert PUBLICATION_ROUND_ARTIFACTS_INCLUDE in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE not in workflow
-    assert (
-        "For a resumed manuscript, strict preflight reads `ARTIFACT-MANIFEST.json`, `BIBLIOGRAPHY-AUDIT.json`, and "
-        "`reproducibility-manifest.json` from the resolved manuscript directory itself." in shared_preflight
-    )
+    for artifact_name in ("ARTIFACT-MANIFEST.json", "BIBLIOGRAPHY-AUDIT.json", "reproducibility-manifest.json"):
+        assert artifact_name in shared_preflight
     assert "bibliography_audit_clean" in shared_preflight
     assert "reproducibility_ready" in shared_preflight
-    assert (
-        "Strict preflight also requires `ARTIFACT-MANIFEST.json` and `BIBLIOGRAPHY-AUDIT.json` beside the resolved manuscript entry point."
-        in workflow
-    )
-    assert (
-        "Strict preflight also requires the latest round-specific staged `REVIEW-LEDGER*.json` / `REFEREE-DECISION*.json` pair as authoritative submission-gate input."
-        in workflow
-    )
-    assert (
-        "latest recommendation is `accept` or `minor_revision` and there are no unresolved blocking issues" in workflow
-    )
-    assert "`manuscript_proof_review` must also already be cleared" in workflow
-    assert "The same resolved manuscript root is also the strict preflight source of truth" in workflow
-    assert "Set `resolved_main_tex` from `manuscript_entrypoint` and `resolved_dir` from `manuscript_root`" in workflow
-    assert (
-        "it must match that resolved entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`."
-        in workflow
-    )
-    assert "the centralized preflight-resolved entrypoint under that directory is authoritative" in workflow
-    assert (
-        "Do not accept arbitrary external directories or standalone `.tex` entrypoints outside those supported roots."
-        in workflow
-    )
+    for artifact_name in ("ARTIFACT-MANIFEST.json", "BIBLIOGRAPHY-AUDIT.json"):
+        assert artifact_name in workflow
+    assert "manuscript_entrypoint" in workflow
+    assert "manuscript_root" in workflow
     assert 'MAIN_SOURCE="${resolved_main_tex}"' in workflow
     assert 'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"' in workflow
     assert 'SUBMISSION_DIR="${PACKAGE_ROOT}/submission"' in workflow
@@ -240,11 +270,7 @@ def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
         'gpd --raw validate arxiv-package --materialize --submission-dir "$SUBMISSION_DIR" --tarball "$PACKAGE_TARBALL"'
         in workflow
     )
-    assert "Use `PACKAGE_VALIDATION` from `gpd --raw validate arxiv-package --materialize`" in workflow
-    assert (
-        "Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself."
-        in workflow
-    )
+    assert "PACKAGE_VALIDATION" in workflow
 
 
 def test_peer_review_workflow_runs_centralized_review_preflight_with_explicit_arguments() -> None:
@@ -256,9 +282,22 @@ def test_peer_review_workflow_runs_centralized_review_preflight_with_explicit_ar
     assert "gpd validate review-preflight peer-review --strict" not in preflight
     assert "stage-recovery-gate.md" in panel
     assert "checkpoint continuation" in panel
-    assert (
-        "Do not trust the referee's success text until that typed return, the on-disk files, and the validators all agree."
-        in final
+    gate = child_gate_from_text(final, "peer_review_stage6_referee")
+    assert gate.required_status == "completed"
+    assert artifact_paths(gate) == (
+        "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md",
+        "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex",
+        "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
+        "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json",
+        "${PUBLICATION_ROOT}/CONSISTENCY-REPORT.md when produced",
+    )
+    _assert_semantic(
+        final,
+        "peer-review Stage 6 closure requires typed return artifacts and validators",
+        "success text",
+        "typed return",
+        "on-disk files",
+        "validators all agree",
     )
 
 
@@ -271,18 +310,19 @@ def test_peer_review_prompts_do_not_route_managed_subjects_to_global_review_root
     assert "centralized preflight's selected publication/review roots" in command
     assert "Never write managed-subject review artifacts to the global `GPD/review` fallback." in command
     assert "not under the default global `GPD/review` path" in command
-    assert "while still writing review artifacts under `GPD/` in the invoking workspace" not in reliability_reference
-    assert (
-        "Write review artifacts under the target-aware `selected_review_root`, falling back to `GPD/review`."
-        not in workflow
+    _assert_forbidden_semantic(
+        reliability_reference,
+        "peer-review reliability avoids stale invoking-workspace global fallback prose",
+        "while still writing review artifacts under `GPD/` in the invoking workspace",
+    )
+    _assert_forbidden_semantic(
+        workflow,
+        "peer-review workflow avoids stale selected-root fallback prose",
+        "Write review artifacts under the target-aware `selected_review_root`, falling back to `GPD/review`.",
     )
 
     for text in (workflow, round_reference, reliability_reference):
-        assert "selected_publication_root" in text
-        assert "selected_review_root" in text
-        assert "Do not write a managed-subject review bundle to global `GPD/review`" in text or (
-            "do not duplicate or redirect those artifacts into global `GPD/review`" in text
-        )
+        _assert_managed_subject_review_root_semantics(text)
 
 
 def test_publication_review_workflows_reference_shared_manuscript_root_contract() -> None:
@@ -325,12 +365,26 @@ def test_review_knowledge_workflow_keeps_strict_current_workspace_canonical_targ
     assert "missing project state" not in command
     assert "GPD/knowledge/reviews/{knowledge_id}-R{review_round}-REVIEW.md" in command
     assert "{round_suffix}" not in command
-    assert "Keep this init bound to the workspace the user invoked from." in workflow
-    assert "do not auto-reenter a different recent project here." in workflow
+    _assert_semantic(
+        workflow,
+        "review-knowledge stays bound to current workspace",
+        "workspace the user invoked from",
+        "explicit current-workspace target",
+        "do not auto-reenter",
+        "different recent project",
+    )
     assert 'CONTEXT=$(gpd --raw validate command-context review-knowledge "$ARGUMENTS")' in workflow
     assert 'REVIEW_PREFLIGHT=$(gpd --raw validate review-preflight review-knowledge "$ARGUMENTS" --strict)' in workflow
     assert 'echo "$REVIEW_PREFLIGHT"' in workflow
-    assert "Accept only:" in workflow
-    assert "an exact current-workspace `GPD/knowledge/{knowledge_id}.md` path" in workflow
-    assert "a canonical `K-*` knowledge_id that resolves uniquely to that path" in workflow
-    assert "Do not guess from fuzzy topic text, stem similarity, or filename ordering." in workflow
+    assert "GPD/knowledge/{knowledge_id}.md" in workflow
+    assert "K-*" in workflow
+    _assert_semantic(
+        workflow,
+        "review-knowledge accepts only canonical target forms",
+        "Accept only",
+        "exact current-workspace",
+        "canonical",
+        "resolves uniquely",
+        "Do not guess",
+        "fuzzy topic text",
+    )

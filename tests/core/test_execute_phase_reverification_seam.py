@@ -7,6 +7,14 @@ from pathlib import Path
 
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
 from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, machine_exact, semantic_anchor
+from tests.lifecycle_contract_test_support import (
+    artifact_paths,
+    assert_forbidden_lifecycle_prose,
+    assert_machine_contract,
+    assert_semantic_contract,
+    child_gate_from_text,
+)
+from tests.markdown_test_support import extract_marker_range, parse_markdown_table
 from tests.return_skeleton_support import render_gpd_return_block
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,51 +30,153 @@ def _read_execute_phase_stage(name: str) -> str:
     return (EXECUTE_PHASE_STAGE_DIR / name).read_text(encoding="utf-8")
 
 
+def _stage_stop_row(workflow: str, stop: str) -> dict[str, str]:
+    section = extract_marker_range(
+        workflow,
+        '<step name="convention_repair_route">',
+        "</step>",
+        context="consistency-check convention repair route",
+    )
+    table = parse_markdown_table(section, context="consistency-check stage_stop routes")
+    for row in table.rows:
+        if row["Stop"] == stop:
+            return row
+    raise AssertionError(f"missing consistency-check stage_stop row: {stop}")
+
+
 def test_execute_phase_reverification_routes_on_typed_status_not_legacy_verifier_text() -> None:
     workflow = _read_execute_phase_stage("gap-reverification.md")
 
-    assert "automatically re-verify only the previously unresolved targets" in workflow
-    assert "`completed` + `passed`: continue to `consistency_check`" in workflow
-    assert "`checkpoint`: stop and route to `gpd:resume-work`" in workflow
-    assert "`blocked` / `failed`: stop and route to `gpd:verify-work {PHASE_NUMBER}`" in workflow
-    assert "include files_written" in workflow
-    assert "verification_status: passed | gaps_found | expert_needed | human_needed" in workflow
-    assert "Return verification status: passed | gaps_found." not in workflow
-    assert "Do not infer success from prose headings or untyped routing." in workflow
-    assert "Do not mark the phase complete on any non-passing or malformed path." in workflow
+    assert_semantic_contract(
+        workflow,
+        "gap reverification targets only unresolved prior work",
+        "re-verify",
+        "previously unresolved targets",
+    )
+    assert_machine_contract(
+        workflow,
+        "gap reverification status route and return fields",
+        "`completed` + `passed`: continue to `consistency_check`",
+        "`checkpoint`: stop and route to `gpd:resume-work`",
+        "`blocked` / `failed`: stop and route to `gpd:verify-work {PHASE_NUMBER}`",
+        "include files_written",
+        "verification_status: passed | gaps_found | expert_needed | human_needed",
+    )
+    assert_forbidden_lifecycle_prose(
+        workflow,
+        "retired short verifier status vocabulary",
+        "Return verification status: passed | gaps_found.",
+    )
+    assert_semantic_contract(
+        workflow,
+        "gap reverification ignores prose heading success",
+        "prose headings",
+        "untyped routing",
+        "infer success",
+    )
+    assert_semantic_contract(
+        workflow,
+        "gap reverification cannot close on non-passing or malformed paths",
+        "phase complete",
+        "non-passing",
+        "malformed path",
+    )
 
 
 def test_execute_phase_reverification_requires_files_written_and_disk_artifact_gate() -> None:
     workflow = _read_execute_phase_stage("gap-reverification.md")
+    gate = child_gate_from_text(workflow, "gap_closure_reverification")
 
-    assert 'subagent_type="gpd-verifier"' in workflow
-    assert "files_written" in workflow
-    assert "VERIFICATION.md" in workflow
-    assert "gpd validate handoff-artifacts - --expected '{phase_dir}/{phase_number}-VERIFICATION.md'" in workflow
-    assert "--require-files-written" in workflow
-    assert 'id: "gap_closure_reverification"' in workflow
+    assert_machine_contract(
+        workflow,
+        "gap reverification verifier spawn anchor",
+        'subagent_type="gpd-verifier"',
+    )
+    assert gate.id == "gap_closure_reverification"
+    assert gate.role == "gpd-verifier"
+    assert gate.return_profile == "verifier"
+    assert gate.required_status == "completed"
+    assert artifact_paths(gate) == ("{phase_dir}/{phase_number}-VERIFICATION.md",)
+    assert gate.allowed_roots == ("{phase_dir}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$REVERIFY_HANDOFF_STARTED_AT"
+    assert gate.freshness.require_mtime_at_or_after_marker is True
+    assert any(
+        "gpd validate handoff-artifacts - --expected '{phase_dir}/{phase_number}-VERIFICATION.md'" in validator
+        for validator in gate.validators
+    )
+    assert any("--require-files-written" in validator for validator in gate.validators)
+    assert "gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md" in gate.validators
 
 
 def test_execute_phase_reverification_keeps_fail_closed_on_spawn_errors_and_stale_reports() -> None:
     workflow = _read_execute_phase_stage("gap-reverification.md")
 
-    assert "malformed, missing files_written, stale report, or failed validators: fail closed" in workflow
-    assert "stop without auto-looping" in workflow
-    assert "Do not mark the phase complete on any non-passing or malformed path." in workflow
+    assert_semantic_contract(
+        workflow,
+        "gap reverification fail-closed artifact gate failures",
+        "malformed",
+        "files_written",
+        "stale report",
+        "failed validators",
+        "fail closed",
+    )
+    assert_semantic_contract(
+        workflow,
+        "gap reverification non-passing route stops without loop",
+        "non-passing",
+        "stop",
+        "auto-looping",
+    )
+    assert_semantic_contract(
+        workflow,
+        "gap reverification cannot complete on malformed result",
+        "phase complete",
+        "non-passing",
+        "malformed path",
+    )
 
 
 def test_execute_phase_gap_reverification_has_debugger_and_circuit_breaker() -> None:
     workflow = _read_execute_phase_stage("gap-reverification.md")
 
-    assert "Spawn debugger before any second attempt." in workflow
-    assert 'subagent_type="gpd-debugger"' in workflow
-    assert "Maximum two verification-gap closure cycles." in workflow
-    assert "Do not attempt a third automated cycle." in workflow
-    assert "gpd:validate-conventions" in workflow
+    assert_semantic_contract(
+        workflow,
+        "persistent gap requires debugger before second attempt",
+        "debugger",
+        "before",
+        "second attempt",
+    )
+    assert_machine_contract(
+        workflow,
+        "gap reverification debugger and convention command anchors",
+        'subagent_type="gpd-debugger"',
+        "gpd:validate-conventions",
+    )
+    assert_semantic_contract(
+        workflow,
+        "gap reverification circuit breaker prevents third cycle",
+        "maximum two",
+        "verification-gap closure cycles",
+        "third automated cycle",
+    )
 
 
 def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
+    gate = child_gate_from_text(workflow, "rapid_consistency_check")
+
+    assert gate.id == "rapid_consistency_check"
+    assert gate.role == "gpd-consistency-checker"
+    assert gate.return_profile == "checker"
+    assert gate.required_status == "completed"
+    assert artifact_paths(gate) == ("{phase_dir}/CONSISTENCY-CHECK.md",)
+    assert gate.allowed_roots == ("{phase_dir}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$CONSISTENCY_HANDOFF_STARTED_AT"
+    assert gate.freshness.require_mtime_at_or_after_marker is True
+    assert any("--require-files-written" in validator for validator in gate.validators)
+    assert any("--fresh-after" in validator for validator in gate.validators)
 
     assert_prompt_contracts(
         workflow,
@@ -77,19 +187,15 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
                 "<spawn_contract>",
                 "expected_artifacts:",
                 "{phase_dir}/CONSISTENCY-CHECK.md",
-                "Return exactly one typed gpd_return envelope, include files_written",
-                'id: "rapid_consistency_check"',
-                "--require-files-written",
-                "--fresh-after",
                 "CONSISTENCY_HANDOFF_STARTED_AT",
             ),
         ),
         semantic_anchor(
             "runtime return canonical for consistency report",
             (
-                "keep that envelope in the child response",
+                "child response",
                 "runtime return is canonical",
-                "Do not embed or duplicate gpd_return inside the report artifact",
+                "report artifact",
             ),
             match=MatchMode.CASEFOLD_NORMALIZED,
         ),
@@ -100,12 +206,34 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
 def test_execute_phase_consistency_check_fails_closed_on_malformed_output() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
 
-    assert "omits `gpd_return.status`" in workflow
-    assert "omits `files_written`" in workflow
-    assert "returns malformed output, treat the consistency check as blocked" in workflow
-    assert "Do not infer success from prose headings or untyped routing." in workflow
-    assert "Do not hand-author or paste a synthetic `gpd_return`" in workflow
-    assert "gpd:validate-conventions" in workflow
+    assert_machine_contract(
+        workflow,
+        "consistency malformed output machine anchors",
+        "omits `gpd_return.status`",
+        "omits `files_written`",
+        "gpd:validate-conventions",
+    )
+    assert_semantic_contract(
+        workflow,
+        "consistency malformed output blocks acceptance",
+        "malformed output",
+        "consistency check",
+        "blocked",
+    )
+    assert_semantic_contract(
+        workflow,
+        "consistency route ignores prose headings",
+        "prose headings",
+        "untyped routing",
+        "infer success",
+    )
+    assert_semantic_contract(
+        workflow,
+        "consistency parent must not synthesize checker return",
+        "synthetic",
+        "gpd_return",
+        "checker artifact",
+    )
 
 
 def test_execute_phase_consistency_report_without_embedded_return_validates_via_runtime_return(
@@ -143,10 +271,38 @@ def test_execute_phase_consistency_report_without_embedded_return_validates_via_
 def test_execute_phase_consistency_stops_render_from_stage_stop_routes() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
 
-    assert "For every consistency-check stop, populate `stage_stop` before rendering." in workflow
-    assert "| checker spawn/error | `blocked` | `consistency_checker_unavailable`" in workflow
-    assert "| checker checkpoint | `checkpoint` | `consistency_checker_checkpoint`" in workflow
-    assert "| checker blocked | `blocked` | `consistency_checker_blocked`" in workflow
-    assert "| checker failed | `failed` | `consistency_checker_failed`" in workflow
-    assert "| malformed output | `blocked` | `consistency_checker_malformed_output`" in workflow
-    assert "Primary: `{stage_stop.next_runtime_command}`" in workflow
+    assert_semantic_contract(
+        workflow,
+        "consistency stops populate stage_stop before rendering",
+        "consistency-check stop",
+        "stage_stop",
+        "before rendering",
+    )
+    expected_rows = {
+        "checker spawn/error": (
+            "blocked",
+            "consistency_checker_unavailable",
+            "consistency_check",
+            "gpd:validate-conventions",
+        ),
+        "checker checkpoint": ("checkpoint", "consistency_checker_checkpoint", "consistency_check", "gpd:resume-work"),
+        "checker blocked": ("blocked", "consistency_checker_blocked", "consistency_check", "gpd:validate-conventions"),
+        "checker failed": ("failed", "consistency_checker_failed", "consistency_check", "gpd:validate-conventions"),
+        "malformed output": (
+            "blocked",
+            "consistency_checker_malformed_output",
+            "consistency_check",
+            "gpd:validate-conventions",
+        ),
+    }
+    for stop, (status, reason, checkpoint, command) in expected_rows.items():
+        row = _stage_stop_row(workflow, stop)
+        assert row["stage_stop.status"] == status
+        assert row["reason"] == reason
+        assert row["checkpoint"] == checkpoint
+        assert row["next_runtime_command"] == command
+    assert_machine_contract(
+        workflow,
+        "consistency next-up command token",
+        "Primary: `{stage_stop.next_runtime_command}`",
+    )

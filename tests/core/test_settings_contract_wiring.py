@@ -7,6 +7,20 @@ from pathlib import Path
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from gpd.contracts import (
+    CONTRACT_CLAIM_KIND_VALUES,
+    CONTRACT_REFERENCE_ACTION_VALUES,
+    ContractAcceptanceTest,
+    ContractClaim,
+    ContractDeliverable,
+    ContractForbiddenProxy,
+    ContractLink,
+    ContractObservable,
+    ContractReference,
+)
+from gpd.core.config import GPDProjectConfig, canonical_config_key, effective_config_value
+from tests.assertion_taxonomy_support import MatchMode, assert_prompt_contracts, semantic_concept
+from tests.markdown_test_support import parse_markdown_table
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +29,46 @@ COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references"
 TEMPLATES_DIR = REPO_ROOT / "src/gpd/specs/templates"
 _RUNTIME_DISPLAY_NAMES = tuple(descriptor.display_name for descriptor in iter_runtime_descriptors())
+
+
+def _step(text: str, name: str) -> str:
+    return text.split(f'<step name="{name}">', 1)[1].split("</step>", 1)[0]
+
+
+def _assert_semantic_contract(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            label,
+            required=required or None,
+            forbidden=forbidden or None,
+            match=MatchMode.CASEFOLD_NORMALIZED,
+            context=label,
+        ),
+    )
+
+
+def _assert_model_fields_surface(text: str, collection_name: str, model: type) -> None:
+    assert f"`{collection_name}`" in text
+    for field_name in model.model_fields:
+        assert (
+            f'"{field_name}"' in text
+            or f'"{field_name}[]"' in text
+            or f'"{field_name}?"' in text
+            or f"`{field_name}`" in text
+        ), field_name
+
+
+def _settings_rows_by_header(settings_workflow: str) -> dict[str, dict[str, str]]:
+    present_settings = _step(settings_workflow, "present_settings")
+    table = parse_markdown_table(present_settings, context="settings choices")
+    return {row["Header"]: row for row in table.rows}
 
 
 def test_new_project_scope_approval_surfaces_contract_schema_without_restating_it() -> None:
@@ -28,38 +82,28 @@ def test_new_project_scope_approval_surfaces_contract_schema_without_restating_i
     assert "templates/project-contract-schema.md" in workflow_text
     assert "templates/state-json-schema.md" not in workflow_text
     assert "Follow the schema exactly" in workflow_text
-    assert (
-        '`observables[]` — `{ "id", "name", "kind", "definition", "regime?", "units?" }`'
-        in project_contract_schema_text
-    )
-    assert (
-        '`acceptance_tests[]` — `{ "id", "subject", "kind", "procedure", "pass_condition", "evidence_required[]", "automation" }`'
-        in project_contract_schema_text
-    )
-    assert (
-        '`references[]` — `{ "id", "kind", "locator", "aliases[]", "role", "why_it_matters", "applies_to[]", "carry_forward_to[]", "must_surface": true|false, "required_actions[]" }`'
-        in project_contract_schema_text
-    )
-    assert '`links[]` — `{ "id", "source", "target", "relation", "verified_by[]" }`' in project_contract_schema_text
-    assert (
-        "`claims[].claim_kind: theorem | lemma | corollary | proposition | result | claim | other`"
-        in project_contract_schema_text
-    )
-    assert (
-        "`required_actions[]` uses the same closed action vocabulary enforced downstream in contract ledgers: `read`, `use`, `compare`, `cite`, `avoid`."
-        in project_contract_schema_text
-    )
+    for collection_name, model in (
+        ("observables[]", ContractObservable),
+        ("claims[]", ContractClaim),
+        ("deliverables[]", ContractDeliverable),
+        ("acceptance_tests[]", ContractAcceptanceTest),
+        ("references[]", ContractReference),
+        ("forbidden_proxies[]", ContractForbiddenProxy),
+        ("links[]", ContractLink),
+    ):
+        _assert_model_fields_surface(project_contract_schema_text, collection_name, model)
+    for claim_kind in CONTRACT_CLAIM_KIND_VALUES:
+        assert claim_kind in project_contract_schema_text
+    for action in CONTRACT_REFERENCE_ACTION_VALUES:
+        assert f"`{action}`" in project_contract_schema_text
     assert (
         "if `references[].must_surface` is `true`, both `references[].applies_to[]` and "
         "`references[].required_actions[]` must be non-empty"
     ) not in workflow_text
-    assert (
-        "If a project-contract reference sets `must_surface: true`, `required_actions[]` must not be empty."
-        in project_contract_schema_text
-    )
-    assert (
-        "If a project-contract reference sets `must_surface: true`, `applies_to[]` must not be empty."
-        in project_contract_schema_text
+    _assert_semantic_contract(
+        project_contract_schema_text,
+        "must-surface reference rule",
+        required=("must_surface: true", "required_actions", "applies_to", "non-empty"),
     )
 
 
@@ -69,17 +113,18 @@ def test_settings_and_planning_config_keep_conventions_outside_config_json() -> 
     planning_config = (REFERENCES_DIR / "planning" / "planning-config.md").read_text(encoding="utf-8")
     workflow_preferences = (WORKFLOWS_DIR / "new-project/workflow-preferences.md").read_text(encoding="utf-8")
 
-    assert "physics research preferences" not in settings_command
-    assert "physics-specific settings" not in settings_workflow
-    assert "Project conventions do **not** live in `GPD/config.json`." in settings_workflow
-    assert (
-        "Project conventions still live in `GPD/state.json` (`convention_lock`) with "
-        "`GPD/CONVENTIONS.md` as the projection/audit surface"
-    ) in settings_workflow
+    _assert_semantic_contract(
+        settings_command + "\n" + settings_workflow,
+        "settings keeps convention ownership out of config",
+        required=("project conventions", "GPD/config.json", "GPD/state.json", "convention_lock", "GPD/CONVENTIONS.md"),
+        forbidden=("physics research preferences", "physics-specific settings"),
+    )
     assert '"physics": {' not in planning_config
-    assert "Project conventions are not part of `config.json`." in planning_config
-    assert "Do **not** introduce a `physics` block there." in planning_config
-    assert "Project conventions are outside this stage and outside `GPD/config.json`" in workflow_preferences
+    _assert_semantic_contract(
+        planning_config + "\n" + workflow_preferences,
+        "planning config excludes convention physics block",
+        required=("project conventions", "config.json", "outside", "physics", "block"),
+    )
     assert '"physics": {' not in workflow_preferences
 
 
@@ -93,7 +138,11 @@ def test_new_project_workflow_preferences_writes_only_existing_config_keys_and_s
     )
 
     assert workflow_preferences in aggregated_new_project
-    assert "Do not create, persist, or infer a separate preset block." in workflow_preferences
+    _assert_semantic_contract(
+        workflow_preferences,
+        "new-project presets resolve only into config keys",
+        required=("workflow presets", "existing config keys", "preset block"),
+    )
     assert "`SELECTED_RUNTIME`" in workflow_preferences
     assert permissions_sync.search(workflow_preferences)
     assert 'gpd --raw permissions sync --autonomy "$SELECTED_AUTONOMY"' not in workflow_preferences
@@ -110,6 +159,7 @@ def test_new_project_workflow_preferences_writes_only_existing_config_keys_and_s
         "workflow.verifier",
     ):
         assert key in workflow_preferences
+        assert canonical_config_key(key) is not None
 
     forbidden_writes = (
         "gpd config set model_overrides",
@@ -133,14 +183,19 @@ def test_settings_model_cost_onboarding_stays_qualitative_and_runtime_default_fi
     settings_workflow = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/settings.md" in settings_command
-    assert "Keep this wrapper thin" in settings_command
-    assert "Do not invent a parallel settings flow" in settings_command
+    _assert_semantic_contract(
+        settings_command,
+        "settings command stays a thin wrapper",
+        required=("wrapper", "thin", "parallel settings flow"),
+    )
 
-    assert "Supervised (Recommended)" in settings_workflow
+    rows_by_header = _settings_rows_by_header(settings_workflow)
+    assert rows_by_header["Autonomy"]["Options and mapping"].startswith("`Supervised (Recommended)`")
+    assert rows_by_header["Tier Models"]["Options and mapping"].count("`") >= 6
     assert "runtime defaults" in settings_workflow
     assert "gpd:set-tier-models" in settings_workflow
-    assert "Use runtime defaults" in settings_workflow
-    assert "Configure explicit tier models" in settings_workflow
+    assert "Use runtime defaults" in rows_by_header["Tier Models"]["Options and mapping"]
+    assert "Configure explicit tier models" in rows_by_header["Tier Models"]["Options and mapping"]
     assert "tier-1" in settings_workflow
     assert "tier-2" in settings_workflow
     assert "tier-3" in settings_workflow
@@ -152,22 +207,28 @@ def test_settings_workflow_surfaces_optional_usd_budget_guardrails_as_advisory_o
 
     assert "project_usd_budget" in settings_workflow
     assert "session_usd_budget" in settings_workflow
-    assert "To clear a configured USD budget, use literal JSON `null`." in settings_workflow
-    assert "Do not advertise or pass `none` or an empty string as a clearing value." in settings_workflow
-    assert "Blank / `none` should clear the corresponding USD budget." not in settings_workflow
-    assert "never stop work automatically" in settings_workflow
-    assert "live budget enforcement" not in settings_workflow
+    _assert_semantic_contract(
+        settings_workflow,
+        "optional USD budgets are advisory clearable guardrails",
+        required=("advisory", "never stop work automatically", "JSON `null`", "clear", "none", "empty string"),
+        forbidden=("Blank / `none` should clear", "live budget enforcement"),
+    )
 
 
 def test_settings_workflow_preset_contract_keeps_runtime_default_tier_model_path_explicit() -> None:
     settings_workflow = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
+    rows_by_header = _settings_rows_by_header(settings_workflow)
+    tier_row = rows_by_header["Tier Models"]
 
     assert "gpd:set-tier-models" in settings_workflow
-    assert "How should GPD handle concrete tier models for the active runtime?" in settings_workflow
-    assert "Leave current setting unchanged" in settings_workflow
-    assert "Use runtime defaults" in settings_workflow
-    assert "Configure explicit tier models" in settings_workflow
-    assert 'Treat blank / `runtime default` / `none` as "no override for this tier"' in settings_workflow
+    assert tier_row["Question"] == "How should GPD handle concrete tier models for the active runtime?"
+    for option in ("Leave current setting unchanged", "Use runtime defaults", "Configure explicit tier models"):
+        assert option in tier_row["Options and mapping"]
+    _assert_semantic_contract(
+        settings_workflow,
+        "runtime default tier overrides clear per tier",
+        required=("blank", "runtime default", "none", "no override", "tier"),
+    )
 
 
 def test_settings_workflow_uses_same_selected_runtime_for_models_and_permissions() -> None:
@@ -190,7 +251,11 @@ def test_set_tier_models_workflow_keeps_runtime_examples_generic() -> None:
     for display_name in _RUNTIME_DISPLAY_NAMES:
         assert display_name not in set_tier_models
     assert "gpt-5.4" not in set_tier_models
-    assert "runtime-native examples are intentionally not hard-coded here" in set_tier_models.lower()
+    _assert_semantic_contract(
+        set_tier_models,
+        "tier-model examples remain runtime generic",
+        required=("runtime-native examples", "not hard-coded"),
+    )
 
 
 def test_settings_workflow_keeps_convention_ownership_outside_settings_and_routes_changes_to_validate_conventions() -> (
@@ -199,14 +264,20 @@ def test_settings_workflow_keeps_convention_ownership_outside_settings_and_route
     settings_command = (COMMANDS_DIR / "settings.md").read_text(encoding="utf-8")
     settings_workflow = (WORKFLOWS_DIR / "settings.md").read_text(encoding="utf-8")
 
-    assert (
-        "Convention work stays outside settings; use `gpd convention set <key> <value>` or `gpd:validate-conventions` for project convention updates."
-        in settings_command
+    _assert_semantic_contract(
+        settings_command + "\n" + settings_workflow,
+        "settings routes convention edits to convention surfaces",
+        required=(
+            "convention work",
+            "outside settings",
+            "gpd convention set <key> <value>",
+            "gpd:validate-conventions",
+            "GPD/state.json",
+            "convention_lock",
+            "GPD/CONVENTIONS.md",
+            "GPD/config.json",
+        ),
     )
-    assert (
-        "Project conventions still live in `GPD/state.json` (`convention_lock`) with "
-        "`GPD/CONVENTIONS.md` as the projection/audit surface, not in `GPD/config.json`."
-    ) in settings_workflow
     assert "gpd:validate-conventions -- verify convention consistency across the project" in settings_workflow
     assert "gpd convention set <key> <value> -- update the locked project conventions directly" in settings_workflow
 
@@ -222,7 +293,17 @@ def test_settings_workflow_writes_canonical_config_keys_through_cli() -> None:
     assert 'gpd config set model_overrides "$MODEL_OVERRIDES_JSON"' in update_step
     assert 'gpd config set git.phase_branch_template "$SELECTED_PHASE_BRANCH_TEMPLATE"' not in update_step
     assert 'gpd config set git.milestone_branch_template "$SELECTED_MILESTONE_BRANCH_TEMPLATE"' not in update_step
-    assert "Preserve `git.phase_branch_template` and `git.milestone_branch_template`" in update_step
+    _assert_semantic_contract(
+        update_step,
+        "settings preserves branch templates while changing strategy",
+        required=("preserve", "git.phase_branch_template", "git.milestone_branch_template"),
+    )
+    table = parse_markdown_table(update_step, context="settings update config keys")
+    rows = {row["Config key"].strip("`"): row["Selected variable"].strip("`") for row in table.rows}
+    for key, variable in rows.items():
+        assert canonical_config_key(key) is not None
+        assert variable.startswith("SELECTED_")
+        assert effective_config_value(GPDProjectConfig(), key)[0] is True
     for stale_nested_key in ('"planning": {', '"workflow": {', '"execution": {', '"git": {'):
         assert stale_nested_key not in update_step
 
@@ -245,14 +326,24 @@ def test_settings_and_profile_docs_keep_supervised_dense_defaults_consistent() -
     set_profile_workflow = (WORKFLOWS_DIR / "set-profile.md").read_text(encoding="utf-8")
     continuous_execution = (REFERENCES_DIR / "orchestration" / "continuous-execution.md").read_text(encoding="utf-8")
 
-    assert "Core research (Recommended): preview the supervised default bundle" in settings_workflow
-    assert "balanced default bundle" not in settings_workflow
-    assert "using the schema defaults noted below" in settings_workflow
+    _assert_semantic_contract(
+        settings_workflow,
+        "settings defaults favor supervised dense profile preview",
+        required=("core research", "supervised", "default bundle", "schema defaults"),
+        forbidden=("balanced default bundle",),
+    )
 
-    assert "Keep `execution.review_cadence=dense` for publication-quality passes" in set_profile_workflow
-    assert "`execution.review_cadence=adaptive` or `sparse` usually fits" not in set_profile_workflow
+    _assert_semantic_contract(
+        set_profile_workflow,
+        "profile docs keep dense publication cadence",
+        required=("execution.review_cadence=dense", "publication-quality"),
+        forbidden=("`execution.review_cadence=adaptive` or `sparse` usually fits",),
+    )
 
     assert "| **Supervised** (default)         | `supervised`" in continuous_execution
-    assert "This is an explicit opt-in after the user leaves the default `supervised` posture." in continuous_execution
-    assert "The default autonomy setting. The assistant auto-advances" not in continuous_execution
-    assert "eligible for auto-advance in `balanced` or `yolo`" in continuous_execution
+    _assert_semantic_contract(
+        continuous_execution,
+        "supervised is default and auto-advance is opt-in",
+        required=("explicit opt-in", "default `supervised` posture", "auto-advance", "balanced", "yolo"),
+        forbidden=("The default autonomy setting. The assistant auto-advances",),
+    )

@@ -16,12 +16,22 @@ from unittest.mock import ANY, MagicMock, patch
 import anyio
 import pytest
 
-from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_anchor, semantic_concept
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "stage0"
 _TASK_OVERLAY_BODY_KEYS = frozenset(
     {"body", "content", "markdown", "text", "overlay_body", "overlay_content", "overlay_markdown", "overlay_text"}
 )
+
+
+def _assert_semantic_surface(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(text, *semantic_concept(label, required=required, forbidden=forbidden))
 
 
 def _assert_body_free_task_overlay_metadata(payload: dict[str, object]) -> None:
@@ -370,9 +380,11 @@ class TestBuiltinServerDescriptors:
 
         descriptor = build_public_descriptors()["gpd-arxiv"]
 
-        assert "baseline upstream tools" in descriptor["description"]
-        assert "forwards only tools exposed by the live upstream server" in descriptor["description"]
-        assert "download_source" in descriptor["description"]
+        _assert_semantic_surface(
+            descriptor["description"],
+            "arxiv descriptor upstream forwarding semantics",
+            required=("baseline upstream tools", "live upstream server", "download_source"),
+        )
         assert descriptor["capability_surface"] == "baseline_dynamic_upstream"
         assert descriptor["dynamic_upstream_capabilities"] is True
         assert descriptor["baseline_upstream_capabilities"] == list(UPSTREAM_CORE_TOOL_NAMES)
@@ -482,8 +494,11 @@ class TestBuiltinServerDescriptors:
         descriptor = build_public_descriptors()["gpd-skills"]
 
         assert descriptor["description"] == SKILLS_SERVER_DESCRIPTION
-        assert "missing evidence or artifacts" not in descriptor["description"]
-        assert "never fabricate fallback outputs" not in descriptor["description"]
+        _assert_semantic_surface(
+            descriptor["description"],
+            "skills descriptor excludes stale verification prose",
+            forbidden=("missing evidence or artifacts", "never fabricate fallback outputs"),
+        )
 
 
 class TestMcpServerRunner:
@@ -760,9 +775,12 @@ class TestConventionsServer:
         key_schema = schema["properties"]["key"]
         value_schema = schema["properties"]["value"]
 
-        assert "custom:<slug>" in description
-        assert "blank or placeholder string" in description
-        assert "Use None to clear a convention." not in description
+        _assert_semantic_surface(
+            description,
+            "convention_set description key value constraints",
+            required=("custom:<slug>", "blank", "placeholder"),
+            forbidden=("Use None to clear a convention.",),
+        )
 
         key_branches = key_schema["anyOf"]
         assert any(set(branch["enum"]) == set(KNOWN_CONVENTIONS) for branch in key_branches if "enum" in branch)
@@ -771,11 +789,20 @@ class TestConventionsServer:
             branch.get("pattern") == r"^custom:[A-Za-z0-9][A-Za-z0-9_-]*$" and "custom:<slug>" in branch["description"]
             for branch in key_branches
         )
-        assert "alias" in key_schema["description"]
+        _assert_semantic_surface(
+            key_schema["description"],
+            "convention key schema aliases",
+            required=("alias",),
+        )
         assert value_schema["minLength"] == 1
         assert value_schema["pattern"] == r"^(?!\s*(?:null|none|undefined)\s*$)\S(?:.*\S)?$"
-        assert "placeholder strings" in value_schema["description"]
-        assert "Use None to clear a convention." not in value_schema["description"]
+        assert value_schema.get("type") == "string"
+        _assert_semantic_surface(
+            value_schema["description"],
+            "convention value schema placeholders",
+            required=("placeholder", "strings"),
+            forbidden=("Use None to clear a convention.",),
+        )
 
     def test_convention_set_rejects_invalid_custom_key_shape(self, tmp_path):
         from gpd.mcp.servers.conventions_server import convention_set

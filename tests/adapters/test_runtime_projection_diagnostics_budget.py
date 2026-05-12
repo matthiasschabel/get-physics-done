@@ -28,28 +28,28 @@ KNOWN_PROJECTION_HOTSPOTS = {
 }
 COMMAND_ONLY_RUNTIME_PRESSURE_BUDGETS = {
     "claude-code": {
-        "shell_fence_count": 30,
-        "shell_rewrite_count": 30,
-        "bridge_command_occurrences": 40,
-        "runtime_note_count": 5,
+        "shell_fence_count": 28,
+        "shell_rewrite_count": 25,
+        "bridge_command_occurrences": 35,
+        "runtime_note_count": 2,
     },
     "codex": {
-        "shell_fence_count": 40,
-        "shell_rewrite_count": 40,
-        "bridge_command_occurrences": 225,
-        "runtime_note_count": 5,
+        "shell_fence_count": 35,
+        "shell_rewrite_count": 35,
+        "bridge_command_occurrences": 210,
+        "runtime_note_count": 3,
     },
     "gemini": {
-        "shell_fence_count": 120,
-        "shell_rewrite_count": 110,
-        "bridge_command_occurrences": 350,
-        "runtime_note_count": 80,
+        "shell_fence_count": 115,
+        "shell_rewrite_count": 105,
+        "bridge_command_occurrences": 340,
+        "runtime_note_count": 76,
     },
     "opencode": {
-        "shell_fence_count": 40,
-        "shell_rewrite_count": 40,
-        "bridge_command_occurrences": 150,
-        "runtime_note_count": 5,
+        "shell_fence_count": 35,
+        "shell_rewrite_count": 35,
+        "bridge_command_occurrences": 135,
+        "runtime_note_count": 3,
     },
 }
 

@@ -12,17 +12,17 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 43_000, "chars": 1_780_000}
+PROMPT_TOTAL_BUDGET = {"lines": 42_800, "chars": 1_770_000}
 PROMPT_KIND_BUDGETS = {
-    "command": {"lines": 20_500, "chars": 775_000},
-    "agent": {"lines": 7_500, "chars": 405_000},
-    "workflow": {"lines": 15_300, "chars": 620_000},
+    "command": {"lines": 20_200, "chars": 760_000},
+    "agent": {"lines": 7_400, "chars": 402_000},
+    "workflow": {"lines": 15_300, "chars": 618_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 140_000}
 # Phase 4 scaffolding guard. Keep first-turn active content flat while Phase 6
 # ratchets the integrated agent aggregate separately.
 STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 110_000}
-STAGE_EAGER_CHAR_BUDGET = 885_000
+STAGE_EAGER_CHAR_BUDGET = 882_000
 STAGE_SELECTED_INIT_FIELD_BUDGET = 2_525
 STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 23
 REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 4
@@ -164,22 +164,22 @@ FORBIDDEN_MIGRATED_PROMPT_SHELL_FRAGMENTS = {
 
 def _aggregate_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:
     if descriptor.native_include_support:
-        return {"lines": 17_700, "chars": 930_000}
+        return {"lines": 16_000, "chars": 850_000}
     if not descriptor.agent_prompt_uses_dollar_templates:
-        return {"lines": 27_350, "chars": 1_345_000}
+        return {"lines": 25_000, "chars": 1_200_000}
     if descriptor.public_command_surface_prefix.endswith(":"):
-        return {"lines": 27_500, "chars": 1_375_000}
-    return {"lines": 27_850, "chars": 1_350_000}
+        return {"lines": 25_000, "chars": 1_250_000}
+    return {"lines": 25_300, "chars": 1_200_000}
 
 
 def _command_only_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[str, int]:
     if descriptor.native_include_support:
-        return {"lines": 7_400, "chars": 382_000}
+        return {"lines": 7_400, "chars": 378_000}
     if not descriptor.agent_prompt_uses_dollar_templates:
-        return {"lines": 16_300, "chars": 745_000}
+        return {"lines": 16_300, "chars": 725_000}
     if descriptor.public_command_surface_prefix.endswith(":"):
-        return {"lines": 16_400, "chars": 775_000}
-    return {"lines": 16_650, "chars": 750_000}
+        return {"lines": 16_400, "chars": 768_000}
+    return {"lines": 16_650, "chars": 728_000}
 
 
 def _runtime_projection_budgets(*, command_only: bool) -> dict[str, dict[str, int]]:

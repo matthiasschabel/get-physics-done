@@ -38,6 +38,7 @@ PHASE7_STOP_ROW_IDS = frozenset({"LP-JIT-06", "P6-EXEC-JIT-03", "P7-ERG-JIT-05"}
 PHASE7_RUNTIME_NEXTUP_ROW_IDS = (REQUIRED_P7_NEXTUP_JIT_ROW_IDS - {"P7-NEXTUP-JIT-04"}) | frozenset(
     {"P7-ERG-JIT-02", "P7-ERG-JIT-04"}
 )
+PHASE8_REQUIRED_BASE_ROW_PREFIXES = REQUIRED_BASE_ROW_PREFIXES | {"LP13", "LP14", "LP15"}
 
 HARD_ZERO_METRIC_KEYS = (
     "invalid_command_suggestion_count",
@@ -45,14 +46,27 @@ HARD_ZERO_METRIC_KEYS = (
     "unexpected_write_count",
     "unsupported_completion_claim_count",
 )
+PHASE7_HARD_ZERO_METRIC_KEYS = (
+    "raw_reload_leakage_count",
+    "content_hydration_before_selection_count",
+    "wrong_runtime_prefix_count",
+    "missing_runtime_command_label_count",
+)
 
 
 def test_phase7_persona_canary_fixture_contains_base_and_jit_rows() -> None:
     rows = _phase7_fixture_rows()
     row_ids = {str(row["row_id"]) for row in rows}
     base_prefixes = {row_id.split("-", 1)[0] for row_id in row_ids if row_id.startswith("LP")}
+    jit_row_ids = {
+        str(row["row_id"])
+        for row in rows
+        if row.get("row_tier") == "jit_canary" or str(row["row_id"]).startswith("LP-JIT-")
+    }
 
-    assert REQUIRED_BASE_ROW_PREFIXES <= base_prefixes
+    assert len(rows) >= 51
+    assert len(jit_row_ids) >= 39
+    assert PHASE8_REQUIRED_BASE_ROW_PREFIXES <= base_prefixes
     assert REQUIRED_JIT_ROW_IDS <= row_ids
     assert REQUIRED_P7_ERG_JIT_ROW_IDS <= row_ids
 
@@ -139,7 +153,7 @@ def _assert_phase7_score_hard_budgets(wrapped_score: object) -> None:
     classes = wrapped_score.phase7_metric_classes
     for metric_key in HARD_ZERO_METRIC_KEYS:
         assert wrapped_score.behavior_score.metric_counts[metric_key] == 0
-    for metric_key in ("raw_reload_leakage_count", "content_hydration_before_selection_count"):
+    for metric_key in PHASE7_HARD_ZERO_METRIC_KEYS:
         assert counts[metric_key] == 0
     assert classes["useful_work_latency_class"] in {"first_turn", "second_turn"}
     assert classes["reload_loop_class"] == "no_reload_loop"

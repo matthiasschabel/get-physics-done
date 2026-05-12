@@ -25,19 +25,12 @@ _PHASE7_ROW_ID_RE = re.compile(
 _PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 _PHASE7_REQUIRED_BASE_ROW_IDS = (
-    "LP01-START-PROJECTLESS-READONLY",
-    "LP02-RESUME-CONTEXT-LOSS",
-    "LP03-STALE-VERIFY-ARTIFACT",
-    "LP04-STOP-MID-EXECUTION",
-    "LP05-NEW-PROJECT-MINIMAL-VAGUE",
-    "LP06-MAP-RESEARCH-EXISTING",
-    "LP07-WRITE-PAPER-GAPS",
-    "LP08-CHILD-CHECKPOINT-RETURN",
-    "LP09-WORKSPACE-WRITE-BOUNDARY",
-    "LP10-RUNTIME-PERMISSION-BLOCK",
-    "LP11-SET-PROFILE-REVIEW-CANARY",
-    "LP12-GEMINI-POLICY-DENIAL",
-)
+    "LP01-START-PROJECTLESS-READONLY LP02-RESUME-CONTEXT-LOSS LP03-STALE-VERIFY-ARTIFACT "
+    "LP04-STOP-MID-EXECUTION LP05-NEW-PROJECT-MINIMAL-VAGUE LP06-MAP-RESEARCH-EXISTING "
+    "LP07-WRITE-PAPER-GAPS LP08-CHILD-CHECKPOINT-RETURN LP09-WORKSPACE-WRITE-BOUNDARY "
+    "LP10-RUNTIME-PERMISSION-BLOCK LP11-SET-PROFILE-REVIEW-CANARY LP12-GEMINI-POLICY-DENIAL "
+    "LP13-HELP-REFERENCE-ONLY LP14-START-CHOOSER-ROUTE LP15-PEER-REVIEW-MODE"
+).split()
 _PHASE7_REQUIRED_BEHAVIOR_ROW_IDS = tuple(sorted(REQUIRED_JIT_ROW_IDS))
 _PHASE7_REQUIRED_BEHAVIOR_FIELDS = frozenset(
     {
@@ -59,16 +52,9 @@ _PHASE7_REQUIRED_BEHAVIOR_FIELDS = frozenset(
 _PHASE7_BEHAVIOR_CLASS_FIELDS = frozenset(
     field for field in _PHASE7_REQUIRED_BEHAVIOR_FIELDS if field.endswith("_class")
 ) | {"persona_class", "prompt_variant_class", "workflow_class"}
-_PHASE7_PLANNED_BEHAVIOR_COUNT_KEYS = frozenset(
-    (
-        *BEHAVIOR_METRIC_COUNT_KEYS,
-        "physics_progress_count",
-        "schema_surface_count",
-        "conversation_turn_count",
-        "raw_reload_leakage_count",
-        "content_hydration_before_selection_count",
-    )
-)
+_PHASE7_RUNTIME_ZERO_METRIC_KEYS = ("wrong_runtime_prefix_count", "missing_runtime_command_label_count")
+_PHASE7_EXTRA_COUNT_KEYS = "physics_progress_count schema_surface_count conversation_turn_count raw_reload_leakage_count content_hydration_before_selection_count wrong_runtime_prefix_count missing_runtime_command_label_count".split()
+_PHASE7_PLANNED_BEHAVIOR_COUNT_KEYS = frozenset(BEHAVIOR_METRIC_COUNT_KEYS) | frozenset(_PHASE7_EXTRA_COUNT_KEYS)
 
 _PHASE7_FORBIDDEN_RAW_ARTIFACT_NAMES = frozenset(
     {
@@ -120,16 +106,13 @@ _LIFECYCLE_ROW_SEMANTIC_TEST_OWNER_OPTIONS = {
     ),
 }
 
-_PHASE6_INTEGRATION_PLAN_PERSONA_ROWS = {
-    "schema_averse_planner": "P6-PLAN-JIT-01",
-    "blocked_or_changed_plan_planner": "P6-PLAN-JIT-02",
-    "proof_checker_deferral": "P6-PLAN-JIT-03",
-    "execute_interruption": "P6-EXEC-JIT-03",
-    "verification_pressure": "P6-COMP-JIT-01",
-    "ready_closeout": "P6-COMP-JIT-04",
-    "runtime_confused_command": "P7-ERG-JIT-02",
-    "reference_overload": "P7-ERG-JIT-03",
-}
+_PHASE6_INTEGRATION_PLAN_PERSONA_ROWS = dict(
+    zip(
+        "schema_averse_planner blocked_or_changed_plan_planner proof_checker_deferral execute_interruption verification_pressure ready_closeout runtime_confused_command reference_overload".split(),
+        "P6-PLAN-JIT-01 P6-PLAN-JIT-02 P6-PLAN-JIT-03 P6-EXEC-JIT-03 P6-COMP-JIT-01 P6-COMP-JIT-04 P7-ERG-JIT-02 P7-ERG-JIT-03".split(),
+        strict=True,
+    )
+)
 _PHASE6_WORKFLOW_PERSONA_ROWS = {
     "help": "LP13-HELP-REFERENCE-ONLY",
     "start": "LP14-START-CHOOSER-ROUTE",
@@ -237,6 +220,8 @@ def test_phase7_fixture_rows_name_existing_source_and_test_owners() -> None:
     base_row_ids = set(_PHASE7_REQUIRED_BASE_ROW_IDS)
     behavior_row_ids = _phase7_behavior_row_ids(rows)
 
+    assert len(rows) >= 51
+    assert len(behavior_row_ids) >= 39
     assert base_row_ids <= set(row_ids)
     assert set(_PHASE7_REQUIRED_BEHAVIOR_ROW_IDS) <= behavior_row_ids
     assert len(set(row_ids)) == len(row_ids)
@@ -285,6 +270,10 @@ def test_phase7_behavior_canary_rows_are_class_only_and_aligned_to_phase4_scorer
         assert metric_bounds
         assert set(metric_bounds) <= _PHASE7_PLANNED_BEHAVIOR_COUNT_KEYS
         assert all(_is_metric_bound(bound) for bound in metric_bounds.values())
+        if str(row.get("behavior_case", "")).startswith("p7_nextup_"):
+            assert all(
+                metric_bounds.get(metric_key) == {"exact": 0} for metric_key in _PHASE7_RUNTIME_ZERO_METRIC_KEYS
+            ), row_id
 
         phase4_ref = row["phase4_behavior_ref"]
         assert isinstance(phase4_ref, str)

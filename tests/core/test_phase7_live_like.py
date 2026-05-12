@@ -27,6 +27,7 @@ from tests.helpers import phase7_live_like
 from tests.helpers.persona_trace import FakePersonaTrace, FakePersonaTurn
 from tests.helpers.phase7_live_like import (
     PHASE7_LIVE_PERSONA_MATRIX_PATH,
+    REQUIRED_BASE_ROW_PREFIXES,
     REQUIRED_JIT_ROW_IDS,
     REQUIRED_LP_JIT_ROW_IDS,
     REQUIRED_P6_JIT_ROW_IDS,
@@ -45,9 +46,13 @@ REFERENCE_CONTENT_FIELD = "reference_artifacts_content"
 
 def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
     rows = load_phase7_live_like_rows()
-
-    assert {row.row_id for row in rows} >= {"LP01-START-PROJECTLESS-READONLY", "LP12-GEMINI-POLICY-DENIAL"}
-    assert {row.row_id for row in rows} >= REQUIRED_JIT_ROW_IDS
+    row_ids = {row.row_id for row in rows}
+    assert len(rows) >= 51 and sum(row.row_tier == "jit_canary" for row in rows) >= 39
+    assert row_ids >= {"LP01-START-PROJECTLESS-READONLY", "LP12-GEMINI-POLICY-DENIAL"}
+    assert REQUIRED_BASE_ROW_PREFIXES | {"LP13", "LP14", "LP15"} <= {
+        row_id.split("-", 1)[0] for row_id in row_ids if row_id.startswith("LP")
+    }
+    assert row_ids >= REQUIRED_JIT_ROW_IDS
     assert {row.row_tier for row in rows} <= ROW_TIERS
     assert all(row.provider_launch_allowed is False for row in rows)
     assert all(row.network_allowed is False for row in rows)
@@ -91,6 +96,8 @@ def test_phase7_live_like_scores_jit_canary_rows_with_hard_budgets() -> None:
     assert all(score.hard_budget_failures == () for score in scores)
     assert all(score.behavior_score.metric_counts["unexpected_write_count"] == 0 for score in scores)
     assert all(score.phase7_metric_counts["raw_reload_leakage_count"] == 0 for score in scores)
+    assert all(score.phase7_metric_counts["wrong_runtime_prefix_count"] == 0 for score in scores)
+    assert all(score.phase7_metric_counts["missing_runtime_command_label_count"] == 0 for score in scores)
     assert all(
         score.phase7_metric_counts["schema_surface_count"] <= score.phase7_metric_counts["physics_progress_count"] + 1
         for score in scores

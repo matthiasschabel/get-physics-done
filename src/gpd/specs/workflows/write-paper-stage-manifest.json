@@ -290,12 +290,20 @@
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/figure-tracker.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "writer_spawn_needed",
+          "authorities": [
+            "references/orchestration/runtime-delegation-note.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/write-paper.md",
         "workflows/write-paper/outline-scaffold.md",
         "workflows/write-paper/consistency-references.md",
         "workflows/write-paper/publication-review-finalization.md",
+        "references/orchestration/runtime-delegation-note.md",
         "references/publication/publication-review-round-artifacts.md",
         "references/publication/publication-response-artifacts.md",
         "references/publication/publication-pipeline-modes.md",

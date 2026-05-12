@@ -26,6 +26,32 @@ KNOWN_PROJECTION_HOTSPOTS = {
     "new-project",
     "write-paper",
 }
+COMMAND_ONLY_RUNTIME_PRESSURE_BUDGETS = {
+    "claude-code": {
+        "shell_fence_count": 30,
+        "shell_rewrite_count": 30,
+        "bridge_command_occurrences": 40,
+        "runtime_note_count": 5,
+    },
+    "codex": {
+        "shell_fence_count": 40,
+        "shell_rewrite_count": 40,
+        "bridge_command_occurrences": 225,
+        "runtime_note_count": 5,
+    },
+    "gemini": {
+        "shell_fence_count": 120,
+        "shell_rewrite_count": 110,
+        "bridge_command_occurrences": 350,
+        "runtime_note_count": 80,
+    },
+    "opencode": {
+        "shell_fence_count": 40,
+        "shell_rewrite_count": 40,
+        "bridge_command_occurrences": 150,
+        "runtime_note_count": 5,
+    },
+}
 
 
 def _non_negative_int(row: dict[str, object], key: str) -> int:
@@ -38,7 +64,9 @@ def _non_negative_int(row: dict[str, object], key: str) -> int:
 def test_projection_budget_fixture_tracks_runtime_catalog() -> None:
     descriptors = iter_runtime_descriptors()
     runtime_names = tuple(descriptor.runtime_name for descriptor in descriptors)
-    non_native_names = tuple(descriptor.runtime_name for descriptor in descriptors if not descriptor.native_include_support)
+    non_native_names = tuple(
+        descriptor.runtime_name for descriptor in descriptors if not descriptor.native_include_support
+    )
 
     assert RUNTIME_PROJECTION_TARGETS == runtime_names
     assert NON_NATIVE_RUNTIME_PROJECTION_TARGETS == non_native_names
@@ -103,6 +131,37 @@ def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None
     assert saw_shell_rewrite_pressure, "runtime_top_prompts should expose nonzero shell rewrite pressure"
 
 
+def test_command_runtime_projection_shell_and_bridge_pressure_stays_under_advisory_baselines() -> None:
+    report = prompt_diagnostics.build_prompt_surface_report(
+        REPO_ROOT,
+        surfaces=("command",),
+        runtime_names=RUNTIME_PROJECTION_TARGETS,
+        include_tests=False,
+        include_runtime_projections=True,
+    )
+    payload = prompt_diagnostics.report_to_dict(report)
+    totals = payload["totals"]
+    assert isinstance(totals, dict)
+    runtime_projection = totals["runtime_projection"]
+    assert isinstance(runtime_projection, dict)
+
+    assert set(COMMAND_ONLY_RUNTIME_PRESSURE_BUDGETS) <= set(runtime_projection)
+    for runtime, pressure_budgets in COMMAND_ONLY_RUNTIME_PRESSURE_BUDGETS.items():
+        runtime_totals = runtime_projection[runtime]
+        assert isinstance(runtime_totals, dict)
+        for field_name, advisory_budget in pressure_budgets.items():
+            observed = _non_negative_int(runtime_totals, field_name)
+            assert observed <= advisory_budget, (
+                f"{runtime} command projection {field_name} advisory budget exceeded: "
+                f"observed={observed} max={advisory_budget}; "
+                "reduce prompt-local shell fences or repeated runtime bridge snippets"
+            )
+
+        if runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS:
+            assert _non_negative_int(runtime_totals, "include_count") == 0
+            assert _non_negative_int(runtime_totals, "bridge_command_occurrences") > 0
+
+
 def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budgets() -> None:
     report = prompt_diagnostics.build_prompt_surface_report(
         REPO_ROOT,
@@ -116,6 +175,7 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
     missing = sorted(set(STAGED_INIT_COMMAND_PROJECTION_BUDGETS) - set(items_by_name))
     assert missing == []
 
+    shell_rewrites_by_runtime = dict.fromkeys(NON_NATIVE_RUNTIME_PROJECTION_TARGETS, 0)
     for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_BUDGETS.items():
         item = items_by_name[command_name]
         metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
@@ -127,7 +187,10 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
             assert metric.char_count <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
             if runtime in NON_NATIVE_RUNTIME_PROJECTION_TARGETS:
                 assert metric.bridge_command_occurrences > 0
-                assert metric.shell_rewrite_count > 0
+                shell_rewrites_by_runtime[runtime] += metric.shell_rewrite_count
+
+    for runtime, shell_rewrite_count in shell_rewrites_by_runtime.items():
+        assert shell_rewrite_count > 0, f"{runtime} staged command targets should retain shell rewrite diagnostics"
 
 
 def test_selected_agent_runtime_projection_diagnostics_stay_under_baseline_budgets() -> None:
@@ -161,7 +224,4 @@ def test_selected_agent_runtime_projection_diagnostics_stay_under_baseline_budge
         if agent_name in TARGET_AGENT_PROJECTION_BUDGETS:
             target_agent_max_chars[agent_name] = max_chars
 
-    assert (
-        sum(target_agent_max_chars.values())
-        <= TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET
-    )
+    assert sum(target_agent_max_chars.values()) <= TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET

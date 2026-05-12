@@ -26,8 +26,8 @@ def _manifest() -> object:
     )
 
 
-def _expanded_stage_surface(stage: object) -> str:
-    authority_paths = list(dict.fromkeys([*stage.mode_paths, *stage.loaded_authorities]))
+def _expanded_stage_surface(stage: object, *, selected_conditions: tuple[str, ...] = ()) -> str:
+    authority_paths = stage.eager_authorities(selected_conditions=selected_conditions)
     return "\n\n".join(
         expanded_prompt_text(
             SOURCE_ROOT / "specs" / authority,
@@ -176,6 +176,11 @@ def test_respond_to_referees_workflow_defers_stage_authorities_until_the_manifes
         "templates/paper/referee-response.md",
         "templates/paper/author-response.md",
     )
+    assert _conditional_authorities_by_when(response_authoring) == {
+        "writer_spawn_needed": ("references/orchestration/runtime-delegation-note.md",),
+        "review_integrity_recovery_needed": ("references/publication/peer-review-reliability.md",),
+    }
+    assert "references/orchestration/runtime-delegation-note.md" in response_authoring.must_not_eager_load
     assert "reference_artifacts_content" in response_authoring.required_init_fields
     assert {"protocol_bundle_context", "active_reference_context"} <= set(response_authoring.required_init_fields)
     assert finalize.loaded_authorities == (
@@ -210,6 +215,10 @@ def test_respond_to_referees_triage_stage_blocks_before_response_authoring_and_f
 def test_respond_to_referees_response_authoring_stage_retains_response_pair_and_writer_contract() -> None:
     manifest = _manifest()
     response_surface = _expanded_stage_surface(manifest.stage("response_authoring"))
+    response_surface_with_writer = _expanded_stage_surface(
+        manifest.stage("response_authoring"),
+        selected_conditions=("writer_spawn_needed",),
+    )
     revision_gate = _yaml_gate_payload(response_surface, "child_gate", "respond_to_referees_revision_section")
     aggregate_gate = _yaml_gate_payload(
         response_surface, "aggregate_child_gate", "respond_to_referees_response_pair_current"
@@ -218,6 +227,8 @@ def test_respond_to_referees_response_authoring_stage_retains_response_pair_and_
     assert "{GPD_INSTALL_DIR}/templates/paper/author-response.md" in response_surface
     assert "{GPD_INSTALL_DIR}/templates/paper/referee-response.md" in response_surface
     assert "publication-response-writer-handoff.md" in response_surface
+    assert "# Runtime Delegation Note" not in response_surface
+    assert "# Runtime Delegation Note" in response_surface_with_writer
     assert 'subagent_type="gpd-paper-writer"' in response_surface
     assert revision_gate["expected_artifacts"] == [
         "${PAPER_DIR}/{resolved_section_file}",

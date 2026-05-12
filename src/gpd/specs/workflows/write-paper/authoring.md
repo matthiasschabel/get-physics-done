@@ -95,8 +95,9 @@ Existing `.tex` files can make a resumed wave current, but they are not fresh
 child handoff success. Treat the emitted `.tex` file as the success artifact gate
 for each section only after the tuple passes.
 
-For each section, spawn a writer agent:
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+For each section, load the manifest conditional
+`{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md` when
+`writer_spawn_needed`, then spawn a writer agent:
 
 ```
 task(

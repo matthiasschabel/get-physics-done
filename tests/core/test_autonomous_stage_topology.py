@@ -90,6 +90,17 @@ def test_autonomous_command_and_root_use_first_stage_index_shape() -> None:
     assert "@{GPD_INSTALL_DIR}/workflows/autonomous.md" not in command_text
     assert "Compatibility index for the staged `autonomous` workflow." in root_text
     assert "Do not load this index as a stage authority." in root_text
+    for stage_id, authority in AUTONOMOUS_STAGE_AUTHORITY_BY_ID.items():
+        assert f"`{stage_id}`" in root_text
+        assert authority in root_text
+    for stage_owned_fragment in (
+        "lifecycle-contract-gate",
+        "gpd validate plan-contract",
+        "gpd --raw init verify-work",
+        "Bounded checkpoint stop override",
+        "Post-Execution Verification Routing",
+    ):
+        assert stage_owned_fragment not in root_text
     assert "Smart Discuss" not in root_text
 
 
@@ -107,7 +118,7 @@ def test_autonomous_scaffold_prompt_budgets_are_small() -> None:
 
     assert command_metrics.raw_include_count == 1
     assert command_metrics.expanded_char_count < 4_000
-    assert root_metrics.expanded_char_count < 5_000
+    assert root_metrics.expanded_char_count < 2_500
 
 
 def test_init_autonomous_stage_payload_matches_manifest_and_from_phase(tmp_path: Path) -> None:
@@ -121,9 +132,10 @@ def test_init_autonomous_stage_payload_matches_manifest_and_from_phase(tmp_path:
     assert payload["phase_number"] == "2"
     assert payload["phase_found"] is False
     assert payload["staged_loading"] == manifest.staged_loading_payload("phase_route")
-    assert tuple(field for field in payload if field != "staged_loading") == manifest.stage(
-        "phase_route"
-    ).required_init_fields
+    assert (
+        tuple(field for field in payload if field != "staged_loading")
+        == manifest.stage("phase_route").required_init_fields
+    )
 
 
 def test_init_autonomous_rejects_unknown_stage_with_allowed_values(tmp_path: Path) -> None:

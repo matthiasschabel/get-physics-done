@@ -48,6 +48,46 @@ def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
     assert not (target / "hooks").exists()
 
 
+def test_opencode_command_projection_downgrades_non_runnable_shell_examples(tmp_path: Path) -> None:
+    target = tmp_path / ".opencode"
+    bridge = expected_opencode_bridge(target)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "```bash\n"
+        "gpd status\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "git status --porcelain\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "if [ -d GPD ]; then\n"
+        "  gpd status\n"
+        "fi\n"
+        "```\n"
+    )
+
+    projected = OpenCodeAdapter().project_markdown_surface(
+        source,
+        surface_kind="command",
+        path_prefix="./.opencode/",
+        bridge_command=bridge,
+    )
+
+    assert f"```bash\n{bridge} status\n```" in projected
+    assert "```bash\ngit status --porcelain\n```" not in projected
+    assert "```text\ngit status --porcelain\n```" in projected
+    assert "```bash\nif [ -d GPD ]; then" not in projected
+    assert "```text\nif [ -d GPD ]; then" in projected
+    assert "Gemini shell compatibility" not in projected
+
+
 class TestProperties:
     def test_runtime_name(self, adapter: OpenCodeAdapter) -> None:
         assert adapter.runtime_name == "opencode"
@@ -839,9 +879,9 @@ class TestInstall:
         expected_bridge = expected_opencode_bridge(target, is_global=False)
         command = (target / "command" / "gpd-settings.md").read_text(encoding="utf-8")
         workflow = (target / "get-physics-done" / "workflows" / "settings.md").read_text(encoding="utf-8")
-        execute_phase = (
-            target / "get-physics-done" / "workflows" / "execute-phase" / "phase-bootstrap.md"
-        ).read_text(encoding="utf-8")
+        execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase" / "phase-bootstrap.md").read_text(
+            encoding="utf-8"
+        )
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
         planner_procedure = (
             target / "get-physics-done" / "references" / "planning" / "planner-execution-procedure.md"

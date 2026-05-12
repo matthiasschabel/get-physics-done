@@ -32,7 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 TESTS_ROOT = REPO_ROOT / "tests"
 TOP_LEVEL_CONFTEST = TESTS_ROOT / "conftest.py"
 PHASE8_LARGE_TEST_FILE_LOC_BUDGETS = {
-    "tests/core/test_cli.py": 9_500,
+    "tests/core/test_cli.py": 9_700,
     "tests/test_cli_commands.py": 9_500,
     "tests/core/test_prompt_wiring.py": 7_400,
     "tests/core/test_context.py": 6_000,

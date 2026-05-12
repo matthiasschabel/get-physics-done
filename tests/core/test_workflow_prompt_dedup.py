@@ -91,6 +91,37 @@ def test_command_wrappers_do_not_repeat_self_workflow_reference_after_include() 
         assert len(workflow_reference.findall(content)) <= 1, path.relative_to(REPO_ROOT)
 
 
+def test_non_publication_staged_roots_are_indexes_not_authority_catalogs() -> None:
+    allowed_root_references = {
+        "new-project": {"@{GPD_INSTALL_DIR}/references/shared/interactive-choice-fallback.md"},
+    }
+
+    for workflow_id in ("autonomous", "plan-phase", "quick", "new-project"):
+        root = (WORKFLOWS_DIR / f"{workflow_id}.md").read_text(encoding="utf-8")
+        manifest = load_workflow_stage_manifest(workflow_id)
+
+        assert "<canonical_references>" not in root
+        assert "only the stage map" in root or "Do not load this index as a stage authority" in root
+        for stage in manifest.stages:
+            assert f"`{stage.id}`" in root
+            assert stage.mode_paths[0] in root
+            for authority in stage.loaded_authorities:
+                if authority.startswith(f"workflows/{workflow_id}/"):
+                    continue
+                allowed = allowed_root_references.get(workflow_id, set())
+                assert authority not in root or authority in allowed
+
+        for wrapper_or_stage_owned_fragment in (
+            "Full mode output",
+            "Minimal mode output",
+            "Typical quick tasks in physics research",
+            "lifecycle-contract-gate",
+            "gpd --raw init verify-work",
+            "Load `templates/",
+        ):
+            assert wrapper_or_stage_owned_fragment not in root
+
+
 def test_set_profile_updates_only_model_profile_through_config_cli() -> None:
     set_profile = _read("set-profile.md")
 
@@ -395,7 +426,9 @@ def test_runtime_delegation_note_is_loaded_once_per_workflow() -> None:
         "explain.md",
         "new-milestone.md",
         "quick.md",
-        "write-paper.md",
+    }
+    workflows_using_manifest_conditional_references = {
+        "write-paper.md": "{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md",
     }
 
     for path in sorted(WORKFLOWS_DIR.glob("*.md")):
@@ -408,6 +441,10 @@ def test_runtime_delegation_note_is_loaded_once_per_workflow() -> None:
             expected_count = 2 if path.name == "quick.md" else 1
             assert text.count(include) == expected_count, path.name
             assert has_line_with_terms(text, "runtime delegation convention", "loaded above"), path.name
+        if path.name in workflows_using_manifest_conditional_references:
+            text = _read_authority(path.stem)
+            assert include not in text, path.name
+            assert workflows_using_manifest_conditional_references[path.name] in text, path.name
 
     new_project_authority_paths = workflow_authority_paths(WORKFLOWS_DIR, "new-project")
     new_project_task_stage_names = {

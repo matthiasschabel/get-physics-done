@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+from gpd.core.workflow_staging import validate_workflow_stage_manifest_payload
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -9,6 +11,13 @@ WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 AGENTS_DIR = REPO_ROOT / "src" / "gpd" / "agents"
 REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references" / "publication"
 TEMPLATES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "templates" / "paper"
+
+
+def _load_manifest(workflow_name: str) -> object:
+    return validate_workflow_stage_manifest_payload(
+        json.loads((WORKFLOWS_DIR / f"{workflow_name}-stage-manifest.json").read_text(encoding="utf-8")),
+        expected_workflow_id=workflow_name,
+    )
 
 
 def _assert_all_present(text: str, fragments: tuple[str, ...]) -> None:
@@ -121,12 +130,26 @@ def test_publication_workflow_prompt_surfaces_surface_the_shared_manuscript_root
     respond = workflow_authority_text(WORKFLOWS_DIR, "respond-to-referees")
     peer_review = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
     arxiv = workflow_authority_text(WORKFLOWS_DIR, "arxiv-submission")
-    bootstrap_include = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
     handoff_include = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
+    respond_manifest = _load_manifest("respond-to-referees")
+    peer_manifest = _load_manifest("peer-review")
+    arxiv_manifest = _load_manifest("arxiv-submission")
 
     _assert_all_present(write_paper, ("publication-bootstrap-preflight.md", "publication-response-writer-handoff.md"))
-    _assert_all_present(respond, (bootstrap_include, handoff_include))
-    _assert_all_present(arxiv, (bootstrap_include,))
+    _assert_all_present(respond, ("publication-bootstrap-preflight.md", handoff_include))
+    _assert_all_present(arxiv, ("publication-bootstrap-preflight.md",))
     _assert_all_present(peer_review, ("templates/paper/publication-manuscript-root-preflight.md",))
+    assert (
+        "references/publication/publication-bootstrap-preflight.md"
+        in respond_manifest.stage("bootstrap").loaded_authorities
+    )
+    assert (
+        "references/publication/publication-bootstrap-preflight.md"
+        in arxiv_manifest.stage("bootstrap").loaded_authorities
+    )
+    assert (
+        "templates/paper/publication-manuscript-root-preflight.md"
+        in peer_manifest.stage("preflight").loaded_authorities
+    )
     _assert_all_absent(peer_review, ("publication-response-artifacts.md",))
     _assert_all_absent(arxiv, ("@{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md",))

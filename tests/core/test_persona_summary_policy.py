@@ -261,3 +261,29 @@ def test_make_summary_helpers_return_independent_copies() -> None:
     _first_row(first)["result_class"] = "changed"
 
     assert _first_row(second)["result_class"] == "blocked"
+
+
+def test_phase7_summary_policy_accepts_ergonomic_class_counts() -> None:
+    summary = make_phase7_live_canary_summary()
+    row = _first_row(summary)
+    row.update(
+        {
+            "useful_work_latency_class": "first_turn",
+            "reload_loop_class": "no_reload_loop",
+            "instruction_injection_timing_class": "active_stage_only",
+            "runtime_route_class": "active_runtime",
+            "ergonomic_score_class": "green",
+            "conversation_turn_count": 1,
+            "physics_progress_count": 1,
+            "schema_surface_count": 0,
+            "invalid_command_suggestion_count": 0,
+            "schema_repair_loop_count": 0,
+            "raw_reload_leakage_count": 0,
+            "content_hydration_before_selection_count": 0,
+        }
+    )
+
+    result = validate_persona_summary(summary, phase7_live_canary_policy())
+
+    assert result.valid is True
+    assert result.findings == ()

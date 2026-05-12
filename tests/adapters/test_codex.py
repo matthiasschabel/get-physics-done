@@ -156,6 +156,47 @@ def test_codex_command_runtime_note_injection_is_idempotent() -> None:
     _assert_codex_runtime_note_guidance(twice, launcher)
 
 
+def test_codex_command_projection_downgrades_non_runnable_shell_examples(tmp_path: Path) -> None:
+    target = tmp_path / ".codex"
+    bridge = expected_codex_bridge(target)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "```bash\n"
+        "gpd status\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "git status --porcelain\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "INIT=$(gpd --raw init progress --include state,config)\n"
+        'echo "$INIT"\n'
+        "```\n"
+    )
+
+    projected = CodexAdapter().project_markdown_surface(
+        source,
+        surface_kind="command",
+        path_prefix="./.codex/",
+        command_name="projection-probe",
+        bridge_command=bridge,
+    )
+
+    _assert_codex_runtime_note_guidance(projected, bridge)
+    assert f"```bash\n{bridge} status\n```" in projected
+    assert "```bash\ngit status --porcelain\n```" not in projected
+    assert "```text\ngit status --porcelain\n```" in projected
+    assert "```bash\nINIT=$(gpd --raw init progress --include state,config)" not in projected
+    assert "```text\nINIT=$(gpd --raw init progress --include state,config)" in projected
+    assert "Gemini shell compatibility" not in projected
+
+
 def _make_checkout(tmp_path: Path, version: str) -> Path:
     """Create a minimal GPD source checkout with an explicit version."""
     repo_root = tmp_path / "checkout"
@@ -837,9 +878,9 @@ class TestInstall:
         expected_bridge = expected_codex_bridge(target, is_global=False)
         skill = (local_skills / "gpd-set-profile" / "SKILL.md").read_text(encoding="utf-8")
         workflow = (target / "get-physics-done" / "workflows" / "set-profile.md").read_text(encoding="utf-8")
-        execute_phase = (
-            target / "get-physics-done" / "workflows" / "execute-phase" / "phase-bootstrap.md"
-        ).read_text(encoding="utf-8")
+        execute_phase = (target / "get-physics-done" / "workflows" / "execute-phase" / "phase-bootstrap.md").read_text(
+            encoding="utf-8"
+        )
         agent = (target / "agents" / "gpd-planner.md").read_text(encoding="utf-8")
         planner_procedure = (
             target / "get-physics-done" / "references" / "planning" / "planner-execution-procedure.md"
@@ -1846,7 +1887,9 @@ description: Nested command include expansion regression
             assert _has_line_with_terms(normalized, "follow-up", "plain text")
         else:
             raise AssertionError(f"Unhandled Codex questioning mode: {expected_mode}")
-        assert "Ask each user-facing question exactly once" not in single_runtime_note_block(normalized, "codex_questioning")
+        assert "Ask each user-facing question exactly once" not in single_runtime_note_block(
+            normalized, "codex_questioning"
+        )
 
     def test_new_project_workflow_normalizes_codex_questioning(
         self,
@@ -1861,9 +1904,9 @@ description: Nested command include expansion regression
 
         adapter.install(gpd_root, target, skills_dir=skills)
 
-        workflow = (
-            target / "get-physics-done" / "workflows" / "new-project" / "scope-intake.md"
-        ).read_text(encoding="utf-8")
+        workflow = (target / "get-physics-done" / "workflows" / "new-project" / "scope-intake.md").read_text(
+            encoding="utf-8"
+        )
         _assert_no_legacy_codex_questioning(workflow)
         assert "ask exactly one inline\nfreeform question first" in workflow
         assert "Wait for the response." in workflow

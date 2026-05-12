@@ -143,7 +143,7 @@ def test_arxiv_submission_workflow_resolves_manifest_based_manuscript_root_witho
     assert 'gpd --raw init arxiv-submission --stage finalize -- "$ARGUMENTS"' in workflow
     assert "metadata-only" not in workflow
     _assert_arxiv_manuscript_root_semantics(workflow)
-    assert "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" in workflow
+    assert "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" in workflow
     assert "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md" in workflow
     assert "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md" not in workflow
     assert "staged `peer-review-reliability.md` reference" in workflow
@@ -218,7 +218,14 @@ def test_arxiv_submission_stage_manifest_path_is_resolved_and_loadable() -> None
         in manifest.stage("review_gate").loaded_authorities
     )
     assert manifest.stage("review_gate").loaded_authorities[0] == "workflows/arxiv-submission/review-gate.md"
-    assert "references/publication/peer-review-reliability.md" in manifest.stage("review_gate").loaded_authorities
+    assert "references/publication/peer-review-reliability.md" not in manifest.stage("review_gate").loaded_authorities
+    assert {
+        conditional.when: conditional.authorities
+        for conditional in manifest.stage("review_gate").conditional_authorities
+    } == {
+        "review_integrity_recovery_needed": ("references/publication/peer-review-reliability.md",),
+    }
+    assert "references/publication/peer-review-reliability.md" in manifest.stage("review_gate").must_not_eager_load
     assert (
         "references/publication/publication-response-writer-handoff.md"
         not in manifest.stage("review_gate").loaded_authorities

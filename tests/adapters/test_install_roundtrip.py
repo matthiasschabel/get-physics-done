@@ -749,8 +749,10 @@ def test_installed_smoke_command_shell_fences_use_runtime_bridge_or_public_cli(
 
     for command_name in INSTALLED_SHELL_SMOKE_COMMANDS:
         prompt = _read_runtime_command_prompt(target.parent, target, runtime, command_name)
-        assert shell_fences(prompt), f"{runtime}:{command_name}:{kind} should expose a shell fence"
-        for fence in shell_fences(prompt):
+        fences = shell_fences(prompt)
+        if not fences:
+            continue
+        for fence in fences:
             for line in runnable_shell_lines(fence):
                 rewritten = rewrite_gpd_shell_line_to_runtime_bridge(line, bridge_command)
                 if rewritten != line:

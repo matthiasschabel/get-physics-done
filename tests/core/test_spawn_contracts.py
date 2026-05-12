@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -149,6 +150,8 @@ def _find_single_task(path: Path, agent_name: str) -> TaskBlock:
 
 def _assert_runtime_note_include(path: Path) -> None:
     content = _read(path)
+    if RUNTIME_NOTE_INCLUDE_FRAGMENT not in content and _manifest_owns_runtime_note(path):
+        return
     _assert_machine(content, f"{path.relative_to(REPO_ROOT)} runtime note include", RUNTIME_NOTE_INCLUDE_FRAGMENT)
     _assert_forbidden(
         content,
@@ -158,6 +161,8 @@ def _assert_runtime_note_include(path: Path) -> None:
 
 
 def _assert_expanded_runtime_note(path: Path) -> None:
+    if RUNTIME_NOTE_INCLUDE_FRAGMENT not in _read(path) and _manifest_owns_runtime_note(path):
+        return
     content = expand_at_includes(_read(path), REPO_ROOT / "src/gpd", "/runtime/")
     _assert_machine(
         content,
@@ -166,6 +171,20 @@ def _assert_expanded_runtime_note(path: Path) -> None:
         MODEL_OMISSION_FRAGMENT,
         READONLY_RUNTIME_NOTE_FRAGMENT,
     )
+
+
+def _manifest_owns_runtime_note(path: Path) -> bool:
+    manifest_path = path.with_name(f"{path.stem}-stage-manifest.json")
+    if not manifest_path.exists():
+        return False
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for stage in payload.get("stages", ()):
+        if RUNTIME_NOTE_INCLUDE_FRAGMENT.removeprefix("@{GPD_INSTALL_DIR}/") in stage.get("loaded_authorities", ()):
+            return True
+        for conditional in stage.get("conditional_authorities", ()):
+            if RUNTIME_NOTE_INCLUDE_FRAGMENT.removeprefix("@{GPD_INSTALL_DIR}/") in conditional.get("authorities", ()):
+                return True
+    return False
 
 
 def _assert_prompt_bootstrap_in_content(content: str, agent_name: str) -> None:

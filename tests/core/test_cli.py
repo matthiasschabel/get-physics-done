@@ -22,6 +22,7 @@ import gpd.cli as cli_module
 import gpd.runtime_cli as runtime_cli
 import tests.helpers.cli as cli_helpers
 from gpd.adapters import get_adapter, list_runtimes
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.cli import app
 from gpd.core import cli_args as cli_args_module
 from gpd.core.constants import ProjectLayout
@@ -245,6 +246,8 @@ _HELP_FRAGMENT_CASES = [
     _help_case("config set-tier-models", "Update model_overrides for one runtime | --runtime | --tier-1 | --tier-2 | --tier-3 | --clear"),
     _help_case("init", "Assemble context for AI agent workflows | new-project | resume | map-research | verify-work"),
     _help_case("resume", "--recent | Summarize local recovery state or list machine-local recent projects."),
+    _help_case("command", "Read-only command-context metadata | field-access"),
+    _help_case("command field-access", "Expose selected command-context field access metadata. | Command registry key or gpd:name | --style"),
     _help_case("validate", "Validation checks | command-context | plan-preflight | review-preflight | project-contract | proof-redteam"),
     _help_case("validate project-contract", "Validate a project-scoping contract before downstream artifact generation | proof-obligation observables"),
     _help_case("validate verification-contract", "Validate VERIFICATION frontmatter and contract-result alignment | stale proof-audit blockers when recorded | oracle evidence"),
@@ -3744,6 +3747,91 @@ def test_validate_command_context_unknown_command_surfaces_user_facing_error(tmp
     assert "Internal error" not in str(result.exception)
     assert "Internal error" not in result.output
     assert "Internal error" not in result.stderr
+
+
+def test_raw_command_field_access_json_is_deterministic_for_command_context() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "command", "field-access", "compare-experiment", "--style", "json"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["command"] == "gpd:compare-experiment"
+    assert payload["style"] == "json"
+    assert payload["read_only"] is True
+    assert payload["source"] == {
+        "type": "command_context_preflight_result",
+        "validator": "validate command-context",
+    }
+    assert payload["selected_fields"][:4] == ["command", "context_mode", "passed", "project_exists"]
+    assert "instructions" not in payload
+    assert "shell_bindings" not in payload
+
+
+def test_raw_command_field_access_instruction_is_shell_free() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "command", "field-access", "dimensional-analysis"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result)
+    instruction_text = "\n".join(payload["instructions"])
+    assert payload["command"] == "gpd:dimensional-analysis"
+    assert "gpd json get" not in instruction_text
+    assert "$(" not in instruction_text
+    assert "CONTEXT=" not in instruction_text
+    for descriptor in iter_runtime_descriptors():
+        assert descriptor.display_name not in instruction_text
+
+
+def test_raw_command_field_access_is_read_only_and_does_not_run_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "PROJECT.md").write_text("# Root project note\n", encoding="utf-8")
+    (workspace / "ROADMAP.md").write_text("# Root roadmap note\n", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module,
+        "_migrate_planning_files",
+        lambda _cwd: (_ for _ in ()).throw(AssertionError("command field-access must be read-only")),
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_build_command_context_preflight",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("command field-access must not execute preflight")
+        ),
+    )
+
+    result = runner.invoke(
+        app,
+        ["--raw", "--cwd", str(workspace), "command", "field-access", "explain", "--style", "json"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result)
+    assert payload["command"] == "gpd:explain"
+    assert not (workspace / "GPD").exists()
+
+
+def test_raw_command_field_access_rejects_unknown_command() -> None:
+    result = runner.invoke(
+        app,
+        ["--raw", "command", "field-access", "not-a-real-command"],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    payload = json_output_from_result(result, expect_exit=1)
+    assert "Unknown GPD command: gpd:not-a-real-command" in payload["error"]
+    assert "Allowed commands include:" in payload["error"]
 
 
 @patch("gpd.core.contract_validation.validate_project_contract")

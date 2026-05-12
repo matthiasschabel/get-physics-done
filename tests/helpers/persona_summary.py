@@ -173,8 +173,15 @@ _PHASE4_SAFE_CONTAINER_KEYS = _COMMON_SAFE_CONTAINER_KEYS | frozenset(
 )
 _PHASE7_SAFE_LITERAL_KEYS = _COMMON_SAFE_LITERAL_KEYS | frozenset(
     {
+        "content_hydration_before_selection_count",
+        "conversation_turn_count",
+        "invalid_command_suggestion_count",
         "release_publish_provider_launch_allowed",
         "manual_provider_launch_allowed",
+        "physics_progress_count",
+        "raw_reload_leakage_count",
+        "schema_repair_loop_count",
+        "schema_surface_count",
     }
 )
 _PHASE7_SAFE_CONTAINER_KEYS = _COMMON_SAFE_CONTAINER_KEYS | frozenset({"nightly_allowed_triggers"})

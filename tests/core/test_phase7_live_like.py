@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from dataclasses import fields
 from pathlib import Path
 
@@ -27,6 +28,7 @@ from tests.helpers.phase7_live_like import (
     REQUIRED_JIT_ROW_IDS,
     REQUIRED_LP_JIT_ROW_IDS,
     REQUIRED_P6_JIT_ROW_IDS,
+    REQUIRED_P7_ERG_JIT_ROW_IDS,
     REQUIRED_P7_NEXTUP_JIT_ROW_IDS,
     ROW_TIERS,
     Phase7LiveLikeRow,
@@ -73,6 +75,7 @@ def test_phase7_live_like_matrix_has_no_raw_transcripts_or_provider_launch_field
         assert row.get("provider_launch_allowed", False) is False
         assert row.get("network_allowed", False) is False
         assert row.get("raw_artifacts_allowed", False) is False
+        _assert_fixture_values_are_provider_free(row)
 
 
 def test_phase7_live_like_scores_jit_canary_rows_with_hard_budgets() -> None:
@@ -458,10 +461,166 @@ def test_p7_public_render_row_rejects_raw_reload_source_text() -> None:
     assert "raw_reload_leakage_count" in score.hard_budget_failures
 
 
+def test_p7_ergonomic_rows_score_quick_useful_work() -> None:
+    scores = {row_id: score_phase7_live_like_row(_row_by_id(row_id)) for row_id in REQUIRED_P7_ERG_JIT_ROW_IDS}
+
+    assert set(scores) == REQUIRED_P7_ERG_JIT_ROW_IDS
+    assert all(score.passed for score in scores.values())
+    assert all(score.hard_budget_failures == () for score in scores.values())
+
+    for score in scores.values():
+        assert score.row.row_tier == "jit_canary"
+        assert score.behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
+        assert score.behavior_score.metric_counts["schema_repair_loop_count"] == 0
+        assert score.behavior_score.metric_counts["duplicate_question_bucket_count"] == 0
+        assert score.behavior_score.metric_counts["post_stop_activity_count"] == 0
+        assert score.behavior_score.metric_counts["unexpected_write_count"] == 0
+        assert score.behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
+        assert score.phase7_metric_counts["raw_reload_leakage_count"] == 0
+        assert score.phase7_metric_counts["content_hydration_before_selection_count"] == 0
+        assert score.phase7_metric_classes["useful_work_latency_class"] in {"first_turn", "second_turn"}
+        assert score.phase7_metric_classes["reload_loop_class"] == "no_reload_loop"
+        assert score.phase7_metric_classes["instruction_injection_timing_class"] == "active_stage_only"
+        assert score.phase7_metric_classes["runtime_route_class"] == "active_runtime"
+        assert score.phase7_metric_classes["ergonomic_score_class"] == "green"
+        assert score.phase7_metric_classes["physics_to_schema_ratio_class"] != "schema_dominant"
+
+    assert scores["P7-ERG-JIT-02"].behavior_score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
+    assert scores["P7-ERG-JIT-03"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+    assert scores["P7-ERG-JIT-04"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
+    assert scores["P7-ERG-JIT-04"].behavior_score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
+    assert scores["P7-ERG-JIT-05"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
+    assert scores["P7-ERG-JIT-06"].phase7_metric_counts["conversation_turn_count"] <= 2
+
+
+def test_p7_ergonomics_rejects_raw_reload_loop() -> None:
+    row = _row_by_id("P7-ERG-JIT-01")
+    trace = FakePersonaTrace(
+        row_id="P7_ERG_JIT_01_BAD_RAW_RELOAD_LOOP",
+        persona_class=row.persona_class,
+        prompt_variant_class=row.prompt_variant_class,
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="state_reload",
+                action_class="raw_reload_instruction_visible",
+                reload_surface_class="raw_init_visible",
+                schema_surface_class="raw_reload_instruction_visible",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="stage_reload",
+                action_class="raw_reload_instruction_visible",
+                reload_surface_class="raw_stage_field_access_visible",
+                schema_surface_class="raw_reload_instruction_visible",
+            ),
+        ),
+    )
+    score = score_phase7_live_like_row(row, trace_override=trace)
+
+    assert not score.passed
+    assert score.phase7_metric_counts["raw_reload_leakage_count"] > 1
+    assert score.phase7_metric_classes["reload_loop_class"] == "repeated_reload"
+    assert score.phase7_metric_classes["instruction_injection_timing_class"] == "raw_reload_loop"
+    assert score.phase7_metric_classes["ergonomic_score_class"] == "red"
+    assert "raw_reload_leakage_count" in score.hard_budget_failures
+
+
+def test_p7_ergonomics_rejects_schema_first_without_physics_progress() -> None:
+    row = _row_by_id("P7-ERG-JIT-01")
+    trace = FakePersonaTrace(
+        row_id="P7_ERG_JIT_01_BAD_SCHEMA_FIRST",
+        persona_class=row.persona_class,
+        prompt_variant_class=row.prompt_variant_class,
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="schema_first",
+                action_class="schema_surface",
+                schema_surface_class="return_schema_wall",
+            ),
+        ),
+    )
+    score = score_phase7_live_like_row(row, trace_override=trace)
+
+    assert not score.passed
+    assert score.phase7_metric_counts["schema_surface_count"] > score.phase7_metric_counts["physics_progress_count"]
+    assert score.behavior_score.metric_classes["first_useful_action_class"] == "missing"
+    assert score.phase7_metric_classes["useful_work_latency_class"] == "missing"
+    assert score.phase7_metric_classes["ergonomic_score_class"] == "red"
+    assert "physics_progress_count" in score.hard_budget_failures
+
+
+def test_p7_ergonomics_rejects_premature_reference_content() -> None:
+    row = _row_by_id("P7-ERG-JIT-03")
+    trace = FakePersonaTrace(
+        row_id="P7_ERG_JIT_03_BAD_CONTENT_FIRST",
+        persona_class=row.persona_class,
+        prompt_variant_class=row.prompt_variant_class,
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="reference_review",
+                action_class="concrete_command",
+                physics_progress_class="artifact_verified",
+                content_hydration_class="content_loaded",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="reference_choice",
+                action_class="select_reference",
+                artifact_handle_class="handle_selected",
+            ),
+        ),
+    )
+    score = score_phase7_live_like_row(row, trace_override=trace)
+
+    assert not score.passed
+    assert score.phase7_metric_counts["content_hydration_before_selection_count"] > 0
+    assert score.phase7_metric_classes["instruction_injection_timing_class"] == "premature_content"
+    assert score.phase7_metric_classes["ergonomic_score_class"] == "red"
+    assert "content_hydration_before_selection_count" in score.hard_budget_failures
+
+
+def test_p7_ergonomics_rejects_structural_verify_phase_runtime_route() -> None:
+    row = _row_by_id("P7-ERG-JIT-02")
+    bad_outcome = phase7_live_like._BehaviorOutcome(
+        finding_id="runtime_verify_work_suggestion",
+        result_class="ready_for_runtime_verification",
+        failure_classes=(),
+        evidence_classes=("verify_work_correction",),
+        next_action_class="runtime_verify_work",
+        ready=False,
+        state_status_class="read_only",
+        commands=("gpd verify phase 02",),
+    )
+    score = score_phase7_live_like_row(row, behavior_outcome_override=bad_outcome)
+
+    assert not score.passed
+    assert score.behavior_score.metric_counts["invalid_command_suggestion_count"] == 1
+    assert score.phase7_metric_classes["runtime_route_class"] == "invalid_runtime_route"
+    assert score.phase7_metric_classes["ergonomic_score_class"] == "red"
+    assert "invalid_command_suggestion_count" in score.hard_budget_failures
+
+
 def test_phase7_live_like_helper_has_no_execution_or_network_surface() -> None:
     source = inspect.getsource(phase7_live_like)
 
-    for forbidden in ("subprocess", "create_subprocess", "os.environ", "socket", "urllib", "requests"):
+    for forbidden in (
+        "subprocess",
+        "create_subprocess",
+        "os.environ",
+        "socket",
+        "urllib",
+        "requests",
+        "openai",
+        "anthropic",
+    ):
         assert forbidden not in source
 
 
@@ -473,6 +632,46 @@ def _row_by_id(row_id: str) -> Phase7LiveLikeRow:
 def _raw_row_by_id(row_id: str) -> dict[str, object]:
     payload = json.loads(PHASE7_LIVE_PERSONA_MATRIX_PATH.read_text(encoding="utf-8"))
     return next(row for row in payload["rows"] if row["row_id"] == row_id)
+
+
+def _assert_fixture_values_are_provider_free(row: dict[str, object]) -> None:
+    forbidden_value_fragments = (
+        "raw_prompt",
+        "raw_reply",
+        "raw_transcript",
+        "transcript_excerpt",
+        "provider_stdout",
+        "provider_stderr",
+        "auth_path",
+        "subprocess",
+        "socket",
+        "urllib",
+        "requests",
+    )
+    absolute_path_re = re.compile(
+        r"(?<![A-Za-z0-9_])(?:/(?:Users|home|private|tmp|var|etc|Volumes|opt|mnt|root)\b|~[/\\])"
+    )
+    account_re = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+    hash_re = re.compile(r"\b(?:[A-Fa-f0-9]{32}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})\b")
+    secret_env_re = re.compile(r"\b[A-Z][A-Z0-9_]*(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|SECRET|TOKEN)\b")
+
+    for value in _fixture_string_values(row):
+        lowered = value.lower()
+        assert not any(fragment in lowered for fragment in forbidden_value_fragments), value
+        assert absolute_path_re.search(value) is None, value
+        assert account_re.search(value) is None, value
+        assert hash_re.search(value) is None, value
+        assert secret_env_re.search(value) is None, value
+
+
+def _fixture_string_values(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, dict):
+        return tuple(child for item in value.values() for child in _fixture_string_values(item))
+    if isinstance(value, list):
+        return tuple(child for item in value for child in _fixture_string_values(item))
+    return ()
 
 
 def _load_reference_order_manifest(workflow_id: str) -> WorkflowStageManifest:

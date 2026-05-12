@@ -23,18 +23,22 @@ fi
 ```
 
 Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm manifest-selected bootstrap fields. The staged field-access helper is authoritative; use `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction` after later reloads. Parse only fields in `BOOTSTRAP_INIT.staged_loading.required_init_fields`; bootstrap includes `project_contract_gate` before authoritative contract use.
+Use shell aliases only for scalar bindings that truly need them
+(`--alias ALIAS=field`). The bootstrap payload includes `phase_number`,
+`phase_name`, `goal`, `phase_dir`, `phase_slug`, and `padded_phase`; bind
+`PHASE_DIR`, `PHASE_SLUG`, or `PADDED_PHASE` only after confirming those fields.
 
 Mode summary: supervised pauses for user review, balanced pauses only for real
 checker or planning judgment issues, yolo proceeds after hard gates. Research
-mode controls breadth only: explore broadens, exploit suppresses optional
-tangents unless requested, balanced uses standard depth, and adaptive starts
-broad until evidence or an approach lock justifies narrowing. All modes still
-require contract completeness, decisive outputs, required anchors,
+mode controls breadth only: explore broadens; exploit mode: suppress optional
+tangents unless the user explicitly requests `gpd:branch-hypothesis`; do not
+auto-create git-backed branches from `git.branching_strategy` alone. Balanced
+uses standard depth, and adaptive starts broad until decisive evidence or an
+explicit approach lock justifies narrowing. All modes still require contract completeness, decisive outputs, required anchors,
 forbidden-proxy handling, and disconfirming paths before execution starts.
 
 After every later `gpd --raw init plan-phase ... --stage <stage_id>` reload,
-read only `INIT.staged_loading.required_init_fields`; do not reuse shell
-variables parsed from an older stage.
+read only `INIT.staged_loading.required_init_fields`; do not reuse shell variables parsed from an older stage.
 
 ```bash
 REQUESTED_PHASE="${PHASE}"

@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from gpd.adapters.base import RuntimeAdapter
-from gpd.adapters.command_projection import rewrite_projection_shell_bridge
+from gpd.adapters.command_projection import render_projected_command_shell_fences, rewrite_projection_shell_bridge
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
     MANIFEST_NAME,
@@ -258,7 +258,7 @@ def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
 def _render_opencode_command_markdown(content: str, *, path_prefix: str, bridge_command: str | None = None) -> str:
     """Render one canonical command markdown source into OpenCode command content."""
     if bridge_command:
-        content = _rewrite_gpd_cli_invocations(content, bridge_command)
+        content = render_projected_command_shell_fences(content, bridge_command=bridge_command)
     return _inject_opencode_command_marker(convert_claude_to_opencode_frontmatter(content, path_prefix))
 
 

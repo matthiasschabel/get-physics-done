@@ -17,10 +17,9 @@ Output is `arxiv-submission.tar.gz` under
 
 <required_reading>
 Read all files referenced by the invoking prompt's `execution_context` before
-starting. Also read the shared publication bootstrap reference before resolving
-the manuscript target:
-
-@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md
+starting. Also apply the shared publication bootstrap reference from the loaded
+manifest authority `{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md`
+before resolving the manuscript target.
 </required_reading>
 
 <process>

@@ -3008,8 +3008,8 @@ class TestInitNewProject:
         ctx = init_arxiv_submission(tmp_path, stage="bootstrap")
 
         assert ctx["latest_response_round"] == 2
-        assert ctx["latest_author_response"] == "GPD/publication/curvature-flow-bounds/AUTHOR-RESPONSE-R2.md"
-        assert ctx["latest_referee_response"] == ("GPD/publication/curvature-flow-bounds/review/REFEREE_RESPONSE-R2.md")
+        assert "latest_author_response" not in ctx
+        assert "latest_referee_response" not in ctx
         assert ctx["latest_response_requires_fresh_review"] is True
         assert ctx["latest_response_required_review_round"] == 3
         assert ctx["latest_response_freshness_policy"] == "conservative_all_response_artifacts"

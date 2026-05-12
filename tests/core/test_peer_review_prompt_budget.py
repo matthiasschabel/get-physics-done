@@ -15,8 +15,8 @@ SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
 PATH_PREFIX = "/runtime/"
 
 
-def _expanded_stage_surface(stage: object) -> str:
-    authority_paths = list(dict.fromkeys([*stage.mode_paths, *stage.loaded_authorities]))
+def _expanded_stage_surface(stage: object, *, selected_conditions: tuple[str, ...] = ()) -> str:
+    authority_paths = stage.eager_authorities(selected_conditions=selected_conditions)
     return "\n\n".join(
         expanded_prompt_text(
             SOURCE_ROOT / "specs" / authority,
@@ -148,9 +148,9 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
     assert panel_execution.loaded_authorities == (
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-panel-playbook.md",
     )
     assert _conditional_authorities_by_when(panel_execution) == {
+        "panel_rubric_expansion_needed": ("references/publication/peer-review-panel-playbook.md",),
         "panel_child_recovery_needed": ("references/publication/stage-recovery-gate.md",),
         "theorem_bearing_claims_present": (
             "references/verification/core/proof-redteam-workflow-gate.md",
@@ -159,6 +159,7 @@ def test_peer_review_workflow_defers_stage_authorities_until_the_manifest_stages
         ),
     }
     assert "references/publication/stage-recovery-gate.md" in panel_execution.must_not_eager_load
+    assert "references/publication/peer-review-panel-playbook.md" in panel_execution.must_not_eager_load
     assert "references/verification/core/proof-redteam-protocol.md" in panel_execution.must_not_eager_load
     assert "workflows/peer-review/final-adjudication.md" in final_adjudication.loaded_authorities
     assert "references/publication/publication-final-adjudication-boundary.md" in final_adjudication.loaded_authorities
@@ -188,8 +189,13 @@ def test_peer_review_panel_stage_eager_surface_stays_below_phase5_cap() -> None:
 
     panel_surface = _expanded_stage_surface(panel_stage)
     final_surface = _expanded_stage_surface(final_adjudication)
+    panel_with_playbook = _expanded_stage_surface(
+        panel_stage,
+        selected_conditions=("panel_rubric_expansion_needed",),
+    )
 
-    assert len(panel_surface) < 70_000
+    assert len(panel_surface) <= 21_000
     assert "# Peer Review Panel Contract" in panel_surface
-    assert "# Peer Review Panel Playbook" in panel_surface
+    assert "# Peer Review Panel Playbook" not in panel_surface
+    assert "# Peer Review Panel Playbook" in panel_with_playbook
     assert "# Peer Review Panel Playbook" not in final_surface

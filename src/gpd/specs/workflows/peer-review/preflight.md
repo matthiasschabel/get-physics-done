@@ -27,9 +27,8 @@ field names for `review_target_mode`, `resolved_review_target`,
 `project_contract_gate`, `derived_manuscript_reference_status`, and
 `derived_manuscript_proof_review_status`.
 
-Apply the canonical manuscript-root publication preflight:
-
-@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md
+Apply the canonical manuscript-root publication preflight from the loaded
+manifest authority `{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md`.
 
 On the normal path, rely on centralized validators for artifact freshness,
 bibliography, reproducibility, and review integrity. If strict preflight

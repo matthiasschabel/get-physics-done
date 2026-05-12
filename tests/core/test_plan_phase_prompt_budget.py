@@ -47,6 +47,27 @@ def test_plan_phase_command_stays_thin_and_only_eagerly_loads_the_workflow() -> 
         assert late_fragment not in expanded
 
 
+def test_plan_phase_root_is_index_not_lifecycle_authority() -> None:
+    root_text = (WORKFLOWS_DIR / "plan-phase.md").read_text(encoding="utf-8")
+    manifest_payload = json.loads((WORKFLOWS_DIR / "plan-phase-stage-manifest.json").read_text(encoding="utf-8"))
+
+    assert "This root is only the stage map." in root_text
+    for stage in manifest_payload["stages"]:
+        assert f"`{stage['id']}`" in root_text
+        assert stage["mode_paths"][0] in root_text
+
+    for stage_owned_fragment in (
+        "Dirty worktree safety gate",
+        "gpd --raw stage field-access",
+        "Adaptive mode reuses research",
+        "checker-disabled",
+        "`--skip-verify`",
+        "Required 4-way tangent decision model",
+        "state/scope conflicts stop before research",
+    ):
+        assert stage_owned_fragment not in root_text
+
+
 def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_need_them() -> None:
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "plan-phase-stage-manifest.json").read_text(encoding="utf-8")),

@@ -28,7 +28,11 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
 from gpd.adapters.base import RuntimeAdapter
-from gpd.adapters.command_projection import prepend_projection_note, rewrite_projection_shell_bridge
+from gpd.adapters.command_projection import (
+    prepend_projection_note,
+    render_projected_command_shell_fences,
+    rewrite_projection_shell_bridge,
+)
 from gpd.adapters.install_utils import (
     CACHE_DIR_NAME,
     COMMANDS_DIR_NAME,
@@ -141,9 +145,7 @@ _TOOL_REFERENCE_MAP = reference_translation_map(
     auto_discovered_tools=_AUTO_DISCOVERED_TOOLS,
 )
 _CODEX_MCP_STARTUP_TIMEOUT_SEC = 30
-_CODEX_RUNTIME_SNIPPET_RELATIVE_PATH = (
-    f"{GPD_INSTALL_DIR_NAME}/references/tooling/runtime-command-snippets.md"
-)
+_CODEX_RUNTIME_SNIPPET_RELATIVE_PATH = f"{GPD_INSTALL_DIR_NAME}/references/tooling/runtime-command-snippets.md"
 _CODEX_COMMAND_RUNTIME_NOTE_TEMPLATE = (
     "<codex_runtime_notes>\n"
     "Ref: `{snippet_path}#runtime-shell-bridge`; bridge `{launcher}`; "
@@ -799,7 +801,7 @@ def _render_codex_command_skill(
     snippet_path = _codex_runtime_snippet_path(path_prefix)
     content = _convert_to_codex_skill(content, skill_name)
     content = convert_tool_references_in_body(content, _TOOL_REFERENCE_MAP)
-    content = _rewrite_codex_gpd_cli_invocations(content, launcher)
+    content = render_projected_command_shell_fences(content, bridge_command=launcher)
     content = _normalize_codex_questioning(content, snippet_path=snippet_path)
     return _inject_codex_command_runtime_note(content, launcher, snippet_path=snippet_path)
 

@@ -92,9 +92,9 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
     for stage in contract.stages:
         assert root_authority not in stage.mode_paths
         assert root_authority not in stage.loaded_authorities
-        assert all(
-            path.startswith("workflows/new-project/") for path in stage.mode_paths
-        ), f"{stage.id} must use split stage authority files"
+        assert all(path.startswith("workflows/new-project/") for path in stage.mode_paths), (
+            f"{stage.id} must use split stage authority files"
+        )
 
     scope_intake = contract.stage("scope_intake")
     scope_approval = contract.stage("scope_approval")
@@ -278,7 +278,7 @@ def test_new_project_split_stages_load_templates_at_write_boundaries() -> None:
         "GPD/REQUIREMENTS.md": "templates/requirements.md",
         "GPD/STATE.md": "templates/state.md",
     }.items():
-        assert f"Load `{template_path}` only when writing `{output_path}`." in command_text
+        assert f"Load `{template_path}` only when writing `{output_path}`." not in command_text
 
 
 def test_new_project_stage_contract_loader_is_cached() -> None:
@@ -288,11 +288,18 @@ def test_new_project_stage_contract_loader_is_cached() -> None:
     assert first is second
 
 
-def test_new_project_command_mentions_approval_time_grounding_linkage() -> None:
+def test_new_project_approval_stage_owns_grounding_linkage_authorities() -> None:
+    contract = stage_contract_module.load_new_project_stage_contract()
     command_text = _read_new_project_command()
+    scope_approval = contract.stage("scope_approval")
+    scope_approval_text = _read_stage_authority("scope-approval.md")
 
-    assert "project-contract-schema.md" in command_text
-    assert "project-contract-grounding-linkage.md" in command_text
+    assert "templates/project-contract-schema.md" in scope_approval.loaded_authorities
+    assert "templates/project-contract-grounding-linkage.md" in scope_approval.loaded_authorities
+    assert "references/shared/canonical-schema-discipline.md" in scope_approval.loaded_authorities
+    assert "templates/project-contract-schema.md" in scope_approval_text
+    assert "@{GPD_INSTALL_DIR}/templates/project-contract-schema.md" not in command_text
+    assert "@{GPD_INSTALL_DIR}/templates/project-contract-grounding-linkage.md" not in command_text
 
 
 def test_new_project_defines_auto_minimal_conflict_as_prewrite_gate() -> None:
@@ -455,9 +462,7 @@ def test_new_project_stage_contract_rejects_invalid_ordering(tmp_path: Path) -> 
             "unknown field name",
         ),
         (
-            lambda payload: payload["stages"][0]["must_not_eager_load"].append(
-                "workflows/new-project/scope-intake.md"
-            ),
+            lambda payload: payload["stages"][0]["must_not_eager_load"].append("workflows/new-project/scope-intake.md"),
             "overlap with must_not_eager_load",
         ),
         (

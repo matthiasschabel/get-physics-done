@@ -119,9 +119,8 @@ In explicit external-manuscript mode, `project_state` and `conventions` are
 advisory only; hard blockers are the resolved manuscript subject, report-source
 set, and review-integrity failures.
 
-Apply the shared publication bootstrap preflight exactly:
-
-@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md
+Apply the shared publication bootstrap preflight exactly from the loaded
+manifest authority `{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md`.
 
 Treat the project contract as authoritative only when `project_contract_gate.authoritative` is true.
 Bootstrap carries gate and load/validation status, not the full contract body. If response planning needs

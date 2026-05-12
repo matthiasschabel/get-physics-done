@@ -1051,6 +1051,45 @@ def test_codex_projected_command_surface_matches_install_runtime_rewrites(tmp_pa
     assert f"{bridge} --raw init progress --include state,config" in projected
 
 
+@pytest.mark.parametrize("runtime", ("codex", "opencode"))
+def test_codex_and_opencode_projected_commands_downgrade_non_runnable_shell_fences(
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    bridge = runtime_bridge_command(runtime, target_dir)
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "```bash\n"
+        "gpd status\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "git status --porcelain\n"
+        "```\n"
+        "\n"
+        "```bash\n"
+        "INIT=$(gpd --raw init progress --include state,config)\n"
+        'echo "$INIT"\n'
+        "```\n"
+    )
+
+    projected = _project_fixture_command(source, runtime, target_dir)
+
+    assert f"```bash\n{bridge} status\n```" in projected
+    assert "```bash\ngit status --porcelain\n```" not in projected
+    assert "```text\ngit status --porcelain\n```" in projected
+    assert "```bash\nINIT=$(gpd --raw init progress --include state,config)" not in projected
+    assert "```text\nINIT=$(gpd --raw init progress --include state,config)" in projected
+    assert "Gemini shell compatibility" not in projected
+
+
 def test_gemini_projected_command_surface_matches_install_runtime_rewrites(tmp_path: Path) -> None:
     target_dir = tmp_path / ".gemini"
     bridge = runtime_bridge_command("gemini", target_dir)

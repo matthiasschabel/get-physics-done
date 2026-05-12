@@ -10,10 +10,12 @@ writes a compact artifact. Apply
 `{GPD_INSTALL_DIR}/references/publication/stage-recovery-gate.md` before any
 checkpoint continuation, retry, stale-output rejection, or sequential fallback.
 
-The manifest loads `references/publication/peer-review-panel.md` for the machine
-contract and `references/publication/peer-review-panel-playbook.md` for Stage 1-5
-reviewer guidance. Recovery/proof authorities are conditional. Bundle guidance
-enters as handles only: `selected_protocol_bundle_ids` and
+The manifest always loads `references/publication/peer-review-panel.md` for the
+machine contract. Load the conditional
+`references/publication/peer-review-panel-playbook.md` authority only when
+expanded rubric guidance, venue-fit judgment, claim-scope uncertainty, or panel
+child recovery needs it. Recovery/proof authorities are conditional. Bundle
+guidance enters as handles only: `selected_protocol_bundle_ids` and
 `protocol_bundle_load_manifest`.
 Reader-visible claims, surfaced evidence, `${MANUSCRIPT_ROOT}/FIGURE_TRACKER.md`,
 `GPD/comparisons/*-COMPARISON.md`, and review-support artifacts are first-class.

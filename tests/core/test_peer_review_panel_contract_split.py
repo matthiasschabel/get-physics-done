@@ -78,8 +78,12 @@ def test_peer_review_panel_contract_is_compact_index_and_playbook_is_lazy_rubric
 
     panel_stage = manifest.stage("panel_stages")
     final_adjudication = manifest.stage("final_adjudication")
+    panel_conditionals = {
+        authority for conditional in panel_stage.conditional_authorities for authority in conditional.authorities
+    }
     assert "references/publication/peer-review-panel.md" in panel_stage.loaded_authorities
-    assert "references/publication/peer-review-panel-playbook.md" in panel_stage.loaded_authorities
+    assert "references/publication/peer-review-panel-playbook.md" not in panel_stage.loaded_authorities
+    assert "references/publication/peer-review-panel-playbook.md" in panel_conditionals
     assert "references/publication/stage-recovery-gate.md" not in panel_stage.loaded_authorities
     assert "references/verification/core/proof-redteam-protocol.md" not in panel_stage.loaded_authorities
     assert "references/publication/peer-review-panel-playbook.md" not in final_adjudication.loaded_authorities

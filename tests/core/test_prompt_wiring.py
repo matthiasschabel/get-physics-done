@@ -70,6 +70,7 @@ CONTRACT_BASELINE_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "stage0"
 CONTRACT_RESULT_FIXTURES = REPO_ROOT / "tests" / "fixtures" / "stage4"
 PUBLICATION_SHARED_PREFLIGHT_INCLUDE = "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md"
 PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
+PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH = "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
 PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE = (
     "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 )
@@ -4738,7 +4739,7 @@ def test_publication_prompts_surface_strict_semantic_manuscript_gates() -> None:
         )
     _mf(
         respond_workflow,
-        PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
+        PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH,
         PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
         PUBLICATION_REVIEW_RELIABILITY_INLINE,
         context="respond workflow publication authorities",
@@ -4746,7 +4747,7 @@ def test_publication_prompts_surface_strict_semantic_manuscript_gates() -> None:
     _f(respond_workflow, "respond workflow publication authorities", PUBLICATION_ROUND_ARTIFACTS_INCLUDE)
     _mf(
         arxiv_workflow,
-        PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
+        PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH,
         PUBLICATION_ROUND_ARTIFACTS_INCLUDE,
         context="arxiv workflow publication authorities",
     )
@@ -4823,7 +4824,7 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
     arxiv_workflow = _workflow_authority_text("arxiv-submission")
     peer_review_workflow_expanded = _expanded_workflow_authority_text("peer-review")
     shared_preflight_include = "@{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md"
-    bootstrap_preflight_include = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
+    bootstrap_preflight_path = "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
     response_handoff_include = "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
     round_artifacts_include = "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md"
 
@@ -4836,7 +4837,7 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
             "templates/paper/reproducibility-manifest.md",
             PUBLICATION_REVIEW_RELIABILITY_INCLUDE,
             shared_preflight_include,
-            bootstrap_preflight_include,
+            PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
             response_handoff_include,
             round_artifacts_include,
             context="thin publication command schema staging",
@@ -4869,7 +4870,7 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
     _ff(
         peer_review_index,
         PUBLICATION_SHARED_PREFLIGHT_INCLUDE,
-        bootstrap_preflight_include,
+        PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
         response_handoff_include,
         context="peer-review workflow staged schema docs",
     )
@@ -4903,7 +4904,7 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
         respond_workflow,
         "templates/paper/author-response.md",
         "templates/paper/referee-response.md",
-        bootstrap_preflight_include,
+        bootstrap_preflight_path,
         response_handoff_include,
         PUBLICATION_REVIEW_RELIABILITY_INLINE,
         context="respond workflow staged schema docs",
@@ -4913,7 +4914,7 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
         "bootstrap",
         "references/publication/publication-bootstrap-preflight.md",
     )
-    _m(arxiv_workflow, "arxiv workflow staged schema docs", bootstrap_preflight_include, round_artifacts_include)
+    _m(arxiv_workflow, "arxiv workflow staged schema docs", bootstrap_preflight_path, round_artifacts_include)
     _f(
         arxiv_workflow,
         "arxiv workflow staged schema docs",
@@ -4935,7 +4936,7 @@ def test_publication_command_contexts_surface_schema_docs_before_generation() ->
         _ff(
             content,
             shared_preflight_include,
-            bootstrap_preflight_include,
+            PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
             response_handoff_include,
             round_artifacts_include,
             PUBLICATION_REVIEW_RELIABILITY_INCLUDE,
@@ -6438,13 +6439,13 @@ def test_publication_workflows_refresh_bibliography_audit_after_bibliography_cha
     )
     _mf(
         respond,
-        PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
+        PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH,
         PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
         context="respond bibliography workflow includes",
     )
     _mf(
         arxiv_submission,
-        PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
+        PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH,
         PUBLICATION_ROUND_ARTIFACTS_INCLUDE,
         context="arxiv bibliography workflow includes",
     )
@@ -6486,11 +6487,11 @@ def test_publication_workflows_keep_manuscript_local_reference_status_rooted_at_
     )
     _mf(
         respond,
-        PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE,
+        PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH,
         PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE,
         context="respond manuscript-local support includes",
     )
-    _m(arxiv_submission, "arxiv manuscript-local support includes", PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE)
+    _m(arxiv_submission, "arxiv manuscript-local support includes", PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH)
     _sf(
         arxiv_submission,
         "Strict preflight reads",

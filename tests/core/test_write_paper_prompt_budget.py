@@ -18,8 +18,8 @@ BOOTSTRAP_AUTHORITY = WRITE_PAPER_STAGE_DIR / "paper-bootstrap.md"
 PUBLICATION_REVIEW_EAGER_CHAR_BUDGET = 45_000
 
 
-def _expanded_stage_surface(stage: object) -> str:
-    authority_paths = list(dict.fromkeys([*stage.mode_paths, *stage.loaded_authorities]))
+def _expanded_stage_surface(stage: object, *, selected_conditions: tuple[str, ...] = ()) -> str:
+    authority_paths = stage.eager_authorities(selected_conditions=selected_conditions)
     return "\n\n".join(
         expanded_prompt_text(
             SOURCE_ROOT / "specs" / authority,
@@ -70,8 +70,8 @@ def test_write_paper_command_uses_first_stage_authority_boundary() -> None:
         src_root=SOURCE_ROOT,
         path_prefix=PATH_PREFIX,
     )
-    assert "subagent_type=\"gpd-paper-writer\"" not in expanded_command
-    assert "subagent_type=\"gpd-bibliographer\"" not in expanded_command
+    assert 'subagent_type="gpd-paper-writer"' not in expanded_command
+    assert 'subagent_type="gpd-bibliographer"' not in expanded_command
     assert "gpd-referee" not in expanded_command
     assert "templates/paper/review-ledger-schema.md" not in expanded_command
     assert "references/publication/peer-review-panel.md" not in expanded_command
@@ -96,11 +96,7 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
     figure_authoring = manifest.stages[2]
     consistency = manifest.stages[3]
     publication_review = manifest.stages[4]
-    late_stage_authorities = {
-        authority
-        for stage in manifest.stages[1:]
-        for authority in stage.loaded_authorities
-    }
+    late_stage_authorities = {authority for stage in manifest.stages[1:] for authority in stage.loaded_authorities}
 
     assert "workflows/write-paper.md" not in {
         path for stage in manifest.stages for path in (*stage.mode_paths, *stage.loaded_authorities)
@@ -140,6 +136,10 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
         "references/shared/canonical-schema-discipline.md",
         "templates/paper/figure-tracker.md",
     )
+    assert {conditional.when: conditional.authorities for conditional in figure_authoring.conditional_authorities} == {
+        "writer_spawn_needed": ("references/orchestration/runtime-delegation-note.md",),
+    }
+    assert "references/orchestration/runtime-delegation-note.md" in figure_authoring.must_not_eager_load
     assert consistency.loaded_authorities == (
         "workflows/write-paper/consistency-references.md",
         "references/publication/stage-recovery-gate.md",
@@ -151,8 +151,7 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
         "references/publication/publication-review-round-artifacts.md",
     )
     conditional_authorities = {
-        conditional.when: conditional.authorities
-        for conditional in publication_review.conditional_authorities
+        conditional.when: conditional.authorities for conditional in publication_review.conditional_authorities
     }
     assert conditional_authorities == {
         "response_pair_authoring": (
@@ -162,12 +161,8 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
             "templates/paper/author-response.md",
             "templates/paper/referee-response.md",
         ),
-        "advisory_paper_quality_scoring": (
-            "references/publication/paper-quality-scoring.md",
-        ),
-        "review_failure_or_round_state_debug": (
-            "references/publication/peer-review-reliability.md",
-        ),
+        "advisory_paper_quality_scoring": ("references/publication/paper-quality-scoring.md",),
+        "review_failure_or_round_state_debug": ("references/publication/peer-review-reliability.md",),
     }
     assert "references/publication/peer-review-panel.md" in publication_review.must_not_eager_load
     assert "templates/paper/review-ledger-schema.md" in publication_review.must_not_eager_load
@@ -188,6 +183,11 @@ def test_write_paper_reference_body_hydration_is_limited_to_section_authoring() 
     assert "reference_artifacts_content" in figure_authoring.required_init_fields
     assert "protocol_bundle_context" not in figure_authoring.required_init_fields
     assert "active_reference_context" not in figure_authoring.required_init_fields
+    assert "# Runtime Delegation Note" not in _expanded_stage_surface(figure_authoring)
+    assert "# Runtime Delegation Note" in _expanded_stage_surface(
+        figure_authoring,
+        selected_conditions=("writer_spawn_needed",),
+    )
 
     for stage in (consistency, publication_review):
         assert "reference_artifact_files" in stage.required_init_fields
@@ -218,8 +218,8 @@ def test_write_paper_bootstrap_stage_blocks_before_downstream_prompt_loading() -
     assert "literature review with concrete prior-work entries" in bootstrap_surface
 
     for forbidden in (
-        "subagent_type=\"gpd-paper-writer\"",
-        "subagent_type=\"gpd-bibliographer\"",
+        'subagent_type="gpd-paper-writer"',
+        'subagent_type="gpd-bibliographer"',
         "gpd-referee",
         "peer-review-panel.md",
         "review-ledger-schema.md",

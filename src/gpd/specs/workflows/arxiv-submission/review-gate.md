@@ -22,7 +22,10 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Load the shared latest-round publication contract from `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md` and the staged `peer-review-reliability.md` reference at this stage.
+Load the shared latest-round publication contract from `{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md`.
+Load the staged `peer-review-reliability.md` reference only as a conditional
+authority when strict preflight reports degraded review integrity or review-gate
+recovery/debug needs expanded reliability guidance.
 
 Require the latest staged `REVIEW-LEDGER*.json` and `REFEREE-DECISION*.json` pair for the active manuscript. Packaging may continue only when the latest recommendation is `accept` or `minor_revision` and there are no unresolved blocking issues.
 Strict preflight also requires the latest round-specific staged `REVIEW-LEDGER*.json` / `REFEREE-DECISION*.json` pair as authoritative submission-gate input.

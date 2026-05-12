@@ -332,6 +332,12 @@
       ],
       "conditional_authorities": [
         {
+          "when": "writer_spawn_needed",
+          "authorities": [
+            "references/orchestration/runtime-delegation-note.md"
+          ]
+        },
+        {
           "when": "review_integrity_recovery_needed",
           "authorities": [
             "references/publication/peer-review-reliability.md"
@@ -339,6 +345,7 @@
         }
       ],
       "must_not_eager_load": [
+        "references/orchestration/runtime-delegation-note.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-review-round-artifacts.md"
       ],

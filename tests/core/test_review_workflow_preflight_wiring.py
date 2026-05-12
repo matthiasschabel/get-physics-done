@@ -19,6 +19,7 @@ WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
 PUBLICATION_REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references/publication"
 PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
+PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH = "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
 PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE = (
     "{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md"
 )
@@ -195,7 +196,7 @@ def test_respond_to_referees_workflow_runs_centralized_review_preflight() -> Non
     _assert_semantic(
         workflow, "respond-to-referees shared bootstrap preflight", "shared publication bootstrap preflight"
     )
-    assert PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE in workflow
+    assert PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH in workflow
     assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow
     assert "bibliography_audit_clean" in shared_preflight
     assert "reproducibility_ready" in shared_preflight
@@ -249,7 +250,7 @@ def test_arxiv_submission_workflow_runs_centralized_review_preflight() -> None:
     assert 'gpd --raw init arxiv-submission --stage package -- "$ARGUMENTS"' in workflow
     assert 'gpd --raw init arxiv-submission --stage finalize -- "$ARGUMENTS"' in workflow
     _assert_arxiv_submission_gate_semantics(workflow, shared_preflight)
-    assert "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md" in workflow
+    assert PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH in workflow
     assert PUBLICATION_REVIEW_RELIABILITY_INCLUDE not in workflow
     assert "staged `peer-review-reliability.md` reference" in workflow
     assert PUBLICATION_ROUND_ARTIFACTS_INCLUDE in workflow
@@ -335,7 +336,7 @@ def test_publication_review_workflows_reference_shared_manuscript_root_contract(
 
     for workflow_name in ("respond-to-referees.md", "arxiv-submission.md"):
         workflow_text = _workflow_text(workflow_name)
-        assert PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE in workflow_text
+        assert PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH in workflow_text
         if workflow_name == "respond-to-referees.md":
             assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE in workflow_text
             assert PUBLICATION_REVIEW_RELIABILITY_INLINE in workflow_text

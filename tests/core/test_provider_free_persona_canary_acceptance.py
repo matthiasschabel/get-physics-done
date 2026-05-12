@@ -20,6 +20,7 @@ from tests.helpers.phase4_persona.user_steering import (
 from tests.helpers.phase7_live_like import (
     REQUIRED_BASE_ROW_PREFIXES,
     REQUIRED_JIT_ROW_IDS,
+    REQUIRED_P7_ERG_JIT_ROW_IDS,
     REQUIRED_P7_NEXTUP_JIT_ROW_IDS,
     load_phase7_live_like_rows,
     score_phase7_live_like_rows,
@@ -30,9 +31,13 @@ PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_ma
 
 STOP_BEHAVIOR_ROW_IDS = frozenset({"P4-USER-02", "P4-USER-03"})
 EXPECTED_UNSUPPORTED_COMPLETION_DETECTION_ROW_IDS = frozenset({"P4-EXEC-13", "P4-EXEC-14"})
-PHASE7_HANDLE_FIRST_ROW_IDS = frozenset({"LP-JIT-04", "P6-RES-JIT-02", "P6-RES-JIT-03", "P6-RES-JIT-05"})
-PHASE7_STOP_ROW_IDS = frozenset({"LP-JIT-06", "P6-EXEC-JIT-03"})
-PHASE7_RUNTIME_NEXTUP_ROW_IDS = REQUIRED_P7_NEXTUP_JIT_ROW_IDS - {"P7-NEXTUP-JIT-04"}
+PHASE7_HANDLE_FIRST_ROW_IDS = frozenset(
+    {"LP-JIT-04", "P6-RES-JIT-02", "P6-RES-JIT-03", "P6-RES-JIT-05", "P7-ERG-JIT-03"}
+)
+PHASE7_STOP_ROW_IDS = frozenset({"LP-JIT-06", "P6-EXEC-JIT-03", "P7-ERG-JIT-05"})
+PHASE7_RUNTIME_NEXTUP_ROW_IDS = (REQUIRED_P7_NEXTUP_JIT_ROW_IDS - {"P7-NEXTUP-JIT-04"}) | frozenset(
+    {"P7-ERG-JIT-02", "P7-ERG-JIT-04"}
+)
 
 HARD_ZERO_METRIC_KEYS = (
     "invalid_command_suggestion_count",
@@ -49,6 +54,7 @@ def test_phase7_persona_canary_fixture_contains_base_and_jit_rows() -> None:
 
     assert REQUIRED_BASE_ROW_PREFIXES <= base_prefixes
     assert REQUIRED_JIT_ROW_IDS <= row_ids
+    assert REQUIRED_P7_ERG_JIT_ROW_IDS <= row_ids
 
     for row in rows:
         assert row.get("provider_launch_allowed") is False
@@ -135,6 +141,11 @@ def _assert_phase7_score_hard_budgets(wrapped_score: object) -> None:
         assert wrapped_score.behavior_score.metric_counts[metric_key] == 0
     for metric_key in ("raw_reload_leakage_count", "content_hydration_before_selection_count"):
         assert counts[metric_key] == 0
+    assert classes["useful_work_latency_class"] in {"first_turn", "second_turn"}
+    assert classes["reload_loop_class"] == "no_reload_loop"
+    assert classes["instruction_injection_timing_class"] == "active_stage_only"
+    assert classes["runtime_route_class"] == "active_runtime"
+    assert classes["ergonomic_score_class"] in {"green", "yellow"}
 
     if wrapped_score.row.row_id in PHASE7_HANDLE_FIRST_ROW_IDS:
         assert counts["conversation_turn_count"] <= 2
@@ -146,6 +157,7 @@ def _assert_phase7_score_hard_budgets(wrapped_score: object) -> None:
         assert classes["stop_integrity_class"] == "stopped_cleanly"
     if wrapped_score.row.row_id in PHASE7_RUNTIME_NEXTUP_ROW_IDS:
         assert wrapped_score.behavior_score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
+    if wrapped_score.row.row_id in REQUIRED_P7_NEXTUP_JIT_ROW_IDS - {"P7-NEXTUP-JIT-04"}:
         assert classes["primary_owner_class"] == "runtime"
         assert classes["stage_stop_runtime_class"] == "runtime"
         assert classes["rendered_public_raw_reload_class"] == "no_raw_reload"

@@ -105,10 +105,9 @@ specific respectful response, mark "No manuscript change needed", and mirror the
 journal-facing prose into `${RESPONSE_REFEREE_PATH}`.
 
 For Group B manuscript revisions, group comments by resolved section file within
-the manuscript tree rooted at `${PAPER_DIR}` and spawn one paper-writer per
-section:
-
-@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
+the manuscript tree rooted at `${PAPER_DIR}`, load the manifest conditional
+`{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md` when
+`writer_spawn_needed`, and spawn one paper-writer per section:
 
 ```
 task(

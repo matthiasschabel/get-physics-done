@@ -79,6 +79,19 @@ ROOT_AUTHORITY_FREE_WORKFLOWS = frozenset(
         "write-paper",
     }
 )
+PHASE4_STAGED_ROOT_INDEX_SOURCE_BUDGET = {"lines": 700, "chars": 36_000}
+PHASE4_STAGED_COMMAND_WRAPPER_SOURCE_BUDGET = {"lines": 1_400, "chars": 55_000}
+PHASE4_STAGED_JIT_ADVISORY_BUDGETS = {
+    "first_turn_char_count": 160_000,
+    "first_turn_active_char_count": 130_000,
+    "stage_eager_char_count": 940_000,
+    "selected_init_field_count": 2_750,
+    "selected_init_content_field_count": 28,
+    "high_pressure_init_field_count": 575,
+    "likely_bulky_init_field_count": 575,
+    "must_not_eager_load_actionable_violation_count": 0,
+    "must_not_eager_load_prior_stage_residue_count": 10,
+}
 SHELL_PARSING_LINE_BUDGET = 400
 SHELL_MIGRATION_TARGET_WORKFLOWS = frozenset(
     {
@@ -271,6 +284,35 @@ def _stage_init_field_rows(payload: dict[str, object]) -> list[dict[str, object]
     rows = payload["stage_init_field_diagnostics"]
     assert isinstance(rows, list)
     return [row for row in rows if isinstance(row, dict)]
+
+
+def _staged_prompt_items(payload: dict[str, object], kind: str) -> list[dict[str, object]]:
+    items = payload["items"]
+    assert isinstance(items, list)
+    staged_items = [
+        item
+        for item in items
+        if isinstance(item, dict) and item.get("kind") == kind and item.get("name") in ROOT_AUTHORITY_FREE_WORKFLOWS
+    ]
+    observed_names = {item["name"] for item in staged_items}
+    missing_names = sorted(ROOT_AUTHORITY_FREE_WORKFLOWS - observed_names)
+    assert missing_names == []
+    return staged_items
+
+
+def _prompt_item_totals(items: list[dict[str, object]]) -> dict[str, int]:
+    totals = {
+        "item_count": len(items),
+        "raw_line_count": 0,
+        "raw_char_count": 0,
+        "expanded_char_count": 0,
+    }
+    for item in items:
+        for field_name in ("raw_line_count", "raw_char_count", "expanded_char_count"):
+            value = item[field_name]
+            assert isinstance(value, int)
+            totals[field_name] += value
+    return totals
 
 
 def _semantic_duplicate_groups_by_category(payload: dict[str, object]) -> dict[str, dict[str, object]]:
@@ -492,6 +534,68 @@ def test_root_workflow_authority_frontload_stays_within_advisory_budget() -> Non
             f"{workflow_id} is split into stage authority files and must not eagerly load "
             f"workflows/{workflow_id}.md as a stage authority"
         )
+
+
+def test_phase4_staged_root_and_command_wrapper_source_sizes_are_measured_for_ratchets() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    root_totals = _prompt_item_totals(_staged_prompt_items(payload, "workflow"))
+    wrapper_totals = _prompt_item_totals(_staged_prompt_items(payload, "command"))
+
+    assert root_totals["item_count"] == len(ROOT_AUTHORITY_FREE_WORKFLOWS)
+    assert wrapper_totals["item_count"] == len(ROOT_AUTHORITY_FREE_WORKFLOWS)
+
+    assert root_totals["raw_line_count"] <= PHASE4_STAGED_ROOT_INDEX_SOURCE_BUDGET["lines"], (
+        "Phase 4 staged root/index source line budget exceeded: "
+        f"observed={root_totals['raw_line_count']} "
+        f"max={PHASE4_STAGED_ROOT_INDEX_SOURCE_BUDGET['lines']}"
+    )
+    assert root_totals["raw_char_count"] <= PHASE4_STAGED_ROOT_INDEX_SOURCE_BUDGET["chars"], (
+        "Phase 4 staged root/index source char budget exceeded: "
+        f"observed={root_totals['raw_char_count']} "
+        f"max={PHASE4_STAGED_ROOT_INDEX_SOURCE_BUDGET['chars']}"
+    )
+    assert wrapper_totals["raw_line_count"] <= PHASE4_STAGED_COMMAND_WRAPPER_SOURCE_BUDGET["lines"], (
+        "Phase 4 staged command wrapper source line budget exceeded: "
+        f"observed={wrapper_totals['raw_line_count']} "
+        f"max={PHASE4_STAGED_COMMAND_WRAPPER_SOURCE_BUDGET['lines']}"
+    )
+    assert wrapper_totals["raw_char_count"] <= PHASE4_STAGED_COMMAND_WRAPPER_SOURCE_BUDGET["chars"], (
+        "Phase 4 staged command wrapper source char budget exceeded: "
+        f"observed={wrapper_totals['raw_char_count']} "
+        f"max={PHASE4_STAGED_COMMAND_WRAPPER_SOURCE_BUDGET['chars']}"
+    )
+
+    stage_diagnostics = payload["totals"]["stage_diagnostics"]
+    assert isinstance(stage_diagnostics, dict)
+    first_turn_chars = _required_stage_diagnostic_count(stage_diagnostics, "first_turn_char_count")
+    assert wrapper_totals["expanded_char_count"] == first_turn_chars
+
+
+def test_phase4_staged_jit_metrics_are_exposed_for_integration_ratchets() -> None:
+    payload = _prompt_surface_payload(("all",), (), False)
+    stage_diagnostics = payload["totals"]["stage_diagnostics"]
+    assert isinstance(stage_diagnostics, dict)
+
+    for field_name, advisory_budget in PHASE4_STAGED_JIT_ADVISORY_BUDGETS.items():
+        observed = _required_stage_diagnostic_count(stage_diagnostics, field_name)
+        assert observed <= advisory_budget, (
+            f"Phase 4 staged JIT advisory budget exceeded for {field_name}: "
+            f"observed={observed} max={advisory_budget}; keep integration ratchets measured, not guessed"
+        )
+
+    rows = _stage_init_field_rows(payload)
+    assert rows, "stage init field pressure rows should stay available for Phase 4 ratchets"
+    for row in rows[:10]:
+        for field_name in (
+            "workflow_id",
+            "stage_id",
+            "field_name",
+            "field_kind_guess",
+            "field_pressure_class",
+            "likely_bulky",
+            "selection_count",
+        ):
+            assert field_name in row
 
 
 def test_target_workflow_shell_budgets_stay_under_caps() -> None:

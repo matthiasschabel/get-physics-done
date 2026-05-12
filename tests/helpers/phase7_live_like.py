@@ -13,6 +13,7 @@ from tests.helpers.persona_trace import (
     artifact_handle_first_class,
     content_hydration_before_selection_count,
     conversation_turn_count,
+    first_useful_action_class,
     physics_progress_count,
     physics_to_schema_ratio_class,
     raw_reload_leakage_count,
@@ -45,7 +46,10 @@ REQUIRED_P7_NEXTUP_JIT_ROW_IDS = frozenset(
         "P7-NEXTUP-JIT-05",
     }
 )
-REQUIRED_JIT_ROW_IDS = REQUIRED_LP_JIT_ROW_IDS | REQUIRED_P6_JIT_ROW_IDS | REQUIRED_P7_NEXTUP_JIT_ROW_IDS
+REQUIRED_P7_ERG_JIT_ROW_IDS = frozenset(f"P7-ERG-JIT-{index:02d}" for index in range(1, 7))
+REQUIRED_JIT_ROW_IDS = (
+    REQUIRED_LP_JIT_ROW_IDS | REQUIRED_P6_JIT_ROW_IDS | REQUIRED_P7_NEXTUP_JIT_ROW_IDS | REQUIRED_P7_ERG_JIT_ROW_IDS
+)
 LP_JIT_ROW_IDS = tuple(f"LP-JIT-{index:02d}" for index in range(1, 9))
 
 _PREFIX_CASES = {
@@ -67,7 +71,7 @@ _HARD_ZERO_BEHAVIOR_KEYS = (
 )
 _HARD_ZERO_PHASE7_KEYS = ("raw_reload_leakage_count", "content_hydration_before_selection_count")
 # fmt: off
-_HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles"})
+_HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles", "p7_erg_reference_handle_first"})
 _SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true')
 _NEGATED_BODY_FIELD_LINE_MARKERS = ("not receive", "does not receive", "do not receive", "not include", "does not include", "do not include", "must not", "never", "absent", "without", "defer", "deferred", "unavailable")
 # fmt: on
@@ -168,6 +172,12 @@ _BEHAVIOR_CASES = {
     "p7_nextup_blocked_closeout_nonpassing_verification": ("completion", "p7_nextup_blocked_closeout_nonpassing_verification", "verification_non_passing", "blocked_no_mutation", "runtime_verify_work", ("verification_non_passing", "closeout_blocked")),
     "p7_nextup_ready_closeout_local_transition": ("completion", "p7_nextup_ready_closeout_local_transition", "closeout_readiness_read_only", "ready_closeout", "local_phase_complete", ("phase_closeout_readiness", "local_transition")),
     "p7_nextup_public_render_no_raw_reload": ("completion", "p7_nextup_public_render_no_raw_reload", "public_next_up_no_raw_reload", "routed_no_write", "runtime_verify_work", ("no_raw_reload", "command_hint")),
+    "p7_erg_schema_averse_fast_start": ("planning", "p7_erg_schema_averse_fast_start", "new_project_fast_start", "routed_no_write", "concrete_command", ("workflow_stage_manifest", "fast_start")),
+    "p7_erg_runtime_verify_route_correction": ("execution", "p7_erg_runtime_verify_route_correction", "invalid_verify_command_surface", "corrected_runtime_route", "runtime_verify_work", ("invalid_verify_command_surface", "verify_work_correction")),
+    "p7_erg_reference_handle_first": ("planning", "p7_erg_reference_handle_first", "artifact_handle_selected", "routed_no_write", "select_artifact_handle", ("reference_handles", "content_deferred")),
+    "p7_erg_completion_pressure_no_false_complete": ("completion", "p7_erg_completion_pressure_no_false_complete", "verification_missing", "blocked_no_mutation", "runtime_verify_work", ("canonical_verification_missing", "closeout_blocked")),
+    "p7_erg_stop_no_afterwork": ("user_steering", "p7_erg_stop_no_afterwork", "user_abort_stops_dispatch", "stopped_before_dispatch", "bounded_segment_resume", ("user_abort_stops_dispatch", "afterwork_blocked")),
+    "p7_erg_permission_blocked_no_retry_loop": ("user_steering", "p7_erg_permission_blocked_no_retry_loop", "permission_denial_actionable", "blocked_no_mutation", "concrete_command", ("permission_blocked", "actionable_next")),
 }
 # fmt: on
 
@@ -257,6 +267,7 @@ def score_phase7_live_like_row(
         trace,
         source_text=source_text_override,
     )
+    classes.update(_ergonomic_metric_classes(trace, behavior_score, counts, classes))
     failures = _hard_budget_failures(behavior_score, counts, classes, row, case)
     return Phase7LiveLikeScore(row, trace, behavior_score, counts, classes, failures)
 
@@ -418,6 +429,12 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
         "p7_nextup_blocked_closeout_nonpassing_verification": (turn(0, "nonpassing_verification_gate", "runtime_verify_work", "verification_gate"),),
         "p7_nextup_ready_closeout_local_transition": (turn(0, "clean_closeout", "concrete_command", "closeout_ready"),),
         "p7_nextup_public_render_no_raw_reload": (turn(0, "public_next_up_render", "runtime_verify_work", "verification_route"),),
+        "p7_erg_schema_averse_fast_start": (turn(0, "new_project_scope_intake", "concrete_command", "scope_progress"),),
+        "p7_erg_runtime_verify_route_correction": (turn(0, "verify_work_route_correction", "runtime_verify_work", "verification_route"),),
+        "p7_erg_reference_handle_first": (turn(0, "reference_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "reference_review", "concrete_command", "artifact_verified", content_hydration_class="content_loaded")),
+        "p7_erg_completion_pressure_no_false_complete": (turn(0, "missing_verification_gate", "runtime_verify_work", "verification_gate"),),
+        "p7_erg_stop_no_afterwork": (turn(0, "abort_acknowledged", "stop", "stop_acknowledged", stop_class="user_abort_stops_dispatch"),),
+        "p7_erg_permission_blocked_no_retry_loop": (turn(0, "permission_denial_recovery", "concrete_command", "permission_recovery"),),
     }[case]
     # fmt: on
 
@@ -444,13 +461,128 @@ def _trace_metrics(
     classes = {
         "artifact_handle_first_class": _phase7_artifact_handle_first_class(shared_artifact_class),
         "stop_integrity_class": stop_integrity_class(trace),
-        "physics_to_schema_ratio_class": "balanced" if schema <= physics + 1 else "schema_heavy",
+        "physics_to_schema_ratio_class": physics_to_schema_ratio_class(trace),
         "rendered_public_raw_reload_class": "raw_reload_leaked" if rendered_raw_reload_count else "no_raw_reload",
         "rendered_public_structural_verify_class": _rendered_structural_verify_class(rendered_text),
     }
     if case == "clean_stop" and classes["stop_integrity_class"] == "not_applicable":
         classes["stop_integrity_class"] = "ambiguous_stop"
     return counts, classes
+
+
+def _ergonomic_metric_classes(
+    trace: FakePersonaTrace,
+    behavior_score: BehaviorScore,
+    phase7_counts: Mapping[str, int],
+    phase7_classes: Mapping[str, str],
+) -> dict[str, str]:
+    latency_class = _useful_work_latency_class(first_useful_action_class(trace), phase7_counts)
+    reload_class = _reload_loop_class(phase7_counts["raw_reload_leakage_count"])
+    instruction_timing_class = _instruction_injection_timing_class(
+        reload_class,
+        phase7_counts,
+        behavior_score,
+    )
+    runtime_route_class = _runtime_route_class(behavior_score, phase7_classes)
+    ergonomic_score_class = _ergonomic_score_class(
+        behavior_score,
+        phase7_counts,
+        phase7_classes,
+        latency_class=latency_class,
+        reload_class=reload_class,
+        instruction_timing_class=instruction_timing_class,
+        runtime_route_class=runtime_route_class,
+    )
+    return {
+        "useful_work_latency_class": latency_class,
+        "reload_loop_class": reload_class,
+        "instruction_injection_timing_class": instruction_timing_class,
+        "runtime_route_class": runtime_route_class,
+        "ergonomic_score_class": ergonomic_score_class,
+    }
+
+
+def _useful_work_latency_class(first_action_class: str, phase7_counts: Mapping[str, int]) -> str:
+    if first_action_class in {"missing", "not_applicable"}:
+        return "missing"
+    if first_action_class == "delayed":
+        return "second_turn" if phase7_counts["conversation_turn_count"] == 2 else "delayed"
+    return "first_turn"
+
+
+def _reload_loop_class(raw_reload_count: int) -> str:
+    if raw_reload_count <= 0:
+        return "no_reload_loop"
+    if raw_reload_count == 1:
+        return "raw_reload_visible"
+    return "repeated_reload"
+
+
+def _instruction_injection_timing_class(
+    reload_class: str,
+    phase7_counts: Mapping[str, int],
+    behavior_score: BehaviorScore,
+) -> str:
+    if reload_class in {"raw_reload_visible", "repeated_reload"}:
+        return "raw_reload_loop"
+    if phase7_counts["content_hydration_before_selection_count"] > 0:
+        return "premature_content"
+    event_counts = behavior_score.metric_count_maps["event_class_counts"]
+    if any(key in event_counts for key in ("premature_late_stage", "late_stage_content_visible")):
+        return "premature_late_stage"
+    return "active_stage_only"
+
+
+def _runtime_route_class(behavior_score: BehaviorScore, phase7_classes: Mapping[str, str]) -> str:
+    if behavior_score.metric_counts["invalid_command_suggestion_count"] > 0:
+        return "invalid_runtime_route"
+    if phase7_classes.get("rendered_public_structural_verify_class") == "structural_verify_phase_leaked":
+        return "structural_display_only"
+    next_up_class = behavior_score.metric_classes["next_up_specificity_class"]
+    if next_up_class in {"runtime_verify_work", "concrete_command", "bounded_resume"}:
+        return "active_runtime"
+    return "invalid_runtime_route"
+
+
+def _ergonomic_score_class(
+    behavior_score: BehaviorScore,
+    phase7_counts: Mapping[str, int],
+    phase7_classes: Mapping[str, str],
+    *,
+    latency_class: str,
+    reload_class: str,
+    instruction_timing_class: str,
+    runtime_route_class: str,
+) -> str:
+    hard_red_behavior_counts = (
+        "invalid_command_suggestion_count",
+        "schema_repair_loop_count",
+        "duplicate_question_bucket_count",
+        "post_stop_activity_count",
+        "unexpected_write_count",
+        "unsupported_completion_claim_count",
+    )
+    if any(behavior_score.metric_counts[key] > 0 for key in hard_red_behavior_counts):
+        return "red"
+    if phase7_counts["raw_reload_leakage_count"] or phase7_counts["content_hydration_before_selection_count"]:
+        return "red"
+    if behavior_score.metric_classes["smoothness_class"] in {"regressed", "clunky"}:
+        return "red"
+    if phase7_classes["physics_to_schema_ratio_class"] in {"schema_dominant", "no_progress", "schema_heavy"}:
+        return "red"
+    if (
+        latency_class in {"delayed", "missing"}
+        or reload_class != "no_reload_loop"
+        or instruction_timing_class != "active_stage_only"
+        or runtime_route_class == "invalid_runtime_route"
+    ):
+        return "red"
+    if (
+        latency_class == "second_turn"
+        or phase7_counts["schema_surface_count"] > phase7_counts["physics_progress_count"]
+    ):
+        return "yellow"
+    return "green"
 
 
 def _phase7_artifact_handle_first_class(shared_class: str) -> str:
@@ -504,12 +636,12 @@ def _hard_budget_failures(
     failures = [key for key in _HARD_ZERO_BEHAVIOR_KEYS if behavior_score.metric_counts[key] != 0]
     failures.extend(key for key in _HARD_ZERO_PHASE7_KEYS if phase7_counts[key] != 0)
     failures.extend(_row_metric_bound_failures(row.behavior_metric_bounds, behavior_score, phase7_counts))
-    clean_stop_cases = {"clean_stop", "p6_exec_stop_after_first_result"}
+    clean_stop_cases = {"clean_stop", "p6_exec_stop_after_first_result", "p7_erg_stop_no_afterwork"}
     if case in _HANDLE_FIRST_CASES and phase7_classes["artifact_handle_first_class"] != "handle_first":
         failures.append("artifact_handle_first_class")
     if case in clean_stop_cases and phase7_classes["stop_integrity_class"] != "stopped_cleanly":
         failures.append("stop_integrity_class")
-    if phase7_classes["physics_to_schema_ratio_class"] == "schema_heavy":
+    if phase7_classes["physics_to_schema_ratio_class"] in {"schema_heavy", "schema_dominant", "no_progress"}:
         failures.append("physics_to_schema_ratio_class")
     return tuple(dict.fromkeys(failures))
 

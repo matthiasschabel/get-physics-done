@@ -5268,6 +5268,33 @@ def stage_field_access(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# command — Read-only command-context metadata
+# ═══════════════════════════════════════════════════════════════════════════
+
+command_app = typer.Typer(help="Read-only command-context metadata")
+app.add_typer(command_app, name="command")
+
+
+@command_app.command("field-access")
+def command_field_access(
+    command_name: str = typer.Argument(..., help="Command registry key or gpd:name"),
+    style: str = typer.Option(
+        "instruction",
+        "--style",
+        help="Output style: instruction or json",
+    ),
+) -> None:
+    """Expose selected command-context field access metadata."""
+    from gpd.core.command_field_access import build_command_field_access
+
+    try:
+        access = build_command_field_access(command_name, style=style)
+    except ValueError as exc:
+        _error(str(exc))
+    _output(access.to_payload())
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # init — Workflow context assembly
 # ═══════════════════════════════════════════════════════════════════════════
 

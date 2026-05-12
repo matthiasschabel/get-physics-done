@@ -26,6 +26,7 @@ PUBLICATION_BOOTSTRAP_PREFLIGHT = REFERENCES_DIR / "publication" / "publication-
 PUBLICATION_PIPELINE_MODES_INCLUDE = "@{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md"
 PUBLICATION_PIPELINE_MODES_INLINE = "{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md"
 PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE = "@{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
+PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH = "{GPD_INSTALL_DIR}/references/publication/publication-bootstrap-preflight.md"
 PUBLICATION_ROUND_ARTIFACTS_INCLUDE = "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md"
 PUBLICATION_RESPONSE_ARTIFACTS_INCLUDE = "@{GPD_INSTALL_DIR}/references/publication/publication-response-artifacts.md"
 PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE = (
@@ -90,7 +91,9 @@ def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_st
         "Records completion",
         "structured `gpd state` commands",
     )
-    _assert_machine(quick_workflow, "quick workflow project gate field", "project_exists", "**Project Exists:** {project_exists}")
+    _assert_machine(
+        quick_workflow, "quick workflow project gate field", "project_exists", "**Project Exists:** {project_exists}"
+    )
     _assert_semantic(
         quick_workflow,
         "quick workflow project gate without roadmap requirement",
@@ -191,7 +194,9 @@ def test_branch_hypothesis_and_transition_workflows_keep_state_updates_structure
 
     _assert_forbidden(branch_hypothesis, "branch hypothesis stale state editing", "Active Hypothesis", "file_edit tool")
     _assert_machine(branch_hypothesis, "branch hypothesis structured state command", "gpd state add-decision")
-    _assert_forbidden(transition_workflow, "transition workflow no direct state save", "save_state_markdown", "STATE.md directly")
+    _assert_forbidden(
+        transition_workflow, "transition workflow no direct state save", "save_state_markdown", "STATE.md directly"
+    )
     _assert_machine(
         transition_workflow,
         "transition workflow structured state commands",
@@ -221,7 +226,9 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         "`reproducibility-manifest.json` from the resolved manuscript directory itself.",
         "Do not use ad hoc wildcard discovery or first-match filename scans.",
     )
-    _assert_machine(shared_preflight, "publication preflight blocker keys", "bibliography_audit_clean", "reproducibility_ready")
+    _assert_machine(
+        shared_preflight, "publication preflight blocker keys", "bibliography_audit_clean", "reproducibility_ready"
+    )
     _assert_machine(
         bootstrap_preflight,
         "publication bootstrap preflight references",
@@ -229,7 +236,9 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         "publication-review-round-artifacts.md",
         "publication-response-artifacts.md",
     )
-    _assert_machine(publication_artifact_gates, "publication artifact gates pipeline modes path", PUBLICATION_PIPELINE_MODES_INLINE)
+    _assert_machine(
+        publication_artifact_gates, "publication artifact gates pipeline modes path", PUBLICATION_PIPELINE_MODES_INLINE
+    )
     _assert_forbidden(
         publication_artifact_gates,
         "publication artifact gates no at include or migration claim",
@@ -265,13 +274,14 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         WORKFLOWS_DIR / "arxiv-submission.md",
     ):
         text = workflow_authority_text(WORKFLOWS_DIR, path.stem)
-        expected_bootstrap_counts = {
-            "write-paper.md": 0,
+        assert text.count(PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE) == 0, path
+        expected_bootstrap_path_counts = {
+            "write-paper.md": 1,
             "peer-review.md": 0,
             "respond-to-referees.md": 1,
             "arxiv-submission.md": 1,
         }
-        assert text.count(PUBLICATION_BOOTSTRAP_PREFLIGHT_INCLUDE) == expected_bootstrap_counts[path.name], path
+        assert text.count(PUBLICATION_BOOTSTRAP_PREFLIGHT_PATH) >= expected_bootstrap_path_counts[path.name], path
         if path.name == "write-paper.md":
             _assert_machine(text, "write-paper publication bootstrap reference", "publication-bootstrap-preflight.md")
         expected_round_counts = {
@@ -288,7 +298,9 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
 
         assert text.count(PUBLICATION_ROUND_ARTIFACTS_INCLUDE) >= expected_round_counts[path.name], path
         if path.name == "write-paper.md":
-            _assert_machine(text, "write-paper publication round artifacts reference", "publication-review-round-artifacts.md")
+            _assert_machine(
+                text, "write-paper publication round artifacts reference", "publication-review-round-artifacts.md"
+            )
         if path.name in expected_response_artifact_counts:
             assert text.count(PUBLICATION_RESPONSE_ARTIFACTS_INCLUDE) >= expected_response_artifact_counts[path.name], (
                 path
@@ -302,8 +314,12 @@ def test_publication_commands_keep_shared_manuscript_root_preflight_out_of_wrapp
         else:
             assert PUBLICATION_RESPONSE_WRITER_HANDOFF_INCLUDE not in text, path
         if path.name == "arxiv-submission.md":
-            _assert_forbidden(text, "arxiv submission no inline reliability include", PUBLICATION_REVIEW_RELIABILITY_INCLUDE)
-            _assert_semantic(text, "arxiv submission staged reliability reference", "staged `peer-review-reliability.md` reference")
+            _assert_forbidden(
+                text, "arxiv submission no inline reliability include", PUBLICATION_REVIEW_RELIABILITY_INCLUDE
+            )
+            _assert_semantic(
+                text, "arxiv submission staged reliability reference", "staged `peer-review-reliability.md` reference"
+            )
         elif path.name in {"peer-review.md", "respond-to-referees.md"}:
             assert text.count(PUBLICATION_REVIEW_RELIABILITY_INLINE) >= 1, path
         else:
@@ -393,8 +409,14 @@ def test_write_paper_command_defers_the_route_list_to_the_workflow() -> None:
     write_paper_workflow = workflow_authority_text(WORKFLOWS_DIR, "write-paper")
 
     _assert_forbidden(write_paper, "write-paper command no route list", "Routes to the write-paper workflow:")
-    _assert_machine(write_paper, "write-paper command staged bootstrap include", "@{GPD_INSTALL_DIR}/workflows/write-paper/paper-bootstrap.md")
-    _assert_forbidden(write_paper, "write-paper command no monolithic workflow include", "@{GPD_INSTALL_DIR}/workflows/write-paper.md")
+    _assert_machine(
+        write_paper,
+        "write-paper command staged bootstrap include",
+        "@{GPD_INSTALL_DIR}/workflows/write-paper/paper-bootstrap.md",
+    )
+    _assert_forbidden(
+        write_paper, "write-paper command no monolithic workflow include", "@{GPD_INSTALL_DIR}/workflows/write-paper.md"
+    )
     _assert_machine(
         write_paper_workflow,
         "write-paper workflow publication references",
@@ -413,7 +435,9 @@ def test_debug_workflow_path_note_is_not_self_contradictory() -> None:
     debug_workflow = (WORKFLOWS_DIR / "debug.md").read_text(encoding="utf-8")
 
     _assert_machine(debug_workflow, "debug workflow GPD debug path", "Debug files use the `GPD/debug/` path.")
-    _assert_forbidden(debug_workflow, "debug workflow no hidden directory contradiction", "hidden directory with leading dot")
+    _assert_forbidden(
+        debug_workflow, "debug workflow no hidden directory contradiction", "hidden directory with leading dot"
+    )
 
 
 def test_debugger_session_paths_keep_the_active_and_resolved_lifecycles_separate() -> None:

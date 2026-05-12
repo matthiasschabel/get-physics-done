@@ -9,11 +9,14 @@ from gpd.core.workflow_staging import (
     WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT,
     validate_workflow_stage_manifest_payload,
 )
+from tests.prompt_metrics_support import count_unfenced_heading, expanded_prompt_text
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 REFERENCES_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "references" / "publication"
+SOURCE_ROOT = REPO_ROOT / "src" / "gpd"
+PATH_PREFIX = "/runtime/"
 RAW_INCLUDE_ALLOWED_DEFERRED_AUTHORITIES = {
     "references/orchestration/runtime-delegation-note.md",
 }
@@ -54,11 +57,11 @@ PEER_REVIEW_PANEL_REQUIRED_EAGER = frozenset(
     {
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-panel-playbook.md",
     }
 )
 PEER_REVIEW_PANEL_DEFERRED = frozenset(
     {
+        "references/publication/peer-review-panel-playbook.md",
         "references/publication/peer-review-reliability.md",
         "references/publication/publication-final-adjudication-boundary.md",
         "references/publication/publication-response-writer-handoff.md",
@@ -102,6 +105,17 @@ def _load_manifest(workflow_name: str) -> object:
 
 def _conditional_authorities_by_when(stage: object) -> dict[str, frozenset[str]]:
     return {conditional.when: frozenset(conditional.authorities) for conditional in stage.conditional_authorities}
+
+
+def _expanded_stage_surface(stage: object, *, selected_conditions: tuple[str, ...] = ()) -> str:
+    return "\n\n".join(
+        expanded_prompt_text(
+            SOURCE_ROOT / "specs" / authority,
+            src_root=SOURCE_ROOT,
+            path_prefix=PATH_PREFIX,
+        )
+        for authority in stage.eager_authorities(selected_conditions=selected_conditions)
+    )
 
 
 def _canonical_include_relpath(include_path: str) -> str:
@@ -166,6 +180,58 @@ def test_stage_one_deferred_authorities_are_not_raw_projection_includes() -> Non
     assert offenders == []
 
 
+def test_split_publication_stage_authorities_do_not_raw_include_manifest_owned_authorities() -> None:
+    offenders: list[str] = []
+
+    for workflow_name in ("write-paper", "peer-review", "respond-to-referees", "arxiv-submission"):
+        manifest = _load_manifest(workflow_name)
+        for stage in manifest.stages:
+            manifest_owned = set(stage.loaded_authorities)
+            for conditional in stage.conditional_authorities:
+                manifest_owned.update(conditional.authorities)
+
+            for mode_path in stage.mode_paths:
+                source_path = SOURCE_ROOT / "specs" / mode_path
+                for line_number, include_relpath in _raw_projection_include_relpaths(
+                    source_path.read_text(encoding="utf-8")
+                ):
+                    if include_relpath in manifest_owned:
+                        offenders.append(
+                            f"{workflow_name}.{stage.id}:{source_path.name}:{line_number}:{include_relpath}"
+                        )
+
+    assert offenders == []
+
+
+def test_manifest_owned_publication_authorities_expand_once_without_inline_duplicates() -> None:
+    respond_bootstrap = _load_manifest("respond-to-referees").stage("bootstrap")
+    arxiv_bootstrap = _load_manifest("arxiv-submission").stage("bootstrap")
+    peer_preflight = _load_manifest("peer-review").stage("preflight")
+    write_authoring = _load_manifest("write-paper").stage("figure_and_section_authoring")
+    response_authoring = _load_manifest("respond-to-referees").stage("response_authoring")
+
+    assert count_unfenced_heading(_expanded_stage_surface(respond_bootstrap), "# Publication Bootstrap Preflight") == 1
+    assert count_unfenced_heading(_expanded_stage_surface(arxiv_bootstrap), "# Publication Bootstrap Preflight") == 1
+    assert _expanded_stage_surface(peer_preflight).count("Canonical manuscript-root publication preflight.") == 1
+
+    assert "# Runtime Delegation Note" not in _expanded_stage_surface(write_authoring)
+    assert (
+        count_unfenced_heading(
+            _expanded_stage_surface(write_authoring, selected_conditions=("writer_spawn_needed",)),
+            "# Runtime Delegation Note",
+        )
+        == 1
+    )
+    assert "# Runtime Delegation Note" not in _expanded_stage_surface(response_authoring)
+    assert (
+        count_unfenced_heading(
+            _expanded_stage_surface(response_authoring, selected_conditions=("writer_spawn_needed",)),
+            "# Runtime Delegation Note",
+        )
+        == 1
+    )
+
+
 def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> None:
     manifest = _load_manifest("write-paper")
 
@@ -225,6 +291,10 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "roadmap_content",
         "requirements_content",
     } <= set(authoring.required_init_fields)
+    assert _conditional_authorities_by_when(authoring) == {
+        "writer_spawn_needed": frozenset({"references/orchestration/runtime-delegation-note.md"})
+    }
+    assert "references/orchestration/runtime-delegation-note.md" in authoring.must_not_eager_load
     assert {"active_reference_context", "protocol_bundle_context"}.isdisjoint(consistency.required_init_fields)
     assert {
         "state_content",
@@ -349,6 +419,7 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
     assert PEER_REVIEW_PANEL_REQUIRED_EAGER <= panel_loaded
     assert PEER_REVIEW_PANEL_DEFERRED <= set(panel_stages.must_not_eager_load)
     assert _conditional_authorities_by_when(panel_stages) == {
+        "panel_rubric_expansion_needed": frozenset({"references/publication/peer-review-panel-playbook.md"}),
         "panel_child_recovery_needed": frozenset({"references/publication/stage-recovery-gate.md"}),
         "theorem_bearing_claims_present": frozenset(
             {
@@ -370,23 +441,54 @@ def test_peer_review_stage_manifest_uses_canonical_publication_contracts() -> No
 def test_arxiv_submission_stage_manifest_surfaces_publication_routing() -> None:
     manifest = _load_manifest("arxiv-submission")
     bootstrap = manifest.stage("bootstrap")
+    manuscript_preflight = manifest.stage("manuscript_preflight")
+    review_gate = manifest.stage("review_gate")
     package = manifest.stage("package")
+    finalize = manifest.stage("finalize")
+    route_fields = {
+        "publication_subject_slug",
+        "publication_lane_kind",
+        "publication_lane_owner",
+        "managed_publication_root",
+        "selected_publication_root",
+        "selected_review_root",
+    }
+    review_payload_fields = {
+        "latest_review_artifacts",
+        "latest_author_response",
+        "latest_referee_response",
+        "latest_response_artifacts",
+    }
 
     assert manifest.prompt_usage == "staged_init"
     assert "arxiv_submission_argument_input" in bootstrap.required_init_fields
-    assert "publication_subject_slug" in bootstrap.required_init_fields
-    assert "publication_lane_kind" in bootstrap.required_init_fields
-    assert "publication_lane_owner" in bootstrap.required_init_fields
-    assert "managed_publication_root" in bootstrap.required_init_fields
-    assert "selected_publication_root" in bootstrap.required_init_fields
-    assert "selected_review_root" in bootstrap.required_init_fields
+    assert route_fields <= set(bootstrap.required_init_fields)
     assert "latest_response_round" in bootstrap.required_init_fields
-    assert "latest_response_artifacts" in bootstrap.required_init_fields
     assert "latest_response_requires_fresh_review" in bootstrap.required_init_fields
     assert "latest_response_freshness" in bootstrap.required_init_fields
+    assert review_payload_fields.isdisjoint(bootstrap.required_init_fields)
+    assert review_payload_fields.isdisjoint(manuscript_preflight.required_init_fields)
+    assert review_payload_fields.isdisjoint(package.required_init_fields)
+    assert review_payload_fields.isdisjoint(finalize.required_init_fields)
+    assert {
+        "latest_review_ledger",
+        "latest_referee_decision",
+        "latest_review_artifacts",
+        "latest_author_response",
+        "latest_referee_response",
+        "latest_response_artifacts",
+        "latest_response_freshness",
+        "derived_manuscript_proof_review_status",
+    } <= set(review_gate.required_init_fields)
+    assert _conditional_authorities_by_when(review_gate) == {
+        "review_integrity_recovery_needed": frozenset({"references/publication/peer-review-reliability.md"})
+    }
+    assert "references/publication/peer-review-reliability.md" in review_gate.must_not_eager_load
     assert package.writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
     for stage_id in manifest.stage_ids():
-        assert "arxiv_submission_argument_input" in manifest.stage(stage_id).required_init_fields
+        stage_fields = set(manifest.stage(stage_id).required_init_fields)
+        assert "arxiv_submission_argument_input" in stage_fields
+        assert route_fields <= stage_fields
 
 
 def test_respond_to_referees_stage_manifest_uses_publication_response_contracts() -> None:
@@ -459,6 +561,12 @@ def test_respond_to_referees_stage_manifest_uses_publication_response_contracts(
     assert "templates/paper/referee-response.md" in response_authoring.loaded_authorities
     assert "templates/paper/author-response.md" in response_authoring.loaded_authorities
     assert "references/publication/stage-recovery-gate.md" in response_authoring.loaded_authorities
+    assert "references/orchestration/runtime-delegation-note.md" not in response_authoring.loaded_authorities
+    assert "references/orchestration/runtime-delegation-note.md" in response_authoring.must_not_eager_load
+    assert _conditional_authorities_by_when(response_authoring) == {
+        "writer_spawn_needed": frozenset({"references/orchestration/runtime-delegation-note.md"}),
+        "review_integrity_recovery_needed": frozenset({"references/publication/peer-review-reliability.md"}),
+    }
     assert finalize.loaded_authorities == (
         "workflows/respond-to-referees/finalize.md",
         "references/publication/publication-response-writer-handoff.md",

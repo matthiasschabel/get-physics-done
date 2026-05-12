@@ -36,20 +36,39 @@
       "derived_manuscript_reference_status_count",
       "derived_manuscript_proof_review_status"
     ],
-    "publication_review_context": [
+    "publication_route_context": [
       "publication_subject_slug",
       "publication_lane_kind",
       "publication_lane_owner",
       "managed_publication_root",
       "selected_publication_root",
-      "selected_review_root",
+      "selected_review_root"
+    ],
+    "publication_blocker_summary": [
       "publication_blockers",
-      "publication_blocker_count",
+      "publication_blocker_count"
+    ],
+    "latest_review_gate_context": [
       "latest_review_round",
       "latest_review_round_suffix",
       "latest_review_ledger",
       "latest_referee_decision",
-      "latest_review_artifacts",
+      "latest_referee_report_md",
+      "latest_referee_report_tex",
+      "latest_proof_redteam",
+      "latest_review_artifacts"
+    ],
+    "response_freshness_summary": [
+      "latest_response_round",
+      "latest_response_round_suffix",
+      "latest_response_freshness_policy",
+      "latest_response_requires_fresh_review",
+      "latest_response_required_review_round",
+      "latest_response_required_review_round_suffix",
+      "latest_response_freshness_detail",
+      "latest_response_freshness"
+    ],
+    "response_freshness_gate_context": [
       "latest_response_round",
       "latest_response_round_suffix",
       "latest_author_response",
@@ -79,7 +98,9 @@
         "manuscript_package_paths",
         "manuscript_reference_warnings",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context",
+        "publication_blocker_summary",
+        "response_freshness_summary"
       ],
       "loaded_authorities": [
         "workflows/arxiv-submission/bootstrap.md",
@@ -133,7 +154,8 @@
         "manuscript_package_paths",
         "manuscript_reference_warnings",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context",
+        "publication_blocker_summary"
       ],
       "loaded_authorities": [
         "workflows/arxiv-submission/manuscript-preflight.md",
@@ -182,18 +204,28 @@
         "manuscript_package_paths",
         "manuscript_reference_warnings",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context",
+        "publication_blocker_summary",
+        "latest_review_gate_context",
+        "response_freshness_gate_context"
       ],
       "loaded_authorities": [
         "workflows/arxiv-submission/review-gate.md",
-        "references/publication/publication-review-round-artifacts.md",
-        "references/publication/peer-review-reliability.md"
+        "references/publication/publication-review-round-artifacts.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "review_integrity_recovery_needed",
+          "authorities": [
+            "references/publication/peer-review-reliability.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/arxiv-submission.md",
         "workflows/arxiv-submission/package.md",
-        "workflows/arxiv-submission/finalize.md"
+        "workflows/arxiv-submission/finalize.md",
+        "references/publication/peer-review-reliability.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -225,7 +257,7 @@
         "workspace_context",
         "manuscript_package_paths",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context"
       ],
       "loaded_authorities": [
         "workflows/arxiv-submission/package.md"
@@ -272,7 +304,7 @@
         "workspace_context",
         "manuscript_package_paths",
         "manuscript_reference_status",
-        "publication_review_context"
+        "publication_route_context"
       ],
       "loaded_authorities": [
         "workflows/arxiv-submission/finalize.md"

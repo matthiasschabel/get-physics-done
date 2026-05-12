@@ -1634,8 +1634,11 @@ def test_validate_workflow_stage_manifest_payload_loads_peer_review_manifest() -
     assert panel_stages.loaded_authorities == (
         "workflows/peer-review/panel-stages.md",
         "references/publication/peer-review-panel.md",
-        "references/publication/peer-review-panel-playbook.md",
     )
+    panel_conditionals = {
+        authority for conditional in panel_stages.conditional_authorities for authority in conditional.authorities
+    }
+    assert "references/publication/peer-review-panel-playbook.md" in panel_conditionals
     panel_conditionals = {
         authority for conditional in panel_stages.conditional_authorities for authority in conditional.authorities
     }
@@ -1915,7 +1918,11 @@ def test_arxiv_submission_stage_manifest_can_be_loaded() -> None:
     assert "latest_response_requires_fresh_review" in bootstrap.required_init_fields
     assert "latest_response_freshness" in bootstrap.required_init_fields
     assert "references/publication/publication-review-round-artifacts.md" in review_gate.loaded_authorities
-    assert "references/publication/peer-review-reliability.md" in review_gate.loaded_authorities
+    review_gate_conditionals = {
+        authority for conditional in review_gate.conditional_authorities for authority in conditional.authorities
+    }
+    assert "references/publication/peer-review-reliability.md" not in review_gate.loaded_authorities
+    assert "references/publication/peer-review-reliability.md" in review_gate_conditionals
     assert "references/publication/publication-response-writer-handoff.md" not in review_gate.loaded_authorities
     assert package.writes_allowed == ("GPD/publication/{subject_slug}/arxiv",)
 

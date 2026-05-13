@@ -712,7 +712,8 @@ def _run_bootstrap_with_fake_python(
         launch_command = _RUNTIME_LAUNCH_COMMANDS[runtime]
         if runtime.lower() in missing_launchers or launch_command.lower() in missing_launchers:
             continue
-        _write_fake_launcher(fake_bin / launch_command, launch_command)
+        launch_executable = launch_command.split()[0] if launch_command.split() else launch_command
+        _write_fake_launcher(fake_bin / launch_executable, launch_executable)
 
     if precreate_managed_version is not None:
         managed_bin = home / MANAGED_HOME_DIRNAME / "venv" / "bin"

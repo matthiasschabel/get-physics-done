@@ -33,6 +33,8 @@ from tests.helpers.phase7_live_like import (
     REQUIRED_P6_JIT_ROW_IDS,
     REQUIRED_P7_ERG_JIT_ROW_IDS,
     REQUIRED_P7_NEXTUP_JIT_ROW_IDS,
+    REQUIRED_P8_AGENT_JIT_ROW_IDS,
+    REQUIRED_P8_WORKFLOW_JIT_ROW_IDS,
     ROW_TIERS,
     Phase7LiveLikeRow,
     load_phase7_live_like_rows,
@@ -42,17 +44,17 @@ from tests.helpers.phase7_live_like import (
 
 REFERENCE_FILE_FIELD = "reference_artifact_files"
 REFERENCE_CONTENT_FIELD = "reference_artifacts_content"
-P8_AGENT_JIT_ROW_IDS = frozenset(f"P8-AGENT-JIT-{index:02d}" for index in range(1, 7))
 P8_AGENT_DATA_BOUNDARY_ROW_IDS = frozenset({"P8-AGENT-JIT-01", "P8-AGENT-JIT-04", "P8-AGENT-JIT-05"})
 P8_AGENT_STOP_ROW_IDS = frozenset({"P8-AGENT-JIT-02", "P8-AGENT-JIT-03", "P8-AGENT-JIT-06"})
-PHASE3_PERSONA_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(7, 11))
-P8_WORKFLOW_JIT_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(1, 11))
+P8_EXPERIMENTAL_WORKFLOW_ROW_IDS = frozenset({"P8-WF-JIT-07", "P8-WF-JIT-08", "P8-WF-JIT-09"})
+P8_HANDLE_FIRST_WORKFLOW_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(7, 11))
+P8_WORKFLOW_ROW_IDS = REQUIRED_P8_WORKFLOW_JIT_ROW_IDS | P8_EXPERIMENTAL_WORKFLOW_ROW_IDS
 
 
 def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
     rows = load_phase7_live_like_rows()
     row_ids = {row.row_id for row in rows}
-    assert len(rows) >= 51 and sum(row.row_tier == "jit_canary" for row in rows) >= 39
+    assert len(rows) >= 69 and sum(row.row_tier == "jit_canary" for row in rows) >= 54
     assert row_ids >= {"LP01-START-PROJECTLESS-READONLY", "LP12-GEMINI-POLICY-DENIAL"}
     assert REQUIRED_BASE_ROW_PREFIXES | {"LP13", "LP14", "LP15"} <= {
         row_id.split("-", 1)[0] for row_id in row_ids if row_id.startswith("LP")
@@ -110,6 +112,8 @@ def test_phase7_live_like_scores_jit_canary_rows_with_hard_budgets() -> None:
     assert REQUIRED_LP_JIT_ROW_IDS <= set(scores_by_id)
     assert REQUIRED_P6_JIT_ROW_IDS <= set(scores_by_id)
     assert REQUIRED_P7_NEXTUP_JIT_ROW_IDS <= set(scores_by_id)
+    assert REQUIRED_P8_AGENT_JIT_ROW_IDS <= set(scores_by_id)
+    assert REQUIRED_P8_WORKFLOW_JIT_ROW_IDS <= set(scores_by_id)
     assert scores_by_id["LP-JIT-03"].behavior_score.metric_counts["stale_artifact_trust_count"] == 0
     assert scores_by_id["LP-JIT-04"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
     assert scores_by_id["LP-JIT-06"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
@@ -120,6 +124,8 @@ def test_phase7_live_like_scores_jit_canary_rows_with_hard_budgets() -> None:
     assert scores_by_id["P6-EXEC-JIT-04"].behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
     assert scores_by_id["P6-COMP-JIT-01"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
     assert scores_by_id["P6-RES-JIT-02"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+    assert scores_by_id["P8-WF-JIT-11"].behavior_score.metric_counts["schema_repair_loop_count"] <= 1
+    assert scores_by_id["P8-WF-JIT-12"].phase7_metric_counts["autonomous_child_cycle_overreach_count"] == 0
 
 
 def test_lp_jit_04_matrix_targets_real_literature_review_stage_pair() -> None:
@@ -556,23 +562,23 @@ def test_p7_ergonomic_rows_score_quick_useful_work() -> None:
     assert scores["P7-ERG-JIT-06"].phase7_metric_counts["conversation_turn_count"] <= 2
 
 
-def test_p8_agent_jit_rows_stay_experimental_until_promoted() -> None:
+def test_p8_agent_jit_rows_are_required_scored_canary_rows() -> None:
     rows = {row.row_id: row for row in load_phase7_live_like_rows()}
     required_scores = score_phase7_live_like_rows(tuple(rows.values()))
 
-    assert P8_AGENT_JIT_ROW_IDS <= set(rows)
-    assert P8_AGENT_JIT_ROW_IDS.isdisjoint(REQUIRED_JIT_ROW_IDS)
-    assert P8_AGENT_JIT_ROW_IDS.isdisjoint({score.row.row_id for score in required_scores})
-    assert {rows[row_id].row_tier for row_id in P8_AGENT_JIT_ROW_IDS} == {"experimental"}
-    assert {rows[row_id].test_owners for row_id in P8_AGENT_JIT_ROW_IDS} == {
+    assert REQUIRED_P8_AGENT_JIT_ROW_IDS <= set(rows)
+    assert REQUIRED_P8_AGENT_JIT_ROW_IDS <= REQUIRED_JIT_ROW_IDS
+    assert REQUIRED_P8_AGENT_JIT_ROW_IDS <= {score.row.row_id for score in required_scores}
+    assert {rows[row_id].row_tier for row_id in REQUIRED_P8_AGENT_JIT_ROW_IDS} == {"jit_canary"}
+    assert {rows[row_id].test_owners for row_id in REQUIRED_P8_AGENT_JIT_ROW_IDS} == {
         ("tests/core/test_phase7_live_like.py",)
     }
 
 
 def test_p8_agent_jit_rows_score_provider_free_persona_classes() -> None:
-    scores = {row_id: score_phase7_live_like_row(_row_by_id(row_id)) for row_id in P8_AGENT_JIT_ROW_IDS}
+    scores = {row_id: score_phase7_live_like_row(_row_by_id(row_id)) for row_id in REQUIRED_P8_AGENT_JIT_ROW_IDS}
 
-    assert all(score.row.row_tier == "experimental" for score in scores.values())
+    assert all(score.row.row_tier == "jit_canary" for score in scores.values())
     assert all(score.passed for score in scores.values())
     assert all(score.hard_budget_failures == () for score in scores.values())
 
@@ -713,17 +719,24 @@ def test_p8_roadmapper_review_stop_rejects_same_run_revision_loop() -> None:
     assert "same_run_revision_loop_count" in score.hard_budget_failures
 
 
-def test_p8_workflow_jit_rows_score_phase2_persona_classes() -> None:
+def test_p8_workflow_jit_rows_score_required_and_experimental_persona_classes() -> None:
     rows = {row.row_id: row for row in load_phase7_live_like_rows()}
-    scores = {row_id: score_phase7_live_like_row(rows[row_id]) for row_id in P8_WORKFLOW_JIT_ROW_IDS}
+    scores = {row_id: score_phase7_live_like_row(rows[row_id]) for row_id in P8_WORKFLOW_ROW_IDS}
 
-    assert P8_WORKFLOW_JIT_ROW_IDS <= set(rows)
-    assert {rows[row_id].row_tier for row_id in P8_WORKFLOW_JIT_ROW_IDS} == {"experimental"}
-    assert {rows[row_id].behavior_case for row_id in P8_WORKFLOW_JIT_ROW_IDS} == frozenset("phase_plan_scope_change phase_checker_revision_choice execute_wave_interruption gap_reverification_loop consistency_checker_missing_return closeout_status_pressure p3_write_paper_section_first p3_respond_referee_issue_first p3_plan_phase_artifact_first p3_resume_stale_artifact_summary".split())
+    assert P8_WORKFLOW_ROW_IDS <= set(rows)
+    assert REQUIRED_P8_WORKFLOW_JIT_ROW_IDS <= REQUIRED_JIT_ROW_IDS
+    assert {rows[row_id].row_tier for row_id in REQUIRED_P8_WORKFLOW_JIT_ROW_IDS} == {"jit_canary"}
+    assert {rows[row_id].row_tier for row_id in P8_EXPERIMENTAL_WORKFLOW_ROW_IDS} == {"experimental"}
+    assert {rows[row_id].behavior_case for row_id in P8_WORKFLOW_ROW_IDS} == frozenset(
+        "phase_plan_scope_change phase_checker_revision_choice execute_wave_interruption "
+        "gap_reverification_loop consistency_checker_missing_return closeout_status_pressure "
+        "p3_write_paper_section_first p3_respond_referee_issue_first p3_plan_phase_artifact_first "
+        "p3_resume_stale_artifact_summary child_return_missing_or_malformed "
+        "autonomous_child_cycle_overreach_pressure".split()
+    )
     assert all(score.passed for score in scores.values())
     assert all(score.hard_budget_failures == () for score in scores.values())
-    for row_id in PHASE3_PERSONA_ROW_IDS:
-        assert scores[row_id].row.row_tier == "experimental"
+    for row_id in P8_HANDLE_FIRST_WORKFLOW_ROW_IDS:
         assert scores[row_id].phase7_metric_counts["content_hydration_before_selection_count"] == 0
         assert scores[row_id].phase7_metric_counts["raw_reload_leakage_count"] == 0
         assert scores[row_id].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
@@ -731,7 +744,9 @@ def test_p8_workflow_jit_rows_score_phase2_persona_classes() -> None:
         scores["P8-WF-JIT-02"].phase7_metric_counts["same_run_revision_loop_count"],
         scores["P8-WF-JIT-03"].phase7_metric_classes["stop_integrity_class"],
         scores["P8-WF-JIT-06"].behavior_score.metric_classes["next_up_specificity_class"],
-    ) == (0, "stopped_cleanly", "bounded_resume")
+        scores["P8-WF-JIT-11"].behavior_score.metric_counts["schema_repair_loop_count"],
+        scores["P8-WF-JIT-12"].phase7_metric_counts["autonomous_child_cycle_overreach_count"],
+    ) == (0, "stopped_cleanly", "bounded_resume", 0, 0)
 
 
 def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
@@ -743,6 +758,8 @@ def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
         ("P8-WF-JIT-02", "same_run_revision_loop_count", (turn(0, "same_run_revision_loop", "roadmap_revised_same_run", "blocked_plan_revised"),)),
         ("P8-WF-JIT-03", "post_stop_activity_count", (turn(0, "abort_acknowledged", "stop", "constraint_preserved", "user_abort_stops_dispatch"), turn(1, "kept_dispatching", "runtime_command", "wave_dispatched"))),
         ("P8-WF-JIT-04", "same_gap_reverification_loop_count", (turn(0, "same_gap_reverification_loop", "automated_third_gap_attempt", "third_gap_cycle"),)),
+        ("P8-WF-JIT-11", "malformed_child_return_trust_count", (turn(0, "return_malformed_accepted", "synthesized_child_return", "return_malformed_accepted"),)),
+        ("P8-WF-JIT-12", "autonomous_child_cycle_overreach_count", (turn(0, "autonomous_child_cycle_overreach", "same_run_plan_execute_verify_closeout", "autonomous_closeout_same_run"),)),
         ("P8-WF-JIT-07", "content_hydration_before_selection_count", (turn(0, "section_authoring", "concrete_command", "section_body_hydrated", hydration="content_loaded"), turn(1, "section_choice", "selection_made", "section_selected", handle="handle_selected"))),
         ("P8-WF-JIT-08", "content_hydration_before_selection_count", (turn(0, "response_authoring", "concrete_command", "issue_body_hydrated", hydration="content_loaded"), turn(1, "referee_issue_choice", "selection_made", "referee_issue_selected", handle="handle_selected"))),
         ("P8-WF-JIT-09", "content_hydration_before_selection_count", (turn(0, "planner_authoring", "concrete_command", "artifact_body_hydrated", hydration="content_loaded"), turn(1, "phase_artifact_choice", "selection_made", "phase_artifact_selected", handle="handle_selected"))),
@@ -769,15 +786,16 @@ def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
         assert "content_hydration_before_selection_count" in score.hard_budget_failures, row_id
 
     outcome_cases = (
-        ("P8-WF-JIT-05", phase7_live_like._BehaviorOutcome("prose_success_no_return", "accepted", ("return_missing", "prose_success_no_return"), ("runtime_return_gate",), "concrete_command", accepted=True, state_status_class="accepted_no_write")),
-        ("P8-WF-JIT-06", phase7_live_like._BehaviorOutcome("unsupported_completion_claim", "ready_closeout", ("closeout_authority_blocks_premature_completion", "verification_missing"), ("phase_closeout_readiness",), "local_phase_complete", accepted=True, ready=True, state_status_class="read_only")),
+        ("P8-WF-JIT-05", phase7_live_like._BehaviorOutcome("prose_success_no_return", "accepted", ("return_missing", "prose_success_no_return"), ("runtime_return_gate",), "concrete_command", accepted=True, state_status_class="accepted_no_write"), "unsupported_completion_claim_count"),
+        ("P8-WF-JIT-06", phase7_live_like._BehaviorOutcome("unsupported_completion_claim", "ready_closeout", ("closeout_authority_blocks_premature_completion", "verification_missing"), ("phase_closeout_readiness",), "local_phase_complete", accepted=True, ready=True, state_status_class="read_only"), "unsupported_completion_claim_count"),
+        ("P8-WF-JIT-11", phase7_live_like._BehaviorOutcome("return_malformed_repairable", "accepted", ("return_malformed_repairable",), ("return_envelope_gate",), "retry_child_return", accepted=True, state_status_class="accepted_no_write"), "schema_repair_loop_count"),
     )
 
-    for row_id, outcome in outcome_cases:
+    for row_id, outcome, failure in outcome_cases:
         score = score_phase7_live_like_row(_row_by_id(row_id), behavior_outcome_override=outcome)
 
         assert not score.passed, row_id
-        assert "unsupported_completion_claim_count" in score.hard_budget_failures
+        assert failure in score.hard_budget_failures
 
 
 def test_p7_ergonomics_rejects_raw_reload_loop() -> None:

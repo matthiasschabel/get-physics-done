@@ -30,7 +30,7 @@ Full mode may create `GPD/literature/` and `GPD/CONVENTIONS.md` only through
 their owning later stages. roadmap generation and the staged roadmap/conventions handoff
 happen only after the scoping approval gate.
 
-**After this command:** Run `gpd:discuss-phase 1`; show native runtime label.
+**After this command:** Run `gpd:discuss-phase 1`.
 </objective>
 
 <execution_context>

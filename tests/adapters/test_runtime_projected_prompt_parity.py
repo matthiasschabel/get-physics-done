@@ -1030,6 +1030,78 @@ def test_runtime_projected_public_next_up_and_stage_stop_rewrite_canonical_runti
             assert forbidden not in snippet
 
 
+@pytest.mark.parametrize("runtime", PUBLIC_NEXT_UP_PROJECTION_RUNTIMES)
+def test_runtime_projected_after_this_command_uses_native_label_without_meta_instruction(runtime: str) -> None:
+    projected = _project_markdown(COMMANDS_DIR / "new-project.md", runtime, is_agent=False)
+    after_lines = tuple(line for line in projected.splitlines() if "After this command" in line)
+    text = "\n".join(after_lines)
+    expected_discuss_phase = _expected_runtime_command_label(runtime, "discuss-phase", " 1")
+
+    assert after_lines
+    assert expected_discuss_phase in text
+    assert "show native runtime label" not in text.casefold()
+    for forbidden_label in _wrong_runtime_command_labels(runtime, "discuss-phase"):
+        assert forbidden_label not in text
+    for forbidden in PUBLIC_NEXT_UP_FORBIDDEN_PROJECTION_FRAGMENTS:
+        assert forbidden not in text
+
+
+@pytest.mark.parametrize("runtime", PUBLIC_NEXT_UP_PROJECTION_RUNTIMES)
+def test_runtime_projected_after_this_completes_rewrites_public_transition_labels(
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    source = (
+        "---\n"
+        "name: gpd:projection-probe\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "Internal staged loading remains shell-only, not a public route:\n"
+        "\n"
+        "```bash\n"
+        'gpd --raw init resume-work "$ARGUMENTS" --stage resume_routing\n'
+        "```\n"
+        "\n"
+        "## > Next Up\n"
+        "\n"
+        "Primary local transition: `gpd state advance --phase 02`\n"
+        "\n"
+        "**After this completes:** `gpd:resume-work`\n"
+        "\n"
+        "Secondary: `gpd:suggest-next`\n"
+        "\n"
+        "stage_stop:\n"
+        "  status: checkpoint\n"
+        '  next_runtime_command: "gpd:resume-work"\n'
+        "  also_available:\n"
+        '    - "gpd:suggest-next"\n'
+    )
+
+    projected = _project_fixture_command(source, runtime, target_dir)
+    next_up = _extract_next_up_snippet(projected)
+    stage_stop = _extract_stage_stop_snippet(projected)
+    projected_public_surface = next_up + "\n" + stage_stop
+    expected_resume_work = _expected_runtime_command_label(runtime, "resume-work")
+    expected_suggest_next = _expected_runtime_command_label(runtime, "suggest-next")
+
+    assert f"**After this completes:** `{expected_resume_work}`" in next_up
+    assert expected_suggest_next in next_up
+    assert expected_resume_work in stage_stop
+    assert expected_suggest_next in stage_stop
+    for command_name in ("resume-work", "suggest-next"):
+        for forbidden_label in _wrong_runtime_command_labels(runtime, command_name):
+            assert forbidden_label not in projected_public_surface
+    assert "`gpd:resume-work`" not in next_up
+    assert '"gpd:resume-work"' not in stage_stop
+    for snippet in (next_up, stage_stop):
+        for forbidden in PUBLIC_NEXT_UP_FORBIDDEN_PROJECTION_FRAGMENTS:
+            assert forbidden not in snippet
+
+
 @pytest.mark.parametrize("runtime", NON_NATIVE_RUNTIME_PROJECTION_TARGETS)
 def test_compact_shim_public_next_up_and_stage_stop_keep_raw_loader_private(
     runtime: str,

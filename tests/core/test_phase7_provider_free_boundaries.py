@@ -261,6 +261,16 @@ def _provider_command_in_shell_string(command: str) -> str | None:
     return None
 
 
+def test_provider_command_boundary_detects_synthetic_command_detail_examples() -> None:
+    for command_line in (
+        "codex exec --json -o output.json -",
+        "env PROVIDER_COMMAND_DETAILS=class_only claude --print hello",
+        "time command gemini --prompt hello",
+        "npx opencode run",
+    ):
+        assert _provider_command_in_shell_string(command_line) in _PROVIDER_LAUNCH_COMMAND_SET
+
+
 def test_shadow_live_persona_policy_surfaces_do_not_define_provider_runners() -> None:
     failures: list[str] = []
 

@@ -15,6 +15,7 @@ from gpd.core.workflow_staging import (
     load_workflow_stage_manifest,
     validate_workflow_stage_manifest_payload,
 )
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -142,9 +143,13 @@ def test_resume_work_derivation_restore_does_not_rewrite_derivation_state() -> N
     text = workflow_authority_text(WORKFLOWS_DIR, "resume-work")
     section = _workflow_step(text, "restore_persistent_state")
 
-    assert "Do not prune, rewrite, replace, or otherwise modify `GPD/DERIVATION-STATE.md`" in section
-    assert "This is a report-only check." in section
-    assert "Read and summarize the file as-is" in section
+    assert_prompt_contracts(
+        section,
+        semantic_anchor(
+            "derivation restore is read-only and report-only",
+            ("Do not prune", "rewrite", "`GPD/DERIVATION-STATE.md`", "report-only", "as-is"),
+        ),
+    )
     assert "TMP_FILE" not in section
     assert "Pruning oldest" not in section
     assert "Pruned file" not in section
@@ -181,10 +186,19 @@ def test_resume_work_quick_resume_refuses_auto_selected_recent_projects() -> Non
     assert new_project_gate in initialize
     assert initialize.index(ambiguity_gate) < initialize.index(new_project_gate)
     assert initialize.index(auto_recent_gate) < initialize.index(new_project_gate)
-    assert "quick resume is disabled" in quick_resume
-    assert "do not continue automatically" in quick_resume
-    assert "project_contract_gate.repair_required" in quick_resume
-    assert "quick resume must not auto-execute" in quick_resume
+    assert_prompt_contracts(
+        quick_resume,
+        machine_exact(
+            "quick-resume repair gate key stays exact",
+            "project_contract_gate.repair_required",
+            owner="resume-work staged contract",
+            rationale="quick-resume routing reads this context field literally",
+        ),
+        semantic_anchor(
+            "quick resume blocks auto-selected recent projects",
+            ("quick resume", "disabled", "do not continue automatically", "must not auto-execute"),
+        ),
+    )
 
 
 def test_resume_work_partial_recoverable_repair_menu_blocks_downstream_actions() -> None:
@@ -198,11 +212,14 @@ def test_resume_work_partial_recoverable_repair_menu_blocks_downstream_actions()
     assert re.search(r"(?i)\bnext\b[^\n.]{0,80}gpd:sync-state", branch)
 
     normalized = branch.lower()
-    assert "stop before" in normalized
-    assert "planning" in normalized
-    assert "execution" in normalized
+    assert_prompt_contracts(
+        normalized,
+        semantic_anchor(
+            "partial repair stops before downstream planning and execution",
+            ("stop before", "planning", "execution", "overrides quick-resume auto-execution"),
+        ),
+    )
     assert re.search(r"\bmutat(e|es|ing|ion|ions)\b", normalized)
-    assert "overrides quick-resume auto-execution" in normalized
 
     assert _command_is_explicitly_excluded(branch, "gpd:progress")
     assert _command_is_explicitly_excluded(branch, "gpd:new-project")
@@ -217,12 +234,21 @@ def test_resume_routing_status_presentation_uses_three_lanes() -> None:
         assert lane in section
 
     assert '`active_resume_kind="bounded_segment"`' in section
-    assert "outranks" in section
-    assert "advisory `derived_execution_head`" in section
-    assert "`missing_continuity_handoff_file` is a repair blocker" in section
-    assert "disables quick resume" in section
-    assert "separate candidate" in section
-    assert "recovery ladder" in section
+    assert_prompt_contracts(
+        section,
+        semantic_anchor(
+            "resume routing prioritizes blockers and bounded segments",
+            (
+                "outranks",
+                "advisory `derived_execution_head`",
+                "`missing_continuity_handoff_file`",
+                "repair blocker",
+                "disables quick resume",
+                "separate candidate",
+                "recovery ladder",
+            ),
+        ),
+    )
 
 
 def test_resume_routing_next_up_examples_have_one_primary() -> None:

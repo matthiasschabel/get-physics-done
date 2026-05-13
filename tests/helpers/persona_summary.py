@@ -35,13 +35,16 @@ DEFAULT_RAW_KEY_FRAGMENTS = (
     "provider_reply",
     "raw",
     "raw_prompt",
+    "request",
     "reply",
     "secret",
     "session",
     "stderr",
     "stdout",
+    "trace",
     "token",
     "transcript",
+    "usage",
 )
 SAFE_PHASE4_TRIGGERS = frozenset({"operator_local_manual", "workflow_dispatch_summary_validation"})
 SAFE_PHASE7_NIGHTLY_TRIGGERS = frozenset({"workflow_dispatch", "schedule"})
@@ -117,6 +120,15 @@ DEFAULT_RAW_VALUE_PATTERNS = MappingProxyType(
             r"final answer text|transcript excerpt)\b",
             re.IGNORECASE,
         ),
+        "provider_request_id": re.compile(r"(?<![A-Za-z0-9])req_[A-Za-z0-9_:-]{8,}", re.IGNORECASE),
+        "provider_trace_id": re.compile(r"(?<![A-Za-z0-9])trace_[A-Za-z0-9_:-]{8,}", re.IGNORECASE),
+        "provider_usage_json": re.compile(r"\busage[_-]?json\b", re.IGNORECASE),
+        "runtime_home_alias": re.compile(
+            r"\b(?:ANTHROPIC|CLAUDE|CODEX|GEMINI|GOOGLE|OPENAI|OPENCODE)_HOME\b",
+            re.IGNORECASE,
+        ),
+        "raw_diff_sidecar": re.compile(r"\braw[_-]?diff[_-]?sidecar\.(?:diff|json|patch|txt)\b", re.IGNORECASE),
+        "provider_command_details": re.compile(r"\bprovider[_-]?command[_-]?details\b", re.IGNORECASE),
     }
 )
 

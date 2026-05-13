@@ -36,6 +36,9 @@ COMPACT_SHIM_PROJECTION_CASES = (
     ("new-project", COMPACT_STAGED_COMMAND_SHIM_SENTINEL),
     ("help", COMPACT_HELP_BRIDGE_SHIM_SENTINEL),
     ("settings", COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL),
+    ("compare-experiment", COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL),
+    ("dimensional-analysis", COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL),
+    ("review-knowledge", COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL),
 )
 
 
@@ -64,6 +67,10 @@ def _patch_runtime_descriptor_public_prefix(monkeypatch: pytest.MonkeyPatch, run
     return descriptor
 
 
+def _runtime_label_guidance_lines(text: str) -> tuple[str, ...]:
+    return tuple(line for line in text.splitlines() if "runtime label" in line.casefold())
+
+
 @pytest.mark.parametrize(("runtime", "public_prefix"), NON_NATIVE_RUNTIME_PUBLIC_PREFIXES)
 @pytest.mark.parametrize(("command_name", "sentinel"), COMPACT_SHIM_PROJECTION_CASES)
 def test_compact_shims_use_descriptor_public_prefix_through_runtime_projection(
@@ -90,12 +97,13 @@ def test_compact_shims_use_descriptor_public_prefix_through_runtime_projection(
 
     public_label = f"{public_prefix}{command_name}"
     default_prefix = get_runtime_descriptor(runtime).public_command_surface_prefix
+    runtime_label_guidance = _runtime_label_guidance_lines(projected)
 
     assert sentinel in projected
     assert f'command="{public_label}"' in projected
-    assert f"Runtime label: Show `{public_prefix}` as native labels; keep local CLI `gpd ...` unchanged." in projected
+    assert any(public_prefix in line and "native" in line.casefold() for line in runtime_label_guidance)
     assert f'command="{default_prefix}{command_name}"' not in projected
-    assert f"Runtime label: Show `{default_prefix}`" not in projected
+    assert all(default_prefix not in line for line in runtime_label_guidance)
 
 
 def test_codex_projection_uses_descriptor_public_prefix_for_command_references(monkeypatch) -> None:

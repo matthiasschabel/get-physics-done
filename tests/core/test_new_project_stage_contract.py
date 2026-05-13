@@ -10,6 +10,12 @@ import yaml
 
 from gpd.core.child_handoff import ChildGateTuple, child_gate_tuple_from_payload
 from tests import new_project_stage_contract_support as stage_contract_module
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    assert_prompt_contracts,
+    machine_exact,
+    semantic_anchor,
+)
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -308,8 +314,20 @@ def test_new_project_defines_auto_minimal_conflict_as_prewrite_gate() -> None:
 
     expected_error = "Error: --auto and --minimal cannot be combined."
     assert expected_error in command_text
-    assert "This conflict stop happens before git initialization" in command_text
-    assert "Do not initialize git, create `GPD/`, write state" in scope_intake
+    assert_prompt_contracts(
+        command_text,
+        semantic_anchor(
+            "auto/minimal conflict stops before mutation",
+            ("conflict stop", "before git initialization"),
+        ),
+    )
+    assert_prompt_contracts(
+        scope_intake,
+        semantic_anchor(
+            "scope intake forbids prewrite mutation",
+            ("Do not initialize git", "create `GPD/`", "write state"),
+        ),
+    )
     assert "writes_allowed" not in scope_intake
 
 
@@ -322,10 +340,19 @@ def test_new_project_recovery_gate_precedes_generic_project_hard_stops() -> None
 
     assert progress_gate < project_stop
     assert progress_gate < recoverable_stop
-    assert "Use the structured setup fields from `SCOPE_INIT`; do not manually parse" in workflow_text
-    assert "`GPD/init-progress.json`" in workflow_text
-    assert 'init_progress_status="interrupted_init_progress"' in workflow_text
-    assert "Delete\n  `GPD/init-progress.json` only after an explicit start-fresh choice." in workflow_text
+    assert_prompt_contracts(
+        workflow_text,
+        machine_exact(
+            "new-project recovery path and status stay exact",
+            ("`GPD/init-progress.json`", 'init_progress_status="interrupted_init_progress"'),
+            owner="new-project staged contract",
+            rationale="recovery routing consumes this artifact path and status literal",
+        ),
+        semantic_anchor(
+            "new-project recovery uses staged setup fields",
+            ("structured setup fields", "`SCOPE_INIT`", "explicit start-fresh choice"),
+        ),
+    )
     assert "cat GPD/init-progress.json" not in workflow_text
 
 
@@ -335,8 +362,17 @@ def test_new_project_minimal_roadmap_contract_is_direct_not_staged_handoff() -> 
         workflow_text.index("## M4. Create ROADMAP.md") : workflow_text.index("## M5. Create STATE.md")
     ]
 
-    assert "Write a lightweight local `GPD/ROADMAP.md` directly from the approved contract." in minimal_m4
-    assert "Do not delegate this file to a later roadmap authority in minimal mode." in minimal_m4
+    assert_prompt_contracts(
+        minimal_m4,
+        semantic_anchor(
+            "minimal roadmap is written directly",
+            ("lightweight local `GPD/ROADMAP.md`", "directly", "approved contract", "minimal mode"),
+        ),
+        semantic_anchor(
+            "minimal roadmap skips later roadmap delegation",
+            ("Do not delegate", "later roadmap authority"),
+        ),
+    )
     assert "gpd-roadmapper" not in workflow_text
 
 
@@ -380,14 +416,31 @@ def test_new_project_defers_git_until_first_mutation_gate() -> None:
     minimal = _read_stage_authority("minimal-artifacts.md")
     project_artifacts = _read_stage_authority("project-artifacts.md")
 
-    assert "This conflict stop happens before git initialization" in command_text
-    assert "Do not initialize git in Setup." in command_text
-    assert "Do not initialize git, create `GPD/`, write state" in scope_intake
+    assert_prompt_contracts(
+        command_text,
+        semantic_anchor(
+            "new-project setup defers git initialization",
+            ("conflict stop", "before git initialization", "Do not initialize git", "Setup"),
+        ),
+    )
+    assert_prompt_contracts(
+        scope_intake,
+        semantic_anchor(
+            "scope intake forbids setup writes",
+            ("Do not initialize git", "create `GPD/`", "write state"),
+        ),
+    )
     assert "git init" not in scope_intake
     assert "git init" not in scope_approval
     assert "gpd state set-project-contract -" in scope_approval
-    assert "If `has_git` is false, initialize git before the commit" in minimal
-    assert "If `has_git` is false, initialize git before the commit" in project_artifacts
+    for mutation_stage in (minimal, project_artifacts):
+        assert_prompt_contracts(
+            mutation_stage,
+            semantic_anchor(
+                "git initialization is deferred to mutation stages",
+                ("`has_git` is false", "initialize git before the commit"),
+            ),
+        )
 
 
 def test_new_project_notation_contracts_split_checkpoint_from_artifact_write() -> None:
@@ -413,9 +466,25 @@ def test_new_project_notation_spawn_model_and_recovery_contract_are_conditional(
     assert 'task(prompt=NOTATION_PROMPT, subagent_type="gpd-notation-coordinator", readonly=false' in workflow_text
     assert "write the returned content in the main context" not in workflow_text
     assert "re-execute the convention-establishment task in the main context" not in workflow_text
-    assert "spawn one fresh `gpd-notation-coordinator`" in workflow_text
-    assert "continuation that writes `GPD/CONVENTIONS.md`" in workflow_text
-    assert "fail closed" in workflow_text
+    assert_prompt_contracts(
+        workflow_text,
+        semantic_anchor(
+            "notation recovery respawns coordinator and fails closed",
+            (
+                "spawn one fresh `gpd-notation-coordinator`",
+                "continuation that writes `GPD/CONVENTIONS.md`",
+                "fail closed",
+            ),
+        ),
+        semantic_anchor(
+            "stale notation recovery main-context write stays absent",
+            (
+                "write the returned content in the main context",
+                "re-execute the convention-establishment task in the main context",
+            ),
+            mode=FragmentMode.ABSENT,
+        ),
+    )
 
 
 def test_new_project_stage_contract_rejects_unknown_top_level_keys() -> None:

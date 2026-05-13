@@ -8,7 +8,12 @@ from pathlib import Path
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.core.return_contract import validate_gpd_return_markdown
 from gpd.core.workflow_staging import load_workflow_stage_manifest
-from tests.assertion_taxonomy_support import assert_prompt_contracts, forbidden_duplicate, semantic_anchor
+from tests.assertion_taxonomy_support import (
+    assert_prompt_contracts,
+    forbidden_duplicate,
+    semantic_anchor,
+    semantic_concept,
+)
 from tests.markdown_test_support import has_line_with_terms, tag_blocks, yaml_fence_bodies
 from tests.workflow_authority_support import (
     STAGED_WORKFLOW_AUTHORITY_NAMES,
@@ -49,6 +54,23 @@ def _between(text: str, start: str, end: str) -> str:
     body, end_marker, _ = tail.partition(end)
     assert end_marker, f"missing marker: {end}"
     return body
+
+
+def _assert_prompt_concept(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            label,
+            required=required or None,
+            forbidden=forbidden or None,
+        ),
+    )
 
 
 def test_installed_prompt_paths_do_not_reference_source_specs_segment() -> None:
@@ -127,7 +149,7 @@ def test_set_profile_updates_only_model_profile_through_config_cli() -> None:
 
     assert 'PROFILE="$(printf' in set_profile
     assert 'gpd config set model_profile "$PROFILE"' in set_profile
-    assert "This is an action workflow" in set_profile
+    _assert_prompt_concept(set_profile, "set-profile stays action-oriented", required=("action workflow",))
     assert "preserving all other `GPD/config.json` keys" in set_profile
     assert "gpd --raw init progress --include state,config" not in set_profile
     assert "$ARGUMENTS.profile" not in set_profile
@@ -214,12 +236,33 @@ def test_planner_workflows_do_not_embed_the_removed_long_policy_blocks() -> None
     assert has_line_with_terms(plan_phase, "## Standard Planning Template", "filled_prompt")
     assert has_line_with_terms(plan_phase, "## Revision Template", "revision_prompt")
     assert has_line_with_terms(plan_phase, "template-owned", "contract gates")
-    assert "Use the shared planner template, phase template, and `templates/plan-contract-schema.md`." not in plan_phase
-    assert (
-        "Before planning, load the shared planner template, phase template, and canonical contract schema." not in quick
+    assert not has_line_with_terms(
+        plan_phase,
+        "shared planner template",
+        "phase template",
+        "templates/plan-contract-schema.md",
     )
-    assert "The shared planner template owns the canonical planning policy and contract gate." not in verify_work
-    assert "The shared planner template owns the canonical planning and revision policy." not in verify_work
+    assert not has_line_with_terms(
+        quick,
+        "before planning",
+        "shared planner template",
+        "canonical contract schema",
+        casefold=True,
+    )
+    assert not has_line_with_terms(
+        verify_work,
+        "shared planner template",
+        "canonical planning",
+        "contract gate",
+        casefold=True,
+    )
+    assert not has_line_with_terms(
+        verify_work,
+        "shared planner template",
+        "canonical planning",
+        "revision policy",
+        casefold=True,
+    )
 
 
 def test_lifecycle_workflow_prompts_reference_every_real_stage_id() -> None:
@@ -308,7 +351,7 @@ def test_new_project_workflow_references_late_artifact_templates_without_inlinin
     assert "# {project_title}" in project_template
     assert "## Scoping Contract Summary" in project_template
     assert "## Current Position" in state_template
-    assert "**Current Phase Name:** [Phase name]" in state_template
+    assert has_line_with_terms(state_template, "Current Phase Name", "[Phase name]")
 
     assert new_project.count("## Scoping Contract Summary") <= 1
     for removed_project_skeleton_marker in (
@@ -357,7 +400,7 @@ def test_planner_workflows_keep_tangent_policy_single_sourced() -> None:
     assert plan_phase.count("Tangent invariant:") == 1
     assert plan_phase.count("gpd:tangent") == 1
     assert plan_phase.count("gpd:branch-hypothesis") == 2
-    assert "Required 4-way tangent decision model:" not in plan_phase
+    assert not has_line_with_terms(plan_phase, "required", "4-way", "tangent", "decision model", casefold=True)
 
 
 def test_context_pressure_default_threshold_table_is_single_sourced() -> None:
@@ -398,7 +441,9 @@ def test_result_lookup_policy_is_single_sourced_for_high_level_workflows() -> No
             assert command not in raw, workflow_name
             assert command not in expanded, workflow_name
         assert "direct stored-result view before" not in raw, workflow_name
-        assert "reverse dependency tree separated into direct and transitive" not in raw, workflow_name
+        assert not has_line_with_terms(raw, "reverse dependency tree", "direct", "transitive", casefold=True), (
+            workflow_name
+        )
 
 
 def test_state_portability_uses_canonical_continuation_prose() -> None:
@@ -416,8 +461,14 @@ def test_execute_phase_runtime_delegation_rules_are_single_sourced() -> None:
 
     assert execute_phase.count("references/orchestration/runtime-delegation-note.md") == 1
     assert has_line_with_terms(execute_phase, "runtime-neutral", "handoff gates")
-    assert "The shared note owns empty-model omission" not in execute_phase
-    assert "preserve empty-model omission, `readonly=false`, artifact-gated completion" not in execute_phase
+    assert not has_line_with_terms(execute_phase, "shared note", "empty-model omission", casefold=True)
+    assert not has_line_with_terms(
+        execute_phase,
+        "empty-model omission",
+        "readonly=false",
+        "artifact-gated completion",
+        casefold=True,
+    )
     assert execute_phase.count("runtime delegation convention") <= 8
 
 
@@ -502,7 +553,13 @@ def test_numeric_context_budget_guidance_is_single_sourced() -> None:
     assert "## Phase-Class Budget Targets" in context_budget
     assert "Summary aggregation heuristic" in context_budget
     assert "estimated_tokens = plan_count * tasks_per_plan * 6000" not in infra
-    assert "| Phase Type | Orchestrator Budget | Agent Budget (each) | Total per Phase | Notes |" not in meta
+    assert not has_line_with_terms(
+        meta,
+        "Phase Type",
+        "Orchestrator Budget",
+        "Agent Budget",
+        "Total per Phase",
+    )
     assert has_line_with_terms(meta, "strategic routing", "budget table")
     assert "references/orchestration/context-budget.md` as the canonical numeric source" in infra
     assert "references/orchestration/context-budget.md" in execute_phase
@@ -599,8 +656,8 @@ def test_research_agents_delegate_file_templates_to_canonical_templates() -> Non
     assert "{GPD_INSTALL_DIR}/templates/research-project/SUMMARY.md" in synthesizer
     assert "# Research Summary Template" in summary_template
     assert has_line_with_terms(synthesizer, "canonical template", "synthesizer-specific")
-    assert "```markdown\n# Research Summary: [Project Title]" not in synthesizer
-    assert "[Aggregated references from all research files, organized by topic]" not in synthesizer
+    assert not has_line_with_terms(synthesizer, "Research Summary", "[Project Title]")
+    assert not has_line_with_terms(synthesizer, "Aggregated references", "research files", "organized by topic")
 
 
 def test_roadmapper_keeps_project_type_template_catalog_single_sourced() -> None:

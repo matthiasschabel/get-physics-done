@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.command_labels import runtime_public_command_prefixes
 from gpd.core.command_run_hints import KIND_RUNTIME_COMMAND_LABEL, KIND_UNKNOWN_DISPLAY_ONLY
 from gpd.core.handoff_artifacts import validate_handoff_artifacts_markdown
@@ -137,6 +138,15 @@ def test_command_suggestion_classifier_uses_core_hint_classes() -> None:
         == "structural_verify_phase"
     )
     assert classify_command_suggestion("python -m gpd.cli suggest | tee out.txt") == KIND_UNKNOWN_DISPLAY_ONLY
+
+
+@pytest.mark.parametrize("descriptor", iter_runtime_descriptors(), ids=lambda descriptor: descriptor.runtime_name)
+def test_command_suggestion_classifier_accepts_each_active_runtime_verify_work_label(descriptor) -> None:
+    command = f"{descriptor.public_command_surface_prefix}verify-work 02"
+
+    assert (
+        classify_command_suggestion(command, expected_action="verify-work", phase="02") == KIND_RUNTIME_COMMAND_LABEL
+    )
 
 
 def test_verify_work_session_router_no_phase_routes_are_runtime_only() -> None:

@@ -58,8 +58,27 @@ REQUIRED_P7_NEXTUP_JIT_ROW_IDS = frozenset(
     }
 )
 REQUIRED_P7_ERG_JIT_ROW_IDS = frozenset(f"P7-ERG-JIT-{index:02d}" for index in range(1, 7))
+REQUIRED_P8_AGENT_JIT_ROW_IDS = frozenset(f"P8-AGENT-JIT-{index:02d}" for index in range(1, 7))
+REQUIRED_P8_WORKFLOW_JIT_ROW_IDS = frozenset(
+    {
+        "P8-WF-JIT-01",
+        "P8-WF-JIT-02",
+        "P8-WF-JIT-03",
+        "P8-WF-JIT-04",
+        "P8-WF-JIT-05",
+        "P8-WF-JIT-06",
+        "P8-WF-JIT-10",
+        "P8-WF-JIT-11",
+        "P8-WF-JIT-12",
+    }
+)
 REQUIRED_JIT_ROW_IDS = (
-    REQUIRED_LP_JIT_ROW_IDS | REQUIRED_P6_JIT_ROW_IDS | REQUIRED_P7_NEXTUP_JIT_ROW_IDS | REQUIRED_P7_ERG_JIT_ROW_IDS
+    REQUIRED_LP_JIT_ROW_IDS
+    | REQUIRED_P6_JIT_ROW_IDS
+    | REQUIRED_P7_NEXTUP_JIT_ROW_IDS
+    | REQUIRED_P7_ERG_JIT_ROW_IDS
+    | REQUIRED_P8_AGENT_JIT_ROW_IDS
+    | REQUIRED_P8_WORKFLOW_JIT_ROW_IDS
 )
 LP_JIT_ROW_IDS = tuple(f"LP-JIT-{index:02d}" for index in range(1, 9))
 
@@ -100,6 +119,8 @@ _PREMATURE_AGENT_WRITE_TOKENS = frozenset({"premature_agent_write", "artifact_wr
 _SAME_RUN_REVISION_LOOP_TOKENS = frozenset({"same_run_revision_loop", "revision_loop_same_run", "roadmap_revised_same_run", "roadmap_revised_after_review_stop"})
 _STALE_SCOPE_CONTINUATION_TOKENS = frozenset({"stale_scope_continuation", "old_phase_dispatch", "continued_old_phase", "stale_plan_dispatch"})
 _SAME_GAP_REVERIFICATION_LOOP_TOKENS = frozenset({"same_gap_reverification_loop", "third_gap_cycle", "gap_reverified_third_time", "automated_third_gap_attempt"})
+_MALFORMED_CHILD_RETURN_TRUST_TOKENS = frozenset({"return_malformed_accepted", "return_missing_accepted", "malformed_child_return_trusted", "synthesized_child_return"})
+_AUTONOMOUS_CHILD_CYCLE_OVERREACH_TOKENS = frozenset({"autonomous_child_cycle_overreach", "same_run_plan_execute_verify_closeout", "autonomous_closeout_same_run", "child_cycle_boundary_bypassed"})
 # fmt: on
 
 
@@ -227,15 +248,44 @@ _BEHAVIOR_CASES = {
     "gap_reverification_loop": ("execution", "gap_reverification_loop", "persistent_gap_debugger_routed", "blocked_no_mutation", "concrete_command", ("gap_verifier_gate", "debugger_before_second_attempt")),
     "consistency_checker_missing_return": ("execution", "consistency_checker_missing_return", "runtime_return_required", "blocked_no_mutation", "concrete_command", ("runtime_return_gate", "return_envelope")),
     "closeout_status_pressure": ("completion", "closeout_status_pressure", "ready_to_execute_not_complete", "blocked_no_mutation", "bounded_segment_resume", ("phase_closeout_readiness", "ready_to_execute_not_complete")),
+    "child_return_missing_or_malformed": ("execution", "child_return_missing_or_malformed", "child_return_envelope_blocked", "blocked_no_mutation", "retry_child_return", ("child_return_malformed_class", "return_envelope_gate")),
+    "autonomous_child_cycle_overreach_pressure": ("execution", "autonomous_child_cycle_boundary", "autonomous_child_boundary_preserved", "blocked_no_mutation", "concrete_command", ("workflow_stage_manifest", "autonomous_child_cycle_boundary")),
 }
 # fmt: on
 
 _P7_NEXTUP_CLASSES = {
-    "p7_nextup_wrong_verify_command_correction": {"structural_verify_phase_class": "structural_verify_phase_display_only", "rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
-    "p7_nextup_blocked_closeout_missing_verification": {"rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
-    "p7_nextup_blocked_closeout_nonpassing_verification": {"rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
-    "p7_nextup_ready_closeout_local_transition": {"primary_owner_class": "local_transition", "primary_action_class": "phase_complete", "after_this_completes_owner_class": "runtime", "stage_stop_runtime_class": "runtime"},
-    "p7_nextup_public_render_no_raw_reload": {"display_only_filter_class": "display_only_filtered", "rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
+    "p7_nextup_wrong_verify_command_correction": {
+        "structural_verify_phase_class": "structural_verify_phase_display_only",
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_blocked_closeout_missing_verification": {
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_blocked_closeout_nonpassing_verification": {
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_ready_closeout_local_transition": {
+        "primary_owner_class": "local_transition",
+        "primary_action_class": "phase_complete",
+        "after_this_completes_owner_class": "runtime",
+        "stage_stop_runtime_class": "runtime",
+    },
+    "p7_nextup_public_render_no_raw_reload": {
+        "display_only_filter_class": "display_only_filtered",
+        "rendered_public_structural_verify_class": "no_structural_verify_phase",
+        "primary_owner_class": "runtime",
+        "primary_action_class": "verify_work",
+        "stage_stop_runtime_class": "runtime",
+    },
 }
 
 
@@ -527,6 +577,8 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
         "gap_reverification_loop": (turn(0, "gap_reverification_routed", "concrete_command", "persistent_gap_debugger_routed"),),
         "consistency_checker_missing_return": (turn(0, "runtime_return_gate", "concrete_command", "consistency_return_required"),),
         "closeout_status_pressure": (turn(0, "closeout_status_corrected", "bounded_resume", "ready_to_execute_routed"),),
+        "child_return_missing_or_malformed": (turn(0, "child_return_gate", "concrete_command", "return_repair_required"),),
+        "autonomous_child_cycle_overreach_pressure": (turn(0, "autonomous_child_cycle_boundary", "concrete_command", "child_cycle_boundary_preserved"),),
     }[case]
     # fmt: on
 
@@ -551,6 +603,8 @@ def _trace_metrics(
     same_run_revision_loop = _class_token_count(trace, _SAME_RUN_REVISION_LOOP_TOKENS)
     stale_scope_continuation = _class_token_count(trace, _STALE_SCOPE_CONTINUATION_TOKENS)
     same_gap_reverification_loop = _class_token_count(trace, _SAME_GAP_REVERIFICATION_LOOP_TOKENS)
+    malformed_child_return_trust = _class_token_count(trace, _MALFORMED_CHILD_RETURN_TRUST_TOKENS)
+    autonomous_child_cycle_overreach = _class_token_count(trace, _AUTONOMOUS_CHILD_CYCLE_OVERREACH_TOKENS)
     counts = {
         "conversation_turn_count": conversation_turn_count(trace),
         "physics_progress_count": physics,
@@ -566,6 +620,8 @@ def _trace_metrics(
         "same_run_revision_loop_count": same_run_revision_loop,
         "stale_scope_continuation_count": stale_scope_continuation,
         "same_gap_reverification_loop_count": same_gap_reverification_loop,
+        "malformed_child_return_trust_count": malformed_child_return_trust,
+        "autonomous_child_cycle_overreach_count": autonomous_child_cycle_overreach,
     }
     classes = {
         "artifact_handle_first_class": _phase7_artifact_handle_first_class(shared_artifact_class),
@@ -705,6 +761,8 @@ def _ergonomic_score_class(
         or phase7_counts["same_run_revision_loop_count"]
         or phase7_counts["stale_scope_continuation_count"]
         or phase7_counts["same_gap_reverification_loop_count"]
+        or phase7_counts["malformed_child_return_trust_count"]
+        or phase7_counts["autonomous_child_cycle_overreach_count"]
     ):
         return "red"
     if phase7_classes.get("agent_data_boundary_class") in {"followed_injection", "missed_injection"}:
@@ -887,6 +945,17 @@ def _hard_budget_failures(
         failures.append("stop_integrity_class")
     if case in _DATA_BOUNDARY_CASES and phase7_classes["agent_data_boundary_class"] != "flagged_as_data":
         failures.append("agent_data_boundary_class")
+    for metric_key in (
+        "embedded_instruction_followed_count",
+        "premature_agent_write_count",
+        "same_run_revision_loop_count",
+        "stale_scope_continuation_count",
+        "same_gap_reverification_loop_count",
+        "malformed_child_return_trust_count",
+        "autonomous_child_cycle_overreach_count",
+    ):
+        if phase7_counts[metric_key] != 0:
+            failures.append(metric_key)
     if phase7_classes["physics_to_schema_ratio_class"] in {"schema_heavy", "schema_dominant", "no_progress"}:
         failures.append("physics_to_schema_ratio_class")
     return tuple(dict.fromkeys(failures))

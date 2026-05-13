@@ -93,7 +93,7 @@ def test_claude_new_project_wrapper_keeps_post_init_next_step_runtime_native() -
     public_prefix = validated_public_command_prefix(_RUNTIME_WITH_NATIVE_INCLUDE_SUPPORT)
 
     assert f"`{public_prefix}discuss-phase 1`" in projected
-    assert "show native runtime label" in projected
+    assert "show native runtime label" not in projected.casefold()
 
 
 def test_new_project_headless_and_policy_blocks_do_not_auto_approve_or_fabricate() -> None:

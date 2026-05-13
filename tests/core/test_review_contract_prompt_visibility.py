@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import dataclasses
 import re
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 import pytest
-import yaml
 
 from gpd import registry
 from gpd.adapters.install_utils import expand_at_includes
@@ -54,11 +54,6 @@ def _assert_prompt_contracts(text: str, *assertions) -> None:
         assertion.check(text)
 
 
-def _manual_model_visible_yaml_section(*, heading: str, note: str, payload: dict[str, object]) -> str:
-    rendered = yaml.safe_dump(payload, sort_keys=False, allow_unicode=False).rstrip()
-    return f"## {heading}\n\n{note}\n\n```yaml\n{rendered}\n```"
-
-
 def _read_command(name: str) -> str:
     return Path(registry.get_command(name).path).read_text(encoding="utf-8")
 
@@ -79,6 +74,30 @@ def _model_visible_wrapper_payload(text: str, heading: str, wrapper_key: str, *,
 
     assert set(mapping) == {wrapper_key}
     return dict(require_mapping(mapping[wrapper_key], context=f"{context} {wrapper_key} payload"))
+
+
+def _model_visible_payload(text: str, heading: str, *, context: str) -> dict[object, object]:
+    section = extract_markdown_section(text, f"## {heading}", context=context)
+    return _single_yaml_mapping(section, context=f"{context} {heading} YAML")
+
+
+def _assert_review_contract_payload(
+    text: str,
+    expected: Mapping[str, object],
+    *,
+    omitted: Iterable[str] = (),
+    context: str,
+) -> dict[object, object]:
+    payload = _model_visible_wrapper_payload(
+        text,
+        "Review Contract",
+        REVIEW_CONTRACT_PROMPT_WRAPPER_KEY,
+        context=context,
+    )
+    assert payload == expected
+    for field_name in omitted:
+        assert field_name not in payload
+    return payload
 
 
 def test_review_grade_commands_surface_registry_contract_requirements_in_source() -> None:
@@ -234,52 +253,38 @@ def test_model_visible_section_renderers_share_one_canonical_wrapper_structure()
     )
     review_section = render_review_contract_prompt(review_contract_payload_data)
 
-    assert agent_section == _manual_model_visible_yaml_section(
-        heading="Agent Requirements",
-        note=agent_visibility_note(),
-        payload={
-            "commit_authority": "orchestrator",
-            "surface": "internal",
-            "role_family": "analysis",
-            "artifact_write_authority": "scoped_write",
-            "shared_state_authority": "return_only",
-            "tools": ["git", "python"],
-        },
-    )
-    assert command_section == _manual_model_visible_yaml_section(
-        heading="Command Requirements",
-        note=command_visibility_note(),
-        payload={
-            "context_mode": "project-required",
-            "project_reentry_capable": False,
-            "agent": "gpd-planner",
-            "allowed_tools": ["git", "python"],
-            "requires": {"files": ["PROJECT.md"]},
-            COMMAND_POLICY_PROMPT_WRAPPER_KEY: {
-                "schema_version": 1,
-                "supporting_context_policy": {
-                    "project_context_mode": "project-required",
-                    "project_reentry_mode": "disallowed",
-                    "required_file_patterns": ["PROJECT.md"],
-                },
+    assert _model_visible_payload(agent_section, "Agent Requirements", context="agent requirements section") == {
+        "commit_authority": "orchestrator",
+        "surface": "internal",
+        "role_family": "analysis",
+        "artifact_write_authority": "scoped_write",
+        "shared_state_authority": "return_only",
+        "tools": ["git", "python"],
+    }
+    assert _model_visible_payload(command_section, "Command Requirements", context="command requirements section") == {
+        "context_mode": "project-required",
+        "project_reentry_capable": False,
+        "agent": "gpd-planner",
+        "allowed_tools": ["git", "python"],
+        "requires": {"files": ["PROJECT.md"]},
+        COMMAND_POLICY_PROMPT_WRAPPER_KEY: {
+            "schema_version": 1,
+            "supporting_context_policy": {
+                "project_context_mode": "project-required",
+                "project_reentry_mode": "disallowed",
+                "required_file_patterns": ["PROJECT.md"],
             },
         },
-    )
-    assert review_section == _manual_model_visible_yaml_section(
-        heading="Review Contract",
-        note=review_contract_visibility_note(),
-        payload={
-            REVIEW_CONTRACT_PROMPT_WRAPPER_KEY: {
-                "schema_version": 1,
-                "review_mode": "review",
-                "preflight_checks": ["manuscript"],
-            }
+    }
+    _assert_review_contract_payload(
+        review_section,
+        {
+            "schema_version": 1,
+            "review_mode": "review",
+            "preflight_checks": ["manuscript"],
         },
+        context="review contract section",
     )
-    assert "commit_authority: orchestrator" in agent_section
-    assert "agent: gpd-planner" in command_section
-    assert "review_mode: review" in review_section
-    assert "  - manuscript" in review_section
 
 
 def test_model_visible_wrapper_notes_surface_their_closed_schema_rules() -> None:
@@ -999,13 +1004,25 @@ def test_review_contract_renderer_always_surfaces_blocking_preflight_dependency_
     section = render_review_contract_prompt({"schema_version": 1, "review_mode": "review"})
 
     assert review_contract_visibility_note() in section
-    assert "preflight_checks: []" not in section
-    assert "required_outputs: []" not in section
-    assert "required_evidence: []" not in section
-    assert "blocking_conditions: []" not in section
-    assert "stage_artifacts: []" not in section
-    assert "conditional_requirements: []" not in section
-    assert "`conditional_requirements[].blocking_preflight_checks`" in section
+    _assert_review_contract_payload(
+        section,
+        {"schema_version": 1, "review_mode": "review"},
+        omitted=(
+            "preflight_checks",
+            "required_outputs",
+            "required_evidence",
+            "blocking_conditions",
+            "stage_artifacts",
+            "conditional_requirements",
+        ),
+        context="minimal review contract",
+    )
+    machine_exact(
+        "blocking preflight dependency field path stays exact",
+        "`conditional_requirements[].blocking_preflight_checks`",
+        owner=REVIEW_CONTRACT_OWNER,
+        rationale="the renderer note exposes this exact nested field path",
+    ).check(section)
 
 
 def test_review_contract_renderer_accepts_conditional_only_blocking_preflight_checks() -> None:
@@ -1023,9 +1040,21 @@ def test_review_contract_renderer_accepts_conditional_only_blocking_preflight_ch
         }
     )
 
-    assert "conditional_requirements:" in section
-    assert "blocking_preflight_checks:" in section
-    assert "manuscript_proof_review" in section
+    _assert_review_contract_payload(
+        section,
+        {
+            "schema_version": 1,
+            "review_mode": "publication",
+            "preflight_checks": ["manuscript"],
+            "conditional_requirements": [
+                {
+                    "when": "theorem-bearing manuscripts are present",
+                    "blocking_preflight_checks": ["manuscript_proof_review"],
+                }
+            ],
+        },
+        context="conditional-only blocking preflight review contract",
+    )
 
 
 def test_review_contract_renderer_accepts_publication_artifact_preflight_checks() -> None:
@@ -1046,14 +1075,22 @@ def test_review_contract_renderer_accepts_publication_artifact_preflight_checks(
         }
     )
 
-    assert "command_context" in section
-    assert "verification_reports" in section
-    assert "artifact_manifest" in section
-    assert "bibliography_audit" in section
-    assert "bibliography_audit_clean" in section
-    assert "publication_blockers" in section
-    assert "reproducibility_manifest" in section
-    assert "reproducibility_ready" in section
+    payload = _model_visible_wrapper_payload(
+        section,
+        "Review Contract",
+        REVIEW_CONTRACT_PROMPT_WRAPPER_KEY,
+        context="publication artifact preflight review contract",
+    )
+    assert payload["preflight_checks"] == [
+        "command_context",
+        "verification_reports",
+        "artifact_manifest",
+        "bibliography_audit",
+        "bibliography_audit_clean",
+        "publication_blockers",
+        "reproducibility_manifest",
+        "reproducibility_ready",
+    ]
 
 
 def test_render_agent_requirements_section_normalizes_public_inputs() -> None:
@@ -1066,7 +1103,8 @@ def test_render_agent_requirements_section_normalizes_public_inputs() -> None:
         shared_state_authority="return_only",
     )
 
-    assert "tools:\n- file_read\n- file_write" in section
+    payload = _model_visible_payload(section, "Agent Requirements", context="normalized agent requirements")
+    assert payload["tools"] == ["file_read", "file_write"]
 
 
 def test_render_command_requires_section_normalizes_public_inputs() -> None:
@@ -1079,10 +1117,14 @@ def test_render_command_requires_section_normalizes_public_inputs() -> None:
         command_policy=None,
     )
 
-    assert "allowed_tools:\n- git\n- python" in section
-    assert "files:\n  - PROJECT.md" in section
-    assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in section
-    assert "project_reentry_mode: disallowed" in section
+    payload = _model_visible_payload(section, "Command Requirements", context="normalized command requirements")
+    assert payload["allowed_tools"] == ["git", "python"]
+    assert payload["requires"] == {"files": ["PROJECT.md"]}
+    assert payload[COMMAND_POLICY_PROMPT_WRAPPER_KEY]["supporting_context_policy"] == {
+        "project_context_mode": "project-required",
+        "project_reentry_mode": "disallowed",
+        "required_file_patterns": ["PROJECT.md"],
+    }
 
 
 def test_render_command_requires_section_accepts_explicit_command_policy_mapping() -> None:
@@ -1106,12 +1148,26 @@ def test_render_command_requires_section_accepts_explicit_command_policy_mapping
         },
     )
 
-    assert "context_mode: project-aware" in section
-    assert f"{COMMAND_POLICY_PROMPT_WRAPPER_KEY}:" in section
-    assert "subject_kind: publication" in section
-    assert "allow_external_subjects: true" in section
-    assert "managed_root_kind: gpd_managed_durable" in section
-    assert "project_context_mode: project-aware" in section
+    assert _model_visible_payload(section, "Command Requirements", context="explicit command policy") == {
+        "context_mode": "project-aware",
+        "project_reentry_capable": False,
+        COMMAND_POLICY_PROMPT_WRAPPER_KEY: {
+            "schema_version": 1,
+            "subject_policy": {
+                "subject_kind": "publication",
+                "resolution_mode": "explicit_or_project_manuscript",
+                "allow_external_subjects": True,
+            },
+            "supporting_context_policy": {
+                "project_context_mode": "project-aware",
+                "project_reentry_mode": "disallowed",
+            },
+            "output_policy": {
+                "output_mode": "managed",
+                "managed_root_kind": "gpd_managed_durable",
+            },
+        },
+    }
 
 
 @pytest.mark.parametrize(
@@ -1212,7 +1268,13 @@ def test_review_contract_renderer_normalizes_blank_required_state() -> None:
         }
     )
 
-    assert "required_state: ''" not in section
+    payload = _assert_review_contract_payload(
+        section,
+        {"schema_version": 1, "review_mode": "review"},
+        omitted=("required_state",),
+        context="blank required-state review contract",
+    )
+    assert "required_state" not in payload
 
 
 def test_review_contract_renderer_surfaces_required_state_constraint_in_note() -> None:
@@ -1224,8 +1286,13 @@ def test_review_contract_renderer_surfaces_required_state_constraint_in_note() -
         }
     )
 
-    assert "required_state: phase_executed" in section
-    assert "required_state" in section
+    payload = _model_visible_wrapper_payload(
+        section,
+        "Review Contract",
+        REVIEW_CONTRACT_PROMPT_WRAPPER_KEY,
+        context="required-state review contract",
+    )
+    assert payload["required_state"] == "phase_executed"
 
 
 def test_review_contract_renderer_rejects_non_list_and_non_mapping_conditional_shapes() -> None:
@@ -1251,17 +1318,24 @@ def test_review_contract_renderer_rejects_non_list_and_non_mapping_conditional_s
 def test_review_contract_renderer_fills_canonical_defaults_for_minimal_payload() -> None:
     section = render_review_contract_prompt({"schema_version": 1, "review_mode": "review"})
 
-    assert "required_outputs: []" not in section
-    assert "required_evidence: []" not in section
-    assert "blocking_conditions: []" not in section
-    assert "preflight_checks: []" not in section
-    assert "stage_artifacts: []" not in section
-    assert "conditional_requirements: []" not in section
-    assert "required_state:" not in section
-    assert "stage_ids" not in section
-    assert "final_decision_output" not in section
-    assert "requires_fresh_context_per_stage" not in section
-    assert "max_review_rounds" not in section
+    _assert_review_contract_payload(
+        section,
+        {"schema_version": 1, "review_mode": "review"},
+        omitted=(
+            "required_outputs",
+            "required_evidence",
+            "blocking_conditions",
+            "preflight_checks",
+            "stage_artifacts",
+            "conditional_requirements",
+            "required_state",
+            "stage_ids",
+            "final_decision_output",
+            "requires_fresh_context_per_stage",
+            "max_review_rounds",
+        ),
+        context="minimal review contract defaults",
+    )
 
 
 def test_review_contract_renderer_renders_conditional_requirements() -> None:
@@ -1281,14 +1355,23 @@ def test_review_contract_renderer_renders_conditional_requirements() -> None:
         }
     )
 
-    assert "conditional_requirements:" in section
-    assert "- when: theorem-bearing claims are present" in section
-    assert "required_outputs:" in section
-    assert "required_evidence: []" not in section
-    assert "blocking_conditions: []" not in section
-    assert "blocking_preflight_checks:" in section
-    assert "stage_artifacts:" in section
-    assert "GPD/review/PROOF-REDTEAM{round_suffix}.md" in section
+    _assert_review_contract_payload(
+        section,
+        {
+            "schema_version": 1,
+            "review_mode": "publication",
+            "preflight_checks": ["manuscript_proof_review"],
+            "conditional_requirements": [
+                {
+                    "when": "theorem-bearing claims are present",
+                    "required_outputs": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+                    "blocking_preflight_checks": ["manuscript_proof_review"],
+                    "stage_artifacts": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
+                }
+            ],
+        },
+        context="conditional requirements review contract",
+    )
 
 
 def test_review_contract_renderer_renders_scope_variants() -> None:
@@ -1308,12 +1391,23 @@ def test_review_contract_renderer_renders_scope_variants() -> None:
         }
     )
 
-    assert "scope_variants:" in section
-    assert "- scope: explicit_artifact" in section
-    assert "activation: explicit manuscript path was supplied" in section
-    assert "relaxed_preflight_checks:" in section
-    assert "optional_preflight_checks:" in section
-    assert "required_outputs_override:" in section
+    _assert_review_contract_payload(
+        section,
+        {
+            "schema_version": 1,
+            "review_mode": "publication",
+            "scope_variants": [
+                {
+                    "scope": "explicit_artifact",
+                    "activation": "explicit manuscript path was supplied",
+                    "relaxed_preflight_checks": ["manuscript"],
+                    "optional_preflight_checks": ["bibliography_audit"],
+                    "required_outputs_override": ["GPD/review/ARTIFACT-REPORT.md"],
+                }
+            ],
+        },
+        context="scope variants review contract",
+    )
 
 
 def test_publication_scope_variant_relaxed_and_optional_checks_have_preflight_detail_keys() -> None:
@@ -1714,7 +1808,10 @@ def test_write_paper_prompt_discovers_plan_scoped_phase_summaries() -> None:
     source = _read_workflow("write-paper")
 
     assert "GPD/phases/*/*SUMMARY.md" in source
-    assert "Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`)" in source
+    semantic_anchor(
+        "write-paper reads canonical summary artifacts",
+        ("summary artifacts", "`SUMMARY.md`", "`*-SUMMARY.md`"),
+    ).check(source)
 
 
 def test_write_paper_prompt_loads_figure_tracker_schema_before_updating_tracker() -> None:
@@ -1895,14 +1992,17 @@ def test_contract_ledgers_surface_forbidden_proxy_bindings_and_action_vocabulary
         owner=REVIEW_CONTRACT_OWNER,
         rationale="state/project-contract templates surface these exact schema paths and fields",
     ).check(state_schema + "\n" + project_contract_schema)
-    assert (
-        "`must_include_prior_outputs[]` entries should be explicit project-artifact paths or filenames that already exist inside the current project root."
-        in grounding_linkage
-    )
-    assert (
-        "If `project_root` is unavailable, treat them as non-grounding until the file can be resolved against a concrete root."
-        in grounding_linkage
-    )
+    semantic_anchor(
+        "grounding linkage resolves prior outputs against concrete project roots",
+        (
+            "`must_include_prior_outputs[]`",
+            "explicit project-artifact paths",
+            "current project root",
+            "`project_root` is unavailable",
+            "non-grounding",
+            "concrete root",
+        ),
+    ).check(grounding_linkage)
     assert '"must_include_prior_outputs": ["GPD/phases/00-baseline/00-01-SUMMARY.md"]' in project_contract_schema
     assert "`GPD/phases/.../*-SUMMARY.md`" not in project_contract_schema
     assert "`GPD/phases/.../SUMMARY.md`" not in project_contract_schema
@@ -1968,8 +2068,11 @@ def test_referee_schema_and_panel_surface_strict_stage_artifact_naming_and_round
         in panel
     )
     assert "all five must share the same optional `-R<round>` suffix." in panel
-    assert "every theorem-bearing Stage 1 claim must be reviewed and proof-audited" in panel
-    assert "every theorem-bearing Stage 1 claim must be reviewed and proof-audited" in review_math
+    for source in (panel, review_math):
+        semantic_anchor(
+            "theorem-bearing Stage 1 claims require review and proof audit",
+            ("theorem-bearing Stage 1 claim", "reviewed", "proof-audited"),
+        ).check(source)
 
 
 def test_executor_completion_reference_requires_loading_contract_schema_before_summary_frontmatter() -> None:

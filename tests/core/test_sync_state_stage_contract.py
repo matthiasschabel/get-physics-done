@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from gpd.core.workflow_staging import load_workflow_stage_manifest, validate_workflow_stage_manifest_payload
+from tests.assertion_taxonomy_support import assert_prompt_contracts, machine_exact, semantic_anchor
 from tests.workflow_authority_support import workflow_authority_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -95,8 +96,19 @@ def test_sync_state_workflow_uses_staged_fields_instead_of_manual_state_probing(
     assert "CONFLICT_ANALYSIS_INIT=$(gpd --raw init sync-state --stage conflict_analysis)" in text
     assert "RECONCILE_INIT=$(gpd --raw init sync-state --stage reconcile_and_validate)" in text
     assert 'PROJECT_ROOT=$(echo "$SYNC_BOOTSTRAP_INIT" | gpd json get .project_root)' in text
-    assert "sync-state is current-workspace-only and must not inspect or repair a recent project" in text
-    assert "Backup-only state found. Display state_recovery_guidance, then stop." in text
+    assert_prompt_contracts(
+        text,
+        semantic_anchor(
+            "sync-state stays current-workspace-only and stops on backup-only recovery",
+            (
+                "current-workspace-only",
+                "must not inspect or repair a recent project",
+                "Backup-only state found",
+                "state_recovery_guidance",
+                "stop",
+            ),
+        ),
+    )
     assert 'cwd = Path(".")' not in text
     assert 'gpd --raw --cwd "$PROJECT_ROOT" state repair-sync' in text
     assert 'gpd --raw --cwd "$PROJECT_ROOT" state validate' in text
@@ -105,10 +117,24 @@ def test_sync_state_workflow_uses_staged_fields_instead_of_manual_state_probing(
     assert "save_state_markdown" not in text
     assert "save_state_json" not in text
     assert "--prefer" not in text
-    assert "Do not re-probe `GPD/STATE.md`, `GPD/state.json`, or `GPD/state.json.bak` by hand during routing." in text
-    assert "Do not re-read the mirrored files by hand for comparison." in text
+    assert_prompt_contracts(
+        text,
+        machine_exact(
+            "sync-state mirrored state paths stay exact",
+            ("`GPD/STATE.md`", "`GPD/state.json`", "`GPD/state.json.bak`"),
+            owner="sync-state staged contract",
+            rationale="state routing protects these exact mirrored file paths",
+        ),
+        semantic_anchor(
+            "sync-state routing avoids manual mirrored-file probes",
+            ("Do not re-probe", "by hand during routing", "Do not re-read", "by hand for comparison"),
+        ),
+        semantic_anchor(
+            "sync-state raw bodies are limited to conflict analysis",
+            ("Raw state bodies", "`conflict_analysis`", "read-only drift reporting"),
+        ),
+    )
     assert re.search(r"Do not request raw\s+`STATE\.md`, `state\.json`, or `state\.json\.bak` bodies", text)
-    assert "Raw state bodies are reserved for `conflict_analysis` read-only drift reporting" in text
     assert "backend_validation_failed_needs_schema_context" in text
     assert "manual_schema_drift_analysis" in text
     assert "@{GPD_INSTALL_DIR}/templates/state-json-schema.md" not in text
@@ -138,8 +164,19 @@ def test_sync_state_workflow_has_fail_closed_bad_backup_branch() -> None:
         assert required in bad_backup_branch
 
     branch_lower = bad_backup_branch.lower()
-    assert "stop in read-only diagnosis" in branch_lower
-    assert "writes none" in branch_lower or "writes: none" in branch_lower
-    assert "no `state repair-sync`" in branch_lower
+    assert_prompt_contracts(
+        branch_lower,
+        machine_exact(
+            "bad-backup branch keeps repair-sync prohibition exact",
+            "no `state repair-sync`",
+            owner="sync-state staged contract",
+            rationale="bad backup recovery must not run repair-sync",
+        ),
+        semantic_anchor(
+            "bad-backup branch is read-only and write-free",
+            ("stop in read-only diagnosis", "writes"),
+        ),
+    )
+    assert re.search(r"writes:?\s+none", branch_lower)
     assert re.search(r"\b(no|not|never|must not|do not)\b[^\n.]*backup promotion", branch_lower)
     assert re.search(r"\b(no|not|never|must not|do not)\b[^\n.]*state rewrite", branch_lower)

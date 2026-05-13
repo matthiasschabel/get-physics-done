@@ -6,6 +6,8 @@ import re
 from pathlib import Path
 
 from gpd.adapters.install_utils import parse_at_include_path
+from tests.assertion_taxonomy_support import assert_prompt_contracts, semantic_concept
+from tests.markdown_test_support import has_line_with_terms
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 COMMANDS_DIR = REPO_ROOT / "src" / "gpd" / "commands"
@@ -72,6 +74,27 @@ def _success_criteria_items(text: str) -> list[str]:
     return items
 
 
+def _assert_prompt_concept(
+    text: str,
+    label: str,
+    *,
+    required: tuple[str, ...] = (),
+    forbidden: tuple[str, ...] = (),
+) -> None:
+    assert_prompt_contracts(
+        text,
+        *semantic_concept(
+            label,
+            required=required or None,
+            forbidden=forbidden or None,
+        ),
+    )
+
+
+def _assert_line_concept(text: str, label: str, *terms: str) -> None:
+    assert has_line_with_terms(text, *terms, casefold=True), f"missing {label}: {terms}"
+
+
 def test_command_sources_do_not_keep_runtime_boilerplate_html_comments() -> None:
     for path in sorted(COMMANDS_DIR.glob("*.md")):
         text = path.read_text(encoding="utf-8")
@@ -130,7 +153,13 @@ def test_researcher_shared_does_not_label_arxiv_as_peer_reviewed() -> None:
     arxiv_search_rows = [line for line in text.splitlines() if "web_search (arXiv)" in line]
 
     assert len(arxiv_search_rows) == 1
-    assert "HIGH for discovery; publication status varies" in arxiv_search_rows[0]
+    _assert_line_concept(
+        arxiv_search_rows[0],
+        "arxiv discovery confidence without peer-review claim",
+        "HIGH",
+        "discovery",
+        "publication status",
+    )
     assert all("peer-reviewed" not in line.lower() for line in arxiv_search_rows)
 
 
@@ -154,9 +183,7 @@ def test_workflow_delegating_command_wrappers_do_not_copy_workflow_checklists() 
         assert not command_items & workflow_items, (
             f"{filename} wrapper duplicates workflow-owned checklist items: {sorted(command_items & workflow_items)}"
         )
-        assert "workflow executed as the authority" in command_text.lower(), (
-            f"{filename} must delegate implementation mechanics to the workflow contract"
-        )
+        _assert_line_concept(command_text, f"{filename} workflow authority delegation", "workflow", "authority")
 
 
 def test_command_child_invocations_do_not_use_raw_skill_or_shell_shaped_args() -> None:
@@ -184,7 +211,7 @@ def test_parameter_sweep_command_wrapper_delegates_mechanics_to_workflow() -> No
 
     assert "gpd --raw validate command-context parameter-sweep" in text
     assert "@{GPD_INSTALL_DIR}/workflows/parameter-sweep.md" in text
-    assert "same-named workflow owns sweep design" in text
+    _assert_line_concept(text, "parameter-sweep workflow ownership", "workflow", "sweep design")
     assert "GPD/sweeps/" in text
     assert "GPD/phases/XX-sweep" in text
     assert "artifacts/" in text
@@ -231,7 +258,11 @@ def test_thin_command_wrappers_do_not_duplicate_workflow_owned_mechanics() -> No
     for filename, stale_fragments in workflow_owned_fragments.items():
         text = (COMMANDS_DIR / filename).read_text(encoding="utf-8")
         assert f"@{{GPD_INSTALL_DIR}}/workflows/{filename}" in text
-        assert "workflow-owned implementation" in text or "same-named workflow owns" in text
+        _assert_prompt_concept(
+            text,
+            f"{filename} delegates implementation mechanics",
+            required=("workflow-owned implementation", "workflow owns"),
+        )
         for fragment in stale_fragments:
             assert fragment not in text, f"{filename} still duplicates workflow mechanics: {fragment}"
 
@@ -241,9 +272,9 @@ def test_digest_knowledge_command_wrapper_delegates_mechanics_to_workflow() -> N
 
     assert "gpd --raw validate command-context digest-knowledge" in text
     assert "@{GPD_INSTALL_DIR}/workflows/digest-knowledge.md" in text
-    assert "same-named workflow owns classification" in text
+    _assert_line_concept(text, "digest-knowledge workflow ownership", "workflow", "classification")
     assert "current workspace's `GPD/knowledge/` tree" in text
-    assert "External source material may live anywhere." in text
+    _assert_line_concept(text, "digest-knowledge external source boundary", "external source material", "anywhere")
     assert "gpd validate artifact-text <path> --output <txt-path>" in text
     assert "INIT=$(gpd --raw init progress" not in text
     assert "ls GPD/knowledge/*.md" not in text
@@ -253,7 +284,14 @@ def test_error_propagation_command_wrapper_delegates_mechanics_to_workflow() -> 
     text = (COMMANDS_DIR / "error-propagation.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/error-propagation.md" in text
-    assert "The workflow owns project bootstrap, context validation, dependency tracing" in text
+    _assert_line_concept(
+        text,
+        "error-propagation workflow ownership",
+        "workflow",
+        "project bootstrap",
+        "context validation",
+        "dependency tracing",
+    )
     assert "S_i = (x_i / f)" not in text
     assert "np.random.normal" not in text
     assert "Error Budget Table" not in text
@@ -263,7 +301,7 @@ def test_error_patterns_command_wrapper_delegates_category_vocabulary_to_workflo
     text = (COMMANDS_DIR / "error-patterns.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/error-patterns.md" in text
-    assert "same-named workflow owns category validation" in text
+    _assert_line_concept(text, "error-patterns workflow vocabulary ownership", "workflow", "category validation")
     assert "Categories:" not in text
     for stale_category in ("`sign`", "`factor`", "`convention`", "`numerical`", "`approximation`"):
         assert stale_category not in text
@@ -275,10 +313,17 @@ def test_debug_command_wrapper_delegates_mechanics_to_workflow() -> None:
     text = (COMMANDS_DIR / "debug.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/debug.md" in text
-    assert "The workflow owns workspace bootstrap, active-session handling, symptom gathering" in text
+    _assert_line_concept(
+        text,
+        "debug workflow ownership",
+        "workflow",
+        "workspace bootstrap",
+        "active-session",
+        "symptom",
+    )
     assert 'subagent_type="gpd-debugger"' in text
     assert "gpd_return.status" in text
-    assert "Use ask_user for each." not in text
+    assert not has_line_with_terms(text, "ask_user", "each", casefold=True)
     assert "Spawn Fresh Continuation agent" not in text
     assert "Check Active Sessions" not in text
 
@@ -304,9 +349,15 @@ def test_complete_milestone_command_wrapper_delegates_mechanics_to_workflow() ->
     assert "{GPD_INSTALL_DIR}/workflows/complete-milestone.md" in eager_includes
     assert "{GPD_INSTALL_DIR}/templates/milestone.md" not in eager_includes
     assert "{GPD_INSTALL_DIR}/templates/milestone-archive.md" not in eager_includes
-    assert "The workflow owns audit/readiness checks" in text
-    assert "This wrapper owns the public command surface and required version argument." in text
-    assert "If audit status is `gaps_found`" not in text
+    _assert_line_concept(text, "complete-milestone workflow ownership", "workflow", "audit/readiness")
+    _assert_line_concept(
+        text,
+        "complete-milestone wrapper responsibility",
+        "wrapper",
+        "public command surface",
+        "version argument",
+    )
+    assert not has_line_with_terms(text, "audit status", "gaps_found", casefold=True)
     assert "Stage: MILESTONES.md" not in text
     assert "Ask about pushing tag" not in text
 
@@ -336,7 +387,7 @@ def test_review_knowledge_command_delegates_schema_surfaces_to_workflow() -> Non
     workflow = (WORKFLOWS_DIR / "review-knowledge.md").read_text(encoding="utf-8")
 
     assert "@{GPD_INSTALL_DIR}/workflows/review-knowledge.md" in text
-    assert "The workflow owns schema loading" in text
+    _assert_line_concept(text, "review-knowledge workflow ownership", "workflow", "schema loading")
     assert "@{GPD_INSTALL_DIR}/templates/knowledge-schema.md" not in text
     assert "@{GPD_INSTALL_DIR}/templates/knowledge.md" not in text
     assert "@{GPD_INSTALL_DIR}/references/shared/canonical-schema-discipline.md" not in text

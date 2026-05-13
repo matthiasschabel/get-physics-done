@@ -5,6 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from gpd import registry
+from tests.assertion_taxonomy_support import (
+    assert_prompt_contracts,
+    machine_exact,
+    semantic_anchor,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMANDS_DIR = REPO_ROOT / "src/gpd/commands"
@@ -22,11 +27,6 @@ def _section(content: str, start_marker: str, end_marker: str) -> str:
     start = content.index(start_marker) + len(start_marker)
     end = content.index(end_marker, start)
     return content[start:end]
-
-
-def _contains_any(content: str, *phrases: str) -> bool:
-    lowered = content.lower()
-    return any(phrase.lower() in lowered for phrase in phrases)
 
 
 def test_review_knowledge_is_same_stem_wired_and_help_indexed() -> None:
@@ -87,22 +87,51 @@ def test_review_knowledge_workflow_documents_exact_target_resolution_and_review_
     command = _read(REVIEW_COMMAND_PATH)
     workflow = _read(REVIEW_WORKFLOW_PATH)
 
-    assert "non-canonical knowledge target" in command
-    assert "Strict knowledge review preflight is anchored to the explicit current-workspace knowledge target" in command
-    assert "Missing `STATE.md` alone is advisory background context, not a standalone blocker." in workflow
-    assert "Reject lookalikes such as `notes/K-foo.md`" in workflow
-    assert _contains_any(workflow, "exact existing knowledge doc", "exact target", "canonical target", "knowledge_id")
-    assert _contains_any(workflow, "GPD/knowledge/reviews/", "deterministic review artifact", "review artifact")
-    assert _contains_any(
-        workflow,
-        "review_round",
-        "reviewer_kind",
-        "reviewer_id",
-        "approval_artifact_path",
-        "approval_artifact_sha256",
-        "reviewed_content_sha256",
-        "stale",
+    assert_prompt_contracts(
+        command,
+        semantic_anchor(
+            "review-knowledge command anchors canonical current-workspace target rejection",
+            ("non-canonical knowledge target", "explicit current-workspace knowledge target"),
+        ),
     )
-    assert _contains_any(workflow, "approved", "needs_changes", "rejected")
-    assert _contains_any(workflow, "stable", "in_review")
-    assert _contains_any(workflow, "does not claim runtime ingestion", "planner/verifier trust propagation")
+    assert_prompt_contracts(
+        workflow,
+        semantic_anchor(
+            "review-knowledge workflow rejects lookalikes without blocking on missing state alone",
+            ("Missing `STATE.md`", "advisory background context", "Reject lookalikes", "`notes/K-foo.md`"),
+        ),
+        semantic_anchor(
+            "review-knowledge workflow resolves a canonical knowledge target",
+            ("exact knowledge target", "canonical `GPD/knowledge/{knowledge_id}.md` target", "knowledge_id"),
+        ),
+        machine_exact(
+            "knowledge review artifact root stays exact",
+            "GPD/knowledge/reviews/",
+            owner="review-knowledge prompt contract",
+            rationale="review artifacts are written under this managed root",
+        ),
+        machine_exact(
+            "knowledge review promotion fields stay exact",
+            (
+                "review_round",
+                "reviewer_kind",
+                "reviewer_id",
+                "approval_artifact_path",
+                "approval_artifact_sha256",
+                "reviewed_content_sha256",
+                "stale",
+            ),
+            owner="review-knowledge prompt contract",
+            rationale="knowledge review artifacts expose these schema fields",
+        ),
+        machine_exact(
+            "knowledge review decision and lifecycle enums stay exact",
+            ("approved", "needs_changes", "rejected", "stable", "in_review"),
+            owner="review-knowledge prompt contract",
+            rationale="review promotion status values are closed vocabulary",
+        ),
+        semantic_anchor(
+            "knowledge review promotion does not imply runtime ingestion",
+            ("does not claim runtime ingestion", "planner/verifier/executor context"),
+        ),
+    )

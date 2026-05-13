@@ -291,6 +291,7 @@ def test_runtime_catalog_priority_order_is_intentional() -> None:
         ("gemini", 20),
         ("codex", 30),
         ("opencode", 40),
+        ("copilot-cli", 50),
     ]
 
 

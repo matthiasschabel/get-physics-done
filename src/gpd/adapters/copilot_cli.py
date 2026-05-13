@@ -33,7 +33,6 @@ from gpd.adapters.install_utils import (
     UPDATE_CACHE_FILENAME,
     _default_install_target,
     _normalize_install_scope_flag,
-    _paths_equal,
     compile_markdown_for_runtime,
     compute_path_prefix,
     convert_tool_references_in_body,
@@ -48,6 +47,7 @@ from gpd.adapters.install_utils import (
     render_markdown_frontmatter,
     split_markdown_frontmatter,
 )
+from gpd.adapters.runtime_catalog import paths_equal
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
 from gpd.mcp import managed_integrations as _managed_integrations
 
@@ -553,7 +553,7 @@ def write_manifest(
     elif isinstance(runtime, str) and runtime.strip() and normalized_scope in {"--local", "--global"}:
         default_target = _default_install_target(runtime.strip(), normalized_scope)
         if default_target is not None:
-            manifest["explicit_target"] = not _paths_equal(config_dir, default_target)
+            manifest["explicit_target"] = not paths_equal(config_dir, default_target)
     if managed_command_file_names:
         manifest[_MANIFEST_COPILOT_GENERATED_COMMAND_FILES_KEY] = sorted(
             {

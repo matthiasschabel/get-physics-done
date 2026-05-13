@@ -28,15 +28,6 @@ Use shell aliases only for scalar bindings that truly need them
 `phase_name`, `goal`, `phase_dir`, `phase_slug`, and `padded_phase`; bind
 `PHASE_DIR`, `PHASE_SLUG`, or `PADDED_PHASE` only after confirming those fields.
 
-Mode summary: supervised pauses for user review, balanced pauses only for real
-checker or planning judgment issues, yolo proceeds after hard gates. Research
-mode controls breadth only: explore broadens; exploit mode: suppress optional
-tangents unless the user explicitly requests `gpd:branch-hypothesis`; do not
-auto-create git-backed branches from `git.branching_strategy` alone. Balanced
-uses standard depth, and adaptive starts broad until decisive evidence or an
-explicit approach lock justifies narrowing. All modes still require contract completeness, decisive outputs, required anchors,
-forbidden-proxy handling, and disconfirming paths before execution starts.
-
 After every later `gpd --raw init plan-phase ... --stage <stage_id>` reload,
 read only `INIT.staged_loading.required_init_fields`; do not reuse shell variables parsed from an older stage.
 
@@ -47,6 +38,32 @@ INIT="${BOOTSTRAP_INIT}"
 # gpd --raw stage field-access plan-phase --stage phase_bootstrap --style shell --payload-var INIT --alias PHASE=phase_number
 PHASE=$(echo "$INIT" | gpd json get .phase_number --default "${REQUESTED_PHASE}")
 ```
+
+## 1.1 Select Phase Target
+
+<event name="phase_target_selected">
+Extract phase number and flags (`--research`, `--skip-research`, `--gaps`,
+`--skip-verify`, `--light`, `--inline-discuss`). If no phase number was given,
+use bootstrap's `phase_number`; if bootstrap cannot infer one, ask for an
+explicit phase before running downstream gates. If `phase_found` is false,
+validate ROADMAP.md and stop with `Error: Phase {PHASE} not found in ROADMAP.md.`
+when invalid.
+
+Present the selected target before the gate wall: `phase_number`, `phase_name`,
+`phase_dir`, and whether the target was found. This is a read-only selection
+event; do not create `PHASE_DIR`, spawn agents, render planner/checker prompts,
+or write files here.
+</event>
+
+Mode summary: supervised pauses for user review, balanced pauses only for real
+checker or planning judgment issues, yolo proceeds after hard gates. Research
+mode controls breadth only: explore broadens; exploit mode suppresses optional
+tangents unless the user explicitly requests `gpd:branch-hypothesis`; do not
+auto-create git-backed branches from `git.branching_strategy` alone. Balanced
+uses standard depth, and adaptive starts broad until decisive evidence or an
+explicit approach lock justifies narrowing. All modes still require contract
+completeness, decisive outputs, required anchors, forbidden-proxy handling, and
+disconfirming paths before execution starts.
 
 **Dirty worktree safety gate:** before phase directory creation, handoffs,
 fingerprints, alignment, or write-capable reloads, inspect only the project
@@ -94,18 +111,11 @@ contract_conflict`, `plan_authority: blocked`, `execution_state: not_started`,
 
 ## 1.5 Proof-Obligation Planning Gate
 
-The planner template owns detailed theorem and proof-redteam policy. Bootstrap
-only keeps proof-bearing work fail-closed: `--skip-verify` does NOT waive checker review;
-any proof-bearing plan set still needs checker review or an equivalent main-context audit
-before planning is complete. Checker-disabled config also does not waive proof review.
+Bootstrap proof invariant: `--skip-verify` never waives proof-bearing plan
+audit. The planner and checker stages own the detailed theorem, quantifier,
+hypothesis, proof-redteam, and equivalent main-context audit policy.
 
-## 2. Parse and Normalize Arguments
-
-Extract phase number and flags (`--research`, `--skip-research`, `--gaps`,
-`--skip-verify`, `--light`, `--inline-discuss`). If no phase number was given,
-use bootstrap's `phase_number`; if bootstrap cannot infer one, ask for an
-explicit phase. If `phase_found` is false, validate ROADMAP.md and stop with
-`Error: Phase {PHASE} not found in ROADMAP.md.` when invalid.
+## 2. Bootstrap Routing
 
 `--inline-discuss` is only a quick gray-area probe for straightforward phases:
 ask 2-3 planning-critical questions, record answers in lightweight CONTEXT.md,
@@ -124,16 +134,11 @@ Run the convention check before spawning researcher or planner. Convention
 mismatches compound into every planned and executed task; route failures to
 convention validation.
 
-Required 4-way tangent decision model:
-
-- Branch as alternative hypothesis -> route through `gpd:tangent` or `gpd:branch-hypothesis`
-- Run a bounded side investigation now -> route through `gpd:quick`
-- Capture and defer -> route through `gpd:add-todo`
-- Stay on the main line -> create plans only for the selected primary approach
-
-Do NOT silently branch, widen scope, or create detached side plans. When
-multiple viable approaches appear, checkpoint explicitly and let the later
-planner/checker stages apply the detailed tangent model.
+Tangent invariant: do not silently branch, widen scope, or create detached side
+plans. When multiple viable approaches appear, checkpoint explicitly and let
+later planner/checker events apply the detailed tangent model.
+If a tangent decision is needed, surface `gpd:tangent`; create
+`gpd:branch-hypothesis` only after an explicit branch outcome.
 
 Next, reload `gpd --raw init plan-phase "$PHASE" --stage research_routing` and
 read only that stage's `staged_loading.eager_authorities`.

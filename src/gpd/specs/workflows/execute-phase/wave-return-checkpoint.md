@@ -22,7 +22,7 @@ fi
 Use `gpd --raw stage field-access execute-phase --stage wave_return_checkpoint --style instruction` before reading `WAVE_RETURN_INIT`.
 </step>
 
-<step name="accept_executor_returns">
+<step name="classify_child_return_status">
 Wait for all executor children in the current wave to return. Report progress as each child finishes:
 
 ```
@@ -30,7 +30,19 @@ Wait for all executor children in the current wave to return. Report progress as
   Result: {one-line summary from SUMMARY.md or failure reason}
 ```
 
-Run the local child artifact gate before success. Git commits and files are recovery evidence only until this gate passes and the canonical applicator reports `passed: true`; git commits are partial evidence only.
+Read only the runtime `gpd_return.status` first. Do not run completed-artifact validators, proof-redteam checks, or the SUMMARY applicator until the status is known to be `completed`.
+
+| Runtime status | Route |
+| --- | --- |
+| `completed` | Continue to `completed_executor_return_gate` for the child_gate and applicator. |
+| `checkpoint` | Route directly to `checkpoint_resume`; do not run artifact validators or the applicator. |
+| `blocked` | Route to `wave_failure_menu`. |
+| `failed` | Route to `wave_failure_menu`. |
+| missing, malformed, duplicate, or unknown status | Route through the local failure route (`repair_prompt_once` if repairable, otherwise `wave_failure_menu`). |
+</step>
+
+<step name="completed_executor_return_gate">
+For every executor return classified as `completed`, run the local child artifact gate before success. Git commits and files are recovery evidence only until this gate passes and the canonical applicator reports `passed: true`; git commits are partial evidence only.
 
 ```yaml
 child_gate:
@@ -78,9 +90,9 @@ child_gate:
 
 Completed executor returns are accepted only after `wave_executor_plan_result` passes, including the local SUMMARY, deliverable, self-check, proof-redteam from `proof_critic_dispatch`, and applicator validators.
 
-Executor subagents MUST NOT write STATE.md directly. Executor subagents must not write `GPD/STATE.md` directly. The SUMMARY applicator is the only durable state-update path for accepted executor returns, and it runs exactly once per accepted SUMMARY. The orchestrator applies them through `gpd apply-return-updates` after each agent completes. The concrete helper call is `gpd --raw apply-return-updates ${SUMMARY_FILE}`.
+Executor subagents must not write `GPD/STATE.md` directly. The SUMMARY applicator is the only durable state-update path for accepted executor returns, and it runs exactly once per accepted SUMMARY. The orchestrator applies them through `gpd apply-return-updates` after each agent completes. The concrete helper call is `gpd --raw apply-return-updates ${SUMMARY_FILE}`.
 
-Checkpoint returns go to `checkpoint_resume` without artifact validators or the applicator. Other non-completed statuses route to `wave_failure_menu`.
+Checkpoint returns have already routed to `checkpoint_resume` without artifact validators or the applicator. Other non-completed statuses have already routed to `wave_failure_menu`.
 </step>
 
 <step name="spot_check_and_report_wave">

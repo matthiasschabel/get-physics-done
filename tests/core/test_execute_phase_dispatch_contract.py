@@ -16,9 +16,11 @@ def test_wave_planning_keeps_phase_wide_gates_without_full_checkpoint_or_verific
     wave_planning = _stage("wave-planning.md")
 
     for anchor in (
+        '<step name="refresh_wave_planning_context">',
+        '<step name="discover_and_group_plans">',
+        '<step name="select_current_wave_intent">',
         '<step name="detect_proof_obligation_work">',
         '<step name="claim_deliverable_alignment_check">',
-        '<step name="discover_and_group_plans">',
         '<step name="resolve_execution_cadence">',
         '<step name="publish_wave_plan_for_dispatch">',
         "Intra-wave dependency validation",
@@ -29,7 +31,18 @@ def test_wave_planning_keeps_phase_wide_gates_without_full_checkpoint_or_verific
     ):
         assert anchor in wave_planning
 
-    assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" in wave_planning
+    refresh_idx = wave_planning.index('<step name="refresh_wave_planning_context">')
+    discover_idx = wave_planning.index('<step name="discover_and_group_plans">')
+    intent_idx = wave_planning.index('<step name="select_current_wave_intent">')
+    proof_idx = wave_planning.index('<step name="detect_proof_obligation_work">')
+    alignment_idx = wave_planning.index('<step name="claim_deliverable_alignment_check">')
+    cadence_idx = wave_planning.index('<step name="resolve_execution_cadence">')
+
+    assert refresh_idx < discover_idx < intent_idx < proof_idx < alignment_idx < cadence_idx
+    assert "current_wave_intent.selected_plan_ids" in wave_planning
+    assert "Do not populate live first-result or pre-fanout result fields" in wave_planning
+    assert "references/verification/core/proof-redteam-workflow-gate.md" in wave_planning
+    assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" not in wave_planning
     assert "@{GPD_INSTALL_DIR}/references/orchestration/checkpoints.md" not in wave_planning
     assert "@{GPD_INSTALL_DIR}/references/verification/core/verification-core.md" not in wave_planning
     assert "checkpoint_resume" in wave_planning

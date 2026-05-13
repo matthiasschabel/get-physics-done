@@ -71,7 +71,7 @@ def test_plan_and_execute_phase_require_proof_redteam_gates() -> None:
         execute_phase,
         "execute-phase proof redteam gate machine tokens",
         '<step name="detect_proof_obligation_work">',
-        PROOF_GATE_REF,
+        PROOF_GATE_PATH,
         "autonomy=yolo",
         "{plan_id}-PROOF-REDTEAM.md",
         "`gpd-check-proof`",

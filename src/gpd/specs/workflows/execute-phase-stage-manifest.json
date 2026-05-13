@@ -329,10 +329,15 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/execute-phase/wave-planning.md",
-        "references/verification/core/proof-redteam-workflow-gate.md"
+        "workflows/execute-phase/wave-planning.md"
       ],
       "conditional_authorities": [
+        {
+          "when": "selected_wave_has_proof_bearing_plan",
+          "authorities": [
+            "references/verification/core/proof-redteam-workflow-gate.md"
+          ]
+        },
         {
           "when": "context_pressure",
           "authorities": [
@@ -356,6 +361,7 @@
         "references/orchestration/context-budget.md",
         "references/orchestration/checkpoints.md",
         "references/orchestration/agent-infrastructure.md",
+        "references/verification/core/proof-redteam-workflow-gate.md",
         "references/verification/core/verification-core.md",
         "references/execution/github-lifecycle.md",
         "templates/contract-results-schema.md",
@@ -1078,11 +1084,16 @@
       ],
       "required_init_fields": [],
       "loaded_authorities": [
-        "workflows/execute-phase/gap-reverification.md",
-        "references/verification/verification-status-authority.md",
-        "references/orchestration/child-artifact-gate.md"
+        "workflows/execute-phase/gap-reverification.md"
       ],
       "conditional_authorities": [
+        {
+          "when": "gap_only_reverification_acceptance",
+          "authorities": [
+            "references/verification/verification-status-authority.md",
+            "references/orchestration/child-artifact-gate.md"
+          ]
+        },
         {
           "when": "localized_reexecution",
           "authorities": [
@@ -1103,6 +1114,8 @@
       "must_not_eager_load": [
         "references/orchestration/checkpoints.md",
         "references/orchestration/agent-infrastructure.md",
+        "references/orchestration/child-artifact-gate.md",
+        "references/verification/verification-status-authority.md",
         "references/verification/core/verification-core.md",
         "references/execution/executor-index.md",
         "references/execution/git-integration.md",
@@ -1164,10 +1177,15 @@
       ],
       "required_init_fields": [],
       "loaded_authorities": [
-        "workflows/execute-phase/consistency-check.md",
-        "references/verification/verification-status-authority.md"
+        "workflows/execute-phase/consistency-check.md"
       ],
       "conditional_authorities": [
+        {
+          "when": "checker_status_ambiguity_recovery",
+          "authorities": [
+            "references/verification/verification-status-authority.md"
+          ]
+        },
         {
           "when": "full_verification_policy",
           "authorities": [
@@ -1184,6 +1202,7 @@
       "must_not_eager_load": [
         "references/orchestration/checkpoints.md",
         "references/orchestration/agent-infrastructure.md",
+        "references/verification/verification-status-authority.md",
         "references/verification/core/verification-core.md",
         "references/execution/executor-index.md",
         "references/execution/git-integration.md",

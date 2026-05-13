@@ -8,19 +8,20 @@ Second-stage authority: research handoff context, research mode routing, researc
 
 <process>
 
-## 4.7 Refresh Research Handoff Context
+## 4.7 Load Research Routing Slice
 
-Load the staged handoff slice needed to assemble the researcher prompt. Do not use the lighter routing slice here:
+Load the routing slice first. This stage chooses reuse, refresh, gap mode, or
+skip from handles and scalar status fields; it must not hydrate planner
+authoring bodies before the route is known.
 
 ```bash
-INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)
-# Alternate lighter slice available at: gpd --raw init plan-phase "$PHASE" --stage research_routing
+INIT=$(gpd --raw init plan-phase "$PHASE" --stage research_routing)
 if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-# Confirm fields with: gpd --raw stage field-access plan-phase --stage planner_authoring --style instruction
-# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
+# Confirm fields with: gpd --raw stage field-access plan-phase --stage research_routing --style instruction
+# Parse only the research_routing fields listed in INIT.staged_loading.required_init_fields before use.
 ```
 
 ## 5. Handle Research
@@ -29,12 +30,25 @@ fi
 
 ### Research Mode Decision
 
+<event name="research_route_decision">
+Choose the route from `has_research`, `has_context`, `research_enabled`,
+`research_mode`, `project_contract_gate`, phase target fields, and explicit
+flags. Do not parse `*_content` fields, `active_reference_context`, protocol
+bundle bodies, planner templates, or checker controls in this event.
+
 **If `has_research` is true (from init) AND no `--research` flag:**
 
 - `explore`: refresh research; broaden method comparisons and anchors.
-- `exploit`: reuse only after directly comparing existing `RESEARCH.md` with the current method family, anchor set, and decisive-evidence path; otherwise refresh targeted method context.
-- `adaptive`: use `SUMMARY_FILE=$(ls GPD/phases/*/*SUMMARY.md 2>/dev/null | head -1)` and inspect the loaded SUMMARY.md artifacts directly for decisive evidence before reusing research; otherwise refresh before planning.
-- `balanced`: skip by default, but refresh when state, contract, references, or roadmap changes make the existing research stale for this phase.
+- `exploit`: if handles/status make reuse plausible but not certain, route to
+  `research_handoff_context_needed` for a targeted comparison against the
+  current method family, anchor set, and decisive-evidence path; otherwise
+  refresh targeted method context.
+- `adaptive`: use a small SUMMARY.md handle/header scan for decisive-evidence
+  signals before reusing research; otherwise refresh before planning.
+- `balanced`: skip by default, but route to refresh or targeted comparison when
+  state, contract, references, or roadmap changes make existing research
+  plausibly stale for this phase.
+</event>
 
 **If RESEARCH.md missing OR `--research` flag OR explore mode with existing research:**
 
@@ -48,6 +62,23 @@ Display banner:
 * Spawning researcher...
 ```
 
+<event name="research_handoff_context_needed">
+Only after `research_route_decision` chooses refresh/spawn/continue, load the
+stage-local authoring payload needed to assemble the researcher handoff. This is
+context hydration for the chosen handoff, not permission to load planner or
+checker authority prose in this stage.
+
+```bash
+INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)
+if [ $? -ne 0 ]; then
+  echo "ERROR: staged plan-phase init failed: $INIT"
+  exit 1
+fi
+# Confirm fields with: gpd --raw stage field-access plan-phase --stage planner_authoring --style instruction
+# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
+```
+</event>
+
 ### Spawn gpd-phase-researcher
 
 Apply the shared runtime delegation note at task-construction time:
@@ -55,7 +86,7 @@ Apply the shared runtime delegation note at task-construction time:
 
 ```bash
 PHASE_DESC=$(gpd --raw roadmap get-phase "${PHASE}" | gpd json get .section --default "")
-# Use requirements_content from INIT (already loaded via --include requirements)
+# Use requirements_content from the stage-local planner_authoring payload above.
 REQUIREMENTS=$(echo "$INIT" | gpd json get .requirements_content --default "")
 STATE_SNAP=$(gpd state snapshot)
 # Extract decisions from gpd state snapshot JSON: echo "$STATE_SNAP" | gpd json list .decisions
@@ -78,13 +109,12 @@ Requirements: {requirements}
 Prior decisions: {decisions}
 Project contract: {project_contract}
 Active references: {active_reference_context}
-Reference artifacts: {reference_artifacts_content}
+Reference artifact handles: {reference_artifact_files}
 </additional_context>
 
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 </protocol_bundle_handoff>
 
@@ -181,7 +211,6 @@ Read that file before continuing so you inherit the prior research state instead
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
-<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>
 <protocol_bundle_verifier_extensions>{protocol_bundle_verifier_extensions}</protocol_bundle_verifier_extensions>
 </protocol_bundle_handoff>
 

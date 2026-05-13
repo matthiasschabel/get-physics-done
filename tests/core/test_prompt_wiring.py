@@ -2387,7 +2387,7 @@ def test_planning_and_phase_templates_surface_active_reference_context() -> None
         "project_contract_gate.authoritative",
         "Use `contract_gate_stop`",
         "Planning requires an approved scoping contract in `GPD/state.json`",
-        "**Anchor coverage:**",
+        "**Anchor and protocol coverage:**",
         "Required references",
         context="plan-phase active reference context",
     )
@@ -2513,8 +2513,8 @@ def test_planning_prompts_keep_contract_gate_in_light_mode_and_all_modes() -> No
         workflow_text,
         "Checker presentation headings",
         "non-authority",
-        "structured status",
-        "plan-list validators",
+        "`gpd_return.status`",
+        "structured `approved_plans`",
         context="plan-phase checker presentation headings are non-authority",
     )
     _s(checker_agent, "plan checker contract completeness", "Human review", "does not replace", "requirements")
@@ -2619,11 +2619,11 @@ def test_plan_checker_requires_contract_gate_and_reference_artifacts() -> None:
         (
             "project_contract_gate",
             "project_contract_load_info",
-            "project_contract_validation",
-            "contract_intake",
-            "effective_reference_intake",
-            "reference_artifacts_content",
-        ),
+                "project_contract_validation",
+                "contract_intake",
+                "effective_reference_intake",
+                "reference_artifact_files",
+            ),
         context="plan-phase contract gate placeholders",
     )
     _s(workflow_text, "plan-phase decisive output checks", "Decisive outputs", "decisive claims and deliverables")
@@ -6803,7 +6803,7 @@ def test_planner_and_plan_phase_keep_no_silent_branching_and_exploit_tangent_sup
         "do not auto-create",
         "git-backed branches",
         "git.branching_strategy",
-        "suppress optional tangents",
+        "suppresses optional tangents",
         "user explicitly requests",
         "gpd:branch-hypothesis",
         "exploit mode",

@@ -162,7 +162,7 @@ WORKFLOW_BASELINES = {
     "error-patterns": (143, 3_937, 0),
     "error-propagation": (387, 17_136, 0),
     "execute-phase": (22, 1_191, 0),
-    "execute-plan": (577, 36_508, 0),
+    "execute-plan": (346, 24_476, 0),
     "explain": (270, 10_920, 1),
     "export-logs": (170, 6_195, 0),
     "export": (443, 12_009, 0),
@@ -214,7 +214,7 @@ WORKFLOW_BASELINES = {
     "write-paper": (54, 2_396, 0),
 }
 WORST_WORKFLOW_HARD_CAPS = {
-    "execute-plan": (600, 38_000),
+    "execute-plan": (380, 26_000),
     "verify-phase": (400, 21_000),
     "write-paper": (70, 3_000),
     "respond-to-referees": (70, 4_000),

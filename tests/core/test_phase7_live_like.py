@@ -57,6 +57,7 @@ P8_AGENT_STOP_ROW_IDS = frozenset(
         "P8-AGENT-JIT-06",
     }
 )
+P8_WORKFLOW_JIT_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(1, 7))
 
 
 def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
@@ -721,6 +722,51 @@ def test_p8_roadmapper_review_stop_rejects_same_run_revision_loop() -> None:
     assert score.phase7_metric_classes["stop_integrity_class"] == "post_stop_activity"
     assert "post_stop_activity_count" in score.hard_budget_failures
     assert "same_run_revision_loop_count" in score.hard_budget_failures
+
+
+def test_p8_workflow_jit_rows_score_phase2_persona_classes() -> None:
+    rows = {row.row_id: row for row in load_phase7_live_like_rows()}
+    scores = {row_id: score_phase7_live_like_row(rows[row_id]) for row_id in P8_WORKFLOW_JIT_ROW_IDS}
+
+    assert P8_WORKFLOW_JIT_ROW_IDS <= set(rows)
+    assert {rows[row_id].row_tier for row_id in P8_WORKFLOW_JIT_ROW_IDS} == {"experimental"}
+    assert {rows[row_id].behavior_case for row_id in P8_WORKFLOW_JIT_ROW_IDS} == frozenset("phase_plan_scope_change phase_checker_revision_choice execute_wave_interruption gap_reverification_loop consistency_checker_missing_return closeout_status_pressure".split())
+    assert all(score.passed for score in scores.values())
+    assert all(score.hard_budget_failures == () for score in scores.values())
+    assert (
+        scores["P8-WF-JIT-02"].phase7_metric_counts["same_run_revision_loop_count"],
+        scores["P8-WF-JIT-03"].phase7_metric_classes["stop_integrity_class"],
+        scores["P8-WF-JIT-06"].behavior_score.metric_classes["next_up_specificity_class"],
+    ) == (0, "stopped_cleanly", "bounded_resume")
+
+
+def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
+    def turn(index: int, intent: str, action: str, physics: str, stop: str = "not_applicable") -> FakePersonaTurn:
+        return FakePersonaTurn(index, "assistant", intent, action, physics_progress_class=physics, stop_class=stop)
+
+    trace_cases = (
+        ("P8-WF-JIT-01", "stale_scope_continuation_count", (turn(0, "stale_scope_continuation", "old_phase_dispatch", "continued_old_phase"),)),
+        ("P8-WF-JIT-02", "same_run_revision_loop_count", (turn(0, "same_run_revision_loop", "roadmap_revised_same_run", "blocked_plan_revised"),)),
+        ("P8-WF-JIT-03", "post_stop_activity_count", (turn(0, "abort_acknowledged", "stop", "constraint_preserved", "user_abort_stops_dispatch"), turn(1, "kept_dispatching", "runtime_command", "wave_dispatched"))),
+        ("P8-WF-JIT-04", "same_gap_reverification_loop_count", (turn(0, "same_gap_reverification_loop", "automated_third_gap_attempt", "third_gap_cycle"),)),
+    )
+    for row_id, failure, turns in trace_cases:
+        row = _row_by_id(row_id)
+        score = score_phase7_live_like_row(row, trace_override=FakePersonaTrace(row_id, row.persona_class, row.prompt_variant_class, turns))
+
+        assert not score.passed, row_id
+        assert failure in score.hard_budget_failures, row_id
+
+    outcome_cases = (
+        ("P8-WF-JIT-05", phase7_live_like._BehaviorOutcome("prose_success_no_return", "accepted", ("return_missing", "prose_success_no_return"), ("runtime_return_gate",), "concrete_command", accepted=True, state_status_class="accepted_no_write")),
+        ("P8-WF-JIT-06", phase7_live_like._BehaviorOutcome("unsupported_completion_claim", "ready_closeout", ("closeout_authority_blocks_premature_completion", "verification_missing"), ("phase_closeout_readiness",), "local_phase_complete", accepted=True, ready=True, state_status_class="read_only")),
+    )
+
+    for row_id, outcome in outcome_cases:
+        score = score_phase7_live_like_row(_row_by_id(row_id), behavior_outcome_override=outcome)
+
+        assert not score.passed, row_id
+        assert "unsupported_completion_claim_count" in score.hard_budget_failures
 
 
 def test_p7_ergonomics_rejects_raw_reload_loop() -> None:

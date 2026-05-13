@@ -56,23 +56,25 @@ def _extract_precheck_body() -> str:
 _PRECHECK_BODY = _extract_precheck_body()
 
 
-def test_precheck_step_exists_and_lives_before_plan_discovery() -> None:
+def test_precheck_step_exists_and_lives_after_current_wave_selection() -> None:
     assert _PRECHECK_OPEN_TAG in EXECUTE_PHASE, (
         "claim_deliverable_alignment_check step is missing from execute-phase.md"
     )
 
-    proof_gate_tag = '<step name="detect_proof_obligation_work">'
     discover_tag = '<step name="discover_and_group_plans">'
+    wave_intent_tag = '<step name="select_current_wave_intent">'
+    proof_gate_tag = '<step name="detect_proof_obligation_work">'
 
+    discover_idx = EXECUTE_PHASE.index(discover_tag)
+    wave_intent_idx = EXECUTE_PHASE.index(wave_intent_tag)
     proof_gate_idx = EXECUTE_PHASE.index(proof_gate_tag)
     precheck_idx = EXECUTE_PHASE.index(_PRECHECK_OPEN_TAG)
-    discover_idx = EXECUTE_PHASE.index(discover_tag)
 
-    assert proof_gate_idx < precheck_idx < discover_idx, (
-        "claim_deliverable_alignment_check must be positioned after "
-        "detect_proof_obligation_work and before discover_and_group_plans "
-        f"(got offsets proof_gate={proof_gate_idx}, precheck={precheck_idx}, "
-        f"discover={discover_idx})"
+    assert discover_idx < wave_intent_idx < proof_gate_idx < precheck_idx, (
+        "claim_deliverable_alignment_check must run after plan discovery, current-wave "
+        "selection, and proof classification "
+        f"(got offsets discover={discover_idx}, wave_intent={wave_intent_idx}, "
+        f"proof_gate={proof_gate_idx}, precheck={precheck_idx})"
     )
 
 

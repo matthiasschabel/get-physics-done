@@ -132,6 +132,8 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
         for stage in manifest.stages
     }
 
+    assert manifest.stage("wave_planning").loaded_authorities == ("workflows/execute-phase/wave-planning.md",)
+    assert "references/verification/core/proof-redteam-workflow-gate.md" in conditional_by_stage["wave_planning"]
     assert "workflows/execute-plan.md" in conditional_by_stage["executor_dispatch"]
     assert "workflows/verify-phase.md" in conditional_by_stage["verification_handoff"]
     assert "references/verification/core/verification-core.md" in conditional_by_stage["verification_handoff"]
@@ -157,6 +159,7 @@ def test_execute_phase_heavy_authorities_are_conditional_or_lazy_not_uncondition
     assert "workflows/verify-phase.md" in verification_handoff.must_not_eager_load
     assert "references/verification/core/verification-core.md" in verification_handoff.must_not_eager_load
     assert "templates/recovery-plan.md" in aggregate.must_not_eager_load
+    assert "references/verification/core/proof-redteam-workflow-gate.md" in manifest.stage("wave_planning").must_not_eager_load
     assert "references/execution/github-lifecycle.md" in closeout.must_not_eager_load
     assert "references/execution/git-integration.md" in closeout.must_not_eager_load
     for authority in (
@@ -309,7 +312,8 @@ def test_execute_phase_late_authorities_live_in_owning_stages() -> None:
     gap_reverification = _stage_text("gap-reverification.md")
     closeout = _stage_text("closeout.md")
 
-    assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" in wave_planning
+    assert "references/verification/core/proof-redteam-workflow-gate.md" in wave_planning
+    assert "@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md" not in wave_planning
     assert "@{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md" in executor_dispatch
     assert "{GPD_INSTALL_DIR}/workflows/execute-plan.md" in executor_dispatch
     assert "gpd-check-proof" in proof_critic_dispatch

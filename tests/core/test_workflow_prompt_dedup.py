@@ -354,8 +354,10 @@ def test_notation_coordinator_references_subfield_defaults_without_inlining_tabl
 def test_planner_workflows_keep_tangent_policy_single_sourced() -> None:
     plan_phase = _read("plan-phase.md")
 
-    assert plan_phase.count("Required 4-way tangent decision model:") == 1
-    assert plan_phase.count("Branch as alternative hypothesis") == 1
+    assert plan_phase.count("Tangent invariant:") == 1
+    assert plan_phase.count("gpd:tangent") == 1
+    assert plan_phase.count("gpd:branch-hypothesis") == 2
+    assert "Required 4-way tangent decision model:" not in plan_phase
 
 
 def test_context_pressure_default_threshold_table_is_single_sourced() -> None:

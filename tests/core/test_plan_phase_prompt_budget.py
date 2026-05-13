@@ -111,6 +111,14 @@ def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_
     }
     assert checker_conditionals["revision_template_rendering"] == ("templates/planner-subagent-prompt.md",)
     assert "templates/planner-subagent-prompt.md" in checker_revision.must_not_eager_load
+    assert "checker_model" not in bootstrap.required_init_fields
+    assert "plan_checker_enabled" not in bootstrap.required_init_fields
+    assert "checker_model" not in research_routing.required_init_fields
+    assert "plan_checker_enabled" not in research_routing.required_init_fields
+    assert "checker_model" in planner_authoring.required_init_fields
+    assert "plan_checker_enabled" in planner_authoring.required_init_fields
+    assert "checker_model" in checker_revision.required_init_fields
+    assert "plan_checker_enabled" in checker_revision.required_init_fields
     assert "active_reference_context" in planner_authoring.required_init_fields
     assert "reference_artifact_files" in planner_authoring.required_init_fields
     assert "reference_artifacts_content" not in planner_authoring.required_init_fields

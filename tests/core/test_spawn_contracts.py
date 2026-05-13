@@ -488,7 +488,7 @@ def test_quick_and_write_paper_gate_handoffs_on_expected_artifacts() -> None:
 
 
 def test_plan_phase_reloads_research_from_disk_and_keeps_checker_advisory() -> None:
-    content = _read(WORKFLOWS_DIR / "plan-phase.md")
+    content = workflow_authority_text(WORKFLOWS_DIR, "plan-phase")
 
     _assert_semantic(
         content,
@@ -496,7 +496,7 @@ def test_plan_phase_reloads_research_from_disk_and_keeps_checker_advisory() -> N
         "Verify RESEARCH.md was written (guard against silent researcher failure):",
         "After it passes, re-read the research file from disk",
         "the earlier init `research_content` is no longer current",
-        "Proceed without plan verification. Plans are still executable.",
+        "Proceed without plan verification only for non-proof-bearing plan sets",
         "Approved plans from partial approval are final",
     )
 
@@ -514,8 +514,8 @@ def test_execute_phase_requires_state_return_envelope_and_handoff_spot_checks() 
     _assert_semantic(
         content,
         "execute-phase executor artifact gate and partial evidence",
-        "Executor subagents MUST NOT write STATE.md directly.",
-        "Run the local child artifact gate before success",
+        "Executor subagents must not write `GPD/STATE.md` directly.",
+        "run the local child artifact gate before success",
         "git commits are partial evidence only",
     )
     _assert_machine(content, "execute-phase pre-execution specialist gate", "pre_execution_specialists")

@@ -99,10 +99,8 @@ def test_summary_driven_workflows_search_canonical_summary_artifacts() -> None:
     assert "ls GPD/phases/*/*SUMMARY.md 2>/dev/null" in graph
     assert "GPD/phases/*/*SUMMARY.md" in write_paper
     assert "Read summary artifacts (`SUMMARY.md` and `*-SUMMARY.md`)" in write_paper
-    assert "SUMMARY_FILE=$(ls GPD/phases/*/*SUMMARY.md 2>/dev/null | head -1)" in plan_phase
-    assert (
-        "inspect the loaded SUMMARY.md artifacts directly for decisive evidence before reusing research" in plan_phase
-    )
+    assert "small SUMMARY.md handle/header scan for decisive-evidence" in plan_phase
+    assert "signals before reusing research" in plan_phase
 
 
 def test_transition_workflow_surfaces_standalone_phase_artifact_support() -> None:

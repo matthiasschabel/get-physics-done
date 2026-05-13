@@ -67,6 +67,10 @@ def test_wave_return_checkpoint_accepts_executor_summary_only_through_applicator
     assert "Executor subagents must not write `GPD/STATE.md` directly" in wave_return
     assert "proof_critic_dispatch" in wave_return
     assert 'subagent_type="gpd-check-proof"' not in wave_return
+    assert '<step name="classify_child_return_status">' in wave_return
+    assert '<step name="completed_executor_return_gate">' in wave_return
+    assert wave_return.index('<step name="classify_child_return_status">') < wave_return.index("child_gate:")
+    assert "Checkpoint returns have already routed to `checkpoint_resume`" in wave_return
 
     assert gate.role == "gpd-executor"
     assert gate.return_profile == "executor"

@@ -13,6 +13,7 @@ from tests.workflow_authority_support import STAGED_WORKFLOW_AUTHORITY_NAMES, wo
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
+EXECUTION_REFERENCES_DIR = REPO_ROOT / "src/gpd/specs/references/execution"
 
 
 def _workflow_gpd_return_examples(path: Path) -> list[GpdReturnExample]:
@@ -34,15 +35,25 @@ def _validated_workflow_return_examples(path: Path, *, expected_count: int) -> l
     )
 
 
-def test_execute_plan_visible_return_examples_are_complete_valid_envelopes() -> None:
-    envelopes = _validated_workflow_return_examples(WORKFLOWS_DIR / "execute-plan.md", expected_count=3)
+def test_execute_plan_defers_visible_return_examples_to_completion_reference() -> None:
+    assert _workflow_gpd_return_examples(WORKFLOWS_DIR / "execute-plan.md") == []
 
-    assert any("state_updates" in envelope and "contract_updates" in envelope for envelope in envelopes)
+    completion = EXECUTION_REFERENCES_DIR / "executor-completion.md"
+    examples = extract_gpd_return_examples(completion, source_name=completion.name)
+    assert len(examples) == 2
+    envelopes = validated_gpd_return_examples(completion, source_name=completion.name, require_required_fields=True)
+
+    assert any(envelope["status"] == "completed" for envelope in envelopes)
     assert any(
-        envelope["status"] == "checkpoint" and "decisions" in envelope and "blockers" in envelope
+        envelope["status"] == "checkpoint"
+        and "state_updates" in envelope
+        and "contract_updates" in envelope
+        and "decisions" in envelope
+        and "blockers" in envelope
+        and "continuation_update" in envelope
         for envelope in envelopes
     )
-    assert any(envelope["status"] == "completed" and "continuation_update" in envelope for envelope in envelopes)
+    assert "gpd apply-return-updates" in completion.read_text(encoding="utf-8")
 
 
 def test_map_research_visible_return_example_is_a_complete_valid_envelope() -> None:

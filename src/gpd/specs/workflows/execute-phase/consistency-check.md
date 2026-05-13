@@ -62,8 +62,19 @@ Return exactly one typed gpd_return envelope, include files_written, and keep th
 ```
 </step>
 
+<step name="checker_return_status_route">
+After the single rapid checker returns, read the runtime `gpd_return.status` first and route before schema repair or report-acceptance details.
+
+- `completed`: accept only if the child_gate passes; continue to `consistency_child_gate` to run that gate.
+- `checkpoint`: stop, surface the checkpoint payload, and route to `gpd:resume-work`.
+- `blocked`: stop and route to `gpd:validate-conventions`.
+- `failed`: stop and route to `gpd:validate-conventions`.
+
+If the checker fails to spawn, returns an error, omits `gpd_return.status`, omits `files_written`, writes no readable `CONSISTENCY-CHECK.md`, or returns malformed output, treat the consistency check as blocked. Do not infer success from prose headings or untyped routing. Do not hand-author or paste a synthetic `gpd_return` into the checker artifact from the parent stage. Do not load report-contract repair templates unless the completed-return gate reports a repairable report schema issue.
+</step>
+
 <step name="consistency_child_gate">
-Run the local child_gate before accepting the checker output. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`.
+Run the local child_gate only for checker returns triaged as `completed`. Shared acceptance semantics live in `references/orchestration/child-artifact-gate.md`; checkpoint transport lives in `references/orchestration/continuation-boundary.md`.
 
 ```yaml
 child_gate:
@@ -94,15 +105,8 @@ fi
 ```
 </step>
 
-<step name="typed_status_route">
-Handle the checker response through `gpd_return.status`:
-
-- `completed`: accept only if the child_gate passes. Surface issues as warnings, then continue to `closeout`.
-- `checkpoint`: stop, surface the checkpoint payload, and route to `gpd:resume-work`.
-- `blocked`: stop and route to `gpd:validate-conventions`.
-- `failed`: stop and route to `gpd:validate-conventions`.
-
-If the checker fails to spawn, returns an error, omits `gpd_return.status`, omits `files_written`, writes no readable `CONSISTENCY-CHECK.md`, or returns malformed output, treat the consistency check as blocked. Do not infer success from prose headings or untyped routing. Do not hand-author or paste a synthetic `gpd_return` into the checker artifact from the parent stage.
+<step name="completed_consistency_route">
+After `rapid_consistency_check` passes, surface checker issues as warnings and continue to `closeout`. The report artifact must not embed or duplicate a `gpd_return`; the runtime return is canonical.
 </step>
 
 <step name="convention_repair_route">

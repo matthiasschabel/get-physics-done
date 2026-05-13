@@ -43,7 +43,7 @@ PAYLOAD_WORKFLOWS = (
 )
 STAGED_PROMPT_HYGIENE_WORKFLOWS = ("new-milestone", "quick", "map-research", "literature-review")
 EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
-    "plan-phase": ("phase_bootstrap", "planner_authoring", "checker_revision"),
+    "plan-phase": ("phase_bootstrap", "research_routing", "planner_authoring", "checker_revision"),
     "execute-phase": (
         "phase_bootstrap",
         "phase_classification",

@@ -7,11 +7,13 @@
       "planner_model"
     ],
     "planning_controls": [
-      "checker_model",
       "research_enabled",
-      "plan_checker_enabled",
       "autonomy",
       "research_mode"
+    ],
+    "checker_controls": [
+      "checker_model",
+      "plan_checker_enabled"
     ],
     "phase_target_context": [
       "phase_found",
@@ -173,6 +175,7 @@
       "required_init_field_groups": [
         "planner_model_context",
         "planning_controls",
+        "checker_controls",
         "phase_target_context",
         "contract_gate_status",
         "reference_handle_context",
@@ -236,6 +239,7 @@
         "workflows/plan-phase/checker-revision.md"
       ],
       "required_init_field_groups": [
+        "checker_controls",
         "planning_controls",
         "phase_target_context",
         "contract_gate_status",

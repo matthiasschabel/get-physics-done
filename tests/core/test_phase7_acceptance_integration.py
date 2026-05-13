@@ -21,7 +21,7 @@ _PHASE7_ROW_ID_RE = re.compile(
     r"P6-(?:PLAN|EXEC|COMP|RES)-JIT-[0-9]{2}|"
     r"P7-ERG-JIT-[0-9]{2}|"
     r"P7-NEXTUP-JIT-[0-9]{2}|"
-    r"P8-AGENT-JIT-[0-9]{2})$"
+    r"P8-(?:AGENT|WF)-JIT-[0-9]{2})$"
 )
 _PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 

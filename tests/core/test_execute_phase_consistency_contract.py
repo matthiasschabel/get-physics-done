@@ -28,7 +28,13 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
     assert "runtime return is canonical" in workflow
     assert "Do not embed or duplicate gpd_return inside the report artifact" in workflow
     assert "Append the same typed YAML gpd_return block to the artifact before returning" not in workflow
-    assert "Run the local child_gate before accepting the checker output." in workflow
+    assert '<step name="checker_return_status_route">' in workflow
+    assert '<step name="consistency_child_gate">' in workflow
+    assert workflow.index('<step name="spawn_rapid_checker">') < workflow.index(
+        '<step name="checker_return_status_route">'
+    )
+    assert workflow.index('<step name="checker_return_status_route">') < workflow.index("child_gate:")
+    assert "Run the local child_gate only for checker returns triaged as `completed`." in workflow
     assert "`completed`: accept only if the child_gate passes" in workflow
     assert "`checkpoint`: stop, surface the checkpoint payload" in workflow
     assert "`blocked`: stop and route to `gpd:validate-conventions`" in workflow

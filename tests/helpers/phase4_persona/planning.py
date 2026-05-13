@@ -604,13 +604,16 @@ def _score_proof_bearing_checker_audit_visibility() -> PlanningReplayOutcome:
     checker_conditionals = {
         authority for conditional in checker_stage.conditional_authorities for authority in conditional.authorities
     }
+    bootstrap_flat = " ".join(bootstrap.split())
+    checker_flat = " ".join(checker.split())
     assert "templates/planner-subagent-prompt.md" in checker_conditionals
     assert "templates/planner-subagent-prompt.md" in checker_stage.must_not_eager_load
-    assert "`--skip-verify` does NOT waive checker review" in bootstrap
-    assert "any proof-bearing plan set still needs checker review or an equivalent main-context audit" in bootstrap
+    assert "Bootstrap proof invariant" in bootstrap
+    assert "`--skip-verify` never waives proof-bearing plan audit" in bootstrap_flat
+    assert "planner and checker stages own the detailed" in bootstrap_flat
     assert "proof-bearing plans still need checker review or an equivalent main-context audit" in planner
     assert "Proof-obligation audit path" in checker
-    assert "sibling `{plan_id}-PROOF-REDTEAM.md` review artifact" in checker
+    assert "sibling `{plan_id}-PROOF-REDTEAM.md` review artifact" in checker_flat
     assert "Anti-bypass language" in checker
     assert "If any plan is proof-bearing, do NOT waive this gate" in checker
     assert (

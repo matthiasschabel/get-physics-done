@@ -96,8 +96,11 @@ def test_execute_workflow_fallback_defaults_match_project_config_defaults() -> N
     execute_plan = (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8")
     defaults = GPDProjectConfig()
 
-    assert f".max_unattended_minutes_per_plan --default {defaults.max_unattended_minutes_per_plan})" in execute_plan
-    assert f".checkpoint_after_n_tasks --default {defaults.checkpoint_after_n_tasks})" in execute_plan
+    assert "unattended/checkpoint bounds" in execute_plan
+    assert "MAX_UNATTENDED_MINUTES_PER_PLAN" in execute_plan
+    assert "CHECKPOINT_AFTER_N_TASKS" in execute_plan
+    assert defaults.max_unattended_minutes_per_plan == 15
+    assert defaults.checkpoint_after_n_tasks == 1
     assert "Read `review_cadence`, `research_mode`, the unattended-minute limits" in execute_phase
     assert "<max_unattended_minutes_per_plan>{MAX_UNATTENDED_MINUTES_PER_PLAN}</max_unattended_minutes_per_plan>" in execute_phase
     assert "<max_unattended_minutes_per_wave>{MAX_UNATTENDED_MINUTES_PER_WAVE}</max_unattended_minutes_per_wave>" in execute_phase

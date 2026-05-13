@@ -326,14 +326,18 @@ def test_execute_phase_closeout_spec_is_readiness_transition_only() -> None:
     }
 
     assert "does not spawn verifiers, close gaps, run consistency checks, or decide scientific status" in workflow
-    assert (
-        "`verification_handoff` or `gap_reverification` produced a validated canonical verification report" in workflow
-    )
-    assert "`consistency_check` completed through its child_gate" in workflow
+    assert "Prerequisites are summarized here, but the helper is authority" in workflow
+    assert "canonical verification report exists and has status `passed`" in workflow
+    assert "`consistency_check` passed its child gate" in workflow
     assert "gpd --raw phase closeout-readiness" in workflow
     assert "--require-verification" in workflow
     assert 'gpd phase complete "${phase_number}"' in workflow
     assert workflow.index("gpd --raw phase closeout-readiness") < workflow.index('gpd phase complete "${phase_number}"')
+    assert "CLOSEOUT_READY=$(echo \"$CLOSEOUT_READINESS\" | gpd json get .ready --default false)" in workflow
+    assert workflow.index('if [ "$CLOSEOUT_READY" != "true" ]; then') < workflow.index(
+        'gpd phase complete "${phase_number}"'
+    )
+    assert "`ready-to-execute` and `ready-for-verification` are not `ready-for-closeout`" in workflow
     assert "Do not repair blockers, update roadmap/state, or clean checkpoints from this stage." in workflow
     assert closeout_stage["loaded_authorities"] == ["workflows/execute-phase/closeout.md"]
     assert {"workflows/transition.md", "templates/state-machine.md"} <= conditional_authorities

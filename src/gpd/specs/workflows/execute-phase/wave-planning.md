@@ -3,7 +3,7 @@ Plan wave execution, dependency posture, proof-bearing routing, claim alignment,
 </purpose>
 
 <stage_boundary>
-This stage owns phase-wide wave planning. It classifies proof obligations, checks claim/deliverable alignment, groups plans into waves, and decides cadence/risk policy. It does not spawn executors, verifiers, proof critics, or child-return handlers.
+This stage owns phase-wide wave planning. It refreshes current phase context, groups incomplete plans, selects the current wave intent, then classifies proof obligations, checks claim/deliverable alignment, and decides cadence/risk policy for the selected wave. It does not spawn executors, verifiers, proof critics, or child-return handlers.
 </stage_boundary>
 
 <process>
@@ -21,16 +21,6 @@ Later staged refreshes surface `effective_reference_intake`, active-reference ha
 - Disabled generic verifier, sparse cadence, `autonomy=yolo`, or "skip verification" never disables proof red-team for proof-bearing work.
 </stage_policy>
 
-<step name="detect_proof_obligation_work">
-Classify whether any selected plan is proof-bearing before execution and before honoring verifier-disabled or sparse-review settings.
-
-@{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md
-
-Mark a plan proof-bearing when it establishes a theorem, lemma, equivalence, bound, identity, no-go result, derivation validity claim, parameter coverage claim, or proof-backed acceptance test. For each proof-bearing plan, require a sibling `{plan_id}-PROOF-REDTEAM.md` artifact before wave success can be claimed.
-
-Never treat a clean `SUMMARY.md`, correct algebra in a subset of cases, or "human will inspect later" as a substitute for the sibling proof-redteam artifact. Runtime delegation should use `gpd-check-proof` for that independent audit; executors may draft proof context but must not self-certify theorem-proof alignment.
-</step>
-
 <step name="refresh_wave_planning_context">
 Refresh the wave-planning stage so the orchestrator does not keep late execution context pinned in bootstrap state:
 
@@ -45,8 +35,69 @@ fi
 Use `gpd --raw stage field-access execute-phase --stage wave_planning --style instruction`; read only manifest-selected keys.
 </step>
 
+<step name="discover_and_group_plans">
+Load plan inventory with wave grouping from `gpd phase index {phase_number}`.
+
+Parse JSON for `phase`, `plans[]` (`id`, `wave`, `interactive`, `gap_closure`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves`, `incomplete`, and `has_checkpoints`.
+
+**Filtering:** skip plans where `has_summary: true`. If `$GAPS_ONLY` is true, also skip non-gap_closure plans. If all filtered: "No matching incomplete plans" -> exit.
+
+**Intra-wave dependency validation:** verify that no plan's `depends_on` references another plan in the same wave. If any same-wave dependency exists, stop and report the plan IDs and wave number.
+
+**Parallel file conflict detection:** for waves with two or more plans, compare the indexed `files_modified` sets. If two plans touch the same path, warn and offer to serialize those plans within the wave.
+
+If `INTRA_WAVE_CONFLICT` is true: STOP, present the dependency issue, and do not proceed.
+If `FILE_CONFLICT` is true: WARN, present the overlap, and offer to serialize the conflicting plans within the wave.
+
+Report:
+
+```
+## Execution Plan
+
+**Phase {X}: {Name}** -- {total_plans} plans across {wave_count} waves
+
+| Wave | Plans | What it builds |
+|------|-------|----------------|
+| 1 | 01-01, 01-02 | {from plan objectives, 3-8 words} |
+| 2 | 01-03 | ... |
+```
+</step>
+
+<step name="select_current_wave_intent">
+Before proof, claim-alignment, or cadence machinery, select exactly one current wave intent from the filtered incomplete plan inventory.
+
+Choose the earliest runnable wave unless the user explicitly requested a gap-only or narrowed target. If the user changes a wave constraint, revise this current-wave selection before reopening proof or alignment gates.
+
+Emit:
+
+```yaml
+current_wave_intent:
+  phase: "{phase_number}"
+  wave: "{wave_id}"
+  selected_plan_ids:
+    - "{plan_id}"
+  gap_only: "{true | false}"
+  objective: "{one sentence from selected plan objectives}"
+  sequential_overrides:
+    - "{plan_id pair or empty}"
+  file_conflicts:
+    - "{path or empty}"
+  dependency_posture: "runnable | blocked"
+```
+
+If dependency posture is blocked, stop with the dependency issue and do not continue into proof, alignment, or dispatch policy.
+</step>
+
+<step name="detect_proof_obligation_work">
+Classify whether any plan in `current_wave_intent.selected_plan_ids` is proof-bearing before execution and before honoring verifier-disabled or sparse-review settings.
+
+When the selected wave has proof-bearing work, load the conditional authority `{GPD_INSTALL_DIR}/references/verification/core/proof-redteam-workflow-gate.md` for the detailed workflow gate. Mark a plan proof-bearing when it establishes a theorem, lemma, equivalence, bound, identity, no-go result, derivation validity claim, parameter coverage claim, or proof-backed acceptance test. For each proof-bearing selected plan, require a sibling `{plan_id}-PROOF-REDTEAM.md` artifact before wave success can be claimed.
+
+Never treat a clean `SUMMARY.md`, correct algebra in a subset of cases, or "human will inspect later" as a substitute for the sibling proof-redteam artifact. Runtime delegation should use `gpd-check-proof` for that independent audit; executors may draft proof context but must not self-certify theorem-proof alignment.
+</step>
+
 <step name="claim_deliverable_alignment_check">
-Gate execution on explicit confirmation that the machine-readable claim matches user intent for Phase {N}.
+Gate execution on explicit confirmation that the machine-readable claim matches user intent for Phase {N} and the selected current wave.
 
 Read the persisted alignment status and current fingerprints before rendering anything:
 
@@ -69,7 +120,7 @@ if [ -z "$CONTRACT_HASH" ] || [ -z "$CONTEXT_HASH" ]; then
 fi
 ```
 
-**Gating:** fires when `autonomy=supervised` OR `review_cadence=dense` OR any selected plan is proof-bearing per `detect_proof_obligation_work`. Skip only under `autonomy=yolo AND review_cadence in {adaptive, sparse} AND no proof-bearing plans`; log `claim_deliverable_alignment_check: skipped (autonomy=yolo, cadence=adaptive, no proof-bearing plans)` and continue to `discover_and_group_plans` without prompting.
+**Gating:** fires when `autonomy=supervised` OR `review_cadence=dense` OR any selected plan is proof-bearing per `detect_proof_obligation_work`. Skip only under `autonomy=yolo AND review_cadence in {adaptive, sparse} AND no proof-bearing plans`; log `claim_deliverable_alignment_check: skipped (autonomy=yolo, cadence=adaptive, no proof-bearing plans)` and continue to `resolve_execution_cadence` without prompting.
 
 **Suppression:** if `confirmed_at` is set AND the current `contract_fingerprint == confirmed_contract_hash` AND `context_guidance_fingerprint == confirmed_context_hash`, skip and log `claim_deliverable_alignment_check: skipped (already confirmed this session)`.
 
@@ -104,36 +155,8 @@ gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$
 On `n`, exit cleanly and emit `Next Up: gpd:execute-phase {N}`. On `e` or `p`, hand off to `gpd:discuss-phase {N}` or `gpd:plan-phase {N}`; if repeated, defer and stop looping.
 </step>
 
-<step name="discover_and_group_plans">
-Load plan inventory with wave grouping from `gpd phase index {phase_number}`.
-
-Parse JSON for `phase`, `plans[]` (`id`, `wave`, `interactive`, `gap_closure`, `objective`, `files_modified`, `task_count`, `has_summary`), `waves`, `incomplete`, and `has_checkpoints`.
-
-**Filtering:** skip plans where `has_summary: true`. If `$GAPS_ONLY` is true, also skip non-gap_closure plans. If all filtered: "No matching incomplete plans" -> exit.
-
-**Intra-wave dependency validation:** verify that no plan's `depends_on` references another plan in the same wave. If any same-wave dependency exists, stop and report the plan IDs and wave number.
-
-**Parallel file conflict detection:** for waves with two or more plans, compare the indexed `files_modified` sets. If two plans touch the same path, warn and offer to serialize those plans within the wave.
-
-If `INTRA_WAVE_CONFLICT` is true: STOP, present the dependency issue, and do not proceed.
-If `FILE_CONFLICT` is true: WARN, present the overlap, and offer to serialize the conflicting plans within the wave.
-
-Report:
-
-```
-## Execution Plan
-
-**Phase {X}: {Name}** -- {total_plans} plans across {wave_count} waves
-
-| Wave | Plans | What it builds |
-|------|-------|----------------|
-| 1 | 01-01, 01-02 | {from plan objectives, 3-8 words} |
-| 2 | 01-03 | ... |
-```
-</step>
-
 <step name="resolve_execution_cadence">
-Translate cadence config plus wave risk into execution boundaries before spawning executors.
+Translate cadence config plus selected-wave risk into execution boundaries before spawning executors.
 
 Read `review_cadence`, `research_mode`, the unattended-minute limits, checkpoint thresholds, `strict_wait`, `never_interrupt_running_workers`, and `never_auto_close_child_agents` from the current staged payload/config. `strict_wait` disables unattended-minute cutoffs entirely; `never_interrupt_running_workers` is the narrower form of the same guarantee. In either case, set plan and wave unattended-minute limits to zero so workers run to natural completion. `never_auto_close_child_agents` means a spawned child remains open until it returns, checkpoints, or fails; no parent stage may synthesize closure.
 
@@ -157,17 +180,17 @@ When `review_cadence=dense`, treat every wave as risky and require both first-re
 
 When a wave is not risky, keep bounded execution available for long plans, wall-clock budgets, and context pressure, but allow short low-fanout plans to run without checkpoint-free micro-pauses.
 
-If the first material result is anchor-thin, stop before downstream fanout and record the weakest unchecked anchor, remaining assumption, quickest disconfirming observation, and downstream plans at risk.
+If the risk logic predicts an anchor-thin first material result, emit required placeholder labels for downstream gate owners: weakest unchecked anchor, remaining assumption, quickest disconfirming observation, and downstream plans at risk. Do not populate live first-result or pre-fanout result fields before `wave_return_checkpoint` has accepted a concrete result.
 
 Unexpected but non-blocking alternatives are tangent proposals, not silent side work. Classify each proposal as `ignore`, `defer`, `branch_later`, or `pursue_now`; `pursue_now` requires explicit user request or approved contract scope.
 
 If a tangent should become an explicit side investigation, surface `gpd:tangent` as the follow-up command instead of silently branching inside execution.
 
-Do NOT narrow bounded review scope just because a wave advanced or one proxy passed; keep the weakest unchecked anchor and decisive disconfirming check visible until the gate clears.
+Do NOT narrow bounded review scope just because a wave advanced or one proxy passed. Later gate owners keep the weakest unchecked anchor and decisive disconfirming check visible until the gate clears.
 </step>
 
 <step name="publish_wave_plan_for_dispatch">
-Emit a compact wave-plan record for downstream stages. It must include each wave's plan IDs, sequential/parallel posture, risk flags, `FIRST_RESULT_GATE_REQUIRED`, `PRE_FANOUT_REVIEW_REQUIRED`, `SEGMENT_TASK_CAP`, proof-bearing plan IDs, file-conflict serialization decisions, and convention-lock assumptions.
+Emit a compact wave-plan record for downstream stages. It must include `current_wave_intent`, each wave's plan IDs, sequential/parallel posture, risk flags, `FIRST_RESULT_GATE_REQUIRED`, `PRE_FANOUT_REVIEW_REQUIRED`, `SEGMENT_TASK_CAP`, proof-bearing plan IDs, file-conflict serialization decisions, and convention-lock assumptions.
 
 This stage owns only the policy and route labels. Full checkpoint presentation belongs to `checkpoint_resume`; executor task semantics belong to `executor_dispatch` and child-readable `workflows/execute-plan.md`; proof-redteam execution belongs to proof critic dispatch/return stages; final verification belongs to aggregate/verification stages.
 </step>

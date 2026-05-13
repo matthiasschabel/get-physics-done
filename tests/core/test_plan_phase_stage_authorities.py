@@ -73,6 +73,12 @@ def test_plan_phase_bootstrap_defers_late_authorities() -> None:
     ):
         assert late_fragment not in bootstrap_text
 
+    assert bootstrap_text.index('<event name="phase_target_selected">') < bootstrap_text.index(
+        "**Dirty worktree safety gate:**"
+    )
+    assert "Bootstrap proof invariant: `--skip-verify` never waives proof-bearing plan" in bootstrap_text
+    assert "Required 4-way tangent decision model" not in bootstrap_text
+
 
 def test_plan_phase_research_routing_defers_phase_file_content_to_authoring() -> None:
     manifest = load_workflow_stage_manifest("plan-phase")
@@ -93,6 +99,34 @@ def test_plan_phase_research_routing_defers_phase_file_content_to_authoring() ->
     assert phase_file_content_fields.isdisjoint(research_routing.required_init_fields)
     assert phase_file_content_fields.issubset(planner_authoring.required_init_fields)
     assert "platform" in research_routing.required_init_fields
+
+
+def test_plan_phase_checker_controls_start_after_research_routing() -> None:
+    manifest = load_workflow_stage_manifest("plan-phase")
+    checker_fields = {"checker_model", "plan_checker_enabled"}
+
+    assert checker_fields.isdisjoint(manifest.stage("phase_bootstrap").required_init_fields)
+    assert checker_fields.isdisjoint(manifest.stage("research_routing").required_init_fields)
+    assert checker_fields.issubset(manifest.stage("planner_authoring").required_init_fields)
+    assert checker_fields.issubset(manifest.stage("checker_revision").required_init_fields)
+
+
+def test_research_routing_uses_routing_slice_until_route_or_handoff_requires_authoring() -> None:
+    research = _stage_text("research-routing.md")
+
+    routing_reload = 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage research_routing)'
+    authoring_reload = 'INIT=$(gpd --raw init plan-phase "$PHASE" --stage planner_authoring)'
+    route_decision = '<event name="research_route_decision">'
+    handoff_context = '<event name="research_handoff_context_needed">'
+
+    assert routing_reload in research
+    assert "gpd --raw stage field-access plan-phase --stage research_routing --style instruction" in research
+    assert research.index(routing_reload) < research.index(route_decision)
+    assert research.index(route_decision) < research.index(handoff_context)
+    assert research.index(handoff_context) < research.index(authoring_reload)
+    assert "--stage planner_authoring" not in research[: research.index(handoff_context)]
+    assert "reference_artifacts_content" not in research
+    assert "protocol_bundle_context" not in research
 
 
 def test_plan_phase_late_authorities_live_in_owning_stages() -> None:

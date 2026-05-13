@@ -3,7 +3,7 @@ Close the phase only after execution, verification, gap re-verification if neede
 </purpose>
 
 <stage_boundary>
-This stage owns readiness-gated completion, post-closeout helper checkpoint cleanup, and renderer-ready next-command selection. The code-owned `NextCommand` taxonomy and shared renderer own the public next-up shape. This stage does not spawn verifiers, close gaps, run consistency checks, or decide scientific status.
+This stage owns readiness-gated completion, helper checkpoint cleanup, and renderer-ready next-command selection. Code owns the `NextCommand` taxonomy and public next-up shape. This stage does not spawn verifiers, close gaps, run consistency checks, or decide scientific status.
 </stage_boundary>
 
 <process>
@@ -21,12 +21,11 @@ fi
 
 Use `gpd --raw stage field-access execute-phase --stage closeout --style instruction` before reading `CLOSEOUT_INIT`.
 
-Before any roadmap/state transition, run the helper below and route from its JSON. The checks named here are prerequisites, not a second routing policy:
+Before any roadmap/state transition, run the helper below and route from its JSON. Prerequisites are summarized here, but the helper is authority:
 
-- `verification_handoff` or `gap_reverification` produced a validated canonical verification report
-- canonical verification status is `passed`
-- proof-bearing work has fresh proof-redteam artifacts with `status: passed`
-- `consistency_check` completed through its child_gate
+- canonical verification report exists and has status `passed`
+- proof-bearing work has fresh passed proof-redteam artifacts
+- `consistency_check` passed its child gate
 - no bounded execution segment is active
 
 Then run the read-only readiness helper:
@@ -41,17 +40,27 @@ fi
 
 The readiness helper is read-only. On any blocker, stop and surface its next action. Do not repair blockers, update roadmap/state, or clean checkpoints from this stage.
 
+`ready-to-execute` and `ready-for-verification` are not `ready-for-closeout`; the helper JSON is the transition authority. Branch before showing any mutation:
+
+```bash
+CLOSEOUT_READY=$(echo "$CLOSEOUT_READINESS" | gpd json get .ready --default false)
+if [ "$CLOSEOUT_READY" != "true" ]; then
+  echo "$CLOSEOUT_READINESS" | gpd next-up render --from-closeout-readiness
+  exit 0
+fi
+```
+
 Readiness next-action ownership:
 
 - Blocked closeout keeps a public runtime primary, such as `gpd:verify-work ${phase_number}`, `gpd:resume-work`, or `gpd:execute-phase ${phase_number}`.
 - Ready closeout labels `gpd phase complete "${phase_number}"` as `Primary local transition`, not a runtime workflow.
 - Prompt-visible ready closeout names the read-only readiness helper before the safe mutation: `gpd --raw phase closeout-readiness {PHASE_NUMBER} --require-verification`, then `gpd phase complete {PHASE_NUMBER}`.
-- Use the typed next-command owner taxonomy: `closeout_command_hint` is the local transition and `cleanup_command_hint` is only a secondary local helper.
-- Checkpoint cleanup is a secondary local helper. It never competes with the primary transition and never appears in `stage_stop.next_runtime_command` or `stage_stop.also_available`.
+- `closeout_command_hint` is the local transition; `cleanup_command_hint` is only a secondary local helper.
+- Checkpoint cleanup never appears in `stage_stop.next_runtime_command` or `stage_stop.also_available`.
 </step>
 
-<step name="complete_phase">
-Only after the gates above pass:
+<step name="ready_success_complete_phase">
+Only after `CLOSEOUT_READINESS.ready == true`, show and run the safe local transition:
 
 ```bash
 gpd phase complete "${phase_number}"
@@ -61,7 +70,7 @@ The completion helper owns the roadmap/state transition and rechecks lifecycle r
 Do not read `workflows/transition.md`, `templates/state-machine.md`, or `references/orchestration/state-portability.md` during normal closeout. If readiness is green and `gpd phase complete` reports an ambiguous transition/state-machine result, load the `transition_helper_ambiguity` conditional authority pack before interpreting or repairing that result.
 </step>
 
-<step name="cleanup_phase_checkpoints">
+<step name="ready_success_cleanup_phase_checkpoints">
 After successful phase completion, remove only helper-owned checkpoint tags:
 
 ```bash
@@ -72,7 +81,7 @@ If cleanup exits nonzero, print the helper JSON and stop. Preserve tags for bloc
 </step>
 
 <step name="offer_next">
-Never end with only "ready to plan/continue" prose. After successful closeout, choose one matching variant, choose exactly one primary `NextCommand`, populate `stage_stop.next_runtime_command` from the shared renderer projection, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print raw staged-init or field-access commands in the final answer.
+Never end with only "ready to plan/continue" prose. After successful closeout, choose one matching variant, one primary `NextCommand`, populate `stage_stop.next_runtime_command`, and emit a `## > Next Up` block with exactly one `Primary:` line. Do not print raw staged-init or field-access commands.
 
 Render the variants below from the refreshed closeout payload using the shared renderer shape (`Primary:`, `Primary local transition:`, `**After this completes:**`, and `Secondary ...` lines) without reading `references/ui/ui-brand.md` or `references/orchestration/continuous-execution.md` on the normal path. Load the `next_up_rendering_recovery` conditional authority pack only if the fixed `stage_stop` / `## > Next Up` variants cannot be rendered from the closeout payload.
 

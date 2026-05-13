@@ -22,8 +22,26 @@ fi
 Use `gpd --raw stage field-access execute-phase --stage gap_reverification --style instruction` before reading `GAP_REVERIFY_INIT`.
 </step>
 
+<step name="select_current_gap">
+Before report-bridge, verifier, debugger, or repair machinery appears, select exactly one current unresolved gap from the canonical verification report.
+
+Read only the validated top-level verification status from `{phase_dir}/{phase_number}-VERIFICATION.md` plus structured gap ledgers. Do not use unanchored text search over nested `status:` fields, headings, or prose. Choose one unresolved target and emit:
+
+```yaml
+current_gap:
+  failed_plan: "{plan_id | none}"
+  contract_target: "{claim/test/deliverable id}"
+  failure_summary: "{one sentence from structured report data}"
+  prior_attempt_count: "{0 | 1 | 2}"
+  convention_suspected: "{true | false}"
+  localized: "{true | false}"
+```
+
+If there is no unresolved current gap, do not run this stage's repair or verifier machinery; continue to `consistency_check`. If several unrelated gaps remain, pick one only for triage, then stop for user decision before new planning rather than looping through the old report.
+</step>
+
 <step name="classify_gap_closure_route">
-Read the validated top-level verification status from `{phase_dir}/{phase_number}-VERIFICATION.md`. Count only top-level report status and structured gap ledgers; do not use unanchored text search over nested `status:` fields.
+Using `current_gap`, classify the smallest safe closure route. Count only top-level report status and structured gap ledgers; do not use unanchored text search over nested `status:` fields.
 
 | Failure pattern | Route |
 | --- | --- |
@@ -37,7 +55,7 @@ Gap-only execution uses `gpd:execute-phase {PHASE_NUMBER} --gaps-only` after gap
 </step>
 
 <step name="localized_reexecution">
-For a single localized failure, spawn one executor with explicit verifier context:
+For a single localized `current_gap`, spawn one executor with explicit verifier context:
 
 ```
 task(
@@ -94,7 +112,7 @@ Primary: `gpd:validate-conventions`
 </step>
 
 <step name="debugger_diagnosis">
-For a persistent gap after one closure attempt, spawn `gpd-debugger` before any second gap attempt:
+For a persistent `current_gap` after one closure attempt, spawn `gpd-debugger` before any second gap attempt:
 
 ```
 task(
@@ -129,7 +147,7 @@ Do not attempt a third automated cycle.
 </step>
 
 <step name="gap_only_reverification">
-After gap-only execution or localized re-execution succeeds, automatically re-verify only the previously unresolved targets.
+Only after `current_gap` exists and gap-only execution or localized re-execution succeeds, automatically re-verify only the previously unresolved targets. The verification report bridge and verifier child_gate are branch-local to this success path.
 
 ```bash
 REVERIFY_HANDOFF_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")

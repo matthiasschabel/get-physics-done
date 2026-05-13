@@ -47,6 +47,14 @@ def _stage_stop_row(workflow: str, stop: str) -> dict[str, str]:
 def test_execute_phase_reverification_routes_on_typed_status_not_legacy_verifier_text() -> None:
     workflow = _read_execute_phase_stage("gap-reverification.md")
 
+    select_idx = workflow.index('<step name="select_current_gap">')
+    classify_idx = workflow.index('<step name="classify_gap_closure_route">')
+    bridge_idx = workflow.index("verification_report_skeleton_bridge")
+    verifier_idx = workflow.index('subagent_type="gpd-verifier"')
+
+    assert select_idx < classify_idx < verifier_idx < bridge_idx
+    assert "current_gap:" in workflow
+    assert "failed_plan:" in workflow
     assert_semantic_contract(
         workflow,
         "gap reverification targets only unresolved prior work",
@@ -166,6 +174,12 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
     workflow = _read_execute_phase_stage("consistency-check.md")
     gate = child_gate_from_text(workflow, "rapid_consistency_check")
 
+    spawn_idx = workflow.index('<step name="spawn_rapid_checker">')
+    route_idx = workflow.index('<step name="checker_return_status_route">')
+    gate_idx = workflow.index("child_gate:")
+    repair_idx = workflow.index('<step name="convention_repair_route">')
+
+    assert spawn_idx < route_idx < gate_idx < repair_idx
     assert gate.id == "rapid_consistency_check"
     assert gate.role == "gpd-consistency-checker"
     assert gate.return_profile == "checker"

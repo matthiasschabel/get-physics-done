@@ -25,10 +25,10 @@ STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
         "opencode": 5_920,
     },
     "new-project": {
-        "claude-code": 8_000,
-        "codex": 9_800,
-        "gemini": 10_300,
-        "opencode": 9_700,
+        "claude-code": 7_500,
+        "codex": 9_300,
+        "gemini": 9_800,
+        "opencode": 9_200,
     },
     "write-paper": {
         "claude-code": 13_076,
@@ -62,13 +62,13 @@ COMPACT_WORKFLOW_REFERENCE_TARGET_COMMANDS = tuple(COMPACT_WORKFLOW_REFERENCE_CO
 TARGET_AGENT_PROJECTION_BUDGETS = {
     "gpd-planner": {"lines": 600, "chars": 35_000},
     "gpd-research-synthesizer": {"lines": 520, "chars": 31_000},
-    "gpd-roadmapper": {"lines": 760, "chars": 38_000},
+    "gpd-roadmapper": {"lines": 520, "chars": 27_500},
 }
-TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 102_000
+TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 90_000
 
 SELECTED_AGENT_PROJECTION_BUDGETS = {
-    "gpd-executor": {"lines": 700, "chars": 41_000},
-    "gpd-experiment-designer": {"lines": 710, "chars": 40_000},
+    "gpd-executor": {"lines": 670, "chars": 39_000},
+    "gpd-experiment-designer": {"lines": 460, "chars": 27_000},
     "gpd-plan-checker": {"lines": 450, "chars": 25_500},
     **TARGET_AGENT_PROJECTION_BUDGETS,
     "gpd-project-researcher": {"lines": 380, "chars": 18_000},

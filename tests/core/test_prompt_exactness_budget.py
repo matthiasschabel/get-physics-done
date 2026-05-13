@@ -10,7 +10,7 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXACTNESS_TOTAL_BUDGETS = {
-    "brittle_prose_assertions": 875,
+    "brittle_prose_assertions": 800,
     "exact_assertion_count": 5_620,
 }
 HIGH_SEVERITY_BASELINES: dict[str, dict[str, int]] = {}

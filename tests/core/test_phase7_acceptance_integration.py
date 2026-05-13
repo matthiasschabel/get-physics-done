@@ -15,7 +15,7 @@ from tests.helpers.phase7_live_like import REQUIRED_JIT_ROW_IDS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-_PHASE7_TRACKED_LOC_CAP = 3_850
+_PHASE7_TRACKED_LOC_CAP = 3_400
 _PHASE7_ROW_ID_RE = re.compile(
     r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|"
     r"P6-(?:PLAN|EXEC|COMP|RES)-JIT-[0-9]{2}|"

@@ -26,6 +26,14 @@ allowed-tools:
   - web_search
   - web_fetch
   - ask_user
+help:
+  group: Validation and analysis
+  order: 340
+  compact_description: Compare results against external data
+  display_signature: gpd:compare-experiment
+  examples:
+    - gpd:compare-experiment data/results.csv
+  root_detail_order: 180
 ---
 
 

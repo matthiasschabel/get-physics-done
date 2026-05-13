@@ -8,6 +8,11 @@ allowed-tools:
   - shell
   - task
   - ask_user
+help:
+  group: Validation and analysis
+  order: 300
+  compact_description: Start a persistent debug session
+  display_signature: gpd:debug [issue description]
 ---
 <objective>
 Route a physics debugging request into the workflow-owned debugging orchestrator.

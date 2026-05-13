@@ -10,6 +10,11 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Tangents, memory, and exports
+  order: 560
+  compact_description: Search the decision log
+  display_signature: gpd:decisions [phase or keyword]
 ---
 
 

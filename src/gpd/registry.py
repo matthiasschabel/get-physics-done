@@ -21,10 +21,12 @@ import yaml
 
 from gpd.adapters.install_utils import expand_at_includes
 from gpd.command_labels import (
+    CANONICAL_COMMAND_PREFIX,
     canonical_command_label,
     canonical_skill_label,
     command_slug_from_label,
     parse_command_label,
+    runtime_public_command_prefixes,
 )
 from gpd.core.agent_role_kits import (
     AGENT_ROLE_KITS_FRONTMATTER_KEY,
@@ -106,6 +108,7 @@ _COMMAND_FRONTMATTER_KEYS = frozenset(
         # plan-phase carries this metadata in canonical frontmatter even though
         # registry consumers currently do not project it.
         "agent",
+        "help",
     }
 )
 _AGENT_FRONTMATTER_KEYS = frozenset(
@@ -155,6 +158,20 @@ _COMMAND_POLICY_KEYS = frozenset(_COMMAND_POLICY_FIELD_ORDER)
 _COMMAND_POLICY_SUBJECT_KEYS = frozenset(_COMMAND_POLICY_SUBJECT_FIELD_ORDER)
 _COMMAND_POLICY_SUPPORTING_CONTEXT_KEYS = frozenset(_COMMAND_POLICY_SUPPORTING_CONTEXT_FIELD_ORDER)
 _COMMAND_POLICY_OUTPUT_KEYS = frozenset(_COMMAND_POLICY_OUTPUT_FIELD_ORDER)
+_COMMAND_HELP_KEYS = frozenset(
+    {
+        "group",
+        "order",
+        "compact_description",
+        "display_signature",
+        "detail_signature",
+        "examples",
+        "notes",
+        "root_detail_order",
+        "variants",
+    }
+)
+_COMMAND_HELP_VARIANT_KEYS = frozenset({"command", "description", "examples", "notes"})
 _WRITE_PAPER_EXTERNAL_AUTHORING_INPUT_KIND = "authoring_intake_manifest"
 _WRITE_PAPER_EXTERNAL_AUTHORING_SCOPE = "explicit_intake_manifest"
 _WRITE_PAPER_EXTERNAL_AUTHORING_REQUIRED_OUTPUTS = (
@@ -292,6 +309,31 @@ class AgentDef:
 
 
 @dataclass(frozen=True, slots=True)
+class CommandHelpVariant:
+    """Display-only documented variant for a registry command."""
+
+    command: str
+    description: str
+    examples: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CommandHelpMetadata:
+    """Display-only help metadata parsed from command frontmatter."""
+
+    group: str
+    order: int
+    compact_description: str | None = None
+    display_signature: str | None = None
+    detail_signature: str | None = None
+    examples: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
+    root_detail_order: int | None = None
+    variants: tuple[CommandHelpVariant, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CommandDef:
     """Parsed command/skill definition from a .md file."""
 
@@ -307,6 +349,7 @@ class CommandDef:
     project_reentry_capable: bool = False
     command_policy: CommandPolicy | None = None
     review_contract: ReviewCommandContract | None = None
+    help: CommandHelpMetadata | None = None
     agent: str | None = None
     staged_loading: WorkflowStageManifest | None = None
     spawn_contracts: tuple[dict[str, object], ...] = ()
@@ -611,6 +654,236 @@ def _parse_allowed_tools(raw: object, *, command_name: str) -> list[str]:
             seen.add(value)
             values.append(value)
     return values
+
+
+@lru_cache(maxsize=1)
+def _runtime_specific_help_label_pattern() -> re.Pattern[str]:
+    prefixes = tuple(prefix for prefix in runtime_public_command_prefixes() if prefix != CANONICAL_COMMAND_PREFIX)
+    if not prefixes:
+        return re.compile(r"$^")
+    escaped_prefixes = "|".join(re.escape(prefix) for prefix in prefixes)
+    return re.compile(rf"(?<![A-Za-z0-9_-])(?P<label>(?:{escaped_prefixes})[A-Za-z0-9][A-Za-z0-9-]*)")
+
+
+def _reject_runtime_specific_help_labels(value: str, *, field_name: str, command_name: str) -> None:
+    """Reject runtime-specific command labels in canonical help metadata."""
+
+    match = _runtime_specific_help_label_pattern().search(value)
+    if match is not None:
+        raise ValueError(
+            f"{field_name} for {command_name} must use canonical gpd: labels; "
+            f"got runtime-specific label {match.group('label')!r}"
+        )
+
+
+def _parse_command_help_string(
+    raw: object,
+    *,
+    field_name: str,
+    command_name: str,
+    required: bool = False,
+) -> str | None:
+    """Validate display-only help scalar string fields."""
+
+    subject = f"{field_name} for {command_name}"
+    if raw is None:
+        if required:
+            raise ValueError(f"{subject} must be a non-empty string")
+        return None
+    if not isinstance(raw, str):
+        raise ValueError(f"{subject} must be a string")
+    value = raw.strip()
+    if not value:
+        raise ValueError(f"{subject} must be a non-empty string")
+    _reject_runtime_specific_help_labels(value, field_name=field_name, command_name=command_name)
+    return value
+
+
+def _parse_command_help_int(raw: object, *, field_name: str, command_name: str, required: bool = False) -> int | None:
+    """Validate display-only help integer fields without accepting YAML booleans."""
+
+    subject = f"{field_name} for {command_name}"
+    if raw is None:
+        if required:
+            raise ValueError(f"{subject} must be an integer")
+        return None
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        raise ValueError(f"{subject} must be an integer")
+    return raw
+
+
+def _parse_command_help_string_list(
+    raw: object,
+    *,
+    field_name: str,
+    command_name: str,
+) -> tuple[str, ...]:
+    """Validate ordered help examples/notes as duplicate-free strings."""
+
+    if raw is None:
+        return ()
+    subject = f"{field_name} for {command_name}"
+    if not isinstance(raw, list):
+        raise ValueError(f"{subject} must be a list of strings")
+
+    values: list[str] = []
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise ValueError(f"{subject} must contain only strings")
+        value = item.strip()
+        if not value:
+            raise ValueError(f"{subject} must not contain blank entries")
+        _reject_runtime_specific_help_labels(value, field_name=field_name, command_name=command_name)
+        if value in seen:
+            duplicates.append(value)
+            continue
+        seen.add(value)
+        values.append(value)
+
+    if duplicates:
+        formatted = ", ".join(repr(value) for value in duplicates)
+        raise ValueError(f"{subject} must not contain duplicate entries: {formatted}")
+    return tuple(values)
+
+
+def _parse_command_help_variant(raw: object, *, command_name: str, variant_index: int) -> CommandHelpVariant:
+    """Validate one documented help variant for a command."""
+
+    subject = f"help.variants[{variant_index}] for {command_name}"
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"{subject} must be a mapping")
+    unknown_keys = sorted(str(key) for key in raw if str(key) not in _COMMAND_HELP_VARIANT_KEYS)
+    if unknown_keys:
+        raise ValueError(f"{subject} has unknown keys: {', '.join(unknown_keys)}")
+
+    command = _parse_command_help_string(
+        raw.get("command"),
+        field_name=f"help.variants[{variant_index}].command",
+        command_name=command_name,
+        required=True,
+    )
+    assert command is not None
+    parsed_variant = parse_command_label(command)
+    if parsed_variant.canonical_command != command_name:
+        raise ValueError(
+            f"help.variants[{variant_index}].command for {command_name} must normalize to {command_name}; "
+            f"got {parsed_variant.canonical_command}"
+        )
+
+    description = _parse_command_help_string(
+        raw.get("description"),
+        field_name=f"help.variants[{variant_index}].description",
+        command_name=command_name,
+        required=True,
+    )
+    assert description is not None
+    return CommandHelpVariant(
+        command=command,
+        description=description,
+        examples=_parse_command_help_string_list(
+            raw.get("examples"),
+            field_name=f"help.variants[{variant_index}].examples",
+            command_name=command_name,
+        ),
+        notes=_parse_command_help_string_list(
+            raw.get("notes"),
+            field_name=f"help.variants[{variant_index}].notes",
+            command_name=command_name,
+        ),
+    )
+
+
+def _parse_command_help_variants(raw: object, *, command_name: str) -> tuple[CommandHelpVariant, ...]:
+    """Validate documented help variants."""
+
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"help.variants for {command_name} must be a list of mappings")
+
+    variants: list[CommandHelpVariant] = []
+    seen_commands: set[str] = set()
+    duplicate_commands: list[str] = []
+    for index, item in enumerate(raw):
+        variant = _parse_command_help_variant(item, command_name=command_name, variant_index=index)
+        if variant.command in seen_commands:
+            duplicate_commands.append(variant.command)
+            continue
+        seen_commands.add(variant.command)
+        variants.append(variant)
+
+    if duplicate_commands:
+        formatted = ", ".join(repr(command) for command in duplicate_commands)
+        raise ValueError(f"help.variants for {command_name} must not contain duplicate commands: {formatted}")
+    return tuple(variants)
+
+
+def _parse_command_help_metadata(meta: Mapping[object, object], *, command_name: str) -> CommandHelpMetadata | None:
+    """Parse strict display-only help metadata from command frontmatter."""
+
+    if "help" not in meta:
+        return None
+
+    raw = meta.get("help")
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"help for {command_name} must be a mapping")
+
+    unknown_keys = sorted(str(key) for key in raw if str(key) not in _COMMAND_HELP_KEYS)
+    if unknown_keys:
+        raise ValueError(f"help for {command_name} has unknown keys: {', '.join(unknown_keys)}")
+
+    group = _parse_command_help_string(
+        raw.get("group"),
+        field_name="help.group",
+        command_name=command_name,
+        required=True,
+    )
+    assert group is not None
+    order = _parse_command_help_int(
+        raw.get("order"),
+        field_name="help.order",
+        command_name=command_name,
+        required=True,
+    )
+    assert order is not None
+
+    return CommandHelpMetadata(
+        group=group,
+        order=order,
+        compact_description=_parse_command_help_string(
+            raw.get("compact_description"),
+            field_name="help.compact_description",
+            command_name=command_name,
+        ),
+        display_signature=_parse_command_help_string(
+            raw.get("display_signature"),
+            field_name="help.display_signature",
+            command_name=command_name,
+        ),
+        detail_signature=_parse_command_help_string(
+            raw.get("detail_signature"),
+            field_name="help.detail_signature",
+            command_name=command_name,
+        ),
+        examples=_parse_command_help_string_list(
+            raw.get("examples"),
+            field_name="help.examples",
+            command_name=command_name,
+        ),
+        notes=_parse_command_help_string_list(
+            raw.get("notes"),
+            field_name="help.notes",
+            command_name=command_name,
+        ),
+        root_detail_order=_parse_command_help_int(
+            raw.get("root_detail_order"),
+            field_name="help.root_detail_order",
+            command_name=command_name,
+        ),
+        variants=_parse_command_help_variants(raw.get("variants"), command_name=command_name),
+    )
 
 
 def _normalize_command_policy_string(
@@ -1646,6 +1919,7 @@ def render_command_visibility_sections_from_frontmatter(frontmatter: str, *, com
     review_contract_value = _review_contract_frontmatter_value(meta, command_name=command_name)
     command_policy_value, command_policy_explicit = _command_policy_frontmatter_value(meta, command_name=command_name)
     _validate_command_frontmatter_keys(meta, command_name=command_name)
+    _parse_command_help_metadata(meta, command_name=command_name)
 
     requires = _parse_requires(meta.get("requires"), command_name=command_name)
     allowed_tools = _parse_allowed_tools(meta.get("allowed-tools"), command_name=command_name)
@@ -2366,6 +2640,10 @@ def _parse_command_file(path: Path, source: str) -> CommandDef:
     except ValueError as exc:
         raise ValueError(f"Invalid review-contract in {path}: {exc}") from exc
     _validate_command_frontmatter_keys(meta, command_name=command_name)
+    try:
+        help_metadata = _parse_command_help_metadata(meta, command_name=command_name)
+    except ValueError as exc:
+        raise ValueError(f"Invalid help metadata in {path}: {exc}") from exc
     requires = _parse_requires(meta.get("requires"), command_name=command_name)
     allowed_tools = _parse_allowed_tools(meta.get("allowed-tools"), command_name=command_name)
     agent = _parse_command_agent(meta.get("agent"), command_name=command_name)
@@ -2434,6 +2712,7 @@ def _parse_command_file(path: Path, source: str) -> CommandDef:
         requires=requires,
         allowed_tools=allowed_tools,
         review_contract=review_contract,
+        help=help_metadata,
         staged_loading=staged_loading,
         spawn_contracts=spawn_contracts,
         interactive_spawn_contracts=interactive_spawn_contracts,
@@ -2802,6 +3081,8 @@ __all__ = [
     "COMMANDS_DIR",
     "LOCAL_CLI_BRIDGE_WORKFLOW_EXEMPT_COMMANDS",
     "CommandDef",
+    "CommandHelpMetadata",
+    "CommandHelpVariant",
     "CommandOutputPolicy",
     "CommandPolicy",
     "CommandSubjectPolicy",

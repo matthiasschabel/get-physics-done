@@ -86,6 +86,16 @@ allowed-tools:
   - search_files
   - find_files
   - task
+help:
+  group: Writing and publication
+  order: 480
+  compact_description: Package a built manuscript for arXiv from the resolved GPD-owned manuscript root or entrypoint
+  display_signature: gpd:arxiv-submission [manuscript root or .tex entrypoint]
+  examples:
+    - gpd:arxiv-submission paper/
+  notes:
+    - Packages the GPD-owned manuscript root or a supported .tex entrypoint; it does not package arbitrary external material.
+  root_detail_order: 290
 ---
 
 

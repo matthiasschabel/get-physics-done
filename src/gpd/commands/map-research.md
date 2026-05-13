@@ -11,6 +11,13 @@ allowed-tools:
   - search_files
   - file_write
   - task
+help:
+  group: Starter commands
+  order: 60
+  compact_description: Map an existing research folder before planning
+  display_signature: gpd:map-research
+  detail_signature: gpd:map-research
+  root_detail_order: 20
 ---
 
 <objective>

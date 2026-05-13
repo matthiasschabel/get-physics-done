@@ -135,6 +135,20 @@ allowed-tools:
   - task
   - ask_user
   - web_search
+help:
+  group: Writing and publication
+  order: 460
+  compact_description: Run the staged review workflow on the current project manuscript or one explicit artifact
+  display_signature: gpd:peer-review [paper directory | manuscript path | explicit artifact path]
+  detail_signature: gpd:peer-review [paper directory | manuscript path | explicit artifact path]
+  examples:
+    - gpd:peer-review draft.docx
+    - gpd:peer-review data/observables.csv
+  notes:
+    - Explicit artifact intake follows command-policy supported suffixes for publication-artifact paths.
+    - Use `gpd validate artifact-text <path> --output <txt-path>` when explicit artifact text extraction is needed.
+    - Project-backed mode uses the resolved manuscript entrypoint before staged review.
+  root_detail_order: 270
 ---
 
 

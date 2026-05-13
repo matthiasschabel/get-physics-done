@@ -9,6 +9,11 @@ allowed-tools:
   - shell
   - task
   - ask_user
+help:
+  group: Roadmap and milestones
+  order: 270
+  compact_description: Start the next milestone
+  display_signature: gpd:new-milestone <name>
 ---
 
 

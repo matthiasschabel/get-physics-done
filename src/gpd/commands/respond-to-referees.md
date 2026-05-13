@@ -72,6 +72,20 @@ allowed-tools:
   - find_files
   - task
   - ask_user
+help:
+  group: Writing and publication
+  order: 470
+  compact_description: Draft referee responses and revise the resolved manuscript root
+  display_signature: gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]
+  detail_signature: gpd:respond-to-referees [--manuscript PATH --report PATH | report path | paste]
+  examples:
+    - gpd:respond-to-referees --manuscript paper/main.tex --report reports/referee-report.md
+    - gpd:respond-to-referees reports/referee-report.md
+    - gpd:respond-to-referees paste
+  notes:
+    - Uses a bounded external-authoring lane when an explicit intake manifest or subject is allowed by command policy.
+    - Project-backed review/response/package outputs stay under the resolved manuscript root; this is not a full publication-root migration.
+  root_detail_order: 280
 ---
 <objective>
 Structure a point-by-point response to referee reports and revise the manuscript accordingly.

@@ -11,6 +11,11 @@ allowed-tools:
   - search_files
   - find_files
   - ask_user
+help:
+  group: Writing and publication
+  order: 490
+  compact_description: Create presentation slides
+  display_signature: gpd:slides [topic, audience, or source path]
 ---
 
 

@@ -721,6 +721,49 @@ def render_markdown_frontmatter(preamble: str, frontmatter: str, separator: str,
     return rendered + body
 
 
+_TOP_LEVEL_FRONTMATTER_KEY_RE = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*:")
+
+
+def _strip_top_level_frontmatter_key(frontmatter: str, key: str) -> str:
+    """Return frontmatter with one top-level key and its nested block removed."""
+
+    stripped_lines: list[str] = []
+    skipping = False
+    for line in frontmatter.splitlines():
+        key_match = _TOP_LEVEL_FRONTMATTER_KEY_RE.match(line)
+        if key_match is not None:
+            if key_match.group("key") == key:
+                skipping = True
+                continue
+            skipping = False
+        if skipping:
+            continue
+        stripped_lines.append(line)
+    return "\n".join(stripped_lines).strip("\n")
+
+
+def strip_display_only_command_help_frontmatter(content: str) -> str:
+    """Remove command-owned help metadata from model/runtime-visible markdown.
+
+    The `help` frontmatter block is parsed by the registry for command discovery
+    and renderer projections. It is display metadata, not prompt authority, so
+    installed command prompts and prompt-surface diagnostics should not spend
+    model context on it.
+    """
+
+    preamble, frontmatter, separator, body = split_markdown_frontmatter(content)
+    if not frontmatter:
+        return content
+    if not re.search(r"(?m)^help\s*:", frontmatter):
+        return content
+    command_name_match = re.search(r"(?m)^name:\s*(?P<name>.+?)\s*$", frontmatter)
+    command_name = command_name_match.group("name").strip().strip("\"'") if command_name_match is not None else ""
+    if not command_name.startswith("gpd:"):
+        return content
+    stripped_frontmatter = _strip_top_level_frontmatter_key(frontmatter, "help")
+    return render_markdown_frontmatter(preamble, stripped_frontmatter, separator, body)
+
+
 COMPACT_STAGED_COMMAND_SHIM_SENTINEL = "<gpd_staged_bootstrap_shim"
 COMPACT_HELP_BRIDGE_SHIM_SENTINEL = "<gpd_help_bridge_shim"
 COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL = "<gpd_workflow_reference_shim"
@@ -1739,6 +1782,8 @@ def compile_markdown_for_runtime(
     Runtime-owned container conversions such as TOML command wrapping,
     SKILL frontmatter, or flat-command rendering stay in the adapter.
     """
+    content = strip_display_only_command_help_frontmatter(content)
+
     if src_root is not None and not get_runtime_descriptor(runtime).native_include_support:
         content = expand_at_includes(
             content,

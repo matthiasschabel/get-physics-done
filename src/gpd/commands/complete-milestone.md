@@ -9,6 +9,11 @@ allowed-tools:
   - file_read
   - file_write
   - shell
+help:
+  group: Roadmap and milestones
+  order: 280
+  compact_description: Archive a completed milestone
+  display_signature: gpd:complete-milestone <version>
 ---
 
 <objective>

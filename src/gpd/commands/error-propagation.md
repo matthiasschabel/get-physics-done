@@ -12,6 +12,12 @@ allowed-tools:
   - search_files
   - task
   - ask_user
+help:
+  group: Validation and analysis
+  order: 410
+  compact_description: Track uncertainties through a calculation chain
+  display_signature: gpd:error-propagation
+  root_detail_order: 220
 ---
 
 

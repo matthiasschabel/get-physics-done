@@ -38,6 +38,15 @@ def _rendered_command_index_rows() -> dict[str, str]:
     return dict(rows)
 
 
+def _metadata_index_signature(command: content_registry.CommandDef) -> str:
+    assert command.help is not None
+    if command.help.display_signature:
+        return command.help.display_signature
+    if command.argument_hint:
+        return f"{command.name} {command.argument_hint}"
+    return command.name
+
+
 def _detailed_command_block(content: str, command_heading: str, next_command_heading: str | None = None) -> str:
     detailed_start_marker, _ = help_surface_markers("detailed-command-reference")
     if detailed_start_marker in content:
@@ -100,6 +109,74 @@ def test_help_inventory_covers_registry_command_inventory() -> None:
 
     missing = sorted(registry_commands - help_inventory)
     assert missing == []
+
+
+def test_help_command_index_inventory_is_backed_by_command_help_metadata() -> None:
+    content_registry.invalidate_cache()
+    help_renderer.help_command_groups.cache_clear()
+
+    commands = [
+        content_registry.get_command(command_label)
+        for command_label in content_registry.list_commands(name_format="label")
+    ]
+    missing_help = sorted(command.name for command in commands if command.help is None)
+    assert missing_help == []
+
+    expected_rows: dict[str, str] = {}
+    duplicate_rows: list[str] = []
+    help_orders: dict[int, str] = {}
+    duplicate_orders: list[str] = []
+    for command in commands:
+        assert command.help is not None
+        if command.help.order in help_orders:
+            duplicate_orders.append(f"{help_orders[command.help.order]} / {command.name}")
+        help_orders[command.help.order] = command.name
+
+        signature = _metadata_index_signature(command)
+        if signature in expected_rows:
+            duplicate_rows.append(signature)
+        expected_rows[signature] = command.help.compact_description or command.description
+        for variant in command.help.variants:
+            if variant.command in expected_rows:
+                duplicate_rows.append(variant.command)
+            expected_rows[variant.command] = variant.description
+
+    assert duplicate_orders == []
+    assert duplicate_rows == []
+
+    rows = _rendered_command_index_rows()
+    assert set(rows) == set(expected_rows)
+    for signature, description in expected_rows.items():
+        assert rows[signature] == description
+
+    grouped_base_commands = {
+        entry.registry_command
+        for group in help_renderer.help_command_groups()
+        for entry in group.commands
+        if not entry.documented_variant
+    }
+    assert grouped_base_commands == {command.name for command in commands}
+
+
+def test_root_detail_inventory_is_selected_by_command_help_metadata() -> None:
+    content_registry.invalidate_cache()
+    help_renderer._root_detailed_reference_commands.cache_clear()
+
+    commands = [
+        content_registry.get_command(command_label)
+        for command_label in content_registry.list_commands(name_format="label")
+    ]
+    missing_help = sorted(command.name for command in commands if command.help is None)
+    assert missing_help == []
+    root_records = [
+        (command.help.root_detail_order, command.name.removeprefix("gpd:"))
+        for command in commands
+        if command.help is not None and command.help.root_detail_order is not None
+    ]
+    expected_root_slugs = [slug for _order, slug in sorted(root_records)]
+
+    root_headings = _detailed_command_headings(help_renderer.render_root_detailed_command_reference_markdown())
+    assert root_headings == expected_root_slugs
 
 
 def test_detailed_help_reference_has_one_block_for_each_registry_command() -> None:

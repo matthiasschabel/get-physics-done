@@ -29,6 +29,16 @@ allowed-tools:
   - search_files
   - find_files
   - ask_user
+help:
+  group: Validation and analysis
+  order: 330
+  compact_description: Run convergence checks for a project phase or one explicit current-workspace artifact
+  display_signature: gpd:numerical-convergence
+  examples:
+    - gpd:numerical-convergence results/mesh-study.csv
+  notes:
+    - Part of the project-aware technical-analysis lane for explicit current-workspace convergence checks.
+  root_detail_order: 160
 ---
 
 

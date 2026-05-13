@@ -30,6 +30,16 @@ allowed-tools:
   - search_files
   - task
   - ask_user
+help:
+  group: Validation and analysis
+  order: 400
+  compact_description: Rank which inputs matter most from project context or explicit current-workspace flags
+  display_signature: gpd:sensitivity-analysis
+  examples:
+    - gpd:sensitivity-analysis --target observable --params alpha,beta --method sobol
+  notes:
+    - Part of the project-aware technical-analysis lane for ranking influential inputs from project context or explicit current-workspace flags.
+  root_detail_order: 200
 ---
 
 

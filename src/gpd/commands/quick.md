@@ -11,6 +11,11 @@ allowed-tools:
   - shell
   - task
   - ask_user
+help:
+  group: Starter commands
+  order: 110
+  compact_description: Run one small bounded task without the full phase workflow
+  display_signature: gpd:quick
 ---
 
 

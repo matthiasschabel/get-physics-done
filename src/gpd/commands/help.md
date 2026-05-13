@@ -3,6 +3,11 @@ name: gpd:help
 description: Show available GPD commands and usage guide
 argument-hint: "[--all | --command <name>]"
 context_mode: global
+help:
+  group: Starter commands
+  order: 10
+  compact_description: Show the quick start or command index
+  display_signature: gpd:help
 ---
 
 

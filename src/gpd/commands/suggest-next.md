@@ -7,6 +7,12 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Starter commands
+  order: 90
+  compact_description: Ask only for the next best action
+  display_signature: gpd:suggest-next
+  root_detail_order: 60
 ---
 
 

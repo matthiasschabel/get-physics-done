@@ -12,6 +12,11 @@ allowed-tools:
   - search_files
   - ask_user
   - task
+help:
+  group: Planning and execution
+  order: 200
+  compact_description: Run all remaining phases autonomously (discuss→plan→execute→verify each)
+  display_signature: gpd:autonomous [--from N]
 ---
 
 <objective>

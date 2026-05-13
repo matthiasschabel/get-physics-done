@@ -10,6 +10,11 @@ allowed-tools:
   - find_files
   - search_files
   - ask_user
+help:
+  group: Planning and execution
+  order: 120
+  compact_description: Capture phase context before planning
+  display_signature: gpd:discuss-phase <number>
 ---
 
 

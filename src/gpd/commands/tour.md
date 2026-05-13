@@ -5,6 +5,11 @@ argument-hint: "[optional short goal]"
 context_mode: projectless
 allowed-tools:
   - file_read
+help:
+  group: Starter commands
+  order: 30
+  compact_description: Show a read-only overview of the main commands
+  display_signature: gpd:tour
 ---
 
 

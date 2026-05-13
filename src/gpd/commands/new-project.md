@@ -9,6 +9,26 @@ allowed-tools:
   - file_write
   - task
   - ask_user
+help:
+  group: Starter commands
+  order: 40
+  compact_description: Create a full GPD project
+  display_signature: gpd:new-project
+  variants:
+    - command: gpd:new-project --minimal
+      description: Create a GPD project through the shortest setup path
+  detail_signature: gpd:new-project
+  examples:
+    - gpd:new-project --minimal
+    - gpd:new-project --minimal @file.md
+    - gpd:new-project --auto
+  notes:
+    - All modes build a scoping contract before downstream artifacts.
+    - Blocking gaps get one targeted repair prompt, and scope must be explicitly approved before requirements or roadmap generation.
+    - '`--minimal @file.md` still repairs blocking gaps and asks for scoping approval.'
+    - '`--auto` follows the configured autonomy gates.'
+    - '`GPD/state.json.bak` and `GPD/state.json.lock` are local recovery/coordination files.'
+  root_detail_order: 10
 ---
 
 <context>

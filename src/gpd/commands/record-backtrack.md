@@ -9,6 +9,12 @@ allowed-tools:
   - file_edit
   - shell
   - ask_user
+help:
+  group: Tangents, memory, and exports
+  order: 610
+  compact_description: Capture a backtrack event (what went wrong, what got reverted)
+  display_signature: gpd:record-backtrack [--reverted-commit=<sha>] [--trigger=<text>] [--phase=<NN-slug>] [description]
+  root_detail_order: 320
 ---
 
 

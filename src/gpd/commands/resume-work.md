@@ -10,6 +10,14 @@ allowed-tools:
   - shell
   - file_write
   - ask_user
+help:
+  group: Starter commands
+  order: 70
+  compact_description: Resume the selected project's canonical state inside the runtime
+  display_signature: gpd:resume-work
+  notes:
+    - '`state.json.continuation` is the durable authority. Canonical continuation fields define the public resume vocabulary: `active_resume_kind`, `active_resume_origin`, `active_resume_pointer`, `active_bounded_segment`, `derived_execution_head`, `active_resume_result`, `continuity_handoff_file`, `recorded_continuity_handoff_file`, `missing_continuity_handoff_file`, `resume_candidates`.'
+  root_detail_order: 30
 ---
 
 

@@ -40,6 +40,12 @@ allowed-tools:
   - mcp__gpd_verification__get_bundle_checklist
   - mcp__gpd_verification__suggest_contract_checks
   - mcp__gpd_verification__run_contract_check
+help:
+  group: Validation and analysis
+  order: 290
+  compact_description: Run physics verification checks
+  display_signature: gpd:verify-work [phase]
+  root_detail_order: 120
 ---
 
 <objective>

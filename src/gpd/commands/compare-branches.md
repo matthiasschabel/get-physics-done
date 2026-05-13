@@ -7,6 +7,11 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Tangents, memory, and exports
+  order: 520
+  compact_description: Compare results across hypothesis branches
+  display_signature: gpd:compare-branches
 ---
 
 

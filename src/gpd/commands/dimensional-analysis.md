@@ -27,6 +27,16 @@ allowed-tools:
   - find_files
   - file_write
   - ask_user
+help:
+  group: Validation and analysis
+  order: 310
+  compact_description: Check dimensional consistency for a project phase or one explicit current-workspace file
+  display_signature: gpd:dimensional-analysis
+  examples:
+    - gpd:dimensional-analysis results/01-SUMMARY.md
+  notes:
+    - Part of the project-aware technical-analysis lane; analysis artifacts belong under GPD/analysis/ when a standalone target is supplied.
+  root_detail_order: 140
 ---
 
 

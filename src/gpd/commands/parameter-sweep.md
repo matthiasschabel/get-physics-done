@@ -32,6 +32,14 @@ allowed-tools:
   - search_files
   - task
   - ask_user
+help:
+  group: Validation and analysis
+  order: 390
+  compact_description: Run a structured parameter sweep
+  display_signature: gpd:parameter-sweep [phase | computation anchor]
+  examples:
+    - gpd:parameter-sweep --param beta --range 0.1:1.0
+  root_detail_order: 170
 ---
 
 <objective>

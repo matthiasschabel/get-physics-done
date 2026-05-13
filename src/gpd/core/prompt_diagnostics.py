@@ -18,6 +18,7 @@ from gpd.adapters.install_utils import (
     expand_at_includes,
     project_markdown_for_runtime,
     projection_target_dir_from_path_prefix,
+    strip_display_only_command_help_frontmatter,
 )
 from gpd.adapters.runtime_catalog import (
     get_runtime_descriptor,
@@ -428,26 +429,27 @@ def measure_prompt_file(
     """Measure one prompt source without mutating repo or project state."""
 
     raw_text = source.absolute_path.read_text(encoding="utf-8")
-    expanded_text = expand_at_includes(raw_text, source.src_root, DEFAULT_PATH_PREFIX)
-    raw_include_count = _count_raw_includes(raw_text)
+    measured_text = strip_display_only_command_help_frontmatter(raw_text) if source.kind == "command" else raw_text
+    expanded_text = expand_at_includes(measured_text, source.src_root, DEFAULT_PATH_PREFIX)
+    raw_include_count = _count_raw_includes(measured_text)
     (
         visible_schema_example_count,
         invalid_return_examples,
         invalid_frontmatter_examples,
-    ) = _inspect_visible_schema_examples(raw_text, source.path)
+    ) = _inspect_visible_schema_examples(measured_text, source.path)
     invalid_return_count = len(invalid_return_examples)
     invalid_frontmatter_count = len(invalid_frontmatter_examples)
-    return_field_mentions = _scan_return_field_mentions(raw_text, source.path)
+    return_field_mentions = _scan_return_field_mentions(measured_text, source.path)
     disallowed_return_field_mentions = _disallowed_return_field_mentions(return_field_mentions)
-    hard_gate_line_count, hard_gate_density = _hard_gate_metrics(raw_text)
-    shell_fence_count = _count_shell_fences(raw_text)
-    shell_parsing_line_count = _count_shell_parsing_lines(raw_text)
+    hard_gate_line_count, hard_gate_density = _hard_gate_metrics(measured_text)
+    shell_fence_count = _count_shell_fences(measured_text)
+    shell_parsing_line_count = _count_shell_parsing_lines(measured_text)
     unresolved_include_count = len(_UNRESOLVED_INCLUDE_RE.findall(expanded_text))
 
     runtime_projection: tuple[RuntimeProjectionMetric, ...] = ()
     if include_runtime_projections and source.kind in {"command", "agent"}:
         runtime_projection = tuple(
-            _measure_runtime_projection(source, raw_text, expanded_text, runtime_name)
+            _measure_runtime_projection(source, measured_text, expanded_text, runtime_name)
             for runtime_name in _normalize_runtime_names(runtime_names)
         )
 
@@ -464,8 +466,8 @@ def measure_prompt_file(
         kind=source.kind,
         name=source.name,
         path=source.path,
-        raw_line_count=_line_count(raw_text),
-        raw_char_count=len(raw_text),
+        raw_line_count=_line_count(measured_text),
+        raw_char_count=len(measured_text),
         raw_include_count=raw_include_count,
         expanded_line_count=_line_count(expanded_text),
         expanded_char_count=len(expanded_text),

@@ -29,6 +29,16 @@ allowed-tools:
   - find_files
   - task
   - ask_user
+help:
+  group: Planning and execution
+  order: 210
+  compact_description: Run a rigorous derivation workflow from project context or one explicit current-workspace target
+  display_signature: gpd:derive-equation
+  examples:
+    - gpd:derive-equation "effective mass from self-energy"
+  notes:
+    - Part of the project-aware technical-analysis lane for explicit current-workspace derivations.
+  root_detail_order: 130
 ---
 
 

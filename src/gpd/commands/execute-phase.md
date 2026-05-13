@@ -14,6 +14,12 @@ allowed-tools:
   - shell
   - task
   - ask_user
+help:
+  group: Planning and execution
+  order: 190
+  compact_description: Run all plans in a phase, or only gap-closure plans
+  display_signature: gpd:execute-phase <phase-number> [--gaps-only]
+  root_detail_order: 110
 ---
 
 <objective>

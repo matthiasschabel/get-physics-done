@@ -14,6 +14,14 @@ allowed-tools:
   - search_files
   - task
   - web_fetch
+help:
+  group: Planning and execution
+  order: 180
+  compact_description: Build a detailed execution plan for a phase
+  display_signature: gpd:plan-phase <number>
+  notes:
+    - '`--skip-verify` may skip routine verification, but proof-bearing plans still require checker review or an equivalent main-context audit.'
+  root_detail_order: 100
 ---
 
 <objective>

@@ -7,6 +7,14 @@ allowed-tools:
   - file_read
   - shell
   - ask_user
+help:
+  group: Planning and execution
+  order: 170
+  compact_description: Route a scope change to the right milestone/phase workflow
+  display_signature: gpd:route [--frozen=yes|no] [--change=extend|revise] [--layer=new|change]
+  notes:
+    - The frozen scope-expansion path renders the ordered compound sequence `gpd:complete-milestone` then `gpd:new-milestone`.
+  root_detail_order: 310
 ---
 
 

@@ -16,6 +16,11 @@ allowed-tools:
   - file_read
   - shell
   - task
+help:
+  group: Planning and execution
+  order: 130
+  compact_description: Run a focused phase literature survey
+  display_signature: gpd:research-phase <number>
 ---
 <objective>
 Research how to tackle a phase. Use this command when you want phase-specific investigation before planning or when you need to re-research after planning is complete.

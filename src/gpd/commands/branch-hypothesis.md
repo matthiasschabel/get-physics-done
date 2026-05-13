@@ -11,6 +11,11 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Tangents, memory, and exports
+  order: 510
+  compact_description: Explicit git-backed alternative path for a side investigation
+  display_signature: gpd:branch-hypothesis <description>
 ---
 
 

@@ -14,6 +14,11 @@ allowed-tools:
   - shell
   - find_files
   - search_files
+help:
+  group: Configuration and maintenance
+  order: 690
+  compact_description: Repair diverged `STATE.md` and `state.json`
+  display_signature: gpd:sync-state
 ---
 
 

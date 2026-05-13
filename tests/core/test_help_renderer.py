@@ -8,6 +8,7 @@ from collections import Counter
 import pytest
 
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
+from gpd.command_labels import CANONICAL_COMMAND_PREFIX, runtime_public_command_prefixes
 from gpd.core import help_renderer
 from gpd.core.public_surface_contract import (
     beginner_startup_ladder,
@@ -17,7 +18,7 @@ from gpd.core.public_surface_contract import (
     local_cli_resume_command,
     local_cli_resume_recent_command,
 )
-from gpd.registry import list_commands
+from gpd.registry import CommandDef, CommandHelpMetadata, CommandHelpVariant, list_commands
 
 _COMMAND_ROW_RE = re.compile(r"^- `([^`]+)` - (.+)$", re.MULTILINE)
 _NUMBERED_COMMAND_ROW_RE = re.compile(r"^\d+\. `([^`]+)` - (.+)$", re.MULTILINE)
@@ -60,6 +61,71 @@ def _descriptor_with_public_prefix_kind(kind: str):
         for descriptor in iter_runtime_descriptors()
         if descriptor.validated_command_surface == f"public_runtime_{kind}_command"
     )
+
+
+def _fake_command(
+    slug: str,
+    *,
+    description: str,
+    help_metadata: CommandHelpMetadata | None,
+    argument_hint: str = "",
+    context_mode: str = "projectless",
+) -> CommandDef:
+    return CommandDef(
+        name=f"gpd:{slug}",
+        description=description,
+        argument_hint=argument_hint,
+        requires={},
+        allowed_tools=[],
+        content=f"{slug} body",
+        path=f"/fake/{slug}.md",
+        source="commands",
+        context_mode=context_mode,
+        help=help_metadata,
+    )
+
+
+def _fake_registry_label(command_name: str) -> str:
+    head = command_name.strip().split()[0]
+    for prefix in runtime_public_command_prefixes():
+        if prefix != CANONICAL_COMMAND_PREFIX and head.startswith(prefix):
+            return f"{CANONICAL_COMMAND_PREFIX}{head.removeprefix(prefix)}"
+    if head.startswith(CANONICAL_COMMAND_PREFIX):
+        return head
+    return f"{CANONICAL_COMMAND_PREFIX}{head}"
+
+
+@pytest.fixture
+def fake_help_registry(monkeypatch: pytest.MonkeyPatch):
+    commands_by_label: dict[str, CommandDef] = {}
+
+    def install(*commands: CommandDef) -> None:
+        commands_by_label.clear()
+        commands_by_label.update({command.name: command for command in commands})
+
+        def fake_list_commands(*, name_format: str = "slug") -> list[str]:
+            if name_format == "label":
+                return sorted(commands_by_label)
+            if name_format == "slug":
+                return sorted(label.removeprefix("gpd:") for label in commands_by_label)
+            raise ValueError("name_format must be 'slug' or 'label'")
+
+        def fake_get_command(command_name: str) -> CommandDef:
+            label = _fake_registry_label(command_name)
+            try:
+                return commands_by_label[label]
+            except KeyError as exc:
+                raise KeyError(f"Command not found: {command_name}") from exc
+
+        monkeypatch.setattr(help_renderer, "list_commands", fake_list_commands)
+        monkeypatch.setattr(help_renderer, "get_command", fake_get_command)
+        help_renderer.help_command_groups.cache_clear()
+        help_renderer._root_detailed_reference_commands.cache_clear()
+
+    yield install
+
+    help_renderer.help_command_groups.cache_clear()
+    help_renderer._root_detailed_reference_commands.cache_clear()
 
 
 def test_help_renderer_renders_quick_start_structure_without_freezing_marker_body() -> None:
@@ -115,6 +181,58 @@ def test_help_renderer_quick_start_rewrites_runtime_commands_for_public_prefix()
         ),
     )
     _assert_contains_none(quick_start, ("`gpd:start`", "`gpd:progress`"))
+
+
+def test_help_command_groups_follow_command_owned_metadata(fake_help_registry) -> None:
+    fake_help_registry(
+        _fake_command(
+            "alpha",
+            description="Fallback alpha description",
+            argument_hint="[target]",
+            help_metadata=CommandHelpMetadata(
+                group="Synthetic later group",
+                order=20,
+                compact_description="Alpha compact row from metadata",
+                display_signature="gpd:alpha [metadata-target]",
+                variants=(
+                    CommandHelpVariant(
+                        command="gpd:alpha --brief",
+                        description="Alpha documented variant from metadata",
+                    ),
+                ),
+            ),
+        ),
+        _fake_command(
+            "beta",
+            description="Beta registry description fallback",
+            help_metadata=CommandHelpMetadata(group="Synthetic first group", order=10),
+        ),
+    )
+
+    groups = help_renderer.help_command_groups()
+
+    assert [group.name for group in groups] == ["Synthetic first group", "Synthetic later group"]
+    assert [
+        (entry.command, entry.description, entry.registry_command, entry.documented_variant)
+        for entry in groups[0].commands
+    ] == [("gpd:beta", "Beta registry description fallback", "gpd:beta", False)]
+    assert [
+        (entry.command, entry.description, entry.registry_command, entry.documented_variant)
+        for entry in groups[1].commands
+    ] == [
+        ("gpd:alpha [metadata-target]", "Alpha compact row from metadata", "gpd:alpha", False),
+        ("gpd:alpha --brief", "Alpha documented variant from metadata", "gpd:alpha", True),
+    ]
+
+    command_index = help_renderer.render_command_index_markdown()
+    _assert_in_order(command_index, ("### Synthetic first group", "### Synthetic later group"))
+    _assert_contains_all(
+        command_index,
+        (
+            "- `gpd:alpha [metadata-target]` - Alpha compact row from metadata",
+            "- `gpd:alpha --brief` - Alpha documented variant from metadata",
+        ),
+    )
 
 
 def test_help_renderer_renders_command_index_from_registry_backed_groups() -> None:
@@ -193,6 +311,101 @@ def test_command_detail_payload_uses_registry_and_normalizes_documented_variants
 def test_command_detail_payload_fails_closed_for_unknown_commands() -> None:
     with pytest.raises(KeyError):
         help_renderer.command_detail_payload("does-not-exist")
+
+
+def test_command_detail_rendering_uses_command_help_signatures_examples_notes_and_variants(
+    fake_help_registry,
+) -> None:
+    fake_help_registry(
+        _fake_command(
+            "alpha",
+            description="Alpha detail description",
+            argument_hint="[fallback-target]",
+            help_metadata=CommandHelpMetadata(
+                group="Synthetic detail group",
+                order=10,
+                display_signature="gpd:alpha [index-signature]",
+                detail_signature="gpd:alpha --detail <metadata-target>",
+                examples=("gpd:alpha --detail paper.tex", "gpd:alpha --detail data.csv"),
+                notes=("Metadata detail note.",),
+                variants=(
+                    CommandHelpVariant(
+                        command="gpd:alpha --quick",
+                        description="Quick documented path",
+                    ),
+                ),
+            ),
+        )
+    )
+
+    payload = help_renderer.command_detail_payload("gpd:alpha --quick", minimal=True)
+    detail = help_renderer.render_command_detail_markdown("gpd:alpha")
+
+    assert payload["canonical_command"] == "gpd:alpha"
+    assert payload["group"] == "Synthetic detail group"
+    assert payload["signature"] == "gpd:alpha --detail <metadata-target>"
+    assert payload["documented_variants"] == ["gpd:alpha --quick"]
+    assert detail.startswith("### Synthetic detail group")
+    _assert_contains_all(
+        detail,
+        (
+            "**`gpd:alpha --detail <metadata-target>`**",
+            "`gpd:alpha --detail paper.tex`",
+            "`gpd:alpha --detail data.csv`",
+            "Documented variants:",
+            "`gpd:alpha --quick`",
+            "Notes:",
+            "Metadata detail note.",
+        ),
+    )
+    _assert_contains_none(detail, ("gpd:alpha [fallback-target]", "gpd:alpha [index-signature]"))
+
+
+def test_root_detailed_reference_selection_and_order_come_from_command_help_metadata(
+    fake_help_registry,
+) -> None:
+    fake_help_registry(
+        _fake_command(
+            "alpha",
+            description="Alpha root detail",
+            help_metadata=CommandHelpMetadata(
+                group="Synthetic root group",
+                order=10,
+                root_detail_order=30,
+                examples=("gpd:alpha --root",),
+                notes=("Alpha root note.",),
+            ),
+        ),
+        _fake_command(
+            "beta",
+            description="Beta root detail",
+            help_metadata=CommandHelpMetadata(
+                group="Synthetic root group",
+                order=20,
+                root_detail_order=10,
+                detail_signature="gpd:beta [metadata-root]",
+                examples=("gpd:beta --root",),
+            ),
+        ),
+        _fake_command(
+            "hidden",
+            description="Hidden root detail",
+            help_metadata=CommandHelpMetadata(group="Synthetic root group", order=30),
+        ),
+    )
+
+    root_reference = help_renderer.render_root_detailed_command_reference_markdown()
+
+    _assert_in_order(root_reference, ("**`gpd:beta [metadata-root]`**", "**`gpd:alpha`**"))
+    _assert_contains_all(
+        root_reference,
+        (
+            "Usage: `gpd:beta --root`",
+            "Usage: `gpd:alpha --root`",
+            "Notes: Alpha root note.",
+        ),
+    )
+    assert "Hidden root detail" not in root_reference
 
 
 def test_render_command_detail_markdown_uses_registry_and_renderer_metadata() -> None:

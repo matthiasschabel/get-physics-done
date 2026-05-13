@@ -58,6 +58,19 @@ allowed-tools:
   - find_files
   - task
   - ask_user
+help:
+  group: Knowledge authoring
+  order: 430
+  compact_description: Review one canonical current-workspace knowledge doc and write its review artifact
+  display_signature: gpd:review-knowledge [knowledge path|knowledge id]
+  detail_signature: gpd:review-knowledge [knowledge path or knowledge id]
+  examples:
+    - gpd:review-knowledge GPD/knowledge/K-example.md
+  notes:
+    - Reviews a canonical current-workspace knowledge document using typed approval evidence.
+    - Approval can promote stable knowledge; stable and superseded states remain addressable and traceable by canonical path or knowledge id.
+    - Writes review artifacts under GPD/knowledge/reviews/.
+  root_detail_order: 240
 ---
 
 <objective>

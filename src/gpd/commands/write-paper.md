@@ -104,6 +104,20 @@ allowed-tools:
   - task
   - web_search
   - ask_user
+help:
+  group: Writing and publication
+  order: 450
+  compact_description: Draft a paper from current project results or one explicit external-authoring intake manifest into the resolved manuscript lane
+  display_signature: gpd:write-paper [--intake path/to/write-paper-authoring-input.json]
+  examples:
+    - gpd:write-paper
+    - gpd:write-paper --intake intake/write-paper-authoring-input.json
+  notes:
+    - Uses a bounded external-authoring lane driven by an explicit intake manifest only.
+    - GPD-authored outputs live under `GPD/publication/{subject_slug}/...`; `GPD/publication/{subject_slug}/intake/` stores intake/provenance state only.
+    - It does not mine arbitrary folders, and embedded external staged-review parity is out of scope.
+    - Project-backed review/response/package outputs remain in the resolved GPD manuscript lane.
+  root_detail_order: 260
 ---
 
 

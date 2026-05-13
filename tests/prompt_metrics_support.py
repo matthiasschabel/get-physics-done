@@ -10,7 +10,12 @@ from math import ceil
 from pathlib import Path
 
 from gpd.adapters import get_adapter
-from gpd.adapters.install_utils import expand_at_includes, parse_at_include_path, project_markdown_for_runtime
+from gpd.adapters.install_utils import (
+    expand_at_includes,
+    parse_at_include_path,
+    project_markdown_for_runtime,
+    strip_display_only_command_help_frontmatter,
+)
 from gpd.core import prompt_markdown_scan as _prompt_markdown_scan
 from gpd.core.model_visible_text import command_visibility_note
 
@@ -261,6 +266,8 @@ def measure_prompt_surface(
     """Measure prompt weight and first-question anchors for one prompt file."""
 
     raw_text = path.read_text(encoding="utf-8")
+    if path.parent.name == "commands":
+        raw_text = strip_display_only_command_help_frontmatter(raw_text)
     expanded_text = expand_at_includes(raw_text, src_root, path_prefix, runtime=runtime)
     first_question_line = None
     first_question_marker = None
@@ -292,6 +299,8 @@ def measure_projected_prompt_surface(
     """Measure the final runtime-visible projected prompt surface."""
 
     raw_text = path.read_text(encoding="utf-8")
+    if path.parent.name == "commands":
+        raw_text = strip_display_only_command_help_frontmatter(raw_text)
     projected_text = projected_prompt_text(
         path,
         runtime=runtime,

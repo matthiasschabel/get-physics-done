@@ -12,6 +12,18 @@ allowed-tools:
   - shell
   - search_files
   - find_files
+help:
+  group: Starter commands
+  order: 80
+  compact_description: Review project status and likely next steps
+  display_signature: gpd:progress
+  examples:
+    - gpd:progress --full
+    - gpd:progress --brief
+    - gpd:progress --reconcile
+  notes:
+    - 'The local CLI `gpd progress` is a read-only renderer with `json|bar|table` output. Local CLI: `gpd progress json|bar|table`.'
+  root_detail_order: 50
 ---
 
 <objective>

@@ -48,8 +48,9 @@ from gpd.adapters.install_utils import (
     rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
 )
-from gpd.adapters.runtime_catalog import paths_equal
+from gpd.adapters.runtime_catalog import get_runtime_descriptor, paths_equal
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
+from gpd.command_labels import validated_public_command_prefix
 from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,8 @@ def convert_to_copilot_frontmatter(content: str, path_prefix: str | None = None)
 
     converted = content
     converted = convert_tool_references_in_body(converted, _TOOL_REFERENCE_MAP)
+    public_prefix = validated_public_command_prefix(get_runtime_descriptor("copilot-cli"))
+    converted = converted.replace("`gpd:`", f"`{public_prefix}`")
     converted = _GPD_SLASH_COMMAND_RE.sub(r"/gpd-\g<command>", converted)
     converted = re.sub(r"~/\.claude\b", lambda m: resolved_config_dir, converted)
 

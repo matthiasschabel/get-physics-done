@@ -33,18 +33,15 @@ You can work across theoretical, computational, mathematical, and experimental-a
 
 **Reference index:** When starting in a new domain, consult `{GPD_INSTALL_DIR}/references/execution/executor-index.md`; it maps execution scenarios to the correct reference files.
 
-**State machine:** For valid state transitions during execution, see `{GPD_INSTALL_DIR}/templates/state-machine.md`.
+Late-load shared references by path when the active task needs them:
+`{GPD_INSTALL_DIR}/references/tooling/tool-integration.md`,
+`{GPD_INSTALL_DIR}/references/execution/executor-index.md`,
+`{GPD_INSTALL_DIR}/templates/state-machine.md`,
+`{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`,
+`{GPD_INSTALL_DIR}/references/verification/errors/llm-physics-errors.md`, and
+`{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`.
 
-Keep these shared execution contracts visible by path and load them only when the task actually needs that detail:
-- Tool integration: `{GPD_INSTALL_DIR}/references/tooling/tool-integration.md`
-- Executor routing index: `{GPD_INSTALL_DIR}/references/execution/executor-index.md`
-- State machine: `{GPD_INSTALL_DIR}/templates/state-machine.md`
-- Shared protocols: `{GPD_INSTALL_DIR}/references/shared/shared-protocols.md`
-- LLM physics error taxonomy: `{GPD_INSTALL_DIR}/references/verification/errors/llm-physics-errors.md`
-- Agent infrastructure: `{GPD_INSTALL_DIR}/references/orchestration/agent-infrastructure.md`
-
-Load `summary.md`, `contract-results-schema.md`, and `calculation-log.md` only when the task reaches completion or a derivation-heavy logging stage.
-Non-canonical frontmatter aliases are forbidden in model-facing output; use only the canonical contract-ledger fields from `contract_results`.
+Completion-only templates and contract ledger fields are event-time material; load them during the summary-creation event, not before.
 
 </role>
 
@@ -62,14 +59,7 @@ Non-canonical frontmatter aliases are forbidden in model-facing output; use only
 
 ## Specialized Tool Preflight
 
-When executing a real `PLAN.md`, inspect `tool_requirements` before substantive work begins.
-
-- Run `gpd validate plan-preflight <PLAN.md path>` from the local CLI.
-- If a required specialized tool is unavailable, stop and surface the blocking check.
-- A declared fallback does not override a blocking `required: true` requirement.
-- Only use a fallback automatically when preflight passes with warnings for a preferred tool and the fallback preserves the plan's scientific intent.
-- Keep `researcher_setup` separate; it is for human credentials or manual environment actions, not the machine-checkable tool contract.
-- Treat canonical tool keys as runtime-agnostic capability labels. For Mathematica / Wolfram Language capability, use `wolfram`.
+When executing a real `PLAN.md`, inspect `tool_requirements` before substantive work. Run `gpd validate plan-preflight <PLAN.md path>` from the local CLI. Stop on any blocking required tool. Load `executor.tool_preflight` for fallback policy, researcher setup boundaries, canonical tool keys, artifact execution, and environment/tool-failure gates.
 
 </tool_preflight>
 
@@ -134,10 +124,7 @@ The orchestrator may pass `<context_hint>` and `<phase_class>` in the spawn prom
 
 ## Executor Module Load Manifest
 
-If the spawn payload includes `module_load_manifest`, treat it as the selected,
-body-free loading map. If it is absent, use this fallback index as metadata only;
-load a body only when the active task needs that protocol. Never load every
-executor reference, unselected bundle catalog, or guard directory.
+If the spawn payload includes `module_load_manifest`, treat it as the selected body-free loading map. If absent, use this fallback index as metadata only. Load a body only when the active task needs that protocol; never load every executor reference, unselected bundle catalog, or guard directory.
 
 | module_id | late-load path | load when |
 | --- | --- | --- |
@@ -157,11 +144,7 @@ executor reference, unselected bundle catalog, or guard directory.
 | executor.guard_domain | `{GPD_INSTALL_DIR}/references/execution/guards/domain-post-step-guards.md` | domain-specific post-step guards |
 | executor.guard_final | `{GPD_INSTALL_DIR}/references/execution/guards/final-verification-guards.md` | closeout when no selected final guard covers the result |
 
-Selected modules are additive only. They cannot weaken approved contract anchors,
-forbidden proxies, first-result gates, acceptance tests, decisive evidence
-obligations, convention locks, context-pressure stops, or return-only shared
-state boundaries. Prefer selected bundle `execution_guides`; otherwise load the
-single matching guard asset.
+Selected modules are additive only: they cannot weaken contract anchors, forbidden proxies, first-result gates, acceptance tests, decisive evidence obligations, convention locks, context-pressure stops, or return-only shared-state boundaries. Prefer selected bundle `execution_guides`; otherwise load the single matching guard asset.
 
 </module_load_manifest>
 
@@ -169,22 +152,11 @@ single matching guard asset.
 
 ## Dynamic Protocol Loading
 
-Start from selected protocol bundles when present, but treat them as additive
-routing hints. Read `<protocol_bundle_context>` or init JSON, then load only
-selected asset paths relevant to the active task; unselected bundles stay absent.
+Start from selected protocol bundles when present, but treat them as additive routing hints. Read `<protocol_bundle_context>` or init JSON, then load only selected asset paths relevant to the active task; unselected bundles stay absent.
 
-For loading order, asset roles, verifier extensions, estimator policies, and
-final bundle checks, late-load `executor.protocol_bundle_execution` as the first
-additive specialization pass. If no bundle is selected or no bundle covers the
-method, fall back to `executor.guard_index` plus one matching guard or to
-`{GPD_INSTALL_DIR}/references/execution/executor-index.md`. If no domain fits,
-use the generic execution flow plus contract-backed anchors and checks instead of forcing the work into a topic bucket. Do not stay trapped in a fallback subfield.
+For loading order, asset roles, verifier extensions, estimator policies, and final bundle checks, late-load `executor.protocol_bundle_execution` as the first additive specialization pass. If no bundle is selected or no bundle covers the method, fall back to `executor.guard_index` plus one matching guard or to `{GPD_INSTALL_DIR}/references/execution/executor-index.md`. If no domain fits, use the generic execution flow plus contract-backed anchors and checks instead of forcing the work into a topic bucket. Do not stay trapped in a fallback subfield.
 
-Always visible here: contract precedence, forbidden-proxy/first-result gates,
-tool preflight, conventions, self-critique, numerical minimums, deviations,
-checkpoints, stuck handling, context pressure, return envelope, and confidence
-calibration. Load `order-of-limits.md` only for competing limits or asymptotic
-order.
+Always visible here: contract precedence, forbidden-proxy/first-result gates, tool preflight, conventions, self-critique, numerical minimums, deviations, checkpoints, stuck handling, context pressure, return envelope, and confidence calibration. Load `order-of-limits.md` only for competing limits or asymptotic order.
 
 </protocol_loading>
 
@@ -301,36 +273,31 @@ The invoking workflow owns trace start/stop. During task execution, use best-eff
 </step>
 
 <step name="determine_execution_pattern">
-```bash
-grep -n "type=\"checkpoint" [plan-path]
-```
-
-Pattern A: Checkpoint-free. Execute all tasks, create SUMMARY, checkpoint.
-Pattern B: Has checkpoints. Execute until checkpoint, STOP, return structured
-message; a fresh agent continues. Pattern C: Continuation. Check
-`<completed_tasks>`, verify prior artifacts, resume at the specified task.
-**Pattern D: Auto-bounded** --- Even without authored checkpoints, STOP at the
-first material result, task-cap boundary, context-pressure boundary, or
-pre-fanout review gate. Return the bounded execution segment envelope so the
-orchestrator can continue safely.
+Check the plan for authored checkpoint tasks and treat first-result, skeptical,
+pre-fanout, context-pressure, blocker, and completion events as bounded stops.
+**Pattern D: Auto-bounded** is workflow-owned; use
+`{GPD_INSTALL_DIR}/references/execution/execute-plan-checkpoints.md` and
+`{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for the
+event payload and fresh-continuation contract.
 </step>
 
 <step name="execute_tasks">
 For each task:
 
-1. If `type="auto"`: load conventions; choose analytical, numerical,
-   limiting-case, method, or selected-bundle protocol; execute; apply post-step
-   guards; handle deviations/environment gates; verify done criteria; run the
-   first-result sanity gate for the first load-bearing or segment-boundary
-   result; checkpoint; record completion and hash for SUMMARY.
-2. If `type="checkpoint:*"`: STOP immediately and return structured checkpoint
-   message plus bounded execution segment state; a fresh agent continues.
-3. After all tasks: run overall verification, confirm success criteria, and
-   document deviations.
-   </step>
+1. If `type="auto"`: load conventions; choose the relevant analytical,
+   numerical, limiting-case, method, or selected-bundle protocol; execute; apply
+   post-step guards; handle deviations/environment gates; verify done criteria;
+   run the first-result sanity gate when a load-bearing result appears; task
+   checkpoint; record completion and hash for SUMMARY.
+2. If `type="checkpoint:*"` or an auto-bounded gate fires: stop and return
+   `gpd_return.status: checkpoint` with bounded state per the checkpoint and
+   continuation references. Do not wait for the user in the same spawned run.
+3. After all tasks: run overall verification, confirm success criteria,
+   document deviations, then load completion protocols.
+</step>
 
 <step name="context_pressure_monitoring">
-After each task, estimate context window consumption using the executor row in `{GPD_INSTALL_DIR}/references/orchestration/context-pressure-thresholds.md`: GREEN <40%, YELLOW 40-55%, ORANGE 55-70%, RED >70%. The forced-checkpoint rule at 50% is a preservation checkpoint inside YELLOW, not an ORANGE reclassification. GREEN continues; YELLOW logs and prioritizes; ORANGE stops after the current task with SUMMARY/checkpoint; RED checkpoints immediately. Estimate both loaded files and generated work so continuation can resume without re-deriving.
+After each task, estimate context use with the `gpd-executor` row in `{GPD_INSTALL_DIR}/references/orchestration/context-pressure-thresholds.md`. The forced checkpoint starts at 50%; ORANGE still starts at 55%. Estimate loaded files plus generated work so continuation can resume without re-deriving.
 </step>
 
 <step name="stuck_protocol">
@@ -438,38 +405,34 @@ For detailed symptom tables and artifact-specific recovery, late-load
 
 <checkpoint_protocol>
 
-**CRITICAL: Validation before verification**
+Before any `checkpoint:human-verify`, generate and verify the inspectable
+outputs yourself; the researcher supplies physics judgment, not compilation or
+script execution. On any checkpoint task, environment gate, first-result,
+skeptical, pre-fanout, or context-pressure stop, stop immediately and return
+`gpd_return.status: checkpoint`.
 
-Before any `checkpoint:human-verify`, ensure all outputs are generated and accessible. If plan lacks compilation/execution before checkpoint, ADD IT (deviation Rule 4).
-
-For full validation-first patterns, simulation lifecycle, and notebook handling,
-see `{GPD_INSTALL_DIR}/references/orchestration/checkpoints.md` and
-`{GPD_INSTALL_DIR}/references/orchestration/checkpoint-ux-convention.md`.
-
-**Quick reference:** Researchers NEVER run compilation commands or scripts.
-Researchers ONLY inspect results, evaluate physical reasonableness, check
-limiting cases, and provide physics judgment. The executor does all automation.
-
----
-
-When encountering `type="checkpoint:*"`: **STOP immediately.** Return structured checkpoint message using checkpoint_return_format.
-
-`checkpoint:human-verify` gives derived/computed results, units, figures,
-limits, and what physics judgment is needed. `checkpoint:decision` gives options
-and a favored path. `checkpoint:human-action` gives the unavoidable manual step
-and one verification command.
-
-Use the checkpoint mix as a hard prior: **checkpoint:human-verify (90% of checkpoints)**, **checkpoint:decision (9% of checkpoints)**, **checkpoint:human-action (1% -- rare)**.
+Load `{GPD_INSTALL_DIR}/references/orchestration/checkpoints.md`,
+`{GPD_INSTALL_DIR}/references/orchestration/checkpoint-ux-convention.md`,
+`{GPD_INSTALL_DIR}/references/execution/execute-plan-checkpoints.md`, and
+`{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md` for
+validation-first details, checkpoint UX, bounded state, and fresh-continuation
+ownership. Type-selection prior: **checkpoint:human-verify (90% of checkpoints)**, **checkpoint:decision (9% of checkpoints)**, **checkpoint:human-action (1% -- rare)**.
 
 </checkpoint_protocol>
 
 <checkpoint_return_format>
-When hitting checkpoint or environment gate, return `gpd_return.status: checkpoint` with type, plan, progress, completed tasks plus hashes, current task/status/blocker, research state, type-specific details, and awaiting owner/action. Include conventions, key equations/results, verified limits, generated figures, and open questions so a fresh continuation can resume.
+Checkpoint return details live in `execute-plan-checkpoints.md` and
+`continuation-boundary.md`. Include enough completed-task hashes, cursor,
+blocker/gate state, conventions, key equations/results, verified limits,
+generated figures, and open questions for a fresh continuation to resume.
 </checkpoint_return_format>
 
 <continuation_handling>
-If spawned as continuation agent (`<completed_tasks>` in prompt), read `state.json` convention_lock first, verify prior artifacts/log entries and reported values, do not redo completed tasks, then resume from the provided point. After human-action, verify the environment; after human-verify, continue; after decision, implement the selected approach. If another checkpoint hits, return cumulative completed tasks and research state.
-   </continuation_handling>
+If spawned as a continuation, first read `state.json` convention_lock, verify
+prior artifacts/log entries/reported values, skip completed tasks, and resume at
+the provided cursor. If another checkpoint hits, return cumulative completed
+tasks and research state, then stop.
+</continuation_handling>
 
 <benchmark_verification>
 
@@ -502,70 +465,39 @@ State tracking location: `GPD/phases/XX-name/{phase}-{plan}-STATE-TRACKING.md` -
 
 ## Task Checkpoint Protocol (Summary)
 
-Full protocol and examples live in `executor.task_checkpoints`.
-
-After each task completes (verification passed, done criteria met), checkpoint immediately:
-
-1. **Check:** `git status --short`
-2. **Stage individually** — NEVER `git add .` or `git add -A`. Never stage `.aux`, `.log`, `__pycache__/`, `.o`, or binaries >10 MB.
-3. **Commit type:** `derive`, `compute`, `implement`, `analyze`, `figure`, `document`, `validate`, `fix`, `restructure`, `setup`
-4. **Format:** `{type}({phase}-{plan}): {physics description}` with bullet points for key results, verification, conventions
-5. **Record hash:** `TASK_CHECKPOINT=$(git rev-parse --short HEAD)` — track for SUMMARY
+After a verified completed task, checkpoint immediately via
+`executor.task_checkpoints`. Direct-commit authority is scoped to owned
+artifacts. Check `git status --short`, stage task-related files individually,
+exclude transient/cache/build artifacts, commit with the task's physics result,
+and record the hash for SUMMARY.
 </task_checkpoint_protocol>
 
 <summary_creation>
-After all tasks complete, load the completion reference when preparing SUMMARY.md:
+After all tasks complete, load `{GPD_INSTALL_DIR}/references/execution/executor-completion.md` before preparing SUMMARY.md, final self-check, typed return, or completion commit. For contract-backed SUMMARY frontmatter, load `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`, `{GPD_INSTALL_DIR}/templates/summary.md`, and `{GPD_INSTALL_DIR}/templates/calculation-log.md` when needed, follow the canonical ledger fields literally (`plan_contract_ref`, `contract_results`, `comparison_verdicts`), and validate with `gpd validate summary-contract`. Profiles and autonomy modes do NOT relax contract-result emission.
 
-**file_read:** `{GPD_INSTALL_DIR}/references/execution/executor-completion.md`
-
-For contract-backed SUMMARY frontmatter, explicitly load and read the canonical ledger schema before drafting any YAML:
-
-**file_read:** `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`
-**file_read:** `{GPD_INSTALL_DIR}/templates/summary.md`
-
-This schema is authoritative for `plan_contract_ref`, `contract_results`, and `comparison_verdicts`. Re-open it immediately before writing frontmatter so the exact validator-consumed fields and closed-schema rules are visible in context.
-These ledgers are user-visible evidence. They describe what was established, what artifact exists, and what decisive comparisons passed or failed.
-
-Key requirements (always in memory — sufficient if the file_read above fails):
-- SUMMARY.md location: `GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md`
-- For contract-backed plans, load the schema above before writing frontmatter, then re-open it immediately before finalizing YAML and follow it literally. Do not rely on memory, prior plans, or a paraphrase from `templates/summary.md`.
-- Validate contract-backed output with `gpd validate summary-contract GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md`.
-- One-liner must be substantive and physics-specific (not "calculation completed")
-- Include conventions table, key results with confidence tags, deviation documentation, and environment gates.
-- For multi-step derivation plans, also produce CALCULATION_LOG.md using `{GPD_INSTALL_DIR}/templates/calculation-log.md`.
+The completion reference owns the detailed SUMMARY schema, substantive one-liner
+rules, conventions/key-results/deviation sections, `calculation-log.md` use, and
+closeout return fields.
 
 </summary_creation>
 
 <self_check>
-After writing SUMMARY.md, verify files, checkpoints, reproducibility, compilation/figures, convention consistency, selected bundle final checks, and contract coverage before proceeding.
-
-Load the detailed final self-check from:
-
-**file_read:** `{GPD_INSTALL_DIR}/references/execution/executor-completion.md`
-
-Fallback final guard path: `{GPD_INSTALL_DIR}/references/execution/guards/final-verification-guards.md`
-
-Minimum final checks always visible:
-- Contract-backed anchors and first-result gates outrank every bundle or guard asset.
-- Analytical results need dimension, convention, sign/factor, limiting-case, and symmetry checks.
-- Numerical results need convergence, benchmark or known-answer comparison, uncertainty/error bars, and reproducibility commands.
-- Contract-backed summaries must cover claims, deliverables, acceptance tests, references, forbidden proxies, and `comparison_verdicts`.
-- Profiles and autonomy modes may compress prose or cadence, but they do NOT relax contract-result emission.
-
-Do NOT skip. Do NOT proceed to state updates or typed return if self-check fails.
+After writing SUMMARY.md, load `executor.completion` for the final self-check.
+Verify created files, task checkpoints, reproducibility, compilation/figures,
+conventions, selected bundle final checks, and contract coverage. Do not proceed
+to typed return or completion commit if self-check fails.
 </self_check>
 
 <state_updates_and_completion>
 
 ## State Updates, Final Commit, and Completion
 
-Completion details live in `executor-completion.md`; the inline rules below only cover the minimum needed if that read fails.
-
 Shared state discipline: spawned subagent mode returns state updates in `gpd_return.state_updates`. Do NOT write `GPD/STATE.md` directly unless the invoking workflow explicitly delegates shared-state ownership. The default spawned-agent path is `shared_state_policy: return_only`.
 
-Final commit details live in `executor.completion`. If the workflow explicitly
-delegates shared-state ownership, follow that workflow's separate state-write
-and commit instructions; otherwise exclude `GPD/STATE.md`.
+Completion details and final commit instructions live in `executor.completion`.
+If the workflow explicitly delegates shared-state ownership, follow that
+workflow's separate state-write and commit instructions; otherwise exclude
+`GPD/STATE.md`.
 
 </state_updates_and_completion>
 
@@ -573,7 +505,7 @@ and commit instructions; otherwise exclude `GPD/STATE.md`.
 
 ### Completion Return Format
 
-Return one typed `gpd_return`; markdown labels are human-facing only.
+Return exactly one typed `gpd_return`; markdown labels are human-facing only.
 
 ```yaml
 gpd_return:
@@ -592,13 +524,9 @@ gpd_return:
 
 Use `executor.completion` for optional execution fields: `state_updates`,
 `contract_updates`, `decisions`, `blockers`, and `continuation_update`. Omit
-`recorded_at` and `recorded_by` from child returns; `gpd apply-return-updates` owns provenance. Put
-tangent classification in `issues` and follow-up commands in `next_actions`; do
-not add tangent-specific top-level keys.
-
-```bash
-gpd commit "execute(${phase_number}): complete plan artifacts" --files "${phase_dir}/${plan_id}-SUMMARY.md"
-```
+`recorded_at` and `recorded_by` from child returns; `gpd apply-return-updates`
+owns provenance. Put tangent classification in `issues` and follow-up commands
+in `next_actions`; do not add tangent-specific top-level keys.
 
 </structured_returns>
 
@@ -618,7 +546,7 @@ Plan execution completes only when conventions, tasks or checkpoint pause,
 per-task checkpoints, method protocols, deviations, environment gates, research
 log, verification, SUMMARY, state tracking, shared-state return discipline,
 final commit, context-pressure stops, stuck protocol, and selected/on-demand
-post-step guards are all satisfied. The detailed closeout checklist lives in
+post-step guards are satisfied. The detailed closeout checklist lives in
 `executor.completion`.
       </success_criteria>
 

@@ -12,10 +12,10 @@ from gpd.core.prompt_diagnostics import build_prompt_surface_report, report_to_d
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-PROMPT_TOTAL_BUDGET = {"lines": 42_800, "chars": 1_770_000}
+PROMPT_TOTAL_BUDGET = {"lines": 42_800, "chars": 1_765_000}
 PROMPT_KIND_BUDGETS = {
     "command": {"lines": 20_200, "chars": 760_000},
-    "agent": {"lines": 7_400, "chars": 402_000},
+    "agent": {"lines": 7_350, "chars": 400_000},
     "workflow": {"lines": 15_300, "chars": 618_000},
 }
 STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 140_000}

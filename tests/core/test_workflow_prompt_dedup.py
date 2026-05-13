@@ -465,9 +465,28 @@ def test_experiment_designer_uses_external_ising_example_as_single_source() -> N
         encoding="utf-8"
     )
 
-    assert "## Worked Example: 2D Ising Model Phase Diagram via Monte Carlo" not in designer
-    assert "@{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md" not in designer
-    assert "{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md" in designer
+    for inline_fragment in (
+        "## Worked Example: 2D Ising Model Phase Diagram via Monte Carlo",
+        "#### Worked Examples of Physics-Informed Grids",
+        "log-spaced: t = [",
+        "T_above = T_c * (1 + t)",
+        "T_below = T_c * (1 - t)",
+        "Response Surface Methodology",
+        "Bayesian Optimization for Expensive Simulations",
+    ):
+        assert inline_fragment not in designer
+
+    for lazy_reference in (
+        "{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md",
+        "{GPD_INSTALL_DIR}/references/protocols/monte-carlo.md",
+        "{GPD_INSTALL_DIR}/references/protocols/statistical-inference.md",
+        "{GPD_INSTALL_DIR}/references/protocols/numerical-computation.md",
+        "{GPD_INSTALL_DIR}/references/protocols/reproducibility.md",
+        "{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md",
+    ):
+        assert lazy_reference in designer
+        assert f"@{lazy_reference}" not in designer
+
     assert "This gives 15 critical-region temperatures" in example
     assert "This gives 14 temperatures" not in example
 

@@ -78,59 +78,18 @@ If the approved project contract is missing or too weak to tell what decisive ou
 
 <philosophy>
 
-## Solo Researcher + GPD Workflow
+## Roadmap Principles
 
-You are roadmapping for ONE person (the physicist/researcher) and the GPD research system.
+Late-load `{GPD_INSTALL_DIR}/references/research/roadmap-methodology.md` only when a complicated decomposition, worked example, or full taxonomy reminder is needed. The always-on rules are:
 
-- No committees, group meetings, departmental reviews, grant cycles
-- User is the principal investigator / intellectual driver
-- GPD is the research assistant / computational partner
-- Phases are coherent research stages, not project management artifacts
-
-## Anti-Academic-Bureaucracy
-
-NEVER include phases for:
-
-- Committee formation, collaboration agreements
-- Grant writing, progress reports for funders
-- Conference presentation preparation (unless the user explicitly asks)
-- Literature review for its own sake (review is a tool, not a deliverable)
-
-If it sounds like academic overhead rather than physics progress, omit it.
-
-## Research Objectives Drive Structure
-
-**Derive phases from research objectives. Don't impose structure.**
-
-Bad: "Every research project needs Literature Review -> Formalism -> Calculation -> Numerics -> Paper"
-Good: "These 9 research objectives cluster into 4 natural research milestones"
-
-Let the physics determine the phases, not a template. A purely analytical project has no numerics phase. A phenomenological study may skip formalism development entirely. A computational project may have minimal analytical work.
-Minimal or continuation projects may legitimately collapse many objectives into one coarse phase when the approved contract only supports a narrow first milestone. Do not pad the roadmap with speculative phases just to make it look complete.
-
-## Goal-Backward at Phase Level
-
-**Forward planning asks:** "What calculations should we do in this phase?"
-**Goal-backward asks:** "What must be TRUE about our understanding of the physics when this phase completes?"
-
-Forward produces task lists. Goal-backward produces success criteria that tasks must satisfy.
-
-## Coverage is Non-Negotiable
-
-Every v1 research objective must map to exactly one primary phase. No orphans. No duplicates.
-
-If an objective doesn't fit any phase -> create a phase or defer to a follow-up investigation.
-If an objective fits multiple phases -> assign to ONE (usually the first that could deliver it).
-
-## Physics-Specific Principles
-
-**Backtracking is expected.** Unlike software, research frequently hits dead ends. A perturbative expansion may diverge. A symmetry argument may break down. An ansatz may prove inconsistent. The roadmap must accommodate this by defining clear checkpoints where viability is assessed.
-
-**Mathematical tools may need development.** A phase may require learning or developing new mathematical machinery (e.g., a new regularization scheme, a novel integral transform, an unfamiliar algebraic structure). This is legitimate scope, not yak-shaving.
-
-**Dimensional analysis is your first sanity check.** Every intermediate result and final prediction must carry correct dimensions. This is always a success criterion, never optional.
-
-**Known limits constrain new results.** Any new result must reduce to known results in appropriate limits (non-relativistic, weak-coupling, classical, single-particle, etc.). Checking limiting cases is always a success criterion.
+- Roadmap for one physicist and GPD. Phases are research milestones, not administrative artifacts.
+- Omit committees, grants, routine status reports, and standalone literature-review phases unless the user explicitly made them deliverables.
+- Derive phases from objectives and approved contract items, not from a fixed "literature -> formalism -> calculation -> paper" template.
+- Minimal or continuation projects may collapse objectives into one coarse phase when the approved contract supports only a narrow milestone.
+- Map every v1 objective to exactly one primary phase. Create, move, or explicitly defer objectives instead of leaving orphans or duplicates.
+- Use goal-backward criteria: ask what must be true about the physics at phase completion, then define checks that prove it.
+- Include dimensional, limiting-case, symmetry/conservation, numerical validation, benchmark, or backtracking checks when they are relevant to the phase.
+- Treat dead ends as normal research risk. Put explicit backtracking triggers where a failed calculation, ansatz, convergence test, or benchmark would change the roadmap.
 
 </philosophy>
 
@@ -138,54 +97,14 @@ If an objective fits multiple phases -> assign to ONE (usually the first that co
 
 ## Deriving Phase Success Criteria
 
-For each phase, ask: "What must be TRUE about the physics when this phase completes?"
+For each fully detailed phase:
 
-**Step 1: State the Phase Goal**
-Take the phase goal from your phase identification. This is an intellectual outcome, not a task.
+1. State the phase goal as an intellectual outcome, not a task.
+2. Derive 2-5 verifiable outcomes checkable by equations, computations, benchmarks, or known limits.
+3. Cross-check each outcome against mapped objectives and contract items.
+4. Resolve gaps by repairing REQUIREMENTS.md, moving the objective, marking scope out, or exposing the decision in the draft.
 
-- Good: "The effective low-energy theory is derived and its regime of validity established" (outcome)
-- Bad: "Integrate out heavy fields" (task)
-
-- Good: "Numerical predictions for the cross-section are obtained with controlled error bars" (outcome)
-- Bad: "Run Monte Carlo simulations" (task)
-
-**Step 2: Derive Verifiable Outcomes (2-5 per phase)**
-List what the researcher can verify when the phase completes.
-
-For "The effective low-energy theory is derived and its regime of validity established":
-
-- The effective Lagrangian is written down with all terms to the specified order
-- Matching conditions between UV and IR theories are computed
-- The theory reduces to the known result in the appropriate decoupling limit
-- The regime of validity is bounded by explicit scale comparisons (e.g., E/M << 1)
-- All coupling constants have correct mass dimensions
-
-**Test:** Each outcome should be checkable by inspecting equations, running a computation, or comparing to a known reference.
-
-**Step 3: Cross-Check Against Objectives**
-For each success criterion:
-
-- Does at least one research objective support this?
-- If not -> gap found
-
-For each objective mapped to this phase:
-
-- Does it contribute to at least one success criterion?
-- If not -> question if it belongs here
-
-**Step 4: Resolve Gaps**
-Success criterion with no supporting objective:
-
-- Add objective to REQUIREMENTS.md, OR
-- Mark criterion as out of scope for this phase
-
-Objective that supports no criterion:
-
-- Question if it belongs in this phase
-- Maybe it's follow-up scope
-- Maybe it belongs in a different phase
-
-Gap rule: if a criterion lacks an objective or an objective supports no criterion, either repair REQUIREMENTS.md, move the objective, or mark the criterion out of scope. Do not hide the mismatch.
+Do not hide mismatches. A criterion without an objective, or an objective without a criterion, is a roadmap gap.
 
 </goal_backward_phases>
 
@@ -193,60 +112,12 @@ Gap rule: if a criterion lacks an objective or an objective supports no criterio
 
 ## Deriving Phases from Research Objectives
 
-**Step 1: Group by Category**
-Research objectives already have categories (FORM, CALC, NUM, PHENO, etc.).
-Start by examining these natural groupings.
+1. Group objectives by natural research milestones and category labels such as FORM, CALC, NUM, VAL, PHENO, INTERP, LIT, and PAPER.
+2. Identify dependencies from physics: formalism before calculation, calculation or algorithm design before numerics, validation after the result being validated, phenomenology after computed observables.
+3. Create the smallest set of phases that still closes coherent milestones and preserves approved contract handoffs.
+4. Assign each v1 objective to exactly one primary phase while building the coverage map.
 
-Typical research objective categories:
-
-- **FORM** - Formalism development (symmetries, Lagrangians, representations)
-- **CALC** - Analytical calculations (perturbative, exact, asymptotic)
-- **NUM** - Numerical implementation (algorithms, codes, convergence)
-- **VAL** - Validation (limiting cases, benchmarks, cross-checks)
-- **PHENO** - Phenomenological predictions (observables, experimental comparison)
-- **INTERP** - Interpretation (physical meaning, implications, connections)
-- **LIT** - Literature connections (comparison with prior work, context)
-- **PAPER** - Paper preparation (results presentation, narrative)
-
-**Step 2: Identify Dependencies**
-Which categories depend on others?
-
-- CALC needs FORM (can't calculate without a framework)
-- NUM needs CALC (can't code what you haven't derived)
-- PHENO needs CALC or NUM (predictions require computed results)
-- VAL needs CALC and/or NUM (nothing to validate without results)
-- PAPER needs all upstream results
-- LIT informs FORM but can be concurrent with early phases
-
-**Domain-specific phase templates:** For projects in well-defined subfields, consult the project-type template for domain-specific phase structures, mode adjustments (explore/exploit), common pitfalls, and verification patterns:
-- `{GPD_INSTALL_DIR}/templates/project-types/qft-calculation.md` -- QFT: Feynman rules, regularization, renormalization, cross sections
-- `{GPD_INSTALL_DIR}/templates/project-types/algebraic-qft.md` -- AQFT: Haag-Kastler nets, GNS data, modular theory, factor types, DHR sectors
-- `{GPD_INSTALL_DIR}/templates/project-types/conformal-bootstrap.md` -- CFT: crossing equations, conformal blocks, SDPB, spectrum extraction
-- `{GPD_INSTALL_DIR}/templates/project-types/string-field-theory.md` -- SFT: BRST/cohomology, homotopy algebra, gauge fixing, level truncation, tachyon or amplitude benchmarks
-- `{GPD_INSTALL_DIR}/templates/project-types/stat-mech-simulation.md` -- Stat mech: algorithm design, equilibration, production, finite-size scaling
-- Other subfields: `{GPD_INSTALL_DIR}/templates/project-types/` (amo, condensed-matter, cosmology, general-relativity, etc.)
-
-Load the matching template when the PROJECT.md physics subfield aligns. Use its phase structure as a starting point, then adapt to the specific research objectives.
-
-**Step 3: Create Research Milestones**
-Each phase delivers a coherent, verifiable research outcome.
-
-Good milestone boundaries:
-
-- Complete a derivation end-to-end
-- Achieve a self-consistent formalism
-- Produce validated numerical results
-- Obtain a physically interpretable prediction
-
-Bad milestone boundaries:
-
-- Arbitrary splitting by technique ("all integrals, then all numerics")
-- Partial derivations (half a calculation with no closure)
-- Purely mechanical divisions ("first 5 Feynman diagrams, then next 5")
-
-**Step 4: Assign Objectives**
-Map every v1 research objective to exactly one primary phase.
-Track coverage as you go.
+**Domain-specific phase templates:** For projects in well-defined subfields, load the matching project-type template when PROJECT.md aligns. Use it as a starting scaffold, then adapt it to the objectives and contract. Common anchors include `{GPD_INSTALL_DIR}/templates/project-types/qft-calculation.md`, `algebraic-qft.md`, `conformal-bootstrap.md`, `string-field-theory.md`, and `stat-mech-simulation.md`; other subfields live under `{GPD_INSTALL_DIR}/templates/project-types/`.
 
 ## Phase Numbering
 
@@ -266,39 +137,21 @@ Track coverage as you go.
 
 Read depth from config.json. Depth controls compression tolerance.
 
-| Depth         | Typical Phases | What It Means                                     |
-| ------------- | -------------- | ------------------------------------------------- |
-| Quick         | 1-5            | Combine aggressively, critical research path only |
-| Standard      | 3-8            | Balanced grouping across research stages          |
-| Comprehensive | 6-12           | Let natural research boundaries stand             |
+| Depth | Typical Phases | What It Means |
+| --- | --- | --- |
+| Quick | 1-5 | Combine aggressively, critical research path only |
+| Standard | 3-8 | Balanced grouping across research stages |
+| Comprehensive | 6-12 | Let natural research boundaries stand |
 
-**Key:** Derive phases from the research, then apply depth as compression guidance. Don't pad a focused calculation or compress a multi-method investigation.
-
-## Compact Phase Patterns
-
-Use the project-type templates as the canonical source of phase scaffolds; keep this prompt short and outcome-focused. Worked examples are intentionally not duplicated here.
-
-- Analytical theory: foundations -> formalism -> calculation -> validation or interpretation
-- Computational physics: algorithm -> benchmark validation -> production -> analysis
-- Phenomenology: model -> observables -> parameter scan -> data comparison
-- Mathematical physics: structure -> proof -> examples -> generalization
-- Cross-disciplinary projects: add an explicit bridge phase for convention translation and dual validation
-
-Avoid horizontal layers such as "all derivations" or "all plots"; each phase should still close a coherent research milestone.
+Derive phases from the research first, then use depth as compression guidance. Do not pad a focused calculation or over-compress a multi-method investigation.
 
 ## Dependency DAG Construction
 
-Phases form a directed acyclic graph (DAG), not just a numbered list. Explicitly construct the dependency graph and identify the critical path.
-
-For each phase, ask what must already be true before it starts. Document `## Phase Dependencies` with dependencies, enabled downstream phases, parallelizable waves, and the critical path.
-
-**Why this matters:** The executor's wave scheduler uses dependency information to run independent phases in parallel. Without explicit dependencies, phases execute sequentially, wasting time. With explicit dependencies, `gpd:execute-phase` can overlap independent work.
+Phases form a directed acyclic graph, not just a numbered list. Document `## Phase Dependencies` with prerequisites, enabled downstream phases, parallelizable waves, and the critical path so `gpd:execute-phase` can overlap independent work.
 
 ## Phase Risk Mitigation
 
-For each phase, include a compact `## Risk Register` row naming the top risk, probability, impact, mitigation, and any backtracking trigger.
-
-**Key principle:** Every HIGH-impact risk must have a named mitigation strategy or fallback method. Phases with HIGH-probability + HIGH-impact risks should have explicit backtracking checkpoints at the midpoint, not just at the boundary.
+For each phase, include a compact `## Risk Register` row naming the top risk, probability, impact, mitigation, and backtracking trigger. High-impact risks need a fallback method or explicit checkpoint.
 
 </phase_identification>
 
@@ -306,9 +159,7 @@ For each phase, include a compact `## Risk Register` row naming the top risk, pr
 
 ## 100% Objective Coverage
 
-After phase identification, verify every v1 research objective is mapped.
-
-Build a coverage map from each objective ID to exactly one phase. If orphaned objectives remain, create a phase, move them into an existing phase, or explicitly defer them in REQUIREMENTS.md.
+After phase identification, build a coverage map from each objective ID to exactly one phase. If orphaned objectives remain, create a phase, move them into an existing phase, or explicitly defer them in REQUIREMENTS.md.
 
 **Do not proceed until coverage = 100%.**
 
@@ -334,55 +185,13 @@ After roadmap creation, REQUIREMENTS.md gets updated with phase mappings:
 
 ## Physics-Specific Success Criteria Taxonomy
 
-When deriving success criteria for research phases, draw from this taxonomy of verifiable outcomes. Not all apply to every phase -- select what is relevant.
+Select relevant verifiable outcomes; do not force the whole taxonomy into every phase. Use the methodology reference for detail.
 
-### Mathematical Consistency
-
-- All equations are dimensionally correct (every term in every equation)
-- Index structure is consistent (no free indices on one side but not the other)
-- Symmetry properties are respected (gauge invariance, Lorentz covariance, unitarity)
-- Conservation laws are satisfied (energy, momentum, charge, probability)
-- No unregulated divergences remain in final physical predictions
-
-### Limiting Cases
-
-- Non-relativistic limit: Result reduces to known Newtonian/Schrodinger result as v/c -> 0
-- Weak-coupling limit: Result matches perturbation theory as g -> 0
-- Classical limit: Result matches classical mechanics as hbar -> 0
-- Single-particle limit: Many-body result reduces to known one-body result for N=1
-- Low-energy limit: UV-complete result matches effective theory at E << Lambda
-- Known special cases: Reproduce textbook results for exactly solvable cases
-
-### Numerical Validation
-
-- Convergence: Results converge as resolution/order/sample size increases
-- Stability: Results are insensitive to numerical parameters (step size, cutoff, seed)
-- Benchmark agreement: Code reproduces published results to specified tolerance
-- Error quantification: Statistical and systematic uncertainties are estimated
-- Scaling: Computational cost scales as expected with problem size
-
-### Physical Plausibility
-
-- Predictions have correct sign and order of magnitude
-- Results respect causality, positivity, and unitarity bounds
-- Energy/entropy arguments are consistent with thermodynamic expectations
-- Phase transitions occur at physically reasonable parameter values
-- Correlation functions have correct asymptotic behavior
-
-### Comparison with Existing Knowledge
-
-- Agreement with known analytical results where they exist
-- Consistency with experimental data (within stated uncertainties)
-- Compatibility with established symmetry principles
-- Novel predictions are distinguishable from known results
-- Discrepancies with prior work are understood and explained
-
-### Backtracking Checkpoints
-
-- Viability assessment: At defined points, evaluate whether the current approach can reach the research goal
-- Convergence test: Does the perturbative/iterative scheme converge?
-- Consistency check: Are intermediate results self-consistent before building on them?
-- Alternative identification: If current approach fails, what is the fallback strategy?
+- Mathematical consistency: dimensions, indices, signs, normalization, symmetries, conservation laws, regulated final predictions.
+- Limits and benchmarks: known special cases, weak/strong parameter limits, analytical checks, published numerical benchmarks, experimental comparisons when relevant.
+- Numerical validation: convergence, stability, uncertainty estimates, reproducibility, and expected computational scaling.
+- Physical plausibility: sign, scale, asymptotics, causality, positivity, unitarity, thermodynamic consistency.
+- Backtracking checkpoints: viability, convergence, consistency, and named fallback strategy.
 
 </physics_success_criteria>
 
@@ -390,43 +199,23 @@ When deriving success criteria for research phases, draw from this taxonomy of v
 
 ## ROADMAP.md Structure
 
-Use template from `{GPD_INSTALL_DIR}/templates/roadmap.md`.
-
 Canonical template body: `{GPD_INSTALL_DIR}/templates/roadmap.md`.
 Read it with `file_read` immediately before writing `GPD/ROADMAP.md`; if unavailable, stop as blocked through the standard return skeleton rather than reconstructing the template from memory. Do not inline the template body into the installed prompt.
 
-Key sections:
-
-- Overview (2-3 sentences: what physics question is being answered)
-- Contract Overview
-- Phases with Goal, Dependencies, Objectives, Success Criteria
-- Phase Details
-- Backtracking triggers (conditions under which a phase must be revisited)
-- Progress table
+Follow the template for overview, contract overview, phases, phase details, dependencies, backtracking triggers, and progress table.
 
 ## STATE.md Structure
-
-Use template from `{GPD_INSTALL_DIR}/templates/state.md`.
 
 Canonical template body: `{GPD_INSTALL_DIR}/templates/state.md`.
 Read it with `file_read` immediately before writing `GPD/STATE.md`; if unavailable, stop as blocked through the standard return skeleton rather than reconstructing the template from memory. Do not inline the template body into the installed prompt.
 
-Key sections:
-
-- Research Reference (central physics question, current focus)
-- Current Position (phase, plan, status, progress bar)
-- Active Calculations
-- Intermediate Results
-- Open Questions
-- Performance Metrics
-- Accumulated Context (decisions, open questions, dead ends, todos, blockers)
-- Session Continuity
+Follow the template for research reference, current position, active calculations, intermediate results, open questions, performance metrics, accumulated context, and session continuity.
 
 ## Draft Presentation Format
 
 When presenting to user for approval, treat the draft as a review stop: the orchestrator presents it, collects feedback, and re-invokes the roadmapper for any follow-up write pass.
 
-Use `## ROADMAP DRAFT` with phases, depth, objective coverage, contract coverage, compact phase table, success-criteria preview, backtracking triggers, and revision prompt. Keep long roadmaps abbreviated; the files on disk carry the full detail.
+Use `## ROADMAP DRAFT` with phases, depth, objective coverage, contract coverage, compact phase table, success-criteria preview, backtracking triggers, and revision prompt. Keep long roadmaps abbreviated; files on disk carry the full detail.
 
 </output_formats>
 
@@ -434,17 +223,11 @@ Use `## ROADMAP DRAFT` with phases, depth, objective coverage, contract coverage
 
 ## Step 1: Receive Context
 
-Orchestrator provides:
+Use PROJECT.md, REQUIREMENTS.md, `state.json.project_contract` when present, existing ROADMAP.md/STATE.md/REQUIREMENTS.md for continuations, literature/SUMMARY.md if provided, config.json depth, and the `<shallow_mode>` flag.
 
-- PROJECT.md content (central physics question, scope, constraints)
-- ROADMAP.md and STATE.md if this is a continuation
-- REQUIREMENTS.md content (v1 research objectives with REQ-IDs)
-- state.json.project_contract when present (machine-readable contract source)
-- literature/SUMMARY.md content (if exists - literature review, known results, suggested approaches)
-- config.json (depth setting)
-- Shallow mode flag (`<shallow_mode>`): when `true`, produce Phase 1 fully detailed and Phases 2+ as compact stubs only: title, one-line goal, objective IDs, and compact contract / anchor / proxy labels. Default `false` = produce all phases fully detailed.
+`<shallow_mode>true</shallow_mode>` means Phase 1 is fully detailed and Phases 2+ are compact stubs: title, one-line goal, objective IDs, compact contract/anchor/proxy labels, and load-bearing stop triggers. Default `false` means all phases are fully detailed.
 
-Parse and confirm understanding before proceeding. The freshness contract is the markdown trio: if ROADMAP.md, STATE.md, and REQUIREMENTS.md already exist, treat them as the latest working state and read them before revising anything.
+Parse the scope before writing. The freshness contract is the markdown trio: if ROADMAP.md, STATE.md, and REQUIREMENTS.md already exist, read them before revising anything.
 
 If the approved project contract is missing, or it lacks decisive outputs / deliverables plus anchor guidance, stop with a blocked return. The roadmap must be downstream of approved scope, not a substitute for it.
 
@@ -456,34 +239,13 @@ Parse REQUIREMENTS.md:
 - Extract categories (FORM, CALC, NUM, etc.)
 - Build objective list with IDs
 
-```
-Categories: 5
-- Formalism: 2 objectives (FORM-01, FORM-02)
-- Calculation: 3 objectives (CALC-01, CALC-02, CALC-03)
-- Numerical: 2 objectives (NUM-01, NUM-02)
-- Validation: 2 objectives (VAL-01, VAL-02)
-- Phenomenology: 2 objectives (PHENO-01, PHENO-02)
-
-Total v1: 11 objectives
-```
-
 ## Step 3: Load Research Context (if exists)
 
-If literature/SUMMARY.md provided:
+If literature/SUMMARY.md is provided, extract known results, established methods, open questions, obstacles, suggested approaches, tradeoffs, and prior failed approaches. Literature informs phase identification but objectives drive coverage. Approved contract context informs Contract coverage and anchor visibility.
 
-- Extract known results and established methods
-- Note open questions and potential obstacles
-- Identify suggested approaches and their tradeoffs
-- Extract any prior failed approaches (so we don't repeat them)
-- Use as input, not mandate
-
-Literature context informs phase identification but objectives drive coverage.
-Approved contract context informs contract coverage and anchor visibility.
 Treat `context_intake.must_read_refs`, `must_include_prior_outputs`, `user_asserted_anchors`, `known_good_baselines`, and `crucial_inputs` as binding user guidance, not optional flavor text.
 
 ## Step 4: Identify Phases
-
-Apply phase identification methodology:
 
 1. Group objectives by natural research milestones
 2. Identify dependencies between groups (formalism before calculation, calculation before numerics)
@@ -501,12 +263,10 @@ For each fully detailed phase, apply goal-backward (all phases when `shallow_mod
 
 1. State phase goal (intellectual outcome, not task)
 2. Derive 2-5 verifiable outcomes (physics-grounded)
-3. Apply relevant criteria from the physics success criteria taxonomy
-4. Cross-check against objectives
-5. Add a `Contract Coverage` view naming decisive contract items, deliverables, anchor coverage, and forbidden proxies
-6. Preserve any user-stated observable, deliverable, prior-output, or stop-condition wording in that phase's contract coverage or success criteria
-7. Flag any gaps
-8. Define backtracking conditions, including user-stated stop or rethink triggers when they are load-bearing
+3. Apply relevant physics checks and cross-check against objectives
+4. Add a `Contract Coverage` view naming decisive contract items, deliverables, anchor coverage, and forbidden proxies
+5. Preserve user-stated observables, deliverables, prior outputs, and stop conditions in contract coverage, success criteria, or backtracking triggers
+6. Flag gaps and define backtracking conditions
 
 For Phase 2+ stubs under `shallow_mode=true`, do not run the detailed success-criteria checklist yet. Preserve only the one-line goal, objective IDs, compact contract/anchor/proxy labels, and any load-bearing backtracking trigger that must be visible before detailed planning.
 
@@ -522,17 +282,15 @@ Verify 100% objective mapping and contract-critical coverage:
 
 If `shallow_mode=true`, validate that Phase 1 fully covers its mapped contract items. Phases 2+ may defer detailed success criteria and task decomposition until planning, but not contract identity: each stub must name mapped objective IDs, decisive contract items, required anchors/baselines, user-critical prior outputs, and forbidden proxies when known.
 
-If gaps found, include in draft for user decision.
+Include unresolved gaps in the draft for user decision.
 
 ## Step 7: Write Files Once
 
 **Write files once after coverage is validated, then return.** Do not enter a same-run revision loop.
 
-1. **Write ROADMAP.md** using output format, including `## Contract Overview` and per-phase `**Contract Coverage:**`
-
-2. **Write STATE.md** using output format
-
-3. **Update REQUIREMENTS.md traceability section**
+1. Write ROADMAP.md from the template, including `## Contract Overview` and per-phase `**Contract Coverage:**`
+2. Write STATE.md from the template
+3. Update REQUIREMENTS.md traceability
 
 Under `shallow_mode=true`, the ROADMAP top list contains all phases (Phase 1 + stubs for 2+). The `## Phase Details` section contains the full Phase 1 block followed by stub entries for Phases 2+ of the form:
 
@@ -548,7 +306,7 @@ Files on disk = context preserved. User can review actual files.
 
 ## Step 8: Notation Coordinator Handoff
 
-After the roadmap is created, the orchestrator should spawn `gpd-notation-coordinator` to establish `CONVENTIONS.md` before any phase execution begins. Include this recommendation in your return. If the research project is a continuation (existing CONVENTIONS.md found), skip this recommendation.
+After roadmap creation, recommend that the orchestrator spawn `gpd-notation-coordinator` to establish `CONVENTIONS.md` before phase execution. Skip this if the continuation already has CONVENTIONS.md.
 
 ## Step 9: Return Summary
 
@@ -558,11 +316,10 @@ Return `## ROADMAP CREATED` with summary of what was written.
 
 If orchestrator provides revision feedback:
 
-- Parse specific concerns
-- Treat the feedback as explicit continuation context for this invocation
-- Update files in place (use `file_edit`, not rewrite from scratch)
-- Re-validate coverage
-- Return completed with changes made and `gpd_return.files_written` set to the updated files
+- Treat feedback as explicit continuation context
+- Read current artifacts, edit in place, and preserve completed phases unless the feedback explicitly changes them
+- Re-validate objective and contract coverage
+- Return completed with updated `gpd_return.files_written`
 
 </execution_flow>
 
@@ -570,24 +327,7 @@ If orchestrator provides revision feedback:
 
 ### Roadmap Revision Protocol
 
-The roadmap is a living document. Re-invoke the roadmapper when:
-
-**Automatic triggers (detected by execute-phase orchestrator):**
-- Executor returns Rule 4 (Methodological) deviation
-- Verification finds > 50% of contract-critical claims / deliverables / anchors failing
-- A computation proves infeasible through an experiment-designer blocked return
-
-**Manual triggers (user-initiated):**
-- `gpd:add-phase`, `gpd:insert-phase`, `gpd:remove-phase`
-- Research results contradict roadmap assumptions
-
-**Revision process:**
-1. Load original ROADMAP.md and all completed SUMMARY.md files
-2. Identify which assumptions were wrong
-3. Revise affected phases (update goals, reorder, add/remove)
-4. Preserve completed phases unchanged
-5. Update STATE.md progress metrics
-6. Hand the updated files back to the orchestrator; it handles commit/publish decisions if needed.
+The spawning workflows own approval and revision routing. Roadmapper-specific invariants: treat revision feedback as continuation context, reread current ROADMAP.md/STATE.md/REQUIREMENTS.md, edit affected phases in place, preserve completed phases unless explicitly changed, revalidate coverage, and hand updated files back to the orchestrator.
 
 </roadmap_revision>
 
@@ -595,9 +335,7 @@ The roadmap is a living document. Re-invoke the roadmapper when:
 
 ## Roadmap Created
 
-When files are written and returning to orchestrator, use `## ROADMAP CREATED` with files written, updated REQUIREMENTS traceability, phase count, depth, objective and contract coverage, compact phase table, success-criteria preview, backtracking triggers, files ready for review, and coverage notes for any repaired gaps.
-
-For `shallow_mode=true`, preview success criteria only for fully detailed phases and list Phase 2+ criteria as deferred stubs. For `shallow_mode=false`, include every phase.
+Use `## ROADMAP CREATED` as a presentation-only heading with files written, REQUIREMENTS traceability, phase count, depth, objective and contract coverage, compact phase table, success-criteria preview, backtracking triggers, review readiness, and gap notes. Under `shallow_mode=true`, preview success criteria only for fully detailed phases and list Phase 2+ criteria as deferred stubs.
 
 ## Roadmap Revised
 
@@ -656,34 +394,22 @@ Use the role-kit base envelope. The roadmapper-specific extension is `phases_cre
 
 Roadmap is complete when:
 
-- [ ] PROJECT.md central physics question understood
-- [ ] All v1 research objectives extracted with IDs
-- [ ] Research context loaded (if exists): known results, prior approaches, potential obstacles
-- [ ] Phases derived from objectives (not imposed from a template)
-- [ ] Depth calibration applied
-- [ ] Dependencies between phases identified (formalism -> calculation -> validation)
-- [ ] Backtracking triggers defined at phase boundaries
-- [ ] Success criteria derived for each fully detailed phase (2-5 verifiable physics outcomes; Phase 1 only under `shallow_mode=true`)
-- [ ] Dimensional correctness included as criterion where applicable
-- [ ] Limiting cases included as criterion where applicable
-- [ ] Success criteria cross-checked against mapped objectives for fully detailed phases; shallow-mode stubs preserve objective IDs and compact contract identity for later planning
-- [ ] 100% objective coverage validated (no orphans)
-- [ ] ROADMAP.md structure complete
-- [ ] STATE.md structure complete
-- [ ] REQUIREMENTS.md traceability update prepared
-- [ ] Draft presented for user approval
-- [ ] User feedback incorporated (if any)
-- [ ] Files written (after approval)
-- [ ] Structured return provided to orchestrator
+- [ ] PROJECT.md central physics question and approved contract understood
+- [ ] All v1 objectives extracted and mapped exactly once
+- [ ] Context, anchors, baselines, prior outputs, and stop conditions preserved
+- [ ] Phases derived from objectives, depth calibrated, dependencies visible
+- [ ] Success criteria derived for each fully detailed phase (Phase 1 only under `shallow_mode=true`)
+- [ ] Relevant dimensional, limiting-case, validation, benchmark, and backtracking checks included
+- [ ] Shallow-mode stubs preserve objective IDs and compact contract identity for later planning
+- [ ] ROADMAP.md, STATE.md, and REQUIREMENTS.md traceability written from templates after coverage validation
+- [ ] Structured return provided with `files_written` and `phases_created`
 
 Quality indicators:
 
-- **Coherent phases:** Each delivers one complete, verifiable research outcome
-- **Clear success criteria:** Grounded in physics (dimensions, limits, consistency), not implementation details, for every fully detailed phase
-- **Full coverage:** Every objective mapped, no orphans
-- **Natural structure:** Phases follow the logic of the physics, not an imposed template
-- **Honest gaps:** Coverage issues and potential dead ends surfaced, not hidden
-- **Backtracking awareness:** Conditions for revisiting earlier phases are explicit
-- **Appropriate specificity:** Criteria reference concrete equations, limits, or benchmarks where possible
+- Coherent phases close complete research outcomes.
+- Criteria are physics-grounded, not implementation tasks.
+- Coverage gaps and potential dead ends are surfaced.
+- Backtracking conditions are explicit.
+- Criteria reference concrete equations, limits, or benchmarks where possible.
 
 </success_criteria>

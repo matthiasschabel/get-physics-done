@@ -62,13 +62,13 @@ COMPACT_WORKFLOW_REFERENCE_TARGET_COMMANDS = tuple(COMPACT_WORKFLOW_REFERENCE_CO
 TARGET_AGENT_PROJECTION_BUDGETS = {
     "gpd-planner": {"lines": 600, "chars": 35_000},
     "gpd-research-synthesizer": {"lines": 520, "chars": 31_000},
-    "gpd-roadmapper": {"lines": 800, "chars": 39_000},
+    "gpd-roadmapper": {"lines": 760, "chars": 38_000},
 }
-TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 110_000
+TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET = 102_000
 
 SELECTED_AGENT_PROJECTION_BUDGETS = {
-    "gpd-executor": {"lines": 760, "chars": 44_000},
-    "gpd-experiment-designer": {"lines": 740, "chars": 42_000},
+    "gpd-executor": {"lines": 700, "chars": 41_000},
+    "gpd-experiment-designer": {"lines": 710, "chars": 40_000},
     "gpd-plan-checker": {"lines": 450, "chars": 25_500},
     **TARGET_AGENT_PROJECTION_BUDGETS,
     "gpd-project-researcher": {"lines": 380, "chars": 18_000},

@@ -788,9 +788,9 @@ def test_return_only_planner_and_executor_do_not_commit_shared_state_files_by_de
     planner = (AGENTS_DIR / "gpd-planner.md").read_text(encoding="utf-8")
     planner_execution = (REFERENCES_DIR / "planning" / "planner-execution-procedure.md").read_text(encoding="utf-8")
     executor = (AGENTS_DIR / "gpd-executor.md").read_text(encoding="utf-8")
-
+    executor_completion = (REFERENCES_DIR / "execution" / "executor-completion.md").read_text(encoding="utf-8")
     planner_commit_blocks = re.findall(r"```bash\n(gpd commit[\s\S]*?)\n```", planner + "\n" + planner_execution)
-    executor_commit_blocks = re.findall(r"```bash\n(gpd commit[\s\S]*?)\n```", executor)
+    executor_commit_blocks = re.findall(r"```bash\n(gpd commit[\s\S]*?)\n```", executor + "\n" + executor_completion)
 
     assert planner_commit_blocks
     assert executor_commit_blocks

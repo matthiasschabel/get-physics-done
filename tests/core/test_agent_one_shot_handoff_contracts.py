@@ -102,6 +102,10 @@ def test_experiment_designer_supervised_mode_mentions_fresh_continuation() -> No
     assert_agent_role_kit_section(agent)
     assert_prompt_contracts(
         content,
+        machine_exact(
+            "experiment designer checkpoint handoff and empty files list",
+            ("{GPD_INSTALL_DIR}/references/orchestration/continuation-boundary.md", "files_written: []"),
+        ),
         semantic_anchor(
             "experiment designer fresh-continuation approval flow",
             (
@@ -110,5 +114,18 @@ def test_experiment_designer_supervised_mode_mentions_fresh_continuation() -> No
                 "spawns a fresh continuation for the write pass",
             ),
             match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+        semantic_anchor(
+            "experiment designer checkpoint does not claim unwritten design",
+            ("status: checkpoint", "no `design_file` until the continuation pass writes the artifact"),
+            match=MatchMode.CASEFOLD_NORMALIZED,
+        ),
+        semantic_anchor(
+            "experiment designer design_file stays coupled to files_written",
+            (
+                "design_file",
+                "must be returned in `files_written`",
+                "must match the EXPERIMENT-DESIGN.md path in `files_written`",
+            ),
         ),
     )

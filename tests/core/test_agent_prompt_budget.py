@@ -17,6 +17,7 @@ from tests.assertion_taxonomy_support import (
 from tests.markdown_test_support import markdown_table_blocks
 from tests.prompt_metrics_support import (
     budget_from_baseline,
+    count_raw_includes,
     expanded_include_markers,
     expanded_prompt_text,
     measure_prompt_surface,
@@ -29,8 +30,8 @@ PATH_PREFIX = "/runtime/"
 
 MIN_LINE_MARGIN = 20
 MIN_CHAR_MARGIN = 1_000
-PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 402_000
-PHASE5_MAX_AGENT_EXPANDED_CHARS = 39_000
+PHASE5_MAX_TOTAL_AGENT_EXPANDED_CHARS = 380_000
+PHASE5_MAX_AGENT_EXPANDED_CHARS = 35_000
 PHASE5_MIN_ROLE_KIT_AGENT_COUNT = 12
 
 AGENT_BASELINES = {
@@ -38,8 +39,8 @@ AGENT_BASELINES = {
     "gpd-check-proof": (81, 6_231),
     "gpd-consistency-checker": (69, 4_112),
     "gpd-debugger": (245, 9_482),
-    "gpd-executor": (643, 37_143),
-    "gpd-experiment-designer": (631, 35_363),
+    "gpd-executor": (576, 33_212),
+    "gpd-experiment-designer": (360, 21_301),
     "gpd-explainer": (241, 9_508),
     "gpd-literature-reviewer": (395, 14_820),
     "gpd-notation-coordinator": (350, 23_208),
@@ -56,7 +57,7 @@ AGENT_BASELINES = {
     "gpd-review-physics": (53, 2_604),
     "gpd-review-reader": (52, 3_166),
     "gpd-review-significance": (54, 2_790),
-    "gpd-roadmapper": (689, 33_451),
+    "gpd-roadmapper": (415, 22_017),
     "gpd-verifier": (374, 25_864),
 }
 
@@ -81,8 +82,8 @@ MODE_TABLE_ALLOWLIST = {
     "gpd-project-researcher",
 }
 WORST_AGENT_HARD_CAPS = {
-    "gpd-executor": (663, 38_200),
-    "gpd-experiment-designer": (651, 36_450),
+    "gpd-executor": (600, 34_500),
+    "gpd-experiment-designer": (380, 23_000),
     "gpd-notation-coordinator": (370, 24_300),
     "gpd-paper-writer": (453, 27_800),
     "gpd-plan-checker": (421, 22_200),
@@ -91,13 +92,15 @@ WORST_AGENT_HARD_CAPS = {
     "gpd-referee": (417, 30_600),
     "gpd-research-mapper": (375, 19_800),
     "gpd-research-synthesizer": (432, 25_100),
-    "gpd-roadmapper": (710, 34_500),
+    "gpd-roadmapper": (435, 23_500),
     "gpd-verifier": (394, 26_700),
 }
 PHASE5_RAW_AGENT_LINE_CAPS = {
-    "gpd-executor": 700,
+    "gpd-executor": 600,
+    "gpd-experiment-designer": 380,
     "gpd-plan-checker": 421,
     "gpd-planner": 590,
+    "gpd-roadmapper": 435,
 }
 TOP_AGENT_HARD_CAP_COUNT = 6
 BULKY_REFERENCE_INCLUDE_FILES = (
@@ -105,6 +108,31 @@ BULKY_REFERENCE_INCLUDE_FILES = (
     "contradiction-resolution-example.md",
     "ising-experiment-design-example.md",
 )
+DIRECT_BODY_AGENT_PROMPTS = (
+    "gpd-executor",
+    "gpd-experiment-designer",
+    "gpd-roadmapper",
+)
+DIRECT_BODY_AGENT_ROLE_KITS = {
+    "gpd-executor": (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    ),
+    "gpd-experiment-designer": (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    ),
+    "gpd-roadmapper": (
+        "status-routing",
+        "fresh-continuation",
+        "files-written-freshness",
+        "context-pressure",
+    ),
+}
 
 
 def _assert_prompt_baseline_is_current(
@@ -171,6 +199,24 @@ def test_phase5_selected_agent_raw_source_prompt_caps(agent_name: str) -> None:
     observed_lines = _raw_line_count(AGENTS_DIR / f"{agent_name}.md")
 
     assert observed_lines <= max_lines
+
+
+@pytest.mark.parametrize("agent_name", DIRECT_BODY_AGENT_PROMPTS)
+def test_top_direct_body_agent_prompts_do_not_gain_raw_includes(agent_name: str) -> None:
+    path = AGENTS_DIR / f"{agent_name}.md"
+    raw_text = path.read_text(encoding="utf-8")
+    metrics = measure_prompt_surface(path, src_root=SOURCE_ROOT, path_prefix=PATH_PREFIX)
+
+    assert count_raw_includes(raw_text) == 0
+    assert metrics.expanded_line_count == len(raw_text.splitlines())
+    assert metrics.expanded_char_count == len(raw_text)
+
+
+def test_top_direct_body_agents_keep_shared_lifecycle_role_kits() -> None:
+    for agent_name, expected_role_kits in DIRECT_BODY_AGENT_ROLE_KITS.items():
+        agent = registry.get_agent(agent_name)
+
+        assert tuple(agent.role_kits) == expected_role_kits
 
 
 def test_full_autonomy_and_research_mode_tables_stay_on_allowlisted_agents() -> None:
@@ -295,6 +341,73 @@ def test_research_synthesizer_references_canonical_contradiction_example_without
             "expanded synthesizer prompt excludes contradiction include marker",
             "contradiction-resolution-example.md",
             mode=FragmentMode.ABSENT,
+        ),
+    )
+
+
+def test_experiment_designer_keeps_ising_example_late_loaded() -> None:
+    raw_text = (AGENTS_DIR / "gpd-experiment-designer.md").read_text(encoding="utf-8")
+    expanded_text = expanded_prompt_text(
+        AGENTS_DIR / "gpd-experiment-designer.md",
+        src_root=SOURCE_ROOT,
+        path_prefix=PATH_PREFIX,
+    )
+
+    assert_prompt_contracts(
+        raw_text,
+        machine_exact(
+            "experiment designer references Ising example lazily",
+            "{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md",
+        ),
+        machine_exact(
+            "experiment designer avoids eager Ising include",
+            "@{GPD_INSTALL_DIR}/references/examples/ising-experiment-design-example.md",
+            mode=FragmentMode.ABSENT,
+        ),
+    )
+    assert_prompt_contracts(
+        "\n".join(expanded_include_markers(expanded_text)),
+        machine_exact(
+            "expanded experiment designer excludes Ising include marker",
+            "ising-experiment-design-example.md",
+            mode=FragmentMode.ABSENT,
+        ),
+    )
+
+
+def test_roadmapper_references_templates_without_eager_inline() -> None:
+    raw_text = (AGENTS_DIR / "gpd-roadmapper.md").read_text(encoding="utf-8")
+    expanded_text = expanded_prompt_text(
+        AGENTS_DIR / "gpd-roadmapper.md",
+        src_root=SOURCE_ROOT,
+        path_prefix=PATH_PREFIX,
+    )
+
+    assert_prompt_contracts(
+        raw_text,
+        machine_exact(
+            "roadmapper keeps roadmap and state templates late-loaded",
+            (
+                "{GPD_INSTALL_DIR}/templates/roadmap.md",
+                "{GPD_INSTALL_DIR}/templates/state.md",
+            ),
+        ),
+        machine_exact(
+            "roadmapper avoids eager roadmap and state template includes",
+            (
+                "@{GPD_INSTALL_DIR}/templates/roadmap.md",
+                "@{GPD_INSTALL_DIR}/templates/state.md",
+            ),
+            mode=FragmentMode.ABSENT,
+        ),
+    )
+    assert_prompt_contracts(
+        expanded_text,
+        semantic_anchor(
+            "expanded roadmapper excludes template bodies",
+            ("# Research Roadmap", "# Research State"),
+            mode=FragmentMode.ABSENT,
+            match=MatchMode.CASEFOLD_NORMALIZED,
         ),
     )
 

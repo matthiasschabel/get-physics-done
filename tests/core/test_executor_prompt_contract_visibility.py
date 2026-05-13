@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gpd.adapters.install_utils import expand_at_includes
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 EXECUTION_REFERENCE_DIR = REPO_ROOT / "src/gpd/specs/references/execution"
@@ -36,28 +34,20 @@ def _assert_contract_schema_tokens_visible(text: str) -> None:
         assert token in text, f"Missing contract-results authority token: {token}"
 
 
-def _expanded_executor_prompt() -> str:
-    return expand_at_includes(
-        _read_executor_prompt(),
-        REPO_ROOT / "src/gpd/specs",
-        "/runtime/",
-    )
-
-
 def test_executor_summary_creation_requires_loading_contract_schema_before_frontmatter() -> None:
     executor = _read_executor_prompt()
     summary_creation = _between(executor, "<summary_creation>", "</summary_creation>")
-    expanded = _expanded_executor_prompt()
+    completion = _read_executor_completion_reference()
 
-    assert "explicitly load and read the canonical ledger schema before drafting any YAML" in summary_creation
+    assert "executor-completion.md" in summary_creation
     assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in summary_creation
     assert "@{GPD_INSTALL_DIR}/templates/summary.md" not in summary_creation
-    assert "**file_read:** `{GPD_INSTALL_DIR}/templates/contract-results-schema.md`" in summary_creation
-    assert "**file_read:** `{GPD_INSTALL_DIR}/templates/summary.md`" in summary_creation
-    assert "Re-open it immediately before writing frontmatter" in summary_creation
-    assert "Do not rely on memory, prior plans, or a paraphrase from `templates/summary.md`." in summary_creation
-    assert "load the schema above before writing frontmatter" in summary_creation
-    assert "gpd validate summary-contract" in expanded
+    assert "templates/contract-results-schema.md" in summary_creation
+    assert "templates/summary.md" in summary_creation
+    assert "follow the canonical ledger fields literally" in summary_creation
+    assert "detailed SUMMARY schema" in summary_creation
+    _assert_contract_schema_tokens_visible(completion)
+    assert "gpd validate summary-contract" in completion
 
 
 def test_executor_completion_reference_exposes_required_summary_depth_and_completion_fields() -> None:
@@ -68,12 +58,14 @@ def test_executor_completion_reference_exposes_required_summary_depth_and_comple
     assert "plan_contract_ref: \"GPD/phases/XX-name/{phase}-{plan}-PLAN.md#/contract\"" in completion
 
 
-def test_expanded_executor_prompt_keeps_summary_contract_authority_and_validator_visible() -> None:
-    expanded = _expanded_executor_prompt()
+def test_executor_completion_reference_keeps_summary_contract_authority_and_validator_visible() -> None:
+    executor = _read_executor_prompt()
+    completion = _read_executor_completion_reference()
 
-    _assert_contract_schema_tokens_visible(expanded)
-    assert "templates/contract-results-schema.md" in _read_executor_prompt()
-    assert "gpd validate summary-contract" in expanded
+    _assert_contract_schema_tokens_visible(completion)
+    assert "templates/contract-results-schema.md" in executor
+    assert "executor-completion.md" in executor
+    assert "gpd validate summary-contract" in completion
 
 
 def test_executor_reference_examples_keep_uncertainty_markers_explicit_and_non_empty() -> None:

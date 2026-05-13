@@ -14,6 +14,12 @@ After all tasks complete, create `{phase}-{plan}-SUMMARY.md` at `${phase_dir}/`.
 
 @{GPD_INSTALL_DIR}/templates/contract-results-schema.md
 
+Before treating contract-backed output as complete, run:
+
+```bash
+gpd validate summary-contract GPD/phases/XX-name/{phase}-{plan}-SUMMARY.md
+```
+
 **Verification contract:** For contract-backed work, the SUMMARY.md frontmatter MUST declare `plan_contract_ref`, `contract_results`, and any decisive `comparison_verdicts` so the verifier can test results without re-reading the full derivation. `plan_contract_ref` must end with the exact `#/contract` fragment. `contract_results` must cover every declared claim, deliverable, acceptance test, reference, and forbidden proxy ID from the PLAN contract. Use only real contract IDs in both ledgers. If a decisive comparison remains open, keep the parent target incomplete and emit `verdict: inconclusive` or `verdict: tension` instead of omitting the verdict. Every decisive numerical result needs concrete evidence. Every equation that matters downstream needs a spot-check or limiting-case anchor. The contract-backed example below keeps `uncertainty_markers` explicit and non-empty to match the canonical schema.
 For `contract_results.references`, keep the action ledger internally consistent: `completed` requires non-empty `completed_actions`, `missing` requires non-empty `missing_actions`, `not_applicable` leaves both empty, and the two lists must not overlap.
 Even singleton values must stay YAML lists in strict contract-backed ledgers: use `linked_ids: [claim-id]`, `completed_actions: [read]`, and `weakest_anchors: [anchor-1]`, never scalar strings.

@@ -10,6 +10,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_DIR = REPO_ROOT / "src/gpd/agents"
 SPECS_DIR = REPO_ROOT / "src/gpd/specs"
 EXECUTION_DIR = SPECS_DIR / "references/execution"
+ORCHESTRATION_DIR = SPECS_DIR / "references/orchestration"
 
 
 def _read_executor_prompt() -> str:
@@ -18,6 +19,10 @@ def _read_executor_prompt() -> str:
 
 def _read_execution_reference(name: str) -> str:
     return (EXECUTION_DIR / name).read_text(encoding="utf-8")
+
+
+def _read_orchestration_reference(name: str) -> str:
+    return (ORCHESTRATION_DIR / name).read_text(encoding="utf-8")
 
 
 def _between(text: str, start: str, end: str) -> str:
@@ -67,7 +72,8 @@ def test_expanded_executor_prompt_stays_under_budget_and_excludes_late_publicati
 def test_executor_base_stays_under_phase6_raw_line_budget_and_names_jit_modules() -> None:
     executor = _read_executor_prompt()
 
-    assert len(executor.splitlines()) < 800
+    assert len(executor) < 35_000
+    assert len(executor.splitlines()) < 620
     assert "@{GPD_INSTALL_DIR}" not in executor
     for module_name in (
         "executor-derivation-checkpoints.md",
@@ -85,8 +91,7 @@ def test_executor_module_load_manifest_is_body_free_late_load_metadata() -> None
 
     assert "module_load_manifest" in manifest
     assert "body-free" in manifest
-    assert "Never load every" in manifest
-    assert "executor reference" in manifest
+    assert "load every executor reference" in manifest.lower()
     assert "@{GPD_INSTALL_DIR}" not in manifest
     for module_id, module_path in (
         ("executor.derivation_checkpoints", "references/execution/executor-derivation-checkpoints.md"),
@@ -203,8 +208,37 @@ def test_executor_context_pressure_thresholds_match_canonical_forced_checkpoint_
     canonical = (SPECS_DIR / "references/orchestration/context-pressure-thresholds.md").read_text(encoding="utf-8")
 
     assert "| gpd-executor | < 40% | 40-55% | 55-70% | > 70% |" in canonical
-    assert "GREEN <40%, YELLOW 40-55%, ORANGE 55-70%, RED >70%" in executor
-    assert "forced-checkpoint rule at 50%" in executor
-    assert "preservation checkpoint inside YELLOW, not an ORANGE reclassification" in executor
+    assert "forced checkpoint at 50%" in canonical
+    assert "context-pressure-thresholds.md" in executor
+    assert "forced checkpoint starts at 50%" in executor
+    assert "ORANGE still starts at 55%" in executor
     assert "If running total exceeds 50%, you are in ORANGE" not in executor
     assert ">50% context consumed" not in executor
+
+
+def test_executor_base_defers_checkpoint_return_and_completion_event_protocols() -> None:
+    executor = _read_executor_prompt()
+
+    assert "type=\"checkpoint:*\"" in executor
+    assert "gpd_return.status: checkpoint" in executor
+    assert "execute-plan-checkpoints.md" in executor
+    assert "continuation-boundary.md" in executor
+    assert "executor-completion.md" in executor
+
+    assert "bounded execution segment envelope" not in executor
+    assert "Pattern A: Checkpoint-free" not in executor
+    assert "type, plan, progress, completed tasks plus hashes" not in executor
+    assert "gpd commit \"execute(${phase_number})" not in executor
+
+
+def test_executor_event_references_own_deferred_protocols() -> None:
+    continuation = _read_orchestration_reference("continuation-boundary.md")
+    checkpoints = _read_execution_reference("execute-plan-checkpoints.md")
+    completion = _read_execution_reference("executor-completion.md")
+
+    assert "one-shot" in continuation
+    assert "must not wait for the user" in continuation
+    assert "Checkpoint Return (For Orchestrator)" in checkpoints
+    assert "execution_segment" in checkpoints
+    assert "gpd validate summary-contract" in completion
+    assert "Final Self-Check" in completion

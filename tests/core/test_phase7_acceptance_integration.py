@@ -15,12 +15,13 @@ from tests.helpers.phase7_live_like import REQUIRED_JIT_ROW_IDS
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 
-_PHASE7_TRACKED_LOC_CAP = 3_375
+_PHASE7_TRACKED_LOC_CAP = 3_850
 _PHASE7_ROW_ID_RE = re.compile(
     r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|"
     r"P6-(?:PLAN|EXEC|COMP|RES)-JIT-[0-9]{2}|"
     r"P7-ERG-JIT-[0-9]{2}|"
-    r"P7-NEXTUP-JIT-[0-9]{2})$"
+    r"P7-NEXTUP-JIT-[0-9]{2}|"
+    r"P8-AGENT-JIT-[0-9]{2})$"
 )
 _PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -162,6 +163,8 @@ def _phase7_row_key(row_id: str) -> str:
     if row_id.startswith("P6-"):
         return row_id
     if row_id.startswith("P7-"):
+        return row_id
+    if row_id.startswith("P8-"):
         return row_id
     return row_id.split("-", 1)[0]
 

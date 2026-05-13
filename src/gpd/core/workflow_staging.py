@@ -361,6 +361,85 @@ MAP_RESEARCH_INIT_FIELDS = frozenset(
         *STAGED_REFERENCE_RUNTIME_FIELDS,
     }
 )
+_READ_WRITE_SEARCH_TOOLS = frozenset(
+    {
+        "file_read",
+        "file_write",
+        "find_files",
+        "search_files",
+        "shell",
+    }
+)
+_READ_WRITE_SEARCH_TASK_TOOLS = frozenset(
+    {
+        *_READ_WRITE_SEARCH_TOOLS,
+        "task",
+    }
+)
+_ASK_READ_SHELL_TASK_TOOLS = frozenset(
+    {
+        "ask_user",
+        "file_read",
+        "shell",
+        "task",
+    }
+)
+_ASK_READ_WRITE_SHELL_TASK_TOOLS = frozenset(
+    {
+        "ask_user",
+        "file_read",
+        "file_write",
+        "shell",
+        "task",
+    }
+)
+_ASK_READ_SEARCH_TASK_TOOLS = frozenset(
+    {
+        "ask_user",
+        "file_read",
+        "find_files",
+        "search_files",
+        "shell",
+        "task",
+    }
+)
+_ASK_READ_WRITE_SEARCH_TASK_TOOLS = frozenset(
+    {
+        *_READ_WRITE_SEARCH_TASK_TOOLS,
+        "ask_user",
+    }
+)
+_ASK_FULL_FILE_TASK_TOOLS = frozenset(
+    {
+        *_ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+        "file_edit",
+    }
+)
+_PLAN_PHASE_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_READ_WRITE_SEARCH_TASK_TOOLS,
+        "web_fetch",
+    }
+)
+_LITERATURE_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_ASK_READ_SEARCH_TASK_TOOLS,
+        "web_fetch",
+        "web_search",
+    }
+)
+_PEER_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+        "web_search",
+    }
+)
+_WRITE_PAPER_STAGE_ALLOWED_TOOLS = frozenset(
+    {
+        *_ASK_FULL_FILE_TASK_TOOLS,
+        "web_search",
+    }
+)
 VERIFY_WORK_MCP_VERIFICATION_TOOLS = frozenset(
     {
         "mcp__gpd_verification__get_bundle_checklist",
@@ -417,7 +496,22 @@ VERIFY_WORK_INIT_FIELDS = frozenset(
     }
 )
 _DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW = {
+    "arxiv-submission": _READ_WRITE_SEARCH_TASK_TOOLS,
+    "autonomous": _ASK_READ_SHELL_TASK_TOOLS,
+    "execute-phase": _ASK_FULL_FILE_TASK_TOOLS,
+    "literature-review": _LITERATURE_REVIEW_STAGE_ALLOWED_TOOLS,
+    "map-research": _ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+    "new-milestone": _ASK_READ_WRITE_SHELL_TASK_TOOLS,
+    "new-project": _ASK_READ_WRITE_SHELL_TASK_TOOLS,
+    "peer-review": _PEER_REVIEW_STAGE_ALLOWED_TOOLS,
+    "plan-phase": _PLAN_PHASE_STAGE_ALLOWED_TOOLS,
+    "quick": _ASK_READ_WRITE_SEARCH_TASK_TOOLS,
+    "research-phase": _ASK_READ_SHELL_TASK_TOOLS,
+    "respond-to-referees": _ASK_FULL_FILE_TASK_TOOLS,
+    "resume-work": frozenset({"ask_user", "file_read", "file_write", "shell"}),
+    "sync-state": _READ_WRITE_SEARCH_TOOLS,
     "verify-work": VERIFY_WORK_STAGE_ALLOWED_TOOLS,
+    "write-paper": _WRITE_PAPER_STAGE_ALLOWED_TOOLS,
 }
 WRITE_PAPER_INIT_FIELDS = frozenset(
     {
@@ -810,7 +904,7 @@ def _normalize_relative_posix_path(raw: object, *, label: str) -> str:
 
 def _normalize_tool_set(values: Iterable[str] | None, *, workflow_id: str) -> frozenset[str]:
     if values is None:
-        return _DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW.get(workflow_id, frozenset(CANONICAL_TOOL_NAMES))
+        return allowed_tools_for_workflow(workflow_id)
     normalized: set[str] = set()
     for value in values:
         if not isinstance(value, str):
@@ -820,6 +914,13 @@ def _normalize_tool_set(values: Iterable[str] | None, *, workflow_id: str) -> fr
             raise ValueError("allowed_tools must not contain blank entries")
         normalized.add(tool)
     return frozenset(normalized)
+
+
+def allowed_tools_for_workflow(workflow_id: str | None) -> frozenset[str]:
+    if workflow_id is None:
+        return frozenset(CANONICAL_TOOL_NAMES)
+    normalized_workflow_id = _normalize_workflow_id(workflow_id)
+    return _DEFAULT_ALLOWED_TOOLS_BY_WORKFLOW.get(normalized_workflow_id, frozenset(CANONICAL_TOOL_NAMES))
 
 
 def _normalize_init_field_set(values: Iterable[str] | None, *, workflow_id: str) -> frozenset[str] | None:
@@ -1502,6 +1603,7 @@ __all__ = [
     "WorkflowStage",
     "WorkflowStageConditionalAuthority",
     "WorkflowStageManifest",
+    "allowed_tools_for_workflow",
     "expanded_required_init_fields_by_stage",
     "expanded_required_init_fields_for_workflow",
     "invalidate_workflow_stage_manifest_cache",

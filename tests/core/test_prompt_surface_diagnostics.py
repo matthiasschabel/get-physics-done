@@ -632,3 +632,39 @@ def test_prompt_diagnostics_does_not_define_local_stage_manifest_parser() -> Non
 
     assert "_load_local_source_stage_manifest" not in source
     assert "_manifest_string_list" not in source
+
+
+def test_prompt_diagnostics_does_not_define_semantic_duplicate_compat_aliases() -> None:
+    source = PROMPT_DIAGNOSTICS_PATH.read_text(encoding="utf-8")
+    private_prefix = "_"
+
+    forbidden = (
+        "def " + private_prefix + "semantic_duplicate_invariant_groups",
+        "def " + private_prefix + "status_handling_terms",
+        "scan"
+        + private_prefix
+        + "semantic_duplicate_invariant_groups as "
+        + private_prefix
+        + "scan"
+        + private_prefix
+        + "semantic_duplicate_invariant_groups",
+        "semantic"
+        + private_prefix
+        + "example_limit as "
+        + private_prefix
+        + "semantic"
+        + private_prefix
+        + "example_limit",
+        "status"
+        + private_prefix
+        + "handling_terms as "
+        + private_prefix
+        + "semantic"
+        + private_prefix
+        + "status"
+        + private_prefix
+        + "handling_terms",
+    )
+
+    for term in forbidden:
+        assert term not in source

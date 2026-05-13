@@ -23,20 +23,6 @@
     ]
   },
   "local_cli_bridge": {
-    "commands": [
-      "gpd --help",
-      "gpd doctor",
-      "gpd validate unattended-readiness --runtime <runtime> --autonomy <mode>",
-      "gpd permissions status --runtime <runtime> --autonomy <mode>",
-      "gpd permissions sync --runtime <runtime> --autonomy <mode>",
-      "gpd resume",
-      "gpd resume --recent",
-      "gpd observe execution",
-      "gpd cost",
-      "gpd presets list",
-      "gpd validate plan-preflight <PLAN.md>",
-      "gpd integrations status wolfram"
-    ],
     "named_commands": {
       "help": "gpd --help",
       "doctor": "gpd doctor",

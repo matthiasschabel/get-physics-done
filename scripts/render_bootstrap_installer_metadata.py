@@ -75,7 +75,7 @@ def _shared_public_surface_text(contract: PublicSurfaceContract) -> dict[str, ob
         "beginnerPreflightRequirements": list(beginner.preflight_requirements),
         "beginnerCaveats": list(beginner.caveats),
         "beginnerStartupLadder": list(beginner.startup_ladder),
-        "localCliBridgeCommands": list(bridge.commands),
+        "localCliBridgeCommands": list(named_commands.ordered()),
         "localCliBridge": {
             "doctorCommand": named_commands.doctor,
             "helpCommand": named_commands.help,

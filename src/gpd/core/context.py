@@ -310,9 +310,6 @@ from gpd.core.workflow_staging import (
     VERIFY_WORK_INIT_FIELDS as _VERIFY_WORK_INIT_FIELDS,
 )
 from gpd.core.workflow_staging import (
-    VERIFY_WORK_STAGE_ALLOWED_TOOLS as _VERIFY_WORK_STAGE_ALLOWED_TOOLS,
-)
-from gpd.core.workflow_staging import (
     WRITE_PAPER_INIT_FIELDS as _WRITE_PAPER_INIT_FIELDS,
 )
 from gpd.core.write_paper_intake import (
@@ -416,62 +413,6 @@ _REFERENCE_ROLE_PRIORITY = {
     "background": 4,
     "other": 5,
 }
-_PLAN_PHASE_STAGE_ALLOWED_TOOLS = frozenset(
-    {
-        "file_read",
-        "file_write",
-        "shell",
-        "find_files",
-        "search_files",
-        "task",
-        "web_fetch",
-    }
-)
-_QUICK_STAGE_ALLOWED_TOOLS = frozenset(
-    {
-        "ask_user",
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell",
-        "task",
-    }
-)
-_WRITE_PAPER_STAGE_ALLOWED_TOOLS = frozenset(
-    {
-        "ask_user",
-        "file_edit",
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell",
-        "task",
-        "web_search",
-    }
-)
-_PEER_REVIEW_STAGE_ALLOWED_TOOLS = frozenset(
-    {
-        "ask_user",
-        "file_read",
-        "file_write",
-        "find_files",
-        "search_files",
-        "shell",
-        "task",
-        "web_search",
-    }
-)
-_NEW_MILESTONE_STAGE_ALLOWED_TOOLS = frozenset(
-    {
-        "ask_user",
-        "file_read",
-        "file_write",
-        "shell",
-        "task",
-    }
-)
 _EXECUTE_PHASE_EXECUTOR_TASK_OVERLAY_IDS = ("executor.bounded_segment",)
 _EXECUTE_PHASE_TASK_OVERLAY_SELECTION_SOURCE = "execute-phase.executor_dispatch"
 _EXECUTE_PHASE_TASK_OVERLAY_POLICY_SUMMARY = (
@@ -4105,7 +4046,6 @@ def init_plan_phase(
 
     manifest = load_workflow_stage_manifest(
         "plan-phase",
-        allowed_tools=_PLAN_PHASE_STAGE_ALLOWED_TOOLS,
         known_init_fields=_PLAN_PHASE_INIT_FIELDS,
     )
 
@@ -4160,10 +4100,7 @@ def init_new_project(cwd: Path, stage: str | None = None) -> dict:
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "new-project",
-        allowed_tools={"ask_user", "file_read", "file_write", "shell", "task"},
-    )
+    manifest = load_workflow_stage_manifest("new-project")
     return _assemble_staged_init_payload(
         workflow_id="new-project",
         stage_id=stage,
@@ -4255,7 +4192,6 @@ def init_new_milestone(cwd: Path, stage: str | None = None) -> dict:
 
     manifest = load_workflow_stage_manifest(
         "new-milestone",
-        allowed_tools=_NEW_MILESTONE_STAGE_ALLOWED_TOOLS,
         known_init_fields=_NEW_MILESTONE_INIT_FIELDS,
     )
 
@@ -4360,7 +4296,6 @@ def init_quick(cwd: Path, description: str | None = None, stage: str | None = No
 
     manifest = load_workflow_stage_manifest(
         "quick",
-        allowed_tools=_QUICK_STAGE_ALLOWED_TOOLS,
         known_init_fields=_QUICK_INIT_FIELDS,
     )
 
@@ -4518,10 +4453,7 @@ def init_resume(cwd: Path, *, data_root: Path | None = None, stage: str | None =
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "resume-work",
-        allowed_tools={"ask_user", "file_read", "file_write", "shell"},
-    )
+    manifest = load_workflow_stage_manifest("resume-work")
 
     def canonicalize_resume_staged_payload(_assembly_context: object, staged_source: dict[str, object]) -> None:
         canonical = canonicalize_resume_public_payload(staged_source)
@@ -4594,10 +4526,7 @@ def init_sync_state(cwd: Path, *, stage: str | None = None) -> dict:
 
     from gpd.core.workflow_staging import load_workflow_stage_manifest
 
-    manifest = load_workflow_stage_manifest(
-        "sync-state",
-        allowed_tools={"ask_user", "file_read", "file_write", "shell", "find_files", "search_files"},
-    )
+    manifest = load_workflow_stage_manifest("sync-state")
 
     return _assemble_staged_init_payload(
         workflow_id="sync-state",
@@ -4676,7 +4605,6 @@ def init_verify_work(cwd: Path, phase: str | None, stage: str | None = None) -> 
 
     manifest = load_workflow_stage_manifest(
         "verify-work",
-        allowed_tools=_VERIFY_WORK_STAGE_ALLOWED_TOOLS,
         known_init_fields=_VERIFY_WORK_INIT_FIELDS,
     )
 
@@ -4780,7 +4708,6 @@ def init_write_paper(cwd: Path, subject: str | None = None, stage: str | None = 
 
     manifest = load_workflow_stage_manifest(
         "write-paper",
-        allowed_tools=_WRITE_PAPER_STAGE_ALLOWED_TOOLS,
         known_init_fields=_WRITE_PAPER_INIT_FIELDS,
     )
 
@@ -4863,7 +4790,6 @@ def init_peer_review(cwd: Path, subject: str | None = None, stage: str | None = 
 
     manifest = load_workflow_stage_manifest(
         "peer-review",
-        allowed_tools=_PEER_REVIEW_STAGE_ALLOWED_TOOLS,
         known_init_fields=PEER_REVIEW_INIT_FIELDS,
     )
     return _assemble_staged_init_payload(

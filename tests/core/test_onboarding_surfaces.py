@@ -352,33 +352,29 @@ def test_public_surface_contract_schema_does_not_duplicate_local_cli_command_val
     )
 
     local_cli_bridge_schema = schema["sections"]["local_cli_bridge"]
-    assert "commands" not in local_cli_bridge_schema
+    assert "commands" not in local_cli_bridge_schema["keys"]
     assert "gpd --help" not in json.dumps(schema)
 
 
-def test_public_surface_contract_loader_still_rejects_command_named_command_order_drift(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
+def test_public_surface_contract_bridge_commands_derive_from_named_command_order() -> None:
     canonical_payload = json.loads(
         (Path(public_surface_contract_module.__file__).resolve().with_name("public_surface_contract.json")).read_text(
             encoding="utf-8"
         )
     )
-    drifted_payload = copy.deepcopy(canonical_payload)
-    drifted_payload["local_cli_bridge"]["commands"][:2] = [
-        canonical_payload["local_cli_bridge"]["commands"][1],
-        canonical_payload["local_cli_bridge"]["commands"][0],
-    ]
+    canonical_schema = json.loads(
+        (
+            Path(public_surface_contract_module.__file__).resolve().with_name("public_surface_contract_schema.json")
+        ).read_text(encoding="utf-8")
+    )
+    ordered_keys = canonical_schema["sections"]["local_cli_bridge"]["named_commands"]["ordered_keys"]
+    expected_commands = tuple(canonical_payload["local_cli_bridge"]["named_commands"][key] for key in ordered_keys)
 
-    _load_public_surface_contract_with_payload(monkeypatch, tmp_path, drifted_payload)
+    contract = load_public_surface_contract()
 
-    with pytest.raises(
-        ValueError,
-        match=r"local_cli_bridge\.commands must exactly match local_cli_bridge\.named_commands in canonical order",
-    ):
-        load_public_surface_contract()
-    load_public_surface_contract.cache_clear()
+    assert "commands" not in canonical_payload["local_cli_bridge"]
+    assert contract.local_cli_bridge.commands == expected_commands
+    assert contract.local_cli_bridge.commands == contract.local_cli_bridge.named_commands.ordered()
 
 
 @pytest.mark.parametrize(
@@ -405,42 +401,6 @@ def test_public_surface_contract_loader_rejects_section_additive_keys(
     _load_public_surface_contract_with_payload(monkeypatch, tmp_path, additive_payload)
     with pytest.raises(ValueError, match=expected_message):
         load_public_surface_contract()
-    load_public_surface_contract.cache_clear()
-
-
-def test_public_surface_contract_loader_requires_authoritative_local_cli_bridge_commands(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    canonical_path = Path(__file__).resolve().parents[2] / "src" / "gpd" / "core" / "public_surface_contract.json"
-    canonical_payload = json.loads(canonical_path.read_text(encoding="utf-8"))
-    invalid_payload = copy.deepcopy(canonical_payload)
-    invalid_payload["local_cli_bridge"]["commands"] = [
-        command for command in invalid_payload["local_cli_bridge"]["commands"] if command != "gpd doctor"
-    ]
-
-    _load_public_surface_contract_with_payload(monkeypatch, tmp_path, invalid_payload)
-    with pytest.raises(ValueError, match=r"local_cli_bridge\.commands must include 'gpd doctor'"):
-        load_public_surface_contract()
-
-    load_public_surface_contract.cache_clear()
-
-
-def test_public_surface_contract_loader_requires_recovery_ladder_commands_to_stay_public(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    canonical_path = Path(__file__).resolve().parents[2] / "src" / "gpd" / "core" / "public_surface_contract.json"
-    canonical_payload = json.loads(canonical_path.read_text(encoding="utf-8"))
-    invalid_payload = copy.deepcopy(canonical_payload)
-    invalid_payload["local_cli_bridge"]["commands"] = [
-        command for command in invalid_payload["local_cli_bridge"]["commands"] if command != "gpd resume --recent"
-    ]
-
-    _load_public_surface_contract_with_payload(monkeypatch, tmp_path, invalid_payload)
-    with pytest.raises(ValueError, match=r"local_cli_bridge\.commands must include 'gpd resume --recent'"):
-        load_public_surface_contract()
-
     load_public_surface_contract.cache_clear()
 
 
@@ -476,10 +436,9 @@ def test_public_surface_contract_loader_normalizes_whitespace(
         f"  {canonical_payload['beginner_onboarding']['startup_ladder'][0]}  ",
         *canonical_payload["beginner_onboarding"]["startup_ladder"][1:],
     ]
-    noisy_payload["local_cli_bridge"]["commands"] = [
-        f"  {canonical_payload['local_cli_bridge']['commands'][0]}  ",
-        *canonical_payload["local_cli_bridge"]["commands"][1:],
-    ]
+    noisy_payload["local_cli_bridge"]["named_commands"]["help"] = (
+        f"  {canonical_payload['local_cli_bridge']['named_commands']['help']}  "
+    )
     noisy_payload["local_cli_bridge"]["named_commands"]["doctor"] = (
         f"  {canonical_payload['local_cli_bridge']['named_commands']['doctor']}  "
     )
@@ -500,7 +459,10 @@ def test_public_surface_contract_loader_normalizes_whitespace(
     assert contract.beginner_onboarding.startup_ladder == tuple(
         canonical_payload["beginner_onboarding"]["startup_ladder"]
     )
-    assert contract.local_cli_bridge.commands == tuple(canonical_payload["local_cli_bridge"]["commands"])
+    assert contract.local_cli_bridge.commands == contract.local_cli_bridge.named_commands.ordered()
+    assert (
+        contract.local_cli_bridge.named_commands.help == canonical_payload["local_cli_bridge"]["named_commands"]["help"]
+    )
     assert (
         contract.local_cli_bridge.named_commands.doctor
         == canonical_payload["local_cli_bridge"]["named_commands"]["doctor"]
@@ -518,10 +480,12 @@ def test_public_surface_contract_loader_rejects_duplicate_entries(
     canonical_path = Path(__file__).resolve().parents[2] / "src" / "gpd" / "core" / "public_surface_contract.json"
     canonical_payload = json.loads(canonical_path.read_text(encoding="utf-8"))
     duplicate_payload = copy.deepcopy(canonical_payload)
-    duplicate_payload["local_cli_bridge"]["commands"].append(canonical_payload["local_cli_bridge"]["commands"][0])
+    duplicate_payload["local_cli_bridge"]["named_commands"]["doctor"] = canonical_payload["local_cli_bridge"][
+        "named_commands"
+    ]["help"]
 
     _load_public_surface_contract_with_payload(monkeypatch, tmp_path, duplicate_payload)
-    with pytest.raises(ValueError, match=r"local_cli_bridge\.commands must not contain duplicates"):
+    with pytest.raises(ValueError, match=r"local_cli_bridge\.named_commands must not contain duplicate command values"):
         load_public_surface_contract()
 
     load_public_surface_contract.cache_clear()
@@ -577,20 +541,6 @@ def test_doc_surface_contract_helpers_read_runtime_normalized_contract(
             startup_ladder=("help", "start"),
         ),
         local_cli_bridge=public_surface_contract_module.LocalCliBridgeContract(
-            commands=(
-                "gpd --help",
-                "gpd doctor",
-                "gpd validate unattended-readiness --runtime <runtime> --autonomy balanced",
-                "gpd permissions status --runtime <runtime> --autonomy balanced",
-                "gpd permissions sync --runtime <runtime> --autonomy balanced",
-                "gpd resume",
-                "gpd resume --recent",
-                "gpd observe execution",
-                "gpd cost",
-                "gpd presets list",
-                "gpd validate plan-preflight <PLAN.md>",
-                "gpd integrations status wolfram",
-            ),
             named_commands=public_surface_contract_module.LocalCliNamedCommandsContract(
                 help="gpd --help",
                 doctor="gpd doctor",
@@ -658,7 +608,10 @@ def test_doc_surface_contract_helpers_read_runtime_normalized_contract(
     assert recovery_cross_workspace_command() == "resume --recent"
     assert public_surface_contract_module.local_cli_bridge_purpose_phrase() == "workspace diagnostics"
     bridge_note = local_cli_bridge_note()
-    assert bridge_note == "Use `gpd --help` in your normal terminal for the broader local CLI surface: workspace diagnostics."
+    assert (
+        bridge_note
+        == "Use `gpd --help` in your normal terminal for the broader local CLI surface: workspace diagnostics."
+    )
     assert public_surface_contract_module.local_cli_bridge_purpose_phrase() in bridge_note
     assert public_surface_contract_module.local_cli_plan_preflight_command() not in bridge_note
     assert public_surface_contract_module.local_cli_install_local_example_command() == "gpd install <runtime> --local"
@@ -681,20 +634,6 @@ def test_doc_surface_contract_helpers_refresh_dynamic_command_surfaces(
             startup_ladder=("help", "start"),
         ),
         local_cli_bridge=public_surface_contract_module.LocalCliBridgeContract(
-            commands=(
-                "gpd help dynamic",
-                "gpd doctor dynamic",
-                "gpd validate dynamic-unattended --runtime <runtime> --autonomy balanced",
-                "gpd permissions status dynamic --runtime <runtime> --autonomy balanced",
-                "gpd permissions sync dynamic --runtime <runtime> --autonomy balanced",
-                "gpd resume dynamic",
-                "gpd resume dynamic --recent",
-                "gpd observe dynamic",
-                "gpd cost dynamic",
-                "gpd presets dynamic",
-                "gpd validate dynamic-plan <PLAN.md>",
-                "gpd integrations status dynamic-wolfram",
-            ),
             named_commands=public_surface_contract_module.LocalCliNamedCommandsContract(
                 help="gpd help dynamic",
                 doctor="gpd doctor dynamic",

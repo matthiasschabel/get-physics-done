@@ -40,11 +40,11 @@ from gpd.core.workflow_staging import (
     RESEARCH_PHASE_STAGE_MANIFEST_PATH,
     VERIFY_WORK_INIT_FIELDS,
     VERIFY_WORK_MCP_VERIFICATION_TOOLS,
-    VERIFY_WORK_STAGE_ALLOWED_TOOLS,
     WORKFLOW_STAGE_MANIFEST_DIR,
     WORKFLOW_STAGE_MANIFEST_SUFFIX,
     WRITE_PAPER_MANAGED_INTAKE_ROOT,
     WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT,
+    allowed_tools_for_workflow,
     expanded_required_init_fields_by_stage,
     expanded_required_init_fields_for_workflow,
     invalidate_workflow_stage_manifest_cache,
@@ -592,11 +592,62 @@ def test_verify_work_manifest_accepts_declared_mcp_verification_tools() -> None:
     manifest = validate_workflow_stage_manifest_payload(
         _workflow_payload("verify-work"),
         expected_workflow_id="verify-work",
-        allowed_tools=VERIFY_WORK_STAGE_ALLOWED_TOOLS,
     )
 
     inventory = manifest.stage("inventory_build")
     assert set(VERIFY_WORK_MCP_VERIFICATION_TOOLS).issubset(inventory.allowed_tools)
+
+
+def test_workflow_allowed_tool_defaults_cover_all_stage_manifests() -> None:
+    fallback_tools = allowed_tools_for_workflow("__synthetic__")
+
+    for manifest_path in sorted(WORKFLOW_STAGE_MANIFEST_DIR.glob(f"*{WORKFLOW_STAGE_MANIFEST_SUFFIX}")):
+        workflow_id = manifest_path.name.removesuffix(WORKFLOW_STAGE_MANIFEST_SUFFIX)
+        manifest = load_workflow_stage_manifest(workflow_id)
+        stage_tools = {tool for stage in manifest.stages for tool in stage.allowed_tools}
+        workflow_default = allowed_tools_for_workflow(workflow_id)
+
+        assert workflow_default != fallback_tools, f"{workflow_id} must have a workflow-specific tool default"
+        assert stage_tools <= workflow_default
+
+
+def test_workflow_allowed_tool_defaults_reject_policy_forbidden_canonical_tool() -> None:
+    payload = _workflow_payload("quick")
+    stage = payload["stages"][0]
+    stage["allowed_tools"] = [*stage["allowed_tools"], "web_search"]
+
+    with pytest.raises(ValueError, match="unknown tool name"):
+        validate_workflow_stage_manifest_payload(payload, expected_workflow_id="quick")
+
+
+def test_explicit_allowed_tool_override_still_supports_synthetic_manifest() -> None:
+    manifest = validate_workflow_stage_manifest_payload(
+        {
+            "schema_version": 1,
+            "workflow_id": "synthetic",
+            "stages": [
+                {
+                    "id": "probe",
+                    "order": 1,
+                    "purpose": "Load a synthetic stage.",
+                    "mode_paths": ["workflows/quick.md"],
+                    "required_init_fields": [],
+                    "loaded_authorities": ["workflows/quick.md"],
+                    "conditional_authorities": [],
+                    "must_not_eager_load": [],
+                    "allowed_tools": ["special_probe"],
+                    "writes_allowed": [],
+                    "produced_state": [],
+                    "next_stages": [],
+                    "checkpoints": [],
+                },
+            ],
+        },
+        expected_workflow_id="synthetic",
+        allowed_tools={"special_probe"},
+    )
+
+    assert manifest.stage("probe").allowed_tools == ("special_probe",)
 
 
 def test_staged_loading_payload_exposes_eager_authority_metadata() -> None:

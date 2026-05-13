@@ -23,7 +23,9 @@ def _load_schema_payload() -> dict[str, object]:
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
 
-def _bind_public_surface_contract_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, contract_payload: dict[str, object]) -> None:
+def _bind_public_surface_contract_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, contract_payload: dict[str, object]
+) -> None:
     (tmp_path / "public_surface_contract.json").write_text(json.dumps(contract_payload), encoding="utf-8")
     (tmp_path / "public_surface_contract_schema.json").write_text(json.dumps(_load_schema_payload()), encoding="utf-8")
     monkeypatch.setattr(public_surface_contract, "files", lambda _package: tmp_path)
@@ -31,7 +33,9 @@ def _bind_public_surface_contract_files(tmp_path: Path, monkeypatch: pytest.Monk
     public_surface_contract.load_public_surface_contract_schema.cache_clear()
 
 
-def test_fast_public_surface_contract_rejects_schema_version_bool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fast_public_surface_contract_rejects_schema_version_bool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     payload = _load_contract_payload()
     payload["schema_version"] = True
     _bind_public_surface_contract_files(tmp_path, monkeypatch, contract_payload=payload)
@@ -44,16 +48,19 @@ def test_fast_public_surface_contract_rejects_schema_version_bool(tmp_path: Path
         public_surface_contract.load_public_surface_contract_schema.cache_clear()
 
 
-def test_fast_public_surface_contract_rejects_bridge_command_drift(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fast_public_surface_contract_rejects_duplicate_named_bridge_command_values(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     payload = copy.deepcopy(_load_contract_payload())
-    commands = payload["local_cli_bridge"]["commands"]
-    commands[0], commands[1] = commands[1], commands[0]
+    named_commands = payload["local_cli_bridge"]["named_commands"]
+    named_commands["doctor"] = named_commands["help"]
     _bind_public_surface_contract_files(tmp_path, monkeypatch, contract_payload=payload)
 
     try:
         with pytest.raises(
             ValueError,
-            match=r"local_cli_bridge\.commands must exactly match local_cli_bridge\.named_commands in canonical order",
+            match=r"local_cli_bridge\.named_commands must not contain duplicate command values",
         ):
             public_surface_contract.load_public_surface_contract()
     finally:

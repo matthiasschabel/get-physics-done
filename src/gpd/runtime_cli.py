@@ -805,11 +805,12 @@ def main(argv: list[str] | None = None) -> int:
         ),
         cli_cwd=cli_cwd,
     )
-    missing_install_artifacts = (
-        adapter.missing_install_artifacts(config_dir)
-        if assessment.state in {"absent", "clean", "owned_complete", "owned_incomplete"}
-        else None
-    )
+    if assessment.state == "owned_incomplete":
+        missing_install_artifacts = assessment.missing_install_artifacts
+    elif assessment.state in {"absent", "clean"}:
+        missing_install_artifacts = adapter.missing_install_artifacts(config_dir)
+    else:
+        missing_install_artifacts = None
     failure = _classify_bridge_failure(
         runtime=runtime,
         config_dir=config_dir,

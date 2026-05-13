@@ -25,6 +25,19 @@ from gpd.adapters import get_adapter, list_runtimes
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.cli import app
 from gpd.core import cli_args as cli_args_module
+from gpd.core.command_preflight import (
+    _command_managed_output_root,
+    command_supports_project_reentry,
+    resolve_registry_command,
+)
+from gpd.core.command_subjects import (
+    ResolvedCommandSubject,
+    _build_resolved_command_subject,
+    _command_explicit_manuscript_subject_uses_supported_roots,
+    _command_explicit_manuscript_suffixes,
+    _command_requires_compiled_manuscript,
+    _resolve_review_preflight_manuscript,
+)
 from gpd.core.constants import ProjectLayout
 from gpd.core.costs import (
     _profile_tier_mix,
@@ -2383,19 +2396,19 @@ def test_resume_raw_drops_malformed_resume_candidates_from_public_output(tmp_pat
 
 def test_command_supports_project_reentry_prefers_explicit_metadata() -> None:
     assert (
-        cli_module._command_supports_project_reentry(
+        command_supports_project_reentry(
             SimpleNamespace(name="gpd:custom", context_mode="project-required", project_reentry_capable=True)
         )
         is True
     )
     assert (
-        cli_module._command_supports_project_reentry(
+        command_supports_project_reentry(
             SimpleNamespace(name="gpd:progress", context_mode="project-required", project_reentry_capable=False)
         )
         is False
     )
     assert (
-        cli_module._command_supports_project_reentry(
+        command_supports_project_reentry(
             SimpleNamespace(name="gpd:progress", context_mode="project-required")
         )
         is False
@@ -2404,7 +2417,7 @@ def test_command_supports_project_reentry_prefers_explicit_metadata() -> None:
 
 def test_command_supports_project_reentry_requires_explicit_positive_metadata() -> None:
     assert (
-        cli_module._command_supports_project_reentry(
+        command_supports_project_reentry(
             SimpleNamespace(name="gpd:plan-phase", context_mode="project-required")
         )
         is False
@@ -8164,9 +8177,9 @@ def test_build_resolved_command_subject_treats_managed_publication_manuscript_la
     (tmp_path / "GPD").mkdir()
     (tmp_path / "GPD" / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
     manuscript = _write_managed_publication_manuscript(tmp_path)
-    command, _ = cli_module._resolve_registry_command("arxiv-submission")
+    command, _ = resolve_registry_command("arxiv-submission")
 
-    resolved_subject = cli_module._build_resolved_command_subject(
+    resolved_subject = _build_resolved_command_subject(
         tmp_path,
         command,
         "GPD/publication/curvature-flow/manuscript/managed_manuscript.tex",
@@ -8186,8 +8199,8 @@ def test_build_resolved_command_subject_treats_managed_publication_manuscript_la
 def test_command_managed_output_root_binds_subject_slug_for_managed_publication_lane(tmp_path: Path) -> None:
     (tmp_path / "GPD").mkdir()
     manuscript = _write_managed_publication_manuscript(tmp_path)
-    command, _ = cli_module._resolve_registry_command("arxiv-submission")
-    resolved_subject = cli_module.ResolvedCommandSubject(
+    command, _ = resolve_registry_command("arxiv-submission")
+    resolved_subject = ResolvedCommandSubject(
         command="gpd:arxiv-submission",
         workspace_root=tmp_path,
         resolved_project_root=tmp_path,
@@ -8202,7 +8215,7 @@ def test_command_managed_output_root_binds_subject_slug_for_managed_publication_
         detail="explicit managed manuscript subject",
     )
 
-    managed_output_root = cli_module._command_managed_output_root(
+    managed_output_root = _command_managed_output_root(
         command,
         project_root=tmp_path,
         resolved_subject=resolved_subject,
@@ -8217,9 +8230,9 @@ def test_build_resolved_command_subject_write_paper_external_intake_bootstraps_m
     workspace = tmp_path / "external-authoring"
     workspace.mkdir()
     intake_path = _write_write_paper_authoring_input(workspace)
-    command, _ = cli_module._resolve_registry_command("write-paper")
+    command, _ = resolve_registry_command("write-paper")
 
-    resolved_subject = cli_module._build_resolved_command_subject(
+    resolved_subject = _build_resolved_command_subject(
         workspace,
         command,
         f"--intake {intake_path.name}",
@@ -8258,9 +8271,9 @@ def test_build_resolved_command_subject_write_paper_external_intake_reports_sche
         ),
         encoding="utf-8",
     )
-    command, _ = cli_module._resolve_registry_command("write-paper")
+    command, _ = resolve_registry_command("write-paper")
 
-    resolved_subject = cli_module._build_resolved_command_subject(
+    resolved_subject = _build_resolved_command_subject(
         workspace,
         command,
         f"--intake {intake_path.name}",
@@ -8279,9 +8292,9 @@ def test_build_resolved_command_subject_write_paper_external_intake_reports_sche
 
 def test_command_managed_output_root_normalizes_gpd_root_policy(tmp_path: Path) -> None:
     (tmp_path / "GPD").mkdir()
-    command, _ = cli_module._resolve_registry_command("respond-to-referees")
+    command, _ = resolve_registry_command("respond-to-referees")
 
-    managed_output_root = cli_module._command_managed_output_root(command, project_root=tmp_path)
+    managed_output_root = _command_managed_output_root(command, project_root=tmp_path)
 
     assert managed_output_root == (tmp_path / "GPD").resolve(strict=False)
 
@@ -8408,7 +8421,7 @@ def test_resolve_review_preflight_manuscript_directory_uses_manifest_declared_en
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper",
         allow_markdown=True,
@@ -8430,7 +8443,7 @@ def test_resolve_review_preflight_manuscript_reports_ambiguous_project_state(tmp
             encoding="utf-8",
         )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         None,
         allow_markdown=True,
@@ -8454,7 +8467,7 @@ def test_resolve_review_preflight_manuscript_explicit_supported_root_bypasses_pr
             encoding="utf-8",
         )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper",
         allow_markdown=True,
@@ -8489,7 +8502,7 @@ def test_resolve_review_preflight_manuscript_explicit_supported_file_requires_ma
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper/curvature_flow_bounds.tex",
         allow_markdown=True,
@@ -8515,7 +8528,7 @@ def test_resolve_review_preflight_manuscript_uses_workspace_cwd_for_relative_tar
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "../paper/curvature_flow_bounds.tex",
         allow_markdown=True,
@@ -8541,7 +8554,7 @@ def test_resolve_review_preflight_manuscript_nested_supported_directory_resolves
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper/sections",
         allow_markdown=True,
@@ -8566,7 +8579,7 @@ def test_resolve_review_preflight_manuscript_rejects_nested_supported_directory_
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "paper/sections",
         allow_markdown=True,
@@ -8580,7 +8593,7 @@ def test_resolve_review_preflight_manuscript_rejects_nested_supported_directory_
 def test_resolve_review_preflight_manuscript_rejects_missing_out_of_root_target_before_existence_check(
     tmp_path: Path,
 ) -> None:
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "submission/missing.tex",
         allow_markdown=True,
@@ -8615,7 +8628,7 @@ def test_resolve_review_preflight_manuscript_reports_inconsistent_project_state(
         encoding="utf-8",
     )
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         None,
         allow_markdown=True,
@@ -8658,7 +8671,7 @@ def test_resolve_review_preflight_manuscript_rejects_unsupported_explicit_target
     explicit_target = submission_dir / "curvature_flow_bounds.tex"
     explicit_target.write_text("\\documentclass{article}\\begin{document}Hello\\end{document}", encoding="utf-8")
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         "submission/curvature_flow_bounds.tex",
         allow_markdown=False,
@@ -8676,8 +8689,8 @@ def test_resolve_review_preflight_manuscript_accepts_peer_review_only_external_s
     tmp_path: Path,
     suffix: str,
 ) -> None:
-    peer_review_command, _ = cli_module._resolve_registry_command("peer-review")
-    allowed_suffixes = cli_module._command_explicit_manuscript_suffixes(peer_review_command)
+    peer_review_command, _ = resolve_registry_command("peer-review")
+    allowed_suffixes = _command_explicit_manuscript_suffixes(peer_review_command)
     artifact = tmp_path / f"standalone{suffix}"
     if suffix in {".docx", ".xlsx"}:
         artifact.write_bytes(b"PK\x03\x04\x14\x00\x00\x00binary-ooxml")
@@ -8686,7 +8699,7 @@ def test_resolve_review_preflight_manuscript_accepts_peer_review_only_external_s
 
     assert suffix in allowed_suffixes
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         artifact.name,
         allow_markdown=True,
@@ -8704,8 +8717,8 @@ def test_resolve_review_preflight_manuscript_rejects_peer_review_only_external_s
     tmp_path: Path,
     suffix: str,
 ) -> None:
-    arxiv_submission_command, _ = cli_module._resolve_registry_command("arxiv-submission")
-    allowed_suffixes = cli_module._command_explicit_manuscript_suffixes(arxiv_submission_command)
+    arxiv_submission_command, _ = resolve_registry_command("arxiv-submission")
+    allowed_suffixes = _command_explicit_manuscript_suffixes(arxiv_submission_command)
     paper_dir = tmp_path / "paper"
     paper_dir.mkdir()
     artifact = paper_dir / f"submission{suffix}"
@@ -8716,11 +8729,11 @@ def test_resolve_review_preflight_manuscript_rejects_peer_review_only_external_s
 
     assert suffix not in allowed_suffixes
 
-    resolved, detail = cli_module._resolve_review_preflight_manuscript(
+    resolved, detail = _resolve_review_preflight_manuscript(
         tmp_path,
         artifact.relative_to(tmp_path).as_posix(),
-        allow_markdown=not cli_module._command_requires_compiled_manuscript(arxiv_submission_command),
-        restrict_to_supported_roots=cli_module._command_explicit_manuscript_subject_uses_supported_roots(
+        allow_markdown=not _command_requires_compiled_manuscript(arxiv_submission_command),
+        restrict_to_supported_roots=_command_explicit_manuscript_subject_uses_supported_roots(
             arxiv_submission_command
         ),
         allowed_suffixes=allowed_suffixes,

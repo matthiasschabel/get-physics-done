@@ -89,19 +89,10 @@ from gpd.core.command_preflight import (
     command_label_lookup_and_arguments,
 )
 from gpd.core.command_preflight import (
-    _command_managed_output_context_root as _core_command_managed_output_context_root,
-)
-from gpd.core.command_preflight import (
-    _command_managed_output_root as _core_command_managed_output_root,
-)
-from gpd.core.command_preflight import (
     build_command_context_preflight as _core_build_command_context_preflight,
 )
 from gpd.core.command_preflight import (
     command_preflight_cwd as _core_command_preflight_cwd,
-)
-from gpd.core.command_preflight import (
-    command_supports_project_reentry as _core_command_supports_project_reentry,
 )
 from gpd.core.command_preflight import (
     resolve_registry_command as _core_resolve_registry_command,
@@ -121,18 +112,6 @@ from gpd.core.command_subjects import (
     _resolve_review_preflight_manuscript,
     _resolve_subject_path,
     _supported_manuscript_root_for_target,
-)
-from gpd.core.command_subjects import (
-    _command_context_manuscript_check as _core_command_context_manuscript_check,
-)
-from gpd.core.command_subjects import (
-    _command_explicit_input_labels_from_policy as _core_command_explicit_input_labels_from_policy,
-)
-from gpd.core.command_subjects import (
-    _command_has_typed_subject_policy as _core_command_has_typed_subject_policy,
-)
-from gpd.core.command_subjects import (
-    _command_required_files_override_detail as _core_command_required_files_override_detail,
 )
 from gpd.core.constants import (
     CONFIG_FILENAME,
@@ -7666,85 +7645,6 @@ def _runtime_surface_dispatch_note(*, cwd: Path | None = None) -> str:
 def _canonical_command_name(command_name: str) -> str:
     """Normalize a CLI command name to the registry's public gpd:name form."""
     return canonical_command_label(command_name)
-
-
-def _command_supports_project_reentry(command: object) -> bool:
-    """Return whether one registry command can recover a project root before execution."""
-    return _core_command_supports_project_reentry(command)
-
-
-def _command_managed_output_root(
-    command: object,
-    *,
-    project_root: Path,
-    resolved_subject: ResolvedCommandSubject | None = None,
-) -> Path | None:
-    """Compatibility wrapper for the core managed-output root helper."""
-    return _core_command_managed_output_root(
-        command,
-        project_root=project_root,
-        resolved_subject=resolved_subject,
-    )
-
-
-def _command_managed_output_context_root(
-    *,
-    workspace_root: Path,
-    context_root: Path,
-    project_exists: bool,
-) -> Path:
-    """Compatibility wrapper for the core managed-output context-root helper."""
-    return _core_command_managed_output_context_root(
-        workspace_root=workspace_root,
-        context_root=context_root,
-        project_exists=project_exists,
-    )
-
-
-def _command_required_files_override_detail(
-    project_root: Path,
-    command: object,
-    arguments: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-    resolved_subject: ResolvedCommandSubject | None = None,
-) -> str | None:
-    """Compatibility wrapper for the core explicit manuscript required-file detail."""
-    return _core_command_required_files_override_detail(
-        project_root,
-        command,
-        arguments,
-        workspace_cwd=workspace_cwd,
-        resolved_subject=resolved_subject,
-    )
-
-
-def _command_context_manuscript_check(
-    project_root: Path,
-    command: object,
-    arguments: str | None,
-    *,
-    workspace_cwd: Path | None = None,
-    resolved_subject: ResolvedCommandSubject | None = None,
-) -> tuple[bool, str] | None:
-    """Compatibility wrapper for the core manuscript-context preflight check."""
-    return _core_command_context_manuscript_check(
-        project_root,
-        command,
-        arguments,
-        workspace_cwd=workspace_cwd,
-        resolved_subject=resolved_subject,
-    )
-
-
-def _command_has_typed_subject_policy(command: object) -> bool:
-    """Compatibility wrapper for the core typed-subject policy predicate."""
-    return _core_command_has_typed_subject_policy(command)
-
-
-def _command_explicit_input_labels_from_policy(command: object) -> list[str]:
-    """Compatibility wrapper for core explicit-input policy labels."""
-    return _core_command_explicit_input_labels_from_policy(command)
 
 
 def _resolve_registry_command(command_name: str) -> tuple[object, str]:

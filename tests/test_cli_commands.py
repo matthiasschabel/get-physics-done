@@ -28,6 +28,8 @@ from gpd.cli import app
 from gpd.command_labels import rewrite_runtime_command_surfaces, runtime_command_surface_pattern
 from gpd.core import help_renderer
 from gpd.core.artifact_text import PEER_REVIEW_ARTIFACT_SUFFIXES
+from gpd.core.command_preflight import _command_managed_output_context_root, _command_managed_output_root
+from gpd.core.command_subjects import _command_context_manuscript_check, _command_required_files_override_detail
 from gpd.core.recent_projects import record_recent_project
 from gpd.core.reproducibility import compute_sha256
 from gpd.core.state import StateUpdateResult, default_state_dict, generate_state_markdown
@@ -3020,7 +3022,7 @@ class TestReviewValidationCommands:
             review_contract=SimpleNamespace(preflight_checks=["manuscript", "compiled_manuscript"]),
         )
 
-        detail = cli_module._command_required_files_override_detail(
+        detail = _command_required_files_override_detail(
             tmp_path,
             command,
             str(manuscript.relative_to(tmp_path)),
@@ -3043,7 +3045,7 @@ class TestReviewValidationCommands:
             review_contract=SimpleNamespace(preflight_checks=["manuscript", "referee_report_source"]),
         )
 
-        detail = cli_module._command_required_files_override_detail(
+        detail = _command_required_files_override_detail(
             tmp_path,
             command,
             str(manuscript.relative_to(tmp_path)),
@@ -3061,7 +3063,7 @@ class TestReviewValidationCommands:
             review_contract=SimpleNamespace(preflight_checks=["manuscript"]),
         )
 
-        result = cli_module._command_context_manuscript_check(
+        result = _command_context_manuscript_check(
             isolated_root,
             command,
             arguments=None,
@@ -3448,12 +3450,12 @@ class TestReviewValidationCommands:
         workspace = ancestor_root / "scratch" / command_name
         workspace.mkdir(parents=True)
         patched_command = _command_with_analysis_output_policy(command_name)
-        managed_output_context_root = cli_module._command_managed_output_context_root(
+        managed_output_context_root = _command_managed_output_context_root(
             workspace_root=workspace,
             context_root=ancestor_root,
             project_exists=False,
         )
-        managed_output_root = cli_module._command_managed_output_root(
+        managed_output_root = _command_managed_output_root(
             patched_command,
             project_root=managed_output_context_root,
         )
@@ -3471,12 +3473,12 @@ class TestReviewValidationCommands:
         workspace = project_root / "notes" / "scratch"
         workspace.mkdir(parents=True)
         patched_command = _command_with_analysis_output_policy("derive-equation")
-        managed_output_context_root = cli_module._command_managed_output_context_root(
+        managed_output_context_root = _command_managed_output_context_root(
             workspace_root=workspace,
             context_root=project_root,
             project_exists=True,
         )
-        managed_output_root = cli_module._command_managed_output_root(
+        managed_output_root = _command_managed_output_root(
             patched_command,
             project_root=managed_output_context_root,
         )
@@ -3492,12 +3494,12 @@ class TestReviewValidationCommands:
         workspace = ancestor_root / "scratch" / "parameter-sweep"
         workspace.mkdir(parents=True)
         command = registry_module.get_command("parameter-sweep")
-        managed_output_context_root = cli_module._command_managed_output_context_root(
+        managed_output_context_root = _command_managed_output_context_root(
             workspace_root=workspace,
             context_root=ancestor_root,
             project_exists=False,
         )
-        managed_output_root = cli_module._command_managed_output_root(
+        managed_output_root = _command_managed_output_root(
             command,
             project_root=managed_output_context_root,
         )
@@ -3515,12 +3517,12 @@ class TestReviewValidationCommands:
         workspace = project_root / "notes" / "scratch"
         workspace.mkdir(parents=True)
         command = registry_module.get_command("parameter-sweep")
-        managed_output_context_root = cli_module._command_managed_output_context_root(
+        managed_output_context_root = _command_managed_output_context_root(
             workspace_root=workspace,
             context_root=project_root,
             project_exists=True,
         )
-        managed_output_root = cli_module._command_managed_output_root(
+        managed_output_root = _command_managed_output_root(
             command,
             project_root=managed_output_context_root,
         )

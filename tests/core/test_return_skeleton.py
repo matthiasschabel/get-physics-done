@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from gpd.cli import app
 from gpd.core.commands import cmd_apply_return_updates
+from gpd.core.prompt_semantic_duplicate_diagnostics import status_handling_terms
 from gpd.core.return_contract import (
     ALLOWED_RETURN_EXTENSION_FIELDS,
     KNOWN_RETURN_FIELD_NAMES,
@@ -91,12 +92,10 @@ def test_return_status_helper_normalizes_callsite_status_selectors() -> None:
         normalize_return_status("waiting")
 
 
-def test_prompt_diagnostics_status_vocab_term_uses_return_contract_order() -> None:
-    from gpd.core import prompt_diagnostics
-
+def test_semantic_duplicate_status_vocab_term_uses_return_contract_order() -> None:
     status_pipe = " | ".join(RETURN_STATUS_ORDER)
 
-    assert prompt_diagnostics._status_handling_terms(status_pipe) == (status_pipe,)
+    assert status_handling_terms(status_pipe) == (status_pipe,)
 
 
 def test_list_gpd_return_profiles_matches_profile_registry_and_filters() -> None:

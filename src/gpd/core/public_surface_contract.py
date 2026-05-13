@@ -99,7 +99,6 @@ class LocalCliNamedCommandsContract:
 
 @dataclass(frozen=True, slots=True)
 class LocalCliBridgeContract:
-    commands: tuple[str, ...]
     named_commands: LocalCliNamedCommandsContract
     terminal_phrase: str
     purpose_phrase: str
@@ -107,6 +106,10 @@ class LocalCliBridgeContract:
     doctor_local_command: str
     doctor_global_command: str
     validate_command_context_command: str
+
+    @property
+    def commands(self) -> tuple[str, ...]:
+        return self.named_commands.ordered()
 
     def render_note(self) -> str:
         return (
@@ -392,6 +395,14 @@ def _require_exact_command(commands: tuple[str, ...], *, label: str, command: st
     return command
 
 
+def _require_unique_command_values(commands: tuple[str, ...], *, label: str) -> None:
+    seen: set[str] = set()
+    for command in commands:
+        if command in seen:
+            raise ValueError(f"{label} must not contain duplicate command values")
+        seen.add(command)
+
+
 def _local_cli_bridge_command(command: str) -> str:
     return _require_exact_command(local_cli_bridge_commands(), label="local_cli_bridge", command=command)
 
@@ -405,7 +416,6 @@ def _require_local_cli_bridge_template(command: str, *, label: str, expected: st
 def _require_local_cli_named_commands(
     payload: dict[str, object],
     *,
-    bridge_commands: tuple[str, ...],
     named_command_keys: tuple[str, ...],
 ) -> LocalCliNamedCommandsContract:
     named_payload = _require_object(payload.get("named_commands"), label="local_cli_bridge.named_commands")
@@ -453,10 +463,7 @@ def _require_local_cli_named_commands(
             label="local_cli_bridge.named_commands",
         ),
     )
-    for command in named_commands.ordered():
-        _require_exact_command(bridge_commands, label="local_cli_bridge", command=command)
-    if bridge_commands != named_commands.ordered():
-        raise ValueError("local_cli_bridge.commands must exactly match local_cli_bridge.named_commands in canonical order")
+    _require_unique_command_values(named_commands.ordered(), label="local_cli_bridge.named_commands")
     return named_commands
 
 
@@ -532,10 +539,8 @@ def load_public_surface_contract() -> PublicSurfaceContract:
         label="recovery_ladder",
         keys=schema.section_keys["recovery_ladder"],
     )
-    bridge_commands = _require_string_list(bridge_payload, "commands", label="local_cli_bridge")
     named_commands = _require_local_cli_named_commands(
         bridge_payload,
-        bridge_commands=bridge_commands,
         named_command_keys=schema.local_cli_named_command_keys,
     )
     recovery_local_snapshot_command = _require_string(
@@ -548,12 +553,8 @@ def load_public_surface_contract() -> PublicSurfaceContract:
         "cross_workspace_command",
         label="recovery_ladder",
     )
-    _require_exact_command(bridge_commands, label="local_cli_bridge", command=recovery_local_snapshot_command)
-    _require_exact_command(bridge_commands, label="local_cli_bridge", command=recovery_cross_workspace_command)
     if recovery_local_snapshot_command != named_commands.resume:
-        raise ValueError(
-            "recovery_ladder.local_snapshot_command must equal local_cli_bridge.named_commands.resume"
-        )
+        raise ValueError("recovery_ladder.local_snapshot_command must equal local_cli_bridge.named_commands.resume")
     if recovery_cross_workspace_command != named_commands.resume_recent:
         raise ValueError(
             "recovery_ladder.cross_workspace_command must equal local_cli_bridge.named_commands.resume_recent"
@@ -581,7 +582,6 @@ def load_public_surface_contract() -> PublicSurfaceContract:
             startup_ladder=_require_string_list(beginner_payload, "startup_ladder", label="beginner_onboarding"),
         ),
         local_cli_bridge=LocalCliBridgeContract(
-            commands=bridge_commands,
             named_commands=named_commands,
             terminal_phrase=_require_string(bridge_payload, "terminal_phrase", label="local_cli_bridge"),
             purpose_phrase=_require_string(bridge_payload, "purpose_phrase", label="local_cli_bridge"),

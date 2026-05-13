@@ -121,7 +121,7 @@ def test_bootstrap_installer_public_surface_text_matches_node_loader_shape() -> 
         "beginnerPreflightRequirements": list(beginner.preflight_requirements),
         "beginnerCaveats": list(beginner.caveats),
         "beginnerStartupLadder": list(beginner.startup_ladder),
-        "localCliBridgeCommands": list(bridge.commands),
+        "localCliBridgeCommands": list(named_commands.ordered()),
         "localCliBridge": {
             "doctorCommand": named_commands.doctor,
             "helpCommand": named_commands.help,

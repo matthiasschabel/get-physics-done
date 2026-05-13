@@ -25,6 +25,7 @@ from gpd.adapters.runtime_catalog import (
     normalize_runtime_name,
 )
 from gpd.core import prompt_markdown_scan as _prompt_markdown_scan
+from gpd.core import prompt_semantic_duplicate_diagnostics
 from gpd.core.frontmatter import (
     UNSUPPORTED_FRONTMATTER_FIELDS,
     VERIFICATION_REPORT_STATUSES,
@@ -49,19 +50,6 @@ from gpd.core.prompt_exactness_diagnostics import (
 )
 from gpd.core.prompt_exactness_diagnostics import (
     scan_exact_assertion_diagnostics as _scan_exact_assertion_diagnostics,
-)
-from gpd.core.prompt_semantic_duplicate_diagnostics import (
-    SemanticDuplicateGroup,
-    SemanticDuplicateOccurrence,
-)
-from gpd.core.prompt_semantic_duplicate_diagnostics import (
-    scan_semantic_duplicate_invariant_groups as _scan_semantic_duplicate_invariant_groups,
-)
-from gpd.core.prompt_semantic_duplicate_diagnostics import (
-    semantic_example_limit as _semantic_example_limit,
-)
-from gpd.core.prompt_semantic_duplicate_diagnostics import (
-    status_handling_terms as _semantic_status_handling_terms,
 )
 from gpd.core.prompt_stage_diagnostics import (
     AuthorityPromptMetric,
@@ -105,6 +93,9 @@ _iter_unfenced_lines = _prompt_markdown_scan.iter_unfenced_lines
 _line_count = _prompt_markdown_scan.line_count
 _relative_path = _prompt_markdown_scan.relative_path
 _top_limit = _prompt_markdown_scan.top_limit
+
+SemanticDuplicateGroup = prompt_semantic_duplicate_diagnostics.SemanticDuplicateGroup
+SemanticDuplicateOccurrence = prompt_semantic_duplicate_diagnostics.SemanticDuplicateOccurrence
 
 PromptSurfaceKind = Literal["command", "agent", "workflow"]
 
@@ -523,7 +514,10 @@ def build_prompt_surface_report(
         for source in sources
     )
     duplicate_invariants: tuple[DuplicateInvariantGroup, ...] = ()
-    semantic_duplicate_invariants = _semantic_duplicate_invariant_groups(root, include_tests=include_tests)
+    semantic_duplicate_invariants = prompt_semantic_duplicate_diagnostics.scan_semantic_duplicate_invariant_groups(
+        _duplicate_scan_paths(root, include_tests=include_tests),
+        repo_root=root,
+    )
     exact_assertion_diagnostics = (
         _scan_exact_assertion_diagnostics(root) if include_tests else _empty_exact_assertion_diagnostics()
     )
@@ -568,6 +562,7 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
     """Convert a report into JSON-serializable primitives."""
 
     limit = _top_limit(top)
+    semantic_example_limit = prompt_semantic_duplicate_diagnostics.semantic_example_limit(top)
     stage_authority_rows = _stage_authority_top_prompt_rows(report.stage_diagnostics, top)
     stage_init_field_rows = _stage_init_field_pressure_rows(report.stage_diagnostics, top)
     return {
@@ -626,7 +621,7 @@ def report_to_dict(report: PromptSurfaceReport, top: int | None = None) -> dict[
                         "matched_terms": list(example.matched_terms),
                         "is_reference_or_template": example.is_reference_or_template,
                     }
-                    for example in group.examples[: _semantic_example_limit(top)]
+                    for example in group.examples[:semantic_example_limit]
                 ],
             }
             for group in report.semantic_duplicate_invariants[:limit]
@@ -928,7 +923,7 @@ def render_prompt_surface_markdown(report: PromptSurfaceReport, top: int | None 
                 f"{_markdown_table_cell(refs)} | "
                 f"{_markdown_table_cell(group.suggested_action)} |"
             )
-        example_limit = _semantic_example_limit(top)
+        example_limit = prompt_semantic_duplicate_diagnostics.semantic_example_limit(top)
         for group in semantic_groups:
             examples = group.examples[:example_limit]
             if not examples:
@@ -1903,21 +1898,6 @@ def _duplicate_scan_paths(repo_root: Path, *, include_tests: bool) -> tuple[Path
         if tests_root.is_dir():
             paths.extend(path for path in sorted(tests_root.rglob("*.py")) if path.is_file() and not path.is_symlink())
     return tuple(paths)
-
-
-def _semantic_duplicate_invariant_groups(
-    repo_root: Path,
-    *,
-    include_tests: bool,
-) -> tuple[SemanticDuplicateGroup, ...]:
-    return _scan_semantic_duplicate_invariant_groups(
-        _duplicate_scan_paths(repo_root, include_tests=include_tests),
-        repo_root=repo_root,
-    )
-
-
-def _status_handling_terms(clause: str) -> tuple[str, ...]:
-    return _semantic_status_handling_terms(clause)
 
 
 def _top_items(items: Sequence[PromptSurfaceItem], top: int | None) -> tuple[PromptSurfaceItem, ...]:

@@ -227,26 +227,7 @@
       "prompt_free_mode_value": "none",
       "supports_runtime_permission_sync": true
     },
-    "hook_payload": {
-      "notify_event_types": [],
-      "workspace_keys": [],
-      "project_dir_keys": [],
-      "runtime_session_id_keys": [],
-      "model_keys": [],
-      "provider_keys": [],
-      "usage_keys": [],
-      "input_tokens_keys": [],
-      "output_tokens_keys": [],
-      "total_tokens_keys": [],
-      "cached_input_tokens_keys": [],
-      "cache_write_input_tokens_keys": [],
-      "cost_usd_keys": [],
-      "agent_id_keys": [],
-      "agent_name_keys": [],
-      "agent_scope_keys": [],
-      "context_window_size_keys": [],
-      "context_remaining_keys": []
-    },
+    "hook_payload": {},
     "global_config": {
       "strategy": "env_or_home",
       "env_var": "COPILOT_CONFIG_DIR",

@@ -2,6 +2,11 @@
 Create the milestone roadmap through the roadmapper handoff and final artifact gate.
 </purpose>
 
+<first_decision>
+First read `GPD/MILESTONES.md` for the next phase number, then run the fresh
+roadmap-authoring init before spawning the one-shot roadmapper.
+</first_decision>
+
 <process>
 
 ## 9. Create Roadmap
@@ -27,69 +32,35 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access new-milestone --stage roadmap_authoring --style instruction` to confirm the manifest-selected roadmapping fields. Read only those keys from `ROADMAPPER_INIT`; `ROADMAPPER_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Use the generated helper output from
+`gpd --raw stage field-access new-milestone --stage roadmap_authoring --style instruction`
+as the field policy for `ROADMAPPER_INIT`.
 
 Use bootstrap init for milestone identity and contract gating. Use this
 late-stage init for the final handoff; do not reuse earlier survey/objective
 inputs.
 
-Apply the canonical runtime delegation convention already loaded above.
+Apply the canonical runtime delegation convention already loaded above. Spawn the
+roadmapper with `gpd-roadmapper.md`, the current milestone identity, approved
+objectives, project contract/gate status, effective reference intake,
+`reference_artifact_files`, prior-output handles, and these local requirements:
+start phases at `[N]`, map every objective exactly once, surface contract
+coverage and unresolved context gaps, write `GPD/ROADMAP.md` and
+`GPD/REQUIREMENTS.md` immediately, return typed `gpd_return`, and never edit
+shared state directly.
+For each phase, include explicit contract coverage in `ROADMAP.md`.
 
 ```
-task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and instructions.
-
-<files_to_read>
-Read these files using the file_read tool before proceeding:
-- GPD/PROJECT.md
-- GPD/state.json
-- GPD/config.json
-- GPD/MILESTONES.md (if exists, skip if not found)
-- GPD/REQUIREMENTS.md
-- GPD/literature/SUMMARY.md (if exists, skip if not found)
-- Files named in `effective_reference_intake.must_include_prior_outputs` when they exist
-- Files named in `reference_artifact_files` when they exist and are relevant to anchor coverage
-</files_to_read>
-
-<milestone_context>
-Current milestone: {current_milestone}
-Milestone name: {current_milestone_name}
-Planning file paths: GPD/PROJECT.md, GPD/state.json, GPD/config.json, GPD/MILESTONES.md, GPD/REQUIREMENTS.md, GPD/ROADMAP.md
-Reference artifact file handles: {reference_artifact_files}
-</milestone_context>
-
-<contract_context>
-Project contract: {project_contract}
-Project contract gate: {project_contract_gate}
-Project contract validation: {project_contract_validation}
-Project contract load info: {project_contract_load_info}
-Contract intake: {contract_intake}
-Effective reference intake: {effective_reference_intake}
-Reference artifact file handles: {reference_artifact_files}
-</contract_context>
-
-<shallow_mode>false</shallow_mode>
-<!-- Milestones keep the full-detail roadmap so scoped continuations inherit every phase's contract coverage and success criteria up front. -->
-
-<continuation_context>
-This is a fresh continuation handoff for the current milestone roadmap. Carry forward the approved objectives, requirement traceability, prior survey findings, and any unresolved context gaps. Edit the existing roadmap files in place and return the roadmapper `gpd_return` profile.
-</continuation_context>
-
-<instructions>
-Create research roadmap for milestone v[X.Y]:
-1. Start phase numbering from [N]
-2. Derive phases from THIS MILESTONE's objectives, the approved project contract only when `project_contract_gate.authoritative` is true, and the effective reference intake
-3. Map every objective to exactly one phase
-4. For each phase, include explicit contract coverage in ROADMAP.md showing decisive contract items, anchor coverage, required prior outputs, and forbidden proxies advanced by that phase
-5. Treat `must_read_refs`, `must_include_prior_outputs`, `user_asserted_anchors`, `known_good_baselines`, and `crucial_inputs` as binding milestone context, and surface unresolved `context_gaps`
-6. Derive 2-5 success criteria per phase (concrete, verifiable results)
-7. Validate 100% objective coverage and surface all contract-critical items touched by this milestone
-8. Write files immediately (ROADMAP.md and REQUIREMENTS.md traceability). Do not write STATE.md directly; return any proposed state status, position, or decision-log update for the orchestrator to apply with `gpd state` commands after the artifact gate.
-9. Return the roadmapper `gpd_return` profile; completed local artifacts are `GPD/ROADMAP.md` and `GPD/REQUIREMENTS.md`.
-10. If blocked, checkpointed, or failed, return the typed status with concrete issues and next actions; the parent gate below owns retry, freshness, display, and commit routing.
-
-</instructions>
-", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Create research roadmap")
+task(
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md.\n\n<contract_context>\nProject contract gate: {project_contract_gate}\nProject contract load info: {project_contract_load_info}\nProject contract validation: {project_contract_validation}\nContract intake: {contract_intake}\nEffective reference intake: {effective_reference_intake}\nReference artifact file handles: {reference_artifact_files}\n</contract_context>\n\n<shallow_mode>false</shallow_mode>\n\nUse the milestone handoff above plus the task-local spawn_contract below; write GPD/ROADMAP.md and GPD/REQUIREMENTS.md immediately. Do not write STATE.md directly. Return the roadmapper gpd_return profile.",
+  subagent_type="gpd-roadmapper",
+  model="{roadmapper_model}",
+  readonly=false,
+  description="Create research roadmap"
+)
 ```
+
+Use the approved project contract only when `project_contract_gate.authoritative` is true.
 
 Add this contract inside the spawned roadmapper prompt when adapting it:
 
@@ -159,25 +130,10 @@ proof passes, then present a compact roadmap summary:
 - "Adjust phases" — Tell me what to change
 - "Review full file" — Show raw ROADMAP.md
 
-**If "Adjust":** Get notes, then respawn the roadmapper with a revision continuation handoff:
-
-Apply the canonical runtime delegation convention already loaded above.
-
-  ```
-  task(prompt="First, read {GPD_AGENTS_DIR}/gpd-roadmapper.md for your role and instructions.
-
-  <continuation>
-  Continuation of the current roadmap handoff, not a fresh brainstorm.
-  User feedback: [user's notes]
-  Current artifacts: GPD/ROADMAP.md, GPD/STATE.md, GPD/REQUIREMENTS.md.
-  Read the existing roadmap and requirements before editing in place.
-  Return typed `gpd_return` status and updated roadmap artifacts.
-  </continuation>
-
-  <shallow_mode>false</shallow_mode>
-  <!-- Milestones keep the full-detail roadmap so scoped continuations inherit every phase's contract coverage and success criteria up front. -->
-  ", subagent_type="gpd-roadmapper", model="{roadmapper_model}", readonly=false, description="Revise roadmap")
-  ```
+**If "Adjust":** Get notes, then respawn the roadmapper with a fresh revision
+continuation: read `gpd-roadmapper.md`, `GPD/ROADMAP.md`, and
+`GPD/REQUIREMENTS.md`; apply the user's notes in place; return typed
+`gpd_return` and updated roadmap artifacts.
 
   **If the revision roadmapper agent fails to spawn or returns an error:** Treat the revision as incomplete. Do not compare old file contents as proof of success. Ask whether to retry the same continuation once or stop. If retrying, use a fresh continuation handoff that includes the current roadmap, requirements, and user notes.
 

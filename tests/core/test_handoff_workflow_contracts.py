@@ -56,8 +56,10 @@ def test_research_phase_routes_on_typed_status_and_expected_artifacts() -> None:
 def test_map_research_routes_on_typed_status_and_expected_artifacts() -> None:
     workflow = workflow_authority_text(WORKFLOWS_DIR, "map-research")
 
-    assert "Each mapper agent is a one-shot file-producing handoff." in workflow
-    assert "Route on `gpd_return.status`, then verify `gpd_return.files_written` against the expected artifacts before accepting the run." in workflow
+    assert "Mapper handoff gate: each mapper is one-shot and file-producing." in workflow
+    assert "Route on" in workflow
+    assert "`gpd_return.files_written` against expected" in workflow
+    assert "artifacts before accepting the run" in workflow
     assert workflow.count("<spawn_contract>") >= 4
     assert "shared_state_policy: return_only" in workflow
     assert "gpd_return.status: completed" in workflow

@@ -451,10 +451,11 @@ def test_validate_workflow_stage_manifest_payload_loads_verify_work_manifest() -
         "proof-readiness context loaded; classify proof-bearing status from inspected proof metadata"
         in manifest.stages[1].checkpoints
     )
-    assert manifest.stages[2].loaded_authorities == (
-        "workflows/verify-work/inventory-build.md",
-        "references/verification/meta/verification-independence.md",
-    )
+    assert manifest.stages[2].loaded_authorities == ("workflows/verify-work/inventory-build.md",)
+    assert {
+        conditional.when: conditional.authorities for conditional in manifest.stages[2].conditional_authorities
+    } == {"full_independence_policy_check": ("references/verification/meta/verification-independence.md",)}
+    assert "references/verification/meta/verification-independence.md" in manifest.stages[2].must_not_eager_load
     assert "templates/verification-report.md" not in manifest.stages[2].eager_authorities()
     assert "workflows/verify-work/gap-repair.md" in manifest.stages[2].must_not_eager_load
     assert "protocol_bundle_verifier_extensions" in manifest.stages[2].required_init_fields
@@ -662,9 +663,12 @@ def test_staged_loading_payload_exposes_eager_authority_metadata() -> None:
     assert payload["mode_paths"] == list(stage.mode_paths)
     assert payload["loaded_authorities"] == list(stage.loaded_authorities)
     assert payload["eager_authorities"] == list(stage.eager_authorities())
-    assert payload["eager_authorities"] == [
-        "workflows/verify-work/inventory-build.md",
-        "references/verification/meta/verification-independence.md",
+    assert payload["eager_authorities"] == ["workflows/verify-work/inventory-build.md"]
+    assert payload["conditional_authorities"] == [
+        {
+            "when": "full_independence_policy_check",
+            "authorities": ["references/verification/meta/verification-independence.md"],
+        }
     ]
     assert payload["required_init_fields"] == list(stage.required_init_fields)
     assert payload["produced_state"] == list(stage.produced_state)
@@ -1240,12 +1244,17 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
     assert "publication_intake_root" in bootstrap.required_init_fields
     assert "managed_publication_root" in bootstrap.required_init_fields
     assert "managed_manuscript_root" in bootstrap.required_init_fields
-    assert outline.loaded_authorities == (
-        "workflows/write-paper/outline-scaffold.md",
-        "references/publication/publication-pipeline-modes.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-    )
+    assert outline.loaded_authorities == ("workflows/write-paper/outline-scaffold.md",)
+    assert {conditional.when: conditional.authorities for conditional in outline.conditional_authorities} == {
+        "publication_lane_or_builder_config_selection": ("references/publication/publication-pipeline-modes.md",),
+        "paper_builder_config_or_artifact_manifest_write": (
+            "templates/paper/paper-config-schema.md",
+            "templates/paper/artifact-manifest-schema.md",
+        ),
+    }
+    assert "references/publication/publication-pipeline-modes.md" in outline.must_not_eager_load
+    assert "templates/paper/paper-config-schema.md" in outline.must_not_eager_load
+    assert "templates/paper/artifact-manifest-schema.md" in outline.must_not_eager_load
     assert outline.writes_allowed == (
         WRITE_PAPER_MANAGED_MANUSCRIPT_ROOT,
         WRITE_PAPER_MANAGED_INTAKE_ROOT,
@@ -1439,7 +1448,8 @@ def test_quick_reference_context_is_only_bundle_capable_stage() -> None:
     assert bundle_fields.isdisjoint(manifest.stage("task_authoring").required_init_fields)
     assert bundle_fields.issubset(manifest.stage("reference_context").required_init_fields)
     assert body_fields.isdisjoint(manifest.stage("reference_context").required_init_fields)
-    assert "The bootstrap and default `task_authoring` payloads intentionally do not include" in quick_text
+    assert "`reference_context` only for targeted source lookup or tasks that need active project anchors" in quick_text
+    assert "Default Reference Runtime:** not loaded for `task_authoring`" in quick_text
     assert "If `TASK_AUTHORING_INIT.staged_loading.stage_id` is `reference_context`" in quick_text
     assert "<selected_protocol_bundle_ids>" in quick_text
     assert "<protocol_bundle_load_manifest>" in quick_text
@@ -1610,9 +1620,13 @@ def test_validate_workflow_stage_manifest_payload_loads_new_milestone_manifest()
     assert manifest.stage("roadmap_authoring").loaded_authorities == (
         "workflows/new-milestone/roadmap-authoring.md",
         "references/orchestration/runtime-delegation-note.md",
-        "templates/project.md",
-        "templates/requirements.md",
     )
+    assert {
+        conditional.when: conditional.authorities
+        for conditional in manifest.stage("roadmap_authoring").conditional_authorities
+    } == {"roadmap_artifact_template_write": ("templates/project.md", "templates/requirements.md")}
+    assert "templates/project.md" in manifest.stage("roadmap_authoring").must_not_eager_load
+    assert "templates/requirements.md" in manifest.stage("roadmap_authoring").must_not_eager_load
     assert "requirements_content" not in manifest.stage("roadmap_authoring").required_init_fields
     assert "roadmap_content" not in manifest.stage("roadmap_authoring").required_init_fields
     assert "project_content" not in manifest.stage("roadmap_authoring").required_init_fields

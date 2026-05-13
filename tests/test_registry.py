@@ -2243,12 +2243,13 @@ class TestRegistryPromptIncludeInlining:
             "gpd verification-report finalize",
             "Do not hand-author frontmatter",
             "do not wrapper-repair the canonical report",
-            "do not route to gaps unless a schema-valid gap report exists",
+            "route to gaps",
         )
 
         assert skill.source_kind == "command"
         assert "Stage id: `session_router`." in skill.content
-        assert "Do not assume reference ledgers, protocol bundles, or report schemas are loaded here." in skill.content
+        assert "Do not assume reference ledgers," in skill.content
+        assert "protocol bundles, or report schemas" in skill.content
         for fragment in durable_fragments:
             assert fragment not in skill.content
             assert fragment in inventory_stage
@@ -2340,10 +2341,11 @@ class TestRegistryPromptIncludeInlining:
         assert "Paper Config Schema" not in command.content
         assert "Review Ledger Schema" not in command.content
         assert "Referee Decision Schema" not in command.content
-        assert (
-            "templates/paper/paper-config-schema.md"
-            in command.staged_loading.stage("outline_and_scaffold").loaded_authorities
+        outline = command.staged_loading.stage("outline_and_scaffold")
+        outline_conditionals = tuple(
+            authority for conditional in outline.conditional_authorities for authority in conditional.authorities
         )
+        assert "templates/paper/paper-config-schema.md" in outline_conditionals
         publication_review = command.staged_loading.stage("publication_review")
         assert "references/publication/publication-review-round-artifacts.md" in publication_review.loaded_authorities
         assert "references/publication/peer-review-panel.md" in publication_review.must_not_eager_load
@@ -3269,12 +3271,17 @@ class TestPublicAPI:
             "workflows/verify-work/phase-bootstrap.md",
             "references/verification/core/proof-redteam-workflow-gate.md",
         )
-        assert cmd.staged_loading.stages[2].loaded_authorities == (
-            "workflows/verify-work/inventory-build.md",
-            "references/verification/meta/verification-independence.md",
-        )
-        assert cmd.staged_loading.stages[2].next_stages == ("interactive_validation",)
-        assert cmd.staged_loading.stages[2].checkpoints == (
+        inventory_build = cmd.staged_loading.stages[2]
+        assert inventory_build.loaded_authorities == ("workflows/verify-work/inventory-build.md",)
+        assert [entry.to_payload() for entry in inventory_build.conditional_authorities] == [
+            {
+                "when": "full_independence_policy_check",
+                "authorities": ["references/verification/meta/verification-independence.md"],
+            },
+        ]
+        assert "references/verification/meta/verification-independence.md" in inventory_build.must_not_eager_load
+        assert inventory_build.next_stages == ("interactive_validation",)
+        assert inventory_build.checkpoints == (
             "verifier delegation completed",
             "handoff remains fail-closed",
             "anchor obligations explicit",

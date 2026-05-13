@@ -64,7 +64,7 @@ def test_respond_to_referees_group_b_completion_requires_fresh_child_files_writt
         "respond-to-referees revision section return gate",
         "respond_to_referees_revision_section",
         "child_gate",
-        "revised section file",
+        "revised section",
         "RESPONSE_AUTHOR_PATH",
         "RESPONSE_REFEREE_PATH",
     )

@@ -25,7 +25,7 @@ def test_quick_command_wrapper_surfaces_staged_handoff_and_preserves_workflow_ga
     assert "When to Use Quick vs Full Workflow" not in command
     assert "Rigor Expectations in Quick Mode" not in command
 
-    assert "Ask ONE question inline (freeform, NOT ask_user):" in bootstrap
+    assert "Ask ONE inline freeform question (NOT ask_user):" in bootstrap
     assert "project_exists" in bootstrap
     assert "Run this `child_gate`" in authoring
     assert "Structured state updated via `gpd state` commands" in authoring

@@ -27,6 +27,10 @@
       "project_contract_validation",
       "effective_reference_intake"
     ],
+    "response_contract_gate_context_compact": [
+      "project_contract_gate",
+      "effective_reference_intake"
+    ],
     "response_protocol_reference_context": [
       "selected_protocol_bundle_ids",
       "protocol_bundle_context",
@@ -306,7 +310,7 @@
       ],
       "required_init_field_groups": [
         "response_launch_context",
-        "response_contract_gate_context",
+        "response_contract_gate_context_compact",
         "response_protocol_reference_handles",
         "response_reference_handle_context",
         "response_publication_roots",
@@ -381,7 +385,7 @@
       ],
       "required_init_field_groups": [
         "response_launch_context",
-        "response_contract_body_context",
+        "response_contract_gate_context_compact",
         "response_protocol_reference_context",
         "response_reference_evidence_context",
         "response_publication_roots",

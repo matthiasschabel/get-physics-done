@@ -176,7 +176,7 @@ VERIFY_WORK_CONCISE_GUIDANCE_FRAGMENTS = (
     "SESSION_ROUTER_INIT=$(gpd --raw init verify-work",
     "Read `active_verification_sessions` from `SESSION_ROUTER_INIT`.",
     "replaces shell loops over `GPD/phases`",
-    "Do not assume reference ledgers, protocol bundles, or report schemas are loaded here.",
+    "Do not assume reference ledgers,",
     'gpd validate review-preflight verify-work "${PHASE_ARG}" --strict',
     "LIFECYCLE_CONTRACT_GATE=$(gpd --raw validate lifecycle-contract-gate verify-work",
 )

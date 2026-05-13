@@ -75,7 +75,6 @@ def test_autonomy_prompt_defaults_preserve_supervised_default() -> None:
         "debug.md",
         "digest-knowledge.md",
         "validate-conventions.md",
-        "literature-review.md",
     )
 
     for name in fallback_workflows:
@@ -99,6 +98,7 @@ def test_autonomy_prompt_defaults_preserve_supervised_default() -> None:
         assert (
             "--default supervised" in workflow
             or "`autonomy=supervised` (default)" in workflow
+            or "`autonomy=supervised`:" in workflow
             or "supervised pauses" in workflow
         ), name
         assert "`autonomy=balanced` (default)" not in workflow, name

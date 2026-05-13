@@ -18,6 +18,10 @@
       "project_contract_validation",
       "effective_reference_intake"
     ],
+    "contract_reference_gate_context": [
+      "project_contract_gate",
+      "effective_reference_intake"
+    ],
     "publication_subject_context": [
       "publication_subject",
       "publication_subject_status",
@@ -186,7 +190,7 @@
       "required_init_field_groups": [
         "project_root_context",
         "workspace_context",
-        "contract_reference_context",
+        "contract_reference_gate_context",
         "publication_subject_context",
         "selected_review_root_context",
         "publication_intake_context",
@@ -202,12 +206,23 @@
         "platform"
       ],
       "loaded_authorities": [
-        "workflows/write-paper/outline-scaffold.md",
-        "references/publication/publication-pipeline-modes.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md"
+        "workflows/write-paper/outline-scaffold.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "publication_lane_or_builder_config_selection",
+          "authorities": [
+            "references/publication/publication-pipeline-modes.md"
+          ]
+        },
+        {
+          "when": "paper_builder_config_or_artifact_manifest_write",
+          "authorities": [
+            "templates/paper/paper-config-schema.md",
+            "templates/paper/artifact-manifest-schema.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/write-paper.md",
         "workflows/write-paper/authoring.md",
@@ -218,8 +233,11 @@
         "references/publication/publication-response-artifacts.md",
         "references/publication/peer-review-panel.md",
         "references/publication/peer-review-reliability.md",
+        "references/publication/publication-pipeline-modes.md",
         "references/publication/stage-recovery-gate.md",
         "references/shared/canonical-schema-discipline.md",
+        "templates/paper/paper-config-schema.md",
+        "templates/paper/artifact-manifest-schema.md",
         "templates/paper/bibliography-audit-schema.md",
         "templates/paper/review-ledger-schema.md",
         "templates/paper/referee-decision-schema.md",
@@ -269,7 +287,7 @@
       ],
       "required_init_field_groups": [
         "workspace_context",
-        "contract_reference_context",
+        "contract_reference_gate_context",
         "publication_subject_context",
         "publication_intake_context",
         "manuscript_resolution_context",
@@ -356,7 +374,7 @@
       ],
       "required_init_field_groups": [
         "workspace_context",
-        "contract_reference_context",
+        "contract_reference_gate_context",
         "publication_subject_context",
         "publication_intake_context",
         "manuscript_resolution_context",
@@ -437,7 +455,7 @@
       ],
       "required_init_field_groups": [
         "workspace_context",
-        "contract_reference_context",
+        "contract_reference_gate_context",
         "publication_subject_context",
         "selected_review_root_context",
         "publication_intake_context",

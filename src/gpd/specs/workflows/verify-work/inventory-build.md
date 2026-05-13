@@ -1,6 +1,10 @@
 <purpose>
 Delegate phase verification to one fresh `gpd-verifier` and gate the produced report.
 </purpose>
+<first_route>
+First fail closed if project, roadmap, contract, proof, or anchor readiness is
+unusable; only then delegate one fresh verifier and gate its report.
+</first_route>
 <philosophy>
 Do not duplicate verifier policy. Fail closed before delegation if project, roadmap, contract, or proof readiness is unusable. The wrapper gates artifacts and routes; the verifier owns scientific status. Every child handoff is one-shot and file-producing success requires fresh expected artifacts.
 </philosophy>
@@ -30,7 +34,10 @@ fi
 ```
 
 <field_access>
-Before reading `INVENTORY_BUILD_INIT`, check `gpd --raw stage field-access verify-work --stage inventory_build --style instruction`; read only `INVENTORY_BUILD_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use reference/citation handles without inlining rendered prose or bodies.
+Use the generated helper output from
+`gpd --raw stage field-access verify-work --stage inventory_build --style instruction`
+as the field policy for `INVENTORY_BUILD_INIT`. Use reference/citation handles
+without inlining rendered prose or bodies.
 </field_access>
 
 - If it names a benchmark, prior artifact, or must-read reference, verification must explicitly check it or report why it could not.
@@ -123,13 +130,16 @@ If runtime delegation is unavailable, fallback execution is still `gpd-verifier`
 <step name="sync_verifier_output">
 Read the verifier-produced verification file or report path.
 
-Apply the `verify_work_verifier_report` child_gate before downstream routing. Route only on canonical verification frontmatter plus `gpd_return.status`; headings, marker strings, runtime success, and preexisting reports are not authority.
-- Any verifier-written canonical `VERIFICATION.md`, including gap reports and `blocked`/`failed` handoffs, must pass `gpd validate verification-contract "${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md"` before this wrapper accepts it as canonical.
-- Missing/unreadable/unnamed/invalid artifacts use the tuple failure route; never present them as accepted or passed.
-- Fallback executions that reach this step after failed report validation stop here: emit the blocked/final response with latest validator errors. Do not list the invalid `VERIFICATION.md` as an authoritative artifact, do not route to gaps unless a schema-valid gap report exists, do not enter `gap_repair` or `complete_session`, and do not patch the canonical verification report from this wrapper.
-- Do not patch canonical verification frontmatter in this wrapper. Surface bounded-loop validator errors fail-closed through `references/orchestration/stage-stop-envelope.md`: primary `gpd:verify-work ${phase_number}`, secondary `gpd:resume-work` and `gpd:suggest-next`.
-- If a canonical verification file already exists, preserve its authoritative frontmatter and append only the session-local overlay here.
-- Do not recompute canonical verification status in this workflow.
+Apply the `verify_work_verifier_report` child_gate before downstream routing.
+Route only on canonical verification frontmatter plus `gpd_return.status`;
+headings, marker strings, runtime success, and preexisting reports are not
+authority. Every verifier-written canonical `VERIFICATION.md`, including gap or
+non-green handoffs, must pass `gpd validate verification-contract` before this
+wrapper accepts it. Missing, unreadable, unnamed, invalid, or failed-validation
+reports stop through the tuple failure route; do not list them as authoritative,
+route to gaps, enter `gap_repair`, patch frontmatter, or recompute canonical
+status. Existing canonical frontmatter stays authoritative; append only the
+session-local overlay here.
 
 Load the staged researcher-session scaffold and canonical schema pack at this stage.
 
@@ -142,7 +152,10 @@ fi
 ```
 
 <field_access>
-Before reading `INTERACTIVE_VALIDATION_INIT`, check `gpd --raw stage field-access verify-work --stage interactive_validation --style instruction`; read only `INTERACTIVE_VALIDATION_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Session-overlay writes stay report-schema bounded.
+Use the generated helper output from
+`gpd --raw stage field-access verify-work --stage interactive_validation --style instruction`
+as the field policy for `INTERACTIVE_VALIDATION_INIT`. Session-overlay writes
+stay report-schema bounded.
 </field_access>
 
 Keep the session overlay frontmatter compatible with the authoritative verification report.

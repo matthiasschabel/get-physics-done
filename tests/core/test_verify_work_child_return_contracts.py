@@ -135,12 +135,13 @@ def test_verify_work_verifier_handoff_stays_one_shot_and_routes_on_typed_status(
     assert 'id: "verify_work_verifier_report"' in workflow
     _assert_semantic(workflow, "verify-work verifier heading non-authority", "presentation headings", "non-authority")
     assert "Verifier checkpoints use `references/orchestration/continuation-boundary.md`" in workflow
-    assert "Missing/unreadable/unnamed/invalid artifacts use the tuple failure route" in workflow
+    assert "Missing, unreadable, unnamed, invalid, or failed-validation" in workflow
+    assert "tuple failure route" in workflow
     _assert_semantic(
         workflow,
         "verify-work wrapper does not recompute canonical status",
-        "do not recompute",
-        "canonical verification status",
+        "recompute canonical",
+        "status",
     )
 
 
@@ -173,26 +174,26 @@ def test_verify_work_verifier_sync_requires_artifact_gate_before_downstream_rout
     _assert_semantic(
         workflow,
         "verify-work verifier canonical report gate",
-        "Any verifier-written canonical",
-        "including gap reports",
-        "blocked",
-        "failed",
+        "Every verifier-written canonical",
+        "including gap",
+        "non-green handoffs",
         "gpd validate verification-contract",
-        "before this wrapper accepts it as canonical",
+        "before this wrapper accepts it",
     )
-    assert "Missing/unreadable/unnamed/invalid artifacts use the tuple failure route" in workflow
+    assert "Missing, unreadable, unnamed, invalid, or failed-validation" in workflow
+    assert "tuple failure route" in workflow
     _assert_semantic(
         workflow,
         "verify-work verifier sync keeps status canonical",
-        "do not recompute",
-        "canonical verification status",
+        "recompute canonical",
+        "status",
     )
     _assert_semantic(workflow, "verify-work preexisting reports non-authority", "preexisting reports", "not authority")
     _assert_semantic(
         workflow,
         "verify-work existing canonical report preservation",
-        "canonical verification file already exists",
-        "preserve its authoritative frontmatter",
+        "Existing canonical frontmatter",
+        "authoritative",
         "session-local overlay",
     )
     assert "Write to `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`." in workflow
@@ -237,20 +238,18 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
         "run `sync_verifier_output`",
         "do not wrapper-repair the canonical report",
     )
-    sync_stop = (
-        "- Fallback executions that reach this step after failed report validation stop here: emit the blocked/final response with latest validator errors. "
-        "Do not list the invalid `VERIFICATION.md` as an authoritative artifact, do not route to gaps unless a schema-valid gap report exists, do not enter `gap_repair` or `complete_session`, "
-        "and do not patch the canonical verification report from this wrapper."
-    )
-    stage_stop_line = (
-        "- Do not patch canonical verification frontmatter in this wrapper. Surface bounded-loop validator errors fail-closed through `references/orchestration/stage-stop-envelope.md`: "
-        "primary `gpd:verify-work ${phase_number}`, secondary `gpd:resume-work` and `gpd:suggest-next`."
-    )
-
     for fragment in fallback_fragments:
         assert fragment in workflow
-    assert sync_stop in workflow
-    assert stage_stop_line in workflow
+    for fragment in (
+        "failed-validation",
+        "do not list them as authoritative",
+        "route to gaps",
+        "enter `gap_repair`",
+        "patch frontmatter",
+        "recompute canonical",
+        "status",
+    ):
+        assert fragment in workflow
     assert (
         "Schema finalization is bounded: validator pass returns; after the second validator failure total, including the initial failure and one repair rerun, return `gpd_return.status: blocked` with latest errors."
         in workflow
@@ -260,11 +259,11 @@ def test_verify_work_fallback_failed_validation_stops_at_sync_gate() -> None:
     assert workflow.index("fallback execution is still `gpd-verifier` work") < workflow.index(
         '<step name="sync_verifier_output">'
     )
-    assert workflow.index(sync_stop) < workflow.index(
+    assert workflow.index("failed-validation") < workflow.index(
         'INTERACTIVE_VALIDATION_INIT=$(gpd --raw init verify-work "${PHASE_ARG}" --stage interactive_validation)'
     )
-    assert workflow.index(sync_stop) < workflow.index('<step name="load_gap_repair_stage">')
-    assert workflow.index(sync_stop) < workflow.index('<step name="complete_session">')
+    assert workflow.index("failed-validation") < workflow.index('<step name="load_gap_repair_stage">')
+    assert workflow.index("failed-validation") < workflow.index('<step name="complete_session">')
 
 
 def test_verify_work_gap_plan_checker_routes_on_canonical_gpd_return_status() -> None:

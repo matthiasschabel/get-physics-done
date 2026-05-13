@@ -124,12 +124,17 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
     assert "templates/paper/review-ledger-schema.md" in bootstrap.must_not_eager_load
     assert "templates/paper/referee-decision-schema.md" in bootstrap.must_not_eager_load
 
-    assert outline.loaded_authorities == (
-        "workflows/write-paper/outline-scaffold.md",
-        "references/publication/publication-pipeline-modes.md",
-        "templates/paper/paper-config-schema.md",
-        "templates/paper/artifact-manifest-schema.md",
-    )
+    assert outline.loaded_authorities == ("workflows/write-paper/outline-scaffold.md",)
+    assert {conditional.when: conditional.authorities for conditional in outline.conditional_authorities} == {
+        "publication_lane_or_builder_config_selection": ("references/publication/publication-pipeline-modes.md",),
+        "paper_builder_config_or_artifact_manifest_write": (
+            "templates/paper/paper-config-schema.md",
+            "templates/paper/artifact-manifest-schema.md",
+        ),
+    }
+    assert "references/publication/publication-pipeline-modes.md" in outline.must_not_eager_load
+    assert "templates/paper/paper-config-schema.md" in outline.must_not_eager_load
+    assert "templates/paper/artifact-manifest-schema.md" in outline.must_not_eager_load
     assert figure_authoring.loaded_authorities == (
         "workflows/write-paper/authoring.md",
         "references/publication/stage-recovery-gate.md",
@@ -209,6 +214,31 @@ def test_write_paper_authoring_defers_reference_and_planning_bodies_until_target
         assert "reference_artifacts_content" not in stage.required_init_fields
         assert "protocol_bundle_context" not in stage.required_init_fields
         assert "active_reference_context" not in stage.required_init_fields
+
+
+def test_write_paper_publication_review_keeps_exact_round_artifact_reads_before_routing() -> None:
+    manifest = validate_workflow_stage_manifest_payload(
+        json.loads((WORKFLOWS_DIR / "write-paper-stage-manifest.json").read_text(encoding="utf-8")),
+        expected_workflow_id="write-paper",
+    )
+    publication_review = manifest.stage("publication_review")
+    publication_review_surface = _expanded_stage_surface(publication_review)
+
+    assert "selected_publication_root" in publication_review.required_init_fields
+    assert "selected_review_root" in publication_review.required_init_fields
+    assert "references/publication/publication-review-round-artifacts.md" in publication_review.loaded_authorities
+    assert "references/publication/publication-response-artifacts.md" in publication_review.must_not_eager_load
+    assert (
+        "Read `${selected_review_root}/REFEREE-DECISION{round_suffix}.json` and\n"
+        "`${selected_review_root}/REVIEW-LEDGER{round_suffix}.json` first"
+    ) in publication_review_surface
+    assert "then read `${selected_publication_root}/REFEREE-REPORT{round_suffix}.md`" in publication_review_surface
+    assert (
+        "Recommend `gpd:arxiv-submission` only when project-backed staged review already\nclears packaging."
+        in publication_review_surface
+    )
+    assert "summary-only" not in publication_review_surface
+    assert "summarized favorable flag" not in publication_review_surface
 
 
 def test_write_paper_bootstrap_stage_blocks_before_downstream_prompt_loading() -> None:

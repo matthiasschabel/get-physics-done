@@ -27,8 +27,7 @@ def test_required_acknowledgment_is_wired_into_paper_prompts() -> None:
     ):
         content = _read(relative_path)
         if relative_path == "src/gpd/specs/workflows/write-paper.md":
-            assert "This research made use of Get" in content, relative_path
-            assert "Physics Done (GPD), developed by Physical Superintelligence PBC (PSI)." in content, relative_path
+            assert "templates/paper/paper-config-schema.md" in content, relative_path
         else:
             assert REQUIRED_GPD_ACKNOWLEDGMENT in content, relative_path
         assert FORBIDDEN_FUNDING_CLAIM_FRAGMENT not in content, relative_path

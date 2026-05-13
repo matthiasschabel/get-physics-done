@@ -44,6 +44,17 @@ def test_referee_checkpoint_ownership_and_mode_routing_are_explicit() -> None:
     assert "publication-pipeline-modes.md" in source
 
 
+def test_publication_child_agents_keep_return_only_shared_state_boundary() -> None:
+    for agent_name in ("gpd-paper-writer.md", "gpd-bibliographer.md", "gpd-referee.md"):
+        source = _read_agent(agent_name)
+        frontmatter = source.split("---", 2)[1]
+
+        assert "shared_state_authority: return_only" in frontmatter
+        assert "shared_state_authority: direct" not in source
+        assert "shared_state_policy: direct" not in source
+        assert "success proof" not in source.casefold()
+
+
 def test_peer_review_and_referee_skill_surfaces_keep_lifecycle_cleanup_boundary() -> None:
     from gpd.mcp.servers.skills_server import get_skill
 

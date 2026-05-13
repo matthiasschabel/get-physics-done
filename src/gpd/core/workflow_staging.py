@@ -32,6 +32,9 @@ from gpd.core.staged_context_fields import (
     RESEARCH_PHASE_FILE_CONTENT_FIELDS,
     RESUME_FILE_CONTENT_FIELDS,
     RESUME_REFERENCE_RUNTIME_FIELDS,
+    STAGED_BODY_FIELDS,
+    STAGED_REFERENCE_HANDLE_STATUS_FIELDS,
+    STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS,
     STAGED_REFERENCE_RUNTIME_FIELDS,
     STATE_MEMORY_FIELDS,
     STRUCTURED_STATE_FIELDS,
@@ -685,6 +688,83 @@ _STAGED_LOADING_PAYLOAD_FIELDS = (
     "next_stages",
     "checkpoints",
 )
+_BODY_FIELD_SUFFIX = "_content"
+_HANDLE_STATUS_SUFFIXES = (
+    "_count",
+    "_counts",
+    "_file",
+    "_files",
+    "_ids",
+    "_load_info",
+    "_manifest",
+    "_status",
+    "_statuses",
+    "_summary",
+    "_warnings",
+)
+
+
+def render_staged_field_access_instruction(
+    workflow_id: str,
+    stage: WorkflowStage,
+    *,
+    init_reference: str = "<INIT>",
+) -> str:
+    """Render the compact active-stage field-access instruction."""
+
+    raw_command = f"gpd --raw stage field-access {workflow_id} --stage {stage.id} --style instruction"
+    required_marker = f"`{init_reference}.staged_loading.required_init_fields`"
+    parts = [
+        (
+            f"Field access ({workflow_id}.{stage.id}): run `{raw_command}` for the selected-field "
+            f"inventory or aliases; read only selected init keys listed in {required_marker}. "
+            "Selected fields stay structured there, not repeated as prose. "
+            "Treat unlisted init/body fields as unavailable for this active stage. "
+            "Reject stale/older init payloads and shell variables from another stage."
+        )
+    ]
+
+    body_fields = _selected_body_fields(stage.required_init_fields)
+    handle_status_fields = _selected_handle_status_fields(stage.required_init_fields)
+    if body_fields:
+        parts.append(
+            "Body fields: selected body fields are target-scoped "
+            f"({', '.join(body_fields)}); read them only after choosing the concrete section, issue, "
+            "artifact, gap, handoff, or reference target; use handles/status/load manifests first."
+        )
+    elif handle_status_fields:
+        parts.append(
+            "Body fields: no staged body fields are selected; selected handle/status fields are handles "
+            "only, so use handles/status/load manifests first."
+        )
+    else:
+        parts.append("Body fields: no staged body fields are selected for this stage.")
+
+    rendered_context_fields = _selected_rendered_context_fields(stage.required_init_fields)
+    if rendered_context_fields:
+        parts.append(
+            "Rendered context fields selected for this stage "
+            f"({', '.join(rendered_context_fields)}) do not make unselected body fields available."
+        )
+    return " ".join(parts)
+
+
+def _selected_body_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        field for field in selected_fields if field in STAGED_BODY_FIELDS or field.endswith(_BODY_FIELD_SUFFIX)
+    )
+
+
+def _selected_handle_status_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        field
+        for field in selected_fields
+        if field in STAGED_REFERENCE_HANDLE_STATUS_FIELDS or field.endswith(_HANDLE_STATUS_SUFFIXES)
+    )
+
+
+def _selected_rendered_context_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(field for field in selected_fields if field in STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -762,7 +842,9 @@ class WorkflowStage:
             "workflow_id": workflow_id,
             "stage_id": self.id,
             "order": self.order,
-            **self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[:3]),
+            "required_init_fields": list(self.required_init_fields),
+            "field_access_instruction": render_staged_field_access_instruction(workflow_id, self),
+            **self._sequence_payload_fields(_STAGED_LOADING_PAYLOAD_FIELDS[1:3]),
             "eager_authorities": list(self.eager_authorities()),
         }
         if self.init_spec_id is not None:
@@ -1624,6 +1706,7 @@ __all__ = [
     "load_workflow_stage_manifest",
     "load_workflow_stage_manifest_from_path",
     "known_init_fields_for_workflow",
+    "render_staged_field_access_instruction",
     "resolve_workflow_stage_manifest_path",
     "validate_new_project_stage_contract_payload",
     "validate_new_milestone_stage_contract_payload",

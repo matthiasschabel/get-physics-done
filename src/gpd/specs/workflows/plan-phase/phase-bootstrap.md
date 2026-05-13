@@ -22,14 +22,13 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction` to confirm manifest-selected bootstrap fields. The staged field-access helper is authoritative; use `gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction` after later reloads. Parse only fields in `BOOTSTRAP_INIT.staged_loading.required_init_fields`; bootstrap includes `project_contract_gate` before authoritative contract use.
-Use shell aliases only for scalar bindings that truly need them
-(`--alias ALIAS=field`). The bootstrap payload includes `phase_number`,
-`phase_name`, `goal`, `phase_dir`, `phase_slug`, and `padded_phase`; bind
-`PHASE_DIR`, `PHASE_SLUG`, or `PADDED_PHASE` only after confirming those fields.
-
-After every later `gpd --raw init plan-phase ... --stage <stage_id>` reload,
-read only `INIT.staged_loading.required_init_fields`; do not reuse shell variables parsed from an older stage.
+Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction`
+to confirm manifest-selected bootstrap fields. The staged field-access helper is
+authoritative; after later reloads, use
+`gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction`
+and only the fields in `INIT.staged_loading.required_init_fields`. Use shell
+aliases only for scalar bindings that truly need them (`--alias ALIAS=field`);
+do not reuse shell variables parsed from an older stage.
 
 ```bash
 REQUESTED_PHASE="${PHASE}"

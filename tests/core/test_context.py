@@ -2479,10 +2479,20 @@ class TestInitNewProject:
         assert ctx["staged_loading"]["order"] == 2
         assert ctx["staged_loading"]["loaded_authorities"] == [
             "workflows/new-project/scope-approval.md",
-            "templates/project-contract-schema.md",
-            "templates/project-contract-grounding-linkage.md",
-            "references/shared/canonical-schema-discipline.md",
         ]
+        assert ctx["staged_loading"]["conditional_authorities"] == [
+            {
+                "when": "contract_schema_validation_or_linkage_repair",
+                "authorities": [
+                    "templates/project-contract-schema.md",
+                    "templates/project-contract-grounding-linkage.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            }
+        ]
+        assert "templates/project-contract-schema.md" in ctx["staged_loading"]["must_not_eager_load"]
+        assert "templates/project-contract-grounding-linkage.md" in ctx["staged_loading"]["must_not_eager_load"]
+        assert "references/shared/canonical-schema-discipline.md" in ctx["staged_loading"]["must_not_eager_load"]
         assert ctx["staged_loading"]["writes_allowed"] == [
             "GPD/state.json",
             "GPD/STATE.md",
@@ -2515,7 +2525,12 @@ class TestInitNewProject:
 
         stage_ctx.assert_context_stage(ctx, manifest, "resume-work", "state_restore")
         assert ctx["project_contract_gate"]["visible"] is True
-        assert {"reference_artifacts_content", "active_reference_context", "state_content", "project_content"}.isdisjoint(ctx)
+        assert {
+            "reference_artifacts_content",
+            "active_reference_context",
+            "state_content",
+            "project_content",
+        }.isdisjoint(ctx)
         assert all(ctx[field] is not None for field in ("contract_intake", "effective_reference_intake"))
 
     def test_resume_work_stage_state_restore_skips_reference_artifact_payload(
@@ -2544,9 +2559,7 @@ class TestInitNewProject:
         assert "active_reference_context" not in ctx
         assert calls == []
 
-    def test_resume_work_stage_resume_routing_uses_handoff_handles_without_file_bodies(
-        self, tmp_path: Path
-    ) -> None:
+    def test_resume_work_stage_resume_routing_uses_handoff_handles_without_file_bodies(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
         from gpd.core.state import default_state_dict
 
@@ -4181,10 +4194,11 @@ class TestInitVerifyWork:
 
         manifest = load_workflow_stage_manifest("verify-work")
         inventory_build = manifest.stage("inventory_build")
-        assert inventory_build.loaded_authorities == (
-            "workflows/verify-work/inventory-build.md",
-            "references/verification/meta/verification-independence.md",
-        )
+        assert inventory_build.loaded_authorities == ("workflows/verify-work/inventory-build.md",)
+        assert {
+            conditional.when: conditional.authorities for conditional in inventory_build.conditional_authorities
+        } == {"full_independence_policy_check": ("references/verification/meta/verification-independence.md",)}
+        assert "references/verification/meta/verification-independence.md" in inventory_build.must_not_eager_load
         assert "templates/verification-report.md" not in inventory_build.loaded_authorities
         assert "templates/contract-results-schema.md" not in inventory_build.loaded_authorities
         assert "templates/verification-report.md" in inventory_build.must_not_eager_load

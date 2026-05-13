@@ -3,6 +3,12 @@ Own paper scope, journal/builder selection, detailed outline, and manuscript
 scaffold generation.
 </purpose>
 
+<first_decision>
+First choose the target journal, paper type, one-sentence key result, audience,
+and evidence lane; if the key result cannot be stated cleanly, narrow before any
+scaffold or builder repair.
+</first_decision>
+
 <stage_boundary>
 This stage may write the managed manuscript scaffold and intake/provenance roots
 already allowed by the stage manifest. It does not draft sections, verify
@@ -22,27 +28,16 @@ fi
 INIT="$OUTLINE_INIT"
 ```
 
-Use `gpd --raw stage field-access write-paper --stage outline_and_scaffold --style instruction`
-to confirm the manifest-selected outline/scaffold fields before reading
-`OUTLINE_INIT`.
-
-This stage receives handle/status/count fields for reference artifacts,
-literature reviews, research-map references, derived inventory, and protocol
-bundles. It does not receive `state_content`, `roadmap_content`,
-`requirements_content`, `reference_artifacts_content`, rendered
-`protocol_bundle_context`, or rendered `active_reference_context`. When outline
-decisions require planning prose or an evidence quote, read the specific
-`GPD/STATE.md`, `GPD/ROADMAP.md`, `GPD/REQUIREMENTS.md`, manuscript, or reference
-path by handle.
-
-Apply `{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md`
-from this staged payload before outline-level mode decisions, including
-bibliographer search breadth, referee strictness, and paper-writer style by mode.
+Use the generated helper output from
+`gpd --raw stage field-access write-paper --stage outline_and_scaffold --style instruction`
+as the field policy before reading `OUTLINE_INIT`. This stage is handle/status
+first; read specific project, manuscript, or reference files by handle only after
+the paper target above is selected.
 </init>
 
 <journal_formats>
-The manuscript builder and emitted `${PAPER_DIR}/ARTIFACT-MANIFEST.json`
-currently support only these `PAPER-CONFIG.json` journal keys:
+The builder schema owns exact fields. Current valid `PAPER-CONFIG.json` and
+`${PAPER_DIR}/ARTIFACT-MANIFEST.json` journal keys:
 
 - `prl`
 - `apj`
@@ -54,14 +49,13 @@ currently support only these `PAPER-CONFIG.json` journal keys:
 These are the only valid `journal` values in `PAPER-CONFIG.json` and
 `${PAPER_DIR}/ARTIFACT-MANIFEST.json`.
 
-Manual `PaperQualityInput` JSON can use additional scoring-only profiles such as
-`prd`, `prb`, `prc`, or `nature_physics`, but those are not supported
-`PAPER-CONFIG.json` builder keys yet. Unsupported values fall back to the
-`generic` scoring profile rather than being inferred.
+Read `publication-pipeline-modes.md` only for the selected paper lane's mode
+choices; do not infer unsupported builder journal keys from scoring-only
+profiles.
 </journal_formats>
 
 <scope>
-From the validated bootstrap/evidence state, determine:
+From the validated bootstrap/evidence state, record:
 
 - target journal and formatting requirements
 - paper type: new result, new method, comparison, or review
@@ -116,20 +110,20 @@ ${PAPER_DIR}/
 +-- Makefile
 ```
 
-Prefer the canonical builder whenever a machine-readable paper spec is available:
+Prefer the canonical builder whenever a real machine-readable paper spec exists:
 
 ```bash
 mkdir -p "${PAPER_DIR}"
 gpd paper-build "${PAPER_DIR}/PAPER-CONFIG.json" --output-dir "${PAPER_DIR}"
 ```
 
-This emits `${PAPER_DIR}/{topic_specific_stem}.tex`, writes the manuscript-root
-artifact manifest at `${PAPER_DIR}/ARTIFACT-MANIFEST.json`, and defines
-manuscript build truth; local compiler runs are smoke checks. For
-`fresh_project_bootstrap` or explicit
-builder-regeneration, create `${PAPER_DIR}/PAPER-CONFIG.json` from
-`{GPD_INSTALL_DIR}/templates/paper/paper-config-schema.md` if absent, set a short
-underscore `output_filename`, and run `gpd paper-build` before drafting.
+This emits `${PAPER_DIR}/{topic_specific_stem}.tex` and the manuscript-root
+artifact manifest at `${PAPER_DIR}/ARTIFACT-MANIFEST.json`; builder output
+defines manuscript build truth and local compiler runs are smoke checks. For
+`fresh_project_bootstrap` or explicit builder-regeneration, create/repair
+`${PAPER_DIR}/PAPER-CONFIG.json` from
+`templates/paper/paper-config-schema.md`, set a short underscore
+`output_filename`, and run `gpd paper-build` before drafting.
 
 For `resume_existing_manuscript`, do not probe the builder with throwaway `/tmp`
 configs or create optional `${PAPER_DIR}/PAPER-CONFIG.json` when an accepted
@@ -137,20 +131,10 @@ entrypoint exists. Read the schema only for real builder repair; if unclear or
 audits cannot refresh, stop at `checkpoint: command_failed` or
 `checkpoint: bibliography_gate`.
 
-When authoring `${PAPER_DIR}/PAPER-CONFIG.json`:
-
-- use the exact top-level fields from
-  `{GPD_INSTALL_DIR}/templates/paper/paper-config-schema.md`
-- keep `authors`, `sections`, `figures`, and `appendix_sections` as JSON arrays
-- keep custom funding/collaborator text in `acknowledgments`; `gpd paper-build`
-  appends this sentence automatically if missing: `This research made use of Get
-  Physics Done (GPD), developed by Physical Superintelligence PBC (PSI).`
-- keep `journal` to a supported builder key
-- do not reuse `${PAPER_DIR}/PAPER-CONFIG.json` as the external-authoring intake
-  contract
-
-Canonical schema for `${PAPER_DIR}/ARTIFACT-MANIFEST.json`:
-`{GPD_INSTALL_DIR}/templates/paper/artifact-manifest-schema.md`.
+Schema authorities own full config and artifact-manifest details. Local
+constraints: keep `journal` to a supported builder key, keep list fields as JSON
+arrays, and do not reuse `${PAPER_DIR}/PAPER-CONFIG.json` as the external intake
+contract.
 
 Keep this split explicit:
 

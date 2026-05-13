@@ -93,6 +93,23 @@ def test_assemble_dispatches_only_intersecting_providers_and_emits_manifest_orde
     assert payload["staged_loading"] == manifest.staged_loading_payload("bootstrap")
 
 
+def test_nested_field_access_instruction_does_not_change_top_level_payload_keys(tmp_path: Path) -> None:
+    manifest = _manifest(_stage("bootstrap", ("base", "tail")))
+
+    payload = assemble_staged_init_payload(
+        workflow_id="demo",
+        stage_id="bootstrap",
+        cwd=tmp_path,
+        base_payload={"base": 1, "tail": 2},
+        manifest=manifest,
+    )
+
+    assert tuple(payload) == ("base", "tail", "staged_loading")
+    assert set(payload) == {"base", "tail", "staged_loading"}
+    assert "field_access_instruction" not in payload
+    assert payload["staged_loading"]["field_access_instruction"].startswith("Field access (demo.bootstrap):")
+
+
 def test_postprocessors_fill_fields_before_missing_field_detection(tmp_path: Path) -> None:
     manifest = _manifest(_stage("bootstrap", ("base", "derived")))
 
@@ -127,9 +144,7 @@ def test_missing_fields_keep_workflow_stage_and_manifest_order(tmp_path: Path) -
             manifest=manifest,
         )
 
-    assert str(exc_info.value) == (
-        "demo stage 'bootstrap' requires unavailable init field(s): missing_a, missing_b"
-    )
+    assert str(exc_info.value) == ("demo stage 'bootstrap' requires unavailable init field(s): missing_a, missing_b")
 
 
 def test_unknown_stage_keeps_allowed_stage_guidance(tmp_path: Path) -> None:
@@ -205,9 +220,7 @@ def test_init_spec_validation_receives_only_active_fields_before_staged_loading(
 
 
 def test_helper_stays_workflow_neutral() -> None:
-    source = (Path(__file__).resolve().parents[2] / "src/gpd/core/staged_init_assembly.py").read_text(
-        encoding="utf-8"
-    )
+    source = (Path(__file__).resolve().parents[2] / "src/gpd/core/staged_init_assembly.py").read_text(encoding="utf-8")
 
     forbidden_fragments = (
         "gpd.core.context",

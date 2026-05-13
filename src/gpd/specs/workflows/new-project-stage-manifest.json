@@ -38,6 +38,9 @@
       "project_contract_load_info",
       "project_contract_validation"
     ],
+    "approved_contract_gate": [
+      "project_contract_gate"
+    ],
     "literature_models": [
       "researcher_model",
       "synthesizer_model"
@@ -116,19 +119,28 @@
         "contract_gate_status"
       ],
       "loaded_authorities": [
-        "workflows/new-project/scope-approval.md",
-        "templates/project-contract-schema.md",
-        "templates/project-contract-grounding-linkage.md",
-        "references/shared/canonical-schema-discipline.md"
+        "workflows/new-project/scope-approval.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "contract_schema_validation_or_linkage_repair",
+          "authorities": [
+            "templates/project-contract-schema.md",
+            "templates/project-contract-grounding-linkage.md",
+            "references/shared/canonical-schema-discipline.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/new-project.md",
         "references/research/questioning.md",
         "references/ui/ui-brand.md",
+        "references/shared/canonical-schema-discipline.md",
         "templates/project.md",
         "templates/requirements.md",
-        "templates/state.md"
+        "templates/state.md",
+        "templates/project-contract-grounding-linkage.md",
+        "templates/project-contract-schema.md"
       ],
       "allowed_tools": [
         "file_read",
@@ -218,7 +230,7 @@
       "required_init_field_groups": [
         "runtime_mode",
         "git_platform",
-        "contract_gate_status"
+        "approved_contract_gate"
       ],
       "loaded_authorities": [
         "workflows/new-project/workflow-preferences.md"

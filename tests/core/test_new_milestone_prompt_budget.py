@@ -144,7 +144,9 @@ def test_new_milestone_planning_stages_use_handles_instead_of_embedded_bodies() 
     survey_source = SURVEY_AUTHORITY.read_text(encoding="utf-8")
     roadmap_source = ROADMAP_AUTHORITY.read_text(encoding="utf-8")
     assert "<files_to_read>" in survey_source
-    assert "<files_to_read>" in roadmap_source
+    assert "stage field-access new-milestone --stage roadmap_authoring --style instruction" in roadmap_source
+    assert "generated helper output" in roadmap_source
+    assert "reference_artifact_files" in roadmap_source
     assert "Project content: {project_content}" not in survey_source
     assert "Project content: {project_content}" not in roadmap_source
     assert "Active references: {active_reference_context}" not in survey_source

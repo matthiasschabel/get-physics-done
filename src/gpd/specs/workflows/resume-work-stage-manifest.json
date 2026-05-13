@@ -127,9 +127,7 @@
       "execution_paused_at"
     ],
     "contract_gate_routing": [
-      "project_contract_gate",
-      "project_contract_load_info",
-      "project_contract_validation"
+      "project_contract_gate"
     ]
   },
   "stages": [
@@ -281,12 +279,19 @@
         "contract_gate_routing"
       ],
       "loaded_authorities": [
-        "workflows/resume-work/resume-routing.md",
-        "references/orchestration/continuation-format.md"
+        "workflows/resume-work/resume-routing.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "continuation_update_after_route_selection",
+          "authorities": [
+            "references/orchestration/continuation-format.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/resume-work.md",
+        "references/orchestration/continuation-format.md",
         "templates/state-json-schema.md"
       ],
       "allowed_tools": [

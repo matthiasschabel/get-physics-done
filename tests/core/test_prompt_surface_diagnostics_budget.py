@@ -18,12 +18,12 @@ PROMPT_KIND_BUDGETS = {
     "agent": {"lines": 7_350, "chars": 400_000},
     "workflow": {"lines": 15_300, "chars": 618_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 140_000}
-# Phase 4 scaffolding guard. Keep first-turn active content flat while Phase 6
-# ratchets the integrated agent aggregate separately.
-STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 110_000}
-STAGE_EAGER_CHAR_BUDGET = 882_000
-STAGE_SELECTED_INIT_FIELD_BUDGET = 2_525
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 134_999}
+# Phase 3 strict target uses <= assertions, so char caps are one below the
+# acceptance threshold.
+STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 103_999}
+STAGE_EAGER_CHAR_BUDGET = 864_999
+STAGE_SELECTED_INIT_FIELD_BUDGET = 2_499
 STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 16
 REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 4
 STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 525

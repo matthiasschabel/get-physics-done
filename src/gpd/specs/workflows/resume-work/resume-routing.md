@@ -2,6 +2,12 @@
 Detect incomplete work, present recovery status, select the next action, and update continuation only after a route is known.
 </purpose>
 
+<first_route>
+First rank canonical `resume_candidates` and active bounded/handoff/interrupted
+handles; PLAN-without-SUMMARY scans are fallback diagnostics, not candidate
+invention.
+</first_route>
+
 <process>
 
 <step name="check_incomplete_work">
@@ -16,29 +22,21 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access resume-work --stage resume_routing --style instruction` before reading `RESUME_ROUTING_INIT`; read only `RESUME_ROUTING_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Pick one route from candidates/handles before body reads.
+Use the generated helper output from
+`gpd --raw stage field-access resume-work --stage resume_routing --style instruction`
+as the field policy for `RESUME_ROUTING_INIT`. Pick one route from
+candidates/handles before body reads.
 </field_access>
-
-Look for incomplete work that needs attention:
-
-```bash
-# Check for plans without summaries (incomplete execution)
-for plan in GPD/phases/*/*-PLAN.md; do
-  summary="${plan/PLAN/SUMMARY}"
-  [ ! -f "$summary" ] && echo "Incomplete: $plan"
-done 2>/dev/null
-
-# Check for interrupted agents (use has_interrupted_agent and interrupted_agent_id from init)
-if [ "$has_interrupted_agent" = "true" ]; then
-  echo "Interrupted agent: $interrupted_agent_id"
-fi
-```
 
 **Bounded execution segment detection:** If `active_resume_kind` is `bounded_segment`, `execution_resumable` is true, and `active_resume_pointer` is present, treat that bounded continuation as the primary resume target. The runtime ranks three recovery families into `resume_candidates`: a resumable live execution snapshot, a recorded handoff, and an interrupted-agent marker. If the live snapshot lacks a portable usable resume file, keep it visible only as advisory context. Do NOT invent additional candidates from plan files without summaries, auto-checkpoints, or other ad hoc checkpoints.
 
 Reason-scoped clears still matter on resume: a `first_result` clear does not retire `pre_fanout` or skeptical fields, and a `fanout unlock` does not clear the review gate by itself.
 
 When resuming from `first_result` or skeptical state, ask one concrete question first: "What decisive evidence is still owed before downstream work is trustworthy?" Do not resume fanout based only on proxy-looking success or "seems on track" prose.
+
+After canonical candidates are ranked, use a PLAN-without-SUMMARY check only as
+a lower-priority fallback when no higher-priority blocker or resume target is
+active.
 
 **If PLAN without SUMMARY exists:**
 

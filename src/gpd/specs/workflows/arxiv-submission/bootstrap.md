@@ -3,16 +3,11 @@ Prepare a completed paper for arXiv submission.
 
 Stages: `bootstrap` -> `manuscript_preflight` -> `review_gate` -> `package` -> `finalize`.
 
-The `arxiv-submission-stage-manifest.json` sidecar is executable through
-`gpd --raw init arxiv-submission --stage <stage_id>`. Executable stages:
-`gpd --raw init arxiv-submission --stage bootstrap`, `manuscript_preflight`,
-`review_gate`, `package`, `finalize`. Load the active stage payload before
-stage-specific authority; keep centralized command-context and strict
-review-preflight validators as the manuscript gate.
-
-Keep arXiv-only rules inline; shared bootstrap owns manuscript and review gates.
-Output is `arxiv-submission.tar.gz` under
-`GPD/publication/<subject_slug>/arxiv/` plus a manual submission checklist.
+Executable stages use `gpd --raw init arxiv-submission --stage <stage_id>`.
+Bootstrap owns command-context, strict review-preflight, manuscript-root
+resolution, and arXiv-only routing. Later stages own build, review gate,
+package, and final checklist. Output: `arxiv-submission.tar.gz` under
+`GPD/publication/<subject_slug>/arxiv/`.
 </purpose>
 
 <required_reading>
@@ -25,7 +20,7 @@ before resolving the manuscript target.
 <process>
 
 <step name="bootstrap" priority="first">
-Load bootstrap, then enter the resolved project root:
+Load bootstrap and enter the resolved project root:
 
 ```bash
 if [ -n "${ARGUMENTS:-}" ]; then
@@ -73,50 +68,55 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse `REVIEW_PREFLIGHT` for `publication_subject_slug`,
-`publication_lane_kind`, `managed_publication_root`,
-`selected_publication_root`, `selected_review_root`, `manuscript_root`, and
-`manuscript_entrypoint`. Use the shared publication bootstrap reference as the source of truth for manuscript-root resolution, latest-review/latest-response discovery, and paired response gating.
+Parse `REVIEW_PREFLIGHT` for `publication_subject_slug`, `publication_lane_kind`,
+`managed_publication_root`, `selected_publication_root`, `selected_review_root`,
+`manuscript_root`, and `manuscript_entrypoint`. The shared publication bootstrap
+reference remains the source of truth for manuscript-root resolution,
+latest-review/latest-response discovery, and paired response gating.
 
 Strict preflight reads `ARTIFACT-MANIFEST.json`, `BIBLIOGRAPHY-AUDIT.json`, and
-`reproducibility-manifest.json` from the resolved manuscript directory. The same resolved manuscript root is also the strict preflight source of truth for packaging and proof review. Use `derived_manuscript_proof_review_status` as
-first-pass theorem-proof freshness; must not persist `PROOF-REVIEW-MANIFEST.json` beside the manuscript root while validating.
+`reproducibility-manifest.json` from the resolved manuscript root; it is the
+strict preflight source of truth for packaging and proof review. Use
+`derived_manuscript_proof_review_status` as first-pass theorem-proof freshness;
+must not persist `PROOF-REVIEW-MANIFEST.json` beside the manuscript root while
+validating.
 
-Current executable policy is conservative: any same-round or newer
-`gpd:respond-to-referees` author/referee response artifact for the active
-manuscript requires newer staged `gpd:peer-review` before packaging. Without
-durable manuscript-change scope metadata, response-only rounds are not arXiv
-clearance.
-
-Response-freshness mapping: failed `response_freshness` check or
-`latest_response_requires_fresh_review=true` checkpoint as `response_gate`, not
-`review_gate`; an older target-bound staged review pair gives
-`review_state: stale`, `response_state: requires_fresh_review`; no typed pair
-gives `review_state: missing`; response gate before materialization gives
-`command_execution_state: blocked_before_write` and `claim_state: not_applicable`, not `human_needed`; same-round/newer responses require fresh
-staged `gpd:peer-review` before packaging.
-
-For nested-cwd launches, trust `project_root`, `manuscript_root`,
-`selected_publication_root`, and `selected_review_root` from init/preflight.
-Never infer package roots from launch cwd.
+Packaging gates:
+- Same-round/newer `gpd:respond-to-referees` artifacts require newer staged
+  `gpd:peer-review` before packaging; response-only rounds are not clearance.
+- Response-freshness mapping: failed `response_freshness` check or
+  `latest_response_requires_fresh_review=true` checkpoint as `response_gate`,
+  not `review_gate`; older target-bound review pair => `review_state: stale`,
+  `response_state: requires_fresh_review`; no typed pair => `review_state:
+  missing`; response gate before materialization => `command_execution_state:
+  blocked_before_write` and `claim_state: not_applicable`.
+- For nested-cwd launches, trust `project_root`, `manuscript_root`,
+  `selected_publication_root`, and `selected_review_root` from init/preflight.
+  Never infer package roots from launch cwd.
 
 Resolve manuscript target from raw preflight plus `$ARGUMENTS`:
 
-1. Set `resolved_main_tex` from `manuscript_entrypoint` and `resolved_dir` from `manuscript_root` in `REVIEW_PREFLIGHT`.
-2. If `$ARGUMENTS` specifies a `.tex` file, it must match that resolved entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or `GPD/publication/<subject_slug>/manuscript/`.
+1. Set `resolved_main_tex` from `manuscript_entrypoint` and `resolved_dir` from
+   `manuscript_root` in `REVIEW_PREFLIGHT`.
+2. If `$ARGUMENTS` specifies a `.tex` file, it must match that resolved
+   entrypoint and already live under `paper/`, `manuscript/`, `draft/`, or
+   `GPD/publication/<subject_slug>/manuscript/`.
 3. If `$ARGUMENTS` specifies a directory, the centralized preflight-resolved entrypoint under that directory is authoritative.
 4. Otherwise inspect only `paper/`, `manuscript/`, `draft/`, and a unique
    `GPD/publication/<subject_slug>/manuscript/` lane when preflight resolves it.
-5. If manuscript root is ambiguous or missing, STOP and require an explicit manuscript path or a repaired manuscript-root state.
-6. Do not accept arbitrary external directories or standalone `.tex` entrypoints outside those supported roots.
-7. Do not fall back to `find` or arbitrary wildcard matching outside the documented default roots.
+5. If manuscript root is ambiguous/missing, STOP for an explicit manuscript path
+   or repaired manuscript-root state.
+6. Do not accept arbitrary external directories or standalone `.tex` entrypoints
+   outside those supported roots.
+7. Do not fall back to `find` or arbitrary wildcard matching outside the
+   documented default roots.
 
-Then run the centralized publication preflight and review preflight checks. If
-latest review artifacts are missing, incomplete, stale, or blocked, or if
+If latest review artifacts are missing, incomplete, stale, or blocked, or if
 manuscript-root gates fail, stop before packaging. Set `subject_slug` from
-`publication_subject_slug`; if missing, STOP and repair preflight routing.
-Package outputs are always rooted at `GPD/publication/${subject_slug}/arxiv/`.
-Treat `selected_publication_root` as validation context only. Do not write proof-review manifests, package staging trees, or tarballs beside the manuscript root itself.
+`publication_subject_slug`; if missing, STOP. Package outputs are always rooted
+at `GPD/publication/${subject_slug}/arxiv/`; treat `selected_publication_root`
+as validation context only. Do not write proof-review manifests, package staging
+trees, or tarballs beside the manuscript root itself.
 
 Set:
 
@@ -134,9 +134,9 @@ PACKAGE_TARBALL="${PACKAGE_ROOT}/arxiv-submission.tar.gz"
 </step>
 
 <step name="handoff_to_manuscript_preflight">
-After bootstrap context, command-context preflight, strict review preflight, and
-manuscript target resolution all pass, reload `manuscript_preflight` before
-refreshing the build contract:
+After bootstrap, command-context, strict review preflight, and manuscript target
+resolution pass, reload `manuscript_preflight` before refreshing the build
+contract:
 
 ```bash
 if [ -n "${ARGUMENTS:-}" ]; then

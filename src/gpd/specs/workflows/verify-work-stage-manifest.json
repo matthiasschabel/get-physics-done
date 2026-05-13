@@ -192,15 +192,22 @@
         "verification_report_skeleton_bridge"
       ],
       "loaded_authorities": [
-        "workflows/verify-work/inventory-build.md",
-        "references/verification/meta/verification-independence.md"
+        "workflows/verify-work/inventory-build.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "full_independence_policy_check",
+          "authorities": [
+            "references/verification/meta/verification-independence.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/verify-work.md",
         "workflows/verify-work/interactive-validation.md",
         "workflows/verify-work/gap-repair.md",
         "references/verification/core/verification-core.md",
+        "references/verification/meta/verification-independence.md",
         "references/shared/canonical-schema-discipline.md",
         "references/protocols/error-propagation-protocol.md",
         "templates/research-verification.md",

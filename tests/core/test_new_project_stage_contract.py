@@ -152,13 +152,17 @@ def test_new_project_stage_contract_loads_and_preserves_stage_order() -> None:
     assert "project_contract_validation" in scope_approval.required_init_fields
     assert len(scope_approval.required_init_fields) == 4
     assert scope_approval.mode_paths == ("workflows/new-project/scope-approval.md",)
-    assert scope_approval.loaded_authorities == (
-        "workflows/new-project/scope-approval.md",
-        "templates/project-contract-schema.md",
-        "templates/project-contract-grounding-linkage.md",
-        "references/shared/canonical-schema-discipline.md",
-    )
-    assert scope_approval.conditional_authorities == ()
+    assert scope_approval.loaded_authorities == ("workflows/new-project/scope-approval.md",)
+    assert {conditional.when: conditional.authorities for conditional in scope_approval.conditional_authorities} == {
+        "contract_schema_validation_or_linkage_repair": (
+            "templates/project-contract-schema.md",
+            "templates/project-contract-grounding-linkage.md",
+            "references/shared/canonical-schema-discipline.md",
+        )
+    }
+    assert "templates/project-contract-schema.md" in scope_approval.must_not_eager_load
+    assert "templates/project-contract-grounding-linkage.md" in scope_approval.must_not_eager_load
+    assert "references/shared/canonical-schema-discipline.md" in scope_approval.must_not_eager_load
     assert scope_approval.produced_state == ("approved project contract", "approval-state persistence")
     assert scope_approval.checkpoints == (
         "approval gate has passed",
@@ -300,9 +304,17 @@ def test_new_project_approval_stage_owns_grounding_linkage_authorities() -> None
     scope_approval = contract.stage("scope_approval")
     scope_approval_text = _read_stage_authority("scope-approval.md")
 
-    assert "templates/project-contract-schema.md" in scope_approval.loaded_authorities
-    assert "templates/project-contract-grounding-linkage.md" in scope_approval.loaded_authorities
-    assert "references/shared/canonical-schema-discipline.md" in scope_approval.loaded_authorities
+    conditionals = {conditional.when: conditional.authorities for conditional in scope_approval.conditional_authorities}
+    assert conditionals == {
+        "contract_schema_validation_or_linkage_repair": (
+            "templates/project-contract-schema.md",
+            "templates/project-contract-grounding-linkage.md",
+            "references/shared/canonical-schema-discipline.md",
+        )
+    }
+    assert "templates/project-contract-schema.md" in scope_approval.must_not_eager_load
+    assert "templates/project-contract-grounding-linkage.md" in scope_approval.must_not_eager_load
+    assert "references/shared/canonical-schema-discipline.md" in scope_approval.must_not_eager_load
     assert "templates/project-contract-schema.md" in scope_approval_text
     assert "@{GPD_INSTALL_DIR}/templates/project-contract-schema.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/project-contract-grounding-linkage.md" not in command_text

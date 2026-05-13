@@ -36,15 +36,17 @@ def _manifest_workflow_ids() -> tuple[str, ...]:
 
 FIELD_ACCESS_WORKFLOWS = _manifest_workflow_ids()
 FIELD_ACCESS_REQUIRED_MARKER = "`<INIT>.staged_loading.required_init_fields`"
-FIELD_ACCESS_UNLISTED_POLICY = "Treat unlisted init fields as unavailable"
-FIELD_ACCESS_BODY_PREFIX = "Body fields are opt-in:"
-FIELD_ACCESS_TARGET_POLICY = "Body fields are opt-in: selected body fields are target-scoped"
+FIELD_ACCESS_UNLISTED_POLICY = "Treat unlisted init/body fields as unavailable"
+FIELD_ACCESS_STALE_POLICY = "Reject stale/older init payloads"
+FIELD_ACCESS_BODY_PREFIX = "Body fields:"
+FIELD_ACCESS_TARGET_POLICY = "Body fields: selected body fields are target-scoped"
 FIELD_ACCESS_TARGET_SELECTION_POLICY = (
     "after choosing the concrete section, issue, artifact, gap, handoff, or reference target"
 )
-FIELD_ACCESS_HANDLE_FIRST_POLICY = "use handles/status fields first"
+FIELD_ACCESS_HANDLE_FIRST_POLICY = "use handles/status/load manifests first"
 FIELD_ACCESS_HANDLE_ONLY_POLICY = "selected handle/status fields are handles only"
-FIELD_ACCESS_NO_BODY_POLICY = "no staged body fields are selected for this stage"
+FIELD_ACCESS_NO_BODY_POLICY = "no staged body fields are selected"
+FIELD_ACCESS_RENDERED_CONTEXT_POLICY = "do not make unselected body fields available"
 GPD_JSON_GET_TOKEN = "gpd json get"
 PAYLOAD_WORKFLOWS = (
     "plan-phase",
@@ -196,11 +198,14 @@ def test_default_instruction_style_is_shell_free_and_manifest_backed() -> None:
     assert "shell_bindings" not in payload
 
     instruction_text = "\n".join(payload["instructions"])
+    assert payload["instructions"] == [manifest.staged_loading_payload(stage.id)["field_access_instruction"]]
     assert GPD_JSON_GET_TOKEN not in instruction_text
     assert "$(" not in instruction_text
     assert _field_access_command("plan-phase", "planner_authoring") in instruction_text
     assert FIELD_ACCESS_REQUIRED_MARKER in instruction_text
     assert FIELD_ACCESS_UNLISTED_POLICY in instruction_text
+    assert FIELD_ACCESS_STALE_POLICY in instruction_text
+    assert ", ".join(stage.required_init_fields) not in instruction_text
     assert "active_reference_context" in payload["selected_fields"]
     assert "staged_loading" not in payload["selected_fields"]
 
@@ -220,7 +225,9 @@ def test_instruction_style_matches_manifest_for_all_staged_workflow_stages(workf
         assert payload["selected_fields"] == list(stage.required_init_fields)
         assert payload["aliases"] == []
         assert "shell_bindings" not in payload
-        assert payload["selected_fields"] == manifest.staged_loading_payload(stage_id)["required_init_fields"]
+        staged_loading = manifest.staged_loading_payload(stage_id)
+        assert payload["selected_fields"] == staged_loading["required_init_fields"]
+        assert payload["instructions"] == [staged_loading["field_access_instruction"]]
 
 
 @pytest.mark.parametrize("workflow_id", FIELD_ACCESS_WORKFLOWS)
@@ -234,10 +241,12 @@ def test_instruction_compact_policy_is_deterministic_for_all_staged_manifest_sta
 
         assert first["instructions"] == second["instructions"]
         assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
-        assert instruction_text.count("Active-stage field access is manifest-owned") == 1
+        assert len(first["instructions"]) == 1
+        assert instruction_text.count(f"Field access ({workflow_id}.{stage_id})") == 1
         assert _field_access_command(workflow_id, stage_id) in instruction_text
         assert FIELD_ACCESS_REQUIRED_MARKER in instruction_text
         assert FIELD_ACCESS_UNLISTED_POLICY in instruction_text
+        assert FIELD_ACCESS_STALE_POLICY in instruction_text
         assert FIELD_ACCESS_BODY_PREFIX in instruction_text
 
 
@@ -285,6 +294,28 @@ def test_body_selected_stages_are_target_scoped() -> None:
     assert checked_stages
 
 
+def test_rendered_context_fields_do_not_unlock_unselected_body_fields() -> None:
+    rendered_context_fields = {"active_reference_context", "protocol_bundle_context"}
+    checked_stages: list[tuple[str, str]] = []
+
+    for workflow_id in FIELD_ACCESS_WORKFLOWS:
+        manifest = load_workflow_stage_manifest(workflow_id)
+        for stage_id in manifest.stage_ids():
+            payload = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+            selected_fields = set(payload["selected_fields"])
+            rendered_selected = sorted(selected_fields & rendered_context_fields)
+            if not rendered_selected:
+                continue
+            instruction_text = "\n".join(payload["instructions"])
+
+            checked_stages.append((workflow_id, stage_id))
+            for rendered_field in rendered_selected:
+                assert rendered_field in instruction_text
+            assert FIELD_ACCESS_RENDERED_CONTEXT_POLICY in instruction_text
+
+    assert checked_stages
+
+
 @pytest.mark.parametrize("workflow_id", PAYLOAD_WORKFLOWS)
 def test_staged_payload_fields_remain_manifest_owned(tmp_path: Path, workflow_id: str) -> None:
     _setup_manifest_owned_payload_project(tmp_path)
@@ -298,16 +329,24 @@ def test_staged_payload_fields_remain_manifest_owned(tmp_path: Path, workflow_id
         assert tuple(field for field in payload if field != "staged_loading") == stage.required_init_fields
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"] == manifest.staged_loading_payload(stage_id)
+        assert "field_access_instruction" not in payload
+        assert payload["staged_loading"]["field_access_instruction"] == access_payload["instructions"][0]
         assert access_payload["selected_fields"] == list(stage.required_init_fields)
 
 
-def test_target_workflow_prompts_use_field_access_helper_for_staged_reloads() -> None:
+def test_target_workflows_have_generated_field_access_for_staged_reloads() -> None:
     for workflow_id, stage_ids in EXPECTED_FIELD_ACCESS_STAGE_MENTIONS.items():
-        source = workflow_authority_text(WORKFLOWS_DIR, workflow_id)
-
-        assert f"gpd --raw stage field-access {workflow_id}" in source
         for stage_id in stage_ids:
-            assert f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction" in source
+            manifest = load_workflow_stage_manifest(workflow_id)
+            access_payload = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+            staged_loading = manifest.staged_loading_payload(stage_id)
+            instruction_text = access_payload["instructions"][0]
+
+            assert staged_loading["field_access_instruction"] == instruction_text
+            assert staged_loading["required_init_fields"] == access_payload["selected_fields"]
+            assert _field_access_command(workflow_id, stage_id) in instruction_text
+            assert FIELD_ACCESS_REQUIRED_MARKER in instruction_text
+            assert FIELD_ACCESS_UNLISTED_POLICY in instruction_text
 
 
 @pytest.mark.parametrize("workflow_id", STAGED_PROMPT_HYGIENE_WORKFLOWS)

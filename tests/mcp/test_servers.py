@@ -2082,12 +2082,19 @@ class TestSkillsServer:
 
         assert result["staged_loading"]["workflow_id"] == "new-project"
         assert result["staged_loading"]["stages"][0]["id"] == "scope_intake"
-        assert result["staged_loading"]["stages"][1]["loaded_authorities"] == [
-            "workflows/new-project/scope-approval.md",
-            "templates/project-contract-schema.md",
-            "templates/project-contract-grounding-linkage.md",
-            "references/shared/canonical-schema-discipline.md",
+        scope_approval = result["staged_loading"]["stages"][1]
+        assert scope_approval["loaded_authorities"] == ["workflows/new-project/scope-approval.md"]
+        assert scope_approval["conditional_authorities"] == [
+            {
+                "when": "contract_schema_validation_or_linkage_repair",
+                "authorities": [
+                    "templates/project-contract-schema.md",
+                    "templates/project-contract-grounding-linkage.md",
+                    "references/shared/canonical-schema-discipline.md",
+                ],
+            }
         ]
+        assert "templates/project-contract-schema.md" in scope_approval["must_not_eager_load"]
         assert result["structured_metadata_authority"]["staged_loading"] == "mirrored"
 
     def test_get_skill_new_milestone_surfaces_staged_loading_sidecar(

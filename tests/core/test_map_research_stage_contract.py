@@ -79,11 +79,11 @@ def test_map_research_workflow_uses_project_rooted_map_targets_for_side_effects(
         semantic_anchor(
             "update-selected route only delegates selected map documents",
             (
-                "selected list",
+                "selected documents",
                 "`UPDATE_SELECTED_DOCS`",
-                "mapper slices",
-                "selected document",
-                "unselected map documents",
+                "spawn only slices",
+                "selected documents",
+                "unselected map",
                 "fail closed",
             ),
         ),

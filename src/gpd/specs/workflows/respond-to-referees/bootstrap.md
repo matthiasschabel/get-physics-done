@@ -43,7 +43,9 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access respond-to-referees --stage bootstrap --style instruction` before reading `INIT`; read only `INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Reference bodies stay unavailable.
+Use the generated helper output from
+`gpd --raw stage field-access respond-to-referees --stage bootstrap --style instruction`
+as the field policy for `INIT`. Reference bodies stay unavailable.
 </field_access>
 
 For nested-cwd launches, use `project_root`, `selected_publication_root`,

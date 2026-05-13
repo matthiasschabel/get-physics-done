@@ -6,34 +6,16 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-from gpd.core.staged_context_fields import (
-    STAGED_BODY_FIELDS,
-    STAGED_REFERENCE_HANDLE_STATUS_FIELDS,
-    STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS,
-)
 from gpd.core.workflow_staging import (
     WORKFLOW_STAGE_MANIFEST_DIR,
     load_workflow_stage_manifest,
+    render_staged_field_access_instruction,
     resolve_workflow_stage_manifest_path,
 )
 
 FIELD_ACCESS_STYLES = frozenset({"instruction", "json", "shell"})
 _SHELL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _JSON_FIELD_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-_BODY_FIELD_SUFFIX = "_content"
-_HANDLE_STATUS_SUFFIXES = (
-    "_count",
-    "_counts",
-    "_file",
-    "_files",
-    "_ids",
-    "_load_info",
-    "_manifest",
-    "_status",
-    "_statuses",
-    "_summary",
-    "_warnings",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +147,7 @@ def build_staged_field_access(
         stage_order=stage.order,
         stage_purpose=stage.purpose,
         manifest_path=relative_manifest_path,
-        instructions=_instruction_lines(manifest.workflow_id, stage.id, selected_fields)
+        instructions=(render_staged_field_access_instruction(manifest.workflow_id, stage),)
         if normalized_style == "instruction"
         else (),
         shell_bindings=_shell_binding_lines(aliases, payload_variable=payload_variable)
@@ -187,59 +169,6 @@ def _validate_aliases_for_selected_fields(
                 f"Field {alias.field!r} is not selected by {workflow_id} stage {stage_id!r}; "
                 f"selected fields: {', '.join(sorted(selected_fields))}"
             )
-
-
-def _instruction_lines(workflow_id: str, stage_id: str, selected_fields: tuple[str, ...]) -> tuple[str, ...]:
-    field_list = ", ".join(selected_fields)
-    body_fields = _selected_body_fields(selected_fields)
-    handle_status_fields = _selected_handle_status_fields(selected_fields)
-    rendered_context_fields = _selected_rendered_context_fields(selected_fields)
-    lines = [
-        (
-            "Active-stage field access is manifest-owned: run "
-            f"`gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction`, "
-            "then read only keys listed in `<INIT>.staged_loading.required_init_fields`."
-        ),
-        f"{workflow_id} stage {stage_id} selects exactly these staged-init fields: {field_list}.",
-        "Treat unlisted init fields as unavailable for this stage.",
-    ]
-    if body_fields:
-        lines.append(
-            "Body fields are opt-in: selected body fields are target-scoped "
-            f"({', '.join(body_fields)}) may be read only after choosing the concrete section, issue, "
-            "artifact, gap, handoff, or reference target; use handles/status fields first."
-        )
-    elif handle_status_fields:
-        lines.append(
-            "Body fields are opt-in: selected handle/status fields are handles only; "
-            "no staged body fields are selected for this stage."
-        )
-    else:
-        lines.append("Body fields are opt-in: no staged body fields are selected for this stage.")
-    if rendered_context_fields:
-        lines.append(
-            "Rendered context fields selected for this stage "
-            f"({', '.join(rendered_context_fields)}) do not make unselected body fields available."
-        )
-    return tuple(lines)
-
-
-def _selected_body_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(
-        field for field in selected_fields if field in STAGED_BODY_FIELDS or field.endswith(_BODY_FIELD_SUFFIX)
-    )
-
-
-def _selected_handle_status_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(
-        field
-        for field in selected_fields
-        if field in STAGED_REFERENCE_HANDLE_STATUS_FIELDS or field.endswith(_HANDLE_STATUS_SUFFIXES)
-    )
-
-
-def _selected_rendered_context_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(field for field in selected_fields if field in STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS)
 
 
 def _shell_binding_lines(aliases: tuple[StagedFieldAlias, ...], *, payload_variable: str) -> tuple[str, ...]:

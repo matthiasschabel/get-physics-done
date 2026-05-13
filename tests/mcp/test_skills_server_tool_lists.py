@@ -724,12 +724,17 @@ def test_get_skill_verify_work_surfaces_staged_loading_sidecar() -> None:
     assert "One check at a time, plain text responses, no interrogation." not in result["content"]
     assert "Physics verification is not binary:" not in result["content"]
     assert "For deeper focused analysis" not in result["content"]
-    assert result["staged_loading"]["stages"][2]["loaded_authorities"] == [
-        "workflows/verify-work/inventory-build.md",
-        "references/verification/meta/verification-independence.md",
+    inventory_build = result["staged_loading"]["stages"][2]
+    assert inventory_build["loaded_authorities"] == ["workflows/verify-work/inventory-build.md"]
+    assert inventory_build["conditional_authorities"] == [
+        {
+            "when": "full_independence_policy_check",
+            "authorities": ["references/verification/meta/verification-independence.md"],
+        }
     ]
-    assert result["staged_loading"]["stages"][2]["next_stages"] == ["interactive_validation"]
-    assert result["staged_loading"]["stages"][2]["checkpoints"] == [
+    assert "references/verification/meta/verification-independence.md" in inventory_build["must_not_eager_load"]
+    assert inventory_build["next_stages"] == ["interactive_validation"]
+    assert inventory_build["checkpoints"] == [
         "verifier delegation completed",
         "handoff remains fail-closed",
         "anchor obligations explicit",

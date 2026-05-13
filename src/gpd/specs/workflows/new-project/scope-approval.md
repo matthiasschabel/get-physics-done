@@ -3,6 +3,11 @@ Own the second staged `new-project` boundary: draft, repair, explicitly approve,
 validate, and persist the canonical scoping contract.
 </purpose>
 
+<first_decision>
+First repair exactly one missing blocking field if needed; otherwise present the
+scope contract for explicit user approval before any downstream artifact stage.
+</first_decision>
+
 <stage_boundary>
 This stage may use the contract schema, grounding linkage, and canonical schema
 discipline authorities. It must not read downstream project artifact or runtime
@@ -21,7 +26,10 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access new-project --stage scope_approval --style instruction` before reading `SCOPE_APPROVAL_INIT`; read only `SCOPE_APPROVAL_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use only loaded contract/status and approval authorities.
+Use the generated helper output from
+`gpd --raw stage field-access new-project --stage scope_approval --style instruction`
+as the field policy for `SCOPE_APPROVAL_INIT`. Use only loaded contract/status
+and approval authorities.
 </field_access>
 </bootstrap>
 

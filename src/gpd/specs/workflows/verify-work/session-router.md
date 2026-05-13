@@ -37,7 +37,11 @@ fi
 ```
 
 <field_access>
-Before reading `SESSION_ROUTER_INIT`, check `gpd --raw stage field-access verify-work --stage session_router --style instruction`; read only `SESSION_ROUTER_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Do not assume reference ledgers, protocol bundles, or report schemas are loaded here. Verifier/gap authorities are stage-local.
+Use the generated helper output from
+`gpd --raw stage field-access verify-work --stage session_router --style instruction`
+as the field policy for `SESSION_ROUTER_INIT`. Do not assume reference ledgers,
+protocol bundles, or report schemas are loaded here; verifier/gap authorities
+are stage-local.
 </field_access>
 
 ```bash

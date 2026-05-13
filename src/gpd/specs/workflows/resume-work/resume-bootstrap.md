@@ -34,7 +34,10 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access resume-work --stage resume_bootstrap --style instruction` before reading `INIT`; read only `INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. `active_resume_result` is route context only; stale bodies stay unavailable.
+Use the generated helper output from
+`gpd --raw stage field-access resume-work --stage resume_bootstrap --style instruction`
+as the field policy for `INIT`. `active_resume_result` is route context only;
+stale bodies stay unavailable.
 </field_access>
 
 Parse JSON semantically:

@@ -4,6 +4,12 @@ manuscript edits, paper-writer revision handoffs, bounded verification,
 bibliography freshness, and optional manuscript-local response-letter export.
 </purpose>
 
+<first_route>
+First bind the current-round response pair to `selected_publication_root` and
+`selected_review_root`; never write beside `${PAPER_DIR}` or duplicate the pair
+across roots in one run.
+</first_route>
+
 <stage_boundary>
 Load this stage only after revision planning has classified referee points and
 routed new-calculation work. This is the first stage allowed to load
@@ -36,7 +42,10 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access respond-to-referees --stage revision_planning --style instruction` before reading `REVISION_PLANNING_INIT`; read only `REVISION_PLANNING_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Preserve triage; do not draft evidence prose here.
+Use the generated helper output from
+`gpd --raw stage field-access respond-to-referees --stage revision_planning --style instruction`
+as the field policy for `REVISION_PLANNING_INIT`. Preserve triage; do not draft
+evidence prose here.
 </field_access>
 
 Load response-authoring before any response artifact or manuscript write:
@@ -56,7 +65,10 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access respond-to-referees --stage response_authoring --style instruction` before reading `RESPONSE_AUTHORING_INIT`; read only `RESPONSE_AUTHORING_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use hydrated bodies only for selected evidence-dependent comments.
+Use the generated helper output from
+`gpd --raw stage field-access respond-to-referees --stage response_authoring --style instruction`
+as the field policy for `RESPONSE_AUTHORING_INIT`. Use hydrated bodies only for
+selected evidence-dependent comments.
 </field_access>
 
 Read `{GPD_INSTALL_DIR}/templates/paper/author-response.md`,
@@ -116,7 +128,7 @@ the manuscript tree rooted at `${PAPER_DIR}`, load the manifest conditional
 
 ```
 task(
-  prompt="First, read {GPD_AGENTS_DIR}/gpd-paper-writer.md for your role and instructions.\n\nRead the canonical <author_response> protocol at {GPD_INSTALL_DIR}/templates/paper/author-response.md, the canonical referee response template at {GPD_INSTALL_DIR}/templates/paper/referee-response.md, and the shared publication response-writer handoff at {GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md. You own both the manuscript edits and the response-tracker updates for this section. Make the manuscript changes first, then update the response trackers for the same comments. Return through the `respond_to_referees_revision_section` child_gate so the revised section file plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}` are all named.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n" + revision_prompt,
+  prompt="First, read {GPD_AGENTS_DIR}/gpd-paper-writer.md for your role and instructions. Then read both response templates and publication-response-writer-handoff.md. Make manuscript edits first, update both response trackers for the same comments, and return through `respond_to_referees_revision_section` naming the revised section plus `${RESPONSE_AUTHOR_PATH}` and `${RESPONSE_REFEREE_PATH}`.\n\n<autonomy_mode>{AUTONOMY}</autonomy_mode>\n<research_mode>{RESEARCH_MODE}</research_mode>\n" + revision_prompt,
   subagent_type="gpd-paper-writer",
   model="{writer_model}",
   readonly=false,

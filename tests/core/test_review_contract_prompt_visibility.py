@@ -1594,6 +1594,38 @@ def test_respond_to_referees_command_policy_surfaces_explicit_manuscript_and_rep
     )
 
 
+def test_respond_to_referees_response_authoring_keeps_evidence_bodies_until_issue_hydration_exists() -> None:
+    staging = registry.get_command("respond-to-referees").staged_loading
+
+    assert staging is not None
+    revision_planning = staging.stage("revision_planning")
+    response_authoring = staging.stage("response_authoring")
+
+    assert "reference_artifacts_content" not in revision_planning.required_init_fields
+    assert "active_reference_context" not in revision_planning.required_init_fields
+    assert "protocol_bundle_context" not in revision_planning.required_init_fields
+    assert "reference_artifacts_content" in response_authoring.required_init_fields
+    assert "active_reference_context" in response_authoring.required_init_fields
+    assert "protocol_bundle_context" in response_authoring.required_init_fields
+    for field_name in (
+        "selected_publication_root",
+        "selected_review_root",
+        "latest_review_round",
+        "latest_review_ledger",
+        "latest_referee_decision",
+        "latest_referee_report_md",
+        "latest_author_response",
+        "latest_referee_response",
+    ):
+        assert field_name in response_authoring.required_init_fields
+
+    response_workflow = _read_workflow("respond-to-referees")
+    semantic_anchor(
+        "response authoring only uses hydrated bodies for selected evidence comments",
+        ("Use hydrated bodies only", "selected evidence-dependent comments"),
+    ).check(response_workflow)
+
+
 def test_write_paper_review_contract_uses_round_suffixed_referee_outputs() -> None:
     contract = registry.get_command("write-paper").review_contract
 
@@ -1851,8 +1883,18 @@ def test_write_paper_stage_visibility_delays_publication_review_schemas_until_th
         "references/publication/publication-bootstrap-preflight.md",
         "templates/paper/publication-manuscript-root-preflight.md",
     )
-    assert "templates/paper/paper-config-schema.md" in outline.loaded_authorities
-    assert "templates/paper/artifact-manifest-schema.md" in outline.loaded_authorities
+    outline_conditionals = {
+        conditional.when: conditional.authorities for conditional in outline.conditional_authorities
+    }
+    assert outline_conditionals == {
+        "publication_lane_or_builder_config_selection": ("references/publication/publication-pipeline-modes.md",),
+        "paper_builder_config_or_artifact_manifest_write": (
+            "templates/paper/paper-config-schema.md",
+            "templates/paper/artifact-manifest-schema.md",
+        ),
+    }
+    assert "templates/paper/paper-config-schema.md" in outline.must_not_eager_load
+    assert "templates/paper/artifact-manifest-schema.md" in outline.must_not_eager_load
     assert "templates/paper/bibliography-audit-schema.md" not in outline.loaded_authorities
     assert "templates/paper/review-ledger-schema.md" not in outline.loaded_authorities
     assert "templates/paper/referee-decision-schema.md" not in outline.loaded_authorities

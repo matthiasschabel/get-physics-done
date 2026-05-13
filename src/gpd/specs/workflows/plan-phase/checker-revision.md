@@ -34,8 +34,8 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-# Confirm fields with: gpd --raw stage field-access plan-phase --stage checker_revision --style instruction
-# Parse only the checker_revision fields listed in INIT.staged_loading.required_init_fields before use.
+# Confirm fields with generated helper output:
+# gpd --raw stage field-access plan-phase --stage checker_revision --style instruction
 ```
 
 Read each fresh plan artifact into `PLANS_CONTENT` only after the planner gate
@@ -55,10 +55,10 @@ Checker prompt:
 **Phase Goal:** {goal from ROADMAP}
 
 **Plans to verify:** {plans_content}
-Use `checker_revision.required_init_fields` as the prompt inventory. Include the
-project contract/gate values, `contract_intake`, `effective_reference_intake`,
-and the selected reference path handles from that staged payload; do not request
-rendered reference or artifact body fields.
+Use the generated checker-revision field-access helper output as the prompt
+inventory. Include the project contract/gate values, `contract_intake`,
+`effective_reference_intake`, and selected reference path handles from that
+staged payload; do not request rendered reference or artifact body fields.
 <protocol_bundle_handoff>
 <selected_protocol_bundle_ids>{selected_protocol_bundle_ids}</selected_protocol_bundle_ids>
 <protocol_bundle_load_manifest>{protocol_bundle_load_manifest}</protocol_bundle_load_manifest>
@@ -395,40 +395,10 @@ Route to `<offer_next>`.
 </process>
 
 <offer_next>
-Output this markdown directly (not as a code block):
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- GPD > PHASE {X} PLANNED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-**Phase {X}: {Name}** -- {N} plan(s) in {M} wave(s)
-
-| Wave | Plans  | What it builds |
-| ---- | ------ | -------------- |
-| 1    | 01, 02 | [objectives]   |
-| 2    | 03     | [objective]    |
-
-Research: {Completed | Used existing | Skipped}
-Verification: {Passed | Partial (N approved, M revised) | Passed with override | Skipped}
-
----
-
-## > Next Up
-
-**Execute Phase {X}** -- run all {N} plans
-
-gpd:execute-phase {X}
-
-<sub>Start a fresh context window</sub>
-
----
-
-**Also available:**
-
-- read `GPD/phases/{phase-dir}/*-PLAN.md` -- review plans
-- gpd:plan-phase {X} --research -- re-research first
-
----
+Output a compact `GPD > PHASE {X} PLANNED` offer directly, not as a code block.
+Include phase name, plan/wave count, research status, final checker status, and
+`## > Next Up` with primary `gpd:execute-phase {X}`. Also list plan review and
+`gpd:plan-phase {X} --research` as secondary options.
 
 </offer_next>
 

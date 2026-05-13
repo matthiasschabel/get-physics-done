@@ -57,7 +57,7 @@ COMMAND_BASELINES = {
     "insert-phase": (198, 5_913, 1),
     "limiting-cases": (318, 11_529, 1),
     "list-phase-assumptions": (393, 14_092, 1),
-    "literature-review": (175, 9_868, 1),
+    "literature-review": (168, 7_123, 1),
     "map-research": (196, 8_131, 1),
     "merge-phases": (387, 12_144, 1),
     "new-milestone": (152, 6_940, 1),

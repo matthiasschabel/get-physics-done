@@ -1015,8 +1015,8 @@ def test_anchor_registry_templates_document_must_surface_column_and_fallback_heu
     )
 
     assert "| Must Surface |" in literature_workflow
-    assert "Set `Must Surface` to `yes`" in literature_workflow
-    assert "roles like `benchmark`, `definition`, `method`, or `must_consider`" in literature_workflow
+    assert "roles such as `benchmark`, `definition`" in literature_workflow
+    assert "`method`, or `must_consider`" in literature_workflow
     assert "| Must Surface |" in reference_template
     assert "`Must Surface` marks anchors" in reference_template
     assert "required actions such as `use`, `compare`, or `avoid`" in reference_template

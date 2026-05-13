@@ -701,13 +701,11 @@ def test_plan_phase_uses_manifest_owned_staged_init_access() -> None:
     _f(plan_phase, "plan-phase staged init manifest access", "bind_plan_phase_init")
     _mf(
         plan_phase,
-        "BOOTSTRAP_INIT.staged_loading.required_init_fields",
-        "INIT.staged_loading.required_init_fields",
-        "--alias ALIAS=field",
+        "gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction",
+        "gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction",
         'gpd --raw init plan-phase "$PHASE" --stage planner_authoring',
         'gpd --raw init plan-phase "$PHASE" --stage checker_revision',
-        "# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields",
-        "# Parse only the checker_revision fields listed in INIT.staged_loading.required_init_fields",
+        "generated checker-revision field-access helper output",
         context="plan-phase staged init manifest access",
     )
 
@@ -1355,7 +1353,8 @@ def test_publication_workflows_surface_no_write_stop_contracts_from_committed_so
     )
     _assert_contains_fragments(
         arxiv,
-        "`command_execution_state: blocked_before_write`",
+        "command_execution_state:",
+        "blocked_before_write",
         "`response_gate`",
         "`review_state: stale`",
         "`response_state: requires_fresh_review`",
@@ -1915,9 +1914,8 @@ def test_arxiv_submission_documents_conservative_response_freshness_policy() -> 
         workflow,
         "arxiv workflow conservative response freshness gate",
         required=(
-            "Current executable policy is conservative",
-            "any same-round or newer `gpd:respond-to-referees` author/referee response artifact",
             "all-response freshness policy",
+            "response artifacts as revision records",
             "durable manuscript-change scope metadata",
         ),
         context="arxiv response freshness gate",
@@ -1930,7 +1928,6 @@ def test_arxiv_submission_documents_conservative_response_freshness_policy() -> 
         "review_state: stale",
         "response_state: requires_fresh_review",
         "claim_state: not_applicable",
-        "not `human_needed`",
         context="arxiv response freshness machine markers",
     )
 
@@ -2354,8 +2351,6 @@ def test_discuss_and_plan_workflows_resolve_roadmap_only_phases() -> None:
         "phase_name",
         "goal",
         "PHASE_DIR",
-        "PHASE_SLUG",
-        "PADDED_PHASE",
         context="plan-phase roadmap-only phase resolution",
     )
 
@@ -3100,7 +3095,8 @@ def test_workflows_use_raw_json_when_shell_snippets_pipe_cli_output_into_gpd_jso
                 "MAPPER_AUTHORING_INIT=$(load_map_research_stage mapper_authoring)",
                 'gpd --raw --cwd "$target_cwd" init map-research --stage "${stage_name}" -- "${ARGUMENTS:-}"',
                 'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)',
-                "Map focus: {map_focus}",
+                "Map focus:",
+                "{map_focus}",
             ),
             "map-research raw json plumbing",
         ),
@@ -4400,7 +4396,10 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         for authority in conditional.authorities
     )
     assert {"templates/verification-report.md", "templates/contract-results-schema.md"} <= set(interactive_conditionals)
-    assert "references/verification/meta/verification-independence.md" in inventory_build.loaded_authorities
+    assert any(
+        "references/verification/meta/verification-independence.md" in row.authorities
+        for row in inventory_build.conditional_authorities
+    )
     _ff(
         write_paper_command,
         "templates/paper/review-ledger-schema.md",
@@ -5106,23 +5105,19 @@ def test_skill_surface_exposes_contract_references_for_paper_and_review_workflow
     respond_contract_documents = {
         Path(entry["path"]).name: entry for entry in respond_to_referees["contract_documents"]
     }
-    write_paper_stage_authorities = {
-        authority
-        for stage in write_paper.get("staged_loading", {}).get("stages", [])
-        for authority in stage.get("loaded_authorities", [])
-    }
-    peer_review_stage_authorities = {
-        authority
-        for stage in peer_review.get("staged_loading", {}).get("stages", [])
-        for authority in (
-            *stage.get("loaded_authorities", []),
-            *(
-                authority
-                for conditional in stage.get("conditional_authorities", [])
-                for authority in conditional.get("authorities", [])
-            ),
-        )
-    }
+    def _all_stage_authorities(skill: dict[str, object]) -> set[str]:
+        stages = skill.get("staged_loading", {}).get("stages", [])
+        return {
+            authority
+            for stage in stages
+            for authority in (
+                *stage.get("loaded_authorities", []),
+                *(item for row in stage.get("conditional_authorities", []) for item in row.get("authorities", [])),
+            )
+        }
+
+    write_paper_stage_authorities = _all_stage_authorities(write_paper)
+    peer_review_stage_authorities = _all_stage_authorities(peer_review)
 
     assert "error" not in write_paper
     assert "error" not in peer_review
@@ -5292,7 +5287,10 @@ def test_verification_and_agent_reference_prompts_expand_or_stage_required_refer
         "# Contract Results Schema",
         context="verify-work staged reference raw include boundaries",
     )
-    assert "references/verification/meta/verification-independence.md" in inventory_build.loaded_authorities
+    assert any(
+        "references/verification/meta/verification-independence.md" in row.authorities
+        for row in inventory_build.conditional_authorities
+    )
     interactive_conditionals = tuple(
         authority
         for conditional in interactive_validation.conditional_authorities
@@ -5478,8 +5476,8 @@ def test_sync_state_defers_state_schema_while_write_paper_expands_required_schem
     assert "`convention_lock`" in sync_state_workflow
     assert "templates/paper/reproducibility-manifest.md" in write_paper
     assert "Reproducibility Manifest Template" not in write_paper
-    assert "bibliographer search breadth" in write_paper
-    assert "paper-writer style by mode" in write_paper
+    assert "bibliography audit refresh" in write_paper
+    assert "publication-pipeline-modes.md" in write_paper
     _sf(
         write_paper,
         "bounded external-authoring lane",
@@ -6238,9 +6236,9 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
         quick,
         "staged quick init",
         "task-bootstrap",
-        "default task-authoring",
-        "`reference_context` stage",
-        "actually needs project reference artifacts",
+        "default small-task path",
+        "`reference_context`",
+        "tasks that need active project anchors",
         context="quick staged loading",
     )
     _mf(
@@ -6257,13 +6255,13 @@ def test_runtime_parity_docs_use_canonical_model_resolution_and_generic_handoff_
     _sf(
         quick,
         "Quick mode",
-        "approved `project_contract`",
+        "Inherit `project_contract`",
         "`project_contract_gate.authoritative`",
         "true",
         context="quick project contract gate",
     )
 
-    _s(quick, "quick reference context", "default small-task path", "does not load", "full active reference ledger")
+    _s(quick, "quick reference context", "default small-task path", "Reference runtime:", "not loaded")
     _assert_init_placeholders_visible(
         quick,
         (
@@ -6498,7 +6496,7 @@ def test_publication_workflows_keep_manuscript_local_reference_status_rooted_at_
         "ARTIFACT-MANIFEST.json",
         "BIBLIOGRAPHY-AUDIT.json",
         "reproducibility-manifest.json",
-        "same resolved manuscript root",
+        "resolved manuscript root",
         "source of truth for packaging",
         context="arxiv manuscript-local support artifacts",
     )

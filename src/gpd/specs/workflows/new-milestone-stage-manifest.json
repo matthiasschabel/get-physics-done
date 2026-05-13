@@ -134,16 +134,24 @@
       ],
       "loaded_authorities": [
         "workflows/new-milestone/roadmap-authoring.md",
-        "references/orchestration/runtime-delegation-note.md",
-        "templates/project.md",
-        "templates/requirements.md"
+        "references/orchestration/runtime-delegation-note.md"
       ],
-      "conditional_authorities": [],
+      "conditional_authorities": [
+        {
+          "when": "roadmap_artifact_template_write",
+          "authorities": [
+            "templates/project.md",
+            "templates/requirements.md"
+          ]
+        }
+      ],
       "must_not_eager_load": [
         "workflows/new-milestone.md",
         "workflows/new-milestone/survey-objectives.md",
         "references/research/questioning.md",
-        "references/ui/ui-brand.md"
+        "references/ui/ui-brand.md",
+        "templates/project.md",
+        "templates/requirements.md"
       ],
       "allowed_tools": [
         "ask_user",

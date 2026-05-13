@@ -1193,6 +1193,7 @@ class TestInstall:
                 "stage_id",
                 "order",
                 "required_init_fields",
+                "field_access_instruction",
                 "mode_paths",
                 "loaded_authorities",
                 "eager_authorities",

@@ -32,7 +32,11 @@ if [ -n "$PROJECT_ROOT" ]; then
 fi
 ```
 
-Parse bootstrap JSON using the manifest-owned `paper_bootstrap.required_init_fields` in `write-paper-stage-manifest.json`; `gpd --raw stage field-access write-paper --stage paper_bootstrap --style instruction` is the helper-owned field inventory. Keep `project_contract_gate`, load info, validation, and `effective_reference_intake` visible before authoritative-use decisions; treat the contract as authoritative only when `project_contract_gate.authoritative` is true; do not duplicate the manifest's required-field list in prose.
+Parse bootstrap JSON using the generated helper output from `gpd --raw stage field-access write-paper --stage paper_bootstrap --style instruction`; keep `project_contract_gate` in view and do not duplicate the manifest's required-field list in prose.
+Keep `project_contract_gate`, load info, validation, and
+`effective_reference_intake` visible before authoritative-use decisions; treat
+the contract as authoritative only when `project_contract_gate.authoritative` is
+true.
 
 Use derived manuscript review statuses from init before reconstructing them from
 source ordering or prose: `derived_manuscript_reference_status` for the resolved

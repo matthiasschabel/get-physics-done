@@ -214,7 +214,7 @@ def test_quick_publication_and_settings_surfaces_block_proof_bypass() -> None:
         quick,
         "quick blocks proof obligation bypass",
         "Quick mode",
-        "NOT authorized",
+        "must not produce",
         "theorem-style",
         "proof_obligation",
         "blocked pending the full proof-redteam workflow",
@@ -351,6 +351,6 @@ def test_proof_obligation_detection_distinguishes_generic_manuscript_claims() ->
         "generic manuscript or task",
         "claim",
         "not enough by itself",
-        "formal proof target",
+        "theorem/proof/formal metadata",
         "proof_obligation",
     )

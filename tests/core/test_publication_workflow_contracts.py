@@ -39,7 +39,7 @@ def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mo
     _assert_all_present(
         bootstrap_parse_line,
         (
-            "paper_bootstrap.required_init_fields",
+            "stage field-access write-paper --stage paper_bootstrap --style instruction",
             "do not duplicate the manifest's required-field list in prose",
         ),
     )

@@ -6175,6 +6175,19 @@ class TestInitPhaseOp:
     ) -> None:
         _setup_project(tmp_path)
         _create_phase_dir(tmp_path, "01-test")
+        _install_fake_stage_manifest(
+            monkeypatch,
+            workflow_id="research-phase",
+            stages={
+                "research_handoff": [
+                    "active_reference_context",
+                    "reference_artifacts_content",
+                    "state_load_source",
+                    "derived_convention_lock",
+                    "current_execution",
+                ]
+            },
+        )
         calls: list[str] = []
 
         def reference_context(cwd: Path) -> dict[str, object]:

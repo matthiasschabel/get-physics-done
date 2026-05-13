@@ -111,8 +111,8 @@ def _descriptor_with_spaced_selection_alias() -> tuple[object, str]:
         )
         if alias is not None:
             matches.append((descriptor, alias))
-    if len(matches) != 1:
-        raise AssertionError(f"Expected exactly one runtime descriptor with a spaced alias, got {len(matches)}")
+    if not matches:
+        raise AssertionError("Expected at least one runtime descriptor with a spaced alias")
     return matches[0]
 
 

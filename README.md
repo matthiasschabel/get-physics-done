@@ -405,6 +405,7 @@ Available profiles are `deep-theory`, `numerical`, `exploratory`, `review`, and 
 |---------|-------------|-----------------|---------------|
 | Claude Code / Gemini CLI | `/gpd:set-profile review` | `/gpd:set-tier-models` | `/gpd:settings` |
 | Codex | `$gpd-set-profile review` | `$gpd-set-tier-models` | `$gpd-settings` |
+| GitHub Copilot CLI | `/gpd-set-profile review` | `/gpd-set-tier-models` | `/gpd-settings` |
 | OpenCode | `/gpd-set-profile review` | `/gpd-set-tier-models` | `/gpd-settings` |
 
 <details>
@@ -415,6 +416,7 @@ When you set explicit tier overrides, the model string is runtime-native. GPD pa
 - **Claude Code**: use the exact model or deployment identifier accepted by your install.
 - **Codex**: use the exact `model` string accepted by your configured provider.
 - **Gemini CLI**: use the exact Gemini model name accepted by your install.
+- **GitHub Copilot CLI**: use the exact model identifier accepted by your install.
 - **OpenCode**: use the exact `provider/model` string accepted by your install.
 
 If you are unsure, keep the runtime defaults and tune tiers later through your runtime's `set-tier-models` command.
@@ -441,6 +443,11 @@ Per-project tier settings live in `GPD/config.json` under `model_overrides`:
       "tier-3": "<runtime-native-model-id>"
     },
     "gemini": {
+      "tier-1": "<runtime-native-model-id>",
+      "tier-2": "<runtime-native-model-id>",
+      "tier-3": "<runtime-native-model-id>"
+    },
+    "copilot-cli": {
       "tier-1": "<runtime-native-model-id>",
       "tier-2": "<runtime-native-model-id>",
       "tier-3": "<runtime-native-model-id>"
@@ -581,9 +588,10 @@ This research made use of Get Physics Done (GPD), developed by Physical Superint
 
 Papers that cite or acknowledge use of GPD. If your paper should be listed here, please open a pull request.
 
+- C. Ferko, S. Frank, J. Halverson and V. Jejjala, *Anomalies in Neural Network Field Theory* (2026), [arXiv:2605.12488](https://arxiv.org/abs/2605.12488).
 - L. Eberhardt, *The Super Virasoro Minimal String from 3d Supergravity* (2026), [arXiv:2604.26038](https://arxiv.org/abs/2604.26038).
-- C. Ferko, J. Halverson, V. Jejjala and B. Robinson, *Topological Effects in Neural Network Field Theory* (2026), [arXiv:2604.02313](https://arxiv.org/abs/2604.02313).
 - V. G. Filev, *Holographic entanglement entropy, Wilson loops, and neural networks* (2026), [arXiv:2604.05970](https://arxiv.org/abs/2604.05970).
+- C. Ferko, J. Halverson, V. Jejjala and B. Robinson, *Topological Effects in Neural Network Field Theory* (2026), [arXiv:2604.02313](https://arxiv.org/abs/2604.02313).
 
 ## Star History
 

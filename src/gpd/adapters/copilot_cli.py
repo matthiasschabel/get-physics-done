@@ -33,7 +33,6 @@ from gpd.adapters.install_utils import (
     UPDATE_CACHE_FILENAME,
     _default_install_target,
     _normalize_install_scope_flag,
-    _paths_equal,
     compile_markdown_for_runtime,
     compute_path_prefix,
     convert_tool_references_in_body,
@@ -46,9 +45,12 @@ from gpd.adapters.install_utils import (
     remove_empty_json_object_file,
     remove_stale_agents,
     render_markdown_frontmatter,
+    rewrite_gpd_cli_invocations_to_runtime_bridge,
     split_markdown_frontmatter,
 )
+from gpd.adapters.runtime_catalog import get_runtime_descriptor, paths_equal
 from gpd.adapters.tool_names import build_runtime_alias_map, reference_translation_map, translate_for_runtime
+from gpd.command_labels import validated_public_command_prefix
 from gpd.mcp import managed_integrations as _managed_integrations
 
 logger = logging.getLogger(__name__)
@@ -132,6 +134,8 @@ def convert_to_copilot_frontmatter(content: str, path_prefix: str | None = None)
 
     converted = content
     converted = convert_tool_references_in_body(converted, _TOOL_REFERENCE_MAP)
+    public_prefix = validated_public_command_prefix(get_runtime_descriptor("copilot-cli"))
+    converted = converted.replace("`gpd:`", f"`{public_prefix}`")
     converted = _GPD_SLASH_COMMAND_RE.sub(r"/gpd-\g<command>", converted)
     converted = re.sub(r"~/\.claude\b", lambda m: resolved_config_dir, converted)
 
@@ -189,6 +193,23 @@ def convert_to_copilot_frontmatter(content: str, path_prefix: str | None = None)
 
     new_frontmatter = "\n".join(new_lines).strip()
     return render_markdown_frontmatter(preamble, new_frontmatter, separator, body)
+
+
+def _rewrite_gpd_cli_invocations(content: str, bridge_command: str) -> str:
+    """Rewrite fenced-shell command-position ``gpd`` calls to the runtime bridge."""
+    return rewrite_gpd_cli_invocations_to_runtime_bridge(content, bridge_command)
+
+
+def _render_copilot_command_markdown(
+    content: str,
+    *,
+    path_prefix: str,
+    bridge_command: str | None = None,
+) -> str:
+    """Render one canonical command markdown source into Copilot CLI command content."""
+    if bridge_command:
+        content = _rewrite_gpd_cli_invocations(content, bridge_command)
+    return convert_to_copilot_frontmatter(content, path_prefix)
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +279,11 @@ def copy_flattened_commands(
                 workflow_target_dir=workflow_target_dir,
                 explicit_target=explicit_target,
             )
-            content = convert_to_copilot_frontmatter(content, path_prefix)
+            content = _render_copilot_command_markdown(
+                content,
+                path_prefix=path_prefix,
+                bridge_command=bridge_command,
+            )
 
             dest_path.write_text(content, encoding="utf-8")
             if managed_command_files is not None and dest_name.startswith("gpd-"):
@@ -553,7 +578,7 @@ def write_manifest(
     elif isinstance(runtime, str) and runtime.strip() and normalized_scope in {"--local", "--global"}:
         default_target = _default_install_target(runtime.strip(), normalized_scope)
         if default_target is not None:
-            manifest["explicit_target"] = not _paths_equal(config_dir, default_target)
+            manifest["explicit_target"] = not paths_equal(config_dir, default_target)
     if managed_command_file_names:
         manifest[_MANIFEST_COPILOT_GENERATED_COMMAND_FILES_KEY] = sorted(
             {
@@ -712,6 +737,7 @@ class CopilotCliAdapter(RuntimeAdapter):
         surface_kind: str,
         path_prefix: str,
         command_name: str | None = None,
+        bridge_command: str | None = None,
     ) -> str:
         del command_name
         if surface_kind != "command":
@@ -719,8 +745,9 @@ class CopilotCliAdapter(RuntimeAdapter):
                 content,
                 surface_kind=surface_kind,
                 path_prefix=path_prefix,
+                bridge_command=bridge_command,
             )
-        return convert_to_copilot_frontmatter(content, path_prefix)
+        return _render_copilot_command_markdown(content, path_prefix=path_prefix, bridge_command=bridge_command)
 
     def translate_shared_command_references(self, content: str) -> str:
         return content.replace("/gpd:", self.public_command_surface_prefix)

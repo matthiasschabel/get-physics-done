@@ -22,6 +22,7 @@ from gpd.core.model_visible_text import (
 )
 from gpd.registry import _frontmatter_parts, _load_frontmatter_mapping, _parse_spawn_contracts
 from tests.adapters.projection_budget_support import (
+    COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
     NATIVE_AGENT_PROJECTION_BUDGETS,
     NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
     RUNTIME_PROJECTION_TARGETS,
@@ -71,11 +72,19 @@ COMPACT_WORKFLOW_COMMANDS = (
     "limiting-cases",
     "progress",
     "error-propagation",
+    "compare-experiment",
+    "dimensional-analysis",
     "discover",
     "start",
     "audit-milestone",
     "debug",
+    "review-knowledge",
 )
+COMPACT_WORKFLOW_STALE_WRAPPER_PHRASES = {
+    "compare-experiment": ("Follow the included compare-experiment workflow.",),
+    "dimensional-analysis": ("Follow the included dimensional-analysis workflow.",),
+    "review-knowledge": ("Follow the included review-knowledge workflow exactly.",),
+}
 TARGET_FIRST_STAGE_BY_COMMAND = {
     "plan-phase": "phase_bootstrap",
     "execute-phase": "phase_bootstrap",
@@ -443,7 +452,14 @@ def _project_installed_shared_markdown(path: Path, runtime: str) -> str:
     return get_adapter(runtime).translate_shared_markdown(_read(path), "/runtime/", install_scope="--local")
 
 
-def _project_fixture_command(content: str, runtime: str, target_dir: Path) -> str:
+def _project_fixture_command(
+    content: str,
+    runtime: str,
+    target_dir: Path,
+    *,
+    command_name: str = "projection-probe",
+    src_root: Path | None = None,
+) -> str:
     descriptor = get_runtime_descriptor(runtime)
     return project_markdown_for_runtime(
         content,
@@ -452,7 +468,8 @@ def _project_fixture_command(content: str, runtime: str, target_dir: Path) -> st
         surface_kind="command",
         install_scope="--local",
         workflow_target_dir=target_dir,
-        command_name="projection-probe",
+        src_root=src_root,
+        command_name=command_name,
     )
 
 
@@ -731,7 +748,14 @@ def test_hotspot_commands_use_native_include_or_compact_workflow_reference_shim(
     assert f'workflow="{command_name}"' in projected
     assert f"workflows/{command_name}.md" in projected
     assert "Read these installed authority files before acting:" in projected
-    assert len(projected) <= len(expanded_workflow) * 0.85
+    budget = COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS.get(command_name, {}).get(runtime)
+    if budget is None:
+        assert len(projected) <= len(expanded_workflow) * 0.85
+    else:
+        assert len(projected) <= budget["chars"]
+        assert len(projected.splitlines()) <= budget["lines"]
+    for phrase in COMPACT_WORKFLOW_STALE_WRAPPER_PHRASES.get(command_name, ()):
+        assert phrase not in projected
 
 
 @pytest.mark.parametrize(
@@ -992,6 +1016,70 @@ def test_runtime_projected_public_next_up_and_stage_stop_rewrite_canonical_runti
     expected_resume_work = _expected_runtime_command_label(runtime, "resume-work")
     expected_suggest_next = _expected_runtime_command_label(runtime, "suggest-next")
 
+    assert expected_verify_work in next_up
+    assert expected_verify_work in stage_stop
+    assert expected_resume_work in stage_stop
+    assert expected_suggest_next in stage_stop
+    for command_name in ("verify-work", "resume-work", "suggest-next"):
+        for forbidden_label in _wrong_runtime_command_labels(runtime, command_name):
+            assert forbidden_label not in projected_public_surface
+    assert "`gpd:verify-work 02`" not in next_up
+    assert '"gpd:verify-work 02"' not in stage_stop
+    for snippet in (next_up, stage_stop):
+        for forbidden in PUBLIC_NEXT_UP_FORBIDDEN_PROJECTION_FRAGMENTS:
+            assert forbidden not in snippet
+
+
+@pytest.mark.parametrize("runtime", NON_NATIVE_RUNTIME_PROJECTION_TARGETS)
+def test_compact_shim_public_next_up_and_stage_stop_keep_raw_loader_private(
+    runtime: str,
+    tmp_path: Path,
+) -> None:
+    descriptor = get_runtime_descriptor(runtime)
+    target_dir = tmp_path / descriptor.config_dir_name
+    bridge = runtime_bridge_command(runtime, target_dir)
+    source = (
+        "---\n"
+        "name: gpd:verify-work\n"
+        "description: Projection probe\n"
+        "allowed-tools:\n"
+        "  - shell\n"
+        "---\n"
+        "\n"
+        "<execution_context>\n"
+        "@{GPD_INSTALL_DIR}/workflows/verify-work.md\n"
+        "</execution_context>\n"
+        "\n"
+        "## > Next Up\n"
+        "\n"
+        "Primary: `gpd:verify-work 02`\n"
+        "\n"
+        "Public stage-stop envelope:\n"
+        "\n"
+        "stage_stop:\n"
+        "  status: blocked\n"
+        '  next_runtime_command: "gpd:verify-work 02"\n'
+        "  also_available:\n"
+        '    - "gpd:resume-work"\n'
+        '    - "gpd:suggest-next"\n'
+    )
+
+    projected = _project_fixture_command(
+        source,
+        runtime,
+        target_dir,
+        command_name="verify-work",
+        src_root=REPO_ROOT / "src/gpd",
+    )
+    next_up = _extract_next_up_snippet(projected)
+    stage_stop = _extract_stage_stop_snippet(projected)
+    projected_public_surface = next_up + "\n" + stage_stop
+    expected_verify_work = _expected_runtime_command_label(runtime, "verify-work", " 02")
+    expected_resume_work = _expected_runtime_command_label(runtime, "resume-work")
+    expected_suggest_next = _expected_runtime_command_label(runtime, "suggest-next")
+
+    assert has_staged_shim_sentinel(projected)
+    assert _expected_target_init_command("verify-work", bridge) in first_runnable_shell_commands(projected)
     assert expected_verify_work in next_up
     assert expected_verify_work in stage_stop
     assert expected_resume_work in stage_stop

@@ -176,10 +176,10 @@ def _command_only_budget_for_descriptor(descriptor: RuntimeDescriptor) -> dict[s
     if descriptor.native_include_support:
         return {"lines": 7_400, "chars": 378_000}
     if not descriptor.agent_prompt_uses_dollar_templates:
-        return {"lines": 16_300, "chars": 725_000}
+        return {"lines": 15_400, "chars": 690_000}
     if descriptor.public_command_surface_prefix.endswith(":"):
-        return {"lines": 16_400, "chars": 768_000}
-    return {"lines": 16_650, "chars": 728_000}
+        return {"lines": 15_500, "chars": 735_000}
+    return {"lines": 15_900, "chars": 690_000}
 
 
 def _runtime_projection_budgets(*, command_only: bool) -> dict[str, dict[str, int]]:

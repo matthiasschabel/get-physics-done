@@ -40,6 +40,25 @@ STAGED_INIT_COMMAND_PROJECTION_BUDGETS = {
 STAGED_INIT_TARGET_COMMANDS = tuple(STAGED_INIT_COMMAND_PROJECTION_BUDGETS)
 STAGED_PROJECTED_COMMAND_CHAR_BUDGET = 20_000
 
+COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS = {
+    "compare-experiment": {
+        "codex": {"chars": 7_600, "lines": 150},
+        "gemini": {"chars": 8_400, "lines": 150},
+        "opencode": {"chars": 7_800, "lines": 160},
+    },
+    "dimensional-analysis": {
+        "codex": {"chars": 7_100, "lines": 145},
+        "gemini": {"chars": 8_000, "lines": 145},
+        "opencode": {"chars": 7_300, "lines": 160},
+    },
+    "review-knowledge": {
+        "codex": {"chars": 9_800, "lines": 170},
+        "gemini": {"chars": 9_700, "lines": 165},
+        "opencode": {"chars": 11_200, "lines": 220},
+    },
+}
+COMPACT_WORKFLOW_REFERENCE_TARGET_COMMANDS = tuple(COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS)
+
 TARGET_AGENT_PROJECTION_BUDGETS = {
     "gpd-planner": {"lines": 600, "chars": 35_000},
     "gpd-research-synthesizer": {"lines": 520, "chars": 31_000},

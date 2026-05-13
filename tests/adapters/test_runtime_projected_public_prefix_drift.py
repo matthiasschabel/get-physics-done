@@ -3,17 +3,99 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
+import pytest
+
+import gpd.adapters as adapters_module
 import gpd.adapters.base as base_module
 import gpd.adapters.claude_code as claude_module
 import gpd.adapters.codex as codex_module
 import gpd.adapters.gemini as gemini_module
+import gpd.adapters.install_utils as install_utils_module
 import gpd.adapters.opencode as opencode_module
+from gpd.adapters.install_utils import (
+    COMPACT_HELP_BRIDGE_SHIM_SENTINEL,
+    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
+    COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
+    project_markdown_for_runtime,
+)
 from gpd.adapters.runtime_catalog import get_runtime_descriptor
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = REPO_ROOT / "src/gpd"
+COMMANDS_DIR = SRC_ROOT / "commands"
+
+NON_NATIVE_RUNTIME_PUBLIC_PREFIXES = (
+    ("codex", "$public-"),
+    ("gemini", "/public:"),
+    ("opencode", "/public-"),
+)
+
+COMPACT_SHIM_PROJECTION_CASES = (
+    ("new-project", COMPACT_STAGED_COMMAND_SHIM_SENTINEL),
+    ("help", COMPACT_HELP_BRIDGE_SHIM_SENTINEL),
+    ("settings", COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL),
+)
 
 
 def _descriptor_with_public_prefix(runtime: str, public_prefix: str):
     return replace(get_runtime_descriptor(runtime), public_command_surface_prefix=public_prefix)
+
+
+def _patch_runtime_descriptor_public_prefix(monkeypatch: pytest.MonkeyPatch, runtime: str, public_prefix: str):
+    descriptor = _descriptor_with_public_prefix(runtime, public_prefix)
+
+    def fake_get_runtime_descriptor(candidate: str):
+        if candidate == runtime:
+            return descriptor
+        return get_runtime_descriptor(candidate)
+
+    for module in (
+        adapters_module,
+        base_module,
+        codex_module,
+        gemini_module,
+        install_utils_module,
+        opencode_module,
+    ):
+        monkeypatch.setattr(module, "get_runtime_descriptor", fake_get_runtime_descriptor)
+
+    return descriptor
+
+
+@pytest.mark.parametrize(("runtime", "public_prefix"), NON_NATIVE_RUNTIME_PUBLIC_PREFIXES)
+@pytest.mark.parametrize(("command_name", "sentinel"), COMPACT_SHIM_PROJECTION_CASES)
+def test_compact_shims_use_descriptor_public_prefix_through_runtime_projection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    runtime: str,
+    public_prefix: str,
+    command_name: str,
+    sentinel: str,
+) -> None:
+    descriptor = _patch_runtime_descriptor_public_prefix(monkeypatch, runtime, public_prefix)
+    target_dir = tmp_path / descriptor.config_dir_name
+
+    projected = project_markdown_for_runtime(
+        (COMMANDS_DIR / f"{command_name}.md").read_text(encoding="utf-8"),
+        runtime=runtime,
+        path_prefix=f"./{descriptor.config_dir_name}/",
+        surface_kind="command",
+        install_scope="--local",
+        src_root=SRC_ROOT,
+        workflow_target_dir=target_dir,
+        command_name=command_name,
+    )
+
+    public_label = f"{public_prefix}{command_name}"
+    default_prefix = get_runtime_descriptor(runtime).public_command_surface_prefix
+
+    assert sentinel in projected
+    assert f'command="{public_label}"' in projected
+    assert f"Runtime label: Show `{public_prefix}` as native labels; keep local CLI `gpd ...` unchanged." in projected
+    assert f'command="{default_prefix}{command_name}"' not in projected
+    assert f"Runtime label: Show `{default_prefix}`" not in projected
 
 
 def test_codex_projection_uses_descriptor_public_prefix_for_command_references(monkeypatch) -> None:

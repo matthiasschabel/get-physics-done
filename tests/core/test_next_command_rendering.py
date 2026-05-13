@@ -142,6 +142,22 @@ def test_raw_loader_label_is_rejected_even_with_misleading_runtime_owner() -> No
         render_next_up_block(primary=primary)
 
 
+def test_bridge_prefixed_raw_loader_label_is_rejected_even_with_misleading_runtime_owner() -> None:
+    primary = NextCommand(
+        label=(
+            "/runtime/python -m gpd.runtime_cli --runtime codex --config-dir /tmp/.codex "
+            "--install-scope local --raw init verify-work 02 --stage session_router"
+        ),
+        action="verify-work",
+        owner=NEXT_COMMAND_OWNER_RUNTIME,
+        phase="02",
+        kind=KIND_RUNTIME_COMMAND_LABEL,
+    )
+
+    with pytest.raises(NextCommandRenderingError, match="forbidden command fragment"):
+        render_next_up_block(primary=primary)
+
+
 def test_bare_gpd_skill_prefix_can_render_when_active_runtime_classified_it() -> None:
     primary = classify_next_command(
         command="gpd-verify-work 02",

@@ -745,8 +745,10 @@ _COMPACT_WORKFLOW_COMMAND_ALLOWLIST = frozenset(
         "audit-milestone",
         "autonomous",
         "complete-milestone",
+        "compare-experiment",
         "debug",
         "derive-equation",
+        "dimensional-analysis",
         "discover",
         "discuss-phase",
         "error-propagation",
@@ -754,6 +756,7 @@ _COMPACT_WORKFLOW_COMMAND_ALLOWLIST = frozenset(
         "numerical-convergence",
         "parameter-sweep",
         "progress",
+        "review-knowledge",
         "settings",
         "sensitivity-analysis",
         "start",
@@ -1049,6 +1052,7 @@ def _render_compact_workflow_reference_shim(
     include_paths: Sequence[str],
 ) -> str:
     authorities = "\n".join(f"- `{{GPD_INSTALL_DIR}}/{path}`" for path in include_paths)
+    workflow_guardrails = _compact_workflow_reference_guardrails(workflow_id)
     return (
         f'{COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL} command="{public_label}" workflow="{workflow_id}">\n'
         "This non-native runtime cannot resolve command workflow includes natively, so this command prompt names "
@@ -1060,7 +1064,20 @@ def _render_compact_workflow_reference_shim(
         "Use the wrapper sections outside this block only for launch arguments, public command context, and "
         "command-specific constraints. If an authority file is missing or unreadable, stop and report the broken "
         "install instead of reconstructing the workflow from memory.\n"
+        f"{workflow_guardrails}"
         "</gpd_workflow_reference_shim>"
+    )
+
+
+def _compact_workflow_reference_guardrails(workflow_id: str) -> str:
+    if workflow_id != "compare-experiment":
+        return ""
+    return (
+        "\nCompact compare-experiment guardrails: "
+        "`{GPD_INSTALL_DIR}/templates/paper/experimental-comparison.md`; "
+        "`{GPD_INSTALL_DIR}/references/results/result-lookup-policy.md`; "
+        "`GPD/comparisons/{slug}/`; "
+        "Do not run an unconditional standalone docs commit for this workflow.\n"
     )
 
 
@@ -1134,6 +1151,9 @@ def _rewrite_compact_workflow_followup_guidance(content: str) -> str:
         "Read the included workflow first and follow it exactly.",
         "Read the included settings workflow.",
         "Follow the included complete-milestone workflow end-to-end after loading the execution-context files above.",
+        "Follow the included compare-experiment workflow.",
+        "Follow the included dimensional-analysis workflow.",
+        "Follow the included review-knowledge workflow exactly.",
         "Execute the included derive-equation workflow end-to-end.",
         "Execute the autonomous workflow end-to-end.",
     ):

@@ -7,6 +7,8 @@ from pathlib import Path
 from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core import prompt_diagnostics
 from tests.adapters.projection_budget_support import (
+    COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
+    COMPACT_WORKFLOW_REFERENCE_TARGET_COMMANDS,
     NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
     RUNTIME_PROJECTION_TARGETS,
     SELECTED_AGENT_PROJECTION_BUDGETS,
@@ -34,21 +36,21 @@ COMMAND_ONLY_RUNTIME_PRESSURE_BUDGETS = {
         "runtime_note_count": 2,
     },
     "codex": {
-        "shell_fence_count": 35,
-        "shell_rewrite_count": 35,
-        "bridge_command_occurrences": 210,
+        "shell_fence_count": 32,
+        "shell_rewrite_count": 32,
+        "bridge_command_occurrences": 195,
         "runtime_note_count": 3,
     },
     "gemini": {
-        "shell_fence_count": 115,
-        "shell_rewrite_count": 105,
-        "bridge_command_occurrences": 340,
+        "shell_fence_count": 105,
+        "shell_rewrite_count": 95,
+        "bridge_command_occurrences": 325,
         "runtime_note_count": 76,
     },
     "opencode": {
-        "shell_fence_count": 35,
-        "shell_rewrite_count": 35,
-        "bridge_command_occurrences": 135,
+        "shell_fence_count": 32,
+        "shell_rewrite_count": 32,
+        "bridge_command_occurrences": 125,
         "runtime_note_count": 3,
     },
 }
@@ -72,6 +74,8 @@ def test_projection_budget_fixture_tracks_runtime_catalog() -> None:
     assert NON_NATIVE_RUNTIME_PROJECTION_TARGETS == non_native_names
     for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_BUDGETS.items():
         assert set(budget_by_runtime) == set(runtime_names), command_name
+    for command_name, budget_by_runtime in COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS.items():
+        assert set(budget_by_runtime) == set(non_native_names), command_name
 
 
 def test_report_to_dict_exposes_non_native_runtime_top_prompt_hotspots() -> None:
@@ -191,6 +195,32 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
 
     for runtime, shell_rewrite_count in shell_rewrites_by_runtime.items():
         assert shell_rewrite_count > 0, f"{runtime} staged command targets should retain shell rewrite diagnostics"
+
+
+def test_compact_workflow_reference_command_diagnostics_stay_under_baseline_budgets() -> None:
+    report = prompt_diagnostics.build_prompt_surface_report(
+        REPO_ROOT,
+        surfaces=("command",),
+        runtime_names=NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
+        include_tests=False,
+        include_runtime_projections=True,
+    )
+
+    items_by_name = {item.name: item for item in report.items if item.kind == "command"}
+    missing = sorted(set(COMPACT_WORKFLOW_REFERENCE_TARGET_COMMANDS) - set(items_by_name))
+    assert missing == []
+
+    for command_name, budget_by_runtime in COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS.items():
+        item = items_by_name[command_name]
+        metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
+        assert set(NON_NATIVE_RUNTIME_PROJECTION_TARGETS) <= set(metrics_by_runtime)
+
+        for runtime, budget in budget_by_runtime.items():
+            metric = metrics_by_runtime[runtime]
+            assert metric.native_include_support is False
+            assert metric.include_count == 0
+            assert metric.char_count <= budget["chars"]
+            assert metric.line_count <= budget["lines"]
 
 
 def test_selected_agent_runtime_projection_diagnostics_stay_under_baseline_budgets() -> None:

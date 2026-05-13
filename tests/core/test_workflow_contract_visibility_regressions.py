@@ -126,7 +126,7 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
         ("compare-results.md", "Parse JSON for:", "project_contract_gate", "project_contract_gate.authoritative", None),
         (
             "new-project.md",
-            "Parse only fields named by `staged_loading.required_init_fields`",
+            "gpd --raw stage field-access new-project --stage scope_intake --style instruction",
             "project_contract_gate",
             "project_contract_gate.authoritative",
             "scope_intake",
@@ -143,7 +143,7 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
         ("write-paper.md", "Parse bootstrap JSON using", "project_contract_gate", "project_contract_gate.authoritative", None),
         (
             "respond-to-referees.md",
-            "Use `INIT.staged_loading.required_init_fields` as the bootstrap contract",
+            "gpd --raw stage field-access respond-to-referees --stage bootstrap --style instruction",
             "project_contract_gate",
             "project_contract_gate.authoritative",
             "bootstrap",

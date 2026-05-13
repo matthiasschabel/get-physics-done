@@ -35,13 +35,33 @@ def _manifest_workflow_ids() -> tuple[str, ...]:
 
 
 FIELD_ACCESS_WORKFLOWS = _manifest_workflow_ids()
+FIELD_ACCESS_REQUIRED_MARKER = "`<INIT>.staged_loading.required_init_fields`"
+FIELD_ACCESS_UNLISTED_POLICY = "Treat unlisted init fields as unavailable"
+FIELD_ACCESS_BODY_PREFIX = "Body fields are opt-in:"
+FIELD_ACCESS_TARGET_POLICY = "Body fields are opt-in: selected body fields are target-scoped"
+FIELD_ACCESS_TARGET_SELECTION_POLICY = (
+    "after choosing the concrete section, issue, artifact, gap, handoff, or reference target"
+)
+FIELD_ACCESS_HANDLE_FIRST_POLICY = "use handles/status fields first"
+FIELD_ACCESS_HANDLE_ONLY_POLICY = "selected handle/status fields are handles only"
+FIELD_ACCESS_NO_BODY_POLICY = "no staged body fields are selected for this stage"
+GPD_JSON_GET_TOKEN = "gpd json get"
 PAYLOAD_WORKFLOWS = (
     "plan-phase",
     "execute-phase",
     "new-project",
     "write-paper",
 )
-STAGED_PROMPT_HYGIENE_WORKFLOWS = ("new-milestone", "quick", "map-research", "literature-review")
+STAGED_PROMPT_HYGIENE_WORKFLOWS = (
+    "new-milestone",
+    "quick",
+    "map-research",
+    "literature-review",
+    "respond-to-referees",
+    "resume-work",
+    "verify-work",
+    "new-project",
+)
 EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
     "plan-phase": ("phase_bootstrap", "research_routing", "planner_authoring", "checker_revision"),
     "execute-phase": (
@@ -55,7 +75,10 @@ EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
         "closeout",
     ),
     "new-project": (
+        "scope_intake",
+        "scope_approval",
         "minimal_artifacts",
+        "workflow_preferences",
         "project_artifacts",
         "literature_survey",
         "requirements_authoring",
@@ -74,6 +97,21 @@ EXPECTED_FIELD_ACCESS_STAGE_MENTIONS = {
     "quick": ("task_bootstrap", "task_authoring", "reference_context"),
     "map-research": ("map_bootstrap", "mapper_authoring"),
     "literature-review": ("review_bootstrap", "scope_locked", "review_handoff", "completion_gate"),
+    "respond-to-referees": (
+        "bootstrap",
+        "report_triage",
+        "revision_planning",
+        "response_authoring",
+        "finalize",
+    ),
+    "resume-work": ("resume_bootstrap", "state_restore", "derivation_restore", "resume_routing"),
+    "verify-work": (
+        "session_router",
+        "phase_bootstrap",
+        "inventory_build",
+        "interactive_validation",
+        "gap_repair",
+    ),
 }
 STAGED_FIELD_INVENTORY_PATTERNS = (
     re.compile(r"\bParse JSON for\s*:?\s*`", re.IGNORECASE),
@@ -81,7 +119,23 @@ STAGED_FIELD_INVENTORY_PATTERNS = (
     re.compile(r"\bExtract from the staged refresh\s*:?\s*`", re.IGNORECASE),
     re.compile(r"\bParse the staged refresh for\s*`", re.IGNORECASE),
     re.compile(r"\bParse the completion refresh for\s*`", re.IGNORECASE),
+    re.compile(
+        r"\bUse\s+`?(?!staged_loading\b)[a-z][a-z0-9_]*\.required_init_fields`?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bTreat\s+`?(?!staged_loading\b)[a-z][a-z0-9_]*\.required_init_fields`?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bRead only\s+`?(?!staged_loading\b)[a-z][a-z0-9_]*\.required_init_fields`?",
+        re.IGNORECASE,
+    ),
 )
+
+
+def _field_access_command(workflow_id: str, stage_id: str) -> str:
+    return f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction"
 
 
 def _setup_manifest_owned_payload_project(project_root: Path) -> None:
@@ -142,8 +196,11 @@ def test_default_instruction_style_is_shell_free_and_manifest_backed() -> None:
     assert "shell_bindings" not in payload
 
     instruction_text = "\n".join(payload["instructions"])
-    assert "gpd json get" not in instruction_text
+    assert GPD_JSON_GET_TOKEN not in instruction_text
     assert "$(" not in instruction_text
+    assert _field_access_command("plan-phase", "planner_authoring") in instruction_text
+    assert FIELD_ACCESS_REQUIRED_MARKER in instruction_text
+    assert FIELD_ACCESS_UNLISTED_POLICY in instruction_text
     assert "active_reference_context" in payload["selected_fields"]
     assert "staged_loading" not in payload["selected_fields"]
 
@@ -164,6 +221,68 @@ def test_instruction_style_matches_manifest_for_all_staged_workflow_stages(workf
         assert payload["aliases"] == []
         assert "shell_bindings" not in payload
         assert payload["selected_fields"] == manifest.staged_loading_payload(stage_id)["required_init_fields"]
+
+
+@pytest.mark.parametrize("workflow_id", FIELD_ACCESS_WORKFLOWS)
+def test_instruction_compact_policy_is_deterministic_for_all_staged_manifest_stages(workflow_id: str) -> None:
+    manifest = load_workflow_stage_manifest(workflow_id)
+
+    for stage_id in manifest.stage_ids():
+        first = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+        second = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+        instruction_text = "\n".join(first["instructions"])
+
+        assert first["instructions"] == second["instructions"]
+        assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
+        assert instruction_text.count("Active-stage field access is manifest-owned") == 1
+        assert _field_access_command(workflow_id, stage_id) in instruction_text
+        assert FIELD_ACCESS_REQUIRED_MARKER in instruction_text
+        assert FIELD_ACCESS_UNLISTED_POLICY in instruction_text
+        assert FIELD_ACCESS_BODY_PREFIX in instruction_text
+
+
+def test_handle_only_stages_do_not_imply_body_availability() -> None:
+    checked_stages: list[tuple[str, str]] = []
+
+    for workflow_id in FIELD_ACCESS_WORKFLOWS:
+        manifest = load_workflow_stage_manifest(workflow_id)
+        for stage_id in manifest.stage_ids():
+            payload = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+            selected_fields = payload["selected_fields"]
+            body_fields = [field for field in selected_fields if field.endswith("_content")]
+            if "reference_artifact_files" not in selected_fields or body_fields:
+                continue
+            instruction_text = "\n".join(payload["instructions"])
+
+            checked_stages.append((workflow_id, stage_id))
+            assert FIELD_ACCESS_HANDLE_ONLY_POLICY in instruction_text
+            assert FIELD_ACCESS_NO_BODY_POLICY in instruction_text
+            assert "reference_artifacts_content" not in instruction_text
+
+    assert checked_stages
+
+
+def test_body_selected_stages_are_target_scoped() -> None:
+    checked_stages: list[tuple[str, str]] = []
+
+    for workflow_id in FIELD_ACCESS_WORKFLOWS:
+        manifest = load_workflow_stage_manifest(workflow_id)
+        for stage_id in manifest.stage_ids():
+            payload = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
+            selected_fields = payload["selected_fields"]
+            body_fields = [field for field in selected_fields if field.endswith("_content")]
+            if not body_fields:
+                continue
+            instruction_text = "\n".join(payload["instructions"])
+
+            checked_stages.append((workflow_id, stage_id))
+            for body_field in body_fields:
+                assert body_field in instruction_text
+            assert FIELD_ACCESS_TARGET_POLICY in instruction_text
+            assert FIELD_ACCESS_TARGET_SELECTION_POLICY in instruction_text
+            assert FIELD_ACCESS_HANDLE_FIRST_POLICY in instruction_text
+
+    assert checked_stages
 
 
 @pytest.mark.parametrize("workflow_id", PAYLOAD_WORKFLOWS)
@@ -261,6 +380,32 @@ def test_shell_style_without_aliases_binds_no_fields() -> None:
     assert payload["shell_bindings"] == []
 
 
+def test_cli_raw_stage_field_access_instruction_exposes_compact_policy() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "--raw",
+            "stage",
+            "field-access",
+            "plan-phase",
+            "--stage",
+            "planner_authoring",
+            "--style",
+            "instruction",
+        ],
+        catch_exceptions=False,
+        color=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    instruction_text = "\n".join(payload["instructions"])
+    assert payload["selected_fields"]
+    assert _field_access_command("plan-phase", "planner_authoring") in instruction_text
+    assert FIELD_ACCESS_REQUIRED_MARKER in instruction_text
+    assert FIELD_ACCESS_TARGET_POLICY in instruction_text
+
+
 def test_cli_raw_stage_field_access_json() -> None:
     result = runner.invoke(
         app,
@@ -310,4 +455,5 @@ def test_cli_raw_stage_field_access_rejects_unselected_alias_field() -> None:
 
     assert result.exit_code == 1
     payload = json.loads(result.output)
-    assert "Field 'state_content' is not selected by plan-phase stage 'phase_bootstrap'" in payload["error"]
+    expected_error = "Field 'state_content' is not selected by plan-phase stage 'phase_bootstrap'"
+    assert expected_error in payload["error"]

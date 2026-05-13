@@ -15,7 +15,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `resume_routing.required_init_fields` as the routing payload.
+<field_access>
+Check `gpd --raw stage field-access resume-work --stage resume_routing --style instruction` before reading `RESUME_ROUTING_INIT`; read only `RESUME_ROUTING_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Pick one route from candidates/handles before body reads.
+</field_access>
 
 Look for incomplete work that needs attention:
 

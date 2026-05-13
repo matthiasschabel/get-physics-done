@@ -125,8 +125,28 @@ def test_plan_phase_workflow_defers_stage_authorities_until_the_manifest_stages_
     assert "active_reference_context" not in checker_revision.required_init_fields
     assert "reference_artifact_files" in checker_revision.required_init_fields
     assert "reference_artifacts_content" not in checker_revision.required_init_fields
-    assert "experiment_design_content" in planner_authoring.required_init_fields
-    assert "experiment_design_content" not in checker_revision.required_init_fields
+    assert {
+        "state_content",
+        "roadmap_content",
+        "requirements_content",
+        "context_content",
+        "research_content",
+    } <= set(planner_authoring.required_init_fields)
+    assert {
+        "experiment_design_content",
+        "verification_content",
+        "validation_content",
+    }.isdisjoint(planner_authoring.required_init_fields)
+    assert {
+        "state_content",
+        "roadmap_content",
+        "requirements_content",
+        "context_content",
+        "research_content",
+        "experiment_design_content",
+        "verification_content",
+        "validation_content",
+    }.isdisjoint(checker_revision.required_init_fields)
 
 
 def test_plan_phase_clean_non_autonomous_planning_reports_green_with_no_checkpoint() -> None:

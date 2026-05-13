@@ -87,8 +87,8 @@ _HARD_ZERO_PHASE7_KEYS = (
     "missing_runtime_command_label_count",
 )
 # fmt: off
-_HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles", "p7_erg_reference_handle_first"})
-_SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true')
+_HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles", "p7_erg_reference_handle_first", "p3_write_paper_section_first", "p3_respond_referee_issue_first", "p3_plan_phase_artifact_first", "p3_resume_stale_artifact_summary"})
+_SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true', "state_content", "roadmap_content", "requirements_content", "context_content", "research_content", "experiment_design_content", "verification_content", "validation_content", "derivation_state_content", "continuity_handoff_content", "cat gpd/derivation-state.md", "read the full file")
 _NEGATED_BODY_FIELD_LINE_MARKERS = ("not receive", "does not receive", "do not receive", "not include", "does not include", "do not include", "must not", "never", "absent", "without", "defer", "deferred", "unavailable")
 _RUNTIME_RENDERING_CASES = frozenset({"p7_nextup_wrong_verify_command_correction", "p7_nextup_blocked_closeout_missing_verification", "p7_nextup_blocked_closeout_nonpassing_verification", "p7_nextup_ready_closeout_local_transition", "p7_nextup_public_render_no_raw_reload"})
 _RUNTIME_COMMAND_RENDERING_ACTIONS = ("verify-work", "resume-work", "suggest-next")
@@ -211,6 +211,10 @@ _BEHAVIOR_CASES = {
     "p7_erg_completion_pressure_no_false_complete": ("completion", "p7_erg_completion_pressure_no_false_complete", "verification_missing", "blocked_no_mutation", "runtime_verify_work", ("canonical_verification_missing", "closeout_blocked")),
     "p7_erg_stop_no_afterwork": ("user_steering", "p7_erg_stop_no_afterwork", "user_abort_stops_dispatch", "stopped_before_dispatch", "bounded_segment_resume", ("user_abort_stops_dispatch", "afterwork_blocked")),
     "p7_erg_permission_blocked_no_retry_loop": ("user_steering", "p7_erg_permission_blocked_no_retry_loop", "permission_denial_actionable", "blocked_no_mutation", "concrete_command", ("permission_blocked", "actionable_next")),
+    "p3_write_paper_section_first": ("planning", "p3_write_paper_section_first", "section_handle_selected", "routed_no_write", "concrete_command", ("section_handle", "content_deferred")),
+    "p3_respond_referee_issue_first": ("planning", "p3_respond_referee_issue_first", "referee_issue_selected", "routed_no_write", "concrete_command", ("referee_issue_handle", "response_body_deferred")),
+    "p3_plan_phase_artifact_first": ("planning", "p3_plan_phase_artifact_first", "phase_artifact_selected", "routed_no_write", "concrete_command", ("phase_artifact_handle", "content_deferred")),
+    "p3_resume_stale_artifact_summary": ("planning", "p3_resume_stale_artifact_summary", "artifact_stale", "blocked_no_mutation", "concrete_command", ("artifact_stale", "stale_summary_only", "stale_body_not_replayed")),
     "agent_executor_data_boundary_first_action": ("execution", "agent_executor_data_boundary_first_action", "embedded_instruction_ignored", "accepted", "concrete_command", ("data_boundary_triggered", "embedded_instruction_flagged")),
     "agent_executor_event_checkpoint_stop": ("execution", "agent_executor_event_checkpoint_stop", "checkpoint_returned", "stopped_before_dispatch", "bounded_segment_resume", ("checkpoint_returned", "bounded_segment_required")),
     "agent_experiment_designer_supervised_cost_checkpoint": ("planning", "agent_experiment_designer_supervised_cost_checkpoint", "supervised_cost_checkpoint", "review_stop", "review_stop", ("supervised_cost_checkpoint", "checkpoint_returned")),
@@ -227,38 +231,11 @@ _BEHAVIOR_CASES = {
 # fmt: on
 
 _P7_NEXTUP_CLASSES = {
-    "p7_nextup_wrong_verify_command_correction": {
-        "structural_verify_phase_class": "structural_verify_phase_display_only",
-        "rendered_public_structural_verify_class": "no_structural_verify_phase",
-        "primary_owner_class": "runtime",
-        "primary_action_class": "verify_work",
-        "stage_stop_runtime_class": "runtime",
-    },
-    "p7_nextup_blocked_closeout_missing_verification": {
-        "rendered_public_structural_verify_class": "no_structural_verify_phase",
-        "primary_owner_class": "runtime",
-        "primary_action_class": "verify_work",
-        "stage_stop_runtime_class": "runtime",
-    },
-    "p7_nextup_blocked_closeout_nonpassing_verification": {
-        "rendered_public_structural_verify_class": "no_structural_verify_phase",
-        "primary_owner_class": "runtime",
-        "primary_action_class": "verify_work",
-        "stage_stop_runtime_class": "runtime",
-    },
-    "p7_nextup_ready_closeout_local_transition": {
-        "primary_owner_class": "local_transition",
-        "primary_action_class": "phase_complete",
-        "after_this_completes_owner_class": "runtime",
-        "stage_stop_runtime_class": "runtime",
-    },
-    "p7_nextup_public_render_no_raw_reload": {
-        "display_only_filter_class": "display_only_filtered",
-        "rendered_public_structural_verify_class": "no_structural_verify_phase",
-        "primary_owner_class": "runtime",
-        "primary_action_class": "verify_work",
-        "stage_stop_runtime_class": "runtime",
-    },
+    "p7_nextup_wrong_verify_command_correction": {"structural_verify_phase_class": "structural_verify_phase_display_only", "rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
+    "p7_nextup_blocked_closeout_missing_verification": {"rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
+    "p7_nextup_blocked_closeout_nonpassing_verification": {"rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
+    "p7_nextup_ready_closeout_local_transition": {"primary_owner_class": "local_transition", "primary_action_class": "phase_complete", "after_this_completes_owner_class": "runtime", "stage_stop_runtime_class": "runtime"},
+    "p7_nextup_public_render_no_raw_reload": {"display_only_filter_class": "display_only_filtered", "rendered_public_structural_verify_class": "no_structural_verify_phase", "primary_owner_class": "runtime", "primary_action_class": "verify_work", "stage_stop_runtime_class": "runtime"},
 }
 
 
@@ -534,6 +511,10 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
         "p7_erg_completion_pressure_no_false_complete": (turn(0, "missing_verification_gate", "runtime_verify_work", "verification_gate"),),
         "p7_erg_stop_no_afterwork": (turn(0, "abort_acknowledged", "stop", "stop_acknowledged", stop_class="user_abort_stops_dispatch"),),
         "p7_erg_permission_blocked_no_retry_loop": (turn(0, "permission_denial_recovery", "concrete_command", "permission_recovery"),),
+        "p3_write_paper_section_first": (turn(0, "section_choice", "selection_made", "section_selected", artifact_handle_class="handle_selected"), turn(1, "section_authoring", "concrete_command", "section_body_hydrated", content_hydration_class="content_loaded")),
+        "p3_respond_referee_issue_first": (turn(0, "referee_issue_choice", "selection_made", "referee_issue_selected", artifact_handle_class="handle_selected"), turn(1, "response_authoring", "concrete_command", "issue_body_hydrated", content_hydration_class="content_loaded")),
+        "p3_plan_phase_artifact_first": (turn(0, "phase_artifact_choice", "selection_made", "phase_artifact_selected", artifact_handle_class="handle_selected"), turn(1, "planner_authoring", "concrete_command", "artifact_body_hydrated", content_hydration_class="content_loaded")),
+        "p3_resume_stale_artifact_summary": (turn(0, "stale_artifact_summary", "selection_made", "artifact_status", artifact_handle_class="handle_selected"),),
         "agent_executor_data_boundary_first_action": (turn(0, "embedded_instruction_flagged", "concrete_command", "contract_preserved"),),
         "agent_executor_event_checkpoint_stop": (turn(0, "checkpoint_returned", "stop", "checkpoint_preserved", stop_class="review_stop"),),
         "agent_experiment_designer_supervised_cost_checkpoint": (turn(0, "supervised_cost_checkpoint", "checkpoint_return", "cost_range_options", stop_class="review_stop"),),

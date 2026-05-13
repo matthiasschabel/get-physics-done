@@ -71,10 +71,19 @@ def test_resume_work_stage_manifest_loads_and_preserves_stage_order() -> None:
         "workflows/resume-work/state-restore.md",
         "references/orchestration/state-portability.md",
     )
-    assert "project_contract_gate" in state_restore.required_init_fields
-    assert "state_content" in state_restore.required_init_fields
-    assert "project_content" in state_restore.required_init_fields
-    assert "reference_artifacts_content" not in state_restore.required_init_fields
+    assert {
+        "project_contract_gate",
+        "contract_intake",
+        "effective_reference_intake",
+        "state_load_source",
+        "state_integrity_issues",
+    } <= set(state_restore.required_init_fields)
+    assert {
+        "state_content",
+        "project_content",
+        "active_reference_context",
+        "reference_artifacts_content",
+    }.isdisjoint(state_restore.required_init_fields)
 
     assert derivation_restore.loaded_authorities == (
         "workflows/resume-work/derivation-restore.md",
@@ -94,9 +103,14 @@ def test_resume_work_stage_manifest_loads_and_preserves_stage_order() -> None:
     assert derivation_restore.writes_allowed == ()
     assert "file_write" not in derivation_restore.allowed_tools
 
-    assert "project_contract_gate" in resume_routing.required_init_fields
-    assert "roadmap_content" in resume_routing.required_init_fields
-    assert "continuity_handoff_content" in resume_routing.required_init_fields
+    assert {
+        "project_contract_gate",
+        "active_bounded_segment",
+        "continuity_handoff_file",
+        "missing_continuity_handoff_file",
+        "active_resume_pointer",
+    } <= set(resume_routing.required_init_fields)
+    assert {"roadmap_content", "continuity_handoff_content"}.isdisjoint(resume_routing.required_init_fields)
 
     known_fields = known_init_fields_for_workflow("resume-work")
     assert known_fields is not None

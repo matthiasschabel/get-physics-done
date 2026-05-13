@@ -35,6 +35,10 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
+<field_access>
+Check `gpd --raw stage field-access respond-to-referees --stage revision_planning --style instruction` before reading `REVISION_PLANNING_INIT`; read only `REVISION_PLANNING_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Preserve triage; do not draft evidence prose here.
+</field_access>
+
 Load response-authoring before any response artifact or manuscript write:
 
 ```bash
@@ -50,6 +54,10 @@ if [ $? -ne 0 ]; then
   # STOP; surface the error.
 fi
 ```
+
+<field_access>
+Check `gpd --raw stage field-access respond-to-referees --stage response_authoring --style instruction` before reading `RESPONSE_AUTHORING_INIT`; read only `RESPONSE_AUTHORING_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use hydrated bodies only for selected evidence-dependent comments.
+</field_access>
 
 Read `{GPD_INSTALL_DIR}/templates/paper/author-response.md`,
 `{GPD_INSTALL_DIR}/templates/paper/referee-response.md`, and the loaded
@@ -88,13 +96,10 @@ stale drafts or one-sided files do not count.
 </step>
 
 <step name="draft_responses">
-Use full `reference_artifacts_content` only for comments whose response or
-manuscript edit depends on reference-backed evidence. Routine wording,
-formatting, and already-local manuscript changes use selected manuscript files,
-latest review artifacts, and reference handles. If init exposes
-`protocol_bundle_context` and `selected_protocol_bundle_ids`, treat them only as
-additive guidance for benchmark anchors, decisive artifacts, and estimator
-caveats; they do not create new claims or replace the review ledger.
+If init exposes `protocol_bundle_context` and `selected_protocol_bundle_ids`,
+treat them only as additive guidance for benchmark anchors, decisive artifacts,
+and estimator caveats; they do not create new claims or replace the review
+ledger.
 
 ```bash
 WRITER_MODEL=$(gpd resolve-model gpd-paper-writer)

@@ -9,11 +9,9 @@ Load this stage only after report triage has selected the active report source a
 <process>
 
 <step name="load_specialized_revision_context">
-Use `selected_protocol_bundle_ids` from init JSON as additive revision-routing
-handles, alongside `protocol_bundle_load_manifest`. This stage receives
-reference artifact handles and citation/reference summaries only; do not hydrate
-full protocol or reference bodies unless a later response-authoring task is
-actually drafting an evidence-backed rebuttal or manuscript revision.
+<field_access>
+Check `gpd --raw stage field-access respond-to-referees --stage revision_planning --style instruction` before reading the revision-planning payload; read only its `staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Select reviewer issues from handles before evidence bodies load.
+</field_access>
 
 - If `selected_protocol_bundle_ids` is non-empty, keep the bundle's decisive artifact expectations, benchmark anchors, estimator caveats, and reference prompts visible while triaging referee requests.
 - Use bundle guidance to distinguish "missing decisive evidence we already owed" from "new side quest the referee is asking for."

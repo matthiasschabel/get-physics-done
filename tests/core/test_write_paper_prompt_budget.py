@@ -170,7 +170,7 @@ def test_write_paper_workflow_defers_stage_authorities_until_the_manifest_stages
     assert len(_expanded_stage_surface(publication_review)) < PUBLICATION_REVIEW_EAGER_CHAR_BUDGET
 
 
-def test_write_paper_reference_body_hydration_is_limited_to_section_authoring() -> None:
+def test_write_paper_authoring_defers_reference_and_planning_bodies_until_target_selection() -> None:
     manifest = validate_workflow_stage_manifest_payload(
         json.loads((WORKFLOWS_DIR / "write-paper-stage-manifest.json").read_text(encoding="utf-8")),
         expected_workflow_id="write-paper",
@@ -180,7 +180,19 @@ def test_write_paper_reference_body_hydration_is_limited_to_section_authoring() 
     publication_review = manifest.stage("publication_review")
 
     assert "reference_artifact_files" in figure_authoring.required_init_fields
-    assert "reference_artifacts_content" in figure_authoring.required_init_fields
+    assert "reference_artifacts_content" not in figure_authoring.required_init_fields
+    assert {
+        "state_content",
+        "roadmap_content",
+        "requirements_content",
+    }.isdisjoint(figure_authoring.required_init_fields)
+    assert {
+        "citation_source_files",
+        "citation_source_count",
+        "citation_source_warnings",
+        "derived_citation_sources",
+        "derived_citation_source_count",
+    } <= set(figure_authoring.required_init_fields)
     assert "protocol_bundle_context" not in figure_authoring.required_init_fields
     assert "active_reference_context" not in figure_authoring.required_init_fields
     assert "# Runtime Delegation Note" not in _expanded_stage_surface(figure_authoring)

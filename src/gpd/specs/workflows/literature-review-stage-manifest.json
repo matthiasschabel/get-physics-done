@@ -24,7 +24,8 @@
         "project_contract_validation",
         "contract_intake",
         "effective_reference_intake",
-        "active_reference_context"
+        "active_references",
+        "active_reference_count"
       ],
       "loaded_authorities": [
         "workflows/literature-review/review-bootstrap.md"
@@ -66,7 +67,7 @@
     {
       "id": "scope_locked",
       "order": 2,
-      "purpose": "load scoped reference artifacts and assemble the review handoff",
+      "purpose": "select scoped reference artifact handles and assemble the review handoff",
       "mode_paths": [
         "workflows/literature-review/scope-locked.md"
       ],
@@ -85,7 +86,6 @@
         "project_contract_validation",
         "contract_intake",
         "effective_reference_intake",
-        "active_reference_context",
         "reference_artifact_files",
         "literature_review_files",
         "literature_review_count",
@@ -135,7 +135,7 @@
         "review_handoff"
       ],
       "checkpoints": [
-        "reference artifacts loaded only after scope is fixed",
+        "reference artifact handles loaded only after scope is fixed",
         "active anchors remain scoped",
         "reviewer handoff is ready"
       ]

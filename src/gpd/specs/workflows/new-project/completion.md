@@ -21,9 +21,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access new-project --stage completion --style instruction`
-to confirm the manifest-selected fields. Read only those keys from
-`COMPLETION_INIT`.
+<field_access>
+Check `gpd --raw stage field-access new-project --stage completion --style instruction` before reading `COMPLETION_INIT`; read only `COMPLETION_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Summarize only after the chosen initialization path has landed.
+</field_access>
 </bootstrap>
 
 <cleanup>

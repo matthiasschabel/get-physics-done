@@ -43,21 +43,10 @@ from tests.helpers.phase7_live_like import (
 REFERENCE_FILE_FIELD = "reference_artifact_files"
 REFERENCE_CONTENT_FIELD = "reference_artifacts_content"
 P8_AGENT_JIT_ROW_IDS = frozenset(f"P8-AGENT-JIT-{index:02d}" for index in range(1, 7))
-P8_AGENT_DATA_BOUNDARY_ROW_IDS = frozenset(
-    {
-        "P8-AGENT-JIT-01",
-        "P8-AGENT-JIT-04",
-        "P8-AGENT-JIT-05",
-    }
-)
-P8_AGENT_STOP_ROW_IDS = frozenset(
-    {
-        "P8-AGENT-JIT-02",
-        "P8-AGENT-JIT-03",
-        "P8-AGENT-JIT-06",
-    }
-)
-P8_WORKFLOW_JIT_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(1, 7))
+P8_AGENT_DATA_BOUNDARY_ROW_IDS = frozenset({"P8-AGENT-JIT-01", "P8-AGENT-JIT-04", "P8-AGENT-JIT-05"})
+P8_AGENT_STOP_ROW_IDS = frozenset({"P8-AGENT-JIT-02", "P8-AGENT-JIT-03", "P8-AGENT-JIT-06"})
+PHASE3_PERSONA_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(7, 11))
+P8_WORKFLOW_JIT_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(1, 11))
 
 
 def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
@@ -193,13 +182,13 @@ def test_handle_only_reference_stage_inventory_keeps_content_deferred() -> None:
         ("peer-review", "final_adjudication"),
         ("respond-to-referees", "revision_planning"),
         ("verify-work", "interactive_validation"),
+        ("write-paper", "figure_and_section_authoring"),
         ("write-paper", "consistency_and_references"),
         ("write-paper", "publication_review"),
     )
     content_stages = (
         ("literature-review", "review_handoff"),
         ("respond-to-referees", "response_authoring"),
-        ("write-paper", "figure_and_section_authoring"),
     )
 
     for workflow_id, stage_id in handle_only_stages:
@@ -730,9 +719,14 @@ def test_p8_workflow_jit_rows_score_phase2_persona_classes() -> None:
 
     assert P8_WORKFLOW_JIT_ROW_IDS <= set(rows)
     assert {rows[row_id].row_tier for row_id in P8_WORKFLOW_JIT_ROW_IDS} == {"experimental"}
-    assert {rows[row_id].behavior_case for row_id in P8_WORKFLOW_JIT_ROW_IDS} == frozenset("phase_plan_scope_change phase_checker_revision_choice execute_wave_interruption gap_reverification_loop consistency_checker_missing_return closeout_status_pressure".split())
+    assert {rows[row_id].behavior_case for row_id in P8_WORKFLOW_JIT_ROW_IDS} == frozenset("phase_plan_scope_change phase_checker_revision_choice execute_wave_interruption gap_reverification_loop consistency_checker_missing_return closeout_status_pressure p3_write_paper_section_first p3_respond_referee_issue_first p3_plan_phase_artifact_first p3_resume_stale_artifact_summary".split())
     assert all(score.passed for score in scores.values())
     assert all(score.hard_budget_failures == () for score in scores.values())
+    for row_id in PHASE3_PERSONA_ROW_IDS:
+        assert scores[row_id].row.row_tier == "experimental"
+        assert scores[row_id].phase7_metric_counts["content_hydration_before_selection_count"] == 0
+        assert scores[row_id].phase7_metric_counts["raw_reload_leakage_count"] == 0
+        assert scores[row_id].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
     assert (
         scores["P8-WF-JIT-02"].phase7_metric_counts["same_run_revision_loop_count"],
         scores["P8-WF-JIT-03"].phase7_metric_classes["stop_integrity_class"],
@@ -741,14 +735,18 @@ def test_p8_workflow_jit_rows_score_phase2_persona_classes() -> None:
 
 
 def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
-    def turn(index: int, intent: str, action: str, physics: str, stop: str = "not_applicable") -> FakePersonaTurn:
-        return FakePersonaTurn(index, "assistant", intent, action, physics_progress_class=physics, stop_class=stop)
+    def turn(index: int, intent: str, action: str, physics: str, stop: str = "not_applicable", handle: str = "not_applicable", hydration: str = "not_applicable") -> FakePersonaTurn:
+        return FakePersonaTurn(index, "assistant", intent, action, physics_progress_class=physics, stop_class=stop, artifact_handle_class=handle, content_hydration_class=hydration)
 
     trace_cases = (
         ("P8-WF-JIT-01", "stale_scope_continuation_count", (turn(0, "stale_scope_continuation", "old_phase_dispatch", "continued_old_phase"),)),
         ("P8-WF-JIT-02", "same_run_revision_loop_count", (turn(0, "same_run_revision_loop", "roadmap_revised_same_run", "blocked_plan_revised"),)),
         ("P8-WF-JIT-03", "post_stop_activity_count", (turn(0, "abort_acknowledged", "stop", "constraint_preserved", "user_abort_stops_dispatch"), turn(1, "kept_dispatching", "runtime_command", "wave_dispatched"))),
         ("P8-WF-JIT-04", "same_gap_reverification_loop_count", (turn(0, "same_gap_reverification_loop", "automated_third_gap_attempt", "third_gap_cycle"),)),
+        ("P8-WF-JIT-07", "content_hydration_before_selection_count", (turn(0, "section_authoring", "concrete_command", "section_body_hydrated", hydration="content_loaded"), turn(1, "section_choice", "selection_made", "section_selected", handle="handle_selected"))),
+        ("P8-WF-JIT-08", "content_hydration_before_selection_count", (turn(0, "response_authoring", "concrete_command", "issue_body_hydrated", hydration="content_loaded"), turn(1, "referee_issue_choice", "selection_made", "referee_issue_selected", handle="handle_selected"))),
+        ("P8-WF-JIT-09", "content_hydration_before_selection_count", (turn(0, "planner_authoring", "concrete_command", "artifact_body_hydrated", hydration="content_loaded"), turn(1, "phase_artifact_choice", "selection_made", "phase_artifact_selected", handle="handle_selected"))),
+        ("P8-WF-JIT-10", "content_hydration_before_selection_count", (turn(0, "stale_body_replay", "concrete_command", "stale_body_replayed", hydration="content_loaded"), turn(1, "stale_artifact_summary", "selection_made", "artifact_status", handle="handle_selected"))),
     )
     for row_id, failure, turns in trace_cases:
         row = _row_by_id(row_id)
@@ -756,6 +754,19 @@ def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
 
         assert not score.passed, row_id
         assert failure in score.hard_budget_failures, row_id
+
+    source_cases = (
+        ("P8-WF-JIT-07", "Reference artifacts: {reference_artifacts_content}"),
+        ("P8-WF-JIT-08", "<protocol_bundle_context>{protocol_bundle_context}</protocol_bundle_context>"),
+        ("P8-WF-JIT-09", "Planner source fields: state_content verification_content validation_content"),
+        ("P8-WF-JIT-10", "Read the full file before freshness checks: cat GPD/DERIVATION-STATE.md"),
+    )
+    for row_id, source in source_cases:
+        score = score_phase7_live_like_row(_row_by_id(row_id), source_text_override=source)
+
+        assert not score.passed, row_id
+        assert score.phase7_metric_counts["content_hydration_before_selection_count"] > 0, row_id
+        assert "content_hydration_before_selection_count" in score.hard_budget_failures, row_id
 
     outcome_cases = (
         ("P8-WF-JIT-05", phase7_live_like._BehaviorOutcome("prose_success_no_return", "accepted", ("return_missing", "prose_success_no_return"), ("runtime_return_gate",), "concrete_command", accepted=True, state_status_class="accepted_no_write")),

@@ -2,7 +2,7 @@
 Plan, check, and close verifier-diagnosed gaps without changing verifier-owned canonical status.
 </purpose>
 <philosophy>
-The verifier decides scientific status. This stage only turns diagnosed gaps into fresh plans, checks those plans, and records session closeout after canonical validation. All agents are one-shot; file-producing success requires fresh expected artifacts.
+Verifier owns scientific status. This stage turns diagnosed gaps into plans, checks, and records closeout after canonical validation.
 </philosophy>
 <shared_contract_floor>
 **Project Contract Gate:** {project_contract_gate}
@@ -11,10 +11,13 @@ The verifier decides scientific status. This stage only turns diagnosed gaps int
 **Contract Intake:** {contract_intake}
 **Effective Reference Intake:** {effective_reference_intake}
 
-Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true. A visible-but-blocked contract must be repaired before it is used as authoritative verification scope; keep the same contract-critical floor at all times.
-Treat `effective_reference_intake` as the structured source of carry-forward anchors. This stage receives reference artifact handles, not embedded bodies: read or quote a listed artifact file only when a diagnosed gap cites that exact artifact or needs decisive comparison evidence.
-Do NOT skip contract-critical anchors.
+Treat `project_contract` as authoritative only when `project_contract_gate.authoritative` is true; blocked contracts stop verification scope and keep the same contract-critical floor. `effective_reference_intake` carries anchors. This stage receives reference artifact handles, not embedded bodies; read or quote a listed artifact file only when a diagnosed gap cites that exact artifact or needs decisive comparison evidence.
+Do not skip contract-critical anchors.
 </shared_contract_floor>
+
+<field_access>
+Before `GAP_REPAIR_INIT`, run `gpd --raw stage field-access verify-work --stage gap_repair --style instruction`; the staged payload is the source of truth for planner/checker routing. Use only listed fields, and ignore stale init.
+</field_access>
 
 <process>
 

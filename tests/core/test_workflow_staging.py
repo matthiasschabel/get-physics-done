@@ -1042,8 +1042,22 @@ def test_validate_workflow_stage_manifest_payload_loads_plan_phase_manifest() ->
     assert "protocol_bundle_context" not in manifest.stages[3].required_init_fields
     assert "active_reference_context" in manifest.stages[2].required_init_fields
     assert "active_reference_context" not in manifest.stages[3].required_init_fields
-    assert "experiment_design_content" in manifest.stages[2].required_init_fields
-    assert "experiment_design_content" not in manifest.stages[3].required_init_fields
+    for core_evidence_field in (
+        "state_content",
+        "roadmap_content",
+        "requirements_content",
+        "context_content",
+        "research_content",
+    ):
+        assert core_evidence_field in manifest.stages[2].required_init_fields
+        assert core_evidence_field not in manifest.stages[3].required_init_fields
+    for artifact_specific_field in (
+        "experiment_design_content",
+        "verification_content",
+        "validation_content",
+    ):
+        assert artifact_specific_field not in manifest.stages[2].required_init_fields
+        assert artifact_specific_field not in manifest.stages[3].required_init_fields
     assert "requirements_content" not in manifest.stages[3].required_init_fields
     assert "context_content" not in manifest.stages[3].required_init_fields
     assert "state_content" not in manifest.stages[3].required_init_fields
@@ -1205,7 +1219,7 @@ def test_validate_workflow_stage_manifest_payload_loads_write_paper_manifest() -
         "GPD/state.json",
     )
     assert "reference_artifact_files" in authoring.required_init_fields
-    assert "reference_artifacts_content" in authoring.required_init_fields
+    assert "reference_artifacts_content" not in authoring.required_init_fields
     assert "protocol_bundle_load_manifest" in authoring.required_init_fields
     assert "protocol_bundle_context" not in authoring.required_init_fields
     assert "active_reference_context" not in authoring.required_init_fields

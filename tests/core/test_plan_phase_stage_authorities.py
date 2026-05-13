@@ -85,19 +85,24 @@ def test_plan_phase_research_routing_defers_phase_file_content_to_authoring() ->
     research_routing = manifest.stage("research_routing")
     planner_authoring = manifest.stage("planner_authoring")
 
-    phase_file_content_fields = {
+    core_phase_file_content_fields = {
+        "state_content",
         "roadmap_content",
         "requirements_content",
         "context_content",
         "research_content",
+    }
+    target_specific_phase_file_content_fields = {
         "experiment_design_content",
         "verification_content",
         "validation_content",
     }
 
     assert {field for field in research_routing.required_init_fields if field.endswith("_content")} == set()
-    assert phase_file_content_fields.isdisjoint(research_routing.required_init_fields)
-    assert phase_file_content_fields.issubset(planner_authoring.required_init_fields)
+    assert core_phase_file_content_fields.isdisjoint(research_routing.required_init_fields)
+    assert target_specific_phase_file_content_fields.isdisjoint(research_routing.required_init_fields)
+    assert core_phase_file_content_fields.issubset(planner_authoring.required_init_fields)
+    assert target_specific_phase_file_content_fields.isdisjoint(planner_authoring.required_init_fields)
     assert "platform" in research_routing.required_init_fields
 
 

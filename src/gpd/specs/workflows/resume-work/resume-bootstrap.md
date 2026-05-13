@@ -33,6 +33,10 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
+<field_access>
+Check `gpd --raw stage field-access resume-work --stage resume_bootstrap --style instruction` before reading `INIT`; read only `INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. `active_resume_result` is route context only; stale bodies stay unavailable.
+</field_access>
+
 Parse JSON semantically:
 
 - **Requested workspace availability:** `workspace_state_exists`, `workspace_roadmap_exists`, `workspace_project_exists`, `workspace_planning_exists`
@@ -50,12 +54,10 @@ chosen, `gpd:resume-work` reloads that project's canonical state.
 
 **If `project_root_auto_selected` is true or `project_root_source="recent_project"`:** Runtime started outside the selected project. Do not quick-resume or act from the unrelated workspace. On bare "continue" or "go", stop. Show `project_root`; require explicit confirmation or a reopened project folder.
 
-When present, use `active_resume_result` as hydrated result context; summarize
-structured fields and keep its `id` as rerun anchor. `workspace_*` fields judge
-the user-requested workspace; selected-project fields apply after re-entry
-resolution. Resolver order: `GPD/state.json` / continuation, then
-`GPD/state.json.bak`, then `GPD/STATE.md`; `.continue-here.md` and live
-snapshots are context, not sole authority.
+`workspace_*` fields judge the user-requested workspace; selected-project
+fields apply after re-entry resolution. Resolver order: `GPD/state.json` /
+continuation, then `GPD/state.json.bak`, then `GPD/STATE.md`;
+`.continue-here.md` and live snapshots are context, not sole authority.
 
 **If `planning_exists` is false and no recent-project selection is required:** If recoverable state exists, repair first. Otherwise route to gpd:new-project and do not attempt STATE.md reconstruction.
 **If `state_exists` is false but `roadmap_exists` or `project_exists` is true:** Offer to reconstruct STATE.md from the existing project artifacts.

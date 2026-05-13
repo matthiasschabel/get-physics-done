@@ -35,7 +35,9 @@ fi
 PHASE_DIR_ABS=$(echo "$PHASE_BOOTSTRAP_INIT" | gpd json get .phase_dir_abs --default "$PHASE_DIR_ABS")
 ```
 
-Use `phase_bootstrap.required_init_fields` as the refreshed payload.
+<field_access>
+Before reading `PHASE_BOOTSTRAP_INIT`, check `gpd --raw stage field-access verify-work --stage phase_bootstrap --style instruction`; read only `PHASE_BOOTSTRAP_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Proof readiness stays fail-closed until phase artifacts are inspected.
+</field_access>
 
 `staged_loading.checkpoints` is not a proof classifier; ignore `phase_proof_review_status.state=not_reviewed|fresh` alone.
 Classify proof-bearing only from research artifacts; exclude installed runtime/config/skills trees and generated manifests.

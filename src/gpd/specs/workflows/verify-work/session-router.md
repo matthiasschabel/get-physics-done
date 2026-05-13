@@ -36,15 +36,15 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Read only `session_router.required_init_fields`.
+<field_access>
+Before reading `SESSION_ROUTER_INIT`, check `gpd --raw stage field-access verify-work --stage session_router --style instruction`; read only `SESSION_ROUTER_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Do not assume reference ledgers, protocol bundles, or report schemas are loaded here. Verifier/gap authorities are stage-local.
+</field_access>
 
 ```bash
 export PROJECT_ROOT PHASE_DIR_ABS
 PROJECT_ROOT=$(echo "$SESSION_ROUTER_INIT" | gpd json get .project_root)
 PHASE_DIR_ABS=$(echo "$SESSION_ROUTER_INIT" | gpd json get .phase_dir_abs --default "")
 ```
-
-Do not assume reference ledgers, protocol bundles, or report schemas are loaded here.
 
 **If no phase was provided:**
 

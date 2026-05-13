@@ -276,10 +276,10 @@
         "manuscript_package_paths",
         "managed_publication_context",
         "protocol_reference_handles",
-        "reference_artifact_context",
+        "reference_artifact_handles",
         "literature_review_context",
-        "derived_research_inventory",
-        "planning_state_content"
+        "citation_source_context",
+        "derived_research_inventory"
       ],
       "required_init_fields": [
         "platform"

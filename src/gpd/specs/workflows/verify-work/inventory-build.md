@@ -29,7 +29,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Treat `inventory_build.required_init_fields` as source of truth. This stage is handle/status-oriented: use `effective_reference_intake`, `active_references`, `citation_source_files`, and `citation_source_warnings` as mandatory routing inputs without inlining rendered reference prose or artifact bodies.
+<field_access>
+Before reading `INVENTORY_BUILD_INIT`, check `gpd --raw stage field-access verify-work --stage inventory_build --style instruction`; read only `INVENTORY_BUILD_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use reference/citation handles without inlining rendered prose or bodies.
+</field_access>
 
 - If it names a benchmark, prior artifact, or must-read reference, verification must explicitly check it or report why it could not.
 - Stable knowledge docs that appear through handle/status fields are reviewed background synthesis: use them to clarify definitions, assumptions, and caveats only when they agree with stronger sources, and never as decisive evidence on their own.
@@ -139,7 +141,10 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `interactive_validation.required_init_fields` before writing the session overlay.
+<field_access>
+Before reading `INTERACTIVE_VALIDATION_INIT`, check `gpd --raw stage field-access verify-work --stage interactive_validation --style instruction`; read only `INTERACTIVE_VALIDATION_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Session-overlay writes stay report-schema bounded.
+</field_access>
+
 Keep the session overlay frontmatter compatible with the authoritative verification report.
 Write to `${PHASE_DIR_ABS}/${phase_number}-VERIFICATION.md`.
 Changed verification files fail `gpd pre-commit-check` when this header is missing or mismatched against the active lock.

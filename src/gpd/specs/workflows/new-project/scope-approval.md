@@ -20,7 +20,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse only the fields named by `staged_loading.required_init_fields`.
+<field_access>
+Check `gpd --raw stage field-access new-project --stage scope_approval --style instruction` before reading `SCOPE_APPROVAL_INIT`; read only `SCOPE_APPROVAL_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use only loaded contract/status and approval authorities.
+</field_access>
 </bootstrap>
 
 <contract_authoring>

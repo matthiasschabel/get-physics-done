@@ -6,6 +6,11 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from gpd.core.staged_context_fields import (
+    STAGED_BODY_FIELDS,
+    STAGED_REFERENCE_HANDLE_STATUS_FIELDS,
+    STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS,
+)
 from gpd.core.workflow_staging import (
     WORKFLOW_STAGE_MANIFEST_DIR,
     load_workflow_stage_manifest,
@@ -15,6 +20,20 @@ from gpd.core.workflow_staging import (
 FIELD_ACCESS_STYLES = frozenset({"instruction", "json", "shell"})
 _SHELL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _JSON_FIELD_PATH_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_BODY_FIELD_SUFFIX = "_content"
+_HANDLE_STATUS_SUFFIXES = (
+    "_count",
+    "_counts",
+    "_file",
+    "_files",
+    "_ids",
+    "_load_info",
+    "_manifest",
+    "_status",
+    "_statuses",
+    "_summary",
+    "_warnings",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,9 +105,7 @@ def parse_field_alias_specs(alias_specs: Iterable[str] | None) -> tuple[StagedFi
         if not alias or not field:
             raise ValueError(f"Invalid field-access alias spec {raw_spec!r}; expected ALIAS=field")
         if not _SHELL_IDENTIFIER_RE.fullmatch(alias):
-            raise ValueError(
-                f"Invalid field-access alias {alias!r}; aliases must be shell identifier names"
-            )
+            raise ValueError(f"Invalid field-access alias {alias!r}; aliases must be shell identifier names")
         if alias in seen_aliases:
             raise ValueError(f"Duplicate field-access alias {alias!r}")
         seen_aliases.add(alias)
@@ -108,7 +125,9 @@ def build_staged_field_access(
 
     normalized_style = style.strip().casefold()
     if normalized_style not in FIELD_ACCESS_STYLES:
-        raise ValueError(f"Unknown field-access style {style!r}; expected one of: {', '.join(sorted(FIELD_ACCESS_STYLES))}")
+        raise ValueError(
+            f"Unknown field-access style {style!r}; expected one of: {', '.join(sorted(FIELD_ACCESS_STYLES))}"
+        )
     if not stage_id or not stage_id.strip():
         raise ValueError("field-access requires --stage")
     if normalized_style == "shell" and not _SHELL_IDENTIFIER_RE.fullmatch(payload_variable):
@@ -127,7 +146,9 @@ def build_staged_field_access(
     selected_fields = stage.required_init_fields
     selected_field_set = set(selected_fields)
     aliases = parse_field_alias_specs(alias_specs)
-    _validate_aliases_for_selected_fields(aliases, selected_field_set, workflow_id=manifest.workflow_id, stage_id=stage.id)
+    _validate_aliases_for_selected_fields(
+        aliases, selected_field_set, workflow_id=manifest.workflow_id, stage_id=stage.id
+    )
 
     manifest_path = resolve_workflow_stage_manifest_path(manifest.workflow_id)
     try:
@@ -170,12 +191,55 @@ def _validate_aliases_for_selected_fields(
 
 def _instruction_lines(workflow_id: str, stage_id: str, selected_fields: tuple[str, ...]) -> tuple[str, ...]:
     field_list = ", ".join(selected_fields)
-    return (
+    body_fields = _selected_body_fields(selected_fields)
+    handle_status_fields = _selected_handle_status_fields(selected_fields)
+    rendered_context_fields = _selected_rendered_context_fields(selected_fields)
+    lines = [
+        (
+            "Active-stage field access is manifest-owned: run "
+            f"`gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction`, "
+            "then read only keys listed in `<INIT>.staged_loading.required_init_fields`."
+        ),
         f"{workflow_id} stage {stage_id} selects exactly these staged-init fields: {field_list}.",
-        "Read those keys directly from the staged init JSON object.",
-        "Treat any init field not listed here as unavailable for this stage.",
-        "Use staged_loading.required_init_fields as the runtime confirmation of the same field list.",
+        "Treat unlisted init fields as unavailable for this stage.",
+    ]
+    if body_fields:
+        lines.append(
+            "Body fields are opt-in: selected body fields are target-scoped "
+            f"({', '.join(body_fields)}) may be read only after choosing the concrete section, issue, "
+            "artifact, gap, handoff, or reference target; use handles/status fields first."
+        )
+    elif handle_status_fields:
+        lines.append(
+            "Body fields are opt-in: selected handle/status fields are handles only; "
+            "no staged body fields are selected for this stage."
+        )
+    else:
+        lines.append("Body fields are opt-in: no staged body fields are selected for this stage.")
+    if rendered_context_fields:
+        lines.append(
+            "Rendered context fields selected for this stage "
+            f"({', '.join(rendered_context_fields)}) do not make unselected body fields available."
+        )
+    return tuple(lines)
+
+
+def _selected_body_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        field for field in selected_fields if field in STAGED_BODY_FIELDS or field.endswith(_BODY_FIELD_SUFFIX)
     )
+
+
+def _selected_handle_status_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(
+        field
+        for field in selected_fields
+        if field in STAGED_REFERENCE_HANDLE_STATUS_FIELDS or field.endswith(_HANDLE_STATUS_SUFFIXES)
+    )
+
+
+def _selected_rendered_context_fields(selected_fields: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(field for field in selected_fields if field in STAGED_REFERENCE_RENDERED_CONTEXT_FIELDS)
 
 
 def _shell_binding_lines(aliases: tuple[StagedFieldAlias, ...], *, payload_variable: str) -> tuple[str, ...]:

@@ -22,9 +22,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access new-project --stage requirements_authoring --style instruction`
-to confirm the manifest-selected fields. Read only those keys from
-`REQUIREMENTS_INIT`.
+<field_access>
+Check `gpd --raw stage field-access new-project --stage requirements_authoring --style instruction` before reading `REQUIREMENTS_INIT`; read only `REQUIREMENTS_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Roadmap and convention authorities remain unavailable.
+</field_access>
 
 If `project_contract_gate.authoritative` is false,
 `project_contract_load_info.status` starts with `blocked`, or

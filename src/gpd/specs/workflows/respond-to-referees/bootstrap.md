@@ -42,12 +42,13 @@ if [ -n "$PROJECT_ROOT" ]; then
 fi
 ```
 
-Use `INIT.staged_loading.required_init_fields` as the bootstrap contract. Parse
-only the selected fields for `project_contract_gate`, manuscript routing,
-publication/review roots, latest review/response artifacts, autonomy, and
-research_mode. For nested-cwd launches, use `project_root`,
-`selected_publication_root`, `selected_review_root`, and the resolved manuscript
-root from init/preflight as authority.
+<field_access>
+Check `gpd --raw stage field-access respond-to-referees --stage bootstrap --style instruction` before reading `INIT`; read only `INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Reference bodies stay unavailable.
+</field_access>
+
+For nested-cwd launches, use `project_root`, `selected_publication_root`,
+`selected_review_root`, and the resolved manuscript root from init/preflight as
+authority.
 Bootstrap keeps `project_contract_gate`, `project_contract_load_info`, and
 `project_contract_validation` visible.
 

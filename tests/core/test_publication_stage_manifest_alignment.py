@@ -290,6 +290,11 @@ def test_write_paper_stage_manifest_uses_canonical_publication_contracts() -> No
         "state_content",
         "roadmap_content",
         "requirements_content",
+    }.isdisjoint(authoring.required_init_fields)
+    assert {
+        "reference_artifact_files",
+        "citation_source_files",
+        "derived_citation_sources",
     } <= set(authoring.required_init_fields)
     assert _conditional_authorities_by_when(authoring) == {
         "writer_spawn_needed": frozenset({"references/orchestration/runtime-delegation-note.md"})

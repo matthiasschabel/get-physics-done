@@ -1445,6 +1445,14 @@ class TestInitPlanPhase:
                 assert "Grid scan." in ctx["experiment_design_content"]
             else:
                 assert "experiment_design_content" not in ctx
+            if stage_id == "planner_authoring":
+                assert "Current phase: 02" in ctx["state_content"]
+                assert "Compare the benchmark observable" in ctx["roadmap_content"]
+                assert "Preserve benchmark anchors" in ctx["requirements_content"]
+                assert "Locked scope." in ctx["context_content"]
+                assert "Method comparison." in ctx["research_content"]
+                assert "verification_content" not in ctx
+                assert "validation_content" not in ctx
 
     def test_basic(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
@@ -2507,7 +2515,8 @@ class TestInitNewProject:
 
         stage_ctx.assert_context_stage(ctx, manifest, "resume-work", "state_restore")
         assert ctx["project_contract_gate"]["visible"] is True
-        assert "reference_artifacts_content" not in ctx
+        assert {"reference_artifacts_content", "active_reference_context", "state_content", "project_content"}.isdisjoint(ctx)
+        assert all(ctx[field] is not None for field in ("contract_intake", "effective_reference_intake"))
 
     def test_resume_work_stage_state_restore_skips_reference_artifact_payload(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2523,12 +2532,43 @@ class TestInitNewProject:
             raise AssertionError("state_restore should not scan reference artifacts")
 
         monkeypatch.setattr(context_module, "_reference_artifact_payload", _record_artifact_payload)
+        monkeypatch.setattr(
+            context_module,
+            "_render_active_reference_context",
+            stage_ctx.fail_if_context_builder_runs("_render_active_reference_context"),
+        )
 
         ctx = init_resume(tmp_path, stage="state_restore")
 
         assert ctx["staged_loading"]["stage_id"] == "state_restore"
-        assert "active_reference_context" in ctx
+        assert "active_reference_context" not in ctx
         assert calls == []
+
+    def test_resume_work_stage_resume_routing_uses_handoff_handles_without_file_bodies(
+        self, tmp_path: Path
+    ) -> None:
+        _setup_project(tmp_path)
+        from gpd.core.state import default_state_dict
+
+        state = default_state_dict()
+        state["continuation"]["handoff"]["resume_file"] = "GPD/phases/03-analysis/.continue-here.md"
+        state["continuation"]["handoff"]["stopped_at"] = "2026-03-10T12:00:00+00:00"
+        resume_path = tmp_path / "GPD" / "phases" / "03-analysis" / ".continue-here.md"
+        resume_path.parent.mkdir(parents=True, exist_ok=True)
+        resume_path.write_text("# Continue Here\nResume this derivation.\n", encoding="utf-8")
+        (tmp_path / "GPD" / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+        manifest = load_workflow_stage_manifest("resume-work")
+
+        ctx = init_resume(tmp_path, stage="resume_routing")
+
+        stage_ctx.assert_context_stage(ctx, manifest, "resume-work", "resume_routing")
+        assert ctx["active_resume_kind"] == "continuity_handoff"
+        assert {
+            ctx["active_resume_pointer"],
+            ctx["continuity_handoff_file"],
+        } == {"GPD/phases/03-analysis/.continue-here.md"}
+        assert {"roadmap_content", "continuity_handoff_content"}.isdisjoint(ctx)
 
     def test_sync_state_stage_sync_bootstrap_filters_payload(self, tmp_path: Path) -> None:
         _setup_project(tmp_path)
@@ -4818,9 +4858,10 @@ class TestInitLiteratureReview:
         ctx = init_literature_review(tmp_path, topic="Curvature flow bounds", stage="review_bootstrap")
 
         assert ctx["staged_loading"]["stage_id"] == "review_bootstrap"
-        assert "active_reference_context" in ctx
+        assert "active_reference_context" not in ctx
+        assert ctx["active_reference_count"] >= 1
+        assert "ref-benchmark" in {ref["id"] for ref in ctx["active_references"]}
         assert "reference_artifacts_content" not in ctx
-        assert "Benchmark Ref 2024" not in ctx["active_reference_context"]
         assert ctx["project_contract_gate"]["visible"] is True
 
 

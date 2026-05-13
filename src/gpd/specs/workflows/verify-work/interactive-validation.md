@@ -2,11 +2,13 @@
 Present verifier evidence, collect researcher responses, and route diagnosed issues.
 </purpose>
 <philosophy>
-Do not duplicate verifier policy. Present verifier-produced evidence one check at a time, record only the session overlay, and start a fresh continuation after any user input needed by a child.
+Present verifier-produced evidence one check at a time, write only the session overlay, and checkpoint user input.
 </philosophy>
 <stage_scope>
-Stage id: `interactive_validation`. Owns researcher-facing check presentation, response capture, diagnosis, and the explicit transition into gap repair. Do not load planner/checker gap-repair authority until the user chooses auto-plan fixes.
+Stage id: `interactive_validation`. Owns check presentation, response capture, diagnosis, and the explicit transition into gap repair.
 </stage_scope>
+
+Field access: check `gpd --raw stage field-access verify-work --stage interactive_validation --style instruction`; use only `INTERACTIVE_VALIDATION_INIT.staged_loading.required_init_fields`, no stale init.
 
 <process>
 
@@ -119,7 +121,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Treat the staged payload as the source of truth for planner and checker routing.
+Treat `GAP_REPAIR_INIT.staged_loading.required_init_fields` as the planner/checker routing source; gap-repair field access is `gpd --raw stage field-access verify-work --stage gap_repair --style instruction`.
 
 If the staged init is blocked, stale, or missing required fields, stop and surface the blocking issues instead of falling back to unstaged plan repair.
 </step>

@@ -11,6 +11,7 @@ import pytest
 from gpd.core import context as context_module
 from gpd.core.context import (
     init_execute_phase,
+    init_literature_review,
     init_peer_review,
     init_respond_to_referees,
     init_verify_work,
@@ -193,6 +194,22 @@ def _assert_handle_only_payload(
             "outline_and_scaffold",
             lambda project_root: None,
             lambda project_root: init_write_paper(project_root, stage="outline_and_scaffold"),
+        ),
+        (
+            "write-paper",
+            "figure_and_section_authoring",
+            lambda project_root: None,
+            lambda project_root: init_write_paper(project_root, stage="figure_and_section_authoring"),
+        ),
+        (
+            "literature-review",
+            "scope_locked",
+            lambda project_root: None,
+            lambda project_root: init_literature_review(
+                project_root,
+                topic="Curvature flow bounds",
+                stage="scope_locked",
+            ),
         ),
     ),
 )

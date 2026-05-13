@@ -15,7 +15,9 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `derivation_restore.required_init_fields` as the derivation-history payload.
+<field_access>
+Check `gpd --raw stage field-access resume-work --stage derivation_restore --style instruction` before reading `DERIVATION_RESTORE_INIT`; read only `DERIVATION_RESTORE_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Read selected bodies only for continuity recovery.
+</field_access>
 
 **Read cumulative derivation history from `GPD/DERIVATION-STATE.md`:**
 

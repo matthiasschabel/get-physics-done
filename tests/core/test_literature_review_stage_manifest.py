@@ -36,11 +36,14 @@ def test_literature_review_stage_manifest_defers_reference_artifacts_and_tracks_
     assert bootstrap.loaded_authorities == ("workflows/literature-review/review-bootstrap.md",)
     assert "reference_artifact_files" not in bootstrap.required_init_fields
     assert "reference_artifacts_content" not in bootstrap.required_init_fields
+    assert "active_reference_context" not in bootstrap.required_init_fields
+    assert {"active_references", "active_reference_count"} <= set(bootstrap.required_init_fields)
     assert "references/orchestration/runtime-delegation-note.md" in bootstrap.must_not_eager_load
     assert "workflows/literature-review/scope-locked.md" in bootstrap.must_not_eager_load
 
     assert "reference_artifact_files" in scope_locked.required_init_fields
     assert "reference_artifacts_content" not in scope_locked.required_init_fields
+    assert "active_reference_context" not in scope_locked.required_init_fields
     assert "protocol_bundle_context" not in scope_locked.required_init_fields
     assert scope_locked.loaded_authorities == ("workflows/literature-review/scope-locked.md",)
     assert "references/orchestration/runtime-delegation-note.md" in scope_locked.must_not_eager_load
@@ -49,6 +52,7 @@ def test_literature_review_stage_manifest_defers_reference_artifacts_and_tracks_
         "workflows/literature-review/review-handoff.md",
         "references/orchestration/runtime-delegation-note.md",
     )
+    assert "reference_artifacts_content" in review_handoff.required_init_fields
     assert "GPD/literature/slug-REVIEW.md" in review_handoff.writes_allowed
     assert "GPD/literature/slug-CITATION-SOURCES.json" in review_handoff.writes_allowed
     assert "GPD/literature/slug-CITATION-AUDIT.md" in review_handoff.writes_allowed

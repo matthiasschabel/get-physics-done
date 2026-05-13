@@ -187,9 +187,6 @@
         "requirements_content",
         "context_content",
         "research_content",
-        "experiment_design_content",
-        "verification_content",
-        "validation_content",
         "platform"
       ],
       "loaded_authorities": [

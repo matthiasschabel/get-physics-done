@@ -9,8 +9,6 @@ from pathlib import Path
 import pytest
 
 from gpd.adapters.install_utils import (
-    COMPACT_HELP_BRIDGE_SHIM_SENTINEL,
-    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
     MANIFEST_NAME,
     hook_python_interpreter,
@@ -24,7 +22,13 @@ from gpd.adapters.opencode import (
     copy_flattened_commands,
     write_manifest,
 )
-from tests.adapters.projection_test_utils import runtime_bridge_command
+from tests.adapters.projection_test_utils import (
+    assert_compact_help_bridge_shim,
+    assert_compact_staged_command_shim,
+    assert_compact_workflow_reference_shim,
+    iter_staged_command_projection_cases,
+    runtime_bridge_command,
+)
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -38,6 +42,16 @@ def adapter() -> OpenCodeAdapter:
 
 def expected_opencode_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
     return runtime_bridge_command("opencode", target, is_global=is_global, explicit_target=explicit_target)
+
+
+def _staged_projection_case(gpd_root: Path, command_name: str):
+    cases = iter_staged_command_projection_cases(
+        commands_dir=gpd_root / "commands",
+        workflows_dir=gpd_root / "specs" / "workflows",
+    )
+    case = next((candidate for candidate in cases if candidate.command_name == command_name), None)
+    assert case is not None, f"{command_name} has no staged projection case"
+    return case
 
 
 def _assert_no_manifestless_gpd_artifacts(target: Path) -> None:
@@ -548,20 +562,23 @@ class TestInstall:
         execute_phase = (target / "command" / "gpd-execute-phase.md").read_text(encoding="utf-8")
         help_command = (target / "command" / "gpd-help.md").read_text(encoding="utf-8")
 
-        assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in execute_phase
-        assert "/gpd-execute-phase" in execute_phase
+        case = _staged_projection_case(gpd_root, "execute-phase")
+        assert_compact_staged_command_shim(
+            execute_phase,
+            command_name=case.command_name,
+            first_stage=case.first_stage_id,
+            staged_loading_keys=case.staged_loading_keys,
+            command_label="/gpd-execute-phase",
+            stage_count=case.stage_count,
+        )
         assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in execute_phase
-        assert "payload.staged_loading" in execute_phase
-        assert "<!-- [included: execute-phase.md] -->" not in execute_phase
         assert "@{GPD_INSTALL_DIR}" not in execute_phase
         assert len(execute_phase) < 20_000
 
-        assert COMPACT_HELP_BRIDGE_SHIM_SENTINEL in help_command
-        assert "/gpd-help" in help_command
+        assert_compact_help_bridge_shim(help_command, command_label="/gpd-help")
         assert f"{expected_bridge} --raw help" in help_command
         assert f"{expected_bridge} --raw help --all" in help_command
         assert f"{expected_bridge} --raw help --command <name>" in help_command
-        assert "<!-- [included: help.md] -->" not in help_command
         assert "@{GPD_INSTALL_DIR}" not in help_command
         assert len(help_command) < 10_000
 
@@ -739,9 +756,13 @@ class TestInstall:
         adapter.install(gpd_root, target)
 
         content = (target / "command" / "gpd-complete-milestone.md").read_text(encoding="utf-8")
-        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in content
+        assert_compact_workflow_reference_shim(
+            content,
+            workflow_id="complete-milestone",
+            command_label="/gpd-complete-milestone",
+            authority_suffixes=("get-physics-done/workflows/complete-milestone.md",),
+        )
         assert "{GPD_INSTALL_DIR}" not in content
-        assert "get-physics-done/workflows/complete-milestone.md" in content
         assert "get-physics-done/templates/milestone-archive.md" in content
         assert "<!-- [included: complete-milestone.md] -->" not in content
         assert "<!-- [included: milestone-archive.md] -->" not in content

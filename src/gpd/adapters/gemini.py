@@ -24,7 +24,11 @@ from pathlib import Path
 from typing import Literal
 
 from gpd.adapters.base import RuntimeAdapter
-from gpd.adapters.command_projection import prepend_projection_note, rewrite_projection_shell_bridge
+from gpd.adapters.command_projection import (
+    prepend_projection_note,
+    rewrite_projection_shell_bridge,
+    strip_projection_note_blocks,
+)
 from gpd.adapters.gemini_shell_patches import (
     GEMINI_APPROVED_CONTRACT_PATH,
     rewrite_gemini_shell_workflow_guidance,
@@ -160,6 +164,7 @@ _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE = re.compile(
     r"<gemini_shell_runtime_notes>\n.*?</gemini_shell_runtime_notes>\n*",
     re.DOTALL,
 )
+_GEMINI_RUNTIME_HELPER_RE = re.compile(r"(?:gpd\.runtime_cli|\bgpd_cli\s+--raw\b|\bgpd\s+--raw\b)")
 
 _SHARED_SHELL_FENCE_CLASSIFIER_NAMES = (
     "classify_shell_fence_body",
@@ -381,11 +386,7 @@ def _shared_shell_classification_reasons(classification: object | None) -> tuple
         return (_normalize_shared_shell_kind(reasons) or reasons,)
     if not isinstance(reasons, (list, tuple, set, frozenset)):
         return ()
-    normalized = tuple(
-        reason
-        for value in reasons
-        if (reason := _normalize_shared_shell_kind(value)) is not None
-    )
+    normalized = tuple(reason for value in reasons if (reason := _normalize_shared_shell_kind(value)) is not None)
     return tuple(dict.fromkeys(normalized))
 
 
@@ -430,14 +431,17 @@ def _inject_gemini_command_runtime_note(
     content: str,
     bridge_command: str,
     *,
+    include_runtime_note: bool = True,
     include_shell_allowlist: bool = False,
 ) -> str:
     """Prepend Gemini-specific shell guidance to installed top-level commands."""
-    public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
-    note = _GEMINI_COMMAND_RUNTIME_NOTE.format(
-        launcher=bridge_command,
-        public_prefix=public_prefix,
-    )
+    note = ""
+    if include_runtime_note:
+        public_prefix = validated_public_command_prefix(get_runtime_descriptor("gemini"))
+        note += _GEMINI_COMMAND_RUNTIME_NOTE.format(
+            launcher=bridge_command,
+            public_prefix=public_prefix,
+        )
     if include_shell_allowlist:
         note += _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE.format(
             launcher=bridge_command,
@@ -451,6 +455,23 @@ def _inject_gemini_command_runtime_note(
             _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE,
         ),
     )
+
+
+def _strip_gemini_command_runtime_notes(content: str) -> str:
+    """Return Gemini command content without adapter-injected note blocks."""
+    return strip_projection_note_blocks(
+        content,
+        (
+            _GEMINI_COMMAND_RUNTIME_NOTE_BLOCK_RE,
+            _GEMINI_COMMAND_SHELL_ALLOWLIST_NOTE_BLOCK_RE,
+        ),
+    )
+
+
+def _needs_gemini_runtime_note(content: str, *, bridge_command: str) -> bool:
+    """Return whether note-free content still needs Gemini runtime bridge guidance."""
+    note_free_content = _strip_gemini_command_runtime_notes(content)
+    return bridge_command in note_free_content or _GEMINI_RUNTIME_HELPER_RE.search(note_free_content) is not None
 
 
 _GEMINI_SHELL_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -656,9 +677,11 @@ def _render_gemini_command_prompt(
     )
     rewritten = _rewrite_gpd_cli_invocations(content, bridge_command)
     shell_allowlist_required = shell_allowlist_required or rewritten != content
+    runtime_note_required = _needs_gemini_runtime_note(rewritten, bridge_command=bridge_command)
     return _inject_gemini_command_runtime_note(
         rewritten,
         bridge_command,
+        include_runtime_note=runtime_note_required,
         include_shell_allowlist=shell_allowlist_required,
     )
 

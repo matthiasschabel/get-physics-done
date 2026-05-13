@@ -140,7 +140,9 @@ def test_gemini_projection_uses_descriptor_public_prefix_for_runtime_note(monkey
         """---
 description: Prefix drift probe
 ---
-Body.
+```bash
+gpd status
+```
 """,
         surface_kind="command",
         path_prefix="",
@@ -150,6 +152,7 @@ Body.
 
     assert "/public:..." in projected
     assert "/gpd:..." not in projected
+    assert "python -m gpd status" in projected
 
 
 def test_gemini_projection_uses_descriptor_public_prefix_for_command_references(monkeypatch) -> None:

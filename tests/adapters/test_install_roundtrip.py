@@ -103,6 +103,14 @@ LOCAL_HELPER_TERM_RE = re.compile(
     r"\b(?:stage\s+field-access|phase\s+(?:checkpoint|closeout-readiness)|"
     r"validate\s+child-handoff|return\s+skeleton|apply-return-updates)\b"
 )
+GEMINI_RUNTIME_NOTE_BLOCK_RE = re.compile(
+    r"<gemini_runtime_notes>\n.*?</gemini_runtime_notes>\n*",
+    re.DOTALL,
+)
+GEMINI_SHELL_RUNTIME_NOTE_BLOCK_RE = re.compile(
+    r"<gemini_shell_runtime_notes>\n.*?</gemini_shell_runtime_notes>\n*",
+    re.DOTALL,
+)
 UNRESOLVED_INSTALL_SHAPE_MARKERS = (
     "{GPD_INSTALL_DIR}",
     "{GPD_CONFIG_DIR}",
@@ -200,6 +208,16 @@ def _assert_runtime_command_label_visible(text: str, *, runtime: str, command_na
 
 def _runtime_public_helper_labels(runtime: str) -> tuple[str, ...]:
     return tuple(get_adapter(runtime).format_command(stem) for stem in INTERNAL_HELPER_LABEL_STEMS)
+
+
+def _strip_gemini_runtime_note_blocks(prompt: str) -> str:
+    prompt = GEMINI_RUNTIME_NOTE_BLOCK_RE.sub("", prompt)
+    return GEMINI_SHELL_RUNTIME_NOTE_BLOCK_RE.sub("", prompt)
+
+
+def _gemini_prompt_needs_generic_runtime_note(prompt: str, *, bridge_command: str) -> bool:
+    note_free_prompt = _strip_gemini_runtime_note_blocks(prompt)
+    return bridge_command in note_free_prompt or LOCAL_HELPER_TERM_RE.search(note_free_prompt) is not None
 
 
 def _installed_workflow_text(target: Path, workflow_name: str) -> str:
@@ -712,7 +730,11 @@ def test_installed_smoke_command_runtime_note_tags_match_runtime_container(
 
         if runtime == "gemini":
             assert tag_count(prompt, "codex_runtime_notes") == (0, 0), label
-            assert tag_count(prompt, "gemini_runtime_notes") == (1, 1), label
+            bridge_command = _expected_local_bridge_for_runtime(runtime, target)
+            expected_runtime_note_count = (
+                (1, 1) if _gemini_prompt_needs_generic_runtime_note(prompt, bridge_command=bridge_command) else (0, 0)
+            )
+            assert tag_count(prompt, "gemini_runtime_notes") == expected_runtime_note_count, label
             expected_shell_note_count = (1, 1) if shell_fences(prompt) else (0, 0)
             assert tag_count(prompt, "gemini_shell_runtime_notes") == expected_shell_note_count, label
             continue

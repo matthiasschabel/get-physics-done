@@ -8,11 +8,9 @@ from gpd.adapters.runtime_catalog import iter_runtime_descriptors
 from gpd.core import prompt_diagnostics
 from tests.adapters.projection_budget_support import (
     COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
-    COMPACT_WORKFLOW_REFERENCE_TARGET_COMMANDS,
     NON_NATIVE_RUNTIME_PROJECTION_TARGETS,
     RUNTIME_PROJECTION_TARGETS,
     SELECTED_AGENT_PROJECTION_BUDGETS,
-    STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
     STAGED_PROJECTED_COMMAND_CHAR_BUDGET,
     TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET,
     TARGET_AGENT_PROJECTION_BUDGETS,
@@ -30,28 +28,76 @@ KNOWN_PROJECTION_HOTSPOTS = {
 }
 COMMAND_ONLY_RUNTIME_PRESSURE_BUDGETS = {
     "claude-code": {
-        "shell_fence_count": 28,
-        "shell_rewrite_count": 25,
-        "bridge_command_occurrences": 35,
-        "runtime_note_count": 2,
+        "shell_fence_count": 27,
+        "shell_rewrite_count": 22,
+        "bridge_command_occurrences": 32,
+        "runtime_note_count": 1,
     },
     "codex": {
-        "shell_fence_count": 32,
-        "shell_rewrite_count": 32,
-        "bridge_command_occurrences": 195,
-        "runtime_note_count": 3,
+        "shell_fence_count": 31,
+        "shell_rewrite_count": 31,
+        "bridge_command_occurrences": 186,
+        "runtime_note_count": 2,
     },
     "gemini": {
-        "shell_fence_count": 105,
-        "shell_rewrite_count": 95,
-        "bridge_command_occurrences": 325,
-        "runtime_note_count": 76,
+        "shell_fence_count": 95,
+        "shell_rewrite_count": 88,
+        "bridge_command_occurrences": 300,
+        "runtime_note_count": 58,
     },
     "opencode": {
-        "shell_fence_count": 32,
-        "shell_rewrite_count": 32,
-        "bridge_command_occurrences": 125,
-        "runtime_note_count": 3,
+        "shell_fence_count": 31,
+        "shell_rewrite_count": 31,
+        "bridge_command_occurrences": 115,
+        "runtime_note_count": 2,
+    },
+}
+ADDITIONAL_COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS = {
+    "export": {
+        "codex": {"chars": 5_400, "lines": 105},
+        "gemini": {"chars": 4_900, "lines": 90},
+        "opencode": {"chars": 5_200, "lines": 100},
+    },
+    "explain": {
+        "codex": {"chars": 6_150, "lines": 130},
+        "gemini": {"chars": 6_950, "lines": 130},
+        "opencode": {"chars": 6_550, "lines": 145},
+    },
+    "list-phase-assumptions": {
+        "codex": {"chars": 7_900, "lines": 155},
+        "gemini": {"chars": 7_400, "lines": 140},
+        "opencode": {"chars": 7_850, "lines": 160},
+    },
+}
+COMPACT_WORKFLOW_REFERENCE_PROJECTION_BUDGETS = {
+    **COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
+    **ADDITIONAL_COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
+}
+COMPACT_WORKFLOW_REFERENCE_PROJECTION_TARGET_COMMANDS = tuple(COMPACT_WORKFLOW_REFERENCE_PROJECTION_BUDGETS)
+STAGED_INIT_COMMAND_PROJECTION_RATCHET_BUDGETS = {
+    "plan-phase": {
+        "claude-code": 4_500,
+        "codex": 6_650,
+        "gemini": 7_150,
+        "opencode": 6_650,
+    },
+    "execute-phase": {
+        "claude-code": 3_450,
+        "codex": 5_900,
+        "gemini": 6_400,
+        "opencode": 5_850,
+    },
+    "new-project": {
+        "claude-code": 7_300,
+        "codex": 9_050,
+        "gemini": 9_550,
+        "opencode": 8_950,
+    },
+    "write-paper": {
+        "claude-code": 12_950,
+        "codex": 11_850,
+        "gemini": 12_300,
+        "opencode": 15_250,
     },
 }
 
@@ -72,9 +118,9 @@ def test_projection_budget_fixture_tracks_runtime_catalog() -> None:
 
     assert RUNTIME_PROJECTION_TARGETS == runtime_names
     assert NON_NATIVE_RUNTIME_PROJECTION_TARGETS == non_native_names
-    for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_BUDGETS.items():
+    for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_RATCHET_BUDGETS.items():
         assert set(budget_by_runtime) == set(runtime_names), command_name
-    for command_name, budget_by_runtime in COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS.items():
+    for command_name, budget_by_runtime in COMPACT_WORKFLOW_REFERENCE_PROJECTION_BUDGETS.items():
         assert set(budget_by_runtime) == set(non_native_names), command_name
 
 
@@ -176,11 +222,11 @@ def test_target_command_runtime_projection_diagnostics_stay_under_baseline_budge
     )
 
     items_by_name = {item.name: item for item in report.items if item.kind == "command"}
-    missing = sorted(set(STAGED_INIT_COMMAND_PROJECTION_BUDGETS) - set(items_by_name))
+    missing = sorted(set(STAGED_INIT_COMMAND_PROJECTION_RATCHET_BUDGETS) - set(items_by_name))
     assert missing == []
 
     shell_rewrites_by_runtime = dict.fromkeys(NON_NATIVE_RUNTIME_PROJECTION_TARGETS, 0)
-    for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_BUDGETS.items():
+    for command_name, budget_by_runtime in STAGED_INIT_COMMAND_PROJECTION_RATCHET_BUDGETS.items():
         item = items_by_name[command_name]
         metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
         assert set(RUNTIME_PROJECTION_TARGETS) <= set(metrics_by_runtime)
@@ -207,10 +253,10 @@ def test_compact_workflow_reference_command_diagnostics_stay_under_baseline_budg
     )
 
     items_by_name = {item.name: item for item in report.items if item.kind == "command"}
-    missing = sorted(set(COMPACT_WORKFLOW_REFERENCE_TARGET_COMMANDS) - set(items_by_name))
+    missing = sorted(set(COMPACT_WORKFLOW_REFERENCE_PROJECTION_TARGET_COMMANDS) - set(items_by_name))
     assert missing == []
 
-    for command_name, budget_by_runtime in COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS.items():
+    for command_name, budget_by_runtime in COMPACT_WORKFLOW_REFERENCE_PROJECTION_BUDGETS.items():
         item = items_by_name[command_name]
         metrics_by_runtime = {metric.runtime: metric for metric in item.runtime_projection}
         assert set(NON_NATIVE_RUNTIME_PROJECTION_TARGETS) <= set(metrics_by_runtime)

@@ -35,7 +35,7 @@ from gpd.adapters.install_utils import (
     hook_python_interpreter,
 )
 from gpd.hooks.install_metadata import assess_install_target
-from tests.adapters.projection_test_utils import runtime_bridge_command
+from tests.adapters.projection_test_utils import assert_compact_staged_command_shim, runtime_bridge_command
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -438,15 +438,15 @@ class TestRewriteGeminiShellWorkflowGuidance:
         content = (
             "```bash\n"
             "HEALTH_ERR=$(mktemp)\n"
-            "if echo \"$ARGUMENTS\" | grep -q \"\\-\\-fix\"; then\n"
-            "  HEALTH=$(gpd --raw health --fix 2>\"$HEALTH_ERR\")\n"
+            'if echo "$ARGUMENTS" | grep -q "\\-\\-fix"; then\n'
+            '  HEALTH=$(gpd --raw health --fix 2>"$HEALTH_ERR")\n'
             "  HEALTH_STATUS=$?\n"
             "else\n"
-            "  HEALTH=$(gpd --raw health 2>\"$HEALTH_ERR\")\n"
+            '  HEALTH=$(gpd --raw health 2>"$HEALTH_ERR")\n'
             "  HEALTH_STATUS=$?\n"
             "fi\n"
-            "HEALTH_STDERR=$(cat \"$HEALTH_ERR\")\n"
-            "rm -f \"$HEALTH_ERR\"\n"
+            'HEALTH_STDERR=$(cat "$HEALTH_ERR")\n'
+            'rm -f "$HEALTH_ERR"\n'
             "```"
         )
 
@@ -552,7 +552,7 @@ class TestGeminiCommandRuntimeNotes:
         assert "old runtime note" not in result
         assert "old shell note" not in result
 
-    def test_non_shell_command_prompt_omits_full_shell_allowlist(self) -> None:
+    def test_non_shell_command_prompt_omits_runtime_notes_when_body_has_no_bridge_need(self) -> None:
         bridge_command = "/runtime/gpd-cli"
         content = (
             "---\n"
@@ -564,11 +564,28 @@ class TestGeminiCommandRuntimeNotes:
 
         result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
 
-        assert "<gemini_runtime_notes>" in result
-        assert "Gemini runtime compatibility" in result
+        assert "<gemini_runtime_notes>" not in result
+        assert "Gemini runtime compatibility" not in result
+        assert "<gemini_shell_runtime_notes>" not in result
         assert "enforced shell-prefix allowlist" not in result
         assert "`git init`" not in result
         assert "`mkdir -p GPD`" not in result
+
+    def test_non_shell_command_prompt_keeps_runtime_note_for_local_helper_reference(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "---\n"
+            "name: gpd:status\n"
+            "description: Show project status\n"
+            "---\n"
+            "Inspect the local helper output from `gpd --raw status` before summarizing."
+        )
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert "<gemini_runtime_notes>" in result
+        assert "Gemini runtime compatibility" in result
+        assert "<gemini_shell_runtime_notes>" not in result
 
     def test_shell_command_prompt_keeps_full_shell_allowlist(self) -> None:
         bridge_command = "/runtime/gpd-cli"
@@ -587,6 +604,20 @@ class TestGeminiCommandRuntimeNotes:
         assert "If `run_shell_command` is denied by policy, stop and report the policy block" in result
         assert f"{bridge_command} status" in result
 
+    def test_static_policy_shell_prompt_keeps_allowlist_without_generic_runtime_note(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = "---\nname: gpd:init\ndescription: Initialize GPD directory\n---\n```bash\nmkdir -p GPD\n```\n"
+
+        result = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+
+        assert "<gemini_runtime_notes>" not in result
+        assert "<gemini_shell_runtime_notes>" in result
+        assert "enforced shell-prefix allowlist" in result
+        assert f"`{bridge_command}`" in result
+        assert "`git init`" in result
+        assert "`mkdir -p GPD`" in result
+        assert "```bash\nmkdir -p GPD\n```" in result
+
     def test_command_prompt_rendering_is_idempotent_for_projected_gemini_markdown(self) -> None:
         bridge_command = "/runtime/gpd-cli"
         content = "---\nname: gpd:status\ndescription: Show project status\n---\n```bash\ngpd status\n```\n"
@@ -597,6 +628,23 @@ class TestGeminiCommandRuntimeNotes:
         assert once == twice
         assert twice.count("<gemini_runtime_notes>") == 1
         assert twice.count("<gemini_shell_runtime_notes>") == 1
+
+    def test_command_prompt_rendering_keeps_note_free_projection_idempotent(self) -> None:
+        bridge_command = "/runtime/gpd-cli"
+        content = (
+            "---\n"
+            "name: gpd:status\n"
+            "description: Show project status\n"
+            "---\n"
+            "Summarize the current project state and ask exactly one question."
+        )
+
+        once = _render_gemini_command_prompt(content, bridge_command=bridge_command)
+        twice = _render_gemini_command_prompt(once, bridge_command=bridge_command)
+
+        assert once == twice
+        assert twice.count("<gemini_runtime_notes>") == 0
+        assert twice.count("<gemini_shell_runtime_notes>") == 0
 
     def test_rendered_shell_allowlist_matches_policy_prefixes(self) -> None:
         bridge_command = "/runtime/gpd-cli"
@@ -1136,10 +1184,29 @@ class TestInstall:
         assert prompt.count("<gemini_shell_runtime_notes>") == 1
         assert "enforced shell-prefix allowlist" in prompt
         assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in prompt
-        assert "staged_loading.required_init_fields" in prompt
-        assert "staged_loading.eager_authorities" in prompt
-        assert "staged_loading.must_not_eager_load" in prompt
-        assert "staged_loading.next_stages" in prompt
+        assert_compact_staged_command_shim(
+            prompt,
+            command_name="execute-phase",
+            first_stage="phase_bootstrap",
+            staged_loading_keys=(
+                "workflow_id",
+                "stage_id",
+                "order",
+                "required_init_fields",
+                "mode_paths",
+                "loaded_authorities",
+                "eager_authorities",
+                "conditional_authorities",
+                "must_not_eager_load",
+                "allowed_tools",
+                "writes_allowed",
+                "produced_state",
+                "next_stages",
+                "checkpoints",
+            ),
+            command_label="/gpd:execute-phase",
+            stage_count=15,
+        )
         assert len(prompt) < 20_000
 
     def test_install_preserves_existing_policy_paths_and_mcp_trust_choice(
@@ -1277,7 +1344,9 @@ class TestInstall:
         assert "PROJECT_CONTRACT_JSON" not in workflow_authority
         assert "PROJECT_CONTRACT_JSON" not in state_schema
         assert "PRE_CHECK=$(" not in workflow_authority
-        assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow_authority
+        assert (
+            f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow_authority
+        )
         assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" in workflow_authority
         assert f"{expected_bridge} --raw validate project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema
         assert f"{expected_bridge} state set-project-contract {_GEMINI_APPROVED_CONTRACT_PATH}" not in state_schema

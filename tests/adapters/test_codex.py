@@ -23,15 +23,20 @@ from gpd.adapters.codex import (
     _tracked_codex_generated_skill_dirs,
 )
 from gpd.adapters.install_utils import (
-    COMPACT_HELP_BRIDGE_SHIM_SENTINEL,
-    COMPACT_STAGED_COMMAND_SHIM_SENTINEL,
     COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL,
     compile_markdown_for_runtime,
     file_hash,
     hook_python_interpreter,
 )
 from gpd.registry import load_agents_from_dir
-from tests.adapters.projection_test_utils import runtime_bridge_command, single_runtime_note_block
+from tests.adapters.projection_test_utils import (
+    assert_compact_help_bridge_shim,
+    assert_compact_staged_command_shim,
+    assert_compact_workflow_reference_shim,
+    iter_staged_command_projection_cases,
+    runtime_bridge_command,
+    single_runtime_note_block,
+)
 from tests.adapters.review_contract_test_utils import (
     assert_review_contract_prompt_surface,
     compile_review_contract_fixture_for_runtime,
@@ -51,6 +56,16 @@ def adapter() -> CodexAdapter:
 
 def expected_codex_bridge(target: Path, *, is_global: bool = False, explicit_target: bool = False) -> str:
     return runtime_bridge_command("codex", target, is_global=is_global, explicit_target=explicit_target)
+
+
+def _staged_projection_case(gpd_root: Path, command_name: str):
+    cases = iter_staged_command_projection_cases(
+        commands_dir=gpd_root / "commands",
+        workflows_dir=gpd_root / "specs" / "workflows",
+    )
+    case = next((candidate for candidate in cases if candidate.command_name == command_name), None)
+    assert case is not None, f"{command_name} has no staged projection case"
+    return case
 
 
 def _assert_no_manifestless_gpd_artifacts(target: Path, skills_dir: Path) -> None:
@@ -458,10 +473,12 @@ class TestInstall:
         adapter.install(gpd_root, target, is_global=False, skills_dir=skills)
 
         content = (skills / "gpd-help" / "SKILL.md").read_text(encoding="utf-8")
+        expected_bridge = expected_codex_bridge(target, is_global=False)
         assert "slash-command" not in content
-        assert COMPACT_HELP_BRIDGE_SHIM_SENTINEL in content
-        assert 'command="$gpd-help"' in content
-        assert "--raw help" in content
+        assert_compact_help_bridge_shim(content, command_label="$gpd-help")
+        assert f"{expected_bridge} --raw help" in content
+        assert f"{expected_bridge} --raw help --all" in content
+        assert f"{expected_bridge} --raw help --command <name>" in content
         assert "$gpd-" in content
 
     def test_local_install_uses_repo_scoped_skills_dir_by_default(
@@ -916,21 +933,21 @@ class TestInstall:
         local_skills = tmp_path / ".agents" / "skills"
 
         expected_bridge = expected_codex_bridge(target, is_global=False)
+        case = _staged_projection_case(gpd_root, "execute-phase")
         skill = (local_skills / "gpd-execute-phase" / "SKILL.md").read_text(encoding="utf-8")
 
-        assert COMPACT_STAGED_COMMAND_SHIM_SENTINEL in skill
-        assert 'command="$gpd-execute-phase"' in skill
-        assert 'first_stage="phase_bootstrap"' in skill
-        assert "<!-- [included: execute-phase.md] -->" not in skill
-        assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in skill
+        assert_compact_staged_command_shim(
+            skill,
+            command_name=case.command_name,
+            first_stage=case.first_stage_id,
+            staged_loading_keys=case.staged_loading_keys,
+            command_label="$gpd-execute-phase",
+            stage_count=case.stage_count,
+        )
         assert "references/orchestration/context-budget.md" not in skill
         assert skill.count("<codex_runtime_notes>") == 1
         assert skill.count("<!-- Managed by Get Physics Done (GPD). -->") == 1
         assert f'{expected_bridge} --raw init execute-phase "$ARGUMENTS" --stage phase_bootstrap' in skill
-        assert "staged_loading.required_init_fields" in skill
-        assert "staged_loading.eager_authorities" in skill
-        assert "staged_loading.must_not_eager_load" in skill
-        assert "staged_loading.next_stages" in skill
         assert "## Command Requirements" in skill
         assert len(skill) < 20_000
 
@@ -985,9 +1002,11 @@ class TestInstall:
             else settings_skill
         )
 
-        assert COMPACT_HELP_BRIDGE_SHIM_SENTINEL in help_skill
-        assert "Run the matching bridge command and return its output verbatim." in help_skill
-        assert "--raw help --all" in help_skill
+        expected_bridge = expected_codex_bridge(target, is_global=False)
+        assert_compact_help_bridge_shim(help_skill, command_label="$gpd-help")
+        assert f"{expected_bridge} --raw help" in help_skill
+        assert f"{expected_bridge} --raw help --all" in help_skill
+        assert f"{expected_bridge} --raw help --command <name>" in help_skill
         assert "The normal terminal is where you install GPD, run `gpd --help`, and run" in tour_skill
         assert "`gpd resume` is the normal-terminal recovery step for reopening the right" in tour_skill
         assert "use `gpd --help` when you need the broader local CLI entrypoint" in settings_reference
@@ -1956,9 +1975,13 @@ description: Nested command include expansion regression
         adapter.install(gpd_root, target, skills_dir=skills)
 
         content = (skills / "gpd-complete-milestone" / "SKILL.md").read_text(encoding="utf-8")
-        assert COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL in content
+        assert_compact_workflow_reference_shim(
+            content,
+            workflow_id="complete-milestone",
+            command_label="$gpd-complete-milestone",
+            authority_suffixes=("get-physics-done/workflows/complete-milestone.md",),
+        )
         assert "{GPD_INSTALL_DIR}" not in content
-        assert "get-physics-done/workflows/complete-milestone.md" in content
         assert "get-physics-done/templates/milestone-archive.md" in content
         assert "<!-- [included: complete-milestone.md] -->" not in content
         assert "<!-- [included: milestone-archive.md] -->" not in content

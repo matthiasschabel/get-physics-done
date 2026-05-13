@@ -28,7 +28,6 @@ from tests.adapters.projection_budget_support import (
     RUNTIME_PROJECTION_TARGETS,
     SELECTED_AGENT_PROJECTION_BUDGETS,
     SELECTED_AGENT_PROJECTION_TARGETS,
-    STAGED_INIT_COMMAND_PROJECTION_BUDGETS,
     STAGED_INIT_TARGET_COMMANDS,
     STAGED_PROJECTED_COMMAND_CHAR_BUDGET,
     TARGET_AGENT_COMBINED_NON_NATIVE_PROJECTION_CHAR_BUDGET,
@@ -36,8 +35,9 @@ from tests.adapters.projection_budget_support import (
 )
 from tests.adapters.projection_test_utils import (
     PROTOCOL_BUNDLE_INLINE_CATALOG_MARKERS,
-    STAGED_SHIM_CONTRACT_FRAGMENTS,
     StagedCommandProjectionCase,
+    assert_compact_staged_command_shim,
+    assert_compact_workflow_reference_shim,
     assert_no_unresolved_include_markers,
     assert_protocol_bundle_jit_shape,
     assert_runtime_note_tag_count,
@@ -79,11 +79,80 @@ COMPACT_WORKFLOW_COMMANDS = (
     "audit-milestone",
     "debug",
     "review-knowledge",
+    "export",
+    "explain",
+    "list-phase-assumptions",
 )
+ADDITIONAL_COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS = {
+    "export": {
+        "codex": {"chars": 5_400, "lines": 105},
+        "gemini": {"chars": 4_900, "lines": 90},
+        "opencode": {"chars": 5_200, "lines": 100},
+    },
+    "explain": {
+        "codex": {"chars": 6_150, "lines": 130},
+        "gemini": {"chars": 6_950, "lines": 130},
+        "opencode": {"chars": 6_550, "lines": 145},
+    },
+    "list-phase-assumptions": {
+        "codex": {"chars": 7_900, "lines": 155},
+        "gemini": {"chars": 7_400, "lines": 140},
+        "opencode": {"chars": 7_850, "lines": 160},
+    },
+}
+COMPACT_WORKFLOW_REFERENCE_PROJECTION_BUDGETS = {
+    **COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
+    **ADDITIONAL_COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS,
+}
+STAGED_INIT_COMMAND_PROJECTION_RATCHET_BUDGETS = {
+    "plan-phase": {
+        "claude-code": 4_500,
+        "codex": 6_650,
+        "gemini": 7_150,
+        "opencode": 6_650,
+    },
+    "execute-phase": {
+        "claude-code": 3_450,
+        "codex": 5_900,
+        "gemini": 6_400,
+        "opencode": 5_850,
+    },
+    "new-project": {
+        "claude-code": 7_300,
+        "codex": 9_050,
+        "gemini": 9_550,
+        "opencode": 8_950,
+    },
+    "write-paper": {
+        "claude-code": 12_950,
+        "codex": 11_850,
+        "gemini": 12_300,
+        "opencode": 15_250,
+    },
+}
 COMPACT_WORKFLOW_STALE_WRAPPER_PHRASES = {
     "compare-experiment": ("Follow the included compare-experiment workflow.",),
     "dimensional-analysis": ("Follow the included dimensional-analysis workflow.",),
     "review-knowledge": ("Follow the included review-knowledge workflow exactly.",),
+    "export": ("Execute the included export workflow end-to-end.",),
+    "explain": ("Follow the included explain workflow end-to-end.",),
+    "list-phase-assumptions": ("Follow list-phase-assumptions.md workflow:",),
+}
+COMPACT_WORKFLOW_WRAPPER_CONSTRAINTS = {
+    "export": (
+        "Write files to `exports/`.",
+        "Do not commit generated exports unless `$ARGUMENTS` includes `--commit`.",
+    ),
+    "explain": (
+        "validate command-context explain",
+        "GPD/explanations/",
+        "stop and ask the user to rerun with an explicit concept/topic",
+    ),
+    "list-phase-assumptions": (
+        "Conversational output only (no file creation)",
+        "Phase number: $ARGUMENTS (required)",
+        'Prompt "What do you think?"',
+    ),
 }
 TARGET_FIRST_STAGE_BY_COMMAND = {
     "plan-phase": "phase_bootstrap",
@@ -641,7 +710,7 @@ def test_staged_init_target_command_projection_stays_under_baseline_budget(
     runtime: str,
 ) -> None:
     projected = _project_markdown(COMMANDS_DIR / f"{command_name}.md", runtime, is_agent=False)
-    budget = STAGED_INIT_COMMAND_PROJECTION_BUDGETS[command_name][runtime]
+    budget = STAGED_INIT_COMMAND_PROJECTION_RATCHET_BUDGETS[command_name][runtime]
     normalized_projected = normalized_runtime_bridge_text(projected)
 
     assert get_adapter(runtime).format_command(command_name) in projected
@@ -693,6 +762,20 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
         assert not has_staged_shim_sentinel(projected)
         return
 
+    init_lines = tuple(line.strip() for line in projected.splitlines() if f"--raw init {command_name}" in line)
+
+    assert raw_include_count(projected, f"workflows/{command_name}.md") == 0
+    assert f"<!-- [included: {command_name}.md] -->" not in projected
+    assert not has_help_bridge_shim_sentinel(projected)
+    assert any(f"--stage {case.first_stage_id}" in line for line in init_lines)
+    assert_compact_staged_command_shim(
+        projected,
+        command_name=command_name,
+        first_stage=case.first_stage_id,
+        staged_loading_keys=case.staged_loading_keys,
+        command_label=get_adapter(runtime).format_command(command_name),
+        stage_count=case.stage_count,
+    )
     expanded_workflow = expanded_workflow_authority_text(
         WORKFLOWS_DIR,
         command_name,
@@ -700,16 +783,6 @@ def test_runtime_projected_staged_commands_use_native_include_or_compact_stage_s
         path_prefix="/runtime/",
         runtime=runtime,
     )
-    init_lines = tuple(line.strip() for line in projected.splitlines() if f"--raw init {command_name}" in line)
-
-    assert raw_include_count(projected, f"workflows/{command_name}.md") == 0
-    assert f"<!-- [included: {command_name}.md] -->" not in projected
-    assert has_staged_shim_sentinel(projected)
-    assert not has_help_bridge_shim_sentinel(projected)
-    assert any(f"--stage {case.first_stage_id}" in line for line in init_lines)
-    assert f'first_stage="{case.first_stage_id}"' in projected
-    for fragment in (*STAGED_SHIM_CONTRACT_FRAGMENTS, *case.staged_loading_keys):
-        assert fragment in projected
     assert len(projected) <= STAGED_PROJECTED_COMMAND_CHAR_BUDGET
     assert len(projected) <= len(expanded_workflow) * 0.85
 
@@ -742,13 +815,16 @@ def test_hotspot_commands_use_native_include_or_compact_workflow_reference_shim(
 
     assert raw_include_count(projected, f"workflows/{command_name}.md") == 0
     assert f"<!-- [included: {command_name}.md] -->" not in projected
-    assert has_workflow_reference_shim_sentinel(projected)
     assert not has_staged_shim_sentinel(projected)
     assert not has_help_bridge_shim_sentinel(projected)
-    assert f'workflow="{command_name}"' in projected
-    assert f"workflows/{command_name}.md" in projected
-    assert "Read these installed authority files before acting:" in projected
-    budget = COMPACT_WORKFLOW_REFERENCE_COMMAND_PROJECTION_BUDGETS.get(command_name, {}).get(runtime)
+    assert_compact_workflow_reference_shim(
+        projected,
+        workflow_id=command_name,
+        command_label=get_adapter(runtime).format_command(command_name),
+    )
+    for fragment in COMPACT_WORKFLOW_WRAPPER_CONSTRAINTS.get(command_name, ()):
+        assert fragment in projected
+    budget = COMPACT_WORKFLOW_REFERENCE_PROJECTION_BUDGETS.get(command_name, {}).get(runtime)
     if budget is None:
         assert len(projected) <= len(expanded_workflow) * 0.85
     else:

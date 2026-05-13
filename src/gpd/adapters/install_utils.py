@@ -767,6 +767,24 @@ def strip_display_only_command_help_frontmatter(content: str) -> str:
 COMPACT_STAGED_COMMAND_SHIM_SENTINEL = "<gpd_staged_bootstrap_shim"
 COMPACT_HELP_BRIDGE_SHIM_SENTINEL = "<gpd_help_bridge_shim"
 COMPACT_WORKFLOW_COMMAND_SHIM_SENTINEL = "<gpd_workflow_reference_shim"
+_COMPACT_STAGED_PAYLOAD_CONTRACT_VERSION = "1"
+_COMPACT_STAGED_LOADING_REQUIRED_KEYS = (
+    "workflow_id",
+    "stage_id",
+    "order",
+    "required_init_fields",
+    "mode_paths",
+    "loaded_authorities",
+    "eager_authorities",
+    "conditional_authorities",
+    "must_not_eager_load",
+    "allowed_tools",
+    "writes_allowed",
+    "produced_state",
+    "next_stages",
+    "checkpoints",
+)
+_COMPACT_STAGED_LOADING_OPTIONAL_KEYS = ("init_spec_id",)
 _COMPACT_STAGED_COMMAND_NO_ARGUMENTS = frozenset(
     {
         "new-milestone",
@@ -795,7 +813,10 @@ _COMPACT_WORKFLOW_COMMAND_ALLOWLIST = frozenset(
         "discover",
         "discuss-phase",
         "error-propagation",
+        "explain",
+        "export",
         "limiting-cases",
+        "list-phase-assumptions",
         "numerical-convergence",
         "parameter-sweep",
         "progress",
@@ -891,6 +912,7 @@ def compact_staged_command_shim_for_runtime(
         workflow_id=workflow_id,
         public_label=public_label,
         first_stage_id=first_stage.id,
+        stage_count=len(manifest.stages),
         bridge_command=bridge_command or "gpd",
         protocol_bundle_jit_hint=_compact_staged_protocol_bundle_jit_hint(manifest),
     )
@@ -922,37 +944,43 @@ def _render_compact_staged_command_shim(
     workflow_id: str,
     public_label: str,
     first_stage_id: str,
+    stage_count: int,
     bridge_command: str,
     protocol_bundle_jit_hint: str = "",
 ) -> str:
     init_command = _compact_staged_init_command(workflow_id, first_stage_id, bridge_command=bridge_command)
     bundle_hint = f"\n\n{protocol_bundle_jit_hint}" if protocol_bundle_jit_hint else ""
+    required_keys = ", ".join(_COMPACT_STAGED_LOADING_REQUIRED_KEYS)
+    optional_keys = ", ".join(_COMPACT_STAGED_LOADING_OPTIONAL_KEYS)
     return (
-        f'{COMPACT_STAGED_COMMAND_SHIM_SENTINEL} command="{public_label}" first_stage="{first_stage_id}">\n'
-        "This non-native runtime cannot resolve command workflow includes natively, so this command prompt uses "
-        f"a compact staged loader instead of inlining `workflows/{workflow_id}.md`.\n\n"
+        f'{COMPACT_STAGED_COMMAND_SHIM_SENTINEL} command="{public_label}" workflow="{workflow_id}" '
+        f'first_stage="{first_stage_id}" stage_count="{stage_count}" '
+        f'payload_contract_version="{_COMPACT_STAGED_PAYLOAD_CONTRACT_VERSION}">\n'
+        f"source: `workflows/{workflow_id}.md` is loaded by staged init, not inlined.\n"
         f"{_runtime_label_rule_for_public_label(public_label, workflow_id)}\n\n"
-        "Load the active stage first:\n\n"
+        "```yaml\n"
+        "stage_loader:\n"
+        f"  workflow_id: {workflow_id}\n"
+        f"  first_stage_id: {first_stage_id}\n"
+        f"  stage_count: {stage_count}\n"
+        f"  payload_contract_version: {_COMPACT_STAGED_PAYLOAD_CONTRACT_VERSION}\n"
+        "  payload_root: payload.staged_loading\n"
+        f"  required_staged_loading_keys: [{required_keys}]\n"
+        f"  optional_staged_loading_keys: [{optional_keys}]\n"
+        "  raw_stage_loader_command: local_helper_bash_fence_below\n"
+        "  fail_closed_on: [nonzero_init, missing_staged_loading, missing_required_keys, unknown_next_stage]\n"
+        "stage_rules:\n"
+        "  required_init_fields: parse only fields named by the active staged_loading payload\n"
+        "  authorities: read eager_authorities only; keep must_not_eager_load lazy\n"
+        "  routing: use next_stages only; reload with --stage before later-stage work\n"
+        "  constraints: honor allowed_tools, writes_allowed, produced_state, checkpoints\n"
+        "```\n\n"
+        "raw_stage_loader_command:\n\n"
         "```bash\n"
         f"{init_command}\n"
         "```\n\n"
-        f"{_compact_staged_argument_note(workflow_id)} If the init command exits non-zero, stop and surface the "
-        "error.\n\n"
-        "Parse JSON and use the returned top-level keys as only the active-stage payload. Treat only "
-        "`payload.staged_loading` as the authority map:\n\n"
-        "Expected keys on `payload.staged_loading`: `workflow_id`, `stage_id`, `order`, "
-        "optional `init_spec_id`, `required_init_fields`, `mode_paths`, `loaded_authorities`, `eager_authorities`, "
-        "`conditional_authorities`, `must_not_eager_load`, `allowed_tools`, `writes_allowed`, "
-        "`produced_state`, `next_stages`, `checkpoints`.\n\n"
-        "- parse the fields named by `staged_loading.required_init_fields`;\n"
-        "- read only active `staged_loading.eager_authorities`;\n"
-        "- do not read `staged_loading.must_not_eager_load` until a later stage makes it eager;\n"
-        "- route only to stage IDs listed in `staged_loading.next_stages`;\n"
-        "- honor `staged_loading.allowed_tools`, `staged_loading.writes_allowed`, "
-        "`staged_loading.produced_state`, and `staged_loading.checkpoints`;\n"
-        "- reload with the same init command and `--stage <next-stage-id>` before acting on any later stage.\n\n"
-        "Do not guess missing payload fields or invent workflow state. If `staged_loading` or required fields "
-        "are missing, stop and report the malformed init payload."
+        f"{_compact_staged_argument_note(workflow_id)} Treat the returned JSON as the only active-stage payload; "
+        "do not guess missing fields or invent workflow state."
         f"{bundle_hint}\n"
         "</gpd_staged_bootstrap_shim>"
     )
@@ -1199,6 +1227,9 @@ def _rewrite_compact_workflow_followup_guidance(content: str) -> str:
         "Follow the included review-knowledge workflow exactly.",
         "Execute the included derive-equation workflow end-to-end.",
         "Execute the autonomous workflow end-to-end.",
+        "Execute the included export workflow end-to-end.",
+        "Follow the included explain workflow end-to-end.",
+        "Follow list-phase-assumptions.md workflow:",
     ):
         content = content.replace(phrase, replacement)
     return content

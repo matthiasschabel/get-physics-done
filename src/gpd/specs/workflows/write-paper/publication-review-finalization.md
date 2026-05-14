@@ -28,9 +28,7 @@ fi
 INIT="$PUBLICATION_REVIEW_INIT"
 ```
 
-Use `gpd --raw stage field-access write-paper --stage publication_review --style instruction`
-to confirm the manifest-selected publication-review fields before reading
-`PUBLICATION_REVIEW_INIT`.
+Apply `PUBLICATION_REVIEW_INIT.staged_loading.field_access_instruction` before reading `PUBLICATION_REVIEW_INIT`.
 </init>
 
 <pre_submission_review>

@@ -24,7 +24,7 @@ fi
 INIT="$TASK_AUTHORING_INIT"
 ```
 
-Use `gpd --raw stage field-access quick --stage reference_context --style instruction` and read only `TASK_AUTHORING_INIT.staged_loading.required_init_fields`.
+Follow `TASK_AUTHORING_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `TASK_AUTHORING_INIT`.
 
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md
 

@@ -15,14 +15,7 @@ Do not load this index as a stage authority.
 </stage_authorities>
 
 <stage_loading_rule>
-The public command includes only `workflows/new-milestone/milestone-bootstrap.md`.
-Each later stage must be reached by a staged reload:
-
-```bash
-gpd --raw init new-milestone --stage {stage_id}
-```
-
-Load only the active stage's `staged_loading.eager_authorities`. The first stage must not eagerly load survey, objective, roadmapper, template, UI, or runtime-delegation authorities.
+The public command includes only `workflows/new-milestone/milestone-bootstrap.md`; later stage loading is manifest-owned by the active staged payload. The first stage must not eagerly load survey, objective, roadmapper, template, UI, or runtime-delegation authorities.
 </stage_loading_rule>
 
 <compatibility_note>

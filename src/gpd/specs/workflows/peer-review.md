@@ -17,8 +17,7 @@ manifest `peer-review-stage-manifest.json` load the stage-specific files below:
 <boundary_summary>
 Bootstrap resolves target mode, contract-gate visibility, selected publication root,
 selected review root, manuscript root, and the active manuscript entrypoint. Later
-stages must be loaded with `gpd --raw init peer-review "$REVIEW_TARGET" --stage
-<stage_id>` before their authority is used.
+stage loading is manifest-owned.
 
 Artifact preflight, claim extraction, specialist review, proof/stage validation,
 final adjudication, and response routing are separated by stage authority. Stage ids

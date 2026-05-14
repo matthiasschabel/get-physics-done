@@ -56,7 +56,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access literature-review --stage review_bootstrap --style instruction` to confirm manifest-selected bootstrap fields. Read only keys in `BOOTSTRAP_INIT.staged_loading.required_init_fields`.
+Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`.
 `{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
 
 Topic gate:

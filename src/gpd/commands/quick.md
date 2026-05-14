@@ -38,9 +38,4 @@ summary files, not a custom STATE.md table.
 @GPD/STATE.md
 </context>
 
-<process>
-Follow the included first-stage quick authority exactly. After each staged reload, follow only `staged_loading.eager_authorities` for the active stage and do not read `staged_loading.must_not_eager_load` or the root workflow index.
-Preserve workflow gates by following the active stage authority: validation,
-task description, staged planner loading, planning, execution, preflight, state
-updates, commits, and quick-to-full promotion.
-</process>
+<process>Follow the included first-stage quick authority exactly; the active stage authority owns validation, task description, staged planner loading, planning, execution, preflight, state updates, commits, and quick-to-full promotion.</process>

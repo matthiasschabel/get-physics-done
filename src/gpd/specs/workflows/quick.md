@@ -14,10 +14,3 @@ The active authority is selected by `quick-stage-manifest.json`. Do not load thi
   Reference-aware quick authoring when project anchors, reference artifacts,
   literature/research-map files, or targeted source lookup are required.
 </stage_authority_index>
-
-<stage_loading_rule>
-The public command includes only `workflows/quick/task-bootstrap.md`. Later
-stages are loaded from the manifest-selected staged init payload. Use only the
-active stage's `staged_loading.eager_authorities`; never use this index as
-active authority.
-</stage_loading_rule>

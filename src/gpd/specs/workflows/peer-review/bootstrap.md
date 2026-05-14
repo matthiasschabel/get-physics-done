@@ -24,11 +24,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse only fields named by `staged_loading.required_init_fields`; keep
-`project_contract_gate`, `project_contract_load_info`, and
-`project_contract_validation` visible. Use
-`gpd --raw stage field-access peer-review --stage bootstrap --style instruction`
-only if the runtime needs key guidance.
+Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`; keep `project_contract_gate`, `project_contract_load_info`, and `project_contract_validation` visible.
 
 AUTONOMY=$(echo "$BOOTSTRAP_INIT" | gpd json get .autonomy --default balanced)
 RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)

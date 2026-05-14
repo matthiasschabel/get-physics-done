@@ -21,7 +21,7 @@ if [ $? -ne 0 ] || [ -z "$PRE_EXECUTION_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage pre_execution_specialists --style instruction` before reading `PRE_EXECUTION_INIT`; this stage is available only for explicit one-shot specialist handoff sites.
+Apply `PRE_EXECUTION_INIT.staged_loading.field_access_instruction` before reading `PRE_EXECUTION_INIT`; this stage is available only for explicit one-shot specialist handoff sites.
 
 Use this stage only at explicit one-shot specialist handoff sites. Do not recreate placeholder `task(...)` examples here, do not wait in place for user approval inside a child run, and do not treat a named specialist route as complete unless its later artifact gate passes.
 </step>

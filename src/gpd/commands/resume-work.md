@@ -30,5 +30,5 @@ Resume research from the selected project's canonical state.
 </execution_context>
 
 <process>
-Read the included resume-work bootstrap authority first. Later resume stages must be loaded only through `staged_loading.eager_authorities`.
+Read the included resume-work bootstrap authority first. Later resume stages are manifest-owned.
 </process>

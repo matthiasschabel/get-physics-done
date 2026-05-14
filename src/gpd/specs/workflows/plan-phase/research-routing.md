@@ -20,8 +20,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-# Confirm fields with: gpd --raw stage field-access plan-phase --stage research_routing --style instruction
-# Parse only the research_routing fields listed in INIT.staged_loading.required_init_fields before use.
+# Apply INIT.staged_loading.field_access_instruction before using this payload.
 ```
 
 ## 5. Handle Research
@@ -74,8 +73,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-# Confirm fields with: gpd --raw stage field-access plan-phase --stage planner_authoring --style instruction
-# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
+# Apply INIT.staged_loading.field_access_instruction before using this payload.
 ```
 </event>
 
@@ -255,6 +253,6 @@ Numerical phases need explicit experiment obligations, but plan-phase should not
 
 Scan for indicators such as "Monte Carlo", "simulation", "numerical", "finite-size", "convergence", "parameter sweep", "benchmark", "grid", "discretization", "timestep", and "sampling". In `--light` mode, keep the numerical protocol compact but still include the decisive convergence, uncertainty, benchmark, and forbidden-proxy obligations in the PLAN contract.
 
-Next, reload `gpd --raw init plan-phase "$PHASE" --stage planner_authoring` and read only that stage's `staged_loading.eager_authorities`.
+Next, reload `gpd --raw init plan-phase "$PHASE" --stage planner_authoring` and apply the active staged payload instructions.
 
 </process>

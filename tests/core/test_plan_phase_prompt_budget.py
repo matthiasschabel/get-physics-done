@@ -29,8 +29,8 @@ def test_plan_phase_command_stays_thin_and_only_eagerly_loads_the_workflow() -> 
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/planner-subagent-prompt.md" not in command_text
-    assert "staged_loading.eager_authorities" in command_text
-    assert "staged_loading.must_not_eager_load" in command_text
+    assert "Later stage loading is manifest-owned" in command_text
+    assert "do not duplicate the stage manifest here" in command_text
 
     expanded = expanded_prompt_text(
         COMMANDS_DIR / "plan-phase.md",

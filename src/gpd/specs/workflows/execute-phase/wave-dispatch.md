@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$WAVE_DISPATCH_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage wave_dispatch --style instruction` to confirm the manifest-selected wave-dispatch fields. Read only those keys from `WAVE_DISPATCH_INIT`; `WAVE_DISPATCH_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Apply `WAVE_DISPATCH_INIT.staged_loading.field_access_instruction` before reading `WAVE_DISPATCH_INIT`.
 </step>
 
 <step name="lock_wave_conventions">

@@ -25,16 +25,8 @@ Do not load this index as a stage authority.
 </stage_authorities>
 
 <stage_loading_rule>
-The public command includes only `workflows/write-paper/paper-bootstrap.md`.
-Each later stage must be reached by a staged reload:
-
-```bash
-gpd --raw init write-paper --stage {stage_id}
-```
-
-Load only the active stage's `staged_loading.eager_authorities`. The first stage
-must not eagerly load downstream authoring, bibliography, referee, review-panel,
-or response-routing authorities.
+The public command includes only `workflows/write-paper/paper-bootstrap.md`; later stage loading is manifest-owned, and each active payload supplies `staged_loading.field_access_instruction`.
+Keep downstream authoring, bibliography, referee, review-panel, and response-routing authorities lazy until their matching stage.
 </stage_loading_rule>
 
 <canonical_references>

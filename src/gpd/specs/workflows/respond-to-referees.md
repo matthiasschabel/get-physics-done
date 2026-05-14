@@ -19,14 +19,8 @@ Do not use this index as active stage authority. The public command and `respond
 </stage_authority_index>
 
 <stage_loading_rule>
-The public command includes only `workflows/respond-to-referees/bootstrap.md`.
-Each later stage must be reached by a staged reload:
-
-```bash
-gpd --raw init respond-to-referees --stage {stage_id}
-```
-
-Load only the active stage's `staged_loading.eager_authorities`. The bootstrap and report-triage stages must not eagerly load downstream response-authoring, paper-writer spawn, response-template, aggregate response-pair, or finalization authority.
+The public command includes only `workflows/respond-to-referees/bootstrap.md`; later stage loading is manifest-owned.
+Keep downstream response-authoring, paper-writer spawn, response-template, aggregate response-pair, and finalization authority lazy until the matching stage.
 </stage_loading_rule>
 
 <canonical_references>

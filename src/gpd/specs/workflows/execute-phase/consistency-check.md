@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$CONSISTENCY_CHECK_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage consistency_check --style instruction` before reading `CONSISTENCY_CHECK_INIT`.
+Apply `CONSISTENCY_CHECK_INIT.staged_loading.field_access_instruction` before reading `CONSISTENCY_CHECK_INIT`.
 </step>
 
 <step name="spawn_rapid_checker">

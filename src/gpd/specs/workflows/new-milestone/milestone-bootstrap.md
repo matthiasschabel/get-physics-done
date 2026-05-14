@@ -22,7 +22,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access new-milestone --stage milestone_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `INIT`; `INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Apply `INIT.staged_loading.field_access_instruction` before reading the bootstrap payload.
 
 **Mode-aware behavior:** supervised pauses before roadmap generation; balanced
 runs unless scope is ambiguous or conflicts; yolo skips optional survey but not
@@ -47,10 +47,7 @@ milestone scope only when `project_contract_gate.authoritative` is true, with
 `project_contract_load_info` and `project_contract_validation` kept visible as
 gate inputs.
 
-Treat init as staged:
-- Use this bootstrap init for milestone identity and contract gate state only.
-- Run a survey/objectives init before milestone scoping and treat that refresh as the source of truth for carry-forward reference intake, artifact snapshots, and prior-project file context.
-- Run a fresh late-stage init immediately before roadmapping and treat that later init as the source of truth for the final handoff.
+Treat init as staged: use this bootstrap init for milestone identity and contract gate state only; run survey/objectives init before milestone scoping; run a fresh late-stage init immediately before roadmapping.
 
 **If `roadmap_exists` is true:** Note that this milestone will replace
 `GPD/ROADMAP.md`.
@@ -72,7 +69,7 @@ When bootstrap routing is complete, reload `survey_objectives` with:
 SURVEY_INIT=$(gpd --raw init new-milestone --stage survey_objectives)
 ```
 
-Then load only that stage's `staged_loading.eager_authorities` before gathering goals, reading scoped reference artifacts, running optional scouts, or drafting objectives.
+Then apply `SURVEY_INIT.staged_loading.field_access_instruction` before gathering goals, reading scoped reference artifacts, running optional scouts, or drafting objectives.
 </stage_handoff>
 
 </process>

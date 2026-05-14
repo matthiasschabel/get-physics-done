@@ -15,7 +15,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access literature-review --stage completion_gate --style instruction` to confirm the manifest-selected completion fields. Read only those keys from `COMPLETION_GATE_INIT`; `COMPLETION_GATE_INIT.staged_loading.required_init_fields` is the runtime confirmation before presenting results.
+Apply `COMPLETION_GATE_INIT.staged_loading.field_access_instruction` before reading `COMPLETION_GATE_INIT` and presenting results.
 
 Local completion gate:
 

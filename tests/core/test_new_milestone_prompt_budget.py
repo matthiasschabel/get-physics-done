@@ -64,10 +64,10 @@ def test_new_milestone_command_stays_thin_and_only_eagerly_loads_the_workflow() 
     assert "@{GPD_INSTALL_DIR}/templates/project.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/requirements.md" not in command_text
     assert "The workflow handles the full milestone initialization flow:" not in command_text
-    assert "Read {GPD_INSTALL_DIR}/references/research/questioning.md only when you need guided milestone questioning." in command_text
-    assert "Read {GPD_INSTALL_DIR}/templates/project.md only when updating `GPD/PROJECT.md`." in command_text
-    assert "Read {GPD_INSTALL_DIR}/templates/requirements.md only when writing `GPD/REQUIREMENTS.md`." in command_text
-    assert "Read {GPD_INSTALL_DIR}/references/ui/ui-brand.md only when rendering branded completion or status blocks." in command_text
+    assert "Load local late authorities only at matching stages" in command_text
+    assert "questioning reference for guided milestone questions" in command_text
+    assert "project/requirements templates for those writes" in command_text
+    assert "UI brand for completion or status blocks" in command_text
 
 
 def test_new_milestone_command_budget_tracks_the_workflow_without_wrapper_bloat() -> None:
@@ -144,8 +144,8 @@ def test_new_milestone_planning_stages_use_handles_instead_of_embedded_bodies() 
     survey_source = SURVEY_AUTHORITY.read_text(encoding="utf-8")
     roadmap_source = ROADMAP_AUTHORITY.read_text(encoding="utf-8")
     assert "<files_to_read>" in survey_source
-    assert "stage field-access new-milestone --stage roadmap_authoring --style instruction" in roadmap_source
-    assert "generated helper output" in roadmap_source
+    assert "ROADMAPPER_INIT.staged_loading.field_access_instruction" in roadmap_source
+    assert "stage field-access new-milestone --stage roadmap_authoring --style instruction" not in roadmap_source
     assert "reference_artifact_files" in roadmap_source
     assert "Project content: {project_content}" not in survey_source
     assert "Project content: {project_content}" not in roadmap_source

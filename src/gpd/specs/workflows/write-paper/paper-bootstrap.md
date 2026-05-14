@@ -32,8 +32,7 @@ if [ -n "$PROJECT_ROOT" ]; then
 fi
 ```
 
-Parse bootstrap JSON using the generated helper output from `gpd --raw stage field-access write-paper --stage paper_bootstrap --style instruction`; keep `project_contract_gate` in view and do not duplicate the manifest's required-field list in prose.
-Keep `project_contract_gate`, load info, validation, and
+Apply `PAPER_BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `PAPER_BOOTSTRAP_INIT`. Keep `project_contract_gate`, load info, validation, and
 `effective_reference_intake` visible before authoritative-use decisions; treat
 the contract as authoritative only when `project_contract_gate.authoritative` is
 true.
@@ -183,6 +182,5 @@ are non-blocking, reload:
 OUTLINE_INIT=$(gpd --raw init write-paper --stage outline_and_scaffold -- "${WRITE_PAPER_ARGUMENTS:-}")
 ```
 
-Load the next stage authority from `staged_loading.eager_authorities`; do not
-carry this bootstrap authority as the active instruction surface.
+Start the next stage from `OUTLINE_INIT`; do not carry this bootstrap authority as the active instruction surface.
 </handoff>

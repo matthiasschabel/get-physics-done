@@ -3,7 +3,7 @@ Compatibility index for the staged execute-phase workflow.
 </purpose>
 
 <stage_authority_split>
-Do not load this root file as eager authority for any execute-phase stage. The command wrapper and stage manifest start at `workflows/execute-phase/phase-bootstrap.md`; later stages load only the stage-specific authorities named by `staged_loading.eager_authorities`.
+Do not load this root file as eager authority for any execute-phase stage. The command wrapper and stage manifest start at `workflows/execute-phase/phase-bootstrap.md`; active stage loading and field access are manifest-owned by the staged payload.
 
 Stage authorities:
 

@@ -17,12 +17,6 @@ Do not load this index as a stage authority.
 </stage_authorities>
 
 <stage_loading_rule>
-The public command includes only `workflows/literature-review/review-bootstrap.md`.
-Each later stage must be reached by a staged reload:
-
-```bash
-gpd --raw init literature-review "$ARGUMENTS" --stage {stage_id}
-```
-
-Load only the active stage's `staged_loading.eager_authorities`. The first stage must not eagerly load scoped reference artifacts, child handoffs, runtime delegation, citation audit, or completion-gate authority.
+The public command includes only `workflows/literature-review/review-bootstrap.md`; later stage loading is manifest-owned.
+Keep scoped reference artifacts, child handoffs, runtime delegation, citation audit, and completion-gate authority lazy until the matching stage.
 </stage_loading_rule>

@@ -34,10 +34,8 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access resume-work --stage resume_bootstrap --style instruction`
-as the field policy for `INIT`. `active_resume_result` is route context only;
-stale bodies stay unavailable.
+Apply `INIT.staged_loading.field_access_instruction` before reading `INIT`.
+`active_resume_result` is route context only; stale bodies stay unavailable.
 </field_access>
 
 Parse JSON semantically:

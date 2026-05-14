@@ -26,7 +26,7 @@ fi
 INIT="$TASK_AUTHORING_INIT"
 ```
 
-Do not choose `reference_context` just because `project_contract_gate` exists; contract-gate fields are already present in the default payload. Use `gpd --raw stage field-access quick --stage task_authoring --style instruction` and read only staged-loading fields.
+Follow `TASK_AUTHORING_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `TASK_AUTHORING_INIT`. Do not choose `reference_context` just because `project_contract_gate` exists; contract-gate fields are already present in the default payload.
 
 Spawn gpd-planner with the quick-mode context:
 
@@ -65,7 +65,7 @@ Read the file at GPD/STATE.md
 - Quick tasks should be atomic and self-contained
 - No literature review phase, no checker phase
 - Use the `staged_loading` fields from `TASK_AUTHORING_INIT` as the source of truth for the handoff instead of inventing a separate quick-only contract
-- Do not invent reference-runtime, protocol, literature/research-map, proof-review, or publication context that is not present in `TASK_AUTHORING_INIT.staged_loading.required_init_fields`.
+- Do not invent reference-runtime, protocol, literature/research-map, proof-review, or publication context that is not present in the active staged payload.
 - If `project_contract_load_info.status` starts with `blocked` or `project_contract_validation.valid` is false, return checkpoint instead of drafting a plan from guessed scope.
 - If the task is theorem-style or proof-bearing, return checkpoint and tell the user quick mode is blocked pending the full proof-redteam workflow.
 - Proof-obligation command block: theorem-style, lemma/corollary/proposition, or explicit `proof_obligation` work must route to the full proof-redteam workflow.

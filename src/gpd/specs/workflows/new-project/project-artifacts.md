@@ -24,9 +24,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Check `gpd --raw stage field-access new-project --stage project_artifacts --style instruction` before reading `PROJECT_ARTIFACTS_INIT`; read only `PROJECT_ARTIFACTS_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Later literature, roadmap, and convention authorities stay unloaded.
-</field_access>
+Follow `PROJECT_ARTIFACTS_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `PROJECT_ARTIFACTS_INIT`. Later literature, roadmap, and convention authorities stay unloaded.
 </bootstrap>
 
 <config_gate>

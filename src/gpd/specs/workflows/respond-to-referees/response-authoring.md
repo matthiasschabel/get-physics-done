@@ -42,10 +42,7 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access respond-to-referees --stage revision_planning --style instruction`
-as the field policy for `REVISION_PLANNING_INIT`. Preserve triage; do not draft
-evidence prose here.
+Apply `REVISION_PLANNING_INIT.staged_loading.field_access_instruction` before reading `REVISION_PLANNING_INIT`. Preserve triage; do not draft evidence prose here.
 </field_access>
 
 Load response-authoring before any response artifact or manuscript write:
@@ -65,10 +62,7 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access respond-to-referees --stage response_authoring --style instruction`
-as the field policy for `RESPONSE_AUTHORING_INIT`. Use hydrated bodies only for
-selected evidence-dependent comments.
+Apply `RESPONSE_AUTHORING_INIT.staged_loading.field_access_instruction` before reading `RESPONSE_AUTHORING_INIT`. Use hydrated bodies only for selected evidence-dependent comments.
 </field_access>
 
 Read `{GPD_INSTALL_DIR}/templates/paper/author-response.md`,

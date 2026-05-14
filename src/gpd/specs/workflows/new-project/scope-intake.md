@@ -22,9 +22,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Check `gpd --raw stage field-access new-project --stage scope_intake --style instruction` before reading `SCOPE_INIT`; read only `SCOPE_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. No model fields or downstream bodies are available.
-</field_access>
+Follow `SCOPE_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `SCOPE_INIT`. No model fields or downstream bodies are available.
 
 Setup is read-only. Do not initialize git, create `GPD/`, write state, or
 write/delete `GPD/init-progress.json`.

@@ -147,9 +147,8 @@ uses `GPD/publication/{subject_slug}/...`; `.../intake/` is provenance only.
 </context>
 
 <process>
-Follow the included first-stage authority exactly. After each staged reload, follow
-`staged_loading.eager_authorities` for the active stage and do not read
-`staged_loading.must_not_eager_load`. The root workflow index is only a staged-file map.
+Follow the included first-stage authority exactly. Later stage loading is
+manifest-owned. The root workflow index is only a staged-file map.
 </process>
 
 <success_criteria>

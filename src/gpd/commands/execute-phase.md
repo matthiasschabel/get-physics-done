@@ -37,7 +37,6 @@ Phase: $ARGUMENTS
 </arguments>
 
 <process>
-Read the included bootstrap authority first. Later rerun init and read only
-`staged_loading.eager_authorities`; never read
-`staged_loading.must_not_eager_load`.
+Read the included bootstrap authority first. Later stage loading and field
+access are manifest-owned by the staged workflow.
 </process>

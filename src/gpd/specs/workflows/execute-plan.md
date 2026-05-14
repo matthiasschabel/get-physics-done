@@ -31,13 +31,7 @@ fi
 
 This workflow assumes `execute-phase.md` already selected the plan and wave. It does not re-decide wave routing or specialist selection.
 
-Use manifest-backed field guidance instead of ad hoc extraction lists:
-
-```bash
-gpd --raw stage field-access execute-phase --stage phase_bootstrap --style instruction
-```
-
-Extract from init JSON: only the execution identity needed to choose and read the plan first: phase identity, `phase_dir`, selected-plan inventory (`plans`, `incomplete_plans`, counts), selected-plan metadata, execution settings (`executor_model`, `verifier_model`, `autonomy`, `review_cadence`, unattended/checkpoint bounds), repo settings, `project_contract_gate`, and surfaced contract gate flags. If `GPD/` is missing, error.
+Apply `INIT.staged_loading.field_access_instruction` before reading `INIT`. Until the selected plan is visible, use only the selected-plan identity and execution metadata surfaced by that instruction. If `GPD/` is missing, error.
 </step>
 
 <step name="identify_plan">
@@ -77,7 +71,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage phase_classification --style instruction`, then read only the manifest-selected contract, intake, convention, and state-integrity fields from this payload.
+Apply `CONTRACT_INIT.staged_loading.field_access_instruction` before reading `CONTRACT_INIT`.
 
 If `project_contract_load_info.status` starts with `blocked`, STOP and repair the stored contract before executing. Use the surfaced `project_contract_load_info.errors` / `warnings`; do not guess around them from prose-only context.
 
@@ -178,7 +172,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage wave_planning --style instruction`, then read only the selected bundle manifest/context, verifier extensions, active references, state-integrity fields, conventions, intermediate results, approximations, and propagated uncertainties needed by this segment.
+Apply `SEGMENT_INIT.staged_loading.field_access_instruction` before reading `SEGMENT_INIT`.
 
 If `selected_protocol_bundle_ids` is non-empty, treat `protocol_bundle_load_manifest` and `protocol_bundle_context` as the plan-execution specialized-loading guide for this plan. Read any bundle-listed core assets now, not during bootstrap. Preserve `protocol_bundle_verifier_extensions` for verifier-ready outputs and downstream summary/verification checks.
 
@@ -276,7 +270,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage aggregate_and_verify --style instruction`, then read only summary inventory, selected bundle obligations, live execution/gate state, resume state, contract fields, active reference intake, and state-integrity fields needed for finalization.
+Apply `SUMMARY_INIT.staged_loading.field_access_instruction` before reading `SUMMARY_INIT`.
 
 Keep `selected_protocol_bundle_ids`, `protocol_bundle_load_manifest`, `protocol_bundle_context`, and `protocol_bundle_verifier_extensions` visible through summary authoring when the selected bundle added decisive artifact or verifier-extension obligations.
 

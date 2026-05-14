@@ -44,7 +44,9 @@ REFERENCE_CONTENT_FIELD = "reference_artifacts_content"
 P8_AGENT_DATA_BOUNDARY_ROW_IDS = frozenset({"P8-AGENT-JIT-01", "P8-AGENT-JIT-04", "P8-AGENT-JIT-05"})
 P8_AGENT_STOP_ROW_IDS = frozenset({"P8-AGENT-JIT-02", "P8-AGENT-JIT-03", "P8-AGENT-JIT-06"})
 P8_EXPERIMENTAL_WORKFLOW_ROW_IDS = frozenset({"P8-WF-JIT-09"})
-P8_HANDLE_FIRST_WORKFLOW_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(7, 11))
+P8_HANDLE_FIRST_WORKFLOW_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(7, 11)) | {
+    "P8-WF-JIT-13"
+}
 P8_WORKFLOW_ROW_IDS = REQUIRED_P8_WORKFLOW_JIT_ROW_IDS | P8_EXPERIMENTAL_WORKFLOW_ROW_IDS
 
 
@@ -240,6 +242,81 @@ def test_lp_jit_04_uses_shared_handle_before_content_detector() -> None:
     assert score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 0
     assert score.behavior_score.metric_classes["artifact_handle_first_class"] == "handle_before_content"
     assert score.phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+
+
+def test_phase2_active_stage_field_access_row_scores_handle_only_without_reload(tmp_path: Path) -> None:
+    _setup_literature_review_reference_project(tmp_path)
+    row = _row_by_id("P8-WF-JIT-13")
+    score = score_phase7_live_like_row(row)
+    payload = init_literature_review(tmp_path, "Curvature flow bounds", stage="scope_locked")
+
+    assert score.passed
+    assert score.hard_budget_failures == ()
+    assert score.phase7_metric_counts["raw_reload_leakage_count"] == 0
+    assert score.phase7_metric_counts["content_hydration_before_selection_count"] == 0
+    assert score.phase7_metric_classes["instruction_injection_timing_class"] == "active_stage_only"
+    assert score.phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+    assert score.phase7_metric_classes["reload_loop_class"] == "no_reload_loop"
+    assert score.phase7_metric_classes["ergonomic_score_class"] == "green"
+
+    staged_loading = payload["staged_loading"]
+    assert _active_payload_fields(payload) == tuple(staged_loading["required_init_fields"])
+    assert staged_loading["workflow_id"] == "literature-review"
+    assert staged_loading["stage_id"] == "scope_locked"
+    assert "field_access_instruction" in staged_loading
+    assert "field_access_instruction" not in payload
+    assert REFERENCE_FILE_FIELD in payload
+    assert REFERENCE_CONTENT_FIELD not in payload
+
+
+def test_phase2_active_stage_field_access_row_rejects_reload_mechanics_and_body_first() -> None:
+    row = _row_by_id("P8-WF-JIT-13")
+    trace = FakePersonaTrace(
+        row_id="P8_WF_JIT_13_BAD_RELOAD_AND_BODY_FIRST",
+        persona_class=row.persona_class,
+        prompt_variant_class=row.prompt_variant_class,
+        turns=(
+            FakePersonaTurn(
+                turn_index=0,
+                speaker_class="assistant",
+                intent_class="stage_reload",
+                action_class="raw_reload_instruction_visible",
+                reload_surface_class="raw_stage_field_access_visible",
+                schema_surface_class="raw_reload_instruction_visible",
+            ),
+            FakePersonaTurn(
+                turn_index=1,
+                speaker_class="assistant",
+                intent_class="body_before_handle",
+                action_class="concrete_command",
+                physics_progress_class="reference_review",
+                content_hydration_class="content_loaded",
+            ),
+        ),
+    )
+
+    score = score_phase7_live_like_row(row, trace_override=trace)
+
+    assert not score.passed
+    assert score.phase7_metric_counts["raw_reload_leakage_count"] > 0
+    assert score.phase7_metric_counts["content_hydration_before_selection_count"] > 0
+    assert score.phase7_metric_classes["instruction_injection_timing_class"] in {
+        "raw_reload_loop",
+        "premature_content",
+    }
+    assert "raw_reload_leakage_count" in score.hard_budget_failures
+    assert "content_hydration_before_selection_count" in score.hard_budget_failures
+
+    source_score = score_phase7_live_like_row(
+        row,
+        source_text_override=(
+            "Reload with `gpd --raw stage field-access literature-review --stage scope_locked`; "
+            "then read {reference_artifacts_content} before selecting references."
+        ),
+    )
+    assert not source_score.passed
+    assert source_score.phase7_metric_counts["raw_reload_leakage_count"] > 0
+    assert source_score.phase7_metric_counts["content_hydration_before_selection_count"] > 0
 
 
 def test_p6_research_handle_row_rejects_content_before_handle_regression() -> None:
@@ -713,7 +790,7 @@ def test_p8_workflow_jit_rows_score_required_and_experimental_persona_classes() 
         "gap_reverification_loop consistency_checker_missing_return closeout_status_pressure "
         "p3_write_paper_section_first p3_respond_referee_issue_first p3_plan_phase_artifact_first "
         "p3_resume_stale_artifact_summary child_return_missing_or_malformed "
-        "autonomous_child_cycle_overreach_pressure".split()
+        "autonomous_child_cycle_overreach_pressure active_stage_field_access_handle_only".split()
     )
     assert all(score.passed for score in scores.values())
     assert all(score.hard_budget_failures == () for score in scores.values())

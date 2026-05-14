@@ -84,7 +84,7 @@ fi
 </step>
 
 <step name="handoff_to_finalize">
-After `gpd --raw validate arxiv-package --materialize` succeeds, reload `finalize` and read only that stage's eager authorities.
+After `gpd --raw validate arxiv-package --materialize` succeeds, reload `finalize` and start from its staged payload.
 </step>
 
 </process>

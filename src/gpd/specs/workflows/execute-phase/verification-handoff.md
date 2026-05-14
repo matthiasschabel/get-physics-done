@@ -31,7 +31,7 @@ if [ $? -ne 0 ] || [ -z "$VERIFICATION_HANDOFF_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage verification_handoff --style instruction`; read only manifest-owned bridge and handle fields.
+Apply `VERIFICATION_HANDOFF_INIT.staged_loading.field_access_instruction` before reading `VERIFICATION_HANDOFF_INIT`.
 
 `VERIFICATION_HANDOFF_INIT` must carry:
 

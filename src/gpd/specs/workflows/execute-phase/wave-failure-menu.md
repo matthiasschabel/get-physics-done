@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$WAVE_FAILURE_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage wave_failure_menu --style instruction` before reading `WAVE_FAILURE_INIT`.
+Apply `WAVE_FAILURE_INIT.staged_loading.field_access_instruction` before reading `WAVE_FAILURE_INIT`.
 </step>
 
 <step name="wave_failure_menu">

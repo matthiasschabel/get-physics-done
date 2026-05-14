@@ -24,9 +24,7 @@ fi
 INIT="$AUTHORING_INIT"
 ```
 
-Use `gpd --raw stage field-access write-paper --stage figure_and_section_authoring --style instruction`
-to confirm the manifest-selected authoring fields before reading
-`AUTHORING_INIT`.
+Apply `AUTHORING_INIT.staged_loading.field_access_instruction` before reading `AUTHORING_INIT`.
 
 This is a body-hydration stage: section drafting may use planning bodies and
 reference artifact content. It still does not need rendered

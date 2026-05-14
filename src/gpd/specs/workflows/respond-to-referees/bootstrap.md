@@ -43,9 +43,8 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access respond-to-referees --stage bootstrap --style instruction`
-as the field policy for `INIT`. Reference bodies stay unavailable.
+Apply `INIT.staged_loading.field_access_instruction` before reading `INIT`.
+Reference bodies stay unavailable.
 </field_access>
 
 For nested-cwd launches, use `project_root`, `selected_publication_root`,

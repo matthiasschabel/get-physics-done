@@ -14,7 +14,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access new-milestone --stage survey_objectives --style instruction` to confirm the manifest-selected survey/objectives fields. Read only those keys from `SURVEY_INIT`; `SURVEY_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Apply `SURVEY_INIT.staged_loading.field_access_instruction` before reading the survey/objectives payload.
 
 Treat `effective_reference_intake`, `contract_intake`, and `reference_artifact_files` from this survey/objectives init as binding carry-forward handles even when `project_contract` is empty or blocked.
 

@@ -21,9 +21,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Check `gpd --raw stage field-access new-project --stage completion --style instruction` before reading `COMPLETION_INIT`; read only `COMPLETION_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Summarize only after the chosen initialization path has landed.
-</field_access>
+Follow `COMPLETION_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `COMPLETION_INIT`. Summarize only after the chosen initialization path has landed.
 </bootstrap>
 
 <cleanup>

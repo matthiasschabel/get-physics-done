@@ -32,7 +32,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage wave_planning --style instruction`; read only manifest-selected keys.
+Apply `WAVE_PLANNING_INIT.staged_loading.field_access_instruction` before reading `WAVE_PLANNING_INIT`.
 </step>
 
 <step name="discover_and_group_plans">

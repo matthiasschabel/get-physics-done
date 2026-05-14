@@ -6,7 +6,7 @@ Create executable PLAN.md files for a phase through staged authorities. This roo
 
 ## Staged Authority Index
 
-Load exactly one active stage authority at a time from `plan-phase-stage-manifest.json`. The command wrapper starts with `workflows/plan-phase/phase-bootstrap.md`; later stages must be loaded from `staged_loading.eager_authorities` after the matching staged-init reload.
+Load exactly one active stage authority at a time from `plan-phase-stage-manifest.json`. The command wrapper starts with `workflows/plan-phase/phase-bootstrap.md`; later stage loading is manifest-owned by each active staged payload.
 
 | Order | Stage id | Active authority | Purpose | Next stage |
 | ---: | --- | --- | --- | --- |

@@ -18,13 +18,14 @@ PROMPT_KIND_BUDGETS = {
     "agent": {"lines": 6_400, "chars": 355_000},
     "workflow": {"lines": 15_300, "chars": 618_000},
 }
-STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 134_999}
+STAGE_FIRST_TURN_BUDGET = {"lines": 3_460, "chars": 134_287}
 # Phase 3 strict target uses <= assertions, so char caps are one below the
 # acceptance threshold.
-STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 103_999}
+STAGE_FIRST_TURN_ACTIVE_BUDGET = {"lines": 2_430, "chars": 103_532}
 STAGE_EAGER_CHAR_BUDGET = 855_000
-STAGE_SELECTED_INIT_FIELD_BUDGET = 2_499
-STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 14
+PHASE2_STAGE_EAGER_CHAR_BASELINE = 772_803
+STAGE_SELECTED_INIT_FIELD_BUDGET = 2_498
+STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET = 12
 REFERENCE_ARTIFACTS_CONTENT_SELECTION_BUDGET = 3
 STAGE_HIGH_PRESSURE_INIT_FIELD_BUDGET = 525
 STAGE_LIKELY_BULKY_INIT_FIELD_BUDGET = 525
@@ -118,6 +119,8 @@ PHASE1_REVIEW_CONTRACT_FRONTLOAD_ADVISORY_BUDGET = {
     "review_contract_frontload_char_count": 21_000,
 }
 PHASE1_STAGE_MECHANICS_PROSE_ADVISORY_BUDGET = 155
+PHASE2_STAGE_MECHANICS_PROSE_BASELINE = 150
+PHASE2_STAGE_MECHANICS_PROSE_BUDGET = 149
 PHASE1_MANIFEST_MUST_NOT_DUPLICATE_ADVISORY_BUDGETS = {
     "manifest_must_not_duplicate_entry_count": 0,
     "manifest_must_not_duplicate_stage_count": 0,
@@ -482,6 +485,12 @@ def test_phase1_pressure_counters_stay_within_advisory_budgets() -> None:
     stage_mechanics_count = _required_total_count(totals, "stage_mechanics_prose_count")
     stage_mechanics_rows = _stage_mechanics_prose_contributors(payload)
     assert stage_mechanics_count == len(stage_mechanics_rows)
+    assert stage_mechanics_count < PHASE2_STAGE_MECHANICS_PROSE_BASELINE, _format_phase1_budget_failure(
+        "stage_mechanics_prose_count",
+        stage_mechanics_count,
+        PHASE2_STAGE_MECHANICS_PROSE_BUDGET,
+        stage_mechanics_rows,
+    )
     assert stage_mechanics_count <= PHASE1_STAGE_MECHANICS_PROSE_ADVISORY_BUDGET, _format_phase1_budget_failure(
         "stage_mechanics_prose_count",
         stage_mechanics_count,
@@ -521,6 +530,12 @@ def test_staged_init_field_pressure_totals_do_not_grow_from_phase6_baseline() ->
         f"observed={stage_eager_chars} max={STAGE_EAGER_CHAR_BUDGET}; "
         "keep optional stage authorities conditional"
     )
+    stage_mechanics_count = _required_total_count(totals, "stage_mechanics_prose_count")
+    if stage_mechanics_count < PHASE2_STAGE_MECHANICS_PROSE_BASELINE:
+        assert stage_eager_chars < PHASE2_STAGE_EAGER_CHAR_BASELINE, (
+            "stage_diagnostics stage-eager chars did not decrease after Phase 2 markdown cuts: "
+            f"observed={stage_eager_chars} baseline={PHASE2_STAGE_EAGER_CHAR_BASELINE}"
+        )
     budgets = {
         "selected_init_field_count": STAGE_SELECTED_INIT_FIELD_BUDGET,
         "selected_init_content_field_count": STAGE_SELECTED_INIT_CONTENT_FIELD_BUDGET,

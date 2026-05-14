@@ -28,7 +28,7 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access respond-to-referees --stage report_triage --style instruction` before reading `REPORT_TRIAGE_INIT`; read only `REPORT_TRIAGE_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Select report/round before evidence bodies load.
+Apply `REPORT_TRIAGE_INIT.staged_loading.field_access_instruction` before reading `REPORT_TRIAGE_INIT`. Select report/round before evidence bodies load.
 </field_access>
 
 Apply `{GPD_INSTALL_DIR}/references/publication/publication-response-writer-handoff.md` from this stage exactly.

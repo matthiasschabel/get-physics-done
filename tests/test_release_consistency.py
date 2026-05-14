@@ -160,9 +160,10 @@ def _project_keywords(project: dict[str, object]) -> list[str]:
 
 def _project_spdx_license(project: dict[str, object]) -> str:
     classifiers = project.get("classifiers")
+    apache_classifier = "License :: OSI Approved :: Apache Software License"
     assert project.get("license") == {"file": "LICENSE"}
     assert isinstance(classifiers, list)
-    assert "License :: OSI Approved :: Apache Software License" in classifiers
+    assert apache_classifier in classifiers
     return "Apache-2.0"
 
 
@@ -300,6 +301,14 @@ def _assert_semantic_fragments(text: str, label: str, fragments: str | tuple[str
         text,
         semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label),
     )
+
+
+def _assert_ordered_fragments(text: str, label: str, fragments: tuple[str, ...]) -> None:
+    offset = 0
+    for fragment in fragments:
+        index = text.find(fragment, offset)
+        assert index >= 0, f"{label}: missing ordered fragment {fragment!r}"
+        offset = index + len(fragment)
 
 
 def _assert_fragment_count(text: str, label: str, fragment: str, *, expected_count: int) -> None:
@@ -1001,7 +1010,11 @@ def test_pypi_preflight_helper_records_already_published_version(
     assert status == "already-published"
     assert github_output.read_text(encoding="utf-8") == "status=already-published\n"
     assert calls == [("https://pypi.org/pypi/get-physics-done/1.2.3/json", 20.0)]
-    assert "get-physics-done 1.2.3 is already published on PyPI; skipping PyPI publish." in capsys.readouterr().out
+    _assert_semantic_fragments(
+        capsys.readouterr().out,
+        "pypi preflight already-published notice",
+        "get-physics-done 1.2.3 is already published on PyPI; skipping PyPI publish.",
+    )
 
 
 def test_pypi_preflight_helper_attempts_publish_when_probe_is_inconclusive(
@@ -1021,8 +1034,16 @@ def test_pypi_preflight_helper_attempts_publish_when_probe_is_inconclusive(
     captured = capsys.readouterr()
     assert status == "not-published"
     assert github_output.read_text(encoding="utf-8") == "status=not-published\n"
-    assert "Could not determine whether get-physics-done 1.2.3 is already on PyPI" in captured.out
-    assert "PyPI version check failed: temporary network failure" in captured.err
+    _assert_semantic_fragments(
+        captured.out,
+        "pypi inconclusive preflight stdout",
+        "Could not determine whether get-physics-done 1.2.3 is already on PyPI",
+    )
+    _assert_semantic_fragments(
+        captured.err,
+        "pypi inconclusive preflight stderr",
+        "PyPI version check failed: temporary network failure",
+    )
 
 
 def test_pypi_publish_status_helper_reuses_preflight_already_published_status(
@@ -1089,7 +1110,11 @@ def test_pypi_publish_status_helper_recovers_when_failed_publish_is_visible_on_p
 
     assert status == "recovered"
     assert github_output.read_text(encoding="utf-8") == "status=recovered\n"
-    assert "PyPI publish failed, but get-physics-done 1.2.3 is now published; continuing." in capsys.readouterr().out
+    _assert_semantic_fragments(
+        capsys.readouterr().out,
+        "pypi publish recovery notice",
+        "PyPI publish failed, but get-physics-done 1.2.3 is now published; continuing.",
+    )
 
 
 def test_pypi_publish_status_helper_fails_when_publish_and_recovery_probe_fail(
@@ -1259,8 +1284,13 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
             "does not match freshly stamped publish-date metadata",
         ),
     )
-    assert workflow.index("refreshing stamped metadata before returning its URL") < workflow.index(
-        'echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"'
+    _assert_ordered_fragments(
+        workflow,
+        "publish release refreshes stamped metadata before returning PR URL",
+        (
+            "refreshing stamped metadata before returning its URL",
+            'echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"',
+        ),
     )
     assert workflow.index("refresh_followup_branch") < workflow.index(
         'gh pr create --base "$DEFAULT_BRANCH" --head "$FOLLOWUP_BRANCH"'
@@ -1270,10 +1300,11 @@ def test_publish_release_workflow_uses_trusted_publishing_from_merged_release_co
         "publish release stamped validation checkout",
         ("ref: ${{ needs.build-release.outputs.release_sha }}", "Run stamped release validation"),
     )
-    assert workflow.index("Stamp actual publish date in release checkout") < workflow.index(
-        "Run stamped release validation"
+    _assert_ordered_fragments(
+        workflow,
+        "publish release validates stamped checkout before npm publish",
+        ("Stamp actual publish date in release checkout", "Run stamped release validation", "Publish to npm"),
     )
-    assert workflow.index("Run stamped release validation") < workflow.index("Publish to npm")
     _assert_machine_fragments(
         workflow,
         "publish release stamped validation pytest command",
@@ -1384,13 +1415,13 @@ def test_publish_release_followup_recreates_or_fails_when_branch_exists_without_
             'echo "::error::Follow-up branch ${FOLLOWUP_BRANCH} exists, but no open PR URL could be found',
         ),
     )
-    open_pr_refresh_index = branch_exists_block.index("refreshing stamped metadata before returning its URL")
+    open_pr_refresh_message = "refreshing stamped metadata before returning its URL"
+    open_pr_refresh_index = branch_exists_block.index(open_pr_refresh_message)
     no_pr_refresh_index = branch_exists_block.rindex("refresh_followup_branch")
     assert branch_exists_block.index('if [ -n "$PR_URL" ]; then') < open_pr_refresh_index
     assert open_pr_refresh_index < branch_exists_block.index('echo "pr_url=${PR_URL}" >> "$GITHUB_OUTPUT"')
-    assert (
-        branch_exists_block.index("restamping and updating the branch before recreating the PR") < no_pr_refresh_index
-    )
+    restamp_message = "restamping and updating the branch before recreating the PR"
+    assert branch_exists_block.index(restamp_message) < no_pr_refresh_index
     assert (
         no_pr_refresh_index
         < branch_exists_block.index('gh pr create --base "$DEFAULT_BRANCH" --head "$FOLLOWUP_BRANCH"')
@@ -1525,7 +1556,11 @@ def test_model_visible_command_note_does_not_depend_on_live_registry(monkeypatch
 
     note = model_visible_text.command_visibility_note()
 
-    assert "`agent` must match a built-in canonical agent label exactly" in note
+    _assert_semantic_fragments(
+        note,
+        "command visibility agent label exactness note",
+        "`agent` must match a built-in canonical agent label exactly",
+    )
     assert "gpd-planner" not in note
 
 
@@ -1825,7 +1860,7 @@ def test_human_author_check_allows_explicit_repository_automation_identities(tmp
     )
 
     assert result.returncode == 0
-    assert "Human author attribution check passed" in result.stdout
+    _assert_semantic_fragments(result.stdout, "human author hook success notice", "Human author attribution check passed")
 
 
 def test_human_author_commit_msg_hook_rejects_nonhuman_current_identity(tmp_path: Path) -> None:
@@ -1865,7 +1900,8 @@ def test_human_author_check_fails_closed_on_invalid_range(tmp_path: Path) -> Non
     )
 
     assert result.returncode == 1
-    assert "invalid git range missing-base..HEAD" in result.stderr
+    invalid_range_message = "invalid git range missing-base..HEAD"
+    assert invalid_range_message in result.stderr
 
 
 def test_release_test_checkout_fixture_copies_only_tracked_files(tmp_path: Path) -> None:
@@ -2209,7 +2245,11 @@ def test_stamp_publish_date_updates_citation_release_date_and_readme_year(tmp_pa
     readme = (tmp_path / "README.md").read_text(encoding="utf-8")
     assert "date-released: '2027-01-02'" in citation
     assert "year = {2027}" in readme
-    assert "Physical Superintelligence PBC (2027). Get Physics Done (GPD)" in readme
+    _assert_semantic_fragments(
+        readme,
+        "readme acknowledgement citation keeps PSI attribution",
+        "Physical Superintelligence PBC (2027). Get Physics Done (GPD)",
+    )
 
 
 def test_stamp_publish_date_reports_no_changes_when_release_date_already_matches(tmp_path: Path) -> None:

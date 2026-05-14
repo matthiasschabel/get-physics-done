@@ -12,13 +12,7 @@ The active authority is selected by `map-research-stage-manifest.json`. Do not l
 </stage_authority_index>
 
 <stage_loading_rule>
-The public command includes only `workflows/map-research/map-bootstrap.md`. Mapper fanout is reached with:
-
-```bash
-gpd --raw --cwd "$PROJECT_ROOT" init map-research --stage mapper_authoring
-```
-
-Load only the active stage's `staged_loading.eager_authorities`; never read `staged_loading.must_not_eager_load` or this root workflow index as active authority.
+The public command includes only `workflows/map-research/map-bootstrap.md`; mapper-authoring loading is manifest-owned by the active staged payload.
 </stage_loading_rule>
 
 <canonical_references>

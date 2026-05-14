@@ -12,13 +12,7 @@ The active authority is selected by `research-phase-stage-manifest.json`. Do not
 </stage_authority_index>
 
 <stage_loading_rule>
-The public command includes only `workflows/research-phase/phase-bootstrap.md`. The research handoff is reached with:
-
-```bash
-gpd --raw init research-phase "${phase_number}" --stage research_handoff
-```
-
-Load only the active stage's `staged_loading.eager_authorities`; never read `staged_loading.must_not_eager_load` or this root workflow index as active authority.
+The public command includes only `workflows/research-phase/phase-bootstrap.md`; research handoff loading is manifest-owned by the active staged payload.
 </stage_loading_rule>
 
 <canonical_references>

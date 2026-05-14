@@ -26,7 +26,7 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access respond-to-referees --stage finalize --style instruction` before reading `FINALIZE_INIT`; read only `FINALIZE_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Read exact response files before closeout.
+Apply `FINALIZE_INIT.staged_loading.field_access_instruction` before reading `FINALIZE_INIT`. Read exact response files before closeout.
 </field_access>
 
 **Commit all revision artifacts:**

@@ -52,7 +52,7 @@ if [ -z "$PROJECT_ROOT" ] || [ -z "$RESEARCH_MAP_DIR_ABS" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access map-research --stage map_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `BOOTSTRAP_INIT`; `BOOTSTRAP_INIT.staged_loading.required_init_fields` confirms them, including `project_contract_gate`.
+Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`; it is the canonical bootstrap field policy, including `project_contract_gate`.
 `{GPD_INSTALL_DIR}/references/orchestration/contract-authority-gate.md`
 
 Filesystem gate: use `PROJECT_ROOT` / `RESEARCH_MAP_DIR_ABS` from staged init for create, archive, verify, delete, or commit actions. Never target `GPD/research-map` relative to the launch cwd; nested launches still target the resolved project root.
@@ -142,7 +142,7 @@ Expected output files: `FORMALISM.md`, `REFERENCES.md`, `ARCHITECTURE.md`,
 Continue to spawn_agents.
 </step>
 <step name="handoff_to_mapper_authoring">
-When existing-map routing and directory setup are complete, reload `mapper_authoring` and read only that stage's eager authorities before spawning mapper agents.
+When existing-map routing and directory setup are complete, reload `mapper_authoring` before spawning mapper agents.
 
 ```bash
 MAPPER_AUTHORING_INIT=$(load_map_research_stage mapper_authoring)
@@ -152,7 +152,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access map-research --stage mapper_authoring --style instruction` to confirm the manifest-selected authoring fields. Then follow `workflows/map-research/mapper-authoring.md`; do not continue from bootstrap memory into mapper fanout.
+Apply `MAPPER_AUTHORING_INIT.staged_loading.field_access_instruction`, then follow `workflows/map-research/mapper-authoring.md`; do not continue from bootstrap memory into mapper fanout.
 </step>
 
 </process>

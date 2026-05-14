@@ -31,7 +31,7 @@ Reconcile `STATE.md` and `state.json` when they diverge.
 </execution_context>
 
 <process>
-Read the included sync-state bootstrap authority first. Later recovery, conflict-analysis, and reconcile stages must be loaded only through `staged_loading.eager_authorities`.
+Read the included sync-state bootstrap authority first. Later recovery, conflict-analysis, and reconcile stages are manifest-owned.
 </process>
 
 <success_criteria>

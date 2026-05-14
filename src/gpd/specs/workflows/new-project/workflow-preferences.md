@@ -29,9 +29,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Check `gpd --raw stage field-access new-project --stage workflow_preferences --style instruction` before reading `WORKFLOW_PREFS_INIT`; read only `WORKFLOW_PREFS_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Do not pull later project/literature/roadmap authorities forward.
-</field_access>
+Follow `WORKFLOW_PREFS_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `WORKFLOW_PREFS_INIT`. Do not pull later project/literature/roadmap authorities forward.
 
 If `GPD/config.json` already exists, do not rewrite it in this stage. Confirm
 the runtime-permission sync status if autonomy is known, then reload

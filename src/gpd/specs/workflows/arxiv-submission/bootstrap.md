@@ -3,7 +3,6 @@ Prepare a completed paper for arXiv submission.
 
 Stages: `bootstrap` -> `manuscript_preflight` -> `review_gate` -> `package` -> `finalize`.
 
-Executable stages use `gpd --raw init arxiv-submission --stage <stage_id>`.
 Bootstrap owns command-context, strict review-preflight, manuscript-root
 resolution, and arXiv-only routing. Later stages own build, review gate,
 package, and final checklist. Output: `arxiv-submission.tar.gz` under
@@ -150,9 +149,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Read only the active stage's `staged_loading.eager_authorities`, primarily
-`workflows/arxiv-submission/manuscript-preflight.md`. Do not continue from
-bootstrap memory into packaging or finalization.
+Start manuscript preflight from `MANUSCRIPT_PREFLIGHT_INIT`. Do not continue from bootstrap memory into packaging or finalization.
 </step>
 
 </process>

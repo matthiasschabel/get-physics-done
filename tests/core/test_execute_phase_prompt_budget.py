@@ -92,7 +92,9 @@ def test_execute_phase_command_stays_thin_and_only_eagerly_loads_bootstrap_autho
     assert "@{GPD_INSTALL_DIR}/templates/summary.md" not in command_text
     assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in command_text
     assert "Read the included bootstrap authority first." in command_text
-    assert "staged_loading.eager_authorities" in command_text
+    assert "Later stage loading and field" in command_text
+    assert "manifest-owned by the staged workflow" in command_text
+    assert "staged_loading.eager_authorities" not in command_text
 
 
 def test_execute_phase_stage_eager_budgets_stay_below_phase4_caps() -> None:

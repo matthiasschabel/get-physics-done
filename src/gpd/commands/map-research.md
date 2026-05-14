@@ -37,6 +37,5 @@ Project state is loaded by the workflow from the current workspace or its neares
 </context>
 
 <process>
-Follow the included map-research bootstrap authority. After staged reload, follow only `staged_loading.eager_authorities` for mapper authoring and artifact routing.
-Do not duplicate staged init, mapper fanout, or return routing here.
+Follow the included map-research bootstrap authority. Mapper authoring and artifact routing are manifest-owned by the active workflow stages; do not duplicate staged init, mapper fanout, or return routing here.
 </process>

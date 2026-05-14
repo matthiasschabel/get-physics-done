@@ -206,9 +206,10 @@ def test_plan_phase_reloads_each_stage_and_validates_only_fresh_plan_files() -> 
     source = _plan_phase_authority_text()
 
     assert "bind_plan_phase_init" not in source
-    assert "staged_loading.required_init_fields" in source
-    assert "staged field-access helper" in source
-    assert "gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction" in source
+    assert "staged_loading.required_init_fields" not in source
+    assert "BOOTSTRAP_INIT.staged_loading.field_access_instruction" in source
+    assert "INIT.staged_loading.field_access_instruction" in source
+    assert "gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction" not in source
     assert "--alias ALIAS=field" in source
     assert "shell variables parsed from an older stage" in source
     assert 'BOOTSTRAP_INIT=$(gpd --raw init plan-phase "$PHASE" --stage phase_bootstrap)' in source

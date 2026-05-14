@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$PROOF_CRITIC_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage proof_critic_dispatch --style instruction` before reading `PROOF_CRITIC_INIT`.
+Apply `PROOF_CRITIC_INIT.staged_loading.field_access_instruction` before reading `PROOF_CRITIC_INIT`.
 </step>
 
 <step name="dispatch_proof_critic">

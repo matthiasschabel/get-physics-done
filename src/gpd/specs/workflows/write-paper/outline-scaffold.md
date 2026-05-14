@@ -28,11 +28,7 @@ fi
 INIT="$OUTLINE_INIT"
 ```
 
-Use the generated helper output from
-`gpd --raw stage field-access write-paper --stage outline_and_scaffold --style instruction`
-as the field policy before reading `OUTLINE_INIT`. This stage is handle/status
-first; read specific project, manuscript, or reference files by handle only after
-the paper target above is selected.
+Apply `OUTLINE_INIT.staged_loading.field_access_instruction` before reading `OUTLINE_INIT`. This stage is handle/status-first; read specific project, manuscript, or reference files by handle only after the paper target above is selected.
 </init>
 
 <journal_formats>

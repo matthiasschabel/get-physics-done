@@ -25,7 +25,7 @@ if [ $? -ne 0 ] || [ -z "$EXECUTOR_DISPATCH_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage executor_dispatch --style instruction` to confirm the manifest-selected executor-dispatch fields. Read only those keys from `EXECUTOR_DISPATCH_INIT`; `EXECUTOR_DISPATCH_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Apply `EXECUTOR_DISPATCH_INIT.staged_loading.field_access_instruction` before reading `EXECUTOR_DISPATCH_INIT`.
 </step>
 
 <step name="pre_fanout_guard">

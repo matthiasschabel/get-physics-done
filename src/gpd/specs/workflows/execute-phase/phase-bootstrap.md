@@ -49,7 +49,7 @@ fi
 rm -f "$INIT_STDERR"
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage phase_bootstrap --style instruction`; read only those manifest-selected keys from `BOOTSTRAP_INIT`.
+Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`.
 
 **If `phase_found` is false:** Error -- phase directory not found.
 **If `plan_count` is 0:** Error -- no plans found in phase.

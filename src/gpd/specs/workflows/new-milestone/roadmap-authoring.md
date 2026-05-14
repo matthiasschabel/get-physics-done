@@ -32,9 +32,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use the generated helper output from
-`gpd --raw stage field-access new-milestone --stage roadmap_authoring --style instruction`
-as the field policy for `ROADMAPPER_INIT`.
+Apply `ROADMAPPER_INIT.staged_loading.field_access_instruction` as the field policy for the fresh roadmap payload.
 
 Use bootstrap init for milestone identity and contract gating. Use this
 late-stage init for the final handoff; do not reuse earlier survey/objective

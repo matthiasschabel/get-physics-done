@@ -19,13 +19,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Parse only fields named by `staged_loading.required_init_fields`. Use the manifest
-field names for `review_target_mode`, `resolved_review_target`,
-`selected_publication_root`, `selected_review_root`, `manuscript_root`,
-`manuscript_entrypoint`, `artifact_manifest_path`, `bibliography_audit_path`,
-`reproducibility_manifest_path`, `publication_blockers`,
-`project_contract_gate`, `derived_manuscript_reference_status`, and
-`derived_manuscript_proof_review_status`.
+Apply `PREFLIGHT_INIT.staged_loading.field_access_instruction` before reading `PREFLIGHT_INIT`. Keep review target mode, selected roots, manuscript paths, publication blockers, contract gate, and derived manuscript status visible.
 
 Apply the canonical manuscript-root publication preflight from the loaded
 manifest authority `{GPD_INSTALL_DIR}/templates/paper/publication-manuscript-root-preflight.md`.

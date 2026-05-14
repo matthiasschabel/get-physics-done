@@ -183,9 +183,7 @@ If no explicit target is supplied, the workflow may either use the current GPD p
 </context>
 
 <process>
-Follow the included bootstrap authority exactly. Reload later peer-review stages through
-`gpd --raw init peer-review "$REVIEW_TARGET" --stage <stage_id>` before using their
-stage-specific authorities.
+Follow the included bootstrap authority exactly. Later peer-review stage loading is manifest-owned.
 </process>
 
 <success_criteria>

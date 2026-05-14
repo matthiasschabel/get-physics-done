@@ -16,7 +16,9 @@ Do not skip contract-critical anchors.
 </shared_contract_floor>
 
 <field_access>
-Before `GAP_REPAIR_INIT`, run `gpd --raw stage field-access verify-work --stage gap_repair --style instruction`; the staged payload is the source of truth for planner/checker routing. Use only listed fields, and ignore stale init.
+Apply `GAP_REPAIR_INIT.staged_loading.field_access_instruction` before reading
+`GAP_REPAIR_INIT`; the staged payload is the source of truth for
+planner/checker routing.
 </field_access>
 
 <process>

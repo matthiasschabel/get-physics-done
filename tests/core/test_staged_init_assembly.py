@@ -104,10 +104,18 @@ def test_nested_field_access_instruction_does_not_change_top_level_payload_keys(
         manifest=manifest,
     )
 
-    assert tuple(payload) == ("base", "tail", "staged_loading")
-    assert set(payload) == {"base", "tail", "staged_loading"}
+    stage = manifest.stage("bootstrap")
+    assert tuple(payload) == (*stage.required_init_fields, "staged_loading")
+    assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
     assert "field_access_instruction" not in payload
-    assert payload["staged_loading"]["field_access_instruction"].startswith("Field access (demo.bootstrap):")
+    staged_loading = payload["staged_loading"]
+    assert [key for key in staged_loading if key == "field_access_instruction"] == ["field_access_instruction"]
+    assert (
+        staged_loading["field_access_instruction"]
+        == manifest.staged_loading_payload("bootstrap")["field_access_instruction"]
+    )
+    assert staged_loading["field_access_instruction"].startswith("Field access (demo.bootstrap):")
+    assert ", ".join(stage.required_init_fields) not in staged_loading["field_access_instruction"]
 
 
 def test_postprocessors_fill_fields_before_missing_field_detection(tmp_path: Path) -> None:

@@ -31,10 +31,3 @@ Do not load this index as a stage authority.
 - `completion` -> `workflows/new-project/completion.md`
   Final cleanup and next-step display.
 </stage_authorities>
-
-<stage_loading_rule>
-The public command includes only `workflows/new-project/scope-intake.md`.
-Later stages are loaded from the manifest-selected staged init payload. Use only
-the active stage's `staged_loading.eager_authorities`. This root is only a
-compatibility map and must not be used as executable workflow authority.
-</stage_loading_rule>

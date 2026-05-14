@@ -16,7 +16,7 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access resume-work --stage state_restore --style instruction` before reading `STATE_RESTORE_INIT`; read only `STATE_RESTORE_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use handles/integrity first; route stale or blocked state to repair.
+Apply `STATE_RESTORE_INIT.staged_loading.field_access_instruction` before reading `STATE_RESTORE_INIT`. Use handles/integrity first; route stale or blocked state to repair.
 </field_access>
 
 **machine_change_detection:** Compare the current hostname/platform with `state.json.continuation.machine.hostname` and `state.json.continuation.machine.platform`. If they differ, display the non-blocking machine-change notice from INIT and recommend rerunning the installer so runtime-local config stays current.

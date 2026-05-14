@@ -17,16 +17,8 @@ Do not load this index as a stage authority.
 </stage_authorities>
 
 <stage_loading_rule>
-The public command includes only `workflows/sync-state/sync-bootstrap.md`.
-Each later stage must be reached by a staged reload:
-
-```bash
-gpd --raw init sync-state --stage {stage_id}
-```
-
-Load only the active stage's `staged_loading.eager_authorities`. Bootstrap and
-backend repair stages must keep the state JSON schema lazy until a conditional
-manual schema-drift or backend validation-failure diagnosis path is selected.
+The public command includes only `workflows/sync-state/sync-bootstrap.md`; later stage loading is manifest-owned.
+Bootstrap and backend repair stages keep the state JSON schema lazy until a conditional manual schema-drift or backend validation-failure diagnosis path is selected.
 Raw state bodies are reserved for `conflict_analysis` read-only drift reporting;
 repair and validation stages rely on compact status fields plus backend repair
 commands.

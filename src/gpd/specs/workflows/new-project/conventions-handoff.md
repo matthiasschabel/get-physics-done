@@ -23,9 +23,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Check `gpd --raw stage field-access new-project --stage conventions_handoff --style instruction` before reading `CONVENTIONS_INIT`; read only `CONVENTIONS_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Do not revise requirements or roadmap structure here.
-</field_access>
+Follow `CONVENTIONS_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `CONVENTIONS_INIT`. Do not revise requirements or roadmap structure here.
 
 Do not require a `notation_model` init field. Resolve the concrete local model
 override inside this stage immediately before spawning:

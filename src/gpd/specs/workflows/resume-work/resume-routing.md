@@ -22,10 +22,7 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access resume-work --stage resume_routing --style instruction`
-as the field policy for `RESUME_ROUTING_INIT`. Pick one route from
-candidates/handles before body reads.
+Apply `RESUME_ROUTING_INIT.staged_loading.field_access_instruction` before reading `RESUME_ROUTING_INIT`. Pick one route from candidates/handles before body reads.
 </field_access>
 
 **Bounded execution segment detection:** If `active_resume_kind` is `bounded_segment`, `execution_resumable` is true, and `active_resume_pointer` is present, treat that bounded continuation as the primary resume target. The runtime ranks three recovery families into `resume_candidates`: a resumable live execution snapshot, a recorded handoff, and an interrupted-agent marker. If the live snapshot lacks a portable usable resume file, keep it visible only as advisory context. Do NOT invent additional candidates from plan files without summaries, auto-checkpoints, or other ad hoc checkpoints.

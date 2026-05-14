@@ -595,7 +595,7 @@ def test_respond_to_referees_workflow_uses_staged_init_without_inline_field_list
     assert "gpd --raw init respond-to-referees --stage bootstrap" in workflow
     assert "gpd --raw init phase-op --include config" not in workflow
     assert "respond-to-referees-stage-manifest.json" in root_index
-    assert "INIT.staged_loading.required_init_fields" in workflow
+    assert "INIT.staged_loading.field_access_instruction" in workflow
     assert "Parse JSON for: `commit_docs`, `state_exists`, `project_exists`" not in workflow
 
 

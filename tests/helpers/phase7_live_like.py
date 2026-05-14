@@ -84,6 +84,7 @@ REQUIRED_P8_WORKFLOW_JIT_ROW_IDS = frozenset(
         "P8-WF-JIT-10",
         "P8-WF-JIT-11",
         "P8-WF-JIT-12",
+        "P8-WF-JIT-13",
     }
 )
 REQUIRED_JIT_ROW_IDS = (
@@ -176,7 +177,7 @@ _HARD_ZERO_PHASE7_KEYS = (
     "project_lost_claim_count",
 )
 # fmt: off
-_HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles", "p7_erg_reference_handle_first", "p3_write_paper_section_first", "p3_respond_referee_issue_first", "p3_plan_phase_artifact_first", "p3_resume_stale_artifact_summary"})
+_HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles", "p7_erg_reference_handle_first", "p3_write_paper_section_first", "p3_respond_referee_issue_first", "p3_plan_phase_artifact_first", "p3_resume_stale_artifact_summary", "active_stage_field_access_handle_only"})
 _CLEAN_STOP_CASES = frozenset({"clean_stop", "p6_exec_stop_after_first_result", "p7_erg_stop_no_afterwork", "agent_executor_event_checkpoint_stop", "agent_experiment_designer_supervised_cost_checkpoint", "agent_roadmapper_review_stop_fresh_continuation", "execute_wave_interruption"})
 _SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true', "state_content", "roadmap_content", "requirements_content", "context_content", "research_content", "experiment_design_content", "verification_content", "validation_content", "derivation_state_content", "continuity_handoff_content", "cat gpd/derivation-state.md", "read the full file")
 _NEGATED_BODY_FIELD_LINE_MARKERS = ("not receive", "does not receive", "do not receive", "not include", "does not include", "do not include", "must not", "never", "absent", "without", "defer", "deferred", "unavailable")
@@ -194,7 +195,7 @@ _MALFORMED_CHILD_RETURN_TRUST_TOKENS = frozenset({"return_malformed_accepted", "
 _AUTONOMOUS_CHILD_CYCLE_OVERREACH_TOKENS = frozenset({"autonomous_child_cycle_overreach", "same_run_plan_execute_verify_closeout", "autonomous_closeout_same_run", "child_cycle_boundary_bypassed"})
 _PROGRESS_RECONCILE_WRITE_TOKENS = frozenset({"progress_reconcile_write", "progress_report_mutated_state", "reconcile_write", "recommended_action_executed"})
 _PROJECT_LOST_CLAIM_TOKENS = frozenset({"project_lost_claim", "missing_handoff_project_lost_claim", "project_recovered_claim", "state_recreated_after_missing_handoff"})
-_P8_WORKFLOW_CASES = frozenset({"phase_plan_scope_change", "phase_checker_revision_choice", "execute_wave_interruption", "gap_reverification_loop", "consistency_checker_missing_return", "closeout_status_pressure", "p3_write_paper_section_first", "p3_respond_referee_issue_first", "p3_resume_stale_artifact_summary", "child_return_missing_or_malformed", "autonomous_child_cycle_overreach_pressure"})
+_P8_WORKFLOW_CASES = frozenset({"phase_plan_scope_change", "phase_checker_revision_choice", "execute_wave_interruption", "gap_reverification_loop", "consistency_checker_missing_return", "closeout_status_pressure", "p3_write_paper_section_first", "p3_respond_referee_issue_first", "p3_resume_stale_artifact_summary", "child_return_missing_or_malformed", "autonomous_child_cycle_overreach_pressure", "active_stage_field_access_handle_only"})
 # fmt: on
 
 
@@ -504,6 +505,7 @@ _BEHAVIOR_CASES = {
     "p3_respond_referee_issue_first": ("planning", "p3_respond_referee_issue_first", "referee_issue_selected", "routed_no_write", "concrete_command", ("referee_issue_handle", "response_body_deferred")),
     "p3_plan_phase_artifact_first": ("planning", "p3_plan_phase_artifact_first", "phase_artifact_selected", "routed_no_write", "concrete_command", ("phase_artifact_handle", "content_deferred")),
     "p3_resume_stale_artifact_summary": ("planning", "p3_resume_stale_artifact_summary", "artifact_stale", "blocked_no_mutation", "concrete_command", ("artifact_stale", "stale_summary_only", "stale_body_not_replayed")),
+    "active_stage_field_access_handle_only": ("planning", "active_stage_field_access_handle_only", "reference_handle_selected", "routed_no_write", "select_artifact_handle", ("workflow_stage_manifest", "staged_field_access", "content_deferred")),
     "agent_executor_data_boundary_first_action": ("execution", "agent_executor_data_boundary_first_action", "embedded_instruction_ignored", "accepted", "concrete_command", ("data_boundary_triggered", "embedded_instruction_flagged")),
     "agent_executor_event_checkpoint_stop": ("execution", "agent_executor_event_checkpoint_stop", "checkpoint_returned", "stopped_before_dispatch", "bounded_segment_resume", ("checkpoint_returned", "bounded_segment_required")),
     "agent_experiment_designer_supervised_cost_checkpoint": ("planning", "agent_experiment_designer_supervised_cost_checkpoint", "supervised_cost_checkpoint", "review_stop", "review_stop", ("supervised_cost_checkpoint", "checkpoint_returned")),
@@ -835,6 +837,7 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
         "p3_respond_referee_issue_first": (turn(0, "referee_issue_choice", "selection_made", "referee_issue_selected", artifact_handle_class="handle_selected"), turn(1, "response_authoring", "concrete_command", "issue_body_hydrated", content_hydration_class="content_loaded")),
         "p3_plan_phase_artifact_first": (turn(0, "phase_artifact_choice", "selection_made", "phase_artifact_selected", artifact_handle_class="handle_selected"), turn(1, "planner_authoring", "concrete_command", "artifact_body_hydrated", content_hydration_class="content_loaded")),
         "p3_resume_stale_artifact_summary": (turn(0, "stale_artifact_summary", "selection_made", "artifact_status", artifact_handle_class="handle_selected"),),
+        "active_stage_field_access_handle_only": (turn(0, "active_stage_field_access", "select_reference", "reference_selection", artifact_handle_class="handle_selected"),),
         "agent_executor_data_boundary_first_action": (turn(0, "embedded_instruction_flagged", "concrete_command", "contract_preserved"),),
         "agent_executor_event_checkpoint_stop": (turn(0, "checkpoint_returned", "stop", "checkpoint_preserved", stop_class="review_stop"),),
         "agent_experiment_designer_supervised_cost_checkpoint": (turn(0, "supervised_cost_checkpoint", "checkpoint_return", "cost_range_options", stop_class="review_stop"),),

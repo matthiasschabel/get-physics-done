@@ -34,10 +34,9 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access verify-work --stage inventory_build --style instruction`
-as the field policy for `INVENTORY_BUILD_INIT`. Use reference/citation handles
-without inlining rendered prose or bodies.
+Apply `INVENTORY_BUILD_INIT.staged_loading.field_access_instruction` before
+reading `INVENTORY_BUILD_INIT`. Use reference/citation handles without inlining
+rendered prose or bodies.
 </field_access>
 
 - If it names a benchmark, prior artifact, or must-read reference, verification must explicitly check it or report why it could not.
@@ -152,10 +151,9 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access verify-work --stage interactive_validation --style instruction`
-as the field policy for `INTERACTIVE_VALIDATION_INIT`. Session-overlay writes
-stay report-schema bounded.
+Apply `INTERACTIVE_VALIDATION_INIT.staged_loading.field_access_instruction`
+before reading `INTERACTIVE_VALIDATION_INIT`. Session-overlay writes stay
+report-schema bounded.
 </field_access>
 
 Keep the session overlay frontmatter compatible with the authoritative verification report.

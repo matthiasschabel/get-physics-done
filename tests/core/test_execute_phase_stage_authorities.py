@@ -256,8 +256,10 @@ def test_execute_phase_command_bootstraps_only_first_stage_authority() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/execute-phase/phase-bootstrap.md" in command
     assert "@{GPD_INSTALL_DIR}/workflows/execute-phase.md" not in command
-    assert "staged_loading.eager_authorities" in command
-    assert "staged_loading.must_not_eager_load" in command
+    assert "Later stage loading and field" in command
+    assert "manifest-owned by the staged workflow" in command
+    assert "staged_loading.eager_authorities" not in command
+    assert "staged_loading.must_not_eager_load" not in command
 
 
 def test_execute_phase_bootstrap_defers_late_authorities() -> None:

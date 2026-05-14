@@ -26,8 +26,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-# Confirm fields with: gpd --raw stage field-access plan-phase --stage planner_authoring --style instruction
-# Parse only the planner_authoring fields listed in INIT.staged_loading.required_init_fields before use.
+# Apply INIT.staged_loading.field_access_instruction before using this payload.
 ```
 
 ## 8. Spawn gpd-planner Agent
@@ -149,6 +148,6 @@ Before continuing, rerun the planner `child_gate`. If the planner continuation c
 
 Only after the planner returns `completed` should the workflow advance to checker review.
 
-Next, reload `gpd --raw init plan-phase "$PHASE" --stage checker_revision` and read only that stage's `staged_loading.eager_authorities`.
+Next, reload `gpd --raw init plan-phase "$PHASE" --stage checker_revision` and apply the active staged payload instructions.
 
 </process>

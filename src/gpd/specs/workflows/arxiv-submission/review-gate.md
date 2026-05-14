@@ -37,7 +37,7 @@ Do not mix round suffixes across review artifacts, response artifacts, or manusc
 </step>
 
 <step name="handoff_to_package">
-After review-gate clearance passes, reload `package` and read only that stage's eager authorities.
+After review-gate clearance passes, reload `package` and start from its staged payload.
 </step>
 
 </process>

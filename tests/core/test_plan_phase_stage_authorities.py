@@ -41,8 +41,8 @@ def test_plan_phase_command_bootstraps_only_first_stage_authority() -> None:
 
     assert "@{GPD_INSTALL_DIR}/workflows/plan-phase/phase-bootstrap.md" in command
     assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" not in command
-    assert "staged_loading.eager_authorities" in command
-    assert "staged_loading.must_not_eager_load" in command
+    assert "Later stage loading is manifest-owned" in command
+    assert "do not duplicate the stage manifest here" in command
 
 
 def test_plan_phase_bootstrap_defers_late_authorities() -> None:
@@ -125,7 +125,7 @@ def test_research_routing_uses_routing_slice_until_route_or_handoff_requires_aut
     handoff_context = '<event name="research_handoff_context_needed">'
 
     assert routing_reload in research
-    assert "gpd --raw stage field-access plan-phase --stage research_routing --style instruction" in research
+    assert "INIT.staged_loading.field_access_instruction" in research
     assert research.index(routing_reload) < research.index(route_decision)
     assert research.index(route_decision) < research.index(handoff_context)
     assert research.index(handoff_context) < research.index(authoring_reload)

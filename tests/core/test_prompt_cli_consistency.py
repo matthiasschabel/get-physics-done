@@ -879,7 +879,11 @@ def test_plan_phase_prompt_is_a_thin_dispatch_shell() -> None:
     assert "@{GPD_INSTALL_DIR}/workflows/plan-phase.md" not in command
     assert "@{GPD_INSTALL_DIR}/templates/plan-contract-schema.md" not in command
     assert "@{GPD_INSTALL_DIR}/references/ui/ui-brand.md" not in command
-    assert "staged_loading.eager_authorities" in command
+    _assert_semantic_fragments(
+        command,
+        "plan-phase wrapper delegates later stage loading to manifest authorities",
+        ("Later stage loading is manifest-owned by the workflow stage authorities",),
+    )
     assert "agent: gpd-planner" in command
     _assert_semantic_absent(
         command,

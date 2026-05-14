@@ -134,7 +134,7 @@ def test_new_project_prompt_surfaces_the_canonical_contract_schema_for_project_c
     assert "project_contract_load_info" in new_project_text
     assert "project_contract_validation" in new_project_text
 
-    assert "staged_loading.required_init_fields" in new_project_text
+    assert "staged_loading.field_access_instruction" in new_project_text
     assert "Parse JSON for:" not in scope_intake_text
     assert tuple(
         field

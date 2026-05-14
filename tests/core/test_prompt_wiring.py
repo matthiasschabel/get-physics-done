@@ -784,16 +784,28 @@ def test_plan_phase_applies_planner_roadmap_updates_in_orchestrator() -> None:
 
 def test_plan_phase_uses_manifest_owned_staged_init_access() -> None:
     plan_phase = _workflow_authority_text("plan-phase")
+    manifest = load_workflow_stage_manifest("plan-phase")
 
     _assert_workflow_calls_staged_init_for_manifest_stages("plan-phase", plan_phase)
     _f(plan_phase, "plan-phase staged init manifest access", "bind_plan_phase_init")
+    assert all(
+        "project_contract_gate" in manifest.stage(stage_id).required_init_fields
+        for stage_id in ("phase_bootstrap", "checker_revision")
+    )
+    _assert_prompt_concepts(
+        plan_phase,
+        {
+            "manifest owns active field access": (
+                "Stage authorities and the manifest own required fields",
+                "later stage loading is manifest-owned",
+            ),
+        },
+        context="plan-phase staged init manifest access",
+    )
     _mf(
         plan_phase,
-        "gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction",
-        "gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction",
         'gpd --raw init plan-phase "$PHASE" --stage planner_authoring',
         'gpd --raw init plan-phase "$PHASE" --stage checker_revision',
-        "generated checker-revision field-access helper output",
         context="plan-phase staged init manifest access",
     )
 
@@ -2141,9 +2153,10 @@ def test_new_project_wiring_mentions_contract_persistence_and_contract_first_dow
         "gpd state set-project-contract",
         "gpd --raw validate project-contract - --mode approved",
         "gpd state set-project-contract -",
-        "staged_loading.required_init_fields",
         context="new-project contract persistence wiring",
     )
+    scope_intake_context = "new-project scope-intake active-stage field access"
+    _sf(scope_intake_text, "SCOPE_INIT.staged_loading.field_access_instruction", context=scope_intake_context)
     _ff(
         workflow_text,
         "/tmp/gpd-project-contract.json",
@@ -5114,7 +5127,6 @@ def test_staged_publication_and_quick_workflow_prompts_match_executable_init_pat
     )
     _mf(
         arxiv_workflow,
-        "gpd --raw init arxiv-submission --stage <stage_id>",
         "gpd --raw init arxiv-submission --stage bootstrap",
         "gpd --raw validate command-context arxiv-submission",
         "gpd --raw validate review-preflight arxiv-submission",

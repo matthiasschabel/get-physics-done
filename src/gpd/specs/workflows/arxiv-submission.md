@@ -18,16 +18,8 @@ The active authority is selected by `arxiv-submission-stage-manifest.json`. Do n
 </stage_authority_index>
 
 <stage_loading_rule>
-The public command includes only `workflows/arxiv-submission/bootstrap.md`. Later stages are reached through staged reloads:
-
-```bash
-gpd --raw init arxiv-submission --stage manuscript_preflight -- "$ARGUMENTS"
-gpd --raw init arxiv-submission --stage review_gate -- "$ARGUMENTS"
-gpd --raw init arxiv-submission --stage package -- "$ARGUMENTS"
-gpd --raw init arxiv-submission --stage finalize -- "$ARGUMENTS"
-```
-
-Load only the active stage's `staged_loading.eager_authorities`; never read `staged_loading.must_not_eager_load` or this root workflow index as active authority.
+The public command includes only `workflows/arxiv-submission/bootstrap.md`; later stage loading is manifest-owned.
+Never read this root workflow index as active authority.
 </stage_loading_rule>
 
 <canonical_references>

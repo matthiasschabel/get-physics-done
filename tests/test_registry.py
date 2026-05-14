@@ -1121,7 +1121,7 @@ class TestParseCommandFile:
 
         assert "project-contract-schema.md" in command_text
         assert "project-contract-grounding-linkage.md" in command_text
-        assert "staged_loading.eager_authorities" in command_text
+        assert "Later stage loading is manifest/stage-owned" in command_text
         assert "new-project-stage-manifest.json" not in command_text
         assert "<!-- [included:" not in command_text
         assert "<!-- [end included] -->" not in command_text
@@ -1129,7 +1129,7 @@ class TestParseCommandFile:
     def test_new_project_command_source_stays_prompt_budget_thin(self) -> None:
         command_text = NEW_PROJECT_COMMAND_PATH.read_text(encoding="utf-8")
 
-        assert "staged_loading.eager_authorities" in command_text
+        assert "Later stage loading is manifest/stage-owned" in command_text
         assert "new-project-stage-manifest.json" not in command_text
         assert "conditional_authorities" not in command_text
 
@@ -2247,7 +2247,7 @@ class TestRegistryPromptIncludeInlining:
         assert skill.source_kind == "command"
         assert "Stage id: `session_router`." in skill.content
         assert "Do not assume reference ledgers," in skill.content
-        assert "protocol bundles, or report schemas" in skill.content
+        assert "bundles, or report schemas" in skill.content
         for fragment in durable_fragments:
             assert fragment not in skill.content
             assert fragment in inventory_stage

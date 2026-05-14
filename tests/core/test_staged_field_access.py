@@ -140,6 +140,20 @@ def _field_access_command(workflow_id: str, stage_id: str) -> str:
     return f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction"
 
 
+def _assert_instruction_omits_full_selected_field_inventory(
+    instruction_text: str, selected_fields: tuple[str, ...]
+) -> None:
+    if len(selected_fields) < 2:
+        return
+    forbidden_inventories = {
+        ", ".join(selected_fields),
+        "\n".join(selected_fields),
+        json.dumps(list(selected_fields)),
+    }
+    for inventory in forbidden_inventories:
+        assert inventory not in instruction_text
+
+
 def _setup_manifest_owned_payload_project(project_root: Path) -> None:
     gpd_dir = project_root / "GPD"
     phase_dir = gpd_dir / "phases" / "02-analysis"
@@ -205,7 +219,7 @@ def test_default_instruction_style_is_shell_free_and_manifest_backed() -> None:
     assert FIELD_ACCESS_REQUIRED_MARKER in instruction_text
     assert FIELD_ACCESS_UNLISTED_POLICY in instruction_text
     assert FIELD_ACCESS_STALE_POLICY in instruction_text
-    assert ", ".join(stage.required_init_fields) not in instruction_text
+    _assert_instruction_omits_full_selected_field_inventory(instruction_text, stage.required_init_fields)
     assert "active_reference_context" in payload["selected_fields"]
     assert "staged_loading" not in payload["selected_fields"]
 
@@ -226,8 +240,14 @@ def test_instruction_style_matches_manifest_for_all_staged_workflow_stages(workf
         assert payload["aliases"] == []
         assert "shell_bindings" not in payload
         staged_loading = manifest.staged_loading_payload(stage_id)
+        instruction_keys = [key for key in staged_loading if key == "field_access_instruction"]
+        assert instruction_keys == ["field_access_instruction"]
+        assert isinstance(staged_loading["field_access_instruction"], str)
+        assert "field_access_instruction" not in payload
+        assert len(payload["instructions"]) == 1
         assert payload["selected_fields"] == staged_loading["required_init_fields"]
         assert payload["instructions"] == [staged_loading["field_access_instruction"]]
+        _assert_instruction_omits_full_selected_field_inventory(payload["instructions"][0], stage.required_init_fields)
 
 
 @pytest.mark.parametrize("workflow_id", FIELD_ACCESS_WORKFLOWS)
@@ -326,10 +346,13 @@ def test_staged_payload_fields_remain_manifest_owned(tmp_path: Path, workflow_id
         payload = _staged_init_payload(workflow_id, tmp_path, stage_id)
         access_payload = build_staged_field_access(workflow_id, stage_id=stage_id).to_payload()
 
-        assert tuple(field for field in payload if field != "staged_loading") == stage.required_init_fields
+        assert tuple(payload) == (*stage.required_init_fields, "staged_loading")
         assert set(payload) == set(stage.required_init_fields) | {"staged_loading"}
         assert payload["staged_loading"] == manifest.staged_loading_payload(stage_id)
         assert "field_access_instruction" not in payload
+        assert [key for key in payload["staged_loading"] if key == "field_access_instruction"] == [
+            "field_access_instruction"
+        ]
         assert payload["staged_loading"]["field_access_instruction"] == access_payload["instructions"][0]
         assert access_payload["selected_fields"] == list(stage.required_init_fields)
 

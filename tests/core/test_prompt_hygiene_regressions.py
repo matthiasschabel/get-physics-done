@@ -7,6 +7,7 @@ from gpd.core.model_visible_text import (
     review_contract_visibility_note,
     skeptical_rigor_guardrails_section,
 )
+from gpd.core.workflow_staging import load_workflow_stage_manifest
 from tests.lifecycle_contract_test_support import (
     assert_forbidden_contract as _assert_forbidden,
 )
@@ -112,14 +113,22 @@ def test_quick_command_and_workflow_keep_the_project_gate_and_drop_the_custom_st
 
 def test_peer_review_init_fields_are_manifest_owned_and_interestingness_stage_bullets_are_space_indented() -> None:
     peer_review = workflow_authority_text(WORKFLOWS_DIR, "peer-review")
+    manifest = load_workflow_stage_manifest("peer-review")
 
     _assert_semantic(
         peer_review,
         "peer-review init fields are manifest-owned",
-        "Parse only fields named by",
-        "staged_loading.required_init_fields",
+        "Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction`",
+        "keep `project_contract_gate`",
     )
-    _assert_machine(peer_review, "peer-review stage field access", "stage field-access peer-review")
+    assert "project_contract_gate" in manifest.stage("bootstrap").required_init_fields
+    _assert_semantic(
+        peer_review,
+        "peer-review stage access is manifest-owned",
+        "staged manifest",
+        "stage-specific files",
+        "stage loading is manifest-owned",
+    )
     _assert_forbidden(
         peer_review,
         "peer-review stale project_exists init parsing",

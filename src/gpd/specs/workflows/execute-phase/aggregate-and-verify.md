@@ -21,7 +21,7 @@ if [ $? -ne 0 ] || [ -z "$AGGREGATE_VERIFY_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage aggregate_and_verify --style instruction` before reading `AGGREGATE_VERIFY_INIT`; aggregation fields are manifest-owned. Do not rely on fields that belong to verifier handoff, verifier report finalization, gap re-verification, or consistency checking.
+Apply `AGGREGATE_VERIFY_INIT.staged_loading.field_access_instruction` before reading `AGGREGATE_VERIFY_INIT`. Do not rely on fields that belong to verifier handoff, verifier report finalization, gap re-verification, or consistency checking.
 </step>
 
 <step name="summary_context_budget">

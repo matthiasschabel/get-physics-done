@@ -69,7 +69,8 @@ Phase: $ARGUMENTS (optional)
 
 <process>
 **CRITICAL: First, read the included session-router stage authority using the file_read tool.**
-Follow the included first-stage authority exactly, then load later stage authorities only through `gpd --raw init verify-work "$PHASE_ARG" --stage <stage_id>`.
+Follow the included first-stage authority exactly. Later stage loading and field
+access are owned by the staged workflow.
 
 The staged workflow authorities own the detailed check taxonomy; this wrapper only bootstraps the canonical verification surface and delegates the physics checks.
   </process>

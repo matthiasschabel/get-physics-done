@@ -107,30 +107,12 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
 @pytest.mark.parametrize(
     ("workflow_name", "surface_marker", "expected_token", "authoritative_marker", "stage_id"),
     [
-        (
-            "plan-phase.md",
-            "gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction",
-            "project_contract_gate",
-            "project_contract_gate.authoritative",
-            "phase_bootstrap",
-        ),
-        (
-            "execute-phase.md",
-            "gpd --raw stage field-access execute-phase --stage phase_bootstrap --style instruction",
-            "project_contract_gate",
-            "non-authoritative `project_contract_gate`",
-            "phase_bootstrap",
-        ),
-        ("execute-plan.md", "Extract from init JSON:", "project_contract_gate", "project_contract_gate.authoritative", None),
+        ("plan-phase.md", None, "project_contract_gate", "project_contract_gate.authoritative", "phase_bootstrap"),
+        ("execute-phase.md", None, "project_contract_gate", "non-authoritative `project_contract_gate`", "phase_bootstrap"),
+        ("execute-plan.md", None, "project_contract_gate", "project_contract_gate.authoritative", "execute-phase:phase_bootstrap"),
         ("compare-experiment.md", "Parse JSON for:", "project_contract_gate", "project_contract_gate.authoritative", None),
         ("compare-results.md", "Parse JSON for:", "project_contract_gate", "project_contract_gate.authoritative", None),
-        (
-            "new-project.md",
-            "gpd --raw stage field-access new-project --stage scope_intake --style instruction",
-            "project_contract_gate",
-            "project_contract_gate.authoritative",
-            "scope_intake",
-        ),
+        ("new-project.md", None, "project_contract_gate", "project_contract_gate.authoritative", "scope_intake"),
         ("progress.md", "Extract from init JSON:", "project_contract_gate", "project_contract_gate.authoritative", None),
         ("audit-milestone.md", "Extract from init JSON:", "project_contract_gate", "project_contract_gate.authoritative", None),
         (
@@ -140,39 +122,46 @@ def test_owned_contract_visibility_workflows_load_shared_authority_gate_once() -
             "project_contract_gate.authoritative",
             None,
         ),
-        ("write-paper.md", "Parse bootstrap JSON using", "project_contract_gate", "project_contract_gate.authoritative", None),
-        (
-            "respond-to-referees.md",
-            "gpd --raw stage field-access respond-to-referees --stage bootstrap --style instruction",
-            "project_contract_gate",
-            "project_contract_gate.authoritative",
-            "bootstrap",
-        ),
-        (
-            "peer-review.md",
-            "Parse only fields named by `staged_loading.required_init_fields`",
-            "project_contract_gate",
-            "project_contract_gate.authoritative",
-            "bootstrap",
-        ),
+        ("write-paper.md", None, "project_contract_gate", "project_contract_gate.authoritative", "write-paper:paper_bootstrap"),
+        ("respond-to-referees.md", None, "project_contract_gate", "project_contract_gate.authoritative", "bootstrap"),
+        ("peer-review.md", None, "project_contract_gate", "project_contract_gate.authoritative", "bootstrap"),
     ],
 )
 def test_contract_gate_is_visible_before_authoritative_use(
     workflow_name: str,
-    surface_marker: str,
+    surface_marker: str | None,
     expected_token: str,
     authoritative_marker: str,
     stage_id: str | None,
 ) -> None:
     workflow = _workflow_text(workflow_name)
-    surface_line = next(line for line in workflow.splitlines() if surface_marker in line)
+    surface_line = (
+        _stage_visibility_line(workflow, _manifest_stage_id(stage_id))
+        if stage_id is not None
+        else next(line for line in workflow.splitlines() if surface_marker and surface_marker in line)
+    )
 
     if stage_id is None:
         _assert_machine(surface_line, f"{workflow_name} contract gate token", expected_token)
     else:
-        workflow_id = workflow_name.removesuffix(".md")
-        assert expected_token in load_workflow_stage_manifest(workflow_id).stage(stage_id).required_init_fields
+        workflow_id, manifest_stage_id = _manifest_ref(workflow_name, stage_id)
+        assert expected_token in load_workflow_stage_manifest(workflow_id).stage(manifest_stage_id).required_init_fields
     assert workflow.index(surface_line) < workflow.index(authoritative_marker)
+
+
+def _stage_visibility_line(workflow: str, stage_id: str) -> str:
+    return next(line for line in workflow.splitlines() if f"`{stage_id}`" in line or f"--stage {stage_id}" in line)
+
+
+def _manifest_ref(workflow_name: str, stage_id: str) -> tuple[str, str]:
+    if ":" in stage_id:
+        workflow_id, manifest_stage_id = stage_id.split(":", 1)
+        return workflow_id, manifest_stage_id
+    return workflow_name.removesuffix(".md"), stage_id
+
+
+def _manifest_stage_id(stage_id: str) -> str:
+    return stage_id.split(":", 1)[-1]
 
 
 @pytest.mark.parametrize(
@@ -190,24 +179,16 @@ def test_manifest_owned_contract_gate_is_visible_before_authoritative_use(
 ) -> None:
     workflow = _workflow_text(f"{workflow_id}.md")
     manifest = load_workflow_stage_manifest(workflow_id)
-    helper_line = next(
-        line
-        for line in workflow.splitlines()
-        if f"gpd --raw stage field-access {workflow_id} --stage {stage_id} --style instruction" in line
-    )
+    stage_line = _stage_visibility_line(workflow, stage_id)
 
     assert "project_contract_gate" in manifest.stage(stage_id).required_init_fields
-    assert workflow.index(helper_line) < workflow.index("project_contract_gate.authoritative")
+    assert workflow.index(stage_line) < workflow.index("project_contract_gate.authoritative")
 
 
 def test_literature_review_workflow_surfaces_contract_gate_before_deferred_reference_artifacts() -> None:
     workflow = _workflow_text("literature-review.md")
     manifest = load_workflow_stage_manifest("literature-review")
-    surface_line = next(
-        line
-        for line in workflow.splitlines()
-        if "gpd --raw stage field-access literature-review --stage review_bootstrap --style instruction" in line
-    )
+    surface_line = _stage_visibility_line(workflow, "review_bootstrap")
 
     assert "project_contract_gate" in manifest.stage("review_bootstrap").required_init_fields
     assert workflow.index(surface_line) < workflow.index("project_contract_gate.authoritative")
@@ -377,16 +358,19 @@ def test_plan_phase_missing_contract_gate_blocks_scope_substitution_and_authorin
 
 def test_write_paper_surfaces_manuscript_reference_status_before_using_it() -> None:
     workflow = _workflow_text("write-paper.md")
-    surface_line = next(line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using"))
+    surface_line = next(
+        line for line in workflow.splitlines() if "PAPER_BOOTSTRAP_INIT.staged_loading.field_access_instruction" in line
+    )
+    gate_line = next(line for line in workflow.splitlines() if "Keep `project_contract_gate`" in line)
     status_line = next(line for line in workflow.splitlines() if "Use derived manuscript review statuses from init" in line)
 
     _assert_semantic(
         surface_line,
-        "write-paper manifest owns required field list",
-        "do not duplicate the manifest's required-field list in prose",
+        "write-paper manifest owns bootstrap field access",
+        "staged_loading.field_access_instruction",
     )
-    _assert_forbidden(surface_line, "write-paper bootstrap surface no selected root use", "selected_publication_root")
-    assert workflow.index(surface_line) < workflow.index(status_line)
+    _assert_forbidden(gate_line, "write-paper bootstrap surface no selected root use", "selected_publication_root")
+    assert workflow.index(surface_line) <= workflow.index(gate_line) < workflow.index(status_line)
     assert workflow.index(status_line) < workflow.index("source ordering or prose")
     _assert_semantic(
         workflow,

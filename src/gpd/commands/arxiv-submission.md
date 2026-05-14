@@ -122,7 +122,7 @@ This remains a project-backed manuscript workflow: package the resolved built ma
 </context>
 
 <process>
-Follow the included arxiv-submission bootstrap authority exactly. After each staged reload, follow only `staged_loading.eager_authorities` for the active stage and do not read `staged_loading.must_not_eager_load` or the root workflow index.
+Follow the included arxiv-submission bootstrap authority exactly. Later stage loading is manifest-owned; do not use the root workflow index as active authority.
 </process>
 
 

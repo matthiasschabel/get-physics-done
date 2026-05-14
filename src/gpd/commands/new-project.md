@@ -65,11 +65,7 @@ question.
 Start with physics questioning and do not surface a preset choice before
 workflow preferences or before the first project-artifact commit.
 
-After each reload, follow the active stage's `staged_loading.eager_authorities`
-and never read `staged_loading.must_not_eager_load`. Later authority loading is
-manifest/stage-owned. `scope_approval` owns `templates/project-contract-schema.md`,
-`templates/project-contract-grounding-linkage.md`, and canonical schema
-discipline. Never load `workflows/new-project.md` as authority; it is an index.
+Later stage loading is manifest/stage-owned. `scope_approval` owns `templates/project-contract-schema.md`, `templates/project-contract-grounding-linkage.md`, and canonical schema discipline. Never load `workflows/new-project.md` as authority; it is an index.
 
 Execute the workflow end-to-end. Preserve all workflow gates (validation, approvals, routing).
 

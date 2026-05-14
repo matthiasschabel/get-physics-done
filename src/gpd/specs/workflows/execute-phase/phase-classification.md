@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$PHASE_CLASSIFICATION_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage phase_classification --style instruction` before reading `PHASE_CLASSIFICATION_INIT`; fields outside that helper-selected set are unavailable at this stage.
+Apply `PHASE_CLASSIFICATION_INIT.staged_loading.field_access_instruction` before reading `PHASE_CLASSIFICATION_INIT`.
 
 Classify semantically. A phase may have multiple classes: `derivation`, `numerical`, `literature`, `paper-writing`, `formalism`, `analysis`, and `validation`; use `mixed` only when none of those apply.
 

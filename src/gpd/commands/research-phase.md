@@ -41,7 +41,7 @@ Normalize phase input before any directory lookups.
 </context>
 
 <process>
-Follow the included research-phase bootstrap authority. After staged reload, follow only `staged_loading.eager_authorities` for the research handoff.
+Follow the included research-phase bootstrap authority. Research handoff loading is manifest-owned by the active workflow stage.
 Do not duplicate init, spawn, or return routing here.
 Research depth follows the workflow-owned `research_mode`.
 </process>

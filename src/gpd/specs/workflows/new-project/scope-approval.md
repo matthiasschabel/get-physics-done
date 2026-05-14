@@ -25,12 +25,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Use the generated helper output from
-`gpd --raw stage field-access new-project --stage scope_approval --style instruction`
-as the field policy for `SCOPE_APPROVAL_INIT`. Use only loaded contract/status
-and approval authorities.
-</field_access>
+Follow `SCOPE_APPROVAL_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `SCOPE_APPROVAL_INIT`. Use only loaded contract/status and approval authorities.
 </bootstrap>
 
 <contract_authoring>

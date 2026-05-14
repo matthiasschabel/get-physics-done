@@ -34,8 +34,7 @@ if [ $? -ne 0 ]; then
   echo "ERROR: staged plan-phase init failed: $INIT"
   exit 1
 fi
-# Confirm fields with generated helper output:
-# gpd --raw stage field-access plan-phase --stage checker_revision --style instruction
+# Apply INIT.staged_loading.field_access_instruction before using this payload.
 ```
 
 Read each fresh plan artifact into `PLANS_CONTENT` only after the planner gate
@@ -55,8 +54,7 @@ Checker prompt:
 **Phase Goal:** {goal from ROADMAP}
 
 **Plans to verify:** {plans_content}
-Use the generated checker-revision field-access helper output as the prompt
-inventory. Include the project contract/gate values, `contract_intake`,
+Use `INIT.staged_loading.field_access_instruction` as the prompt inventory. Include the project contract/gate values, `contract_intake`,
 `effective_reference_intake`, and selected reference path handles from that
 staged payload; do not request rendered reference or artifact body fields.
 <protocol_bundle_handoff>

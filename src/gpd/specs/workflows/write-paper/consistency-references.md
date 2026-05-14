@@ -22,9 +22,7 @@ fi
 INIT="$CONSISTENCY_INIT"
 ```
 
-Use `gpd --raw stage field-access write-paper --stage consistency_and_references --style instruction`
-to confirm the manifest-selected consistency/reference fields before reading
-`CONSISTENCY_INIT`.
+Apply `CONSISTENCY_INIT.staged_loading.field_access_instruction` before reading `CONSISTENCY_INIT`.
 
 This stage receives manuscript paths, citation-source context, reference artifact
 handles, protocol load manifests, and manuscript reference/proof status. It does

@@ -42,7 +42,7 @@ fi
 INIT="$TASK_BOOTSTRAP_INIT"
 ```
 
-Use `gpd --raw stage field-access quick --stage task_bootstrap --style instruction` to confirm the manifest-selected bootstrap fields. Read only those keys from `TASK_BOOTSTRAP_INIT`; `TASK_BOOTSTRAP_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+Follow `TASK_BOOTSTRAP_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `TASK_BOOTSTRAP_INIT`.
 
 Bootstrap gates:
 - If `project_exists` is false or `planning_exists` is false: STOP; Quick mode requires `GPD/PROJECT.md` plus `GPD/`. Run `gpd:new-project` first.
@@ -92,7 +92,7 @@ After Step 3 creates `${QUICK_DIR}`, choose the next stage using the quick bound
 - `task_authoring` for the default small-task path.
 - `reference_context` only for targeted source lookup or tasks that need active project anchors, existing reference artifacts, literature/research-map files, or protocol/reference context.
 
-Reload with `gpd --raw init quick "$DESCRIPTION" --stage task_authoring` or `gpd --raw init quick "$DESCRIPTION" --stage reference_context`, then follow `staged_loading.eager_authorities` for the active stage, primarily `workflows/quick/task-authoring.md`. Do not continue from bootstrap memory into planner or executor handoffs.
+Reload with `gpd --raw init quick "$DESCRIPTION" --stage task_authoring` or `gpd --raw init quick "$DESCRIPTION" --stage reference_context`; the selected stage owns subsequent authority loading. Do not continue from bootstrap memory into planner or executor handoffs.
 </stage_handoff>
 
 </process>

@@ -10,7 +10,7 @@ Load this stage only after report triage has selected the active report source a
 
 <step name="load_specialized_revision_context">
 <field_access>
-Check `gpd --raw stage field-access respond-to-referees --stage revision_planning --style instruction` before reading the revision-planning payload; read only its `staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Select reviewer issues from handles before evidence bodies load.
+Apply `REVISION_PLANNING_INIT.staged_loading.field_access_instruction` before reading `REVISION_PLANNING_INIT`. Select reviewer issues from handles before evidence bodies load.
 </field_access>
 
 - If `selected_protocol_bundle_ids` is non-empty, keep the bundle's decisive artifact expectations, benchmark anchors, estimator caveats, and reference prompts visible while triaging referee requests.

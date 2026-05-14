@@ -17,12 +17,6 @@ Do not load this index as a stage authority.
 </stage_authorities>
 
 <stage_loading_rule>
-The public command includes only `workflows/resume-work/resume-bootstrap.md`.
-Each later stage must be reached by a staged reload:
-
-```bash
-gpd --raw init resume --stage {stage_id}
-```
-
-Load only the active stage's `staged_loading.eager_authorities`. Bootstrap must keep continuation format, state portability, schema, derivation restoration, routing, reconstruction, quick-resume, and continuation-update authority lazy until the matching stage.
+The public command includes only `workflows/resume-work/resume-bootstrap.md`; later stage loading is manifest-owned.
+Bootstrap keeps continuation format, state portability, schema, derivation restoration, routing, reconstruction, quick-resume, and continuation-update authority lazy until the matching stage.
 </stage_loading_rule>

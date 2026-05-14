@@ -66,6 +66,6 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Read the included literature-review bootstrap authority first. The staged workflow owns scope fixing, artifact gating, citation verification, and later authority loading through `staged_loading.eager_authorities`.
+Read the included literature-review bootstrap authority first. The staged workflow owns scope fixing, artifact gating, citation verification, and later authority loading.
 If the invocation is empty in project-backed mode, ask one focused question to set the review topic before handing off. Standalone empty invocations should already have failed preflight.
 </process>

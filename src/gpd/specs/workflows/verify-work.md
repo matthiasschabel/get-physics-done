@@ -26,13 +26,12 @@ Never shell-loop over `GPD/phases` or call `gpd frontmatter get` here.
 Use canonical artifact discovery helpers during bootstrap.
 Route on each entry's canonical `status` / `routing_status`.
 
-Later stages must be loaded with `gpd --raw init verify-work "$PHASE_ARG" --stage
-<stage_id>` before their authority is used. Proof-redteam classification and repair
-begin at `phase_bootstrap`; verifier handoff and verification-report bridges begin
-at `inventory_build`; researcher response capture begins at
-`interactive_validation`; planner/checker gap repair and closeout live in
-`gap_repair`.
+Later stage loading is manifest-owned; use the active stage authority before
+that stage's behavior is used. Proof-redteam classification and repair begin at
+`phase_bootstrap`; verifier handoff and verification-report bridges begin at
+`inventory_build`; researcher response capture begins at `interactive_validation`;
+planner/checker gap repair and closeout live in `gap_repair`.
 
-Stage ids, produced-state labels, allowed-tool boundaries, writes, required init
-fields, and next-stage routing remain manifest-owned for compatibility.
+Stage ids, produced-state labels, allowed-tool boundaries, writes, and routing
+remain manifest-owned for compatibility.
 </boundary_summary>

@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$CLOSEOUT_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage closeout --style instruction` before reading `CLOSEOUT_INIT`.
+Apply `CLOSEOUT_INIT.staged_loading.field_access_instruction` before reading `CLOSEOUT_INIT`.
 
 Before any roadmap/state transition, run the read-only helper below and route from its JSON. It is the authority for verification, proof-redteam, consistency, bounded-segment, and closeout readiness.
 

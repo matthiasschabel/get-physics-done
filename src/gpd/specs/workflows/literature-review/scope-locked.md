@@ -15,7 +15,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-- Use `gpd --raw stage field-access literature-review --stage scope_locked --style instruction` to confirm the manifest-selected scoped-reference fields. Read only those keys from `SCOPE_LOCKED_INIT`; `SCOPE_LOCKED_INIT.staged_loading.required_init_fields` is the runtime confirmation.
+- Apply `SCOPE_LOCKED_INIT.staged_loading.field_access_instruction` before reading `SCOPE_LOCKED_INIT`.
 - If `reference_artifact_files` is populated, read those files now and keep only the entries that support the confirmed scope.
 - Carry forward the scoped file handles; do not rely on embedded artifact bodies in this handle-first stage.
 - Only read or propagate the deferred reference-artifact context after the scope has been fixed.

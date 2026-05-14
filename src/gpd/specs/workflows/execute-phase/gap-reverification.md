@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$GAP_REVERIFY_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage gap_reverification --style instruction` before reading `GAP_REVERIFY_INIT`.
+Apply `GAP_REVERIFY_INIT.staged_loading.field_access_instruction` before reading `GAP_REVERIFY_INIT`.
 </step>
 
 <step name="select_current_gap">

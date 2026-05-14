@@ -25,9 +25,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Check `gpd --raw stage field-access new-project --stage minimal_artifacts --style instruction` before reading `MINIMAL_ARTIFACTS_INIT`; read only `MINIMAL_ARTIFACTS_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Use approved contract/runtime fields only.
-</field_access>
+Follow `MINIMAL_ARTIFACTS_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `MINIMAL_ARTIFACTS_INIT`. Use approved contract/runtime fields only.
 </bootstrap>
 
 <artifact_scope>

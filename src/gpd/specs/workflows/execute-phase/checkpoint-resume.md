@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$CHECKPOINT_RESUME_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage checkpoint_resume --style instruction` before reading `CHECKPOINT_RESUME_INIT`; treat that staged field list as the source of truth and do not reuse wave-dispatch fields here.
+Apply `CHECKPOINT_RESUME_INIT.staged_loading.field_access_instruction` before reading `CHECKPOINT_RESUME_INIT`; do not reuse wave-dispatch fields here.
 
 **Flow:**
 

@@ -38,7 +38,7 @@ If `pdflatex` is available, run a local smoke check after the refreshed manuscri
 </step>
 
 <step name="handoff_to_review_gate">
-After manuscript preflight succeeds, reload `review_gate` and read only that stage's eager authorities.
+After manuscript preflight succeeds, reload `review_gate` and start from its staged payload.
 </step>
 
 </process>

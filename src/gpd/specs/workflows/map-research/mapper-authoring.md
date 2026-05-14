@@ -35,7 +35,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access map-research --stage mapper_authoring --style instruction` to confirm the manifest-selected authoring fields. Read only those keys from `MAPPER_AUTHORING_INIT`; `MAPPER_AUTHORING_INIT.staged_loading.required_init_fields` is the runtime confirmation. Use that refresh for mapper prompts; do not reuse bootstrap state for authoring.
+Apply `MAPPER_AUTHORING_INIT.staged_loading.field_access_instruction` before reading the authoring payload. Use that refresh for mapper prompts; do not reuse bootstrap state for authoring.
 
 Use task tool with `subagent_type="gpd-research-mapper"`, `model="{mapper_model}"`, `readonly=false`, and `run_in_background=true` for parallel execution.
 @{GPD_INSTALL_DIR}/references/orchestration/runtime-delegation-note.md

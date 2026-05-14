@@ -34,16 +34,21 @@ def _read_write_paper_staged_authorities() -> str:
 
 def test_write_paper_balanced_mode_keeps_outline_as_working_draft_and_threads_mode_context() -> None:
     workflow = _read_write_paper_staged_authorities()
-    bootstrap_parse_line = next(line for line in workflow.splitlines() if line.startswith("Parse bootstrap JSON using"))
+    bootstrap_field_line = next(
+        line for line in workflow.splitlines() if line.startswith("Apply `PAPER_BOOTSTRAP_INIT")
+    )
 
     _assert_all_present(
-        bootstrap_parse_line,
+        bootstrap_field_line,
         (
-            "stage field-access write-paper --stage paper_bootstrap --style instruction",
-            "do not duplicate the manifest's required-field list in prose",
+            "PAPER_BOOTSTRAP_INIT.staged_loading.field_access_instruction",
+            "before",
         ),
     )
-    _assert_all_absent(bootstrap_parse_line, ("selected_publication_root", "selected_review_root"))
+    _assert_all_absent(
+        bootstrap_field_line,
+        ("selected_publication_root", "selected_review_root"),
+    )
     _assert_all_present(
         workflow,
         (
@@ -123,7 +128,7 @@ def test_peer_review_stage_six_requires_report_artifacts_and_threads_mode_contex
     _assert_all_present(
         workflow,
         (
-            "Parse only fields named by `staged_loading.required_init_fields`",
+            "BOOTSTRAP_INIT.staged_loading.field_access_instruction",
             "peer-review-stage-manifest.json",
             'RESEARCH_MODE=$(echo "$BOOTSTRAP_INIT" | gpd json get .research_mode --default balanced)',
             "<autonomy_mode>{AUTONOMY}</autonomy_mode>",

@@ -22,9 +22,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-<field_access>
-Check `gpd --raw stage field-access new-project --stage literature_survey --style instruction` before reading `LITERATURE_SURVEY_INIT`; read only `LITERATURE_SURVEY_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Requirements, roadmap, and convention authorities remain unavailable.
-</field_access>
+Follow `LITERATURE_SURVEY_INIT.staged_loading.field_access_instruction`; `<INIT>` there means `LITERATURE_SURVEY_INIT`. Requirements, roadmap, and convention authorities remain unavailable.
 
 Use the staged `research_mode` from `LITERATURE_SURVEY_INIT` for all scout
 handoffs. Do not reread config inside scouts.

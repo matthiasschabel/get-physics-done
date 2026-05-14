@@ -7,7 +7,7 @@ conflict stops, and routing to the next staged authority.
 <stage_boundary>
 Do not load downstream plan-phase authorities here. Research, planner authoring,
 checker review, revision templates, and runtime delegation details belong to
-later stages listed in `staged_loading.eager_authorities`.
+later manifest stages.
 </stage_boundary>
 
 <process>
@@ -22,13 +22,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access plan-phase --stage phase_bootstrap --style instruction`
-to confirm manifest-selected bootstrap fields. The staged field-access helper is
-authoritative; after later reloads, use
-`gpd --raw stage field-access plan-phase --stage <stage_id> --style instruction`
-and only the fields in `INIT.staged_loading.required_init_fields`. Use shell
-aliases only for scalar bindings that truly need them (`--alias ALIAS=field`);
-do not reuse shell variables parsed from an older stage.
+Apply `BOOTSTRAP_INIT.staged_loading.field_access_instruction` before reading `BOOTSTRAP_INIT`. Use shell aliases only for scalar bindings that truly need them (`--alias ALIAS=field`); do not reuse shell variables parsed from an older stage.
 
 ```bash
 REQUESTED_PHASE="${PHASE}"
@@ -139,7 +133,6 @@ later planner/checker events apply the detailed tangent model.
 If a tangent decision is needed, surface `gpd:tangent`; create
 `gpd:branch-hypothesis` only after an explicit branch outcome.
 
-Next, reload `gpd --raw init plan-phase "$PHASE" --stage research_routing` and
-read only that stage's `staged_loading.eager_authorities`.
+Next, reload `gpd --raw init plan-phase "$PHASE" --stage research_routing` and apply the active staged payload instructions.
 
 </process>

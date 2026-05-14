@@ -37,11 +37,10 @@ fi
 ```
 
 <field_access>
-Use the generated helper output from
-`gpd --raw stage field-access verify-work --stage session_router --style instruction`
-as the field policy for `SESSION_ROUTER_INIT`. Do not assume reference ledgers,
-protocol bundles, or report schemas are loaded here; verifier/gap authorities
-are stage-local.
+Apply `SESSION_ROUTER_INIT.staged_loading.field_access_instruction` before
+reading `SESSION_ROUTER_INIT`. Do not assume reference ledgers, protocol
+bundles, or report schemas are loaded here; verifier/gap authorities are
+stage-local.
 </field_access>
 
 ```bash

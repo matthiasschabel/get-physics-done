@@ -16,7 +16,7 @@ fi
 ```
 
 <field_access>
-Check `gpd --raw stage field-access resume-work --stage derivation_restore --style instruction` before reading `DERIVATION_RESTORE_INIT`; read only `DERIVATION_RESTORE_INIT.staged_loading.required_init_fields`, treat unlisted fields as unavailable, and ignore older staged-init values. Read selected bodies only for continuity recovery.
+Apply `DERIVATION_RESTORE_INIT.staged_loading.field_access_instruction` before reading `DERIVATION_RESTORE_INIT`. Read selected bodies only for continuity recovery.
 </field_access>
 
 **Read cumulative derivation history from `GPD/DERIVATION-STATE.md`:**

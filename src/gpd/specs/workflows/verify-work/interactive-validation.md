@@ -8,7 +8,8 @@ Present verifier-produced evidence one check at a time, write only the session o
 Stage id: `interactive_validation`. Owns check presentation, response capture, diagnosis, and the explicit transition into gap repair.
 </stage_scope>
 
-Field access: check `gpd --raw stage field-access verify-work --stage interactive_validation --style instruction`; use only `INTERACTIVE_VALIDATION_INIT.staged_loading.required_init_fields`, no stale init.
+Apply `INTERACTIVE_VALIDATION_INIT.staged_loading.field_access_instruction`
+before reading `INTERACTIVE_VALIDATION_INIT`.
 
 <process>
 
@@ -121,7 +122,7 @@ if [ $? -ne 0 ]; then
 fi
 ```
 
-Treat `GAP_REPAIR_INIT.staged_loading.required_init_fields` as the planner/checker routing source; gap-repair field access is `gpd --raw stage field-access verify-work --stage gap_repair --style instruction`.
+Apply `GAP_REPAIR_INIT.staged_loading.field_access_instruction` before planning repairs.
 
 If the staged init is blocked, stale, or missing required fields, stop and surface the blocking issues instead of falling back to unstaged plan repair.
 </step>

@@ -19,7 +19,7 @@ if [ $? -ne 0 ] || [ -z "$WAVE_RETURN_INIT" ]; then
 fi
 ```
 
-Use `gpd --raw stage field-access execute-phase --stage wave_return_checkpoint --style instruction` before reading `WAVE_RETURN_INIT`.
+Apply `WAVE_RETURN_INIT.staged_loading.field_access_instruction` before reading `WAVE_RETURN_INIT`.
 </step>
 
 <step name="classify_child_return_status">

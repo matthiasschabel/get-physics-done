@@ -42,7 +42,15 @@ dependencies = [
 
 [project.optional-dependencies]
 arxiv = [
-    "arxiv-mcp-server>=0.4.11",
+    # The `[pdf]` extra pulls pymupdf4llm + pymupdf, which arxiv-mcp-server
+    # needs for its download_paper PDF-conversion fallback. Without this
+    # extra, ~45% of download_paper calls fail with "HTML version not
+    # available and PDF conversion requires the pdf extra" once an arxiv
+    # paper lacks an HTML rendering. Confirmed against 14d BQ traces.
+    "arxiv-mcp-server[pdf]>=0.4.11",
+    # pypdf is the lightweight PyPDF2-successor used by
+    # gpd/core/artifact_text.py and gpd/mcp/paper/compiler.py for in-app
+    # PDF text extraction (distinct from arxiv-mcp-server's pymupdf path).
     "pypdf>=5.0",
 ]
 

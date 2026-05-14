@@ -182,23 +182,11 @@ Run the local child_gate before accepting re-verification:
 ```yaml
 child_gate:
   id: "gap_closure_reverification"
-  role: "gpd-verifier"
-  return_profile: "verifier"
-  required_status: "completed"
-  expected_artifacts:
-    - "{phase_dir}/{phase_number}-VERIFICATION.md"
-  allowed_roots:
-    - "{phase_dir}"
-  freshness_marker: "after $REVERIFY_HANDOFF_STARTED_AT"
-  validators:
-    - "gpd validate handoff-artifacts - --expected '{phase_dir}/{phase_number}-VERIFICATION.md' --allowed-root '{phase_dir}' --required-suffix=-VERIFICATION.md --require-status completed --require-files-written --fresh-after \"$REVERIFY_HANDOFF_STARTED_AT\""
-    - "gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md"
-    - "verification-status-authority.md status rules"
-    - "proof-redteam status: passed for proof-bearing work"
-  applicator:
-    command: "none; closeout/update_roadmap is allowed only after re-verifier and consistency gates pass"
-    require_passed_true: false
-  failure_route: "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_verify_work"
+  profile: "execute.gap_reverification_report.v1"
+  artifact:
+    path: "{phase_dir}/{phase_number}-VERIFICATION.md"
+  allowed_root: "{phase_dir}"
+  freshness_marker: "$REVERIFY_HANDOFF_STARTED_AT"
 ```
 
 Apply `gap_closure_reverification`, then route on canonical verification_status:

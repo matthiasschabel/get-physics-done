@@ -11,11 +11,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from gpd.core.return_contract import (
     KNOWN_RETURN_FIELD_NAMES,
     REQUIRED_RETURN_FIELDS,
+    RETURN_ENVELOPE_STATUS_CONTRACTS,
     RETURN_STATUS_ORDER,
+    GpdReturnEnvelope,
     normalize_return_status,
     return_field_allowed_for_status,
     return_fields_allowed_for_status,
     validate_gpd_return_markdown,
+)
+from gpd.core.return_fields import (
+    has_return_field_default,
+    return_field_default,
+    return_field_registry_payload,
 )
 
 __all__ = [
@@ -46,9 +53,8 @@ _CHECKPOINT_INTENT_UNAVAILABLE = (
 )
 
 RETURN_ROLE_ALIASES: dict[str, str] = {
-    "bibliographer": "researcher",
-    "gpd-bibliographer": "researcher",
     "consistency_checker": "checker",
+    "debug": "debugger",
     "experiment": "experiment_designer",
     "gpd-consistency-checker": "checker",
     "gpd-research-mapper": "researcher",
@@ -259,6 +265,11 @@ def list_gpd_return_profiles(*, role: str | None = None, status: str | None = No
         "profiles": profiles,
         "roles": sorted(GPD_RETURN_ROLE_PROFILES),
         "statuses": list(RETURN_STATUS_ORDER),
+        "field_registry": return_field_registry_payload(
+            base_fields=GpdReturnEnvelope.model_fields,
+            status_contracts=RETURN_ENVELOPE_STATUS_CONTRACTS,
+            all_statuses=RETURN_STATUS_ORDER,
+        ),
         "mutated": False,
         "mutates": False,
     }
@@ -408,19 +419,10 @@ def _contract_supports_checkpoint_intent() -> bool:
 
 
 def _default_value_for_field(field_name: str, *, phase: str | None, plan: str | None) -> object:
-    if field_name == "phase":
-        return phase or "unknown"
-    if field_name == "plan":
-        return plan or "unknown"
     try:
-        value = _FIELD_DEFAULTS[field_name]
+        return return_field_default(field_name, phase=phase, plan=plan)
     except KeyError as exc:
         raise ValueError(f"no conservative skeleton default registered for gpd_return field '{field_name}'") from exc
-    if isinstance(value, list):
-        return list(value)
-    if isinstance(value, dict):
-        return dict(value)
-    return value
 
 
 def _validation_commands(*, applicator_ready: bool) -> list[str]:
@@ -455,6 +457,7 @@ def _profile(
     if unknown_defaults:
         fields = ", ".join(unknown_defaults)
         raise ValueError(f"profile '{profile_id}' default fields are not declared role fields: {fields}")
+    _assert_default_fields_have_registry_defaults(profile_id, default_render_fields)
 
     return GpdReturnRoleProfile(
         profile_id=profile_id,
@@ -475,6 +478,18 @@ def _assert_known_profile_fields(fields: Iterable[str]) -> None:
     unknown_fields = sorted(set(fields) - KNOWN_RETURN_FIELD_NAMES)
     if unknown_fields:
         raise ValueError(f"unknown gpd_return profile field(s): {', '.join(unknown_fields)}")
+
+
+def _assert_default_fields_have_registry_defaults(profile_id: str, fields: Iterable[str]) -> None:
+    missing_defaults = sorted(
+        field_name
+        for field_name in set(fields)
+        if field_name not in {_CHECKPOINT_INTENT_FIELD, "continuation_update"}
+        and not has_return_field_default(field_name)
+    )
+    if missing_defaults:
+        joined = ", ".join(missing_defaults)
+        raise ValueError(f"profile '{profile_id}' default field(s) lack registry defaults: {joined}")
 
 
 def _filter_fields_for_status(fields: Iterable[str], status: str) -> tuple[str, ...]:
@@ -507,49 +522,6 @@ def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(result)
 
 
-_FIELD_DEFAULTS: dict[str, object] = {
-    "approximations": [],
-    "approved_plans": [],
-    "blocked_plans": [],
-    "blockers": [],
-    "checks_performed": [],
-    "confidence": "unassessed",
-    "context_pressure": "normal",
-    "conventions": [],
-    "categories_defined": [],
-    "dimensions_checked": [],
-    "dimensions_evaluated": [],
-    "duration_seconds": 0,
-    "field_assessment": "pending",
-    "focus": "unspecified",
-    "citations_added": 0,
-    "cross_convention_checks": [],
-    "equations_added": 0,
-    "figures_added": 0,
-    "framing_strategy": "unspecified",
-    "issues_found": [],
-    "journal_calibration": "unspecified",
-    "major_issues": [],
-    "minor_issues": [],
-    "papers_reviewed": 0,
-    "phase_checked": "unknown",
-    "plans": [],
-    "plans_created": 0,
-    "recommendation": "needs_review",
-    "reference_maps": [],
-    "revision_guidance": [],
-    "revision_round": 1,
-    "roadmap_updates": [],
-    "score": "unscored",
-    "section_name": "unspecified",
-    "tasks_completed": 0,
-    "tasks_total": 0,
-    "test_values_defined": [],
-    "verification_status": "gaps_found",
-    "waves": [],
-}
-
-
 _CALLSITE_FIELDS = (
     "expected_artifacts",
     "allowed_roots",
@@ -574,6 +546,12 @@ _PLANNING_ROLE_FIELDS = (
 )
 _PLANNING_DEFAULT_FIELDS = _PLANNING_ROLE_FIELDS[:-2]
 
+_ROADMAPPER_ROLE_FIELDS = (
+    *_PLANNING_ROLE_FIELDS[:-2],
+    "phases_created",
+    *_PLANNING_ROLE_FIELDS[-2:],
+)
+
 _REVIEW_ROLE_FIELDS = (
     "recommendation",
     "confidence",
@@ -597,6 +575,36 @@ _RESEARCH_ROLE_FIELDS = (
     "continuation_update",
 )
 _RESEARCH_DEFAULT_FIELDS = _RESEARCH_ROLE_FIELDS[:-2]
+
+_BIBLIOGRAPHER_ROLE_FIELDS = (
+    "focus",
+    "papers_reviewed",
+    "entries_added",
+    "citations_added",
+    "field_assessment",
+    "reference_maps",
+    "confidence",
+    "blockers",
+    "continuation_update",
+)
+_BIBLIOGRAPHER_DEFAULT_FIELDS = (
+    "focus",
+    "papers_reviewed",
+    "citations_added",
+    "field_assessment",
+    "reference_maps",
+    "confidence",
+)
+
+_DEBUGGER_ROLE_FIELDS = (
+    "session_file",
+    "checks_performed",
+    "issues_found",
+    "confidence",
+    "blockers",
+    "continuation_update",
+)
+_DEBUGGER_DEFAULT_FIELDS = ("checks_performed", "issues_found", "confidence")
 
 _PAPER_WRITER_ROLE_FIELDS = (
     "section_name",
@@ -675,6 +683,20 @@ GPD_RETURN_ROLE_PROFILES: dict[str, GpdReturnRoleProfile] = {
         agent_names=("gpd-paper-writer",),
         role_fields=_PAPER_WRITER_ROLE_FIELDS,
         default_render_fields=_PAPER_WRITER_DEFAULT_FIELDS,
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
+    "bibliographer": _profile(
+        profile_id="bibliographer",
+        agent_names=("gpd-bibliographer",),
+        role_fields=_BIBLIOGRAPHER_ROLE_FIELDS,
+        default_render_fields=_BIBLIOGRAPHER_DEFAULT_FIELDS,
+        local_callsite_fields=_CALLSITE_FIELDS,
+    ),
+    "debugger": _profile(
+        profile_id="debugger",
+        agent_names=("gpd-debugger",),
+        role_fields=_DEBUGGER_ROLE_FIELDS,
+        default_render_fields=_DEBUGGER_DEFAULT_FIELDS,
         local_callsite_fields=_CALLSITE_FIELDS,
     ),
     "experiment_designer": _profile(
@@ -765,7 +787,7 @@ GPD_RETURN_ROLE_PROFILES: dict[str, GpdReturnRoleProfile] = {
     "roadmapper": _profile(
         profile_id="roadmapper",
         agent_names=("gpd-roadmapper",),
-        role_fields=_PLANNING_ROLE_FIELDS,
+        role_fields=_ROADMAPPER_ROLE_FIELDS,
         default_render_fields=_PLANNING_DEFAULT_FIELDS,
         local_callsite_fields=_CALLSITE_FIELDS,
     ),

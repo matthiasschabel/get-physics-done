@@ -28,6 +28,16 @@ from pydantic import (
 
 from gpd.core.checkpoint_intent import GpdReturnCheckpointIntent
 from gpd.core.continuation import ContinuationBoundedSegment, ContinuationHandoff
+from gpd.core.return_fields import (
+    allowed_return_extension_fields,
+    known_return_field_names,
+    return_field_source,
+    return_field_status_allowed,
+    status_restricted_return_fields,
+)
+from gpd.core.return_fields import (
+    return_fields_allowed_for_status as registry_return_fields_allowed_for_status,
+)
 
 __all__ = [
     "GPD_RETURN_BLOCK_RE",
@@ -61,55 +71,7 @@ RETURN_STATUS_ORDER: tuple[str, ...] = tuple(
 ) + tuple(sorted(VALID_RETURN_STATUSES - set(_RETURN_STATUS_ORDER_SEED)))
 """Stable display/test order for statuses, derived from the canonical status set."""
 
-ALLOWED_RETURN_EXTENSION_FIELDS: frozenset[str] = frozenset(
-    {
-        "affected_quantities",
-        "approximations",
-        "categories_defined",
-        "category",
-        "change_id",
-        "checks_performed",
-        "citations_added",
-        "confidence",
-        "conflicts",
-        "context_pressure",
-        "conventions",
-        "conventions_file",
-        "conversion_table",
-        "cross_convention_checks",
-        "dimensions_checked",
-        "dimensions_evaluated",
-        "downstream_phases_flagged",
-        "entries_added",
-        "equations_added",
-        "figures_added",
-        "focus",
-        "framing_strategy",
-        "issues_found",
-        "journal_calibration",
-        "major_issues",
-        "minor_issues",
-        "new_value",
-        "old_value",
-        "papers_reviewed",
-        "phase_checked",
-        "phases_created",
-        "plans",
-        "plans_created",
-        "recommendation",
-        "reference_maps",
-        "revision_guidance",
-        "revision_round",
-        "roadmap_updates",
-        "score",
-        "section_name",
-        "session_file",
-        "severity",
-        "test_values_defined",
-        "verification_status",
-        "waves",
-    }
-)
+ALLOWED_RETURN_EXTENSION_FIELDS: frozenset[str] = allowed_return_extension_fields()
 """Known workflow/agent-specific top-level extensions allowed in ``gpd_return``."""
 
 GPD_RETURN_BLOCK_RE = re.compile(r"```ya?ml\s*\n(gpd_return:\s*\n[\s\S]*?)```")
@@ -268,9 +230,7 @@ RETURN_ENVELOPE_STATUS_CONTRACTS: dict[str, GpdReturnStatusContract] = {
 }
 """Explicit status-dependent contract structure for supported envelopes."""
 
-_STATUS_RESTRICTED_FIELDS: frozenset[str] = frozenset(
-    field_name for contract in RETURN_ENVELOPE_STATUS_CONTRACTS.values() for field_name in contract.structured_fields
-)
+_STATUS_RESTRICTED_FIELDS: frozenset[str] = status_restricted_return_fields(RETURN_ENVELOPE_STATUS_CONTRACTS)
 
 
 def normalize_return_status(value: object, *, field_name: str = "status") -> str:
@@ -411,18 +371,14 @@ REQUIRED_RETURN_FIELDS: tuple[str, ...] = tuple(
 )
 """Fields that must be present in every ``gpd_return`` envelope."""
 
-KNOWN_RETURN_FIELD_NAMES: frozenset[str] = frozenset(GpdReturnEnvelope.model_fields) | ALLOWED_RETURN_EXTENSION_FIELDS
+KNOWN_RETURN_FIELD_NAMES: frozenset[str] = known_return_field_names(GpdReturnEnvelope.model_fields)
 """All top-level fields known to the canonical return contract."""
 
 
 def return_field_allowed_source(field_name: str) -> Literal["base", "extension", "unknown"]:
     """Classify where a top-level ``gpd_return`` field is allowed from."""
 
-    if field_name in GpdReturnEnvelope.model_fields:
-        return "base"
-    if field_name in ALLOWED_RETURN_EXTENSION_FIELDS:
-        return "extension"
-    return "unknown"
+    return return_field_source(field_name, base_fields=GpdReturnEnvelope.model_fields)
 
 
 def return_field_allowed_for_status(field_name: str, status: object) -> bool:
@@ -431,23 +387,23 @@ def return_field_allowed_for_status(field_name: str, status: object) -> bool:
     if field_name not in KNOWN_RETURN_FIELD_NAMES:
         return False
     normalized_status = normalize_return_status(status)
-    if field_name in _STATUS_RESTRICTED_FIELDS:
-        return field_name in RETURN_ENVELOPE_STATUS_CONTRACTS[normalized_status].structured_fields
-    return True
+    return return_field_status_allowed(
+        field_name,
+        normalized_status,
+        base_fields=GpdReturnEnvelope.model_fields,
+        status_contracts=RETURN_ENVELOPE_STATUS_CONTRACTS,
+    )
 
 
 def return_fields_allowed_for_status(status: object) -> tuple[str, ...]:
     """List known top-level fields legal for a status in stable render order."""
 
     normalized_status = normalize_return_status(status)
-    allowed_fields: list[str] = []
-    for field_name in GpdReturnEnvelope.model_fields:
-        if return_field_allowed_for_status(field_name, normalized_status):
-            allowed_fields.append(field_name)
-    for field_name in sorted(ALLOWED_RETURN_EXTENSION_FIELDS):
-        if return_field_allowed_for_status(field_name, normalized_status):
-            allowed_fields.append(field_name)
-    return tuple(allowed_fields)
+    return registry_return_fields_allowed_for_status(
+        normalized_status,
+        base_fields=GpdReturnEnvelope.model_fields,
+        status_contracts=RETURN_ENVELOPE_STATUS_CONTRACTS,
+    )
 
 
 class GpdReturnValidationResult(BaseModel):

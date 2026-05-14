@@ -685,6 +685,8 @@ def test_report_detects_invalid_schema_and_forbidden_child_return_synthesis(tmp_
         gpd_return:
           status: completed
           files_written: []
+          issues: []
+          next_actions: []
           bogus_child_field: true
         ```
 
@@ -701,10 +703,82 @@ def test_report_detects_invalid_schema_and_forbidden_child_return_synthesis(tmp_
     payload = _diagnostics().report_to_dict(_report(tmp_path, surfaces=("workflow",), runtime_names=()))
 
     assert payload["invalid_gpd_return_examples"]
+    assert any(
+        "Unknown gpd_return top-level field(s): bogus_child_field" in error
+        for error in payload["invalid_gpd_return_examples"][0]["errors"]
+    )
     assert payload["invalid_frontmatter_examples"]
     assert payload["disallowed_return_field_mentions"]
     assert payload["forbidden_child_return_synthesis_mentions"]
     assert payload["items"][0]["visible_schema_example_count"] >= 2
+
+
+def test_return_field_mentions_use_registry_helpers(monkeypatch) -> None:
+    scanners = importlib.import_module("gpd.core.prompt_diagnostics_scanners")
+    calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def fake_return_field_source(field: str, *, base_fields):
+        calls.append((field, tuple(base_fields)))
+        if field == "registry_extension":
+            return "extension"
+        return "unknown"
+
+    def fake_known_return_field_names(base_fields):
+        calls.append(("known_fields", tuple(base_fields)))
+        return frozenset({"registry_extension"})
+
+    monkeypatch.setattr(scanners, "return_field_source", fake_return_field_source)
+    monkeypatch.setattr(scanners, "known_return_field_names", fake_known_return_field_names)
+
+    mentions = scanners._scan_return_field_mentions(
+        """
+        Use gpd_return.registry_extension.
+        Use gpd_return.registry_extensoin.
+        """,
+        "probe.md",
+    )
+    extension = next(mention for mention in mentions if mention.field == "registry_extension")
+    typo = next(mention for mention in mentions if mention.field == "registry_extensoin")
+
+    assert extension.allowed
+    assert extension.allowed_source == "extension"
+    assert extension.severity == "info"
+    assert typo.allowed is False
+    assert typo.allowed_source == "unknown"
+    assert typo.severity == "error"
+    assert typo.suggestion == "registry_extension"
+    assert all("status" in base_fields for _field, base_fields in calls)
+
+
+def test_return_field_mentions_classify_known_extension_and_unknown_polarity() -> None:
+    scanners = importlib.import_module("gpd.core.prompt_diagnostics_scanners")
+
+    mentions = scanners._scan_return_field_mentions(
+        """
+        Use gpd_return.confidence.
+        Use gpd_return.file_written.
+        Do not use gpd_return.file_written.
+        """,
+        "probe.md",
+    )
+    extension = next(mention for mention in mentions if mention.field == "confidence")
+    positive_unknown = next(
+        mention for mention in mentions if mention.field == "file_written" and mention.polarity == "positive"
+    )
+    negative_unknown = next(
+        mention for mention in mentions if mention.field == "file_written" and mention.polarity == "negative"
+    )
+
+    assert extension.allowed
+    assert extension.allowed_source == "extension"
+    assert extension.severity == "info"
+    assert positive_unknown.allowed is False
+    assert positive_unknown.severity == "error"
+    assert positive_unknown.suggestion == "files_written"
+    assert negative_unknown.allowed is False
+    assert negative_unknown.severity == "warn"
+    assert positive_unknown in scanners._disallowed_return_field_mentions(mentions)
+    assert negative_unknown not in scanners._disallowed_return_field_mentions(mentions)
 
 
 def test_include_counting_ignores_fenced_code_and_runtime_projection_covers_runtimes(tmp_path: Path) -> None:

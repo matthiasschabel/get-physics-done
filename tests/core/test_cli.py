@@ -9084,11 +9084,16 @@ def test_return_profiles_raw_lists_role_metadata() -> None:
 
     payload = json_output_from_result(result)
     assert payload["mutated"] is False
+    assert payload["mutates"] is False
     profile_ids = {profile["profile_id"] for profile in payload["profiles"]}
-    assert {"executor", "planner", "checker", "verifier", "referee", "researcher"} <= profile_ids
+    assert {"executor", "planner", "checker", "verifier", "referee", "researcher", "debugger"} <= profile_ids
     executor = next(profile for profile in payload["profiles"] if profile["profile_id"] == "executor")
     assert "completed" in executor["statuses"]
     assert "status" in executor["required_fields"]
+    assert "known_fields" in payload["field_registry"]
+    assert "confidence" in payload["field_registry"]["known_fields"]
+    assert "checkpoint_intent" in payload["field_registry"]["status_allowed_fields"]["checkpoint"]
+    assert "checkpoint_intent" not in payload["field_registry"]["status_allowed_fields"]["completed"]
 
 
 def test_return_profiles_raw_filters_role_and_status() -> None:

@@ -47,45 +47,19 @@ For every executor return classified as `completed`, run the local child artifac
 ```yaml
 child_gate:
   id: "wave_executor_plan_result"
-  role: "gpd-executor"
-  return_profile: "executor"
-  required_status: "completed"
-  expected_artifacts:
-    - path: "${SUMMARY_FILE}"
-      kind: "path"
-      required: true
-      must_be_named_in_files_written: true
-  allowed_roots:
-    - "{phase_dir}"
+  profile: "execute.executor_summary.v1"
+  artifact:
+    path: "${SUMMARY_FILE}"
+  allowed_root: "{phase_dir}"
   freshness:
     marker: "$EXECUTOR_HANDOFF_STARTED_AT"
     require_mtime_at_or_after_marker: true
     preexisting_artifacts: "recovery_evidence_only"
-  validators:
-    - "gpd validate handoff-artifacts - --expected '${SUMMARY_FILE}' --allowed-root '{phase_dir}' --required-suffix=-SUMMARY.md --require-status completed --require-files-written --fresh-after \"$EXECUTOR_HANDOFF_STARTED_AT\""
-    - "SUMMARY key-files.created / key-files.modified required/final deliverables exist"
-    - "no Self-Check: FAILED or Validation: FAILED marker"
-    - "proof-redteam artifact exists and reports status: passed when proof-bearing"
-  applicator:
-    command: "gpd --raw apply-return-updates ${SUMMARY_FILE}"
-    require_passed_true: true
-  write_allowlist:
-    - "${SUMMARY_FILE}"
-    - "{phase_dir}/**"
-  status_route:
-    checkpoint: "checkpoint_resume"
-    blocked: "wave_failure_menu"
-    failed: "wave_failure_menu"
-  failure_route:
-    return_missing: "repair_prompt_once"
-    return_malformed_repairable: "repair_prompt_once"
-    return_malformed_blocking: "wave_failure_menu"
-    artifact_missing: "retry_once_or_main_context_fallback"
-    artifact_stale: "retry_once"
-    artifact_path_repairable: "repair_path_once"
-    artifact_root_blocked: "wave_failure_menu"
-    validator_failed: "wave_failure_menu"
-    applicator_failed: "fail_closed_with_mutation_report"
+  overrides:
+    applicator_target: "${SUMMARY_FILE}"
+    write_allowlist:
+      - "${SUMMARY_FILE}"
+      - "{phase_dir}/**"
 ```
 
 Completed executor returns are accepted only after `wave_executor_plan_result` passes, including the local SUMMARY, deliverable, self-check, proof-redteam from `proof_critic_dispatch`, and applicator validators.

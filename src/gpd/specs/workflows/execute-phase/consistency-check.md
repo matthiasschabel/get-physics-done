@@ -79,30 +79,14 @@ Run the local child_gate only for checker returns triaged as `completed`. Shared
 ```yaml
 child_gate:
   id: "rapid_consistency_check"
-  role: "gpd-consistency-checker"
-  return_profile: "consistency_checker"
-  required_status: "completed"
-  expected_artifacts:
-    - "{phase_dir}/CONSISTENCY-CHECK.md"
-  allowed_roots:
-    - "{phase_dir}"
-  freshness_marker: "after $CONSISTENCY_HANDOFF_STARTED_AT"
-  validators:
-    - "gpd validate handoff-artifacts - --expected {phase_dir}/CONSISTENCY-CHECK.md --allowed-root {phase_dir} --required-suffix=CONSISTENCY-CHECK.md --require-status completed --require-files-written --fresh-after \"$CONSISTENCY_HANDOFF_STARTED_AT\""
-    - "readable artifact check"
-  applicator: none
-  failure_route: "fail_closed -> gpd:validate-conventions | repair_prompt_once | retry_once"
+  profile: "execute.consistency_report.v1"
+  artifact:
+    path: "{phase_dir}/CONSISTENCY-CHECK.md"
+  allowed_root: "{phase_dir}"
+  freshness_marker: "$CONSISTENCY_HANDOFF_STARTED_AT"
 ```
 
-Also check the artifact exists before routing:
-
-```bash
-CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"
-if [ ! -r "$CONSISTENCY_REPORT" ]; then
-  echo "ERROR: consistency-check artifact missing: $CONSISTENCY_REPORT"
-  exit 1
-fi
-```
+The profile-expanded gate owns `CONSISTENCY-CHECK.md` acceptance through the shared child-artifact gate. A consistency-check artifact missing result is a gate failure.
 </step>
 
 <step name="completed_consistency_route">

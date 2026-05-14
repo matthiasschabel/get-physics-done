@@ -447,6 +447,10 @@ def child_gate_tuple_from_payload(payload: Mapping[str, object]) -> ChildGateTup
     candidate = payload.get("child_gate") if "child_gate" in payload else payload
     if not isinstance(candidate, Mapping):
         raise ValueError("child_gate payload must be a mapping")
+    if "profile" in candidate:
+        from gpd.core.child_gate_profiles import expand_child_gate_profile_payload
+
+        candidate = expand_child_gate_profile_payload(candidate)
     return ChildGateTuple.model_validate(candidate)
 
 
@@ -469,7 +473,7 @@ def parse_child_gate_markdown(content: str) -> ChildGateTuple:
             continue
         if not isinstance(payload, Mapping):
             continue
-        if "child_gate" in payload or {"id", "role"} <= set(payload):
+        if "child_gate" in payload or {"id", "role"} <= set(payload) or {"id", "profile"} <= set(payload):
             return child_gate_tuple_from_payload(payload)
     raise ValueError("No child_gate YAML block found")
 

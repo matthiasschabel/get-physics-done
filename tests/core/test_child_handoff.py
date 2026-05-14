@@ -364,6 +364,34 @@ def test_child_handoff_routes_valid_non_required_statuses_without_artifact_accep
         assert result.next_action_class == route
 
 
+def test_child_handoff_profile_payload_routes_checkpoint_before_artifact_or_applicator(tmp_path: Path) -> None:
+    gate_payload = {
+        "child_gate": {
+            "id": "wave_executor_plan_result",
+            "profile": "execute.executor_summary.v1",
+            "artifact": "GPD/phases/01-test/01-01-SUMMARY.md",
+            "allowed_root": "GPD/phases/01-test",
+            "freshness_marker": "$EXECUTOR_HANDOFF_STARTED_AT",
+        }
+    }
+
+    result = validate_child_handoff(
+        tmp_path,
+        _return_block(["GPD/phases/01-test/01-01-SUMMARY.md"], status="checkpoint"),
+        gate_payload,
+    )
+
+    assert result.passed is False
+    assert result.acceptance_state == "status_routed"
+    assert result.status_route_used is True
+    assert result.selected_route == "checkpoint_resume"
+    assert result.checked_files == []
+    assert result.validator_results == []
+    assert result.requires_applicator_pass is True
+    assert result.applicator_command == "gpd --raw apply-return-updates GPD/phases/01-test/01-01-SUMMARY.md"
+    assert result.applicator_ran is False
+
+
 def test_child_handoff_reports_applicator_required_read_only_acceptance_gap(tmp_path: Path) -> None:
     summary_path = tmp_path / "GPD" / "phases" / "01-test" / "01-01-SUMMARY.md"
     summary_path.parent.mkdir(parents=True)

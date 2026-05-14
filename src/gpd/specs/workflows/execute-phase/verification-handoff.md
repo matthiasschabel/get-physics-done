@@ -112,26 +112,14 @@ Run the local child_gate before accepting the verifier result. Shared gate/statu
 ```yaml
 child_gate:
   id: "post_execution_verifier"
-  role: "gpd-verifier"
-  return_profile: "verifier"
-  required_status: "completed"
-  expected_artifacts:
-    - "{phase_dir}/{phase_number}-VERIFICATION.md"
-  allowed_roots:
-    - "{phase_dir}"
-  freshness_marker: "after $VERIFIER_HANDOFF_STARTED_AT"
-  validators:
-    - "gpd validate handoff-artifacts - --expected '{phase_dir}/{phase_number}-VERIFICATION.md' --allowed-root '{phase_dir}' --required-suffix=-VERIFICATION.md --require-status completed --require-files-written --fresh-after \"$VERIFIER_HANDOFF_STARTED_AT\""
-    - "gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md"
-    - "verification-status-authority.md status rules"
-    - "proof-redteam status: passed for proof-bearing work"
-  applicator:
-    command: "none; closeout/update_roadmap is allowed only after verifier and consistency gates pass"
-    require_passed_true: false
-  failure_route: "fail_closed -> gpd:verify-work {PHASE_NUMBER} | repair_prompt_once | retry_once_then_gpd_verify_work"
+  profile: "execute.verification_report.v1"
+  artifact:
+    path: "{phase_dir}/{phase_number}-VERIFICATION.md"
+  allowed_root: "{phase_dir}"
+  freshness_marker: "$VERIFIER_HANDOFF_STARTED_AT"
 ```
 
-Spawn errors, tuple failures, validator failures, malformed returns, and proof-redteam blockers fail closed. Verifier returns and frontmatter stay child/helper-owned; this stage cannot mark the phase complete.
+Spawn errors, tuple failures, validator failures, malformed returns, stale or missing `files_written`, and proof-redteam blockers fail closed. The profile-expanded gate requires the verification contract and `verification-status-authority.md` status rules. Verifier returns and frontmatter stay child/helper-owned; this stage cannot mark the phase complete.
 </step>
 
 <step name="canonical_status_route">

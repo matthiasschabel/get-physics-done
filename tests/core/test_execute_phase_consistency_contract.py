@@ -11,6 +11,7 @@ from tests.assertion_taxonomy_support import (
     machine_exact,
     semantic_anchor,
 )
+from tests.lifecycle_contract_test_support import artifact_paths, child_gate_from_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
@@ -39,6 +40,7 @@ def _s(text: str, label: str, *fragments: str) -> None:
 
 def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
+    gate = child_gate_from_text(workflow, "rapid_consistency_check")
 
     _m(
         workflow,
@@ -50,14 +52,20 @@ def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> No
         '<step name="checker_return_status_route">',
         '<step name="consistency_child_gate">',
         "CONSISTENCY_HANDOFF_STARTED_AT=",
-        'CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"',
-        'if [ ! -r "$CONSISTENCY_REPORT" ]; then',
-        "gpd validate handoff-artifacts -",
-        "--require-files-written",
-        "--require-status completed",
-        "--fresh-after",
-        "CONSISTENCY_HANDOFF_STARTED_AT",
+        'profile: "execute.consistency_report.v1"',
+        'allowed_root: "{phase_dir}"',
+        'freshness_marker: "$CONSISTENCY_HANDOFF_STARTED_AT"',
     )
+    assert gate.role == "gpd-consistency-checker"
+    assert gate.return_profile == "checker"
+    assert gate.required_status == "completed"
+    assert artifact_paths(gate) == ("{phase_dir}/CONSISTENCY-CHECK.md",)
+    assert gate.allowed_roots == ("{phase_dir}",)
+    assert gate.freshness is not None
+    assert gate.freshness.marker == "$CONSISTENCY_HANDOFF_STARTED_AT"
+    assert any("--require-files-written" in validator for validator in gate.validators)
+    assert any("--require-status completed" in validator for validator in gate.validators)
+    assert any('--fresh-after "$CONSISTENCY_HANDOFF_STARTED_AT"' in validator for validator in gate.validators)
     _s(
         workflow,
         "consistency checker typed return and file gate",

@@ -26,11 +26,8 @@ from gpd.core.prompt_diagnostics_types import (
     PromptReturnFieldMention,
     PromptSource,
 )
-from gpd.core.return_contract import (
-    KNOWN_RETURN_FIELD_NAMES,
-    return_field_allowed_source,
-    validate_gpd_return_markdown,
-)
+from gpd.core.return_contract import GpdReturnEnvelope, validate_gpd_return_markdown
+from gpd.core.return_fields import ReturnFieldAllowedSource, known_return_field_names, return_field_source
 
 MarkdownFence = _prompt_markdown_scan.MarkdownFence
 _body_without_frontmatter = _prompt_markdown_scan.body_without_frontmatter
@@ -38,6 +35,7 @@ _body_without_frontmatter_with_line_offset = _prompt_markdown_scan.body_without_
 _iter_markdown_fences = _prompt_markdown_scan.iter_markdown_fences
 _iter_unfenced_lines = _prompt_markdown_scan.iter_unfenced_lines
 _relative_path = _prompt_markdown_scan.relative_path
+_RETURN_FIELD_BASE_FIELDS = tuple(GpdReturnEnvelope.model_fields)
 
 _SPAWN_CONTRACT_RE = re.compile(
     r"^[ \t]*<spawn_contract(?:_interactive)?>[ \t]*$",
@@ -587,12 +585,12 @@ def _build_return_field_mention(
     ],
     snippet: str,
 ) -> PromptReturnFieldMention:
-    allowed_source = return_field_allowed_source(field)
+    allowed_source = _return_field_allowed_source(field)
     allowed = allowed_source != "unknown"
     polarity: Literal["positive", "negative"] = "negative" if _RETURN_FIELD_NEGATION_RE.search(snippet) else "positive"
     severity: Literal["info", "warn", "error"] = "info"
-    if not allowed and polarity == "positive":
-        severity = "error"
+    if not allowed:
+        severity = "warn" if polarity == "negative" else "error"
     return PromptReturnFieldMention(
         path=path,
         line=line,
@@ -608,8 +606,16 @@ def _build_return_field_mention(
 
 
 def _return_field_suggestion(field: str) -> str | None:
-    matches = difflib.get_close_matches(field, sorted(KNOWN_RETURN_FIELD_NAMES), n=1)
+    matches = difflib.get_close_matches(field, sorted(_known_return_field_names()), n=1)
     return matches[0] if matches else None
+
+
+def _return_field_allowed_source(field: str) -> ReturnFieldAllowedSource:
+    return return_field_source(field, base_fields=_RETURN_FIELD_BASE_FIELDS)
+
+
+def _known_return_field_names() -> frozenset[str]:
+    return known_return_field_names(_RETURN_FIELD_BASE_FIELDS)
 
 
 def _prompt_line_snippet(line: str, max_chars: int = 180) -> str:

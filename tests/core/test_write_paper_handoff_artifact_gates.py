@@ -108,7 +108,7 @@ def test_write_paper_bibliography_completion_requires_typed_status_files_written
     gate = _child_gate(source, "write_paper_bibliographer")
 
     assert payload["child_gate"]["return_profile"] == "bibliographer"
-    assert gate.return_profile == "researcher"
+    assert gate.return_profile == "bibliographer"
     assert gate.role == "gpd-bibliographer"
     assert _artifact_paths(gate) == (
         "${PAPER_DIR}/CITATION-AUDIT.md",

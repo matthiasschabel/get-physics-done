@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from gpd.core.return_contract import RETURN_STATUS_ORDER
+from gpd.core.return_skeleton import GPD_RETURN_ROLE_PROFILES, build_gpd_return_skeleton
 from tests.return_example_support import extract_gpd_return_examples, validate_gpd_return_examples
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -56,3 +57,21 @@ def test_agent_return_examples_use_canonical_status_profile_reference() -> None:
             offenders.append(path.relative_to(REPO_ROOT).as_posix())
 
     assert offenders == []
+
+
+def test_prompt_visible_role_extensions_are_profile_visible() -> None:
+    expected_extensions = (
+        (REPO_ROOT / "src" / "gpd" / "agents" / "gpd-roadmapper.md", "roadmapper", "phases_created"),
+        (REPO_ROOT / "src" / "gpd" / "agents" / "gpd-bibliographer.md", "bibliographer", "entries_added"),
+        (REPO_ROOT / "src" / "gpd" / "agents" / "gpd-debugger.md", "debugger", "session_file"),
+    )
+
+    for path, role, field_name in expected_extensions:
+        relative_path = path.relative_to(REPO_ROOT).as_posix()
+        examples = extract_gpd_return_examples(path, source_name=relative_path)
+        envelopes, failures = validate_gpd_return_examples(examples, require_required_fields=True)
+
+        assert not failures, "Invalid gpd_return YAML examples:\n" + "\n".join(failures)
+        assert any(field_name in envelope for envelope in envelopes), f"{relative_path} does not show {field_name}"
+        assert field_name in GPD_RETURN_ROLE_PROFILES[role].role_fields_by_status["completed"]
+        assert field_name in build_gpd_return_skeleton(role=role, status="completed").role_fields

@@ -70,43 +70,17 @@ Proof critic child artifact gate:
 ```yaml
 child_gate:
   id: "proof_critic_wave_audit"
-  role: "gpd-check-proof"
-  return_profile: "proof_redteam"
-  required_status: "completed"
-  expected_artifacts:
-    - path: "{phase_dir}/{plan_id}-PROOF-REDTEAM.md"
-      kind: "path"
-      required: true
-      must_be_named_in_files_written: true
-  allowed_roots:
-    - "{phase_dir}"
+  profile: "execute.proof_critic_report.v1"
+  artifact:
+    path: "{phase_dir}/{plan_id}-PROOF-REDTEAM.md"
+  allowed_root: "{phase_dir}"
   freshness:
     marker: "$PROOF_HANDOFF_STARTED_AT"
     require_mtime_at_or_after_marker: true
     preexisting_artifacts: "recovery_evidence_only"
-  validators:
-    - "gpd validate handoff-artifacts - --expected '{phase_dir}/{plan_id}-PROOF-REDTEAM.md' --allowed-root '{phase_dir}' --require-status completed --require-files-written --fresh-after \"$PROOF_HANDOFF_STARTED_AT\""
-    - "gpd validate proof-redteam {phase_dir}/{plan_id}-PROOF-REDTEAM.md"
-    - "frontmatter status: passed before executor wave success"
-  applicator:
-    command: "none"
-    require_passed_true: false
-  write_allowlist:
-    - "{phase_dir}/{plan_id}-PROOF-REDTEAM.md"
-  status_route:
-    checkpoint: "checkpoint_resume"
-    blocked: "wave_failure_menu"
-    failed: "wave_failure_menu"
-  failure_route:
-    return_missing: "repair_prompt_once"
-    return_malformed_repairable: "repair_prompt_once"
-    return_malformed_blocking: "wave_failure_menu"
-    artifact_missing: "retry_once_then_wave_failure_menu"
-    artifact_stale: "retry_once_then_wave_failure_menu"
-    artifact_path_repairable: "repair_path_once"
-    artifact_root_blocked: "wave_failure_menu"
-    validator_failed: "wave_failure_menu"
-    applicator_failed: "wave_failure_menu"
+  overrides:
+    write_allowlist:
+      - "{phase_dir}/{plan_id}-PROOF-REDTEAM.md"
 ```
 
 Gate failure routes the plan to `wave_failure_menu`; a clean executor SUMMARY, local algebra check, or later human inspection is not a substitute for a fresh proof-redteam artifact with `status: passed`. For the sibling `{plan_id}-PROOF-REDTEAM.md` artifact, `gpd-check-proof` is the canonical owner.

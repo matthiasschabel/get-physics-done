@@ -6,6 +6,7 @@ from pathlib import Path
 
 from gpd.core.context import init_execute_phase
 from gpd.core.workflow_staging import load_workflow_stage_manifest
+from tests.lifecycle_contract_test_support import child_gate_from_text
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src/gpd/specs/workflows"
@@ -59,12 +60,13 @@ def test_execute_phase_manifest_scopes_bridges_to_aggregate_stage() -> None:
 
 def test_execute_phase_workflow_routes_report_construction_through_finalizer_bridge() -> None:
     workflow = _read_execute_phase_stage("verification-handoff.md")
+    gate = child_gate_from_text(workflow, "post_execution_verifier")
 
     assert "verification_report_finalizer_bridge" in workflow
     assert "verification_report_skeleton_bridge" in workflow
     assert "Do not hand-author frontmatter." in workflow
     assert "verification-report skeleton/finalizer bridge" in workflow
-    assert "gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md" in workflow
+    assert "gpd validate verification-contract {phase_dir}/{phase_number}-VERIFICATION.md" in gate.validators
     assert workflow.index("verification_report_finalizer_bridge") < workflow.index("<step name=\"verifier_child_gate\">")
 
 
@@ -79,9 +81,10 @@ def test_execute_phase_verification_handoff_keeps_verify_phase_child_readable() 
 
 def test_execute_phase_verification_handoff_routes_on_canonical_status() -> None:
     workflow = _read_execute_phase_stage("verification-handoff.md")
+    gate = child_gate_from_text(workflow, "post_execution_verifier")
 
     assert 'id: "post_execution_verifier"' in workflow
-    assert "verification-status-authority.md status rules" in workflow
+    assert "verification-status-authority.md status rules" in gate.validators
     assert "canonical verification_status: passed | gaps_found | expert_needed | human_needed" in workflow
     assert "| `passed` | Continue to `consistency_check`; do not close the phase yet. |" in workflow
     assert "| `gaps_found` | Continue to `gap_reverification` or stop with the gap route below. |" in workflow

@@ -161,8 +161,13 @@ def test_execute_phase_proof_critic_child_gate_preserves_local_machine_contract(
     gate = child_gate_from_text(proof_dispatch, "proof_critic_wave_audit")
     failure_route = {failure.value: route for failure, route in gate.failure_route.items()}
 
-    _assert_machine(proof_dispatch, "proof critic source return profile token", 'return_profile: "proof_redteam"')
+    _assert_machine(
+        proof_dispatch,
+        "proof critic child gate profile source token",
+        'profile: "execute.proof_critic_report.v1"',
+    )
     assert gate.role == "gpd-check-proof"
+    assert gate.return_profile == "verifier"
     assert gate.required_status == "completed"
     assert artifact_paths(gate) == ("{phase_dir}/{plan_id}-PROOF-REDTEAM.md",)
     assert gate.allowed_roots == ("{phase_dir}",)

@@ -276,6 +276,44 @@ def test_rejects_transport_execution_segment_inside_durable_continuation_update(
     assert any("continuation_update" in error and "execution_segment" in error for error in result.errors)
 
 
+def test_rejects_unknown_fields_inside_durable_continuation_update_payloads() -> None:
+    nested_payloads = {
+        "handoff": (
+            "    handoff:\n"
+            "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
+            "      stopped_at: Completed phase 01\n"
+            "      extra_durable_owner: child\n"
+        ),
+        "bounded_segment": (
+            "    bounded_segment:\n"
+            "      resume_file: GPD/phases/01-test-phase/.continue-here.md\n"
+            '      phase: "01"\n'
+            '      plan: "01"\n'
+            "      segment_id: seg-01\n"
+            "      segment_status: paused\n"
+            "      extra_durable_owner: child\n"
+        ),
+    }
+
+    for nested_field, nested_yaml in nested_payloads.items():
+        content = _wrap_return_block(
+            "  status: checkpoint\n"
+            "  files_written: [src/main.py]\n"
+            "  issues: []\n"
+            "  next_actions: [gpd:resume-work]\n"
+            "  continuation_update:\n"
+            f"{nested_yaml}"
+        )
+
+        result = validate_gpd_return_markdown(content)
+
+        assert result.passed is False
+        assert any(
+            "continuation_update" in error and nested_field in error and "extra_durable_owner" in error
+            for error in result.errors
+        )
+
+
 def test_rejects_applicator_owned_handoff_metadata_inside_child_return() -> None:
     content = _wrap_return_block(
         "  status: checkpoint\n"
@@ -346,9 +384,7 @@ def test_rejects_applicator_owned_checkpoint_intent_metadata_inside_child_return
         result = validate_gpd_return_markdown(content)
 
         assert result.passed is False
-        assert any(
-            field_name in error and "applicator-owned checkpoint_intent" in error for error in result.errors
-        )
+        assert any(field_name in error and "applicator-owned checkpoint_intent" in error for error in result.errors)
 
 
 def test_rejects_scalar_where_continuation_update_requires_mapping() -> None:

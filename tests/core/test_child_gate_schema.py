@@ -12,6 +12,9 @@ import yaml
 from gpd.core.child_gate_snippets import (
     AggregateChildGateTuple,
     aggregate_child_gate_tuple_from_payload,
+    expand_child_gate_profile_payload,
+    list_child_gate_profiles,
+    normalize_child_gate_profile_id,
     parse_aggregate_child_gate_markdown,
     render_child_gate_inline_summary,
     render_child_gate_markdown,
@@ -259,7 +262,7 @@ _EXPECTED_WORKFLOW_CHILD_GATE_ROLE_PROFILE = {
     "verify_work_proof_critic": ("gpd-check-proof", "verifier"),
     "verify_work_verifier_report": ("gpd-verifier", "verifier"),
     "wave_executor_plan_result": ("gpd-executor", "executor"),
-    "write_paper_bibliographer": ("gpd-bibliographer", "researcher"),
+    "write_paper_bibliographer": ("gpd-bibliographer", "bibliographer"),
     "write_paper_response_pair": ("gpd-paper-writer", "paper_writer"),
     "write_paper_section_writer": ("gpd-paper-writer", "paper_writer"),
 }
@@ -489,6 +492,64 @@ _EXPECTED_WORKFLOW_AGGREGATE_CHILD_GATE = {
     },
 }
 
+_EXECUTE_PHASE_PROFILE_CASES = (
+    (
+        "execute-phase/wave-return-checkpoint.md",
+        "wave_executor_plan_result",
+        {
+            "id": "wave_executor_plan_result",
+            "profile": "execute.executor_summary.v1",
+            "artifact": "${SUMMARY_FILE}",
+            "allowed_root": "{phase_dir}",
+            "freshness_marker": "$EXECUTOR_HANDOFF_STARTED_AT",
+        },
+    ),
+    (
+        "execute-phase/proof-critic-dispatch.md",
+        "proof_critic_wave_audit",
+        {
+            "id": "proof_critic_wave_audit",
+            "profile": "execute.proof_critic_report.v1",
+            "artifact": "{phase_dir}/{plan_id}-PROOF-REDTEAM.md",
+            "allowed_root": "{phase_dir}",
+            "freshness_marker": "$PROOF_HANDOFF_STARTED_AT",
+        },
+    ),
+    (
+        "execute-phase/verification-handoff.md",
+        "post_execution_verifier",
+        {
+            "id": "post_execution_verifier",
+            "profile": "execute.verification_report.v1",
+            "artifact": "{phase_dir}/{phase_number}-VERIFICATION.md",
+            "allowed_root": "{phase_dir}",
+            "freshness_marker": "after $VERIFIER_HANDOFF_STARTED_AT",
+        },
+    ),
+    (
+        "execute-phase/gap-reverification.md",
+        "gap_closure_reverification",
+        {
+            "id": "gap_closure_reverification",
+            "profile": "execute.gap_reverification_report.v1",
+            "artifact": "{phase_dir}/{phase_number}-VERIFICATION.md",
+            "allowed_root": "{phase_dir}",
+            "freshness_marker": "after $REVERIFY_HANDOFF_STARTED_AT",
+        },
+    ),
+    (
+        "execute-phase/consistency-check.md",
+        "rapid_consistency_check",
+        {
+            "id": "rapid_consistency_check",
+            "profile": "execute.consistency_report.v1",
+            "artifact": "{phase_dir}/CONSISTENCY-CHECK.md",
+            "allowed_root": "{phase_dir}",
+            "freshness_marker": "after $CONSISTENCY_HANDOFF_STARTED_AT",
+        },
+    ),
+)
+
 
 def test_child_gate_tuple_renders_compact_yaml_with_inferred_return_profile() -> None:
     rendered = _gate_markdown(_planner_gate())
@@ -609,6 +670,117 @@ def test_child_gate_tuple_accepts_compact_prompt_tuple_shape() -> None:
     assert gate.applicator.command == "none"
     assert gate.write_allowlist == ("${PAPER_DIR}/intro.tex",)
     assert set(gate.failure_route) == set(HandoffFailureClass)
+
+
+def test_child_gate_tuple_from_payload_preserves_raw_tuple_when_profiles_exist() -> None:
+    expected = _workflow_child_gate("execute-phase/wave-return-checkpoint.md", "wave_executor_plan_result")
+    raw_payload = expected.to_payload()
+
+    assert "profile" not in raw_payload
+    assert child_gate_tuple_from_payload(raw_payload) == expected
+    assert child_gate_tuple_from_payload({"child_gate": raw_payload}) == expected
+
+
+@pytest.mark.parametrize(("source", "gate_id", "profile_payload"), _EXECUTE_PHASE_PROFILE_CASES)
+def test_execute_phase_child_gate_profiles_expand_to_current_effective_tuples(
+    source: str,
+    gate_id: str,
+    profile_payload: dict[str, object],
+) -> None:
+    expected = _workflow_child_gate(source, gate_id)
+
+    assert child_gate_tuple_from_payload(profile_payload) == expected
+    assert child_gate_tuple_from_payload({"child_gate": profile_payload}) == expected
+
+
+def test_execute_phase_child_gate_profile_aliases_expand_to_current_effective_tuples() -> None:
+    aliases = {
+        "wave_executor_plan_result": "execute_phase_executor_summary_v1",
+        "proof_critic_wave_audit": "execute_phase_proof_critic_report_v1",
+        "post_execution_verifier": "execute_phase_verification_report_v1",
+        "gap_closure_reverification": "execute_phase_gap_reverification_report_v1",
+        "rapid_consistency_check": "execute_phase_consistency_report_v1",
+    }
+
+    for source, gate_id, profile_payload in _EXECUTE_PHASE_PROFILE_CASES:
+        payload = dict(profile_payload)
+        payload["profile"] = aliases[gate_id]
+        assert normalize_child_gate_profile_id(payload["profile"]) == normalize_child_gate_profile_id(
+            profile_payload["profile"]
+        )
+        assert child_gate_tuple_from_payload(payload) == _workflow_child_gate(source, gate_id)
+
+
+def test_child_gate_profile_payload_rejects_unknown_profile_and_owned_field_drift() -> None:
+    payload = {
+        "id": "post_execution_verifier",
+        "profile": "execute.verification_report.v1",
+        "artifact": "{phase_dir}/{phase_number}-VERIFICATION.md",
+        "allowed_root": "{phase_dir}",
+        "freshness_marker": "$VERIFIER_HANDOFF_STARTED_AT",
+    }
+
+    with pytest.raises(ValueError, match="unknown child_gate profile"):
+        child_gate_tuple_from_payload({**payload, "profile": "execute.unknown_report.v1"})
+
+    with pytest.raises(ValueError, match="requires return_profile"):
+        child_gate_tuple_from_payload({**payload, "return_profile": "executor"})
+
+    with pytest.raises(ValueError, match="owns status_route"):
+        child_gate_tuple_from_payload({**payload, "status_route": {"checkpoint": "checkpoint_resume"}})
+
+    invalid_roots_payload = dict(payload)
+    invalid_roots_payload.pop("allowed_root")
+    invalid_roots_payload["allowed_roots"] = ["{phase_dir}", "GPD"]
+    with pytest.raises(ValueError, match="allowed_roots must contain exactly one root"):
+        child_gate_tuple_from_payload(invalid_roots_payload)
+
+
+def test_execute_phase_child_gate_profiles_preserve_status_route_applicator_and_write_policy() -> None:
+    gates = {
+        gate_id: child_gate_tuple_from_payload(profile_payload)
+        for _, gate_id, profile_payload in _EXECUTE_PHASE_PROFILE_CASES
+    }
+
+    assert tuple(gates["wave_executor_plan_result"].status_route) == ("checkpoint", "blocked", "failed")
+    assert tuple(gates["proof_critic_wave_audit"].status_route) == ("checkpoint", "blocked", "failed")
+    assert gates["post_execution_verifier"].status_route == {}
+    assert gates["gap_closure_reverification"].status_route == {}
+    assert gates["rapid_consistency_check"].status_route == {}
+
+    assert gates["wave_executor_plan_result"].applicator.command == "gpd --raw apply-return-updates ${SUMMARY_FILE}"
+    assert gates["wave_executor_plan_result"].applicator.require_passed_true is True
+    assert gates["proof_critic_wave_audit"].applicator.command == "none"
+    assert gates["rapid_consistency_check"].applicator.command == "none"
+    assert gates["post_execution_verifier"].applicator.command.startswith("none; closeout/update_roadmap")
+    assert gates["gap_closure_reverification"].applicator.command.startswith("none; closeout/update_roadmap")
+
+    assert gates["wave_executor_plan_result"].write_allowlist == ("${SUMMARY_FILE}", "{phase_dir}/**")
+    assert gates["proof_critic_wave_audit"].write_allowlist == ("{phase_dir}/{plan_id}-PROOF-REDTEAM.md",)
+    assert gates["post_execution_verifier"].write_allowlist == ()
+    assert gates["gap_closure_reverification"].write_allowlist == ()
+    assert gates["rapid_consistency_check"].write_allowlist == ()
+
+
+def test_child_gate_profile_list_payload_is_detached_and_defaults_validate() -> None:
+    registry = list_child_gate_profiles()
+    assert sorted(registry["profiles"]) == [
+        "execute.consistency_report.v1",
+        "execute.executor_summary.v1",
+        "execute.gap_reverification_report.v1",
+        "execute.proof_critic_report.v1",
+        "execute.verification_report.v1",
+    ]
+    registry["profiles"]["execute.executor_summary.v1"]["role"] = "mutated"
+    assert list_child_gate_profiles()["profiles"]["execute.executor_summary.v1"]["role"] == "gpd-executor"
+
+    for _, _, profile_payload in _EXECUTE_PHASE_PROFILE_CASES:
+        expanded = expand_child_gate_profile_payload(profile_payload)
+        gate = child_gate_tuple_from_payload(expanded)
+        assert gate.required_status == "completed"
+        assert gate.expected_artifacts[0].must_be_named_in_files_written is True
+        assert gate.freshness is not None
+        assert gate.freshness.require_mtime_at_or_after_marker is True
 
 
 def test_aggregate_child_gate_tuple_accepts_wrapped_payload_and_round_trips_fields() -> None:

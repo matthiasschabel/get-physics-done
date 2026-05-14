@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from tests.assertion_taxonomy_support import (
+    FragmentMode,
+    MatchMode,
+    assert_prompt_contracts,
+    machine_exact,
+    semantic_anchor,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS_DIR = REPO_ROOT / "src" / "gpd" / "specs" / "workflows"
 EXECUTE_PHASE_STAGE_DIR = WORKFLOWS_DIR / "execute-phase"
@@ -17,56 +25,96 @@ def _read_execute_phase_stage(name: str) -> str:
     return (EXECUTE_PHASE_STAGE_DIR / name).read_text(encoding="utf-8")
 
 
+def _m(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(text, machine_exact(label, fragments, context=label))
+
+
+def _f(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(text, machine_exact(label, fragments, mode=FragmentMode.ABSENT, context=label))
+
+
+def _s(text: str, label: str, *fragments: str) -> None:
+    assert_prompt_contracts(text, semantic_anchor(label, fragments, match=MatchMode.CASEFOLD_NORMALIZED, context=label))
+
+
 def test_execute_phase_consistency_check_uses_typed_return_and_file_gate() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
 
-    assert "gpd-consistency-checker.md" in workflow
-    assert "<spawn_contract>" in workflow
-    assert "expected_artifacts:" in workflow
-    assert "{phase_dir}/CONSISTENCY-CHECK.md" in workflow
-    assert "Return exactly one typed gpd_return envelope, include files_written" in workflow
-    assert "runtime return is canonical" in workflow
-    assert "Do not embed or duplicate gpd_return inside the report artifact" in workflow
-    assert "Append the same typed YAML gpd_return block to the artifact before returning" not in workflow
-    assert '<step name="checker_return_status_route">' in workflow
-    assert '<step name="consistency_child_gate">' in workflow
+    _m(
+        workflow,
+        "consistency checker typed return and file gate",
+        "gpd-consistency-checker.md",
+        "<spawn_contract>",
+        "expected_artifacts:",
+        "{phase_dir}/CONSISTENCY-CHECK.md",
+        '<step name="checker_return_status_route">',
+        '<step name="consistency_child_gate">',
+        "CONSISTENCY_HANDOFF_STARTED_AT=",
+        'CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"',
+        'if [ ! -r "$CONSISTENCY_REPORT" ]; then',
+        "gpd validate handoff-artifacts -",
+        "--require-files-written",
+        "--require-status completed",
+        "--fresh-after",
+        "CONSISTENCY_HANDOFF_STARTED_AT",
+    )
+    _s(
+        workflow,
+        "consistency checker typed return and file gate",
+        "Return exactly one typed gpd_return envelope, include files_written",
+        "runtime return is canonical",
+        "Do not embed or duplicate gpd_return inside the report artifact",
+        "Run the local child_gate only for checker returns triaged as `completed`.",
+        "`completed`: accept only if the child_gate passes",
+        "`checkpoint`: stop, surface the checkpoint payload",
+        "`blocked`: stop and route to `gpd:validate-conventions`",
+        "`failed`: stop and route to `gpd:validate-conventions`",
+        "consistency-check artifact missing",
+    )
+    _f(
+        workflow,
+        "consistency checker stale embedded report return",
+        "Append the same typed YAML gpd_return block to the artifact before returning",
+    )
     assert workflow.index('<step name="spawn_rapid_checker">') < workflow.index(
         '<step name="checker_return_status_route">'
     )
     assert workflow.index('<step name="checker_return_status_route">') < workflow.index("child_gate:")
-    assert "Run the local child_gate only for checker returns triaged as `completed`." in workflow
-    assert "`completed`: accept only if the child_gate passes" in workflow
-    assert "`checkpoint`: stop, surface the checkpoint payload" in workflow
-    assert "`blocked`: stop and route to `gpd:validate-conventions`" in workflow
-    assert "`failed`: stop and route to `gpd:validate-conventions`" in workflow
-    assert "CONSISTENCY_HANDOFF_STARTED_AT=" in workflow
-    assert 'CONSISTENCY_REPORT="${phase_dir}/CONSISTENCY-CHECK.md"' in workflow
-    assert 'if [ ! -r "$CONSISTENCY_REPORT" ]; then' in workflow
-    assert "consistency-check artifact missing" in workflow
-    assert "gpd validate handoff-artifacts -" in workflow
-    assert "--require-files-written" in workflow
-    assert "--require-status completed" in workflow
-    assert "--fresh-after" in workflow
-    assert "CONSISTENCY_HANDOFF_STARTED_AT" in workflow
 
 
 def test_execute_phase_consistency_check_no_longer_routes_on_legacy_status() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
 
-    assert "Return consistency_status with any issues found." not in workflow
-    assert "Proceed without cross-phase consistency checking for this wave." not in workflow
-    assert "Present issues to user with resolution options" not in workflow
-    assert "Do not infer success from prose headings or untyped routing." in workflow
-    assert "Do not hand-author or paste a synthetic `gpd_return`" in workflow
+    _f(
+        workflow,
+        "consistency checker legacy status routing",
+        "Return consistency_status with any issues found.",
+        "Proceed without cross-phase consistency checking for this wave.",
+        "Present issues to user with resolution options",
+    )
+    _s(
+        workflow,
+        "consistency checker typed route authority",
+        "Do not infer success from prose headings or untyped routing.",
+        "Do not hand-author or paste a synthetic `gpd_return`",
+    )
 
 
 def test_execute_phase_consistency_stops_render_from_stage_stop_routes() -> None:
     workflow = _read_execute_phase_stage("consistency-check.md")
 
-    assert "For every consistency-check stop, populate `stage_stop` before rendering." in workflow
-    assert "| checker spawn/error | `blocked` | `consistency_checker_unavailable`" in workflow
-    assert "| checker checkpoint | `checkpoint` | `consistency_checker_checkpoint`" in workflow
-    assert "| checker blocked | `blocked` | `consistency_checker_blocked`" in workflow
-    assert "| checker failed | `failed` | `consistency_checker_failed`" in workflow
-    assert "Primary: `{stage_stop.next_runtime_command}`" in workflow
-    assert "End with `## > Next Up`: primary" not in workflow
+    _m(
+        workflow,
+        "consistency checker stage-stop render routes",
+        "| checker spawn/error | `blocked` | `consistency_checker_unavailable`",
+        "| checker checkpoint | `checkpoint` | `consistency_checker_checkpoint`",
+        "| checker blocked | `blocked` | `consistency_checker_blocked`",
+        "| checker failed | `failed` | `consistency_checker_failed`",
+        "Primary: `{stage_stop.next_runtime_command}`",
+    )
+    _s(
+        workflow,
+        "consistency checker stage-stop render routes",
+        "For every consistency-check stop, populate `stage_stop` before rendering.",
+    )
+    _f(workflow, "consistency checker stale next-up render route", "End with `## > Next Up`: primary")

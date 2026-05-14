@@ -57,12 +57,22 @@ def test_phase4_script_and_shared_helper_both_reject_raw_suffix_keys(raw_key: st
     "raw_key",
     [
         "raw_prompt",
+        "stdout",
+        "stderr",
+        "argv",
+        "env",
+        "auth_path",
+        "account_id",
+        "absolute_path",
+        "provider_prompt",
         "provider_reply",
         "provider_output",
+        "transcript",
         "transcript_path",
         "command_line",
-        "auth_path",
         "file_hash",
+        "token_value",
+        "note",
         "request_id_class",
         "session_id",
         "trace_id_class",
@@ -84,11 +94,22 @@ def test_phase4_script_and_shared_helper_both_reject_raw_suffix_keys(raw_key: st
         "secret_classes",
     ],
 )
-def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix(raw_key: str) -> None:
-    summary = make_phase7_live_canary_summary()
+@pytest.mark.parametrize(
+    ("summary_factory", "policy"),
+    [
+        (make_phase4_live_smoke_summary, phase4_live_smoke_policy()),
+        (make_phase7_live_canary_summary, phase7_live_canary_policy()),
+    ],
+)
+def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix(
+    raw_key: str,
+    summary_factory: object,
+    policy: object,
+) -> None:
+    summary = summary_factory()
     _first_row(summary)[raw_key] = 0 if raw_key.endswith(("_count", "_counts")) else "redacted"
 
-    result = validate_persona_summary(summary, phase7_live_canary_policy())
+    result = validate_persona_summary(summary, policy)
 
     assert any(finding.startswith("forbidden_key:") for finding in result.findings)
 
@@ -96,11 +117,16 @@ def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix
 @pytest.mark.parametrize(
     "raw_value",
     [
+        "Prompt text: run the whole phase and tell me the answer",
+        "raw prompt: run the whole phase and tell me the answer",
         "raw prompt: run this exact provider input",
         "provider_prompt: launch with this exact input",
+        "provider_prompt: run this exact input",
         "raw provider reply: the derivation is complete",
         "assistant_reply",
+        "model_reply",
         "model-reply",
+        "provider_reply:accepted",
         "provider_output: final answer text",
         "provider_stdout",
         "provider_stderr",
@@ -111,6 +137,7 @@ def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix
         "stderr",
         "argv",
         "env",
+        "command line: gpd progress --raw",
         "req_01HF7YAT00EXAMPLE",
         "trace_01HF7YAT00EXAMPLE",
         "usage_json",
@@ -118,6 +145,8 @@ def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix
         "CODEX_HOME",
         "raw_diff_sidecar.patch",
         "provider_command_details",
+        "stdout.jsonl",
+        "stderr.txt",
         "prompt.enveloped.txt",
         "provider-output.log",
         "/Users/example/.codex/auth.json",
@@ -129,16 +158,29 @@ def test_persona_summary_policy_rejects_raw_keys_even_with_class_or_count_suffix
         "api_key",
         "client_secret",
         "secret",
+        "Bearer sk-test-secret",
         "Bearer sk-testsecret1234567890",
+        "ghp_0123456789abcdef0123456789abcdef",
         "github_pat_0123456789abcdef0123456789abcdef",
         "a" * 48,
     ],
 )
-def test_persona_summary_policy_rejects_raw_values_in_public_string_lists(raw_value: str) -> None:
-    summary = make_phase7_live_canary_summary()
+@pytest.mark.parametrize(
+    ("summary_factory", "policy"),
+    [
+        (make_phase4_live_smoke_summary, phase4_live_smoke_policy()),
+        (make_phase7_live_canary_summary, phase7_live_canary_policy()),
+    ],
+)
+def test_persona_summary_policy_rejects_raw_values_in_public_string_lists(
+    raw_value: str,
+    summary_factory: object,
+    policy: object,
+) -> None:
+    summary = summary_factory()
     _first_row(summary)["finding_classes"] = [raw_value]
 
-    result = validate_persona_summary(summary, phase7_live_canary_policy())
+    result = validate_persona_summary(summary, policy)
 
     assert any(finding.startswith("raw_value:") for finding in result.findings)
 

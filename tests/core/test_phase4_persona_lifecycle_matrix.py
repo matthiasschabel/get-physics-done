@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.phase4_persona.behavior_metrics import score_behavior_metrics
+from tests.helpers.phase4_persona.behavior_metrics import assert_behavior_contract
 from tests.helpers.phase4_persona.replay import (
     PersonaRow,
     load_phase4_rows,
@@ -30,9 +30,7 @@ def test_phase4_persona_lifecycle_matrix_rows_are_provider_free_and_class_only()
 
 
 @pytest.mark.parametrize("row", load_phase4_rows(), ids=lambda row: f"{row.row_id}-{row.scenario}")
-def test_phase4_persona_lifecycle_matrix(
-    row: PersonaRow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_phase4_persona_lifecycle_matrix(row: PersonaRow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     outcome = score_phase4_row(row, tmp_path, monkeypatch)
 
     assert outcome.provider_launch_allowed is False
@@ -47,7 +45,7 @@ def test_phase4_persona_lifecycle_matrix(
     if row.expected_next_action_class is not None:
         assert outcome.next_action_class == row.expected_next_action_class
 
-    score = score_behavior_metrics(row, outcome)
+    score = assert_behavior_contract(row, outcome)
     assert score.row_id == row.row_id
     assert score.surface == row.surface
     assert score.scenario == row.scenario

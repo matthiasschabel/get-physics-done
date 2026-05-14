@@ -24,10 +24,6 @@ class _RowLike(Protocol):
     scenario: str
 
 
-def _row_id(row: _RowLike) -> str:
-    return row.row_id
-
-
 def _row_key(row: _RowLike) -> tuple[str, str, str]:
     return (row.row_id, row.surface, row.scenario)
 
@@ -51,23 +47,6 @@ def test_executable_scorer_registry_is_fixture_backed() -> None:
     executable_fixture_scenarios = {row.scenario for row in executable_phase4_matrix_rows()}
 
     assert registered_phase4_scenarios() == executable_fixture_scenarios
-
-
-@pytest.mark.parametrize("row", executable_phase4_matrix_rows(), ids=_row_id)
-def test_canonical_matrix_rows_score_through_shared_replay(
-    row: _RowLike, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    outcome = score_phase4_row(row, tmp_path, monkeypatch)
-    replay_row = persona_row_from_matrix_row(row)
-
-    assert outcome.provider_launch_allowed is False
-    assert outcome.finding_id == replay_row.expected_finding
-    assert outcome.result_class == replay_row.expected_result_class
-    assert replay_row.expected_finding in outcome.failure_classes
-    if replay_row.expected_state_status_class is not None:
-        assert outcome.state_status_class == replay_row.expected_state_status_class
-    if replay_row.expected_next_action_class is not None:
-        assert outcome.next_action_class == replay_row.expected_next_action_class
 
 
 @pytest.mark.parametrize(

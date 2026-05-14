@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -18,40 +17,13 @@ from tests.helpers.phase4_persona.user_steering import (
     user_steering_rows,
 )
 from tests.helpers.phase7_live_like import (
-    REQUIRED_BASE_ROW_PREFIXES,
-    REQUIRED_JIT_ROW_IDS,
-    REQUIRED_P7_ERG_JIT_ROW_IDS,
-    REQUIRED_P7_NEXTUP_JIT_ROW_IDS,
-    REQUIRED_P8_AGENT_JIT_ROW_IDS,
-    REQUIRED_P8_WORKFLOW_JIT_ROW_IDS,
+    assert_phase7_live_like_scores_contract,
     load_phase7_live_like_rows,
     score_phase7_live_like_rows,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-PHASE7_FIXTURE_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
-
 STOP_BEHAVIOR_ROW_IDS = frozenset({"P4-USER-02", "P4-USER-03"})
 EXPECTED_UNSUPPORTED_COMPLETION_DETECTION_ROW_IDS = frozenset({"P4-EXEC-13", "P4-EXEC-14"})
-PHASE7_HANDLE_FIRST_ROW_IDS = frozenset(
-    {"LP-JIT-04", "P6-RES-JIT-02", "P6-RES-JIT-03", "P6-RES-JIT-05", "P7-ERG-JIT-03", "P8-WF-JIT-10"}
-)
-PHASE7_STOP_ROW_IDS = frozenset(
-    {
-        "LP-JIT-06",
-        "P6-EXEC-JIT-03",
-        "P7-ERG-JIT-05",
-        "P8-AGENT-JIT-02",
-        "P8-AGENT-JIT-03",
-        "P8-AGENT-JIT-06",
-        "P8-WF-JIT-03",
-    }
-)
-PHASE8_AGENT_DATA_BOUNDARY_ROW_IDS = frozenset({"P8-AGENT-JIT-01", "P8-AGENT-JIT-04", "P8-AGENT-JIT-05"})
-PHASE7_RUNTIME_NEXTUP_ROW_IDS = (REQUIRED_P7_NEXTUP_JIT_ROW_IDS - {"P7-NEXTUP-JIT-04"}) | frozenset(
-    {"P7-ERG-JIT-02", "P7-ERG-JIT-04"}
-)
-PHASE8_REQUIRED_BASE_ROW_PREFIXES = REQUIRED_BASE_ROW_PREFIXES | {"LP13", "LP14", "LP15"}
 
 HARD_ZERO_METRIC_KEYS = (
     "invalid_command_suggestion_count",
@@ -59,36 +31,6 @@ HARD_ZERO_METRIC_KEYS = (
     "unexpected_write_count",
     "unsupported_completion_claim_count",
 )
-PHASE7_HARD_ZERO_METRIC_KEYS = (
-    "raw_reload_leakage_count",
-    "content_hydration_before_selection_count",
-    "wrong_runtime_prefix_count",
-    "missing_runtime_command_label_count",
-)
-
-
-def test_phase7_persona_canary_fixture_contains_base_and_jit_rows() -> None:
-    rows = _phase7_fixture_rows()
-    row_ids = {str(row["row_id"]) for row in rows}
-    base_prefixes = {row_id.split("-", 1)[0] for row_id in row_ids if row_id.startswith("LP")}
-    jit_row_ids = {
-        str(row["row_id"])
-        for row in rows
-        if row.get("row_tier") == "jit_canary" or str(row["row_id"]).startswith("LP-JIT-")
-    }
-
-    assert len(rows) >= 69
-    assert len(jit_row_ids) >= 54
-    assert PHASE8_REQUIRED_BASE_ROW_PREFIXES <= base_prefixes
-    assert REQUIRED_JIT_ROW_IDS <= row_ids
-    assert REQUIRED_P7_ERG_JIT_ROW_IDS <= row_ids
-    assert REQUIRED_P8_AGENT_JIT_ROW_IDS <= jit_row_ids
-    assert REQUIRED_P8_WORKFLOW_JIT_ROW_IDS <= jit_row_ids
-
-    for row in rows:
-        assert row.get("provider_launch_allowed") is False
-        assert row.get("network_allowed") is False
-        assert row.get("raw_artifacts_allowed", False) is False
 
 
 def test_provider_free_persona_canary_scores_obey_hard_budgets(
@@ -99,17 +41,11 @@ def test_provider_free_persona_canary_scores_obey_hard_budgets(
     phase7_scores = score_phase7_live_like_rows(load_phase7_live_like_rows())
 
     assert phase4_scores
-    assert {score.row.row_id for score in phase7_scores} >= REQUIRED_JIT_ROW_IDS
-    assert all(score.row.row_tier == "jit_canary" for score in phase7_scores)
 
     for score in phase4_scores:
         _assert_score_hard_budgets(score)
 
-    for wrapped_score in phase7_scores:
-        assert wrapped_score.passed
-        assert wrapped_score.hard_budget_failures == ()
-        _assert_score_hard_budgets(wrapped_score.behavior_score)
-        _assert_phase7_score_hard_budgets(wrapped_score)
+    assert_phase7_live_like_scores_contract(phase7_scores)
 
 
 def _phase4_behavior_scores(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[BehaviorScore, ...]:
@@ -161,61 +97,6 @@ def _assert_score_hard_budgets(score: BehaviorScore) -> None:
         assert score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
 
     assert score.metric_counts["schema_surface_count"] <= score.metric_counts["physics_progress_count"] + 1
-
-
-def _assert_phase7_score_hard_budgets(wrapped_score: object) -> None:
-    counts = wrapped_score.phase7_metric_counts
-    classes = wrapped_score.phase7_metric_classes
-    for metric_key in HARD_ZERO_METRIC_KEYS:
-        assert wrapped_score.behavior_score.metric_counts[metric_key] == 0
-    for metric_key in PHASE7_HARD_ZERO_METRIC_KEYS:
-        assert counts[metric_key] == 0
-    assert classes["useful_work_latency_class"] in {"first_turn", "second_turn"}
-    assert classes["reload_loop_class"] == "no_reload_loop"
-    assert classes["instruction_injection_timing_class"] == "active_stage_only"
-    assert classes["runtime_route_class"] == "active_runtime"
-    assert classes["ergonomic_score_class"] in {"green", "yellow"}
-
-    if wrapped_score.row.row_id in PHASE7_HANDLE_FIRST_ROW_IDS:
-        assert counts["conversation_turn_count"] <= 2
-        assert wrapped_score.behavior_score.metric_counts["raw_reload_leakage_count"] == 0
-        assert wrapped_score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 0
-        assert wrapped_score.behavior_score.metric_classes["artifact_handle_first_class"] == "handle_before_content"
-        assert classes["artifact_handle_first_class"] == "handle_first"
-    if wrapped_score.row.row_id in PHASE7_STOP_ROW_IDS:
-        assert classes["stop_integrity_class"] == "stopped_cleanly"
-    if wrapped_score.row.row_id in PHASE7_RUNTIME_NEXTUP_ROW_IDS:
-        assert wrapped_score.behavior_score.metric_classes["next_up_specificity_class"] == "runtime_verify_work"
-    if wrapped_score.row.row_id in REQUIRED_P8_AGENT_JIT_ROW_IDS:
-        assert counts["embedded_instruction_followed_count"] == 0
-        assert counts["premature_agent_write_count"] == 0
-        assert counts["same_run_revision_loop_count"] == 0
-    if wrapped_score.row.row_id in PHASE8_AGENT_DATA_BOUNDARY_ROW_IDS:
-        assert counts["embedded_instruction_seen_count"] >= 1
-        assert classes["agent_data_boundary_class"] == "flagged_as_data"
-    if wrapped_score.row.row_id in REQUIRED_P8_WORKFLOW_JIT_ROW_IDS:
-        assert counts["stale_scope_continuation_count"] == 0
-        assert counts["same_gap_reverification_loop_count"] == 0
-        assert counts["malformed_child_return_trust_count"] == 0
-        assert counts["autonomous_child_cycle_overreach_count"] == 0
-    if wrapped_score.row.row_id in REQUIRED_P7_NEXTUP_JIT_ROW_IDS - {"P7-NEXTUP-JIT-04"}:
-        assert classes["primary_owner_class"] == "runtime"
-        assert classes["stage_stop_runtime_class"] == "runtime"
-        assert classes["rendered_public_raw_reload_class"] == "no_raw_reload"
-        assert classes["rendered_public_structural_verify_class"] == "no_structural_verify_phase"
-    if wrapped_score.row.row_id == "P7-NEXTUP-JIT-04":
-        assert wrapped_score.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
-        assert classes["primary_owner_class"] == "local_transition"
-        assert classes["after_this_completes_owner_class"] == "runtime"
-        assert classes["stage_stop_runtime_class"] == "runtime"
-
-
-def _phase7_fixture_rows() -> tuple[dict[str, object], ...]:
-    payload = json.loads(PHASE7_FIXTURE_PATH.read_text(encoding="utf-8"))
-    rows = payload.get("rows")
-    assert isinstance(rows, list)
-    assert all(isinstance(row, dict) for row in rows)
-    return tuple(rows)
 
 
 def _score_search_text(score: BehaviorScore) -> str:

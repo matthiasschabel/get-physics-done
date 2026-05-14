@@ -82,7 +82,8 @@ EXACT_ASSERTION_THRESHOLDS: dict[str, dict[str, int]] = {
 }
 _TAXONOMY_HELPER_USAGE_SCHEMA_VERSION = "taxonomy_helper_usage.v1"
 _TAXONOMY_HELPER_NAMES = tuple(
-    "assert_fragments assert_prompt_contracts forbidden_duplicate fragment_count machine_exact public_exact semantic_anchor".split()
+    "assert_fragments assert_prompt_contracts forbidden_duplicate fragment_count machine_exact public_exact "
+    "semantic_anchor semantic_concept".split()
 )
 _TAXONOMY_HELPER_ALIASES = {"_assert_prompt_contracts": "assert_prompt_contracts"}
 

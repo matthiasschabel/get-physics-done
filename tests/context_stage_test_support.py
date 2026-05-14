@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
 import pytest
 
+from gpd.core.frontmatter import compute_knowledge_reviewed_content_sha256
+from gpd.core.reproducibility import compute_sha256
+from gpd.core.state import default_state_dict
 from tests.helpers.cli import artifact_manifest_payload, write_managed_publication_manuscript
 from tests.workflow_stage_test_support import assert_staged_payload_matches_manifest
 
@@ -268,3 +272,412 @@ def write_managed_context_manuscript(
         body=body,
         produced_by="tests.core.test_context",
     )
+
+
+def write_manuscript_proof_review_artifacts(project_root: Path) -> Path:
+    return write_manuscript_proof_review_artifacts_with_proof_path(
+        project_root,
+        proof_artifact_path="paper/curvature_flow_bounds.tex",
+    )
+
+
+def write_manuscript_proof_review_artifacts_with_proof_path(
+    project_root: Path,
+    *,
+    proof_artifact_path: str,
+) -> Path:
+    manuscript_path = project_root / "paper" / "curvature_flow_bounds.tex"
+    manuscript_path.parent.mkdir(parents=True, exist_ok=True)
+    manuscript_path.write_text(
+        "\\documentclass{article}\n\\begin{document}\n\\begin{theorem}For every r_0 > 0, the orbit intersects the target annulus.\\end{theorem}\n\\end{document}\n",
+        encoding="utf-8",
+    )
+    (manuscript_path.parent / "PAPER-CONFIG.json").write_text(
+        json.dumps(
+            {
+                "title": "Curvature Flow Bounds",
+                "authors": [{"name": "Test Author"}],
+                "abstract": "A test manuscript used to exercise proof-review freshness.",
+                "sections": [],
+                "journal": "jhep",
+                "output_filename": "curvature_flow_bounds",
+            }
+        ),
+        encoding="utf-8",
+    )
+    proof_artifact = project_root / proof_artifact_path
+    proof_artifact.parent.mkdir(parents=True, exist_ok=True)
+    if proof_artifact != manuscript_path:
+        proof_artifact.write_text(
+            "\\documentclass{article}\n\\begin{document}\n\\begin{theorem}External theorem proof.\\end{theorem}\n\\end{document}\n",
+            encoding="utf-8",
+        )
+    proof_redteam_artifact_paths = f"  - {proof_artifact_path}\n"
+    if proof_artifact_path != "paper/curvature_flow_bounds.tex":
+        proof_redteam_artifact_paths += "  - paper/curvature_flow_bounds.tex\n"
+    review_dir = project_root / "GPD" / "review"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    manuscript_sha256 = compute_sha256(manuscript_path)
+    (review_dir / "CLAIMS.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "manuscript_path": "paper/curvature_flow_bounds.tex",
+                "manuscript_sha256": manuscript_sha256,
+                "claims": [
+                    {
+                        "claim_id": "CLM-001",
+                        "claim_type": "main_result",
+                        "claim_kind": "theorem",
+                        "text": "For every r_0 > 0, the orbit intersects the target annulus.",
+                        "artifact_path": proof_artifact_path,
+                        "section": "Main Result",
+                        "equation_refs": [],
+                        "figure_refs": [],
+                        "supporting_artifacts": [],
+                        "theorem_assumptions": ["chi > 0"],
+                        "theorem_parameters": ["r_0"],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (review_dir / "STAGE-math.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "round": 1,
+                "stage_id": "math",
+                "stage_kind": "math",
+                "manuscript_path": "paper/curvature_flow_bounds.tex",
+                "manuscript_sha256": manuscript_sha256,
+                "claims_reviewed": ["CLM-001"],
+                "summary": "math review",
+                "strengths": ["checked proof"],
+                "findings": [],
+                "proof_audits": [
+                    {
+                        "claim_id": "CLM-001",
+                        "theorem_assumptions_checked": ["chi > 0"],
+                        "theorem_parameters_checked": ["r_0"],
+                        "proof_locations": [f"{proof_artifact_path}:1"],
+                        "uncovered_assumptions": [],
+                        "uncovered_parameters": [],
+                        "coverage_gaps": [],
+                        "alignment_status": "aligned",
+                        "notes": "Complete coverage.",
+                    }
+                ],
+                "confidence": "high",
+                "recommendation_ceiling": "minor_revision",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (review_dir / "PROOF-REDTEAM.md").write_text(
+        (
+            "---\n"
+            "status: passed\n"
+            "reviewer: gpd-check-proof\n"
+            "claim_ids:\n"
+            "  - CLM-001\n"
+            "proof_artifact_paths:\n"
+            f"{proof_redteam_artifact_paths}"
+            "manuscript_path: paper/curvature_flow_bounds.tex\n"
+            f"manuscript_sha256: {manuscript_sha256}\n"
+            "round: 1\n"
+            "missing_parameter_symbols: []\n"
+            "missing_hypothesis_ids: []\n"
+            "coverage_gaps: []\n"
+            "scope_status: matched\n"
+            "quantifier_status: matched\n"
+            "counterexample_status: none_found\n"
+            "---\n\n"
+            "# Proof Redteam\n"
+            "## Proof Inventory\n"
+            "- Exact claim / theorem text: For every r_0 > 0, the orbit intersects the target annulus.\n"
+            "- Claim / theorem target: Annulus intersection for every target radius.\n"
+            "- Named parameters:\n"
+            "  - `r_0`: target radius\n"
+            "- Hypotheses:\n"
+            "  - `H1`: chi > 0\n"
+            "- Quantifier / domain obligations:\n"
+            "  - for every r_0 > 0\n"
+            "- Conclusion clauses:\n"
+            "  - annulus intersection holds\n"
+            "## Coverage Ledger\n"
+            "### Named-Parameter Coverage\n"
+            "| Parameter | Role / Domain | Proof Location | Status | Notes |\n"
+            "| --- | --- | --- | --- |\n"
+            f"| `r_0` | target radius | {proof_artifact_path}:1 | covered | Carried through the argument. |\n"
+            "### Hypothesis Coverage\n"
+            "| Hypothesis | Proof Location | Status | Notes |\n"
+            "| --- | --- | --- | --- |\n"
+            f"| `H1` | {proof_artifact_path}:1 | covered | Used in the positivity step. |\n"
+            "### Quantifier / Domain Coverage\n"
+            "| Obligation | Proof Location | Status | Notes |\n"
+            "| --- | --- | --- | --- |\n"
+            f"| `for every r_0 > 0` | {proof_artifact_path}:1 | covered | No specialization introduced. |\n"
+            "### Conclusion-Clause Coverage\n"
+            "| Clause | Proof Location | Status | Notes |\n"
+            "| --- | --- | --- | --- |\n"
+            f"| annulus intersection holds | {proof_artifact_path}:1 | covered | Final sentence states it. |\n"
+            "## Adversarial Probe\n"
+            "- Probe type: dropped-parameter test\n"
+            "- Result: The proof still references r_0, so the theorem remains global in the target radius.\n"
+            "## Verdict\n"
+            "- Scope status: `matched`\n"
+            "- Quantifier status: `matched`\n"
+            "- Counterexample status: `none_found`\n"
+            "- Blocking gaps:\n"
+            "  - None.\n"
+            "## Required Follow-Up\n"
+            "- None.\n"
+        ),
+        encoding="utf-8",
+    )
+    return project_root / "paper" / "references.bib"
+
+
+def write_bundle_ready_contract_state(project_root: Path) -> None:
+    state = default_state_dict()
+    state["project_contract"] = {
+        "schema_version": 1,
+        "scope": {
+            "question": "What finite-size scaling collapse and benchmark comparison does the simulation recover?",
+            "in_scope": ["Recover the decisive finite-size scaling benchmark for the simulation regime"],
+        },
+        "claims": [
+            {
+                "id": "claim-critical",
+                "statement": "Recover benchmark finite-size scaling behavior",
+                "deliverables": ["deliv-data", "deliv-figure"],
+                "acceptance_tests": ["test-benchmark"],
+                "references": ["ref-benchmark"],
+            }
+        ],
+        "deliverables": [
+            {
+                "id": "deliv-data",
+                "kind": "dataset",
+                "path": "results/measurements.csv",
+                "description": "Raw Monte Carlo measurements with metadata",
+            },
+            {
+                "id": "deliv-figure",
+                "kind": "figure",
+                "path": "figures/collapse.png",
+                "description": "Finite-size scaling collapse figure",
+            },
+        ],
+        "acceptance_tests": [
+            {
+                "id": "test-benchmark",
+                "subject": "claim-critical",
+                "kind": "benchmark",
+                "procedure": "Compare Binder cumulants and finite-size scaling against literature benchmarks",
+                "pass_condition": "Benchmark agreement is within uncertainty",
+            }
+        ],
+        "references": [
+            {
+                "id": "ref-benchmark",
+                "kind": "paper",
+                "locator": "Benchmark Monte Carlo paper",
+                "role": "benchmark",
+                "why_it_matters": "Decisive comparison for the simulation regime",
+                "applies_to": ["claim-critical"],
+                "must_surface": True,
+                "required_actions": ["read", "compare", "cite"],
+            }
+        ],
+        "context_intake": {
+            "must_read_refs": ["ref-benchmark"],
+        },
+        "forbidden_proxies": [
+            {
+                "id": "fp-proxy",
+                "subject": "claim-critical",
+                "proxy": "Qualitative agreement without scaling analysis",
+                "reason": "Would not validate the decisive benchmarked observable",
+            }
+        ],
+        "uncertainty_markers": {
+            "weakest_anchors": ["Autocorrelation estimate near the critical point"],
+            "disconfirming_observations": ["Finite-size crossings drift away from the benchmark window"],
+        },
+    }
+    (project_root / "GPD" / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def write_numerical_relativity_project(project_root: Path) -> None:
+    project = project_root / "GPD" / "PROJECT.md"
+    project.write_text(
+        """# Test Project
+
+## What This Is
+
+BSSN numerical relativity study of a binary black hole merger with moving-puncture evolution.
+
+## Research Context
+
+### Theoretical Framework
+
+General relativity
+
+### Known Results
+
+Apparent horizon tracking, constraint propagation, and gravitational waveform extraction should match trusted benchmarks.
+""",
+        encoding="utf-8",
+    )
+
+
+def write_numerical_relativity_contract_state(project_root: Path) -> None:
+    state = default_state_dict()
+    state["project_contract"] = {
+        "schema_version": 1,
+        "scope": {
+            "question": "Does the BSSN evolution reproduce benchmark waveform and remnant behavior?",
+            "in_scope": ["Recover the decisive waveform and remnant benchmark for the BSSN evolution"],
+        },
+        "claims": [
+            {
+                "id": "claim-waveform",
+                "statement": "Recover benchmark waveform phase and remnant properties",
+                "deliverables": ["deliv-data", "deliv-figure"],
+                "acceptance_tests": ["test-benchmark"],
+                "references": ["ref-benchmark"],
+            }
+        ],
+        "deliverables": [
+            {
+                "id": "deliv-data",
+                "kind": "dataset",
+                "path": "results/constraints.csv",
+                "description": "Constraint histories and remnant diagnostics",
+            },
+            {
+                "id": "deliv-figure",
+                "kind": "figure",
+                "path": "figures/waveform-comparison.png",
+                "description": "Waveform benchmark comparison figure",
+            },
+        ],
+        "acceptance_tests": [
+            {
+                "id": "test-benchmark",
+                "subject": "claim-waveform",
+                "kind": "benchmark",
+                "procedure": "Compare waveform phase, remnant parameters, and convergence against trusted numerical-relativity results",
+                "pass_condition": "Benchmark agreement is within numerical uncertainty",
+            }
+        ],
+        "references": [
+            {
+                "id": "ref-benchmark",
+                "kind": "paper",
+                "locator": "https://doi.org/10.1234/numerical-relativity-benchmark",
+                "role": "benchmark",
+                "why_it_matters": "Provides decisive waveform and remnant anchors",
+                "applies_to": ["claim-waveform"],
+                "must_surface": True,
+                "required_actions": ["read", "compare", "cite"],
+            }
+        ],
+        "context_intake": {
+            "must_read_refs": ["ref-benchmark"],
+        },
+        "forbidden_proxies": [
+            {
+                "id": "fp-proxy",
+                "subject": "claim-waveform",
+                "proxy": "Smooth-looking waveforms without converged constraints or benchmark agreement",
+                "reason": "Would not validate the decisive strong-field observable",
+            }
+        ],
+        "uncertainty_markers": {
+            "weakest_anchors": ["Gauge-parameter sensitivity of the extracted waveform"],
+            "disconfirming_observations": ["Constraint growth or waveform phase drift relative to the benchmark"],
+        },
+    }
+    (project_root / "GPD" / "state.json").write_text(json.dumps(state), encoding="utf-8")
+
+
+def write_knowledge_doc(
+    project_root: Path,
+    *,
+    knowledge_id: str = "K-renormalization-group-fixed-points",
+    status: str = "stable",
+    body: str = "Trusted knowledge body.\n",
+) -> None:
+    knowledge_dir = project_root / "GPD" / "knowledge"
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+    path = knowledge_dir / f"{knowledge_id}.md"
+    base_content = (
+        "---\n"
+        "knowledge_schema_version: 1\n"
+        f"knowledge_id: {knowledge_id}\n"
+        "title: Renormalization Group Fixed Points\n"
+        "topic: renormalization-group\n"
+        f"status: {status}\n"
+        "created_at: 2026-04-07T12:00:00Z\n"
+        "updated_at: 2026-04-07T12:00:00Z\n"
+        "sources:\n"
+        "  - source_id: source-main\n"
+        "    kind: paper\n"
+        "    locator: Author et al., 2024\n"
+        "    title: Benchmark Reference\n"
+        "    why_it_matters: Trusted source for the topic\n"
+        "coverage_summary:\n"
+        "  covered_topics: [fixed points]\n"
+        "  excluded_topics: [implementation]\n"
+        "  open_gaps: [none]\n"
+        "---\n\n"
+        f"{body}"
+    )
+    reviewed_content_sha256 = compute_knowledge_reviewed_content_sha256(base_content)
+    if status == "stable":
+        approval_artifact = project_root / "GPD" / "knowledge" / "reviews" / f"{knowledge_id}-R1-REVIEW.md"
+        approval_artifact.parent.mkdir(parents=True, exist_ok=True)
+        approval_artifact.write_text(f"Approved review for {knowledge_id}.\n", encoding="utf-8")
+        approval_artifact_sha256 = hashlib.sha256(approval_artifact.read_bytes()).hexdigest()
+        content = base_content.replace(
+            "---\n\n",
+            "review:\n"
+            "  reviewed_at: 2026-04-07T13:00:00Z\n"
+            "  review_round: 1\n"
+            "  reviewer_kind: workflow\n"
+            "  reviewer_id: gpd-review-knowledge\n"
+            "  decision: approved\n"
+            "  summary: Stable review approved.\n"
+            f"  approval_artifact_path: GPD/knowledge/reviews/{knowledge_id}-R1-REVIEW.md\n"
+            f"  approval_artifact_sha256: {approval_artifact_sha256}\n"
+            f"  reviewed_content_sha256: {reviewed_content_sha256}\n"
+            "  stale: false\n"
+            "---\n\n",
+        )
+    elif status == "in_review":
+        approval_artifact = project_root / "GPD" / "knowledge" / "reviews" / f"{knowledge_id}-R1-REVIEW.md"
+        approval_artifact.parent.mkdir(parents=True, exist_ok=True)
+        approval_artifact.write_text(f"Pending review for {knowledge_id}.\n", encoding="utf-8")
+        approval_artifact_sha256 = hashlib.sha256(approval_artifact.read_bytes()).hexdigest()
+        content = base_content.replace(
+            "---\n\n",
+            "review:\n"
+            "  reviewed_at: 2026-04-07T13:00:00Z\n"
+            "  review_round: 1\n"
+            "  reviewer_kind: workflow\n"
+            "  reviewer_id: gpd-review-knowledge\n"
+            "  decision: approved\n"
+            "  summary: Needs re-review after edits.\n"
+            f"  approval_artifact_path: GPD/knowledge/reviews/{knowledge_id}-R1-REVIEW.md\n"
+            f"  approval_artifact_sha256: {approval_artifact_sha256}\n"
+            f"  reviewed_content_sha256: {reviewed_content_sha256}\n"
+            "  stale: true\n"
+            "---\n\n",
+        )
+    else:
+        content = base_content
+    path.write_text(content, encoding="utf-8")

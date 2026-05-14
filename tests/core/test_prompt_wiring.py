@@ -78,6 +78,61 @@ PUBLICATION_ROUND_ARTIFACTS_INCLUDE = "{GPD_INSTALL_DIR}/references/publication/
 PUBLICATION_ROUND_ARTIFACTS_PATH = "{GPD_INSTALL_DIR}/references/publication/publication-review-round-artifacts.md"
 PUBLICATION_REVIEW_RELIABILITY_INCLUDE = "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md"
 PUBLICATION_REVIEW_RELIABILITY_INLINE = "{GPD_INSTALL_DIR}/references/publication/peer-review-reliability.md"
+PROJECT_BACKED_MANUSCRIPT_EVIDENCE = (
+    "phase summaries or milestone digest",
+    "verification reports",
+    "manuscript-root bibliography audit",
+    "manuscript-root artifact manifest",
+    "manuscript-root reproducibility manifest",
+    "manuscript-root publication artifacts",
+)
+PROJECT_BACKED_MANUSCRIPT_PREFLIGHTS = (
+    "project_state",
+    "roadmap",
+    "conventions",
+    "research_artifacts",
+    "verification_reports",
+    "artifact_manifest",
+    "bibliography_audit",
+    "bibliography_audit_clean",
+    "reproducibility_manifest",
+    "reproducibility_ready",
+)
+PEER_REVIEW_CONDITIONAL_REQUIREMENTS = [
+    {
+        "when": "project-backed manuscript review",
+        "required_outputs": [],
+        "required_evidence": list(PROJECT_BACKED_MANUSCRIPT_EVIDENCE),
+        "blocking_conditions": [
+            "missing project state",
+            "missing roadmap",
+            "missing conventions",
+            "no research artifacts",
+        ],
+        "preflight_checks": list(PROJECT_BACKED_MANUSCRIPT_PREFLIGHTS),
+        "blocking_preflight_checks": list(PROJECT_BACKED_MANUSCRIPT_PREFLIGHTS),
+        "stage_artifacts": [],
+    },
+    {
+        "when": "theorem-bearing claims are present",
+        "required_outputs": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
+        "required_evidence": [],
+        "blocking_conditions": [],
+        "preflight_checks": [],
+        "blocking_preflight_checks": [],
+        "stage_artifacts": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
+    },
+]
+ARXIV_CONDITIONAL_REQUIREMENTS = [
+    {
+        "when": "theorem-bearing manuscripts are present",
+        "required_outputs": [],
+        "required_evidence": ["cleared manuscript proof review for theorem-bearing manuscripts"],
+        "blocking_conditions": ["missing or stale manuscript proof review for theorem-bearing manuscripts"],
+        "blocking_preflight_checks": ["manuscript_proof_review"],
+        "stage_artifacts": [],
+    }
+]
 
 
 def _assert_contains_fragments(text: str, *fragments: str) -> None:
@@ -85,9 +140,31 @@ def _assert_contains_fragments(text: str, *fragments: str) -> None:
     assert not missing, "Missing expected prompt fragments:\n" + "\n".join(missing)
 
 
+def _assert_exact_items(collection, *items: str, context: str) -> None:
+    missing = [item for item in items if item not in collection]
+    assert not missing, f"{context} missing exact items: {missing}"
+
+
+def _review_requirement_rows(requirements, fields: tuple[str, ...]) -> list[dict[str, object]]:
+    return [
+        {
+            field: getattr(requirement, field) if field == "when" else list(getattr(requirement, field))
+            for field in fields
+        }
+        for requirement in requirements
+    ]
+
+
 def _assert_prompt_contracts(text: str, *assertions: FragmentAssertion) -> None:
     for assertion in assertions:
         assertion.check(text)
+
+
+def _assert_fragment_groups(*groups) -> None:
+    for helper, text, context, *fragments in groups:
+        if len(fragments) == 1 and isinstance(fragments[0], tuple):
+            fragments = fragments[0]
+        helper(text, *fragments, context=context)
 
 
 def _assert_machine_fragments(text: str, *fragments: str, context: str) -> None:
@@ -574,8 +651,7 @@ def test_referee_latex_template_exists() -> None:
     referee_template = TEMPLATES_DIR / "paper" / "referee-report.tex"
     assert referee_template.exists()
     content = referee_template.read_text(encoding="utf-8")
-    assert "template_version: 1" in content
-    assert "\\RecommendationBadge" in content
+    _mf(content, "template_version: 1", "\\RecommendationBadge", context="referee report recommendation badge")
 
 
 def test_shared_protocols_require_permission_before_dependency_installs() -> None:
@@ -613,9 +689,13 @@ def test_shared_protocols_require_permission_before_dependency_installs() -> Non
 def test_agent_infrastructure_requires_concrete_next_actions_and_continuation_block() -> None:
     infra = (REFERENCES_DIR / "orchestration" / "agent-infrastructure.md").read_text(encoding="utf-8")
 
-    assert "Prefer copy-pasteable GPD commands" in infra
-    assert "references/orchestration/continuation-format.md" in infra
-    assert "## > Next Up" in infra
+    _mf(
+        infra,
+        "Prefer copy-pasteable GPD commands",
+        "references/orchestration/continuation-format.md",
+        "## > Next Up",
+        context="agent infrastructure next actions and continuation block",
+    )
 
 
 def test_paper_writer_uses_lightweight_path_mentions_for_metadata_only_reference_packs() -> None:
@@ -629,21 +709,29 @@ def test_paper_writer_uses_lightweight_path_mentions_for_metadata_only_reference
     ):
         lightweight = f"{{GPD_INSTALL_DIR}}/{path}"
         eager = f"@{{GPD_INSTALL_DIR}}/{path}"
-        assert lightweight in writer_text
-        assert eager not in writer_text
+        _mf(writer_text, lightweight, context=f"paper writer lightweight reference pack {path}")
+        _ff(writer_text, eager, context=f"paper writer eager reference pack {path}")
 
 
 def test_paper_writer_keeps_cookbook_material_lazy_loaded() -> None:
     writer_text = (AGENTS_DIR / "gpd-paper-writer.md").read_text(encoding="utf-8")
     cookbook = (REFERENCES_DIR / "publication" / "paper-writer-cookbook.md").read_text(encoding="utf-8")
 
-    assert "<writing_reference_packs>" in writer_text
-    assert "<figure_design>" not in writer_text
-    assert "<supplemental_material>" not in writer_text
-    assert "Journal-Specific Figure Requirements" not in writer_text
-    assert "Abstract And Section Shape" in cookbook
-    assert "Equation And Figure Details" in cookbook
-    assert "Supplemental Material Placement" in cookbook
+    _mf(writer_text, "<writing_reference_packs>", context="paper writer lightweight reference pack marker")
+    _ff(
+        writer_text,
+        "<figure_design>",
+        "<supplemental_material>",
+        "Journal-Specific Figure Requirements",
+        context="paper writer lazy-loaded cookbook sections",
+    )
+    _mf(
+        cookbook,
+        "Abstract And Section Shape",
+        "Equation And Figure Details",
+        "Supplemental Material Placement",
+        context="paper writer cookbook lazy-loaded headings",
+    )
 
 
 def test_bibliographer_uses_lightweight_path_mentions_for_metadata_only_reference_packs() -> None:
@@ -660,8 +748,8 @@ def test_bibliographer_uses_lightweight_path_mentions_for_metadata_only_referenc
     ):
         lightweight = f"{{GPD_INSTALL_DIR}}/{path}"
         eager = f"@{{GPD_INSTALL_DIR}}/{path}"
-        assert lightweight in bibliographer_text
-        assert eager not in bibliographer_text
+        _mf(bibliographer_text, lightweight, context=f"bibliographer lightweight reference pack {path}")
+        _ff(bibliographer_text, eager, context=f"bibliographer eager reference pack {path}")
 
 
 def test_continuation_format_scopes_clear_to_resolved_runtime_followups() -> None:
@@ -713,11 +801,15 @@ def test_plan_phase_uses_manifest_owned_staged_init_access() -> None:
 def test_executor_completion_examples_use_command_based_next_actions() -> None:
     completion = (REFERENCES_DIR / "execution" / "executor-completion.md").read_text(encoding="utf-8")
 
-    assert '"gpd:execute-phase {phase}"' in completion
-    assert '"gpd:show-phase {phase}"' in completion
-    assert "gpd state validate" in completion
-    assert "gpd:sync-state" in completion
-    assert "file_edit tool" not in completion
+    _mf(
+        completion,
+        '"gpd:execute-phase {phase}"',
+        '"gpd:show-phase {phase}"',
+        "gpd state validate",
+        "gpd:sync-state",
+        context="executor completion command based next actions",
+    )
+    _ff(completion, "file_edit tool", context="executor completion command based next actions")
 
 
 def test_referee_workflow_mentions_optional_pdf_compile_and_missing_tex_prompt() -> None:
@@ -752,16 +844,16 @@ def test_executor_prompt_defaults_to_return_only_shared_state_updates() -> None:
         "instead of writing `STATE.md` directly",
         context="executor return-only shared state updates",
     )
-    assert (
-        "Your job: Execute the research plan completely, checkpoint each step, create SUMMARY.md, update STATE.md."
-        not in executor
+    _f(
+        executor,
+        "executor stale direct shared-state writing role",
+        "Your job: Execute the research plan completely, checkpoint each step, create SUMMARY.md, update STATE.md.",
     )
     # fmt: off
     _m(executor, "executor return fields", "state_updates", "contract_updates", "decisions", "blockers", "continuation_update")
     # fmt: on
     _s(executor, "executor child return timestamp ownership", "omit `recorded_at`", "`recorded_by`", "child returns")
-    assert 'recorded_at: "{timestamp}"' not in executor
-    assert 'recorded_by: "gpd-executor"' not in executor
+    _f(executor, "executor child timestamp ownership", 'recorded_at: "{timestamp}"', 'recorded_by: "gpd-executor"')
     _mf(
         executor_completion,
         "state_updates:",
@@ -778,8 +870,12 @@ def test_executor_prompt_defaults_to_return_only_shared_state_updates() -> None:
         "child returns",
         context="executor completion child return timestamp ownership",
     )
-    assert 'recorded_at: "{timestamp}"' not in executor_completion
-    assert 'recorded_by: "gpd-executor"' not in executor_completion
+    _f(
+        executor_completion,
+        "executor completion child timestamp ownership",
+        'recorded_at: "{timestamp}"',
+        'recorded_by: "gpd-executor"',
+    )
 
 
 def test_return_only_planner_and_executor_do_not_commit_shared_state_files_by_default() -> None:
@@ -794,21 +890,40 @@ def test_return_only_planner_and_executor_do_not_commit_shared_state_files_by_de
     assert executor_commit_blocks
     assert all("GPD/STATE.md" not in block and "GPD/ROADMAP.md" not in block for block in planner_commit_blocks)
     assert all("GPD/STATE.md" not in block for block in executor_commit_blocks)
-    assert "Authority: use the frontmatter-derived Agent Requirements block" not in planner
-    assert "shared_state_authority: return_only" in registry.get_agent("gpd-planner").system_prompt
-    assert "roadmap_updates" in planner
-    assert "Authority: use the frontmatter-derived Agent Requirements block" not in executor
-    assert "shared_state_authority: return_only" in registry.get_agent("gpd-executor").system_prompt
+    _f(
+        planner,
+        "planner return-only shared-state authority",
+        "Authority: use the frontmatter-derived Agent Requirements block",
+    )
+    _mf(
+        registry.get_agent("gpd-planner").system_prompt,
+        "shared_state_authority: return_only",
+        context="planner shared state authority",
+    )
+    _mf(planner, "roadmap_updates", context="planner roadmap update return field")
+    _f(
+        executor,
+        "executor return-only shared-state authority",
+        "Authority: use the frontmatter-derived Agent Requirements block",
+    )
+    _mf(
+        registry.get_agent("gpd-executor").system_prompt,
+        "shared_state_authority: return_only",
+        context="executor shared state authority",
+    )
 
 
 def test_read_only_plan_checker_and_research_mapper_tool_policy_are_contract_aligned() -> None:
     checker = (AGENTS_DIR / "gpd-plan-checker.md").read_text(encoding="utf-8")
     mapper = (AGENTS_DIR / "gpd-research-mapper.md").read_text(encoding="utf-8")
 
-    assert "Return changed paths in `gpd_return.files_written`" not in checker
-    assert "files_written: []" in checker
-    assert "artifact_write_authority: read_only" in checker
-    assert "All tools declared in frontmatter are available to this agent." in mapper
+    _ff(checker, "Return changed paths in `gpd_return.files_written`", context="plan checker read-only policy")
+    _mf(checker, "files_written: []", "artifact_write_authority: read_only", context="plan checker read-only policy")
+    _m(
+        mapper,
+        "research mapper status-only web tools",
+        "All tools declared in frontmatter are available to this agent.",
+    )
     _s(mapper, "research mapper status-only web tools", "Reserve `web_search`", "`web_fetch`", "`status` focus")
     _f(mapper, "research mapper status-only web tools", "`status`: the same tools plus `web_search` and `web_fetch`")
 
@@ -833,7 +948,7 @@ def test_prompt_sources_do_not_use_stale_agent_install_paths():
     ]
 
     for path in files:
-        assert "{GPD_INSTALL_DIR}/agents/" not in path.read_text(encoding="utf-8"), path
+        _ff(path.read_text(encoding="utf-8"), "{GPD_INSTALL_DIR}/agents/", context=str(path.relative_to(REPO_ROOT)))
 
 
 def test_prompt_sources_use_real_pattern_library_description():
@@ -841,11 +956,11 @@ def test_prompt_sources_use_real_pattern_library_description():
 
     for path in verifier_files:
         content = path.read_text(encoding="utf-8")
-        assert "{GPD_INSTALL_DIR}/learned-patterns/" not in content, path
-        assert "GPD_PATTERNS_ROOT" in content, path
+        _ff(content, "{GPD_INSTALL_DIR}/learned-patterns/", context=str(path.relative_to(REPO_ROOT)))
+        _mf(content, "GPD_PATTERNS_ROOT", context=str(path.relative_to(REPO_ROOT)))
 
     learned_pattern_template = (TEMPLATES_DIR / "learned-pattern.md").read_text(encoding="utf-8")
-    assert "learned-patterns/patterns-by-domain/" in learned_pattern_template
+    _m(learned_pattern_template, "learned pattern template domain library path", "learned-patterns/patterns-by-domain/")
 
 
 def test_workflow_task_prompts_do_not_embed_at_references() -> None:
@@ -923,12 +1038,20 @@ def test_agents_reference_expected_shared_specs() -> None:
 def test_consistency_checker_prompt_keeps_the_canonical_contract_and_stays_least_privileged() -> None:
     source = (AGENTS_DIR / "gpd-consistency-checker.md").read_text(encoding="utf-8")
 
-    assert "one-shot handoff" in source
-    assert "status: completed" in source
-    assert "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md" in source
-    assert "GPD/CONSISTENCY-CHECK.md" in source
-    assert "@{GPD_INSTALL_DIR}" not in source
-    assert "Authority: use the frontmatter-derived Agent Requirements block" not in source
+    _mf(
+        source,
+        "one-shot handoff",
+        "status: completed",
+        "files_written:\n    - GPD/phases/03-conventions/CONSISTENCY-CHECK.md",
+        "GPD/CONSISTENCY-CHECK.md",
+        context="consistency checker handoff contract",
+    )
+    _ff(
+        source,
+        "@{GPD_INSTALL_DIR}",
+        "Authority: use the frontmatter-derived Agent Requirements block",
+        context="consistency checker least-privileged source",
+    )
     assert "shared_state_authority: return_only" in registry.get_agent("gpd-consistency-checker").system_prompt
     _sf(
         source,
@@ -940,9 +1063,13 @@ def test_consistency_checker_prompt_keeps_the_canonical_contract_and_stays_least
         context="consistency checker least-privileged scope",
     )
     _f(source, "consistency checker stale template authoring", "Create it from the template")
-    assert "gpd pattern add" not in source
-    assert "Step 0.5" not in source
-    assert "CONVENTIONS.md does not exist" not in source
+    _ff(
+        source,
+        "gpd pattern add",
+        "Step 0.5",
+        "CONVENTIONS.md does not exist",
+        context="consistency checker stale template authoring",
+    )
 
 
 def test_review_commands_expose_typed_contracts() -> None:
@@ -951,64 +1078,75 @@ def test_review_commands_expose_typed_contracts() -> None:
     arxiv_submission = registry.get_command("arxiv-submission")
     verify_work = registry.get_command("verify-work")
     respond_to_referees = registry.get_command("respond-to-referees")
+    write_paper_contract = write_paper.review_contract
+    peer_review_contract = peer_review.review_contract
+    arxiv_contract = arxiv_submission.review_contract
+    verify_work_contract = verify_work.review_contract
+    respond_contract = respond_to_referees.review_contract
 
-    assert write_paper.review_contract is not None
-    assert write_paper.review_contract.review_mode == "publication"
-    assert "${PAPER_DIR}/ARTIFACT-MANIFEST.json" in write_paper.review_contract.required_outputs
-    assert "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json" in write_paper.review_contract.required_outputs
-    assert "${PAPER_DIR}/reproducibility-manifest.json" in write_paper.review_contract.required_outputs
-    assert "GPD/review/REVIEW-LEDGER{round_suffix}.json" in write_paper.review_contract.required_outputs
-    assert "GPD/review/REFEREE-DECISION{round_suffix}.json" in write_paper.review_contract.required_outputs
-    assert "GPD/REFEREE-REPORT{round_suffix}.md" in write_paper.review_contract.required_outputs
-    assert "GPD/REFEREE-REPORT{round_suffix}.tex" in write_paper.review_contract.required_outputs
-    assert write_paper.review_contract.required_evidence == [
+    assert write_paper_contract is not None
+    assert write_paper_contract.review_mode == "publication"
+    _assert_exact_items(
+        write_paper_contract.required_outputs,
+        "${PAPER_DIR}/ARTIFACT-MANIFEST.json",
+        "${PAPER_DIR}/BIBLIOGRAPHY-AUDIT.json",
+        "${PAPER_DIR}/reproducibility-manifest.json",
+        "GPD/review/REVIEW-LEDGER{round_suffix}.json",
+        "GPD/review/REFEREE-DECISION{round_suffix}.json",
+        "GPD/REFEREE-REPORT{round_suffix}.md",
+        "GPD/REFEREE-REPORT{round_suffix}.tex",
+        context="write-paper required publication outputs",
+    )
+    assert write_paper_contract.required_evidence == [
         "project-backed lane: research artifacts and verification reports",
         "external-authoring lane: explicit `--intake` manifest with claim-to-evidence bindings",
         "bibliography / citation-source input",
     ]
-    assert "command_context" in write_paper.review_contract.preflight_checks
-    assert "verification_reports" in write_paper.review_contract.preflight_checks
-    assert "manuscript" in write_paper.review_contract.preflight_checks
-    assert "artifact_manifest" in write_paper.review_contract.preflight_checks
-    assert "bibliography_audit" in write_paper.review_contract.preflight_checks
-    assert "bibliography_audit_clean" in write_paper.review_contract.preflight_checks
-    assert "reproducibility_manifest" in write_paper.review_contract.preflight_checks
-    assert "reproducibility_ready" in write_paper.review_contract.preflight_checks
-    assert "manuscript_proof_review" in write_paper.review_contract.preflight_checks
-    assert write_paper.review_contract.stage_artifacts == []
-    assert [
-        {
-            "when": requirement.when,
-            "required_outputs": list(requirement.required_outputs),
-        }
-        for requirement in write_paper.review_contract.conditional_requirements
-    ] == [
+    _assert_exact_items(
+        write_paper_contract.preflight_checks,
+        "command_context",
+        "verification_reports",
+        "manuscript",
+        "artifact_manifest",
+        "bibliography_audit",
+        "bibliography_audit_clean",
+        "reproducibility_manifest",
+        "reproducibility_ready",
+        "manuscript_proof_review",
+        context="write-paper publication preflight checks",
+    )
+    assert write_paper_contract.stage_artifacts == []
+    assert _review_requirement_rows(write_paper_contract.conditional_requirements, ("when", "required_outputs")) == [
         {
             "when": "theorem-bearing claims are present",
             "required_outputs": ["GPD/review/PROOF-REDTEAM{round_suffix}.md"],
         }
     ]
 
-    assert peer_review.review_contract is not None
-    assert peer_review.review_contract.review_mode == "publication"
-    assert "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md" in peer_review.review_contract.required_outputs
-    assert "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex" in peer_review.review_contract.required_outputs
-    assert "${REVIEW_ROOT}/CLAIMS{round_suffix}.json" in peer_review.review_contract.required_outputs
-    assert "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json" in peer_review.review_contract.required_outputs
-    assert "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json" in peer_review.review_contract.required_outputs
-    assert peer_review.review_contract.required_evidence == ["existing manuscript or explicit external artifact target"]
-    assert peer_review.review_contract.blocking_conditions == [
+    assert peer_review_contract is not None
+    assert peer_review_contract.review_mode == "publication"
+    _assert_exact_items(
+        peer_review_contract.required_outputs,
+        "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.md",
+        "${PUBLICATION_ROOT}/REFEREE-REPORT{round_suffix}.tex",
+        "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+        "${REVIEW_ROOT}/STAGE-interestingness{round_suffix}.json",
+        "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json",
+        context="peer-review required publication outputs",
+    )
+    assert peer_review_contract.required_evidence == ["existing manuscript or explicit external artifact target"]
+    assert peer_review_contract.blocking_conditions == [
         "missing manuscript or explicit external artifact target",
         "degraded review integrity",
         "unsupported physical significance claims",
         "collapsed novelty or venue fit",
     ]
-    assert peer_review.review_contract.preflight_checks == [
+    assert peer_review_contract.preflight_checks == [
         "command_context",
         "manuscript",
         "manuscript_proof_review",
     ]
-    assert peer_review.review_contract.stage_artifacts == [
+    assert peer_review_contract.stage_artifacts == [
         "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
         "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
         "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json",
@@ -1018,121 +1156,66 @@ def test_review_commands_expose_typed_contracts() -> None:
         "${REVIEW_ROOT}/REVIEW-LEDGER{round_suffix}.json",
         "${REVIEW_ROOT}/REFEREE-DECISION{round_suffix}.json",
     ]
-    assert [
-        {
-            "when": requirement.when,
-            "required_outputs": list(requirement.required_outputs),
-            "required_evidence": list(requirement.required_evidence),
-            "blocking_conditions": list(requirement.blocking_conditions),
-            "preflight_checks": list(requirement.preflight_checks),
-            "blocking_preflight_checks": list(requirement.blocking_preflight_checks),
-            "stage_artifacts": list(requirement.stage_artifacts),
-        }
-        for requirement in peer_review.review_contract.conditional_requirements
-    ] == [
-        {
-            "when": "project-backed manuscript review",
-            "required_outputs": [],
-            "required_evidence": [
-                "phase summaries or milestone digest",
-                "verification reports",
-                "manuscript-root bibliography audit",
-                "manuscript-root artifact manifest",
-                "manuscript-root reproducibility manifest",
-                "manuscript-root publication artifacts",
-            ],
-            "blocking_conditions": [
-                "missing project state",
-                "missing roadmap",
-                "missing conventions",
-                "no research artifacts",
-            ],
-            "preflight_checks": [
-                "project_state",
-                "roadmap",
-                "conventions",
-                "research_artifacts",
-                "verification_reports",
-                "artifact_manifest",
-                "bibliography_audit",
-                "bibliography_audit_clean",
-                "reproducibility_manifest",
-                "reproducibility_ready",
-            ],
-            "blocking_preflight_checks": [
-                "project_state",
-                "roadmap",
-                "conventions",
-                "research_artifacts",
-                "verification_reports",
-                "artifact_manifest",
-                "bibliography_audit",
-                "bibliography_audit_clean",
-                "reproducibility_manifest",
-                "reproducibility_ready",
-            ],
-            "stage_artifacts": [],
-        },
-        {
-            "when": "theorem-bearing claims are present",
-            "required_outputs": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-            "required_evidence": [],
-            "blocking_conditions": [],
-            "preflight_checks": [],
-            "blocking_preflight_checks": [],
-            "stage_artifacts": ["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-        },
-    ]
+    assert (
+        _review_requirement_rows(
+            peer_review_contract.conditional_requirements, tuple(PEER_REVIEW_CONDITIONAL_REQUIREMENTS[0])
+        )
+        == PEER_REVIEW_CONDITIONAL_REQUIREMENTS
+    )
 
-    assert arxiv_submission.review_contract is not None
-    assert arxiv_submission.review_contract.review_mode == "publication"
-    assert "command_context" in arxiv_submission.review_contract.preflight_checks
-    assert "artifact_manifest" in arxiv_submission.review_contract.preflight_checks
-    assert "bibliography_audit" in arxiv_submission.review_contract.preflight_checks
-    assert "bibliography_audit_clean" in arxiv_submission.review_contract.preflight_checks
-    assert "publication_blockers" in arxiv_submission.review_contract.preflight_checks
-    assert "manuscript_proof_review" in arxiv_submission.review_contract.preflight_checks
-    assert [
-        {
-            "when": requirement.when,
-            "required_outputs": list(requirement.required_outputs),
-            "required_evidence": list(requirement.required_evidence),
-            "blocking_conditions": list(requirement.blocking_conditions),
-            "blocking_preflight_checks": list(requirement.blocking_preflight_checks),
-            "stage_artifacts": list(requirement.stage_artifacts),
-        }
-        for requirement in arxiv_submission.review_contract.conditional_requirements
-    ] == [
-        {
-            "when": "theorem-bearing manuscripts are present",
-            "required_outputs": [],
-            "required_evidence": ["cleared manuscript proof review for theorem-bearing manuscripts"],
-            "blocking_conditions": ["missing or stale manuscript proof review for theorem-bearing manuscripts"],
-            "blocking_preflight_checks": ["manuscript_proof_review"],
-            "stage_artifacts": [],
-        }
-    ]
+    assert arxiv_contract is not None
+    assert arxiv_contract.review_mode == "publication"
+    _assert_exact_items(
+        arxiv_contract.preflight_checks,
+        "command_context",
+        "artifact_manifest",
+        "bibliography_audit",
+        "bibliography_audit_clean",
+        "publication_blockers",
+        "manuscript_proof_review",
+        context="arxiv publication preflight checks",
+    )
+    assert (
+        _review_requirement_rows(arxiv_contract.conditional_requirements, tuple(ARXIV_CONDITIONAL_REQUIREMENTS[0]))
+        == ARXIV_CONDITIONAL_REQUIREMENTS
+    )
 
-    assert verify_work.review_contract is not None
-    assert verify_work.review_contract.required_state == "phase_executed"
-    assert "command_context" in verify_work.review_contract.preflight_checks
-    assert "phase_lookup" in verify_work.review_contract.preflight_checks
-    assert "phase_artifacts" in verify_work.review_contract.preflight_checks
-    assert "phase_summaries" in verify_work.review_contract.preflight_checks
-    assert "phase_proof_review" in verify_work.review_contract.preflight_checks
+    assert verify_work_contract is not None
+    assert verify_work_contract.required_state == "phase_executed"
+    _assert_exact_items(
+        verify_work_contract.preflight_checks,
+        "command_context",
+        "phase_lookup",
+        "phase_artifacts",
+        "phase_summaries",
+        "phase_proof_review",
+        context="verify-work phase preflight checks",
+    )
 
-    assert respond_to_referees.review_contract is not None
-    assert "GPD/review/REFEREE_RESPONSE{round_suffix}.md" in respond_to_referees.review_contract.required_outputs
-    assert "GPD/AUTHOR-RESPONSE{round_suffix}.md" in respond_to_referees.review_contract.required_outputs
-    assert "command_context" in respond_to_referees.review_contract.preflight_checks
-    assert respond_to_referees.review_contract.required_evidence == [
+    assert respond_contract is not None
+    _assert_exact_items(
+        respond_contract.required_outputs,
+        "GPD/review/REFEREE_RESPONSE{round_suffix}.md",
+        "GPD/AUTHOR-RESPONSE{round_suffix}.md",
+        context="respond-to-referees required outputs",
+    )
+    _assert_exact_items(
+        respond_contract.preflight_checks,
+        "command_context",
+        context="respond-to-referees preflight checks",
+    )
+    assert respond_contract.required_evidence == [
         "existing manuscript",
         "referee report source when provided as a path",
     ]
-    assert "gpd:peer-review" in registry.list_review_commands()
-    assert "gpd:write-paper" in registry.list_review_commands()
-    assert "gpd:respond-to-referees" in registry.list_review_commands()
-    assert "gpd:verify-work" in registry.list_review_commands()
+    _assert_exact_items(
+        registry.list_review_commands(),
+        "gpd:peer-review",
+        "gpd:write-paper",
+        "gpd:respond-to-referees",
+        "gpd:verify-work",
+        context="review command registry",
+    )
 
 
 def test_conditional_review_contract_requirements_do_not_hide_runtime_blockers() -> None:
@@ -1153,64 +1236,20 @@ def test_conditional_review_contract_requirements_do_not_hide_runtime_blockers()
         "manuscript",
         "manuscript_proof_review",
     ]
-    assert "manuscript_proof_review" in peer_review.preflight_checks
-    assert peer_review.conditional_requirements == [
-        registry.ReviewContractConditionalRequirement(
-            when="project-backed manuscript review",
-            required_evidence=[
-                "phase summaries or milestone digest",
-                "verification reports",
-                "manuscript-root bibliography audit",
-                "manuscript-root artifact manifest",
-                "manuscript-root reproducibility manifest",
-                "manuscript-root publication artifacts",
-            ],
-            blocking_conditions=[
-                "missing project state",
-                "missing roadmap",
-                "missing conventions",
-                "no research artifacts",
-            ],
-            preflight_checks=[
-                "project_state",
-                "roadmap",
-                "conventions",
-                "research_artifacts",
-                "verification_reports",
-                "artifact_manifest",
-                "bibliography_audit",
-                "bibliography_audit_clean",
-                "reproducibility_manifest",
-                "reproducibility_ready",
-            ],
-            blocking_preflight_checks=[
-                "project_state",
-                "roadmap",
-                "conventions",
-                "research_artifacts",
-                "verification_reports",
-                "artifact_manifest",
-                "bibliography_audit",
-                "bibliography_audit_clean",
-                "reproducibility_manifest",
-                "reproducibility_ready",
-            ],
-        ),
-        registry.ReviewContractConditionalRequirement(
-            when="theorem-bearing claims are present",
-            required_outputs=["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-            stage_artifacts=["${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md"],
-        ),
-    ]
-    assert arxiv_submission.conditional_requirements == [
-        registry.ReviewContractConditionalRequirement(
-            when="theorem-bearing manuscripts are present",
-            required_evidence=["cleared manuscript proof review for theorem-bearing manuscripts"],
-            blocking_conditions=["missing or stale manuscript proof review for theorem-bearing manuscripts"],
-            blocking_preflight_checks=["manuscript_proof_review"],
-        )
-    ]
-    assert "manuscript_proof_review" in arxiv_submission.preflight_checks
+    _assert_exact_items(peer_review.preflight_checks, "manuscript_proof_review", context="peer-review preflight checks")
+    assert (
+        _review_requirement_rows(peer_review.conditional_requirements, tuple(PEER_REVIEW_CONDITIONAL_REQUIREMENTS[0]))
+        == PEER_REVIEW_CONDITIONAL_REQUIREMENTS
+    )
+    assert (
+        _review_requirement_rows(arxiv_submission.conditional_requirements, tuple(ARXIV_CONDITIONAL_REQUIREMENTS[0]))
+        == ARXIV_CONDITIONAL_REQUIREMENTS
+    )
+    _assert_exact_items(
+        arxiv_submission.preflight_checks,
+        "manuscript_proof_review",
+        context="arxiv submission preflight checks",
+    )
 
 
 def test_representative_commands_expose_expected_context_modes() -> None:
@@ -1658,8 +1697,12 @@ def test_publication_commands_accept_documented_manuscript_layouts() -> None:
     arxiv = (COMMANDS_DIR / "arxiv-submission.md").read_text(encoding="utf-8")
     respond_command = registry.get_command("respond-to-referees")
 
-    assert "context_mode: project-aware" in write_paper
-    assert "--intake path/to/write-paper-authoring-input.json" in write_paper
+    _m(
+        write_paper,
+        "write-paper documented manuscript layouts",
+        "context_mode: project-aware",
+        "--intake path/to/write-paper-authoring-input.json",
+    )
     _sf(
         write_paper,
         "Project-backed manuscripts",
@@ -1668,10 +1711,22 @@ def test_publication_commands_accept_documented_manuscript_layouts() -> None:
         "`GPD/`",
         context="write-paper documented manuscript layouts",
     )
-    assert "`paper/`, `manuscript/`, and `draft/`" in peer_review
-    assert "{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md" in peer_review
-    assert "subject-owned publication root at `GPD/publication/{subject_slug}`" in publication_modes
-    assert "current global `GPD/` / `GPD/review/` round-artifact layout" not in peer_review
+    _m(
+        peer_review,
+        "peer-review documented manuscript layouts",
+        "`paper/`, `manuscript/`, and `draft/`",
+        "{GPD_INSTALL_DIR}/references/publication/publication-pipeline-modes.md",
+    )
+    _m(
+        publication_modes,
+        "publication modes documented manuscript layouts",
+        "subject-owned publication root at `GPD/publication/{subject_slug}`",
+    )
+    _f(
+        peer_review,
+        "peer-review stale global publication layout",
+        "current global `GPD/` / `GPD/review/` round-artifact layout",
+    )
     assert respond_command.argument_hint == "[--manuscript PATH] (--report PATH [--report PATH...] | paste)"
     assert respond_command.command_policy is not None
     assert respond_command.command_policy.subject_policy is not None
@@ -1681,8 +1736,8 @@ def test_publication_commands_accept_documented_manuscript_layouts() -> None:
         "paste_referee_report",
     ]
     assert respond_command.command_policy.subject_policy.supported_roots == ["paper", "manuscript", "draft"]
-    assert "allow_external_subjects: true" in respond
-    assert "requires:" not in respond
+    _m(respond, "respond external subject policy", "allow_external_subjects: true")
+    _f(respond, "respond stale subject requirements key", "requires:")
     _sf(
         respond,
         "bounded continuation path",
@@ -1690,10 +1745,18 @@ def test_publication_commands_accept_documented_manuscript_layouts() -> None:
         "manuscript-local publication artifacts",
         context="respond bounded publication continuation",
     )
-    assert 'files: ["paper/*.tex", "manuscript/*.tex", "draft/*.tex", "GPD/publication/*/manuscript/*.tex"]' in arxiv
+    _m(
+        arxiv,
+        "arxiv documented manuscript layouts",
+        'files: ["paper/*.tex", "manuscript/*.tex", "draft/*.tex", "GPD/publication/*/manuscript/*.tex"]',
+    )
 
-    assert "conditional_requirements:" in peer_review
-    assert "when: project-backed manuscript review" in peer_review
+    _m(
+        peer_review,
+        "peer-review conditional manuscript requirements",
+        "conditional_requirements:",
+        "when: project-backed manuscript review",
+    )
     _sf(
         peer_review,
         "existing manuscript",
@@ -1701,17 +1764,25 @@ def test_publication_commands_accept_documented_manuscript_layouts() -> None:
         "theorem-bearing claims",
         context="peer-review conditional manuscript requirements",
     )
-    assert "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md" in peer_review
-    assert "gpd-check-proof" in peer_review
-    assert "conditional_requirements:" in arxiv
+    _m(
+        peer_review,
+        "peer-review theorem proof requirements",
+        "${REVIEW_ROOT}/PROOF-REDTEAM{round_suffix}.md",
+        "gpd-check-proof",
+    )
+    _m(arxiv, "arxiv theorem proof requirements", "conditional_requirements:")
     _s(
         arxiv,
         "arxiv conditional theorem requirements",
         "theorem-bearing manuscripts",
         "cleared manuscript proof review",
     )
-    assert "latest peer-review review ledger" in arxiv
-    assert "latest peer-review referee decision" in arxiv
+    _m(
+        arxiv,
+        "arxiv latest peer-review evidence",
+        "latest peer-review review ledger",
+        "latest peer-review referee decision",
+    )
     _sf(
         arxiv,
         "missing latest staged peer-review decision evidence",
@@ -1724,9 +1795,8 @@ def test_publication_commands_accept_documented_manuscript_layouts() -> None:
         "workflow own validation",
         context="arxiv publication gate evidence",
     )
-    assert 'find . -name "main.tex"' not in arxiv
-    assert 'find . -name "*.tex"' not in write_paper
-    assert "first-match" not in arxiv
+    _f(arxiv, "arxiv stale tex discovery", 'find . -name "main.tex"', "first-match")
+    _f(write_paper, "write-paper stale tex discovery", 'find . -name "*.tex"')
 
 
 def test_proof_contract_prompts_surface_explicit_theorem_fields_and_review_bindings() -> None:
@@ -1979,9 +2049,11 @@ def test_new_project_surfaces_supervised_default_and_core_research_preset_previe
         context="new-project core-research preset preview",
     )
 
-    assert "Recommended defaults use YOLO autonomy" not in workflow_text
-    assert (
-        "Config: YOLO autonomy | Balanced research mode | Parallel | All agents | Review profile" not in workflow_text
+    _ff(
+        workflow_text,
+        "Recommended defaults use YOLO autonomy",
+        "Config: YOLO autonomy | Balanced research mode | Parallel | All agents | Review profile",
+        context="new-project stale YOLO preset copy",
     )
 
 
@@ -2443,9 +2515,13 @@ def test_progress_workflow_surfaces_contract_load_and_validation_state() -> None
 def test_progress_workflow_uses_read_only_health_for_compaction_status() -> None:
     workflow_text = (WORKFLOWS_DIR / "progress.md").read_text(encoding="utf-8")
 
-    assert "gpd --raw health" in workflow_text
-    assert "HEALTH_JSON=$(gpd --raw health 2>/dev/null || true)" in workflow_text
-    assert "HEALTH=$(gpd --raw health 2>/dev/null || true)" in workflow_text
+    _mf(
+        workflow_text,
+        "gpd --raw health",
+        "HEALTH_JSON=$(gpd --raw health 2>/dev/null || true)",
+        "HEALTH=$(gpd --raw health 2>/dev/null || true)",
+        context="progress read-only health command",
+    )
     _sf(
         workflow_text,
         "exit 1",
@@ -2453,10 +2529,14 @@ def test_progress_workflow_uses_read_only_health_for_compaction_status() -> None
         "raw health returned nonzero",
         context="progress workflow read-only health compaction status",
     )
-    assert "`State Compaction` check" in workflow_text
-    assert "Report only; do not run raw state compaction from `gpd:progress`." in workflow_text
-    assert "`gpd:progress` did not modify it" in workflow_text
-    assert "gpd --raw state compact" not in workflow_text
+    _sf(
+        workflow_text,
+        "`State Compaction` check",
+        "Report only",
+        "`gpd:progress` did not modify it",
+        context="progress workflow state compaction status",
+    )
+    _ff(workflow_text, "gpd --raw state compact", context="progress workflow read-only state compaction")
 
 
 def test_planning_prompts_keep_contract_gate_in_light_mode_and_all_modes() -> None:
@@ -2771,7 +2851,7 @@ def test_new_project_minimal_mode_and_planning_wiring_allow_coarse_scoped_decomp
     planner_prompt = (TEMPLATES_DIR / "planner-subagent-prompt.md").read_text(encoding="utf-8")
     roadmap_instructions = _extract_between(roadmap_authoring, "<instructions>", "</instructions>")
 
-    assert "say the anchor is\nunknown" in scope_intake
+    _s(scope_intake, "new-project unknown anchor response", "anchor", "unknown")
     _assert_prompt_concepts(
         scope_approval,
         {
@@ -2801,8 +2881,8 @@ def test_new_project_minimal_mode_and_planning_wiring_allow_coarse_scoped_decomp
         },
         context="new-project roadmap instructions",
     )
-    assert "## CHECKPOINT REACHED" in planner_prompt
-    assert "missing or no longer sufficient to identify the right phase slice" in planner_prompt
+    _mf(planner_prompt, "## CHECKPOINT REACHED", context="planner checkpoint marker")
+    _s(planner_prompt, "planner phase slice checkpoint semantics", "missing", "phase slice")
 
 
 def test_reference_workflows_require_anchor_registry_propagation() -> None:
@@ -3281,14 +3361,22 @@ def test_audit_milestone_command_does_not_preload_raw_verification_globs() -> No
 def test_sensitivity_analysis_workflow_uses_canonical_cli_commands() -> None:
     workflow = (WORKFLOWS_DIR / "sensitivity-analysis.md").read_text(encoding="utf-8")
 
-    assert "gpd --raw init progress --include state,config" in workflow
-    assert "gpd --raw init phase-op" in workflow
-    assert "gpd uncertainty add" in workflow
-    assert "gpd commit" in workflow
-    assert "gpd CLI init progress" not in workflow
-    assert "gpd CLI init phase-op" not in workflow
-    assert "gpd CLI uncertainty add" not in workflow
-    assert "gpd CLI commit" not in workflow
+    _mf(
+        workflow,
+        "gpd --raw init progress --include state,config",
+        "gpd --raw init phase-op",
+        "gpd uncertainty add",
+        "gpd commit",
+        context="sensitivity-analysis canonical CLI commands",
+    )
+    _ff(
+        workflow,
+        "gpd CLI init progress",
+        "gpd CLI init phase-op",
+        "gpd CLI uncertainty add",
+        "gpd CLI commit",
+        context="sensitivity-analysis stale CLI wording",
+    )
 
 
 def test_phase_research_and_verification_surfaces_keep_anchor_checks_mandatory() -> None:
@@ -3894,14 +3982,16 @@ def test_execute_phase_workflow_surfaces_project_contract_validation_gate() -> N
         '<step name="claim_deliverable_alignment_check">',
         "</step>",
     )
-    assert "gpd contract alignment-status" in alignment_step
-    assert "gpd contract fingerprint" in alignment_step
-    assert "gpd contract context-fingerprint" in alignment_step
-    assert "gpd contract alignment-summary" in alignment_step
-    assert (
-        'gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$CONTEXT_HASH"'
-    ) in alignment_step
-    assert "claim_deliverable_alignment_check: skipped (already confirmed this session)" in alignment_step
+    _mf(
+        alignment_step,
+        "gpd contract alignment-status",
+        "gpd contract fingerprint",
+        "gpd contract context-fingerprint",
+        "gpd contract alignment-summary",
+        'gpd contract record-alignment --contract-hash "$CONTRACT_HASH" --context-hash "$CONTEXT_HASH"',
+        "claim_deliverable_alignment_check: skipped (already confirmed this session)",
+        context="execute-phase claim deliverable alignment commands",
+    )
 
 
 def test_execute_and_autonomous_gate_execution_before_plan_work() -> None:
@@ -3927,11 +4017,15 @@ def test_execute_and_autonomous_gate_execution_before_plan_work() -> None:
         },
         context="execute-phase selected-plan gate",
     )
-    assert 'gpd validate plan-contract "$plan"' in execute_gate
-    assert 'if ! gpd verify plan "$plan"; then' in execute_gate
-    assert 'PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "$plan")' in execute_gate
-    assert 'gpd verify references "$plan"' in execute_gate
-    assert 'gpd phase validate-waves "$phase_number"' in execute_gate
+    _mf(
+        execute_gate,
+        'gpd validate plan-contract "$plan"',
+        'if ! gpd verify plan "$plan"; then',
+        'PLAN_PREFLIGHT=$(gpd --raw validate plan-preflight "$plan")',
+        'gpd verify references "$plan"',
+        'gpd phase validate-waves "$phase_number"',
+        context="execute-phase selected-plan gate commands",
+    )
 
     _assert_prompt_concepts(
         autonomous,
@@ -3952,12 +4046,16 @@ def test_execute_and_autonomous_gate_execution_before_plan_work() -> None:
         },
         context="autonomous execution-before-plan gate",
     )
-    assert 'gpd --raw validate lifecycle-contract-gate execute-phase "${PHASE_NUM}"' in autonomous
-    assert 'gpd --raw validate lifecycle-contract-gate plan-phase "${PHASE_NUM}"' in autonomous
-    assert "gpd:plan-phase" in autonomous
-    assert "gpd:execute-phase" in autonomous
-    assert "--revise" not in execute_phase
-    assert "--revise" not in autonomous
+    _mf(
+        autonomous,
+        'gpd --raw validate lifecycle-contract-gate execute-phase "${PHASE_NUM}"',
+        'gpd --raw validate lifecycle-contract-gate plan-phase "${PHASE_NUM}"',
+        "gpd:plan-phase",
+        "gpd:execute-phase",
+        context="autonomous lifecycle contract gate commands",
+    )
+    _ff(execute_phase, "--revise", context="execute-phase stale revise flag")
+    _ff(autonomous, "--revise", context="autonomous stale revise flag")
 
 
 def test_execute_phase_and_execute_plan_use_staged_execution_bootstrap_instead_of_monolithic_init() -> None:
@@ -4078,36 +4176,57 @@ def test_lane5_prompt_examples_keep_schema_valid_contract_fields_visible() -> No
     executor_example = (REFERENCES_DIR / "execution" / "executor-worked-example.md").read_text(encoding="utf-8")
     phase_prompt = _expand_prompt_surface(TEMPLATES_DIR / "phase-prompt.md")
 
-    assert "context_intake:" in planner
-    assert 'must_read_refs: ["ref-textbook"]' in planner
-    assert 'references: ["ref-main"]' in phase_prompt
-    assert "context_intake:" in plan_checker
-    assert "why_it_matters:" in plan_checker
-    assert "required_actions: [read, compare, cite]" in plan_checker
-    assert 'procedure: "Compare the computed value against the benchmark anchor within tolerance."' in plan_checker
-    assert "context_intake:" in parameter_sweep
-    assert "must_read_refs: [ref-sweep-anchor]" in parameter_sweep
-    assert "reference-main" in research_verification
-    assert "acceptance-test-main" in research_verification
-    assert "linked_ids: [deliverable-main, acceptance-test-main, reference-main]" in research_verification
-    assert "evidence:\n        - verifier: gpd-verifier" in research_verification
-    assert 'evidence_path: "GPD/phases/01-benchmark/01-VERIFICATION.md"' in research_verification
-    assert "started:" in research_verification
-    assert "updated:" in research_verification
-    assert "test-benchmark" not in research_verification
-    assert "reference-main" not in verify_work
-    assert "acceptance-test-main" not in verify_work
-    assert "test-benchmark" not in verify_work
-    assert "{GPD_INSTALL_DIR}/templates/verification-report.md" in verifier
-    assert "{GPD_INSTALL_DIR}/templates/contract-results-schema.md" in verifier
-    assert "@{GPD_INSTALL_DIR}/templates/verification-report.md" not in verifier
-    assert "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md" not in verifier
-    assert "reference-main" not in verifier
-    assert "acceptance-test-main" not in verifier
-    assert "test-benchmark" not in verifier
-    assert "deliverables:" in executor_example
-    assert "references:" in executor_example
-    assert 'reference_id: "reference-qed-benchmark"' in executor_example
+    _mf(planner, "context_intake:", 'must_read_refs: ["ref-textbook"]', context="planner benchmark intake")
+    _mf(phase_prompt, 'references: ["ref-main"]', context="phase prompt reference example")
+    _mf(
+        plan_checker,
+        "context_intake:",
+        "why_it_matters:",
+        "required_actions: [read, compare, cite]",
+        context="plan checker benchmark intake",
+    )
+    _sf(plan_checker, "procedure:", "computed value", "benchmark anchor", "tolerance", context="plan checker benchmark")
+    _mf(
+        parameter_sweep,
+        "context_intake:",
+        "must_read_refs: [ref-sweep-anchor]",
+        context="parameter sweep reference intake",
+    )
+    _mf(
+        research_verification,
+        "reference-main",
+        "acceptance-test-main",
+        "linked_ids: [deliverable-main, acceptance-test-main, reference-main]",
+        "evidence:\n        - verifier: gpd-verifier",
+        'evidence_path: "GPD/phases/01-benchmark/01-VERIFICATION.md"',
+        "started:",
+        "updated:",
+        context="research verification benchmark example",
+    )
+    _ff(research_verification, "test-benchmark", context="research verification invalid benchmark id")
+    _ff(verify_work, "reference-main", "acceptance-test-main", "test-benchmark", context="verify-work staged inputs")
+    _mf(
+        verifier,
+        "{GPD_INSTALL_DIR}/templates/verification-report.md",
+        "{GPD_INSTALL_DIR}/templates/contract-results-schema.md",
+        context="verifier lightweight schema paths",
+    )
+    _ff(
+        verifier,
+        "@{GPD_INSTALL_DIR}/templates/verification-report.md",
+        "@{GPD_INSTALL_DIR}/templates/contract-results-schema.md",
+        "reference-main",
+        "acceptance-test-main",
+        "test-benchmark",
+        context="verifier lazy schema and no example leakage",
+    )
+    _mf(
+        executor_example,
+        "deliverables:",
+        "references:",
+        'reference_id: "reference-qed-benchmark"',
+        context="executor worked example reference fields",
+    )
     assert "deliverable-self-energy-derivation" in executor_example
 
 
@@ -4304,26 +4423,30 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
     interactive_validation = next(stage for stage in verify_work_staging.stages if stage.id == "interactive_validation")
     inventory_build = next(stage for stage in verify_work_staging.stages if stage.id == "inventory_build")
 
-    _sf(
-        peer_review,
-        "Reader-visible claims",
-        "surfaced evidence",
-        "first-class",
-        "compact `REVIEW_CARRY_FORWARD`",
-        "before spawning panel stages",
-        "Do not repeat",
-        "full contract/reference payloads",
-        "every child prompt",
-        context="peer-review carry-forward context",
-    )
-    _mf(
-        peer_review,
-        "effective_reference_intake",
-        "project_contract_validation",
-        "project_contract_load_info",
-        "Carry-forward packet: {REVIEW_CARRY_FORWARD}",
-        "project_contract_gate.authoritative",
-        context="peer-review contract context",
+    _assert_fragment_groups(
+        (
+            _sf,
+            peer_review,
+            "peer-review carry-forward context",
+            "Reader-visible claims",
+            "surfaced evidence",
+            "first-class",
+            "compact `REVIEW_CARRY_FORWARD`",
+            "before spawning panel stages",
+            "Do not repeat",
+            "full contract/reference payloads",
+            "every child prompt",
+        ),
+        (
+            _mf,
+            peer_review,
+            "peer-review contract context",
+            "effective_reference_intake",
+            "project_contract_validation",
+            "project_contract_load_info",
+            "Carry-forward packet: {REVIEW_CARRY_FORWARD}",
+            "project_contract_gate.authoritative",
+        ),
     )
     _f(peer_review, "peer-review carry-forward payload", "reference artifacts content {reference_artifacts_content}")
     _assert_prompt_contracts(
@@ -4345,31 +4468,36 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
             context="peer-review project contract gate",
         ),
     )
-    _mf(
-        respond_to_referees,
-        "project_contract_gate",
-        "project_contract_load_info",
-        "project_contract_validation",
-        "Treat the project contract as authoritative only when",
-        "`project_contract_gate.authoritative` is true",
-        context="respond-to-referees contract gate",
-    )
-    _ff(
-        peer_review_command,
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md",
-        "references/publication/peer-review-panel.md",
-        context="peer-review command wrapper schema bodies",
-    )
-    _ff(
-        verify_command,
-        "templates/verification-report.md",
-        "templates/contract-results-schema.md",
-        "Severity Classification",
-        "One check at a time, plain text responses, no interrogation.",
-        "Physics verification is not binary:",
-        "For deeper focused analysis",
-        context="verify-work command wrapper schema bodies",
+    _assert_fragment_groups(
+        (
+            _mf,
+            respond_to_referees,
+            "respond-to-referees contract gate",
+            "project_contract_gate",
+            "project_contract_load_info",
+            "project_contract_validation",
+            "Treat the project contract as authoritative only when",
+            "`project_contract_gate.authoritative` is true",
+        ),
+        (
+            _ff,
+            peer_review_command,
+            "peer-review command wrapper schema bodies",
+            "templates/paper/review-ledger-schema.md",
+            "templates/paper/referee-decision-schema.md",
+            "references/publication/peer-review-panel.md",
+        ),
+        (
+            _ff,
+            verify_command,
+            "verify-work command wrapper schema bodies",
+            "templates/verification-report.md",
+            "templates/contract-results-schema.md",
+            "Severity Classification",
+            "One check at a time, plain text responses, no interrogation.",
+            "Physics verification is not binary:",
+            "For deeper focused analysis",
+        ),
     )
     _assert_command_delegates_to_workflow(
         verify_command,
@@ -4400,68 +4528,79 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
         "references/verification/meta/verification-independence.md" in row.authorities
         for row in inventory_build.conditional_authorities
     )
-    _ff(
-        write_paper_command,
-        "templates/paper/review-ledger-schema.md",
-        "templates/paper/referee-decision-schema.md",
-        "references/publication/peer-review-panel.md",
-        context="write-paper command wrapper schema bodies",
-    )
-    _m(
-        write_paper,
-        "write-paper reproducibility schema",
-        "Canonical schema for `${PAPER_DIR}/reproducibility-manifest.json`:",
-    )
-    _mf(
-        sync_state,
-        "Canonical reconciliation contract:",
-        "state-json-schema.md",
-        "state.json is authoritative for structured fields",
-        "optional_commit",
-        'gpd --raw --cwd "$PROJECT_ROOT" state repair-sync',
-        context="sync-state reconciliation",
+    _assert_fragment_groups(
+        (
+            _ff,
+            write_paper_command,
+            "write-paper command wrapper schema bodies",
+            "templates/paper/review-ledger-schema.md",
+            "templates/paper/referee-decision-schema.md",
+            "references/publication/peer-review-panel.md",
+        ),
+        (
+            _mf,
+            write_paper,
+            "write-paper reproducibility schema",
+            "Canonical schema for `${PAPER_DIR}/reproducibility-manifest.json`:",
+        ),
+        (
+            _mf,
+            sync_state,
+            "sync-state reconciliation",
+            "Canonical reconciliation contract:",
+            "state-json-schema.md",
+            "state.json is authoritative for structured fields",
+            "optional_commit",
+            'gpd --raw --cwd "$PROJECT_ROOT" state repair-sync',
+        ),
+        (
+            _ff,
+            sync_state,
+            "sync-state stale reconciliation flow",
+            "gpd --raw state snapshot",
+            "Proceed with reconciliation? (y/n)",
+            "determine which source is more recent",
+        ),
+        (_sf, peer_review, "peer-review blocked contract", "repair it before retrying"),
+        (
+            _mf,
+            review_reader,
+            "review reader schema paths",
+            "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+            "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
+        ),
     )
     _s(sync_state, "sync-state reconciliation", "workflow", "fail-closed")
     _s(sync_state, "sync-state reconciliation", "Do not", "move or delete files", "prompt")
-    _ff(
-        sync_state,
-        "gpd --raw state snapshot",
-        "Proceed with reconciliation? (y/n)",
-        "determine which source is more recent",
-        context="sync-state stale reconciliation flow",
-    )
-    _sf(peer_review, "repair it before retrying", context="peer-review blocked contract")
-    _mf(
-        review_reader,
-        "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
-        "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
-        context="review reader schema paths",
-    )
-    _sf(
-        review_reader,
-        "shared source of truth",
-        "`ClaimIndex`",
-        "`StageReviewReport`",
-        "Stage 1",
-        "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
-        context="review reader schema visibility",
-    )
-
-    _sf(
-        review_reader,
-        "theorem kind",
-        "explicit hypotheses",
-        "free target parameters",
-        "theorem-like claims",
-        context="review reader claim structure",
-    )
-    _sf(
-        review_reader,
-        "`findings`",
-        "overclaiming",
-        "missing promised deliverables",
-        "claim-structure blockers",
-        context="review reader findings",
+    _assert_fragment_groups(
+        (
+            _sf,
+            review_reader,
+            "review reader schema visibility",
+            "shared source of truth",
+            "`ClaimIndex`",
+            "`StageReviewReport`",
+            "Stage 1",
+            "${REVIEW_ROOT}/CLAIMS{round_suffix}.json",
+        ),
+        (
+            _sf,
+            review_reader,
+            "review reader claim structure",
+            "theorem kind",
+            "explicit hypotheses",
+            "free target parameters",
+            "theorem-like claims",
+        ),
+        (
+            _sf,
+            review_reader,
+            "review reader findings",
+            "`findings`",
+            "overclaiming",
+            "missing promised deliverables",
+            "claim-structure blockers",
+        ),
     )
     for label, text, output_path in (
         ("literature", review_literature, "${REVIEW_ROOT}/STAGE-literature{round_suffix}.json"),
@@ -4471,71 +4610,79 @@ def test_review_and_verification_prompts_explicitly_surface_schema_sources_and_c
     ):
         _mf(text, output_path, context=f"review {label} output path")
         _s(text, f"review {label} schema visibility", "shared source of truth", "`StageReviewReport` contract")
-    _sf(
-        review_literature,
-        "`findings`",
-        "claimed advance",
-        "prior work",
-        "novelty assessment",
-        "`reject`",
-        "`major_revision`",
-        context="literature review findings",
-    )
-    _sf(
-        review_math,
-        "theorem-bearing Stage 1 claim",
-        "exactly one `proof_audits[]` entry",
-        "`claim_id`",
-        "`claims_reviewed`",
-        "Do not emit proof audits",
-        "unreviewed claims",
-        "do not repeat `claim_id` values",
-        "theorem-to-proof audit",
-        "what the proof actually uses",
-        "silently specializes away",
-        "coverage gaps",
-        "`recommendation_ceiling`",
-        "`major_revision`",
-        "`reject`",
-        "central theorem-proof gaps",
-        context="math review recommendation ceiling",
-    )
-    _sf(
-        review_physics,
-        "`findings`",
-        "physical assumptions",
-        "regime of validity",
-        "supported physical conclusions",
-        "overstated connections",
-        context="physics review findings",
-    )
-    _sf(
-        review_physics,
-        "`recommendation_ceiling`",
-        "`major_revision`",
-        "physical conclusions",
-        "actual evidence",
-        context="physics review recommendation ceiling",
-    )
-    _sf(
-        review_significance,
-        "`findings`",
-        "why the result might matter",
-        "venue fit",
-        "claim proportionality",
-        context="significance review findings",
-    )
-    _sf(
-        review_significance,
-        "`recommendation_ceiling`",
-        "`reject`",
-        "significance",
-        "venue fit",
-        "`major_revision`",
-        "technically competent",
-        "physically uninteresting",
-        "overclaimed",
-        context="significance review recommendation ceiling",
+    _assert_fragment_groups(
+        (
+            _sf,
+            review_literature,
+            "literature review findings",
+            "`findings`",
+            "claimed advance",
+            "prior work",
+            "novelty assessment",
+            "`reject`",
+            "`major_revision`",
+        ),
+        (
+            _sf,
+            review_math,
+            "math review recommendation ceiling",
+            "theorem-bearing Stage 1 claim",
+            "exactly one `proof_audits[]` entry",
+            "`claim_id`",
+            "`claims_reviewed`",
+            "Do not emit proof audits",
+            "unreviewed claims",
+            "do not repeat `claim_id` values",
+            "theorem-to-proof audit",
+            "what the proof actually uses",
+            "silently specializes away",
+            "coverage gaps",
+            "`recommendation_ceiling`",
+            "`major_revision`",
+            "`reject`",
+            "central theorem-proof gaps",
+        ),
+        (
+            _sf,
+            review_physics,
+            "physics review findings",
+            "`findings`",
+            "physical assumptions",
+            "regime of validity",
+            "supported physical conclusions",
+            "overstated connections",
+        ),
+        (
+            _sf,
+            review_physics,
+            "physics review recommendation ceiling",
+            "`recommendation_ceiling`",
+            "`major_revision`",
+            "physical conclusions",
+            "actual evidence",
+        ),
+        (
+            _sf,
+            review_significance,
+            "significance review findings",
+            "`findings`",
+            "why the result might matter",
+            "venue fit",
+            "claim proportionality",
+        ),
+        (
+            _sf,
+            review_significance,
+            "significance review recommendation ceiling",
+            "`recommendation_ceiling`",
+            "`reject`",
+            "significance",
+            "venue fit",
+            "`major_revision`",
+            "technically competent",
+            "physically uninteresting",
+            "overclaimed",
+        ),
     )
     for text in (review_reader, review_literature, review_math, review_physics, review_significance):
         _f(
@@ -5261,15 +5408,26 @@ def test_review_and_execution_prompts_expand_required_schema_sources() -> None:
         "/runtime/",
     )
 
-    assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in review_reader_raw
-    assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in referee_raw
-    assert "{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md" in referee_raw
-    assert "{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md" in referee_raw
-    assert "Peer Review Panel Protocol" not in review_reader
-    assert "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md" in review_literature
-    assert "Peer Review Panel Protocol" not in review_literature
-    assert "Review Ledger Schema" not in referee
-    assert "Referee Decision Schema" not in referee
+    _mf(
+        review_reader_raw,
+        "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md",
+        context="review reader peer-review panel path",
+    )
+    _mf(
+        referee_raw,
+        "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md",
+        "{GPD_INSTALL_DIR}/templates/paper/review-ledger-schema.md",
+        "{GPD_INSTALL_DIR}/templates/paper/referee-decision-schema.md",
+        context="referee schema source paths",
+    )
+    _ff(review_reader, "Peer Review Panel Protocol", context="review reader lazy peer-review panel body")
+    _mf(
+        review_literature,
+        "{GPD_INSTALL_DIR}/references/publication/peer-review-panel.md",
+        context="review literature peer-review panel path",
+    )
+    _ff(review_literature, "Peer Review Panel Protocol", context="review literature lazy peer-review panel body")
+    _ff(referee, "Review Ledger Schema", "Referee Decision Schema", context="referee lazy schema bodies")
 
 
 def test_verification_and_agent_reference_prompts_expand_or_stage_required_reference_bodies() -> None:
@@ -5470,15 +5628,27 @@ def test_sync_state_defers_state_schema_while_write_paper_expands_required_schem
     sync_state_workflow = _expanded_workflow_authority_text("sync-state")
     write_paper = _expanded_workflow_authority_text("write-paper")
 
-    assert "state-json-schema.md" in sync_state
-    assert "# state.json Schema" not in sync_state
-    assert "Authoritative vs Derived" not in sync_state
-    assert "`convention_lock`" not in sync_state
-    assert "`convention_lock`" in sync_state_workflow
-    assert "templates/paper/reproducibility-manifest.md" in write_paper
-    assert "Reproducibility Manifest Template" not in write_paper
-    assert "bibliography audit refresh" in write_paper
-    assert "publication-pipeline-modes.md" in write_paper
+    _mf(sync_state, "state-json-schema.md", context="sync-state schema path")
+    _ff(
+        sync_state,
+        "# state.json Schema",
+        "Authoritative vs Derived",
+        "`convention_lock`",
+        context="sync-state body deferral",
+    )
+    _mf(
+        sync_state_workflow,
+        "`convention_lock`",
+        context="sync-state workflow expands state schema field",
+    )
+    _mf(
+        write_paper,
+        "templates/paper/reproducibility-manifest.md",
+        "bibliography audit refresh",
+        "publication-pipeline-modes.md",
+        context="write-paper schema source expansion",
+    )
+    _ff(write_paper, "Reproducibility Manifest Template", context="write-paper lazy reproducibility body")
     _sf(
         write_paper,
         "bounded external-authoring lane",
@@ -5486,10 +5656,14 @@ def test_sync_state_defers_state_schema_while_write_paper_expands_required_schem
         "intake manifest only",
         context="write-paper external authoring intake",
     )
-    assert "GPD/publication/{subject_slug}/intake/" in write_paper
-    assert '"execution_steps"' not in write_paper
-    assert "random_seeds[].computation" not in write_paper
-    assert "resource_requirements[].step" not in write_paper
+    _mf(write_paper, "GPD/publication/{subject_slug}/intake/", context="write-paper external authoring intake")
+    _ff(
+        write_paper,
+        '"execution_steps"',
+        "random_seeds[].computation",
+        "resource_requirements[].step",
+        context="write-paper deferred reproducibility body fields",
+    )
 
 
 def test_non_adapter_sources_do_not_hardcode_runtime_names() -> None:
@@ -5576,8 +5750,12 @@ def test_phase_prompt_surfaces_validation_critical_plan_contract_rules() -> None
 def test_review_ledger_schema_surfaces_enforced_id_formats() -> None:
     review_ledger_schema = (TEMPLATES_DIR / "paper" / "review-ledger-schema.md").read_text(encoding="utf-8")
 
-    assert "`issue_id` must match `REF-[A-Za-z0-9][A-Za-z0-9_-]*`" in review_ledger_schema
-    assert "Every `claim_ids[]` entry must match `CLM-[A-Za-z0-9][A-Za-z0-9_-]*`." in review_ledger_schema
+    _mf(
+        review_ledger_schema,
+        "`issue_id` must match `REF-[A-Za-z0-9][A-Za-z0-9_-]*`",
+        "Every `claim_ids[]` entry must match `CLM-[A-Za-z0-9][A-Za-z0-9_-]*`.",
+        context="review ledger id format regexes",
+    )
 
 
 def test_contract_models_match_prompted_schema_contracts() -> None:
@@ -6888,37 +7066,116 @@ def test_expanded_artifact_intake_surfaces_use_cli_text_extraction_helper() -> N
         "**`gpd:peer-review [paper directory | manuscript path | explicit artifact path]`**",
         1,
     )[1].split("**`gpd:respond-to-referees", 1)[0]
+    review_suffixes = ("`.tex`", "`.md`", "`.txt`", "`.pdf`", "`.docx`", "`.csv`", "`.tsv`", "`.xlsx`", "`.xlsm`")
+    digest_suffixes = ("`.md`", "`.txt`", "`.pdf`", "`.docx`", "`.csv`", "`.tsv`", "`.xlsx`")
+    plain_digest_suffixes = ("`.md`", "`.txt`", "`.csv`", "`.tsv`")
+    extracted_digest_suffixes = ("`.pdf`", "`.docx`", "`.xlsx`")
+    artifact_text_command = "`gpd validate artifact-text <path> --output <txt-path>`"
 
-    _sf(
-        peer_review_workflow,
-        "`.tex`",
-        "`.md`",
-        "`.txt`",
-        "`.pdf`",
-        "`.docx`",
-        "`.csv`",
-        "`.tsv`",
-        "`.xlsx`",
-        "`.xlsm`",
-        "manuscript directory path",
-        context="peer-review artifact intake",
-    )
-
-    _sf(
-        peer_review_workflow,
-        "centralized target-aware init",
-        "command-context preflight",
-        "authoritative manuscript resolver",
-        context="peer-review artifact intake",
-    )
-
-    _sf(
-        peer_review_workflow,
-        "project-backed manuscript review",
-        "`paper/`",
-        "`manuscript/`",
-        "`draft/`",
-        context="peer-review artifact intake",
+    _assert_fragment_groups(
+        (_sf, peer_review_workflow, "peer-review artifact intake", (*review_suffixes, "manuscript directory path")),
+        (
+            _sf,
+            peer_review_workflow,
+            "peer-review artifact intake",
+            ("centralized target-aware init", "command-context preflight", "authoritative manuscript resolver"),
+        ),
+        (
+            _sf,
+            peer_review_workflow,
+            "peer-review artifact intake",
+            ("project-backed manuscript review", "`paper/`", "`manuscript/`", "`draft/`"),
+        ),
+        (
+            _sf,
+            peer_review_workflow,
+            "peer-review artifact intake",
+            (
+                "points at one artifact path",
+                "Explicit external artifact intake",
+                "must not widen",
+                "default in-project manuscript family",
+            ),
+        ),
+        (
+            _mf,
+            peer_review_workflow,
+            "peer-review artifact text validator",
+            ('gpd validate artifact-text "$RESOLVED_MANUSCRIPT" --output ${REVIEW_ROOT}/MANUSCRIPT-TEXT.txt',),
+        ),
+        (
+            _pf,
+            help_workflow,
+            "peer-review help public command line",
+            ("- `gpd:peer-review [paper directory | manuscript path | explicit artifact path]`",),
+        ),
+        (
+            _sf,
+            help_workflow,
+            "peer-review help explicit artifact suffix policy",
+            ("command-policy supported suffixes", "publication-artifact paths"),
+        ),
+        (
+            _ff,
+            peer_review_help_block,
+            "peer-review help explicit artifact suffix policy",
+            ("`.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, `.xlsx`, and `.xlsm`", "pdftotext"),
+        ),
+        (
+            _mf,
+            peer_review_help_block,
+            "peer-review help artifact text validator",
+            ("gpd validate artifact-text <path> --output <txt-path>",),
+        ),
+        (
+            _mf,
+            peer_review_help_block,
+            "peer-review help explicit artifact example",
+            ("`gpd:peer-review data/observables.csv`",),
+        ),
+        (
+            _sf,
+            help_workflow,
+            "digest help explicit source examples",
+            ("Example document source", "gpd:digest-knowledge", ".docx", "Example tabular source", ".csv"),
+        ),
+        (_sf, digest_command, "digest-knowledge source intake", ("explicit source-file intake", *digest_suffixes)),
+        (
+            _sf,
+            digest_command,
+            "digest-knowledge source intake",
+            ("text extraction", "inside the workflow", artifact_text_command),
+        ),
+        (_sf, digest_workflow, "digest-knowledge workflow source intake", ("`source_path` suffixes", *digest_suffixes)),
+        (
+            _sf,
+            digest_workflow,
+            "digest workflow plain text source intake",
+            ("read", *plain_digest_suffixes, "directly as source surfaces"),
+        ),
+        (
+            _sf,
+            digest_workflow,
+            "digest-knowledge workflow source intake",
+            (*extracted_digest_suffixes, "working text surface", artifact_text_command),
+        ),
+        (
+            _sf,
+            digest_workflow,
+            "digest-knowledge workflow source intake",
+            ("source began", *extracted_digest_suffixes, "preserve the original artifact path", "metadata"),
+        ),
+        (
+            _sf,
+            referee,
+            "referee artifact intake",
+            (
+                "standalone `.txt`, `.csv`, or `.tsv`",
+                "extracted text surface",
+                "`.pdf`, `.docx`, `.xlsx`, or `.xlsm`",
+                "primary review surface",
+            ),
+        ),
     )
     _s(
         peer_review_workflow,
@@ -6926,475 +7183,5 @@ def test_expanded_artifact_intake_surfaces_use_cli_text_extraction_helper() -> N
         "gpd --raw init peer-review",
         "--stage bootstrap",
     )
-    _sf(
-        peer_review_workflow,
-        "points at one artifact path",
-        "Explicit external artifact intake",
-        "must not widen",
-        "default in-project manuscript family",
-        context="peer-review artifact intake",
-    )
-    _mf(
-        peer_review_workflow,
-        'gpd validate artifact-text "$RESOLVED_MANUSCRIPT" --output ${REVIEW_ROOT}/MANUSCRIPT-TEXT.txt',
-        context="peer-review artifact text validator",
-    )
     _f(peer_review_workflow, "peer-review artifact text validator", "pdftotext")
-
-    _pf(
-        help_workflow,
-        "- `gpd:peer-review [paper directory | manuscript path | explicit artifact path]`",
-        context="peer-review help public command line",
-    )
-    _sf(
-        help_workflow,
-        "command-policy supported suffixes",
-        "publication-artifact paths",
-        context="peer-review help explicit artifact suffix policy",
-    )
-    _ff(
-        peer_review_help_block,
-        "`.txt`, `.pdf`, `.docx`, `.csv`, `.tsv`, `.xlsx`, and `.xlsm`",
-        "pdftotext",
-        context="peer-review help explicit artifact suffix policy",
-    )
-    _m(
-        peer_review_help_block,
-        "peer-review help artifact text validator",
-        "gpd validate artifact-text <path> --output <txt-path>",
-    )
     _assert_help_usage_line(peer_review_help_block, "peer-review", ".docx")
-    assert "`gpd:peer-review data/observables.csv`" in peer_review_help_block
-    _sf(
-        help_workflow,
-        "Example document source",
-        "gpd:digest-knowledge",
-        ".docx",
-        "Example tabular source",
-        ".csv",
-        context="digest help explicit source examples",
-    )
-
-    _sf(
-        digest_command,
-        "explicit source-file intake",
-        "`.md`",
-        "`.txt`",
-        "`.pdf`",
-        "`.docx`",
-        "`.csv`",
-        "`.tsv`",
-        "`.xlsx`",
-        context="digest-knowledge source intake",
-    )
-
-    _sf(
-        digest_command,
-        "text extraction",
-        "inside the workflow",
-        "`gpd validate artifact-text <path> --output <txt-path>`",
-        context="digest-knowledge source intake",
-    )
-    _sf(
-        digest_workflow,
-        "`source_path` suffixes",
-        "`.md`",
-        "`.txt`",
-        "`.pdf`",
-        "`.docx`",
-        "`.csv`",
-        "`.tsv`",
-        "`.xlsx`",
-        context="digest-knowledge workflow source intake",
-    )
-    _sf(
-        digest_workflow,
-        "read",
-        "`.md`",
-        "`.txt`",
-        "`.csv`",
-        "`.tsv`",
-        "directly as source surfaces",
-        context="digest workflow plain text source intake",
-    )
-    _sf(
-        digest_workflow,
-        "`.pdf`",
-        "`.docx`",
-        "`.xlsx`",
-        "working text surface",
-        "`gpd validate artifact-text <path> --output <txt-path>`",
-        context="digest-knowledge workflow source intake",
-    )
-
-    _sf(
-        digest_workflow,
-        "source began",
-        "`.pdf`",
-        "`.docx`",
-        "`.xlsx`",
-        "preserve the original artifact path",
-        "metadata",
-        context="digest-knowledge workflow source intake",
-    )
-
-    _sf(
-        referee,
-        "standalone `.txt`, `.csv`, or `.tsv`",
-        "extracted text surface",
-        "`.pdf`, `.docx`, `.xlsx`, or `.xlsm`",
-        "primary review surface",
-        context="referee artifact intake",
-    )
-
-
-def test_peer_review_and_arxiv_use_subject_aware_publication_roots() -> None:
-    peer_review = _workflow_authority_text("peer-review")
-    arxiv_submission = _workflow_authority_text("arxiv-submission")
-
-    for field in (
-        "publication_subject_slug",
-        "publication_lane_kind",
-        "managed_publication_root",
-        "selected_publication_root",
-        "selected_review_root",
-    ):
-        _m(peer_review, "peer-review subject-aware publication root fields", field)
-        _m(arxiv_submission, "arxiv subject-aware publication root fields", field)
-    _sf(
-        peer_review,
-        "`REVIEW_ROOT`",
-        "`selected_review_root`",
-        "${REVIEW_ROOT}/STAGE-reader{round_suffix}.json",
-        'gpd validate artifact-text "$RESOLVED_MANUSCRIPT" --output ${REVIEW_ROOT}/MANUSCRIPT-TEXT.txt',
-        context="peer-review subject-aware review root",
-    )
-    _f(peer_review, "peer-review subject-aware review root", "GPD/review/STAGE-reader{round_suffix}.json")
-
-    _mf(
-        arxiv_submission,
-        "REVIEW_PREFLIGHT=$(gpd --raw validate review-preflight arxiv-submission",
-        "BOOTSTRAP_INIT=$(gpd --raw init arxiv-submission --stage bootstrap)",
-        'gpd --raw validate command-context arxiv-submission -- "${ARGUMENTS}"',
-        'gpd --raw validate review-preflight arxiv-submission --strict -- "${ARGUMENTS}"',
-        'PUBLICATION_ROOT="GPD/publication/${subject_slug}"',
-        'PACKAGE_ROOT="${PUBLICATION_ROOT}/arxiv"',
-        context="arxiv subject-aware publication root commands",
-    )
-    _s(
-        arxiv_submission,
-        "arxiv subject-aware publication root commands",
-        "Set `subject_slug`",
-        "publication_subject_slug",
-    )
-    _ff(
-        arxiv_submission,
-        'gpd --raw init arxiv-submission --stage bootstrap -- "${ARGUMENTS}"',
-        'PUBLICATION_ROOT="${selected_publication_root:-GPD/publication/${subject_slug}}"',
-        "Derive a stable ASCII `subject_slug`",
-        context="arxiv subject-aware publication root commands",
-    )
-
-
-def test_generated_peer_review_skill_surface_uses_artifact_text_helper_for_non_plaintext_intake() -> None:
-    from gpd.mcp.servers.skills_server import get_skill
-
-    peer_review_skill = get_skill("gpd-peer-review")
-    peer_review_skill_content = peer_review_skill["content"]
-    peer_review_workflow = _workflow_authority_text("peer-review")
-
-    _s(peer_review_skill_content, "generated peer-review skill staged routing", "artifact_discovery", "staged_loading")
-    _sf(
-        peer_review_workflow,
-        "If none exists",
-        "${REVIEW_ROOT}/",
-        "gpd validate artifact-text",
-        "$RESOLVED_MANUSCRIPT",
-        "${REVIEW_ROOT}/MANUSCRIPT-TEXT.txt",
-        "extracted file",
-        "canonical",
-        "`RESOLVED_MANUSCRIPT`",
-        context="generated peer-review skill artifact text helper",
-    )
-
-    _sf(
-        peer_review_workflow,
-        "If extraction fails",
-        "STOP",
-        "`.txt`",
-        "`.md`",
-        "`.tex`",
-        "`.csv`",
-        "`.tsv`",
-        "matching extracted `.txt` companion file",
-        context="generated peer-review skill artifact text helper",
-    )
-    _f(peer_review_skill_content, "generated peer-review skill artifact text helper", "pdftotext")
-
-
-def test_verification_and_publication_prompts_keep_decisive_contract_targets_reader_visible() -> None:
-    verify_work = _workflow_authority_text("verify-work")
-    write_paper = _workflow_authority_text("write-paper")
-    peer_review = _workflow_authority_text("peer-review")
-    respond = _workflow_authority_text("respond-to-referees")
-
-    _sf(
-        verify_work,
-        "researcher",
-        "Project contract",
-        "claim",
-        "acceptance-test",
-        "decisive comparison gaps",
-        context="verify-work decisive contract targets",
-    )
-    _sf(
-        write_paper,
-        "contract_results",
-        "comparison_verdicts",
-        "paper-support artifacts",
-        "not as proof",
-        "pre_submission_review",
-        "reproducibility manifest",
-        context="write-paper decisive contract targets",
-    )
-    _s(peer_review, "peer-review decisive contract targets", "review-support artifacts", "scaffolding")
-    _s(respond, "respond decisive contract targets", "referee requests", "honest scope", "optional", "real support gap")
-
-
-def test_new_project_spawns_roadmapper_with_shallow_mode_in_standard_mode() -> None:
-    new_project = _workflow_authority_text("new-project")
-    assert "<shallow_mode>true</shallow_mode>" in new_project
-
-
-def test_new_milestone_keeps_full_roadmap_detail_shallow_mode_false() -> None:
-    new_milestone = _workflow_authority_text("new-milestone")
-    assert "<shallow_mode>false</shallow_mode>" in new_milestone
-
-
-def test_new_project_next_up_recommends_discuss_phase_1_primary() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project" / "completion.md").read_text(encoding="utf-8")
-    # The standard-mode Next Up block is the final occurrence; the first is the --minimal path.
-    next_up_block = new_project[new_project.rindex("## > Next Up") :]
-    # discuss-phase 1 should appear before plan-phase 1 in that block.
-    discuss_idx = next_up_block.index("`gpd:discuss-phase 1`")
-    plan_idx = next_up_block.index("`gpd:plan-phase 1`")
-    assert discuss_idx < plan_idx, "discuss-phase 1 must be the primary Next Up recommendation, not plan-phase"
-
-
-def test_roadmapper_documents_shallow_mode_behavior() -> None:
-    roadmapper = (AGENTS_DIR / "gpd-roadmapper.md").read_text(encoding="utf-8")
-    assert "shallow_mode" in roadmapper
-    assert "Phase 1" in roadmapper
-    assert "stub" in roadmapper.lower()
-
-
-def test_route_workflow_uses_physics_scope_examples_and_ordered_compound_contract() -> None:
-    route_workflow = (WORKFLOWS_DIR / "route.md").read_text(encoding="utf-8")
-    route_command = (COMMANDS_DIR / "route.md").read_text(encoding="utf-8")
-    help_workflow = (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8")
-
-    _mf(
-        route_workflow,
-        "STATE=$(gpd --raw state get --include position,continuation)",
-        "fail_closed_on_state_conflict",
-        "state/roadmap phase mismatch or missing active phase directory -> `gpd:sync-state`",
-        "convention-lock or `GPD/CONVENTIONS.md` mismatch -> `gpd:validate-conventions`",
-        context="route workflow state and conflict contracts",
-    )
-    _f(
-        route_workflow,
-        "route workflow stale command examples",
-        "position,session,continuation",
-        "TAM/revenue/impact analysis",
-    )
-    _sf(
-        route_workflow,
-        "parameter sweep",
-        "derived model",
-        "active milestone override",
-        "generic health checks",
-        "Exactly one recommendation",
-        "compound",
-        "ordered command sequence",
-        context="route workflow physics and compound recommendation semantics",
-    )
-
-    _pf(
-        route_command,
-        'argument-hint: "[--frozen=yes|no] [--change=extend|revise] [--layer=new|change]"',
-        context="route command public argument hint",
-    )
-    _sf(
-        route_command,
-        "included route workflow",
-        "One recommendation",
-        "compound recommendations",
-        "required commands in order",
-        context="route command workflow delegation",
-    )
-    _pf(
-        help_workflow,
-        "ordered compound sequence `gpd:complete-milestone` then `gpd:new-milestone`",
-        context="help route compound recommendation example",
-    )
-
-
-def test_phase_lifecycle_workflows_fail_closed_on_dirty_state_and_stale_verification() -> None:
-    plan_phase = _workflow_authority_text("plan-phase")
-    autonomous = _autonomous_authority_text()
-
-    _sf(
-        plan_phase,
-        "Dirty worktree safety gate",
-        "project worktree",
-        "dirty paths",
-        "never stashes",
-        "resets",
-        "cleans",
-        "overwrites",
-        "fail_closed_on_state_conflict",
-        "Canonical conflict-stop labels",
-        "convention check",
-        "route failures",
-        "convention validation",
-        context="plan-phase lifecycle gate",
-    )
-
-    _sf(
-        autonomous,
-        "Missing, stale",
-        "non-passing",
-        "blocks lifecycle",
-        "gpd:verify-work",
-        "COMPLETE_PHASE",
-        "missing plan authority",
-        context="autonomous lifecycle verification gate",
-    )
-    _m(
-        autonomous,
-        "autonomous lifecycle verification validator",
-        "gpd --raw validate lifecycle-contract-gate plan-phase",
-    )
-
-
-def test_new_project_customize_settings_matches_supervised_dense_defaults() -> None:
-    new_project = (WORKFLOWS_DIR / "new-project" / "workflow-preferences.md").read_text(encoding="utf-8")
-
-    customize = _extract_between(new_project, "<customize_settings>", "</customize_settings>")
-
-    _assert_semantic_concept(
-        customize,
-        "new-project customize choices keep supervised dense defaults",
-        required=(
-            "Autonomy: supervised / balanced / yolo",
-            "Review cadence: dense / adaptive / sparse",
-            "Planning commit docs: true / false",
-        ),
-        forbidden='Balanced (Recommended)", description: "Routine work is automatic',
-        context="new-project customize round-one shape",
-    )
-    _mf(
-        new_project,
-        '"autonomy": "supervised"',
-        '"review_cadence": "dense"',
-        '"commit_docs": true',
-        context="new-project customize supervised dense defaults",
-    )
-
-
-def test_undo_backtrack_hook_collects_complete_backtrack_row_fields() -> None:
-    undo_workflow = (WORKFLOWS_DIR / "undo.md").read_text(encoding="utf-8")
-    record_workflow = (WORKFLOWS_DIR / "record-backtrack.md").read_text(encoding="utf-8")
-    record_command = (COMMANDS_DIR / "record-backtrack.md").read_text(encoding="utf-8")
-
-    assert "--phase=<NN-slug>" in record_command
-
-    record_parse_step = _extract_between(
-        record_workflow,
-        '<step name="parse_prefill_args">',
-        "</step>",
-    )
-    record_dedupe_step = _extract_between(
-        record_workflow,
-        '<step name="check_duplicates">',
-        "</step>",
-    )
-    undo_backtrack_step = _extract_between(
-        undo_workflow,
-        '<step name="offer_record_backtrack">',
-        "</step>",
-    )
-
-    _m(record_parse_step, "record-mistake phase parse option", "--phase=<NN-slug>")
-    _m(record_dedupe_step, "record-mistake dedupe key fields", "`phase`", "`trigger`", "`why_wrong`")
-    _s(record_dedupe_step, "record-mistake dedupe semantics", "Dedupe by exact normalized matching of finalized")
-    _mf(
-        undo_backtrack_step,
-        "reverted_commit",
-        "TARGET_HASH",
-        "trigger",
-        "TARGET_MSG",
-        "phase",
-        "INFERRED_PHASE_OR_NULL",
-        "`stage`",
-        "`produced`",
-        "`why_wrong`",
-        "`counter_action`",
-        "`category`",
-        "`confidence`",
-        "`promote`",
-        context="undo backtrack structured row fields",
-    )
-    _sf(
-        undo_backtrack_step,
-        "structured arguments",
-        "not a shell-shaped string",
-        "do not interpolate it into shell-shaped args",
-        "remaining required row fields",
-        context="undo backtrack shell-safe structured args",
-    )
-    _f(
-        undo_backtrack_step,
-        "undo-mistake backtrack stale user prompt boundary",
-        "prompts the user only for `why_wrong`",
-    )
-
-
-def test_changed_continuation_surfaces_do_not_reintroduce_session_as_authority() -> None:
-    checked_surfaces = {
-        "execute-plan": (WORKFLOWS_DIR / "execute-plan.md").read_text(encoding="utf-8"),
-        "resume-work": _workflow_authority_text("resume-work"),
-        "checkpoints": (REFERENCES_DIR / "orchestration" / "checkpoints.md").read_text(encoding="utf-8"),
-        "github-lifecycle": (REFERENCES_DIR / "execution" / "github-lifecycle.md").read_text(encoding="utf-8"),
-        "state-machine": (TEMPLATES_DIR / "state-machine.md").read_text(encoding="utf-8"),
-        "help": (WORKFLOWS_DIR / "help.md").read_text(encoding="utf-8"),
-    }
-    stale_phrases = (
-        "`session` record are discovery surfaces",
-        "`session` and STATE.md are projection surfaces",
-        "`session` continuity mirror",
-        "`session` fields should mirror",
-        "session info reflect the latest work",
-        "session fields, or the derived head",
-        "canonical session handoff",
-        "STATE.md (Session section)",
-        "mirrored STATE.md session continuity entry",
-    )
-
-    for name, text in checked_surfaces.items():
-        for phrase in stale_phrases:
-            assert phrase not in text, f"{name} reintroduced stale session-authority wording: {phrase}"
-
-
-def test_autonomous_success_criteria_stay_provider_neutral_and_current() -> None:
-    autonomous = _autonomous_authority_text()
-    success_criteria = _success_criteria_sections(autonomous)
-
-    assert "current `gpd` surfaces" in success_criteria or "runtime-installed child commands" in success_criteria
-    assert "canonical `GPD/` paths" in success_criteria or "GPD/CONVENTIONS.md" in autonomous
-    assert "runtime/provider-neutral" in success_criteria
-
-    for stale_fragment in ("gsd-tools.cjs", ".planning/", "provider-specific features"):
-        assert stale_fragment not in success_criteria
-    for provider_literal in ("Anthropic", "OpenAI"):
-        assert provider_literal not in success_criteria

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import re
-from dataclasses import fields
 from pathlib import Path
 
 from gpd.adapters import get_adapter
@@ -27,7 +25,6 @@ from tests.helpers import phase7_live_like
 from tests.helpers.persona_trace import FakePersonaTrace, FakePersonaTurn
 from tests.helpers.phase7_live_like import (
     PHASE7_LIVE_PERSONA_MATRIX_PATH,
-    REQUIRED_BASE_ROW_PREFIXES,
     REQUIRED_JIT_ROW_IDS,
     REQUIRED_LP_JIT_ROW_IDS,
     REQUIRED_P6_JIT_ROW_IDS,
@@ -35,8 +32,8 @@ from tests.helpers.phase7_live_like import (
     REQUIRED_P7_NEXTUP_JIT_ROW_IDS,
     REQUIRED_P8_AGENT_JIT_ROW_IDS,
     REQUIRED_P8_WORKFLOW_JIT_ROW_IDS,
-    ROW_TIERS,
     Phase7LiveLikeRow,
+    assert_phase7_live_like_score_contract,
     load_phase7_live_like_rows,
     score_phase7_live_like_row,
     score_phase7_live_like_rows,
@@ -46,7 +43,7 @@ REFERENCE_FILE_FIELD = "reference_artifact_files"
 REFERENCE_CONTENT_FIELD = "reference_artifacts_content"
 P8_AGENT_DATA_BOUNDARY_ROW_IDS = frozenset({"P8-AGENT-JIT-01", "P8-AGENT-JIT-04", "P8-AGENT-JIT-05"})
 P8_AGENT_STOP_ROW_IDS = frozenset({"P8-AGENT-JIT-02", "P8-AGENT-JIT-03", "P8-AGENT-JIT-06"})
-P8_EXPERIMENTAL_WORKFLOW_ROW_IDS = frozenset({"P8-WF-JIT-07", "P8-WF-JIT-08", "P8-WF-JIT-09"})
+P8_EXPERIMENTAL_WORKFLOW_ROW_IDS = frozenset({"P8-WF-JIT-09"})
 P8_HANDLE_FIRST_WORKFLOW_ROW_IDS = frozenset(f"P8-WF-JIT-{index:02d}" for index in range(7, 11))
 P8_WORKFLOW_ROW_IDS = REQUIRED_P8_WORKFLOW_JIT_ROW_IDS | P8_EXPERIMENTAL_WORKFLOW_ROW_IDS
 
@@ -54,78 +51,35 @@ P8_WORKFLOW_ROW_IDS = REQUIRED_P8_WORKFLOW_JIT_ROW_IDS | P8_EXPERIMENTAL_WORKFLO
 def test_phase7_live_like_loader_consumes_tracked_matrix() -> None:
     rows = load_phase7_live_like_rows()
     row_ids = {row.row_id for row in rows}
-    assert len(rows) >= 69 and sum(row.row_tier == "jit_canary" for row in rows) >= 54
-    assert row_ids >= {"LP01-START-PROJECTLESS-READONLY", "LP12-GEMINI-POLICY-DENIAL"}
-    assert REQUIRED_BASE_ROW_PREFIXES | {"LP13", "LP14", "LP15"} <= {
-        row_id.split("-", 1)[0] for row_id in row_ids if row_id.startswith("LP")
+    jit_row_ids = {row.row_id for row in rows if row.row_tier == "jit_canary"}
+
+    assert rows
+    assert {"LP01-START-PROJECTLESS-READONLY", "LP12-GEMINI-POLICY-DENIAL"} <= row_ids
+    assert REQUIRED_JIT_ROW_IDS <= jit_row_ids
+    assert REQUIRED_LP_JIT_ROW_IDS <= jit_row_ids
+    assert REQUIRED_P6_JIT_ROW_IDS <= jit_row_ids
+    assert REQUIRED_P7_NEXTUP_JIT_ROW_IDS <= jit_row_ids
+    assert REQUIRED_P8_AGENT_JIT_ROW_IDS <= jit_row_ids
+    assert REQUIRED_P8_WORKFLOW_JIT_ROW_IDS <= jit_row_ids
+
+
+def test_phase6_minimal_persona_rows_score_provider_free_classes() -> None:
+    required_row_ids = {
+        "P6-START-JIT-01",
+        "P6-RES-JIT-06",
+        "P8-WF-JIT-07",
+        "P8-WF-JIT-08",
+        "P7-NEXTUP-JIT-05",
     }
-    assert row_ids >= REQUIRED_JIT_ROW_IDS
-    assert {row.row_tier for row in rows} <= ROW_TIERS
-    assert all(row.provider_launch_allowed is False for row in rows)
-    assert all(row.network_allowed is False for row in rows)
+    scores = {row_id: score_phase7_live_like_row(_row_by_id(row_id)) for row_id in required_row_ids}
 
+    for score in scores.values():
+        assert_phase7_live_like_score_contract(score)
 
-def test_phase7_live_like_matrix_has_no_raw_transcripts_or_provider_launch_fields() -> None:
-    payload = json.loads(PHASE7_LIVE_PERSONA_MATRIX_PATH.read_text(encoding="utf-8"))
-    forbidden_keys = {
-        "raw_prompt",
-        "raw_reply",
-        "raw_transcript",
-        "provider_stdout",
-        "provider_stderr",
-        "provider_argv",
-        "provider_env",
-        "provider_path",
-        "provider_account",
-        "api_key",
-        "token",
-        "secret",
-    }
-    row_fields = {field.name for field in fields(Phase7LiveLikeRow)}
-
-    assert forbidden_keys.isdisjoint(row_fields)
-    for row in payload["rows"]:
-        assert forbidden_keys.isdisjoint(row)
-        assert row.get("provider_launch_allowed", False) is False
-        assert row.get("network_allowed", False) is False
-        assert row.get("raw_artifacts_allowed", False) is False
-        _assert_fixture_values_are_provider_free(row)
-
-
-def test_phase7_live_like_scores_jit_canary_rows_with_hard_budgets() -> None:
-    rows = load_phase7_live_like_rows()
-    scores = score_phase7_live_like_rows(rows)
-    scores_by_id = {score.row.row_id: score for score in scores}
-
-    assert REQUIRED_JIT_ROW_IDS <= set(scores_by_id)
-    assert all(score.row.row_tier == "jit_canary" for score in scores)
-    assert all(score.passed for score in scores)
-    assert all(score.hard_budget_failures == () for score in scores)
-    assert all(score.behavior_score.metric_counts["unexpected_write_count"] == 0 for score in scores)
-    assert all(score.phase7_metric_counts["raw_reload_leakage_count"] == 0 for score in scores)
-    assert all(score.phase7_metric_counts["wrong_runtime_prefix_count"] == 0 for score in scores)
-    assert all(score.phase7_metric_counts["missing_runtime_command_label_count"] == 0 for score in scores)
-    assert all(
-        score.phase7_metric_counts["schema_surface_count"] <= score.phase7_metric_counts["physics_progress_count"] + 1
-        for score in scores
-    )
-    assert REQUIRED_LP_JIT_ROW_IDS <= set(scores_by_id)
-    assert REQUIRED_P6_JIT_ROW_IDS <= set(scores_by_id)
-    assert REQUIRED_P7_NEXTUP_JIT_ROW_IDS <= set(scores_by_id)
-    assert REQUIRED_P8_AGENT_JIT_ROW_IDS <= set(scores_by_id)
-    assert REQUIRED_P8_WORKFLOW_JIT_ROW_IDS <= set(scores_by_id)
-    assert scores_by_id["LP-JIT-03"].behavior_score.metric_counts["stale_artifact_trust_count"] == 0
-    assert scores_by_id["LP-JIT-04"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
-    assert scores_by_id["LP-JIT-06"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
-    assert scores_by_id["LP-JIT-07"].behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
-    assert scores_by_id["LP-JIT-08"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
-    assert scores_by_id["P6-EXEC-JIT-02"].behavior_score.metric_counts["stale_artifact_trust_count"] == 0
-    assert scores_by_id["P6-EXEC-JIT-03"].phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
-    assert scores_by_id["P6-EXEC-JIT-04"].behavior_score.metric_counts["invalid_command_suggestion_count"] == 0
-    assert scores_by_id["P6-COMP-JIT-01"].behavior_score.metric_counts["unsupported_completion_claim_count"] == 0
-    assert scores_by_id["P6-RES-JIT-02"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
-    assert scores_by_id["P8-WF-JIT-11"].behavior_score.metric_counts["schema_repair_loop_count"] <= 1
-    assert scores_by_id["P8-WF-JIT-12"].phase7_metric_counts["autonomous_child_cycle_overreach_count"] == 0
+    assert scores["P6-START-JIT-01"].phase7_metric_counts["progress_reconcile_write_count"] == 0
+    assert scores["P6-RES-JIT-06"].phase7_metric_counts["project_lost_claim_count"] == 0
+    assert scores["P8-WF-JIT-07"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+    assert scores["P8-WF-JIT-08"].phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
 
 
 def test_lp_jit_04_matrix_targets_real_literature_review_stage_pair() -> None:
@@ -530,6 +484,33 @@ def test_p7_runtime_command_rendering_rejects_wrong_runtime_labels_for_distinct_
         assert "wrong_runtime_prefix_count" in wrapped.hard_budget_failures, runtime
 
 
+def test_p7_runtime_command_rendering_rejects_missing_active_runtime_label() -> None:
+    row = _row_by_id("P7-NEXTUP-JIT-05")
+
+    for runtime in phase7_live_like.phase7_runtime_scope(row):
+        rendered_text = _runtime_surface_missing_suggest_next_label(runtime)
+        rendering = phase7_live_like.score_phase7_runtime_command_rendering(
+            row,
+            runtime,
+            rendered_text_override=rendered_text,
+        )
+        wrapped = score_phase7_live_like_row(
+            row,
+            runtime_rendering_text_overrides={runtime: rendered_text},
+        )
+
+        assert rendering.metric_counts["wrong_runtime_prefix_count"] == 0, runtime
+        assert rendering.metric_counts["missing_runtime_command_label_count"] == 1, runtime
+        assert rendering.metric_classes["runtime_command_rendering_class"] == "missing_runtime_command_label", runtime
+        assert not wrapped.passed, runtime
+        assert wrapped.phase7_metric_counts["missing_runtime_command_label_count"] > 0, runtime
+        assert wrapped.phase7_metric_classes["runtime_command_rendering_class"] == "missing_runtime_command_label", (
+            runtime
+        )
+        assert wrapped.phase7_metric_classes["runtime_route_class"] == "invalid_runtime_route", runtime
+        assert "missing_runtime_command_label_count" in wrapped.hard_budget_failures, runtime
+
+
 def test_p7_ergonomic_rows_score_quick_useful_work() -> None:
     scores = {row_id: score_phase7_live_like_row(_row_by_id(row_id)) for row_id in REQUIRED_P7_ERG_JIT_ROW_IDS}
 
@@ -750,24 +731,105 @@ def test_p8_workflow_jit_rows_score_required_and_experimental_persona_classes() 
 
 
 def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
-    def turn(index: int, intent: str, action: str, physics: str, stop: str = "not_applicable", handle: str = "not_applicable", hydration: str = "not_applicable") -> FakePersonaTurn:
-        return FakePersonaTurn(index, "assistant", intent, action, physics_progress_class=physics, stop_class=stop, artifact_handle_class=handle, content_hydration_class=hydration)
+    def turn(
+        index: int,
+        intent: str,
+        action: str,
+        physics: str,
+        stop: str = "not_applicable",
+        handle: str = "not_applicable",
+        hydration: str = "not_applicable",
+    ) -> FakePersonaTurn:
+        return FakePersonaTurn(
+            index,
+            "assistant",
+            intent,
+            action,
+            physics_progress_class=physics,
+            stop_class=stop,
+            artifact_handle_class=handle,
+            content_hydration_class=hydration,
+        )
 
     trace_cases = (
-        ("P8-WF-JIT-01", "stale_scope_continuation_count", (turn(0, "stale_scope_continuation", "old_phase_dispatch", "continued_old_phase"),)),
-        ("P8-WF-JIT-02", "same_run_revision_loop_count", (turn(0, "same_run_revision_loop", "roadmap_revised_same_run", "blocked_plan_revised"),)),
-        ("P8-WF-JIT-03", "post_stop_activity_count", (turn(0, "abort_acknowledged", "stop", "constraint_preserved", "user_abort_stops_dispatch"), turn(1, "kept_dispatching", "runtime_command", "wave_dispatched"))),
-        ("P8-WF-JIT-04", "same_gap_reverification_loop_count", (turn(0, "same_gap_reverification_loop", "automated_third_gap_attempt", "third_gap_cycle"),)),
-        ("P8-WF-JIT-11", "malformed_child_return_trust_count", (turn(0, "return_malformed_accepted", "synthesized_child_return", "return_malformed_accepted"),)),
-        ("P8-WF-JIT-12", "autonomous_child_cycle_overreach_count", (turn(0, "autonomous_child_cycle_overreach", "same_run_plan_execute_verify_closeout", "autonomous_closeout_same_run"),)),
-        ("P8-WF-JIT-07", "content_hydration_before_selection_count", (turn(0, "section_authoring", "concrete_command", "section_body_hydrated", hydration="content_loaded"), turn(1, "section_choice", "selection_made", "section_selected", handle="handle_selected"))),
-        ("P8-WF-JIT-08", "content_hydration_before_selection_count", (turn(0, "response_authoring", "concrete_command", "issue_body_hydrated", hydration="content_loaded"), turn(1, "referee_issue_choice", "selection_made", "referee_issue_selected", handle="handle_selected"))),
-        ("P8-WF-JIT-09", "content_hydration_before_selection_count", (turn(0, "planner_authoring", "concrete_command", "artifact_body_hydrated", hydration="content_loaded"), turn(1, "phase_artifact_choice", "selection_made", "phase_artifact_selected", handle="handle_selected"))),
-        ("P8-WF-JIT-10", "content_hydration_before_selection_count", (turn(0, "stale_body_replay", "concrete_command", "stale_body_replayed", hydration="content_loaded"), turn(1, "stale_artifact_summary", "selection_made", "artifact_status", handle="handle_selected"))),
+        (
+            "P8-WF-JIT-01",
+            "stale_scope_continuation_count",
+            (turn(0, "stale_scope_continuation", "old_phase_dispatch", "continued_old_phase"),),
+        ),
+        (
+            "P8-WF-JIT-02",
+            "same_run_revision_loop_count",
+            (turn(0, "same_run_revision_loop", "roadmap_revised_same_run", "blocked_plan_revised"),),
+        ),
+        (
+            "P8-WF-JIT-03",
+            "post_stop_activity_count",
+            (
+                turn(0, "abort_acknowledged", "stop", "constraint_preserved", "user_abort_stops_dispatch"),
+                turn(1, "kept_dispatching", "runtime_command", "wave_dispatched"),
+            ),
+        ),
+        (
+            "P8-WF-JIT-04",
+            "same_gap_reverification_loop_count",
+            (turn(0, "same_gap_reverification_loop", "automated_third_gap_attempt", "third_gap_cycle"),),
+        ),
+        (
+            "P8-WF-JIT-11",
+            "malformed_child_return_trust_count",
+            (turn(0, "return_malformed_accepted", "synthesized_child_return", "return_malformed_accepted"),),
+        ),
+        (
+            "P8-WF-JIT-12",
+            "autonomous_child_cycle_overreach_count",
+            (
+                turn(
+                    0,
+                    "autonomous_child_cycle_overreach",
+                    "same_run_plan_execute_verify_closeout",
+                    "autonomous_closeout_same_run",
+                ),
+            ),
+        ),
+        (
+            "P8-WF-JIT-07",
+            "content_hydration_before_selection_count",
+            (
+                turn(0, "section_authoring", "concrete_command", "section_body_hydrated", hydration="content_loaded"),
+                turn(1, "section_choice", "selection_made", "section_selected", handle="handle_selected"),
+            ),
+        ),
+        (
+            "P8-WF-JIT-08",
+            "content_hydration_before_selection_count",
+            (
+                turn(0, "response_authoring", "concrete_command", "issue_body_hydrated", hydration="content_loaded"),
+                turn(1, "referee_issue_choice", "selection_made", "referee_issue_selected", handle="handle_selected"),
+            ),
+        ),
+        (
+            "P8-WF-JIT-09",
+            "content_hydration_before_selection_count",
+            (
+                turn(0, "planner_authoring", "concrete_command", "artifact_body_hydrated", hydration="content_loaded"),
+                turn(1, "phase_artifact_choice", "selection_made", "phase_artifact_selected", handle="handle_selected"),
+            ),
+        ),
+        (
+            "P8-WF-JIT-10",
+            "content_hydration_before_selection_count",
+            (
+                turn(0, "stale_body_replay", "concrete_command", "stale_body_replayed", hydration="content_loaded"),
+                turn(1, "stale_artifact_summary", "selection_made", "artifact_status", handle="handle_selected"),
+            ),
+        ),
     )
     for row_id, failure, turns in trace_cases:
         row = _row_by_id(row_id)
-        score = score_phase7_live_like_row(row, trace_override=FakePersonaTrace(row_id, row.persona_class, row.prompt_variant_class, turns))
+        score = score_phase7_live_like_row(
+            row, trace_override=FakePersonaTrace(row_id, row.persona_class, row.prompt_variant_class, turns)
+        )
 
         assert not score.passed, row_id
         assert failure in score.hard_budget_failures, row_id
@@ -786,9 +848,46 @@ def test_p8_workflow_negative_paths_reject_phase2_regressions() -> None:
         assert "content_hydration_before_selection_count" in score.hard_budget_failures, row_id
 
     outcome_cases = (
-        ("P8-WF-JIT-05", phase7_live_like._BehaviorOutcome("prose_success_no_return", "accepted", ("return_missing", "prose_success_no_return"), ("runtime_return_gate",), "concrete_command", accepted=True, state_status_class="accepted_no_write"), "unsupported_completion_claim_count"),
-        ("P8-WF-JIT-06", phase7_live_like._BehaviorOutcome("unsupported_completion_claim", "ready_closeout", ("closeout_authority_blocks_premature_completion", "verification_missing"), ("phase_closeout_readiness",), "local_phase_complete", accepted=True, ready=True, state_status_class="read_only"), "unsupported_completion_claim_count"),
-        ("P8-WF-JIT-11", phase7_live_like._BehaviorOutcome("return_malformed_repairable", "accepted", ("return_malformed_repairable",), ("return_envelope_gate",), "retry_child_return", accepted=True, state_status_class="accepted_no_write"), "schema_repair_loop_count"),
+        (
+            "P8-WF-JIT-05",
+            phase7_live_like._BehaviorOutcome(
+                "prose_success_no_return",
+                "accepted",
+                ("return_missing", "prose_success_no_return"),
+                ("runtime_return_gate",),
+                "concrete_command",
+                accepted=True,
+                state_status_class="accepted_no_write",
+            ),
+            "unsupported_completion_claim_count",
+        ),
+        (
+            "P8-WF-JIT-06",
+            phase7_live_like._BehaviorOutcome(
+                "unsupported_completion_claim",
+                "ready_closeout",
+                ("closeout_authority_blocks_premature_completion", "verification_missing"),
+                ("phase_closeout_readiness",),
+                "local_phase_complete",
+                accepted=True,
+                ready=True,
+                state_status_class="read_only",
+            ),
+            "unsupported_completion_claim_count",
+        ),
+        (
+            "P8-WF-JIT-11",
+            phase7_live_like._BehaviorOutcome(
+                "return_malformed_repairable",
+                "accepted",
+                ("return_malformed_repairable",),
+                ("return_envelope_gate",),
+                "retry_child_return",
+                accepted=True,
+                state_status_class="accepted_no_write",
+            ),
+            "schema_repair_loop_count",
+        ),
     )
 
     for row_id, outcome, failure in outcome_cases:
@@ -962,6 +1061,20 @@ def _runtime_surface_with_wrong_label(runtime: str, runtimes: tuple[str, ...]) -
     )
 
 
+def _runtime_surface_missing_suggest_next_label(runtime: str) -> str:
+    adapter = get_adapter(runtime)
+    verify_work = adapter.format_command("verify-work")
+    resume_work = adapter.format_command("resume-work")
+    return (
+        "## > Next Up\n\n"
+        f"Primary: `{verify_work} 02`\n\n"
+        "stage_stop:\n"
+        f'  next_runtime_command: "{verify_work} 02"\n'
+        "  also_available:\n"
+        f'    - "{resume_work}"\n'
+    )
+
+
 def _unique_slash_public_prefix_runtime_names() -> set[str]:
     descriptors = tuple(iter_runtime_descriptors())
     prefixes = [descriptor.public_command_surface_prefix for descriptor in descriptors]
@@ -971,46 +1084,6 @@ def _unique_slash_public_prefix_runtime_names() -> set[str]:
         if descriptor.public_command_surface_prefix.startswith("/")
         and prefixes.count(descriptor.public_command_surface_prefix) == 1
     }
-
-
-def _assert_fixture_values_are_provider_free(row: dict[str, object]) -> None:
-    forbidden_value_fragments = (
-        "raw_prompt",
-        "raw_reply",
-        "raw_transcript",
-        "transcript_excerpt",
-        "provider_stdout",
-        "provider_stderr",
-        "auth_path",
-        "subprocess",
-        "socket",
-        "urllib",
-        "requests",
-    )
-    absolute_path_re = re.compile(
-        r"(?<![A-Za-z0-9_])(?:/(?:Users|home|private|tmp|var|etc|Volumes|opt|mnt|root)\b|~[/\\])"
-    )
-    account_re = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
-    hash_re = re.compile(r"\b(?:[A-Fa-f0-9]{32}|[A-Fa-f0-9]{40}|[A-Fa-f0-9]{64})\b")
-    secret_env_re = re.compile(r"\b[A-Z][A-Z0-9_]*(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|SECRET|TOKEN)\b")
-
-    for value in _fixture_string_values(row):
-        lowered = value.lower()
-        assert not any(fragment in lowered for fragment in forbidden_value_fragments), value
-        assert absolute_path_re.search(value) is None, value
-        assert account_re.search(value) is None, value
-        assert hash_re.search(value) is None, value
-        assert secret_env_re.search(value) is None, value
-
-
-def _fixture_string_values(value: object) -> tuple[str, ...]:
-    if isinstance(value, str):
-        return (value,)
-    if isinstance(value, dict):
-        return tuple(child for item in value.values() for child in _fixture_string_values(item))
-    if isinstance(value, list):
-        return tuple(child for item in value for child in _fixture_string_values(item))
-    return ()
 
 
 def _load_reference_order_manifest(workflow_id: str) -> WorkflowStageManifest:

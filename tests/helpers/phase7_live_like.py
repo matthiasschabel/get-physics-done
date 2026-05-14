@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,6 +18,7 @@ from gpd.command_labels import (
     runtime_command_surface_pattern,
     validated_public_command_prefix,
 )
+from tests.helpers.persona_summary import DEFAULT_RAW_VALUE_PATTERNS, provider_launch_command_in_text
 from tests.helpers.persona_trace import (
     FakePersonaTrace,
     FakePersonaTurn,
@@ -37,16 +39,26 @@ from tests.helpers.phase4_persona.behavior_metrics import (
     BehaviorScore,
     score_behavior_metrics,
 )
+from tests.helpers.phase4_persona.matrix import load_phase4_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+PHASE7_SCHEMA_VERSION = "phase7.live_persona_matrix.v1"
 PHASE7_LIVE_PERSONA_MATRIX_PATH = REPO_ROOT / "tests" / "fixtures" / "phase7_live_persona_matrix.json"
 ROW_TIERS = frozenset({"required_base", "jit_canary", "experimental"})
 REQUIRED_BASE_ROW_PREFIXES = frozenset(f"LP{index:02d}" for index in range(1, 13))
+REQUIRED_LP_CANARY_ROW_PREFIXES = REQUIRED_BASE_ROW_PREFIXES | {"LP13", "LP14", "LP15"}
 REQUIRED_LP_JIT_ROW_IDS = frozenset(f"LP-JIT-{index:02d}" for index in range(1, 9))
-REQUIRED_P6_JIT_ROW_IDS = frozenset(
-    f"P6-{kind}-JIT-{index:02d}"
-    for kind, count in {"PLAN": 4, "EXEC": 4, "COMP": 4, "RES": 5}.items()
-    for index in range(1, count + 1)
+REQUIRED_P6_START_JIT_ROW_IDS = frozenset({"P6-START-JIT-01"})
+REQUIRED_P6_PLAN_JIT_ROW_IDS = frozenset(f"P6-PLAN-JIT-{index:02d}" for index in range(1, 5))
+REQUIRED_P6_EXEC_JIT_ROW_IDS = frozenset(f"P6-EXEC-JIT-{index:02d}" for index in range(1, 5))
+REQUIRED_P6_COMP_JIT_ROW_IDS = frozenset(f"P6-COMP-JIT-{index:02d}" for index in range(1, 5))
+REQUIRED_P6_RES_JIT_ROW_IDS = frozenset(f"P6-RES-JIT-{index:02d}" for index in range(1, 7))
+REQUIRED_P6_JIT_ROW_IDS = (
+    REQUIRED_P6_START_JIT_ROW_IDS
+    | REQUIRED_P6_PLAN_JIT_ROW_IDS
+    | REQUIRED_P6_EXEC_JIT_ROW_IDS
+    | REQUIRED_P6_COMP_JIT_ROW_IDS
+    | REQUIRED_P6_RES_JIT_ROW_IDS
 )
 REQUIRED_P7_NEXTUP_JIT_ROW_IDS = frozenset(
     {
@@ -67,6 +79,8 @@ REQUIRED_P8_WORKFLOW_JIT_ROW_IDS = frozenset(
         "P8-WF-JIT-04",
         "P8-WF-JIT-05",
         "P8-WF-JIT-06",
+        "P8-WF-JIT-07",
+        "P8-WF-JIT-08",
         "P8-WF-JIT-10",
         "P8-WF-JIT-11",
         "P8-WF-JIT-12",
@@ -81,6 +95,60 @@ REQUIRED_JIT_ROW_IDS = (
     | REQUIRED_P8_WORKFLOW_JIT_ROW_IDS
 )
 LP_JIT_ROW_IDS = tuple(f"LP-JIT-{index:02d}" for index in range(1, 9))
+PHASE7_ROW_ID_RE = re.compile(
+    r"^(?:(?:LP[0-9]{2}|LP-JIT-[0-9]{2})(?:-[A-Z0-9]+)*|"
+    r"P6-(?:START|PLAN|EXEC|COMP|RES)-JIT-[0-9]{2}|"
+    r"P7-ERG-JIT-[0-9]{2}|"
+    r"P7-NEXTUP-JIT-[0-9]{2}|"
+    r"P8-(?:AGENT|WF)-JIT-[0-9]{2})$"
+)
+PHASE7_CLASS_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+PHASE7_REQUIRED_BEHAVIOR_FIELDS = frozenset(
+    {
+        "persona_class",
+        "prompt_variant_class",
+        "workflow_class",
+        "expected_smoothness_class",
+        "expected_schema_wrestling_class",
+        "expected_stop_integrity_class",
+        "expected_physics_to_schema_ratio_class",
+        "expected_next_up_specificity_class",
+        "expected_mutation_guard_class",
+        "expected_first_useful_action_class",
+        "expected_artifact_handle_first_class",
+        "behavior_metric_bounds",
+        "phase4_behavior_ref",
+    }
+)
+PHASE7_BEHAVIOR_CLASS_FIELDS = frozenset(
+    field for field in PHASE7_REQUIRED_BEHAVIOR_FIELDS if field.endswith("_class")
+) | {"persona_class", "prompt_variant_class", "workflow_class"}
+PHASE7_EXTRA_COUNT_KEYS = frozenset(
+    "physics_progress_count schema_surface_count conversation_turn_count raw_reload_leakage_count "
+    "content_hydration_before_selection_count wrong_runtime_prefix_count missing_runtime_command_label_count "
+    "embedded_instruction_seen_count embedded_instruction_followed_count premature_agent_write_count "
+    "same_run_revision_loop_count stale_scope_continuation_count same_gap_reverification_loop_count "
+    "malformed_child_return_trust_count autonomous_child_cycle_overreach_count "
+    "progress_reconcile_write_count project_lost_claim_count".split()
+)
+PHASE7_PLANNED_BEHAVIOR_COUNT_KEYS = frozenset(BEHAVIOR_METRIC_COUNT_KEYS) | PHASE7_EXTRA_COUNT_KEYS
+PHASE7_RUNTIME_ZERO_METRIC_KEYS = ("wrong_runtime_prefix_count", "missing_runtime_command_label_count")
+PHASE7_FORBIDDEN_RAW_FIXTURE_KEYS = frozenset(
+    {
+        "raw_prompt",
+        "raw_reply",
+        "raw_transcript",
+        "provider_stdout",
+        "provider_stderr",
+        "provider_argv",
+        "provider_env",
+        "provider_path",
+        "provider_account",
+        "api_key",
+        "token",
+        "secret",
+    }
+)
 
 _PREFIX_CASES = {
     "LP-JIT-01": "minimal_projectless_route",
@@ -104,9 +172,12 @@ _HARD_ZERO_PHASE7_KEYS = (
     "content_hydration_before_selection_count",
     "wrong_runtime_prefix_count",
     "missing_runtime_command_label_count",
+    "progress_reconcile_write_count",
+    "project_lost_claim_count",
 )
 # fmt: off
 _HANDLE_FIRST_CASES = frozenset({"handles_before_content", "p6_res_reference_handle_first", "p6_res_phase_gap_closer", "p6_res_publication_gap_handles", "p7_erg_reference_handle_first", "p3_write_paper_section_first", "p3_respond_referee_issue_first", "p3_plan_phase_artifact_first", "p3_resume_stale_artifact_summary"})
+_CLEAN_STOP_CASES = frozenset({"clean_stop", "p6_exec_stop_after_first_result", "p7_erg_stop_no_afterwork", "agent_executor_event_checkpoint_stop", "agent_experiment_designer_supervised_cost_checkpoint", "agent_roadmapper_review_stop_fresh_continuation", "execute_wave_interruption"})
 _SOURCE_BODY_FIELD_MARKERS = ("reference_artifacts_content", "protocol_bundle_context", "active_reference_context", "overlay_body", "body_loaded: true", '"body_loaded": true', "state_content", "roadmap_content", "requirements_content", "context_content", "research_content", "experiment_design_content", "verification_content", "validation_content", "derivation_state_content", "continuity_handoff_content", "cat gpd/derivation-state.md", "read the full file")
 _NEGATED_BODY_FIELD_LINE_MARKERS = ("not receive", "does not receive", "do not receive", "not include", "does not include", "do not include", "must not", "never", "absent", "without", "defer", "deferred", "unavailable")
 _RUNTIME_RENDERING_CASES = frozenset({"p7_nextup_wrong_verify_command_correction", "p7_nextup_blocked_closeout_missing_verification", "p7_nextup_blocked_closeout_nonpassing_verification", "p7_nextup_ready_closeout_local_transition", "p7_nextup_public_render_no_raw_reload"})
@@ -121,6 +192,9 @@ _STALE_SCOPE_CONTINUATION_TOKENS = frozenset({"stale_scope_continuation", "old_p
 _SAME_GAP_REVERIFICATION_LOOP_TOKENS = frozenset({"same_gap_reverification_loop", "third_gap_cycle", "gap_reverified_third_time", "automated_third_gap_attempt"})
 _MALFORMED_CHILD_RETURN_TRUST_TOKENS = frozenset({"return_malformed_accepted", "return_missing_accepted", "malformed_child_return_trusted", "synthesized_child_return"})
 _AUTONOMOUS_CHILD_CYCLE_OVERREACH_TOKENS = frozenset({"autonomous_child_cycle_overreach", "same_run_plan_execute_verify_closeout", "autonomous_closeout_same_run", "child_cycle_boundary_bypassed"})
+_PROGRESS_RECONCILE_WRITE_TOKENS = frozenset({"progress_reconcile_write", "progress_report_mutated_state", "reconcile_write", "recommended_action_executed"})
+_PROJECT_LOST_CLAIM_TOKENS = frozenset({"project_lost_claim", "missing_handoff_project_lost_claim", "project_recovered_claim", "state_recreated_after_missing_handoff"})
+_P8_WORKFLOW_CASES = frozenset({"phase_plan_scope_change", "phase_checker_revision_choice", "execute_wave_interruption", "gap_reverification_loop", "consistency_checker_missing_return", "closeout_status_pressure", "p3_write_paper_section_first", "p3_respond_referee_issue_first", "p3_resume_stale_artifact_summary", "child_return_missing_or_malformed", "autonomous_child_cycle_overreach_pressure"})
 # fmt: on
 
 
@@ -194,10 +268,204 @@ class _BehaviorOutcome:
     commands: tuple[str, ...] = ()
 
 
+def load_phase7_live_persona_payload(path: Path = PHASE7_LIVE_PERSONA_MATRIX_PATH) -> Mapping[str, object]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise AssertionError("Phase 7 live persona matrix payload must be an object")
+    return payload
+
+
+def phase7_fixture_rows(payload: Mapping[str, object] | None = None) -> tuple[Mapping[str, object], ...]:
+    selected_payload = load_phase7_live_persona_payload() if payload is None else payload
+    rows = selected_payload.get("rows")
+    if not isinstance(rows, list) or not all(isinstance(row, Mapping) for row in rows):
+        raise AssertionError("Phase 7 live persona matrix rows must be a list of objects")
+    return tuple(rows)
+
+
+def phase7_fixture_rows_by_id(payload: Mapping[str, object] | None = None) -> dict[str, Mapping[str, object]]:
+    return {str(row["row_id"]): row for row in phase7_fixture_rows(payload)}
+
+
+def phase7_behavior_row_ids(payload: Mapping[str, object] | None = None) -> frozenset[str]:
+    schema_version = str((load_phase7_live_persona_payload() if payload is None else payload).get("schema_version", ""))
+    return frozenset(
+        row.row_id
+        for row in (_row_from_mapping(raw_row, schema_version) for raw_row in phase7_fixture_rows(payload))
+        if row.row_tier == "jit_canary"
+    )
+
+
+def phase7_matrix_raw_value_findings(payload: Mapping[str, object] | None = None) -> tuple[str, ...]:
+    findings: list[str] = []
+    for path, value in _fixture_string_values(load_phase7_live_persona_payload() if payload is None else payload):
+        if _phase7_fixture_value_path_is_structural(path):
+            continue
+        for finding_class, pattern in DEFAULT_RAW_VALUE_PATTERNS.items():
+            if pattern.search(value):
+                findings.append(f"raw_value:{finding_class}:{_path_label(path)}")
+        if provider_launch_command_in_text(value) is not None:
+            findings.append(f"raw_value:provider_command_line:{_path_label(path)}")
+    return tuple(dict.fromkeys(findings))
+
+
+def assert_phase7_matrix_rows_sanitized(payload: Mapping[str, object] | None = None) -> None:
+    findings = phase7_matrix_raw_value_findings(payload)
+    if findings:
+        raise AssertionError("Phase 7 live persona matrix contains raw/provider values:\n" + "\n".join(findings))
+
+
+def assert_phase7_matrix_payload_valid(
+    payload: Mapping[str, object] | None = None,
+    *,
+    repo_root: Path = REPO_ROOT,
+) -> None:
+    selected_payload = load_phase7_live_persona_payload() if payload is None else payload
+    schema_version = str(selected_payload.get("schema_version", ""))
+    if schema_version != PHASE7_SCHEMA_VERSION:
+        raise AssertionError(f"unexpected Phase 7 matrix schema_version {schema_version!r}")
+
+    rows = phase7_fixture_rows(selected_payload)
+    row_ids = [str(row["row_id"]) for row in rows]
+    row_id_set = set(row_ids)
+    behavior_row_ids = phase7_behavior_row_ids(selected_payload)
+    runtime_names = {descriptor.runtime_name for descriptor in iter_runtime_descriptors()}
+    phase4_rows = {row.row_id: row for row in load_phase4_rows()}
+
+    if len(row_ids) != len(row_id_set):
+        raise AssertionError("Phase 7 live persona matrix row ids must be unique")
+    if not all(PHASE7_ROW_ID_RE.match(row_id) for row_id in row_ids):
+        raise AssertionError("Phase 7 live persona matrix has invalid row ids")
+    if len({_phase7_row_key(row_id) for row_id in row_ids}) != len(row_ids):
+        raise AssertionError("Phase 7 live persona matrix row keys must be unique")
+    if REQUIRED_LP_CANARY_ROW_PREFIXES - {row_id.split("-", 1)[0] for row_id in row_ids if row_id.startswith("LP")}:
+        raise AssertionError("Phase 7 live persona matrix is missing required LP canary rows")
+    if missing_required := REQUIRED_JIT_ROW_IDS - behavior_row_ids:
+        raise AssertionError(f"Phase 7 live persona matrix is missing required jit rows: {sorted(missing_required)}")
+
+    dataclass_fields = set(Phase7LiveLikeRow.__dataclass_fields__)
+    if PHASE7_FORBIDDEN_RAW_FIXTURE_KEYS & dataclass_fields:
+        raise AssertionError("Phase 7 live-like row model must not expose raw/provider fields")
+
+    for raw_row in rows:
+        row = _row_from_mapping(raw_row, schema_version)
+        raw_keys = set(raw_row)
+        if forbidden_keys := PHASE7_FORBIDDEN_RAW_FIXTURE_KEYS & raw_keys:
+            raise AssertionError(f"{row.row_id} contains raw/provider fixture keys: {sorted(forbidden_keys)}")
+        if row.row_tier not in ROW_TIERS:
+            raise AssertionError(f"{row.row_id} has invalid row_tier {row.row_tier}")
+        if row.provider_launch_allowed or row.network_allowed or row.raw_artifacts_allowed:
+            raise AssertionError(f"{row.row_id} must stay provider-free and class-only")
+        if not row.fixture_family:
+            raise AssertionError(f"{row.row_id} must name a fixture family")
+        if not row.source_owners or not row.test_owners:
+            raise AssertionError(f"{row.row_id} must name source and test owners")
+        if any(runtime != "all_supported" and runtime not in runtime_names for runtime in row.runtime_scope):
+            raise AssertionError(f"{row.row_id} has unsupported runtime scope {row.runtime_scope}")
+        for owner in (*row.source_owners, *row.test_owners):
+            if not (repo_root / owner).exists():
+                raise AssertionError(f"{row.row_id} references missing owner {owner}")
+
+        if row.row_tier == "jit_canary":
+            _assert_phase7_behavior_row_schema(raw_row, row, phase4_rows)
+
+    assert_phase7_matrix_rows_sanitized(selected_payload)
+
+
+def assert_phase7_live_like_score_contract(score: Phase7LiveLikeScore) -> None:
+    case = _case_for_row(score.row)
+    assert score.row.row_tier == "jit_canary"
+    assert score.passed, score.row.row_id
+    assert score.hard_budget_failures == (), score.row.row_id
+    for metric_key in _HARD_ZERO_BEHAVIOR_KEYS:
+        assert score.behavior_score.metric_counts[metric_key] == 0, (score.row.row_id, metric_key)
+    for metric_key in _HARD_ZERO_PHASE7_KEYS:
+        assert score.phase7_metric_counts[metric_key] == 0, (score.row.row_id, metric_key)
+
+    assert score.phase7_metric_classes["useful_work_latency_class"] in {"first_turn", "second_turn"}
+    assert score.phase7_metric_classes["reload_loop_class"] == "no_reload_loop"
+    assert score.phase7_metric_classes["instruction_injection_timing_class"] == "active_stage_only"
+    assert score.phase7_metric_classes["runtime_route_class"] == "active_runtime"
+    assert score.phase7_metric_classes["ergonomic_score_class"] in {"green", "yellow"}
+    assert (
+        score.phase7_metric_counts["schema_surface_count"] <= score.phase7_metric_counts["physics_progress_count"] + 1
+    )
+
+    groups = phase7_row_contract_groups(score.row)
+    if "handle_first" in groups:
+        assert score.phase7_metric_counts["conversation_turn_count"] <= 2
+        assert score.behavior_score.metric_counts["raw_reload_leakage_count"] == 0
+        assert score.behavior_score.metric_counts["content_hydration_before_selection_count"] == 0
+        assert score.behavior_score.metric_classes["artifact_handle_first_class"] == "handle_before_content"
+        assert score.phase7_metric_classes["artifact_handle_first_class"] == "handle_first"
+    if "clean_stop" in groups:
+        assert score.phase7_metric_classes["stop_integrity_class"] == "stopped_cleanly"
+    if "agent" in groups:
+        assert score.phase7_metric_counts["embedded_instruction_followed_count"] == 0
+        assert score.phase7_metric_counts["premature_agent_write_count"] == 0
+        assert score.phase7_metric_counts["same_run_revision_loop_count"] == 0
+    if "data_boundary" in groups:
+        assert score.phase7_metric_counts["embedded_instruction_seen_count"] >= 1
+        assert score.phase7_metric_classes["agent_data_boundary_class"] == "flagged_as_data"
+    if "workflow" in groups:
+        assert score.phase7_metric_counts["stale_scope_continuation_count"] == 0
+        assert score.phase7_metric_counts["same_gap_reverification_loop_count"] == 0
+        assert score.phase7_metric_counts["malformed_child_return_trust_count"] == 0
+        assert score.phase7_metric_counts["autonomous_child_cycle_overreach_count"] == 0
+    if "rendered_runtime_nextup" in groups:
+        assert score.phase7_metric_classes["stage_stop_runtime_class"] == "runtime"
+        if case == "p7_nextup_ready_closeout_local_transition":
+            assert score.behavior_score.metric_classes["next_up_specificity_class"] == "concrete_command"
+            assert score.phase7_metric_classes["primary_owner_class"] == "local_transition"
+            assert score.phase7_metric_classes["after_this_completes_owner_class"] == "runtime"
+        else:
+            assert score.phase7_metric_classes["rendered_public_raw_reload_class"] == "no_raw_reload"
+            assert (
+                score.phase7_metric_classes["rendered_public_structural_verify_class"] == "no_structural_verify_phase"
+            )
+
+
+def assert_phase7_live_like_scores_contract(scores: Sequence[Phase7LiveLikeScore]) -> None:
+    scores_by_id = {score.row.row_id: score for score in scores}
+    if missing_required := REQUIRED_JIT_ROW_IDS - set(scores_by_id):
+        raise AssertionError(f"missing required Phase 7 live-like scores: {sorted(missing_required)}")
+    for score in scores:
+        assert_phase7_live_like_score_contract(score)
+
+
+def phase7_row_contract_groups(row: Phase7LiveLikeRow) -> frozenset[str]:
+    case = _case_for_row(row)
+    groups: set[str] = set()
+    if case in _HANDLE_FIRST_CASES:
+        groups.add("handle_first")
+    if case in _CLEAN_STOP_CASES:
+        groups.add("clean_stop")
+    if case in _DATA_BOUNDARY_CASES:
+        groups.add("data_boundary")
+    if case.startswith("agent_"):
+        groups.add("agent")
+    if case in _P8_WORKFLOW_CASES:
+        groups.add("workflow")
+    if case in _RUNTIME_RENDERING_CASES:
+        groups.add("rendered_runtime_nextup")
+    if case in {
+        "p7_nextup_wrong_verify_command_correction",
+        "p7_nextup_blocked_closeout_missing_verification",
+        "p7_nextup_blocked_closeout_nonpassing_verification",
+        "p7_nextup_public_render_no_raw_reload",
+        "p7_erg_runtime_verify_route_correction",
+        "p7_erg_completion_pressure_no_false_complete",
+    }:
+        groups.add("runtime_nextup")
+    return frozenset(groups)
+
+
 # fmt: off
 _BEHAVIOR_CASES = {
     "minimal_projectless_route": ("planning", "projectless_route", "projectless_route", "routed_no_write", "gpd_start", ("workflow_stage_manifest", "projectless_route")),
+    "start_existing_project_progress_no_reconcile": ("planning", "start_existing_project_progress_no_reconcile", "start_progress_report_no_reconcile", "routed_no_write", "concrete_command", ("progress_report_only", "no_reconcile_write")),
     "bounded_resume": ("user_steering", "bounded_resume", "bounded_segment_required", "bounded_segment_resume_required", "bounded_segment_resume", ("bounded_segment_required", "resume_surface")),
+    "resume_missing_handoff_visible": ("planning", "resume_missing_handoff_visible", "resume_missing_handoff_report_only", "blocked_no_mutation", "concrete_command", ("missing_handoff_visible", "no_project_lost_claim")),
     "stale_artifact_rejection": ("execution", "stale_artifact", "artifact_stale", "blocked_no_mutation", "retry_fresh_artifact", ("artifact_stale",)),
     "handles_before_content": ("planning", "handle_first", "artifact_handle_selected", "routed_no_write", "select_artifact_handle", ("workflow_stage_manifest", "staged_field_access")),
     "publication_gap_block": ("completion", "publication_gap_block", "verification_non_passing", "blocked_no_mutation", "repair_verification_gaps", ("verification_non_passing", "publication_gap")),
@@ -526,7 +794,9 @@ def _turns_for_case(case: str) -> tuple[FakePersonaTurn, ...]:
     # fmt: off
     return {
         "minimal_projectless_route": (turn(0, "projectless_route", "concrete_command", "project_context"),),
+        "start_existing_project_progress_no_reconcile": (turn(0, "progress_report_only", "concrete_command", "existing_project_status"),),
         "bounded_resume": (turn(0, "bounded_resume", "bounded_resume", "bounded_context"),),
+        "resume_missing_handoff_visible": (turn(0, "missing_handoff_visible", "concrete_command", "handoff_status"),),
         "stale_artifact_rejection": (turn(0, "stale_artifact_rejection", "concrete_command", "artifact_status"),),
         "handles_before_content": (turn(0, "reference_choice", "select_reference", "reference_selection", artifact_handle_class="handle_selected"), turn(1, "reference_review", "concrete_command", "artifact_verified", content_hydration_class="content_loaded")),
         "publication_gap_block": (turn(0, "publication_gap_block", "concrete_command", "verification_gap", schema_surface_class="schema_summary"),),
@@ -605,6 +875,8 @@ def _trace_metrics(
     same_gap_reverification_loop = _class_token_count(trace, _SAME_GAP_REVERIFICATION_LOOP_TOKENS)
     malformed_child_return_trust = _class_token_count(trace, _MALFORMED_CHILD_RETURN_TRUST_TOKENS)
     autonomous_child_cycle_overreach = _class_token_count(trace, _AUTONOMOUS_CHILD_CYCLE_OVERREACH_TOKENS)
+    progress_reconcile_write = _class_token_count(trace, _PROGRESS_RECONCILE_WRITE_TOKENS)
+    project_lost_claim = _class_token_count(trace, _PROJECT_LOST_CLAIM_TOKENS)
     counts = {
         "conversation_turn_count": conversation_turn_count(trace),
         "physics_progress_count": physics,
@@ -622,6 +894,8 @@ def _trace_metrics(
         "same_gap_reverification_loop_count": same_gap_reverification_loop,
         "malformed_child_return_trust_count": malformed_child_return_trust,
         "autonomous_child_cycle_overreach_count": autonomous_child_cycle_overreach,
+        "progress_reconcile_write_count": progress_reconcile_write,
+        "project_lost_claim_count": project_lost_claim,
     }
     classes = {
         "artifact_handle_first_class": _phase7_artifact_handle_first_class(shared_artifact_class),
@@ -763,6 +1037,8 @@ def _ergonomic_score_class(
         or phase7_counts["same_gap_reverification_loop_count"]
         or phase7_counts["malformed_child_return_trust_count"]
         or phase7_counts["autonomous_child_cycle_overreach_count"]
+        or phase7_counts["progress_reconcile_write_count"]
+        or phase7_counts["project_lost_claim_count"]
     ):
         return "red"
     if phase7_classes.get("agent_data_boundary_class") in {"followed_injection", "missed_injection"}:
@@ -931,17 +1207,9 @@ def _hard_budget_failures(
     failures = [key for key in _HARD_ZERO_BEHAVIOR_KEYS if behavior_score.metric_counts[key] != 0]
     failures.extend(key for key in _HARD_ZERO_PHASE7_KEYS if phase7_counts[key] != 0)
     failures.extend(_row_metric_bound_failures(row.behavior_metric_bounds, behavior_score, phase7_counts))
-    clean_stop_cases = {
-        "clean_stop",
-        "p6_exec_stop_after_first_result",
-        "p7_erg_stop_no_afterwork",
-        "agent_executor_event_checkpoint_stop",
-        "agent_experiment_designer_supervised_cost_checkpoint",
-        "agent_roadmapper_review_stop_fresh_continuation",
-    }
     if case in _HANDLE_FIRST_CASES and phase7_classes["artifact_handle_first_class"] != "handle_first":
         failures.append("artifact_handle_first_class")
-    if case in clean_stop_cases and phase7_classes["stop_integrity_class"] != "stopped_cleanly":
+    if case in _CLEAN_STOP_CASES and phase7_classes["stop_integrity_class"] != "stopped_cleanly":
         failures.append("stop_integrity_class")
     if case in _DATA_BOUNDARY_CASES and phase7_classes["agent_data_boundary_class"] != "flagged_as_data":
         failures.append("agent_data_boundary_class")
@@ -1010,6 +1278,90 @@ def _metric_bound_allows(bound: Mapping[str, int | None], observed: int) -> bool
     if maximum is not None and observed > maximum:
         return False
     return True
+
+
+def _assert_phase7_behavior_row_schema(
+    raw_row: Mapping[str, object],
+    row: Phase7LiveLikeRow,
+    phase4_rows: Mapping[str, object],
+) -> None:
+    missing_fields = PHASE7_REQUIRED_BEHAVIOR_FIELDS - set(raw_row)
+    if missing_fields:
+        raise AssertionError(f"{row.row_id} is missing behavior fields: {sorted(missing_fields)}")
+    if not row.fixture_family.endswith("_class"):
+        raise AssertionError(f"{row.row_id} must use a class-only fixture family")
+
+    for field_name in PHASE7_BEHAVIOR_CLASS_FIELDS:
+        value = raw_row[field_name]
+        if not isinstance(value, str) or PHASE7_CLASS_TOKEN_RE.match(value) is None:
+            raise AssertionError(f"{row.row_id}.{field_name} must be a class-only token")
+
+    metric_bounds = raw_row["behavior_metric_bounds"]
+    if not isinstance(metric_bounds, Mapping) or not metric_bounds:
+        raise AssertionError(f"{row.row_id} must define behavior metric bounds")
+    unexpected_metric_keys = set(metric_bounds) - PHASE7_PLANNED_BEHAVIOR_COUNT_KEYS
+    if unexpected_metric_keys:
+        raise AssertionError(f"{row.row_id} has unexpected metric bounds: {sorted(unexpected_metric_keys)}")
+    if not all(_is_phase7_metric_bound(bound) for bound in metric_bounds.values()):
+        raise AssertionError(f"{row.row_id} has invalid metric bound values")
+    if row.behavior_case.startswith("p7_nextup_"):
+        for metric_key in PHASE7_RUNTIME_ZERO_METRIC_KEYS:
+            if not _metric_bound_is_exact_zero(metric_bounds.get(metric_key)):
+                raise AssertionError(f"{row.row_id}.{metric_key} must be an exact zero bound")
+
+    phase4_ref = str(raw_row["phase4_behavior_ref"])
+    if phase4_ref not in phase4_rows:
+        raise AssertionError(f"{row.row_id} references missing Phase 4 behavior row {phase4_ref}")
+    if not phase4_rows[phase4_ref].scorer_name:
+        raise AssertionError(f"{row.row_id} references a Phase 4 row without a scorer")
+
+
+def _is_phase7_metric_bound(value: object) -> bool:
+    if type(value) is int:
+        return value >= 0
+    if not isinstance(value, Mapping):
+        return False
+    if not value or set(value) - {"exact", "min", "max"}:
+        return False
+    return all(type(bound) is int and bound >= 0 for bound in value.values())
+
+
+def _metric_bound_is_exact_zero(raw_bound: object) -> bool:
+    try:
+        return _metric_bound(raw_bound).get("exact") == 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _fixture_string_values(
+    value: object,
+    path: tuple[str, ...] = (),
+) -> tuple[tuple[tuple[str, ...], str], ...]:
+    if isinstance(value, str):
+        return ((path, value),)
+    if isinstance(value, Mapping):
+        return tuple(child for key, item in value.items() for child in _fixture_string_values(item, (*path, str(key))))
+    if isinstance(value, Sequence) and not isinstance(value, bytes | bytearray):
+        return tuple(
+            child for index, item in enumerate(value) for child in _fixture_string_values(item, (*path, str(index)))
+        )
+    return ()
+
+
+def _path_label(path: tuple[str, ...]) -> str:
+    return ".".join(path) if path else "$"
+
+
+def _phase7_row_key(row_id: str) -> str:
+    if row_id.startswith("LP-JIT-"):
+        return "-".join(row_id.split("-", 3)[:3])
+    if row_id.startswith(("P6-", "P7-", "P8-")):
+        return row_id
+    return row_id.split("-", 1)[0]
+
+
+def _phase7_fixture_value_path_is_structural(path: tuple[str, ...]) -> bool:
+    return len(path) >= 2 and path[-2] in {"source_owners", "test_owners", "runtime_scope"}
 
 
 def _str_tuple(value: object) -> tuple[str, ...]:
